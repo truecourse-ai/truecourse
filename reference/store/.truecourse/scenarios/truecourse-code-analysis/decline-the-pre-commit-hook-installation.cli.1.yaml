@@ -5,12 +5,12 @@ promise: A developer reads the latency warning and declines the hook
 flow:
   id: decline-the-pre-commit-hook-installation
   fingerprint: sha256:bef08b20f393c21f4a60c9853f0e3ff7ef792e2f56ffa6c869513403728fda9c
-journey:
+interface:
   path:
-    - cli/hooks
+    - cli/hooks-install
     - cli/analyze
   fingerprints:
-    - sha256:d46deb69bdb72e3221bf9395fc98b670c62aae96df97d8df07c5aa19fcc8dd70
+    - sha256:1038639e4b6df928f00ecbcf7f8ddcecf6a249c62ae109d2838192aa506ac539
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
 binds:
   - doc: reference/spec-docs/analyze/git-hooks.mdx

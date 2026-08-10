@@ -4032,3 +4032,48 @@ driver-agnostic).
 | Web Driver | G74, G75, G76 (element facts), G77 |
 | Guard Setup | G77 (recipe kind) |
 | Journey mapping | G76 (diagnostics half), G78 |
+
+## Migration note — journey → INTERFACE (2026-08-10)
+
+The concept this ledger calls a "journey" is now an **interface**, and the
+catalog is one entry per INVOCABLE THING (plan §2, "The concept is named
+INTERFACE, one entry per invocable thing"). What changed in the reference store:
+
+- `.truecourse/guard/journeys.json` → `.truecourse/guard/interfaces.json`, with
+  `journeys[]` → `interfaces[]`. The cli's SEVEN command trees became **22
+  per-command entries** (one per contract command, ids in the api slug style —
+  `cli/rules-list`, `cli/config-llm-setup`, `cli/hooks-install`, the root staying
+  `cli/root`), each carrying only its own command contract. The 32 api entries and
+  the 3 web task entries were already per-invocable-thing and only gained a group.
+  Catalog total: **57** (22 cli + 32 api + 3 web).
+- Every entry carries the new optional `group` field — the family it belongs to:
+  the cli command tree's root word, an api route family (`analyses`, `graph`,
+  `analytics`), the page a web task acts on (`home`, `repos`).
+- `cli/add`, `cli/analyze`, `cli/list` and `cli/root` kept their fingerprints (one
+  command, one step, unchanged). `cli/config`, `cli/hooks` and `cli/rules` moved:
+  they used to fingerprint over a step per subcommand and now fingerprint over
+  their own single invoke step. The identity rule itself is untouched — type +
+  entry + steps.
+- Each scenario's `journey:` block is now `interface:`, and its `path` is DERIVED
+  from the argv its steps actually run rather than restated at tree granularity.
+  Nineteen of the 33 scenarios changed ids as a result (a scenario that ran
+  `rules list` and `rules disable` recorded `cli/rules`; it now records both). The
+  manifest's `journeys[].journeyIds` → `interfaces[].interfaceIds`, rebuilt from
+  the same derivation; the web flow, which has no scenario, keeps the ids its plan
+  recorded.
+- `guard/result.json`'s `journeys` tally → `interfaces`, 7 → 22: the same cli
+  surface at the new granularity.
+
+Two things this note is the record of, because they are NOT migrated:
+
+- **`reference/fixtures/**` keeps the pre-rename vocabulary** (`guard/journeys.json`,
+  `journey:` blocks, `guard: 3`) — frozen artifacts, out of scope by directive.
+  Nothing reads them; the engine has no read fallback for the old filename.
+- **The mapper derives `group` for cli and api, never for web.** The cli rule is
+  the command path's first token; the api rule is the first static segment after a
+  path parameter (else the first static one, stepping over a leading `api` mount).
+  A web task's group is the page it acts on, which no route shape establishes — the
+  three reference entries carry hand-assigned groups, and the web mapper owes the
+  derivation.
+**Owner:** Interface mapping (the workstream formerly called Journey mapping
+throughout this file).

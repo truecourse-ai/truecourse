@@ -26,7 +26,7 @@
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { StepTracker } from "@truecourse/core/progress";
-import type { JourneyProvider, RecipeRunner, SeedRunner } from "@truecourse/guard-generator";
+import type { InterfaceProvider, RecipeRunner, SeedRunner } from "@truecourse/guard-generator";
 import type { GuardSetupReport } from "@truecourse/shared";
 import {
   guardSetupInProcess,
@@ -54,7 +54,7 @@ export interface RunGuardSetupOptions {
   /** Test seams (production spawns the transport / analyzes the tree). */
   recipeRunner?: RecipeRunner;
   seedRunner?: SeedRunner;
-  journeys?: JourneyProvider;
+  interfaces?: InterfaceProvider;
   /** Test seam / explicit override for whether the terminal can prompt. */
   interactive?: boolean;
 }
@@ -95,7 +95,7 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
       ...(opts.refresh ? { refresh: true } : {}),
       ...(opts.recipeRunner ? { recipeRunner: opts.recipeRunner } : {}),
       ...(opts.seedRunner ? { seedRunner: opts.seedRunner } : {}),
-      ...(opts.journeys ? { journeys: opts.journeys } : {}),
+      ...(opts.interfaces ? { interfaces: opts.interfaces } : {}),
       onLlmEstimate: async (estimate) => {
         // ONE LINE, deliberately: setup is bounded at two calls, so the staged modal
         // the big pipelines render would be more ceremony than the spend it describes.

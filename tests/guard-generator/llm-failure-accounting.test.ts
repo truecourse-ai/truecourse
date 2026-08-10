@@ -93,7 +93,7 @@ function commitPriorFlow(r: string): { manifest: string; scenario: string; file:
         flowFingerprint: 'fp-version',
         bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds.fingerprint }],
         scenarios: [{ id: 'version.cli.1', surface: 'cli', status: 'passing' }],
-        journeys: [],
+        interfaces: [],
         // A null hash re-detects the flow as work, so the run really does re-author
         // it — and really would delete its file on a zero-survivor pass.
         generationInputsHash: null,
@@ -387,7 +387,7 @@ describe('the adjudication stages ship unadjudicated on a systemic loss, never a
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'version')!.generationInputsHash).toBeNull()
 
     // The model is reachable again. Authoring is a CACHE hit (the flow, its
-    // sections, its journeys and the recipe are all unchanged), so re-adjudicating
+    // sections, its interfaces and the recipe are all unchanged), so re-adjudicating
     // costs the review call and no authoring call at all.
     let authored = 0
     let reviewed = 0

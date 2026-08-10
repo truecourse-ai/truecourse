@@ -439,7 +439,7 @@ describe('guardGenerateInProcess — an early abort ticks no phase that never ra
     expect(guard.status).toBe('no-docs')
     const steps = last()!
     expect(steps.find((s) => s.key === 'index')!.status).toBe('error')
-    for (const key of ['extract', 'journeys', 'flows', 'match', 'author', 'validate']) {
+    for (const key of ['extract', 'interfaces', 'flows', 'match', 'author', 'validate']) {
       const step = steps.find((s) => s.key === key)!
       expect(step.status).toBe('pending')
       expect(step.detail).toBeUndefined()
@@ -478,7 +478,7 @@ describe('guardGenerateInProcess — an early abort ticks no phase that never ra
 
     const { guard } = await guardGenerateInProcess(r, {
       tracker,
-      journeys: async () => ({ journeys: [] }),
+      interfaces: async () => ({ interfaces: [] }),
       extractRunner: async () => {
         throw new Error('extraction must not run — the recipe was rejected')
       },
@@ -856,7 +856,7 @@ describe('guardGenerateInProcess — flow-led birth line + retry usage', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The flow-led progress steps the CLI renders (`Mapping journeys` /
+// The flow-led progress steps the CLI renders (`Mapping interfaces` /
 // `Synthesizing flows` / `Matching flows`): every long stage ticks a live
 // counter, and the LLM-backed ones carry their model/spend tag.
 // ---------------------------------------------------------------------------
@@ -896,21 +896,21 @@ describe('guardGenerateInProcess — flow-led progress steps', () => {
       },
       matchRunner: async (ctx) => {
         recordStageUsage('guard.match', { model: 'match-model', inputTokens: 20, outputTokens: 5, costUsd: 0.2 })
-        return { plan: ctx.milestones.map((m) => ({ journeyId: ctx.journeys[0].id, milestone: m.order })) }
+        return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
       },
       extractRunner: extractBy({ background: { untestable: 'history' } }),
       generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
       fidelityRunner: faithfulReviewer(),
     })
 
-    expect(painted.get('journeys')?.label).toBe('Mapping journeys')
+    expect(painted.get('interfaces')?.label).toBe('Mapping interfaces')
     expect(painted.get('flows')?.label).toBe('Synthesizing flows')
     expect(painted.get('match')?.label).toBe('Matching flows')
 
-    // Journey mapping is deterministic — a result, never a model tag.
-    const journeys = painted.get('journeys')!.details.join('\n')
-    expect(journeys).toMatch(/\d+ journeys? · \d+ surfaces?/)
-    expect(journeys).not.toContain('model')
+    // Interface mapping is deterministic — a result, never a model tag.
+    const interfaces = painted.get('interfaces')!.details.join('\n')
+    expect(interfaces).toMatch(/\d+ interfaces? · \d+ surfaces?/)
+    expect(interfaces).not.toContain('model')
 
     // Synthesis + matching tick a counter and carry their live spend.
     expect(painted.get('flows')!.details.some((d) => /areas? .*flows-model/.test(d) || /\d+ area/.test(d))).toBe(true)
@@ -1003,7 +1003,7 @@ describe('composeGuardStatus', () => {
     }
     const blocked: GuardManifestFlow = {
       ...sectionFlow('c', []),
-      gaps: [{ surface: 'cli', kind: 'no-journey', reason: 'nothing was mapped for cli' }],
+      gaps: [{ surface: 'cli', kind: 'no-interface', reason: 'nothing was mapped for cli' }],
     }
     const s = composeGuardStatus({ version: GUARD_FORMAT_VERSION, flows: [guarded, partial, blocked] }, null, null)
     expect(s.coverage?.flows).toEqual({
@@ -1011,7 +1011,7 @@ describe('composeGuardStatus', () => {
       guarded: 1,
       partial: 1,
       blocked: 1,
-      gapLabels: ['awaiting web driver', 'no journey'],
+      gapLabels: ['awaiting web driver', 'no interface'],
       // The manifest's own buckets say how much of each flow was realized; the
       // five words say what a reader is TOLD. Nothing ran here, so the realized
       // flow reads Succeeded (it passed when it was written) and the two with a
@@ -1665,7 +1665,7 @@ describe('printGuardGenerateSummary — flow-led', () => {
       })),
       birthPassed: 7,
       coverageGaps: [
-        { doc: DOC, anchor: 'a', kind: 'no-journey', reason: 'nothing mapped for web', flowId: 'onboarding', surface: 'web' },
+        { doc: DOC, anchor: 'a', kind: 'no-interface', reason: 'nothing mapped for web', flowId: 'onboarding', surface: 'web' },
         { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'web', reason: 'the web driver is not runnable yet', flowId: 'task-lifecycle', surface: 'web' },
       ],
       usage: { calls: 21, inputTokens: 900_000, outputTokens: 40_000, costUsd: 8.01 },
@@ -1675,7 +1675,7 @@ describe('printGuardGenerateSummary — flow-led', () => {
 
     expect(out).toContain('flows       5 settled · 1 unsettled · 12 unchanged')
     expect(out).toContain('tests       7 written · 7 passing')
-    expect(out).toContain('gaps        2 (1 awaiting web driver · 1 no journey)')
+    expect(out).toContain('gaps        2 (1 awaiting web driver · 1 no interface)')
     expect(out).toContain('usage       21 calls · $8.01 (≤ $10.29 estimated)')
     expect(out).toContain('next  `truecourse guard run`')
     // Nothing failed, so no failing/rejected/errors blocks at all — and the tests

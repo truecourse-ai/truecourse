@@ -52,7 +52,7 @@ describe('coverage status precedence', () => {
   it('ranks worst-first by the five words, not by where a status came from', () => {
     // A BLOCKER outranks a sibling that passed: a section with a green scenario and
     // a blocked claim reads Blocked, and its detail keeps both.
-    expect(worstCoverageStatus(['pass', 'no-journey'])).toBe('no-journey');
+    expect(worstCoverageStatus(['pass', 'no-interface'])).toBe('no-interface');
     expect(worstCoverageStatus(['pass', 'never-run'])).toBe('never-run');
     expect(worstCoverageStatus(['fail', 'pass', 'web'])).toBe('fail');
     // Within a tier the more informative status still wins.
@@ -119,7 +119,7 @@ describe('the five-word coverage vocabulary', () => {
     // Blocked too: it is actionable, never a status of its own.
     expect(guardCoverageWord('stale')).toBe('Blocked');
     expect(guardCoverageWord('orphaned')).toBe('Blocked');
-    expect(guardCoverageWord('no-journey')).toBe('Blocked');
+    expect(guardCoverageWord('no-interface')).toBe('Blocked');
     expect(guardCoverageWord('blocked-on')).toBe('Blocked');
     expect(guardCoverageWord('needs-setup')).toBe('Blocked');
     expect(guardCoverageWord('authoring-error')).toBe('Blocked');
@@ -178,14 +178,14 @@ describe('no-flow claim reasons → their gap kind', () => {
   const word = (reason: string): string =>
     guardCoverageWord(guardNoFlowClaimGapKind(reason) as GuardSectionCoverageStatus);
 
-  it('reads a missing journey as Blocked, however the sentence leads', () => {
-    expect(guardNoFlowClaimGapKind('blocked-on layer 2: no `cli/guard` journey has been derived.')).toBe(
-      'no-journey',
+  it('reads a missing interface as Blocked, however the sentence leads', () => {
+    expect(guardNoFlowClaimGapKind('blocked-on layer 2: no `cli/guard` interface has been derived.')).toBe(
+      'no-interface',
     );
-    expect(guardNoFlowClaimGapKind('out of the authored journey set — no `cli/spec` journey exists.')).toBe(
-      'no-journey',
+    expect(guardNoFlowClaimGapKind('out of the authored interface set — no `cli/spec` interface exists.')).toBe(
+      'no-interface',
     );
-    expect(word('no journey covers this')).toBe('Blocked');
+    expect(word('no interface covers this')).toBe('Blocked');
   });
 
   it('reads a named blocker as Blocked', () => {
@@ -199,8 +199,8 @@ describe('no-flow claim reasons → their gap kind', () => {
   it('reads a settled answer as Not testable', () => {
     expect(guardNoFlowClaimGapKind('unrealizable under the runner isolation rule.')).toBe('unrealizable');
     expect(guardNoFlowClaimGapKind('unobservable via CLI — nothing prints it.')).toBe('untestable');
-    // A passing mention of the word "journey" is not a missing journey.
-    expect(guardNoFlowClaimGapKind('unrealizable against the target (journey decision `phase-0`).')).toBe(
+    // A passing mention of the word "interface" is not a missing interface.
+    expect(guardNoFlowClaimGapKind('unrealizable against the target (interface decision `phase-0`).')).toBe(
       'unrealizable',
     );
     expect(word('already realized by another flow; recorded uncovered here.')).toBe('Not testable');
@@ -259,7 +259,7 @@ describe('the result STAGE on the read surfaces', () => {
       hasEvidence: false,
     });
     expect(row).toMatchObject({ birthPassed: false, stage: 'birth' });
-    expect(row.journeyPath).toEqual([]);
+    expect(row.interfacePath).toEqual([]);
   });
 
   it('still parses a row with no stage at all (the pre-change wire shape)', () => {

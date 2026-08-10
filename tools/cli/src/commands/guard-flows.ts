@@ -3,13 +3,13 @@
  * ruling a user makes about a flow.
  *
  *   guard flows                  list every synthesized flow with its per-surface state
- *   guard flows --show <id>      one flow: goal, milestones, binds, surfaces, journeys, gaps
+ *   guard flows --show <id>      one flow: goal, milestones, binds, surfaces, interfaces, gaps
  *   guard flows dismiss <id>     rule the flow out of testing (`--note <text>`)
  *   guard flows undismiss <id>   put it back
  *
  * The reads are deterministic and LLM-free: they join the committed flow corpus
  * (`scenarios/flows.json`), the flow-keyed manifest (`scenarios/manifest.json`),
- * the committed scenarios (for their journey paths), and the last run
+ * the committed scenarios (for their interface paths), and the last run
  * (`guard/LATEST.json`). Any of them may be missing — each absence renders as an
  * empty state pointing at the command that produces it, never as an error.
  *
@@ -323,7 +323,7 @@ function printFlowList(views: FlowView[], noFlowClaims: number): void {
   p.outro("Inspect one with `truecourse guard flows --show <id>`.");
 }
 
-/** The drill-down: goal, milestones, binds, per-surface scenarios, journeys, gaps. */
+/** The drill-down: goal, milestones, binds, per-surface scenarios, interfaces, gaps. */
 function printFlowDetail(
   view: FlowView,
   repoRoot: string,
@@ -345,8 +345,8 @@ function printFlowDetail(
   const surfaceText = surfaces.length > 0 ? surfaces.join(" · ") : "(none) — run `truecourse guard generate`";
   p.log.message(`  surfaces    ${surfaceText}`);
 
-  const journeys = journeyIds(repoRoot, entry);
-  if (journeys.length > 0) p.log.message(`  journeys    ${journeys.join(" · ")}`);
+  const interfaces = interfaceIds(repoRoot, entry);
+  if (interfaces.length > 0) p.log.message(`  interfaces  ${interfaces.join(" · ")}`);
 
   const gaps = entry?.gaps ?? [];
   for (const [i, gap] of gaps.entries()) {
@@ -386,7 +386,7 @@ function surfaceLines(
     const result = resultsByScenario.get(s.id);
     // A committed scenario passed birth by construction; a run outcome supersedes it.
     const state = result ? `${result.outcome} ${MARK[result.outcome]}` : "birth ✓";
-    const drift = result?.journeyDrifted ? " · journey drifted" : "";
+    const drift = result?.interfaceDrifted ? " · interface drifted" : "";
     return `${s.surface} → ${s.id} (${state}${drift})`;
   });
   for (const gap of entry?.gaps ?? []) lines.push(`${gap.surface} → ${gapChipLabel(gap)}`);
@@ -394,17 +394,17 @@ function surfaceLines(
 }
 
 /**
- * The realization plan behind the flow's scenarios — the journey ids each one is
- * grounded on, read from the committed YAMLs (journeys are derived, never
+ * The realization plan behind the flow's scenarios — the interface ids each one is
+ * grounded on, read from the committed YAMLs (interfaces are derived, never
  * committed; only the ids/fingerprints ride in the scenario).
  */
-function journeyIds(repoRoot: string, entry: GuardManifestFlow | undefined): string[] {
+function interfaceIds(repoRoot: string, entry: GuardManifestFlow | undefined): string[] {
   if (!entry || entry.scenarios.length === 0) return [];
   const wanted = new Set(entry.scenarios.map((s) => s.id));
   const ids: string[] = [];
   for (const scenario of loadScenarios(repoRoot).scenarios) {
     if (!wanted.has(scenario.id)) continue;
-    for (const id of scenario.journey?.path ?? []) if (!ids.includes(id)) ids.push(id);
+    for (const id of scenario.interface?.path ?? []) if (!ids.includes(id)) ids.push(id);
   }
   return ids;
 }

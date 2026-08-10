@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { runGuard, guardJourneysPath } from '@truecourse/guard-runner'
-import { journeyFingerprint, type Journey, type JourneysFile } from '@truecourse/shared'
+import { runGuard, guardInterfacesPath } from '@truecourse/guard-runner'
+import { interfaceFingerprint, type Interface, type InterfacesFile } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeApiRecipe, writeScenario, apiScenario, specBinds } from './helpers.js'
 
 const repos: string[] = []
@@ -17,24 +17,24 @@ function repo(): string {
 
 const SPEC_DOC = specBinds('a/b')[0].doc
 
-const TODOS: Journey = (() => {
+const TODOS: Interface = (() => {
   const shape = {
     type: 'api' as const,
     entry: { command: ['todos'] },
     steps: [{ kind: 'request' as const, method: 'POST', path: '/todos' }],
   }
-  return { id: 'api/create-todo', title: 'create a todo', ...shape, fingerprint: journeyFingerprint(shape) }
+  return { id: 'api/create-todo', title: 'create a todo', ...shape, fingerprint: interfaceFingerprint(shape) }
 })()
 
-function writeCatalog(root: string, journeys: Journey[]): void {
-  const file: JourneysFile = {
+function writeCatalog(root: string, interfaces: Interface[]): void {
+  const file: InterfacesFile = {
     version: 1,
     generatedAt: new Date().toISOString(),
     recipeFingerprint: 'sha256:recipe',
-    journeys,
+    interfaces,
   }
-  fs.mkdirSync(path.dirname(guardJourneysPath(root)), { recursive: true })
-  fs.writeFileSync(guardJourneysPath(root), JSON.stringify(file, null, 2))
+  fs.mkdirSync(path.dirname(guardInterfacesPath(root)), { recursive: true })
+  fs.writeFileSync(guardInterfacesPath(root), JSON.stringify(file, null, 2))
 }
 
 describe('runGuard — api driver flow annotations', () => {
@@ -50,7 +50,7 @@ describe('runGuard — api driver flow annotations', () => {
       apiScenario({
         id: 'todo-lifecycle.api.1',
         flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
-        journey: { path: ['api/create-todo'], fingerprints: [TODOS.fingerprint] },
+        interface: { path: ['api/create-todo'], fingerprints: [TODOS.fingerprint] },
         binds: specBinds('cli/version', 'cli/whoami'),
         steps: [
           {
@@ -69,7 +69,7 @@ describe('runGuard — api driver flow annotations', () => {
       apiScenario({
         id: 'todo-lifecycle.api.2',
         flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
-        journey: { path: ['api/create-todo'], fingerprints: ['sha256:older-surface'] },
+        interface: { path: ['api/create-todo'], fingerprints: ['sha256:older-surface'] },
         binds: specBinds('a/b'),
         steps: [{ request: { method: 'GET', path: '/todos' }, expect: { status: 200 }, milestone: 1 }],
       }),
@@ -94,7 +94,7 @@ describe('runGuard — api driver flow annotations', () => {
     expect(failed.outcome).toBe('fail')
     expect(failed.flowId).toBe('todo-lifecycle')
     expect(failed.failedMilestone).toBe(2)
-    expect(failed.journeyDrifted).toBeUndefined()
+    expect(failed.interfaceDrifted).toBeUndefined()
     // Evidence names the flow and both bound sections.
     const transcript = fs.readFileSync(path.join(r, failed.evidencePath!, 'transcript.txt'), 'utf-8')
     expect(transcript).toContain('flow:     todo-lifecycle')
@@ -103,7 +103,7 @@ describe('runGuard — api driver flow annotations', () => {
     expect(by.get('todo-lifecycle.api.2')).toMatchObject({
       outcome: 'pass',
       flowId: 'todo-lifecycle',
-      journeyDrifted: true,
+      interfaceDrifted: true,
     })
 
     const stale = by.get('todo-lifecycle.api.3')!

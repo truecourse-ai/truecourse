@@ -54,7 +54,7 @@ export type GuardDependencyClass = z.infer<typeof GuardDependencyClassSchema>
  *  - `config-value`      the program is configured a particular way (`llm.transport`
  *                        = `api`);
  *  - `language-present`  the analyzed repo contains that language (C# ⇒ the .NET SDK);
- *  - `command-path`      the flow steps through that journey (a command that shells
+ *  - `command-path`      the flow steps through that interface (a command that shells
  *                        out to a binary only that command needs).
  */
 export const GuardDependencyPredicateSchema = z.discriminatedUnion('kind', [
@@ -69,7 +69,7 @@ export const GuardDependencyPredicateSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('language-present'), language: z.string().min(1) })
     .strict(),
-  z.object({ kind: z.literal('command-path'), journeyId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal('command-path'), interfaceId: z.string().min(1) }).strict(),
 ])
 export type GuardDependencyPredicate = z.infer<typeof GuardDependencyPredicateSchema>
 

@@ -35,11 +35,11 @@ import {
   runGenerate,
   withExternalServices,
   writeApiRecipe,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
   rawApi,
   PASSING_API_STEPS,
-  DEFAULT_JOURNEYS,
+  DEFAULT_INTERFACES,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -103,8 +103,8 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(
-        DEFAULT_JOURNEYS(r),
+      interfaces: withExternalServices(
+        DEFAULT_INTERFACES(r),
         { service: 'stripe', category: 'payment' },
         { service: 'sendgrid', category: 'messaging' },
       ),
@@ -139,7 +139,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(DEFAULT_JOURNEYS(r), { service: 'stripe', category: 'payment' }),
+      interfaces: withExternalServices(DEFAULT_INTERFACES(r), { service: 'stripe', category: 'payment' }),
       extractRunner: extractBy({}),
       // Nothing is blocked — the dependency is still a fact about the repo.
       generateRunner: authorBy({}),
@@ -163,8 +163,8 @@ describe('generateGuards — the api authoring prompt advertises the detected se
 
     await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(
-        journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: withExternalServices(
+        interfacesOf(r, apiInterface('GET', '/todos')),
         { service: 'stripe', category: 'payment' },
       ),
       extractRunner: extractBy({
@@ -199,8 +199,8 @@ describe('generateGuards — the api authoring prompt advertises the detected se
 
     await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(
-        journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: withExternalServices(
+        interfacesOf(r, apiInterface('GET', '/todos')),
         { service: 'stripe', category: 'payment', baseUrlEnv: 'STRIPE_API_BASE' },
       ),
       extractRunner: extractBy({
@@ -231,7 +231,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
 
     await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(journeysOf(r, apiJourney('GET', '/todos')), {
+      interfaces: withExternalServices(interfacesOf(r, apiInterface('GET', '/todos')), {
         service: 'open-meteo',
         source: 'http',
         baseUrlEnv: 'GEOCODING_BASE_URL',

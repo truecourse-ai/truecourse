@@ -1,10 +1,10 @@
 /**
  * Derived guard read-surface DTOs the dashboard renders — the per-section
- * coverage join, the flow inventory and its detail, the journey catalog, the
+ * coverage join, the flow inventory and its detail, the interface catalog, the
  * staleness probe, and a scenario's YAML source. These are *computed* on read
  * (never persisted, never validated back); the persisted, validated stores are
  * `result.ts` (run), `report.ts` (generate report), `manifest.ts`, `flows.ts`
- * (the flow corpus) and `../journeys.ts` (the journey catalog).
+ * (the flow corpus) and `../interfaces.ts` (the interface catalog).
  *
  * The read surfaces added with the flow model carry Zod schemas so the client can
  * validate a response it did not compose; the older coverage/staleness shapes stay
@@ -12,8 +12,8 @@
  *
  * The server composes these from the store files (`scenarios/flows.json`,
  * `scenarios/manifest.json`, `guard/LATEST.json`, `guard/result.json`,
- * `guard/journeys.json`) plus the live spec doc; the client consumes them as the
- * wire types for the Guard tabs (Coverage, Flows, Journeys, Runs).
+ * `guard/interfaces.json`) plus the live spec doc; the client consumes them as the
+ * wire types for the Guard tabs (Coverage, Flows, Interfaces, Runs).
  */
 
 import { z } from 'zod'
@@ -31,11 +31,11 @@ import type { GuardScenarioSetupView, GuardScenarioStepView } from './scenario.j
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
 import {
-  JourneyCatalogSourceSchema,
-  JourneyContractSchema,
-  JourneyEntrySchema,
-  JourneyStepSchema,
-} from '../journeys.js'
+  InterfaceCatalogSourceSchema,
+  InterfaceContractSchema,
+  InterfaceEntrySchema,
+  InterfaceStepSchema,
+} from '../interfaces.js'
 
 /**
  * A live doc section's coverage status — the single value the coverage view
@@ -93,7 +93,7 @@ export type GuardSectionCoverageStatus =
  *      one registration away from a verdict); then `authoring-error` (generate
  *      tried and could not — an unanswered question, not a settled answer); then
  *      the gaps a user can clear, most actionable first: `needs-setup` (provide
- *      the account) → `blocked-on` → `no-journey` → the awaiting-driver ids
+ *      the account) → `blocked-on` → `no-interface` → the awaiting-driver ids
  *      (registry order); `unguarded` last, the only one that names nothing at all;
  *   3. **Never run** — a test exists and has never executed;
  *   4. **Succeeded** — `pass` (this run proved it) before `guarded` (an earlier
@@ -112,7 +112,7 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   'authoring-error',
   'needs-setup',
   'blocked-on',
-  'no-journey',
+  'no-interface',
   ...awaitingDriverIds,
   'unguarded',
   // Never run
@@ -177,7 +177,7 @@ export function worstCoverageStatus(
  *  - `succeeded` — the claims' scenarios passed;
  *  - `failed` — a scenario contradicted the spec (drift), or could not complete;
  *  - `blocked` — something NAMED stands between the claim and its proof: no
- *    journey to step through, a supplied dependency nobody registered, an
+ *    interface to step through, a supplied dependency nobody registered, an
  *    external account to provide, a bind that no longer holds (a stale or
  *    orphaned anchor is Blocked — it is actionable, not a status of its own);
  *  - `not-testable` — a settled answer: nothing here can be proven (unrealizable,
@@ -237,7 +237,7 @@ const COVERAGE_PLAIN: Record<GuardSectionCoverageStatus, GuardCoveragePlainStatu
   'authoring-error': 'blocked',
   'needs-setup': 'blocked',
   'blocked-on': 'blocked',
-  'no-journey': 'blocked',
+  'no-interface': 'blocked',
   ...(Object.fromEntries(awaitingDriverIds.map((id) => [id, 'blocked'])) as Record<
     (typeof awaitingDriverIds)[number],
     GuardCoveragePlainStatus
@@ -330,7 +330,7 @@ export const GuardFlowGapSchema = z
     reason: z.string(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
-    /** One-line display label (`awaiting web driver`, `no journey`). */
+    /** One-line display label (`awaiting web driver`, `no interface`). */
     label: z.string(),
     /**
      * Present iff `kind === 'blocked-on'` AND the gap names an external service
@@ -368,8 +368,8 @@ export const GuardFlowSurfaceSchema = z
      * Absent on a gap row (no test to have a status).
      */
     stage: GuardResultStageSchema.optional(),
-    /** True when the run flagged journey drift on this scenario (never an outcome). */
-    journeyDrifted: z.boolean().optional(),
+    /** True when the run flagged interface drift on this scenario (never an outcome). */
+    interfaceDrifted: z.boolean().optional(),
     gap: GuardFlowGapSchema.optional(),
   })
   .strict()
@@ -772,8 +772,8 @@ export const GuardFlowListItemSchema = z
     toolDefects: z.number().int().nonnegative().default(0),
     /** Generate errors on the flow's bound sections (best-effort attribution). */
     errors: z.number().int().nonnegative(),
-    /** True when the last run flagged journey drift on any of the flow's scenarios. */
-    journeyDrifted: z.boolean(),
+    /** True when the last run flagged interface drift on any of the flow's scenarios. */
+    interfaceDrifted: z.boolean(),
     /**
      * True when no synthesized flow claims this one any more (`orphaned` on its
      * manifest entry): it is kept only because its committed tests still run. Such
@@ -902,7 +902,7 @@ export const GuardFlowScenarioRowSchema = z
     failure: GuardFailureDetailSchema.optional(),
     /** The milestone the failing step realized — paints the flow instance red there. */
     failedMilestone: z.number().int().positive().optional(),
-    journeyDrifted: z.boolean().optional(),
+    interfaceDrifted: z.boolean().optional(),
     /**
      * True when the failure behind this row landed on an UNMILESTONED setup step —
      * a prerequisite the spec never asserts (see `blockedPrecondition` on
@@ -936,8 +936,8 @@ export const GuardFlowScenarioRowSchema = z
      * can still 404 the fetch — the flag says "the run wrote one", not "it is here".
      */
     hasEvidence: z.boolean(),
-    /** Journey ids this scenario grounds on (its realization path, in order). */
-    journeyPath: z.array(z.string()).default([]),
+    /** Interface ids this scenario grounds on (its realization path, in order). */
+    interfacePath: z.array(z.string()).default([]),
     gap: GuardFlowGapSchema.optional(),
   })
   .strict()
@@ -951,7 +951,7 @@ export type GuardFlowSurfaceGap = z.infer<typeof GuardFlowSurfaceGapSchema>
 
 /**
  * The flow detail — goal, milestone chain (each bound to its live spec section),
- * the per-surface scenario rows, the realization journeys, the gaps, and the
+ * the per-surface scenario rows, the realization interfaces, the gaps, and the
  * findings the last generate attributed to the flow.
  */
 export const GuardFlowDetailSchema = z
@@ -970,8 +970,8 @@ export const GuardFlowDetailSchema = z
     surfaces: z.array(GuardFlowScenarioRowSchema),
     /** The same gaps the surface rows carry, flattened for the gaps block. */
     gaps: z.array(GuardFlowSurfaceGapSchema),
-    /** Journey ids the flow's scenarios ground on, first-seen order. */
-    journeyIds: z.array(z.string()),
+    /** Interface ids the flow's scenarios ground on, first-seen order. */
+    interfaceIds: z.array(z.string()),
     /**
      * The birth-stage failure results the last generate attributed to this flow —
      * its committed failing tests plus any fidelity rejection. Transitional: a
@@ -995,55 +995,55 @@ export const GuardFlowDetailSchema = z
 export type GuardFlowDetail = z.infer<typeof GuardFlowDetailSchema>
 
 // ---------------------------------------------------------------------------
-// Journeys tab — the code-side catalog (the free Map action's read surface).
+// Interfaces tab — the code-side catalog (the free Map action's read surface).
 // ---------------------------------------------------------------------------
 
 /**
- * One flow that USES a journey — the reverse-index entry.
+ * One flow that USES an interface — the reverse-index entry.
  *
  * `realized: false` is the case a plain scenario-derived index cannot see: the
- * flow's realization plan walked this journey, but no scenario was written for
+ * flow's realization plan walked this interface, but no scenario was written for
  * that surface (authoring was blocked on setup the repo hasn't declared). The
  * spec DOES reach the code path; it just cannot be exercised yet, and `gap` says
  * what it is waiting on.
  */
-export const GuardJourneyFlowRefSchema = z
+export const GuardInterfaceFlowRefSchema = z
   .object({
     flowId: z.string(),
     /** The flow's title; its id when no flows corpus names it (hand-written work). */
     title: z.string(),
-    /** True when a committed scenario of this flow grounds on the journey. */
+    /** True when a committed scenario of this flow grounds on the interface. */
     realized: z.boolean(),
     /** Why an unrealized usage produced no scenario. Absent when realized. */
     gap: GuardFlowGapSchema.optional(),
   })
   .strict()
-export type GuardJourneyFlowRef = z.infer<typeof GuardJourneyFlowRefSchema>
+export type GuardInterfaceFlowRef = z.infer<typeof GuardInterfaceFlowRefSchema>
 
-/** One journey row: the catalog entry plus the reverse index onto the flows. */
-export const GuardJourneyRowSchema = z
+/** One interface row: the catalog entry plus the reverse index onto the flows. */
+export const GuardInterfaceRowSchema = z
   .object({
     id: z.string(),
     /** The surface — a driver-registry id. */
     type: GuardDriverIdSchema,
     title: z.string(),
-    entry: JourneyEntrySchema,
-    steps: z.array(JourneyStepSchema),
+    entry: InterfaceEntrySchema,
+    steps: z.array(InterfaceStepSchema),
     /** The state the task starts from — passed through from the catalog verbatim. */
     startingState: z.string().optional(),
     /** The observable state the task leaves behind — passed through verbatim. */
     endState: z.string().optional(),
     fingerprint: z.string(),
     /**
-     * Flows that use this journey — realized (a scenario grounds on it) or merely
+     * Flows that use this interface — realized (a scenario grounds on it) or merely
      * planned (matched, then blocked). EMPTY is the only honest "the spec never
      * mentions this code path", and the single source for the row's flow count.
      */
-    flows: z.array(GuardJourneyFlowRefSchema),
+    flows: z.array(GuardInterfaceFlowRefSchema),
     /** The scenarios that ground on it. */
     scenarioIds: z.array(z.string()),
     /** How this surface's catalog was derived (`tree` | `probes`). */
-    source: JourneyCatalogSourceSchema.optional(),
+    source: InterfaceCatalogSourceSchema.optional(),
     /** Declared in an OpenAPI doc, but no route registration serves it. */
     specOnly: z.literal(true).optional(),
     /**
@@ -1052,53 +1052,53 @@ export const GuardJourneyRowSchema = z
      * where the derivation established the command tree only, which is exactly
      * what the view renders as "no contract derived yet".
      */
-    contract: JourneyContractSchema.optional(),
+    contract: InterfaceContractSchema.optional(),
   })
   .strict()
-export type GuardJourneyRow = z.infer<typeof GuardJourneyRowSchema>
+export type GuardInterfaceRow = z.infer<typeof GuardInterfaceRowSchema>
 
 /**
  * One chip of the detected-surface banner: a driver-registry row with what the
  * mapping found for it. `detected` answers "does TrueCourse think my app has this
  * surface"; `runnable` answers "can we run scenarios on it today".
  */
-export const GuardJourneySurfaceSchema = z
+export const GuardInterfaceSurfaceSchema = z
   .object({
     surface: GuardDriverIdSchema,
     label: z.string(),
     runnable: z.boolean(),
     /** UI copy for a non-runnable surface ("Needs web driver"). */
     waitingLabel: z.string().optional(),
-    /** Journeys mapped for this surface. */
-    journeys: z.number().int().nonnegative(),
+    /** Interfaces mapped for this surface. */
+    interfaces: z.number().int().nonnegative(),
     detected: z.boolean(),
-    source: JourneyCatalogSourceSchema.optional(),
+    source: InterfaceCatalogSourceSchema.optional(),
   })
   .strict()
-export type GuardJourneySurface = z.infer<typeof GuardJourneySurfaceSchema>
+export type GuardInterfaceSurface = z.infer<typeof GuardInterfaceSurfaceSchema>
 
 /**
- * The Journeys-tab payload. `mapped: false` is the clean empty state (no
- * `guard/journeys.json` yet) — every list is empty and the banner still carries a
+ * The Interfaces-tab payload. `mapped: false` is the clean empty state (no
+ * `guard/interfaces.json` yet) — every list is empty and the banner still carries a
  * row per registry driver, so the tab renders its Map CTA without a null check.
  */
-export const GuardJourneysViewSchema = z
+export const GuardInterfacesViewSchema = z
   .object({
     /** False when no catalog snapshot exists — the client renders the Map CTA. */
     mapped: z.boolean(),
     generatedAt: z.string().nullable(),
     /** The recipe fingerprint the mapping ran against. */
     recipeFingerprint: z.string().nullable(),
-    journeys: z.array(GuardJourneyRowSchema),
+    interfaces: z.array(GuardInterfaceRowSchema),
     /** One row per driver-registry surface (the banner), registry order. */
-    surfaces: z.array(GuardJourneySurfaceSchema),
+    surfaces: z.array(GuardInterfaceSurfaceSchema),
     totals: z
       .object({
-        journeys: z.number().int().nonnegative(),
+        interfaces: z.number().int().nonnegative(),
         detectedSurfaces: z.number().int().nonnegative(),
-        /** Journeys at least one flow uses (realized or planned-but-blocked). */
+        /** Interfaces at least one flow uses (realized or planned-but-blocked). */
         grounded: z.number().int().nonnegative(),
-        /** Journeys NO flow references at all — the future infer signal. */
+        /** Interfaces NO flow references at all — the future infer signal. */
         ungrounded: z.number().int().nonnegative(),
       })
       .strict(),
@@ -1109,7 +1109,7 @@ export const GuardJourneysViewSchema = z
     unavailable: z.enum(['no-working-tree']).optional(),
   })
   .strict()
-export type GuardJourneysView = z.infer<typeof GuardJourneysViewSchema>
+export type GuardInterfacesView = z.infer<typeof GuardInterfacesViewSchema>
 
 // --- Claims tab ---------------------------------------------------------------
 

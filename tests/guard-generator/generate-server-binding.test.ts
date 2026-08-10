@@ -27,8 +27,8 @@ import {
   flowOfAll,
   noEpics,
   runGenerate,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
   rawApi,
   FIXTURE_API_SERVER,
   FIXTURE_API_SERVER_V2,
@@ -98,9 +98,9 @@ const TWO_SERVERS = {
   'api-v2': { serve: ['node', FIXTURE_API_SERVER_V2], healthPath: '/v2/health', app: 'apps/api/v2' },
 }
 
-/** A matcher that walks milestone N through journey N — the multi-app plan. */
-const matchEachJourney: MatchRunner = async ({ milestones, journeys }) => ({
-  plan: milestones.map((m, i) => ({ journeyId: journeys[Math.min(i, journeys.length - 1)].id, milestone: m.order })),
+/** A matcher that walks milestone N through interface N — the multi-app plan. */
+const matchEachInterface: MatchRunner = async ({ milestones, interfaces }) => ({
+  plan: milestones.map((m, i) => ({ interfaceId: interfaces[Math.min(i, interfaces.length - 1)].id, milestone: m.order })),
 })
 
 describe('generateGuards — the route gate', () => {
@@ -115,11 +115,11 @@ describe('generateGuards — the route gate', () => {
     let authorCalls = 0
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
       matchRunner: async (ctx) => {
         matchCalls++
-        return { plan: ctx.milestones.map((m) => ({ journeyId: ctx.journeys[0].id, milestone: m.order })) }
+        return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
       },
       generateRunner: authorBy({}, () => {
         authorCalls++
@@ -147,7 +147,7 @@ describe('generateGuards — the route gate', () => {
 
     const opts = {
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
     }
     const first = await runGenerate(opts)
@@ -169,7 +169,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings'), apiJourney('GET', '/api/version')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings'), apiInterface('GET', '/api/version')),
       extractRunner: v2Extract,
       generateRunner: authorBy(
         {
@@ -209,7 +209,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/api/version')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/api/version')),
       extractRunner: webExtract,
       generateRunner: authorBy(
         {
@@ -241,11 +241,11 @@ describe('generateGuards — the route gate', () => {
     let authorCalls = 0
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings'), apiJourney('GET', '/api/version')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings'), apiInterface('GET', '/api/version')),
       extractRunner: bothExtract,
       flowsRunner: flowOfAll('Book through the api, then read the web version'),
       flowsEpicRunner: noEpics,
-      matchRunner: matchEachJourney,
+      matchRunner: matchEachInterface,
       generateRunner: authorBy({}, () => {
         authorCalls++
       }),
@@ -277,7 +277,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
       generateRunner: authorBy(
         {
@@ -306,7 +306,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
       generateRunner: authorBy(
         {

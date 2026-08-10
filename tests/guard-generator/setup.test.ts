@@ -21,7 +21,7 @@ import { recipePath, computeRecipeFingerprint } from '@truecourse/guard-runner'
 import {
   runGuardSetup,
   detectRoleColumns,
-  type JourneyProvider,
+  type InterfaceProvider,
   type SeedDraftDatabase,
   type SeedProposal,
   type SeedRunner,
@@ -29,7 +29,7 @@ import {
 } from '@truecourse/guard-generator'
 import type { DetectedExternalService } from '@truecourse/shared'
 import { rmrf } from '../guard-runner/helpers.js'
-import { writeCorpus, apiJourney } from './helpers.js'
+import { writeCorpus, apiInterface } from './helpers.js'
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url))
 
@@ -111,13 +111,13 @@ const PROPOSAL: SeedProposal = {
   },
 }
 
-/** The journey/detection pass, stubbed at the seam the engine already has. */
-function journeys(over: {
+/** The interface/detection pass, stubbed at the seam the engine already has. */
+function interfaces(over: {
   externalServices?: DetectedExternalService[]
   database?: SeedDraftDatabase | null
-} = {}): JourneyProvider {
+} = {}): InterfaceProvider {
   return async () => ({
-    journeys: [apiJourney('GET', '/orgs')],
+    interfaces: [apiInterface('GET', '/orgs')],
     externalServices: over.externalServices ?? [],
     database: over.database === undefined ? DATABASE : over.database,
     datastoreUrls: [],
@@ -184,7 +184,7 @@ describe('runGuardSetup — the gates', () => {
 
     const { report } = await runGuardSetup({
       repoRoot: r,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled('recipe'),
       seedRunner: neverCalled('seed'),
     })
@@ -206,7 +206,7 @@ describe('runGuardSetup — the happy path', () => {
 
     const { report } = await runGuardSetup({
       repoRoot: r,
-      journeys: journeys({
+      interfaces: interfaces({
         externalServices: [
           { service: 'stripe', category: 'payment', evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
           // No base-URL variable ⇒ nothing honest to declare.
@@ -263,7 +263,7 @@ describe('runGuardSetup — the happy path', () => {
 
     await runGuardSetup({
       repoRoot: r,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled('recipe'),
       seedRunner: seed.runner,
     })
@@ -291,7 +291,7 @@ describe('runGuardSetup — re-run semantics', () => {
 
     const { report } = await runGuardSetup({
       repoRoot: r,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled('recipe'),
       seedRunner: neverCalled('seed'),
     })
@@ -314,7 +314,7 @@ describe('runGuardSetup — re-run semantics', () => {
     const { report } = await runGuardSetup({
       repoRoot: r,
       refresh: true,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: recipeRunnerFor(r),
       seedRunner: neverCalled('seed'),
       confirmSeedReplace: async () => false,
@@ -341,7 +341,7 @@ describe('runGuardSetup — re-run semantics', () => {
     const { report } = await runGuardSetup({
       repoRoot: r,
       refresh: true,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: recipeRunnerFor(r),
       seedRunner: seed.runner,
       confirmSeedReplace: async () => true,
@@ -373,7 +373,7 @@ describe('runGuardSetup — re-run semantics', () => {
     const { report } = await runGuardSetup({
       repoRoot: r,
       refresh: true,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: recipeRunnerFor(r),
       seedRunner: seed.runner,
       confirmSeedReplace: async () => true,
@@ -393,7 +393,7 @@ describe('runGuardSetup — re-run semantics', () => {
 
     const { report } = await runGuardSetup({
       repoRoot: r,
-      journeys: journeys({ database: null }),
+      interfaces: interfaces({ database: null }),
       recipeRunner: neverCalled('recipe'),
       seedRunner: neverCalled('seed'),
     })

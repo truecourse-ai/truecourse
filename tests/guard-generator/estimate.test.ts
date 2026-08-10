@@ -29,8 +29,8 @@ import {
   flowPerClaim,
   matchAll,
   faithfulReviewer,
-  cliJourney,
-  writeJourneySnapshot,
+  cliInterface,
+  writeInterfaceSnapshot,
   PASSING_STEPS,
 } from './helpers.js'
 
@@ -149,7 +149,7 @@ describe('estimateGuardTokens', () => {
     expect(second.written).toEqual([])
   })
 
-  it('a moved journey re-matches and re-authors the flow that grounds on it', async () => {
+  it('a moved interface re-matches and re-authors the flow that grounds on it', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -160,8 +160,8 @@ describe('estimateGuardTokens', () => {
 
     // The cli surface MOVED (the command gained a flag). The catalog fingerprint
     // changes ⇒ the match cache misses ⇒ the estimate plans a matching call, and the
-    // flow it grounds re-authors (its inputs hash folds the journey fingerprint).
-    writeJourneySnapshot(r, [cliJourney(['relkit'], ['--json']), cliJourney(['relkit', 'boom'])])
+    // flow it grounds re-authors (its inputs hash folds the interface fingerprint).
+    writeInterfaceSnapshot(r, [cliInterface(['relkit'], ['--json']), cliInterface(['relkit', 'boom'])])
     const est = await estimateGuardTokens(r)
     const stages = new Map(est.stages!.map((s) => [s.stage, s]))
     expect(stages.get('guardMatch')!.calls).toBe(1)

@@ -207,9 +207,9 @@ describe('guard manifest v2 (flow-keyed)', () => {
           { id: 'task-lifecycle.cli.1', surface: 'cli' as const, status: 'passing' as const },
           { id: 'task-lifecycle.api.1', surface: 'api' as const, status: 'passing' as const },
         ],
-        journeys: [
-          { surface: 'cli' as const, journeyIds: ['cli/tasks-add', 'cli/tasks-list'] },
-          { surface: 'web' as const, journeyIds: ['web/board'] },
+        interfaces: [
+          { surface: 'cli' as const, interfaceIds: ['cli/tasks-add', 'cli/tasks-list'] },
+          { surface: 'web' as const, interfaceIds: ['web/board'] },
         ],
         generationInputsHash: 'sha256:gen',
         gaps: [
@@ -219,24 +219,24 @@ describe('guard manifest v2 (flow-keyed)', () => {
     ],
   }
 
-  it('round-trips through JSON — including the per-surface planned journeys', () => {
+  it('round-trips through JSON — including the per-surface planned interfaces', () => {
     const parsed = GuardManifestSchema.parse(JSON.parse(JSON.stringify(manifest)))
     expect(parsed).toEqual(manifest)
     // The web plan survives even though NO web scenario exists — that record is the
     // only trace a matched-but-unauthored surface leaves.
-    expect(parsed.flows[0].journeys.find((j) => j.surface === 'web')?.journeyIds).toEqual(['web/board'])
+    expect(parsed.flows[0].interfaces.find((j) => j.surface === 'web')?.interfaceIds).toEqual(['web/board'])
   })
 
-  it('defaults the generation-inputs hash to null, and gaps/journeys to []', () => {
+  it('defaults the generation-inputs hash to null, and gaps/interfaces to []', () => {
     const parsed = GuardManifestSchema.parse({
       version: 3,
       flows: [{ flowId: 'f', flowFingerprint: 'sha256:x', bindings: [], scenarios: [] }],
     })
     expect(parsed.flows[0].generationInputsHash).toBeNull()
     expect(parsed.flows[0].gaps).toEqual([])
-    // A manifest written before the field still parses — the journeys read then
+    // A manifest written before the field still parses — the interfaces read then
     // falls back to the committed scenarios' own refs.
-    expect(parsed.flows[0].journeys).toEqual([])
+    expect(parsed.flows[0].interfaces).toEqual([])
   })
 
   it('rejects a v1 manifest (clean cut)', () => {

@@ -14,9 +14,9 @@ import {
   extractBy,
   authorBy,
   runGenerate,
-  journeysOf,
-  cliJourney,
-  apiJourney,
+  interfacesOf,
+  cliInterface,
+  apiInterface,
   raw,
   rawApi,
   stampMilestones,
@@ -60,7 +60,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       extractRunner: listExtract,
       generateRunner: authorBy({ list: rawApi('GET /todos answers 200 with the empty list', PASSING_API_STEPS) }),
     })
@@ -117,7 +117,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       extractRunner: listExtract,
       generateRunner: authorBy({
         list: rawApi('the todos server comes up', PASSING_API_STEPS, {
@@ -144,7 +144,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/boom')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/boom')),
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /boom answers 200', reason: 'HTTP status' }],
         version: { untestable: 'covered elsewhere' },
@@ -203,7 +203,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit']), apiJourney('GET', '/todos')),
+      interfaces: interfacesOf(r, cliInterface(['relkit']), apiInterface('GET', '/todos')),
       extractRunner: listExtract,
       generateRunner: perSurface,
     })
@@ -227,7 +227,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     ])
   }, 60_000)
 
-  it('a runnable surface with an EMPTY journey catalog settles as a no-journey gap', async () => {
+  it('a runnable surface with an EMPTY interface catalog settles as a no-interface gap', async () => {
     // The recipe prepares api, but nothing api-shaped was mapped from the code: the
     // flow is accounted for with a stated gap and nothing is authored for it.
     const r = repo()
@@ -237,16 +237,16 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit'])), // cli only
+      interfaces: interfacesOf(r, cliInterface(['relkit'])), // cli only
       extractRunner: listExtract,
       generateRunner: authorBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }),
     })
 
     expect(res.written.map((w) => w.surface)).toEqual(['cli'])
     const gap = res.coverageGaps.find((g) => g.flowId === 'list' && g.surface === 'api')!
-    expect(gap.kind).toBe('no-journey')
+    expect(gap.kind).toBe('no-interface')
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.gaps).toEqual([
-      expect.objectContaining({ surface: 'api', kind: 'no-journey' }),
+      expect.objectContaining({ surface: 'api', kind: 'no-interface' }),
     ])
   }, 60_000)
 })
@@ -264,7 +264,7 @@ describe('spawnGenerateRunner — per-driver system prompt', () => {
       milestones: [
         { order: 1, claim: 'GET /todos returns 200', doc: 'docs/api.md', sectionHeading: 'list', sectionText: '', realization: [] },
       ],
-      journeyPath: ['api/get-todos'],
+      interfacePath: ['api/get-todos'],
       areaTags: [],
       recipeBuild: 'true',
     }

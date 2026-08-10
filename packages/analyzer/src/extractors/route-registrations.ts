@@ -155,7 +155,7 @@ function extractMount(
  * handler (`asyncHandler(getTodos)`), and inline arrow/function expressions —
  * which register with an EMPTY name: the route is the app's surface whether or
  * not its handler has a symbol, and dropping it would hide the endpoint from
- * every route consumer (flows, journeys, architecture rules). `null` means the
+ * every route consumer (flows, interfaces, architecture rules). `null` means the
  * argument is not a handler shape at all (the call is not a route registration).
  */
 function extractHandlerName(node: SyntaxNode): string | null {

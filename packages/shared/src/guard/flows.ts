@@ -112,7 +112,7 @@ export const GuardFlowSchema = z
     variantOf: z.string().min(1).optional(),
     /**
      * The authoring rationale: why the flow has this shape, what a milestone
-     * honestly proves, and the journey gaps found while writing it. The reviewable
+     * honestly proves, and the interface gaps found while writing it. The reviewable
      * substance behind a flow, which its title and goal cannot carry.
      */
     notes: z.string().min(1).optional(),
@@ -154,7 +154,7 @@ export type GuardNoFlowClaim = z.infer<typeof GuardNoFlowClaimSchema>
  * `blocked-on` capability nouns are.
  *
  * The ladder is ordered, first match wins, and the two answers that matter are the
- * BLOCKED half (`no-journey` / `blocked-on`: something named stands in the way,
+ * BLOCKED half (`no-interface` / `blocked-on`: something named stands in the way,
  * and clearing it turns the claim into a flow) and the NOT-TESTABLE half
  * (`unrealizable` / `untestable`: a settled answer nobody can act on).
  *
@@ -164,10 +164,10 @@ export type GuardNoFlowClaim = z.infer<typeof GuardNoFlowClaimSchema>
  */
 export function guardNoFlowClaimGapKind(reason: string): GuardCoverageGapKind {
   const text = reason.replace(/\s+/g, ' ').trim()
-  // "no `cli/guard` journey has been derived", "no journey exists" — the mapper
+  // "no `cli/guard` interface has been derived", "no interface exists" — the mapper
   // found nothing to step through. Word-adjacent so a passing mention of the word
-  // ("journey decision `phase-0-transport`") can never match.
-  if (/\bno\s+(?:\S+\s+){0,2}journey\b/i.test(text)) return 'no-journey'
+  // ("interface decision `phase-0-transport`") can never match.
+  if (/\bno\s+(?:\S+\s+){0,2}interface\b/i.test(text)) return 'no-interface'
   // The claim's own lead states the verdict — "blocked-on the supplied `x`
   // dependency: …", "needs dotnet-sdk. …". A blocker named anywhere in the
   // sentence still counts ("Blocked on both the supplied SDK and …").

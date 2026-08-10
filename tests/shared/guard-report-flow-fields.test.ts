@@ -27,8 +27,8 @@ const BASE = {
 }
 
 describe('guard report — the realization gap kinds', () => {
-  it('carries `no-journey` and `unrealizable` as first-class kinds', () => {
-    expect(GuardCoverageGapKindSchema.options).toContain('no-journey')
+  it('carries `no-interface` and `unrealizable` as first-class kinds', () => {
+    expect(GuardCoverageGapKindSchema.options).toContain('no-interface')
     expect(GuardCoverageGapKindSchema.options).toContain('unrealizable')
   })
 
@@ -36,8 +36,8 @@ describe('guard report — the realization gap kinds', () => {
     const gap = GuardCoverageGapSchema.parse({
       doc: 'docs/tasks.md',
       anchor: 'tasks/creating',
-      kind: 'no-journey',
-      reason: 'no cli journey was mapped from this repository',
+      kind: 'no-interface',
+      reason: 'no cli interface was mapped from this repository',
       flowId: 'task-lifecycle',
       surface: 'cli',
     })
@@ -51,13 +51,13 @@ describe('guard report — the realization gap kinds', () => {
 
   it('both kinds paint under their own display key and count separately', () => {
     const totals = emptyGapDisplayTotals()
-    expect(totals['no-journey']).toBe(0)
+    expect(totals['no-interface']).toBe(0)
     expect(totals.unrealizable).toBe(0)
     const gap = GuardCoverageGapSchema.parse({
       doc: 'd',
       anchor: 'a',
       kind: 'unrealizable',
-      reason: 'no journey path serves milestone 2',
+      reason: 'no interface path serves milestone 2',
     })
     expect(gapDisplayKind(gap)).toBe('unrealizable')
   })
@@ -112,7 +112,7 @@ describe('guard findings — the composition-triage pair', () => {
 })
 
 describe('guard report — flow-led counts', () => {
-  it('round-trips the flows + journeys blocks', () => {
+  it('round-trips the flows + interfaces blocks', () => {
     const report = GuardGenerateReportSchema.parse({
       ...BASE,
       written: [
@@ -137,13 +137,13 @@ describe('guard report — flow-led counts', () => {
         noFlowClaims: 4,
         unsettledAreas: [{ areaId: 'billing', reason: 'flow synthesis invalid after re-ask' }],
       },
-      journeys: { total: 12, bySurface: { cli: 12 } },
+      interfaces: { total: 12, bySurface: { cli: 12 } },
       orphanedFlowDismissals: [{ flowId: 'gone', title: 'a recomposed flow' }],
     })
 
     expect(report.flows!.settled + report.flows!.unsettled).toBe(report.flows!.total)
     expect(report.flows!.skipped).toBeLessThanOrEqual(report.flows!.settled)
-    expect(report.journeys!.bySurface.cli).toBe(12)
+    expect(report.interfaces!.bySurface.cli).toBe(12)
     expect(report.written[0].flowId).toBe('task-lifecycle')
   })
 

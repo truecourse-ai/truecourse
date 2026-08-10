@@ -8,7 +8,7 @@
  * failing flows first, every row carrying title + goal + exactly ONE status word
  * over the whole coverage-status domain, and NO surface chips), the MERGED DETAIL
  * (the flow's header and its milestone LIST — plain, stateless, one claim sentence
- * per row — then the test itself: verdict, setup, steps, evidence, journey; or the
+ * per row — then the test itself: verdict, setup, steps, evidence, interface; or the
  * why-no-test block, with NO gaps block, NO findings block and NO authoring-errors
  * block), the RECIPE affordance in the list, and the RUNS tab's record (the same
  * scenario rendering plus the "open this flow" link).
@@ -72,7 +72,7 @@ const CLI_SURFACE = {
   status: 'fail' as const,
   outcome: 'fail' as const,
   stage: 'run' as const,
-  journeyDrifted: true,
+  interfaceDrifted: true,
 };
 const WEB_GAP = {
   surface: 'web' as const,
@@ -102,13 +102,13 @@ const FLOWS: GuardFlowListItem[] = [
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: true,
+    interfaceDrifted: true,
   },
   {
     flowId: 'task-export',
     title: 'A user exports the task list',
     goal: 'Export tasks to a file from the CLI',
-    status: 'no-journey',
+    status: 'no-interface',
     bucket: 'blocked',
     epic: false,
     composedOf: [],
@@ -119,14 +119,14 @@ const FLOWS: GuardFlowListItem[] = [
     surfaces: [
       {
         surface: 'cli',
-        status: 'no-journey',
-        gap: { kind: 'no-journey', reason: 'no cli journey exports the list', label: 'no journey' },
+        status: 'no-interface',
+        gap: { kind: 'no-interface', reason: 'no cli interface exports the list', label: 'no interface' },
       },
     ],
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: false,
+    interfaceDrifted: false,
   },
   {
     // Authoring never started: the repo declares no API preparation and no
@@ -156,7 +156,7 @@ const FLOWS: GuardFlowListItem[] = [
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: false,
+    interfaceDrifted: false,
   },
   {
     flowId: `manual:${MANUAL_ID}`,
@@ -174,7 +174,7 @@ const FLOWS: GuardFlowListItem[] = [
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: false,
+    interfaceDrifted: false,
   },
 ];
 
@@ -211,7 +211,7 @@ const BIRTH_FAILED_FLOW: GuardFlowListItem = {
   findings: 1,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 const ERROR_ONLY_FLOW: GuardFlowListItem = {
@@ -230,7 +230,7 @@ const ERROR_ONLY_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 2,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 const LONG_BLOCKED_REASON =
@@ -258,7 +258,7 @@ const LONG_BLOCKED_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 /**
@@ -289,7 +289,7 @@ const CONFLICTS_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 /**
@@ -316,7 +316,7 @@ const UNDERIVED_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
   orphaned: true,
 };
 
@@ -400,15 +400,15 @@ const DETAIL: GuardFlowDetailData = {
       durationMs: 412,
       failure: { step: 3, expected: 'exit 0', actual: 'exit 1: unknown command `done`' },
       failedMilestone: 3,
-      journeyDrifted: true,
+      interfaceDrifted: true,
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
       hasEvidence: true,
-      journeyPath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
+      interfacePath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
     },
-    { surface: 'web', status: 'web', birthPassed: false, hasEvidence: false, journeyPath: [], gap: WEB_GAP.gap },
+    { surface: 'web', status: 'web', birthPassed: false, hasEvidence: false, interfacePath: [], gap: WEB_GAP.gap },
   ],
   gaps: [{ surface: 'web', ...WEB_GAP.gap }],
-  journeyIds: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
+  interfaceIds: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
   findings: [],
   errors: [],
   generatedAt: '2026-07-24T13:40:00.000Z',
@@ -435,11 +435,11 @@ const BIRTH_FAILED_DETAIL: GuardFlowDetailData = {
       stage: 'birth',
       failure: { step: 2, expected: 'exit 0', actual: 'timed out after 120s' },
       hasEvidence: true,
-      journeyPath: [],
+      interfacePath: [],
     },
   ],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
 };
@@ -454,9 +454,9 @@ const ERROR_ONLY_DETAIL: GuardFlowDetailData = {
   status: 'authoring-error',
   bucket: 'blocked',
   milestones: [DETAIL.milestones[0]],
-  surfaces: [{ surface: 'cli', status: 'authoring-error', birthPassed: false, hasEvidence: false, journeyPath: [] }],
+  surfaces: [{ surface: 'cli', status: 'authoring-error', birthPassed: false, hasEvidence: false, interfacePath: [] }],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [
     {
@@ -507,11 +507,11 @@ const UNDERIVED_DETAIL: GuardFlowDetailData = {
       stage: 'run',
       outcome: 'pass',
       hasEvidence: false,
-      journeyPath: [],
+      interfacePath: [],
     },
   ],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
   orphaned: true,
@@ -526,10 +526,10 @@ const CONFLICTS_DETAIL: GuardFlowDetailData = {
   bucket: 'blocked',
   milestones: [DETAIL.milestones[0]],
   surfaces: [
-    { surface: 'cli', status: 'blocked-on', birthPassed: false, hasEvidence: false, journeyPath: [], gap: CONFLICTS_GAP },
+    { surface: 'cli', status: 'blocked-on', birthPassed: false, hasEvidence: false, interfacePath: [], gap: CONFLICTS_GAP },
   ],
   gaps: [{ surface: 'cli', ...CONFLICTS_GAP }],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
 };
@@ -811,7 +811,7 @@ describe('GuardFlowDetail — the flow AND its test, on one page', () => {
       <GuardFlowDetail repoId="r"
         detail={DETAIL}
         onOpenSpec={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         {...props}
       />,
     );
@@ -883,7 +883,7 @@ describe('GuardFlowDetail — the flow AND its test, on one page', () => {
     expect(screen.getByText('Verdict')).toBeInTheDocument();
     expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
     expect(screen.getByText('Evidence')).toBeInTheDocument();
-    expect(screen.getByText('Journey')).toBeInTheDocument();
+    expect(screen.getByText('Interface')).toBeInTheDocument();
     // There is no list of surface ROWS any more — nothing to click through to.
     expect(screen.queryByRole('list', { name: 'Tests' })).toBeNull();
   });
@@ -1018,20 +1018,20 @@ describe('GuardFlowDetail — the flow AND its test, on one page', () => {
     await waitFor(() => expect(screen.getByLabelText('flow source')).toHaveTextContent('sha256:41ac'));
   });
 
-  it('reads its journeys through the TEST that walks them — never a second list', () => {
-    // The scenario body draws each journey the test grounds on. A flow-level list
+  it('reads its interfaces through the TEST that walks them — never a second list', () => {
+    // The scenario body draws each interface the test grounds on. A flow-level list
     // of the same ids beside it would be the same fact told twice.
     renderDetail();
-    expect(screen.getByText('Journey')).toBeInTheDocument();
-    expect(screen.queryByText('Journeys')).toBeNull();
+    expect(screen.getByText('Interface')).toBeInTheDocument();
+    expect(screen.queryByText('Interfaces')).toBeNull();
   });
 
-  it('keeps the flow-level journey list for a flow with no test at all', () => {
+  it('keeps the flow-level interface list for a flow with no test at all', () => {
     renderDetail({
-      detail: { ...NOT_ATTEMPTED_DETAIL, journeyIds: ['cli/tasks-add', 'cli/tasks-list'] },
+      detail: { ...NOT_ATTEMPTED_DETAIL, interfaceIds: ['cli/tasks-add', 'cli/tasks-list'] },
     });
-    const journeys = screen.getByText('Journeys').parentElement!;
-    expect(journeys.querySelectorAll('button')).toHaveLength(2);
+    const interfaces = screen.getByText('Interfaces').parentElement!;
+    expect(interfaces.querySelectorAll('button')).toHaveLength(2);
   });
 
   it('has NO gaps block, NO findings block and NO authoring-errors block', () => {
@@ -1197,7 +1197,7 @@ describe('GuardFlowDetail — the flow AND its test, on one page', () => {
           })),
         }}
         onOpenSpec={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     const list = screen.getByRole('list', { name: 'Milestones' });
@@ -1261,7 +1261,7 @@ function FlowsHarness({
         recipeOpen={recipeOpen}
         onCloseRecipe={() => setRecipeOpen(false)}
         onOpenSpec={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />
     </div>
   );
@@ -1408,7 +1408,7 @@ function DismissHarness() {
         tabs={tabs}
         decisions={decisions}
         onOpenSpec={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />
     </div>
   );
@@ -1546,7 +1546,7 @@ const NEEDS_SETUP_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 /** A corpus with every state on it — failing, needs-setup, blocked, not
@@ -1642,7 +1642,7 @@ const FAILED_RESULT: GuardScenarioResult = {
   evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
   flowId: FLOW_ID,
   failedMilestone: 3,
-  journeyDrifted: true,
+  interfaceDrifted: true,
 };
 
 describe('GuardDriftDetail — the run’s own record', () => {
@@ -1666,7 +1666,7 @@ describe('GuardDriftDetail — the run’s own record', () => {
     renderRun(FAILED_RESULT);
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
     expect(screen.getByText('exit 1: unknown command `done`')).toBeInTheDocument();
-    expect(screen.getByText(/Journey drift/)).toBeInTheDocument();
+    expect(screen.getByText(/Interface drift/)).toBeInTheDocument();
     // The retired flow-instance paint: no chain, and no per-milestone state.
     expect(screen.queryByRole('list', { name: 'Milestones' })).toBeNull();
     expect(screen.queryByText(/no milestone reached/i)).toBeNull();
@@ -1700,11 +1700,11 @@ describe('GuardDriftDetail — the run’s own record', () => {
   });
 
   it('claims nothing when the failure names no milestone (a plumbing failure)', () => {
-    renderRun({ ...FAILED_RESULT, failedMilestone: undefined, journeyDrifted: undefined });
+    renderRun({ ...FAILED_RESULT, failedMilestone: undefined, interfaceDrifted: undefined });
     // The verdict names the step and nothing else — no milestone is credited.
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
     expect(screen.queryByText(/milestone \d/i)).toBeNull();
-    expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Interface drift/)).not.toBeInTheDocument();
   });
 
   // The verdict renders no annotation for a blocked precondition — the field is
@@ -1714,12 +1714,12 @@ describe('GuardDriftDetail — the run’s own record', () => {
     renderRun({
       ...FAILED_RESULT,
       failedMilestone: undefined,
-      journeyDrifted: undefined,
+      interfaceDrifted: undefined,
       blockedPrecondition: true,
       failure: { step: 1, expected: '200', actual: '404' },
     });
     expect(screen.queryByText(/Setup failed/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Interface drift/)).not.toBeInTheDocument();
     // The outcome is untouched: the verdict still reads as a failure.
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
   });

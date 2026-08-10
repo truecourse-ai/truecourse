@@ -5,7 +5,7 @@ promise: A developer checks what their uncommitted changes introduce and resolve
 flow:
   id: diff-uncommitted-changes-against-the-baseline
   fingerprint: sha256:1061ce3a50aae003bd7ca064aed0f8d00dab04465d6a1a5d12f005e9ee428149
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list

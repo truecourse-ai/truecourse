@@ -5,15 +5,21 @@ promise: A developer silences one noisy rule, then puts it back
 flow:
   id: silence-and-restore-an-individual-rule
   fingerprint: sha256:dcdfc709a4a9102d9c1b0514fd7db808a1ba155202dfd8c2d5d847982c99c32f
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list
-    - cli/rules
+    - cli/rules-list
+    - cli/rules-disable
+    - cli/rules-enable
+    - cli/rules-reset
   fingerprints:
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
     - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
-    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+    - sha256:a78a30d5a44c112fb60d3104f8b1fa6556c740d8676a7750c706406e276cd282
+    - sha256:9473e87965b8ca6a84302cc600b2776e92e066b2ee4f940555b4a98fb71c9c3b
+    - sha256:2977512e713caaeaeb76cd62699ef08da750393f9aa81d585b5d43064a179f1c
+    - sha256:65e2b3f80e755827e08d5b637759f29fe8153bdb229eca369208772a751beb1d
 binds:
   - doc: reference/spec-docs/analyze/rules.mdx
     section: individual-rules
@@ -190,7 +196,7 @@ steps:
       - '--no-skills'
     expect:
       exit: 0
-    note: 'The file under test was written by the previous step and is uncommitted, so the tree is dirty and a non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze journey''s stdin contract). `--no-stash` is the answer this claim needs: the point is that a LATER analysis skips the disabled rule over the NEW file, which only exists in the working tree.'
+    note: 'The file under test was written by the previous step and is uncommitted, so the tree is dirty and a non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze interface''s stdin contract). `--no-stash` is the answer this claim needs: the point is that a LATER analysis skips the disabled rule over the NEW file, which only exists in the working tree.'
   - run:
       - rules
       - enable

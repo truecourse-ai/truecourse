@@ -1,7 +1,7 @@
 /**
  * Section-level action button for the Guard tabs — one action per tab: Generate on
  * the Tests tab (synthesizes flows + authors scenarios; opens the estimate modal
- * first), Map on the Journeys tab (derives the journey catalog from the working
+ * first), Map on the Interfaces tab (derives the interface catalog from the working
  * tree — deterministic, LLM-free, FREE, so it names its own price and never opens
  * an estimate), and Run on the Runs tab (runs the committed scenarios; no estimate). Rendered inside the page Header
  * alongside the other section actions, mirroring ContractsHeaderActions /
@@ -47,7 +47,7 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
     kind === 'generate'
       ? 'The spec corpus changed since the last generate — regenerate to write tests for the edits.'
       : kind === 'map'
-        ? 'The working tree changed since the last mapping — re-map to re-derive the journeys.'
+        ? 'The working tree changed since the last mapping — re-map to re-derive the interfaces.'
         : 'The tests changed since the last run — re-run to see where they stand.';
 
   const reason = otherBusy

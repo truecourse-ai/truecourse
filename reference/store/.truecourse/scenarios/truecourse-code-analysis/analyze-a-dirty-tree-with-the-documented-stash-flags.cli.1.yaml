@@ -5,7 +5,7 @@ promise: 'A developer analyzes a dirty tree both ways: as-is, and with the pendi
 flow:
   id: analyze-a-dirty-tree-with-the-documented-stash-flags
   fingerprint: sha256:67697289aea282b9fd5e5ffaf439979d12ef603bbc9d68f46e9737cbd0f1b446
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list

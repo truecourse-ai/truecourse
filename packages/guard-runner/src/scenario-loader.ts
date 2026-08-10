@@ -7,7 +7,7 @@
  *
  * Only the CURRENT format version parses. A file carrying an older `guard:` version
  * gets one actionable line naming the cutover instead of a schema dump, because
- * every field a re-generation would change (plural `binds`, the `flow`/`journey`
+ * every field a re-generation would change (plural `binds`, the `flow`/`interface`
  * refs) would otherwise report as an unrelated validation error.
  */
 

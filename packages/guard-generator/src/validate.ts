@@ -14,7 +14,7 @@
  *  - cli — a step's `run` is argv APPENDED to the recipe entrypoint, so `run[0]`
  *    must be an ARGUMENT: never the program's own name again, never a foreign
  *    build/package/runtime binary (`npm test …`, `cargo run …`).
- *  - api — a journey is a CHAIN. A `${var}` only exists if an EARLIER step
+ *  - api — an interface is a CHAIN. A `${var}` only exists if an EARLIER step
  *    captured it, and a `${HTTP_STUB:<name>}` only resolves if this scenario
  *    declares that stub: either miss dies as a run-level infrastructure error
  *    after a sandbox, a build and a boot have been paid for.
@@ -130,7 +130,7 @@ function referencedVars(value: unknown, into: Set<string>): void {
 const STUB_RE = /\$\{HTTP_STUB:([A-Za-z0-9_-]+)\}/g
 
 /**
- * The api rules — a journey has to compose with itself:
+ * The api rules — an interface has to compose with itself:
  *
  *  1. every `${var}` a step interpolates was captured by an EARLIER step (the
  *     runner throws `UnknownVariableError` mid-run otherwise, which reports as an

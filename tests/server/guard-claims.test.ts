@@ -90,7 +90,7 @@ const MANIFEST = {
       flowFingerprint: 'sha256:f',
       bindings: FLOWS.flows[0].bindings,
       scenarios: [{ id: 'add-then-list.cli.1', surface: 'cli', status: 'never-run' }],
-      journeys: [],
+      interfaces: [],
       generationInputsHash: null,
       gaps: [],
     },

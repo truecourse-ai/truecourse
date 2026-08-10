@@ -256,13 +256,13 @@ export type RequestValidator = z.infer<typeof RequestValidatorSchema>
 /**
  * A request contract keyed by the OPERATION it belongs to — the repo-level product
  * of joining route registrations (path composed with their mount prefix, exactly as
- * journeys compose it) with the validator symbols they name. This is the shape the
- * authoring prompt renders per journey.
+ * interfaces compose it) with the validator symbols they name. This is the shape the
+ * authoring prompt renders per interface.
  */
 export const ApiRequestContractSchema = z.object({
   /** Uppercase HTTP method. */
   method: z.string(),
-  /** Canonical path template — identical to the api journey's `entry.path`. */
+  /** Canonical path template — identical to the api interface's `entry.path`. */
   path: z.string(),
   bodyFields: z.array(RequestFieldSchema).optional(),
   queryFields: z.array(RequestFieldSchema).optional(),

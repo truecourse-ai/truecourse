@@ -47,7 +47,7 @@ afterEach(cleanup);
 const emptyTotals = (over: Partial<Record<GuardSectionCoverageStatus, number>>) =>
   ({
     fail: 0, error: 0, stale: 0, orphaned: 0, pass: 0, guarded: 0,
-    'needs-setup': 0, 'blocked-on': 0, unrealizable: 0, 'no-journey': 0,
+    'needs-setup': 0, 'blocked-on': 0, unrealizable: 0, 'no-interface': 0,
     web: 0, tui: 0, library: 0, desktop: 0, mobile: 0,
     untestable: 0, 'no-claim': 0, dismissed: 0, unguarded: 0,
     ...over,
@@ -150,7 +150,7 @@ describe('needs-setup vocabulary and paint', () => {
     expect(guardNeedsSetupHeadline({ services: [], provided: ['apple', 'googleapis'] })).toBe(
       'apple and googleapis are already set up — these tests just haven’t been authored since.',
     );
-    // The one-line contexts (chips, journey needs, section flow rows) are untouched.
+    // The one-line contexts (chips, interface needs, section flow rows) are untouched.
     expect(guardNeedsSetupNeed({ services: ['apple', 'googleapis'], provided: [] })).toBe(
       'needs setup: apple and googleapis',
     );
@@ -356,12 +356,12 @@ const flowDetail = (needsSetup: GuardNeedsSetup): GuardFlowDetailData => ({
       status: 'needs-setup',
       birthPassed: false,
       hasEvidence: false,
-      journeyPath: [],
+      interfacePath: [],
       gap: { ...NEEDS_SETUP_GAP, needsSetup },
     },
   ],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
   generatedAt: '2026-07-29T10:00:00.000Z',
@@ -378,7 +378,7 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
       <GuardFlowDetail repoId="r"
         detail={flowDetail(needsSetup)}
         onOpenSpec={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         {...(onOpenExternals ? { onOpenExternals } : {})}
       />,
     );

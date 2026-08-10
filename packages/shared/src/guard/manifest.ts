@@ -40,7 +40,7 @@ export type GuardTestabilityVerdict = z.infer<typeof GuardTestabilityVerdictSche
 export const GuardManifestScenarioSchema = z
   .object({
     id: z.string().min(1),
-    /** The driver the scenario runs on — the journey's surface type. */
+    /** The driver the scenario runs on — the interface's surface type. */
     surface: GuardDriverIdSchema,
     /**
      * The test's status as of the generate that wrote it: `failing` when it failed
@@ -84,25 +84,25 @@ export const GuardManifestGapSchema = z
 export type GuardManifestGap = z.infer<typeof GuardManifestGapSchema>
 
 /**
- * The journeys ONE surface's realization plan referenced for a flow — the
+ * The interfaces ONE surface's realization plan referenced for a flow — the
  * spec→code link as the MATCHER drew it, recorded whether or not a scenario was
  * ever written.
  *
- * Without it, journey usage could only be read back off the written scenarios,
- * so a flow that matched journeys but was refused at authoring (blocked-on a
- * capability the repo hasn't declared) left those journeys looking untouched by
+ * Without it, interface usage could only be read back off the written scenarios,
+ * so a flow that matched interfaces but was refused at authoring (blocked-on a
+ * capability the repo hasn't declared) left those interfaces looking untouched by
  * any spec. This is the planning record, not the realization record: the
  * scenarios array above still says what actually exists.
  */
-export const GuardManifestFlowJourneysSchema = z
+export const GuardManifestFlowInterfacesSchema = z
   .object({
     /** The surface whose plan referenced them. */
     surface: GuardDriverIdSchema,
-    /** Journey ids the plan walks, in first-use order. */
-    journeyIds: z.array(z.string().min(1)),
+    /** Interface ids the plan walks, in first-use order. */
+    interfaceIds: z.array(z.string().min(1)),
   })
   .strict()
-export type GuardManifestFlowJourneys = z.infer<typeof GuardManifestFlowJourneysSchema>
+export type GuardManifestFlowInterfaces = z.infer<typeof GuardManifestFlowInterfacesSchema>
 
 export const GuardManifestFlowSchema = z
   .object({
@@ -115,12 +115,12 @@ export const GuardManifestFlowSchema = z
     /** The scenarios realizing the flow, one per surface it was authored for. */
     scenarios: z.array(GuardManifestScenarioSchema),
     /**
-     * Per-surface journeys the realization PLAN referenced — written for every
+     * Per-surface interfaces the realization PLAN referenced — written for every
      * surface that got a plan, authored or blocked. Defaults to `[]` so a manifest
-     * written before this field still parses (the journeys read then falls back to
+     * written before this field still parses (the interfaces read then falls back to
      * the written scenarios' own refs).
      */
-    journeys: z.array(GuardManifestFlowJourneysSchema).default([]),
+    interfaces: z.array(GuardManifestFlowInterfacesSchema).default([]),
     /** Hash of the inputs the generator used; unset until a generator authors. */
     generationInputsHash: z.string().nullable().default(null),
     /** Per-surface gaps: why a surface has no scenario. */
@@ -150,7 +150,7 @@ export type GuardManifest = z.infer<typeof GuardManifestSchema>
 
 /**
  * THE SETTLE INVARIANT — the surfaces the entry PLANNED (a realization plan
- * existed, so `journeys` records the path it walks) but accounts for with NEITHER
+ * existed, so `interfaces` records the path it walks) but accounts for with NEITHER
  * a committed test NOR a gap. Empty ⇒ the invariant holds.
  *
  * A settled flow (one carrying a `generationInputsHash`) is skipped by every
@@ -162,7 +162,7 @@ export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
     ...flow.scenarios.map((s) => s.surface),
     ...flow.gaps.map((g) => g.surface),
   ])
-  return flow.journeys.map((j) => j.surface).filter((surface) => !accounted.has(surface))
+  return flow.interfaces.map((j) => j.surface).filter((surface) => !accounted.has(surface))
 }
 
 /**

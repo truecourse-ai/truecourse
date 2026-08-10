@@ -55,7 +55,7 @@ const authorCtx: AuthorUserContext = {
       realization: ['run: ["--version"]'],
     },
   ],
-  journeyPath: ['cli/relkit'],
+  interfacePath: ['cli/relkit'],
   areaTags: [],
   driver: 'cli',
   recipeEntry: ['node', 'bin.mjs'],
@@ -90,7 +90,7 @@ const matchCtx: MatchUserContext = {
   flow: { id: 'version', title: 'version', goal: 'the version prints' },
   milestones: [{ order: 1, claim: 'v' }],
   surface: 'cli',
-  journeys: [],
+  interfaces: [],
 }
 const recipeInput: RecipeDiscoveryInput = {
   packageJson: '{"name":"relkit"}',

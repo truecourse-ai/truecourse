@@ -80,7 +80,7 @@ const GAPPED: GuardClaimRow = {
   headingText: 'Listing tasks',
   anchorLive: true,
   coverage: 'gapped',
-  gapReason: 'no cli journey lists tasks',
+  gapReason: 'no cli interface lists tasks',
   dismissed: false,
   flows: [],
   scenarios: [],
@@ -167,7 +167,7 @@ const SECTION: GuardSectionCoverage = {
     },
   ],
   claimGaps: [
-    { claimId: GAPPED_ID, title: GAPPED.title, reason: 'no cli journey lists tasks' },
+    { claimId: GAPPED_ID, title: GAPPED.title, reason: 'no cli interface lists tasks' },
     { reason: 'the section states an ordering the flows never reach' },
   ],
   scenarioIds: [SCENARIO_ID],
@@ -619,7 +619,7 @@ describe('GuardTestView — a claim-tagged step list reads as its claims, not as
     status: guardTestStatusView({ status: 'pass' }),
     provenance: 'Latest state',
     binds: { doc: DOC, section: CREATE_ANCHOR },
-    journeyPath: [],
+    interfacePath: [],
     evidence: null,
     // Only the first identity is named by the corpus — the second must still read
     // as itself rather than falling back to a header that means "preparation".
@@ -640,7 +640,7 @@ describe('GuardTestView — a claim-tagged step list reads as its claims, not as
   afterEach(() => vi.unstubAllGlobals());
 
   it('heads each claim-identity group by the CLAIM, and only the untagged step by Prepare', async () => {
-    render(<GuardTestView repoId="r" test={MODEL} journeys={null} onOpenSpec={() => {}} />);
+    render(<GuardTestView repoId="r" test={MODEL} interfaces={null} onOpenSpec={() => {}} />);
     const steps = await screen.findByLabelText('test steps');
     await within(steps).findAllByRole('listitem');
 
@@ -668,7 +668,7 @@ describe('GuardTestView — a claim-tagged step list reads as its claims, not as
         return json({});
       }),
     );
-    render(<GuardTestView repoId="r" test={MODEL} journeys={null} onOpenSpec={() => {}} />);
+    render(<GuardTestView repoId="r" test={MODEL} interfaces={null} onOpenSpec={() => {}} />);
     const steps = await screen.findByLabelText('test steps');
     await within(steps).findAllByRole('listitem');
 

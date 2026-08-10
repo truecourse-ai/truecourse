@@ -5,26 +5,26 @@ import request from 'supertest';
 import { type Express } from 'express';
 
 /**
- * The Journeys tab's MAP action (OSS): `POST /:id/guard/map` derives the journey
+ * The Interfaces tab's MAP action (OSS): `POST /:id/guard/map` derives the interface
  * catalog from the working tree and answers with the fresh catalog view.
  *
  * Mapping is deterministic and LLM-free — no estimate gate, no confirmation — so
- * the real service runs here (analyzer + journey-mapper over a temp repo): the
+ * the real service runs here (analyzer + interface-mapper over a temp repo): the
  * test proves the snapshot lands on disk and the response is the same shape
- * `GET /guard/journeys` returns. The concurrency case swaps in a controllable
+ * `GET /guard/interfaces` returns. The concurrency case swaps in a controllable
  * implementation, since a 409 needs a job still in flight.
  */
 
-vi.mock('@truecourse/core/services/journey', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@truecourse/core/services/journey')>();
-  return { ...actual, mapJourneys: vi.fn(actual.mapJourneys) };
+vi.mock('@truecourse/core/services/interface', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@truecourse/core/services/interface')>();
+  return { ...actual, mapInterfaces: vi.fn(actual.mapInterfaces) };
 });
 
 import { createApp } from '../../apps/dashboard/server/src/app';
-import { mapJourneys } from '@truecourse/core/services/journey';
+import { mapInterfaces } from '@truecourse/core/services/interface';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
-// A small commander CLI — the surface the mapper derives journeys from.
+// A small commander CLI — the surface the mapper derives interfaces from.
 const CLI_SOURCE = [
   "import { Command } from 'commander';",
   '',
@@ -58,34 +58,34 @@ describe('Guard map action', () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createApp({ serveStatic: false });
-    vi.mocked(mapJourneys).mockClear();
+    vi.mocked(mapInterfaces).mockClear();
     fs.mkdirSync(path.join(root, 'src'), { recursive: true });
     fs.writeFileSync(path.join(root, 'src', 'cli.ts'), CLI_SOURCE);
   });
   afterEach(async () => {
-    vi.mocked(mapJourneys).mockReset();
+    vi.mocked(mapInterfaces).mockReset();
     await teardownTestFixture(fixture.project.slug);
   });
 
-  it('writes the catalog snapshot and answers with the journeys view', async () => {
+  it('writes the catalog snapshot and answers with the interfaces view', async () => {
     // Before mapping the tab is in its CTA state.
-    const before = await request(app).get(url('journeys')).expect(200);
+    const before = await request(app).get(url('interfaces')).expect(200);
     expect(before.body.mapped).toBe(false);
 
     const res = await request(app).post(url('map')).expect(200);
     expect(res.body.mapped).toBe(true);
-    // The commander commands in the tree become journeys — deterministic, no LLM.
-    expect(res.body.journeys.map((j: { id: string }) => j.id).sort()).toEqual(['cli/add', 'cli/list']);
-    expect(res.body.totals).toMatchObject({ journeys: 2, detectedSurfaces: 1, grounded: 0, ungrounded: 2 });
+    // The commander commands in the tree become interfaces — deterministic, no LLM.
+    expect(res.body.interfaces.map((j: { id: string }) => j.id).sort()).toEqual(['cli/add', 'cli/list']);
+    expect(res.body.totals).toMatchObject({ interfaces: 2, detectedSurfaces: 1, grounded: 0, ungrounded: 2 });
     // The banner always lists every registry surface, mapped or not.
     expect(res.body.surfaces.some((s: { surface: string }) => s.surface === 'cli')).toBe(true);
 
-    const snapshot = path.join(root, '.truecourse', 'guard', 'journeys.json');
+    const snapshot = path.join(root, '.truecourse', 'guard', 'interfaces.json');
     expect(fs.existsSync(snapshot)).toBe(true);
     expect(JSON.parse(fs.readFileSync(snapshot, 'utf-8'))).toMatchObject({ version: 1 });
 
     // The follow-up read agrees with the action's response (one source, two routes).
-    const after = await request(app).get(url('journeys')).expect(200);
+    const after = await request(app).get(url('interfaces')).expect(200);
     expect(after.body).toEqual(res.body);
   }, 60_000);
 
@@ -94,12 +94,12 @@ describe('Guard map action', () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    vi.mocked(mapJourneys).mockImplementation(async () => {
+    vi.mocked(mapInterfaces).mockImplementation(async () => {
       await held;
       return {
-        catalog: { version: 1, generatedAt: '2026-07-24T00:00:00.000Z', recipeFingerprint: '', journeys: [] },
+        catalog: { version: 1, generatedAt: '2026-07-24T00:00:00.000Z', recipeFingerprint: '', interfaces: [] },
         fingerprints: {},
-        snapshotPath: path.join(root, '.truecourse', 'guard', 'journeys.json'),
+        snapshotPath: path.join(root, '.truecourse', 'guard', 'interfaces.json'),
       };
     });
 

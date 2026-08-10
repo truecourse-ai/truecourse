@@ -65,7 +65,7 @@ const manifest: GuardManifest = {
       flowFingerprint: 'sha256:f',
       bindings: [{ doc: DOC, anchor: 'rule-coverage', fingerprint: 'sha256:s' }],
       scenarios: [{ id: 'read-the-rule-coverage.cli.1', surface: 'cli', status: 'passing' }],
-      journeys: [],
+      interfaces: [],
       gaps: [],
     },
   ],
@@ -225,12 +225,12 @@ describe('composeDocCoverage — the five-word derivation', () => {
       manifest: { ...manifest, flows: [] } as unknown as GuardManifest,
       latest: null,
       result: null,
-      flows: gappedOnly('blocked-on layer 2: no `cli/spec` journey has been derived.'),
+      flows: gappedOnly('blocked-on layer 2: no `cli/spec` interface has been derived.'),
       claims,
     });
     expect(section.flows).toEqual([]);
-    expect(section.status).toBe('no-journey');
-    expect(section.reason).toContain('no `cli/spec` journey');
+    expect(section.status).toBe('no-interface');
+    expect(section.reason).toContain('no `cli/spec` interface');
     // The claim itself stays visible under the headline.
     expect(section.claimGaps).toHaveLength(1);
   });
@@ -267,7 +267,7 @@ describe('composeDocCoverage — the five-word derivation', () => {
   });
 
   it('mixes WORST-FIRST — a blocker is never hidden behind a green sibling', () => {
-    // The lead section has a passing flow AND a claim blocked on a missing journey.
+    // The lead section has a passing flow AND a claim blocked on a missing interface.
     const mixed = statusOf({
       manifest,
       latest: ran('pass'),
@@ -275,12 +275,12 @@ describe('composeDocCoverage — the five-word derivation', () => {
       flows: {
         ...flows,
         noFlowClaims: [
-          { doc: DOC, anchor: 'rule-coverage', claimTitle: CLAIM_TITLE, reason: 'no `cli/spec` journey has been derived.' },
+          { doc: DOC, anchor: 'rule-coverage', claimTitle: CLAIM_TITLE, reason: 'no `cli/spec` interface has been derived.' },
         ],
       },
       claims,
     });
-    expect(mixed.status).toBe('no-journey');
+    expect(mixed.status).toBe('no-interface');
     // …and the mix is still there to read: the scenario that passed AND the gap.
     expect(mixed.flows).toHaveLength(1);
     expect(mixed.claimGaps).toHaveLength(1);

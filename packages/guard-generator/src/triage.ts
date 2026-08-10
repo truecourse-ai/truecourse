@@ -11,7 +11,7 @@
  * missing-setup routes to the needs-setup/blocked machinery BEFORE triage is
  * called — a state the runner detects, never an opinion a model holds.
  *
- * The evidence is the test's own journey transcript (the authored scenario, the
+ * The evidence is the test's own interface transcript (the authored scenario, the
  * failing step, expected vs actual, the raw program output), the flow's spec text
  * (the failing milestone's section), and the request-surface grounding the
  * pipeline already holds: real empty-sandbox probes for a cli test, the plan's
@@ -36,7 +36,7 @@ import {
   type GuardTriage,
 } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
-import type { JourneyContractHint, OutputCorrection } from './prompts.js'
+import type { InterfaceContractHint, OutputCorrection } from './prompts.js'
 import type { ProbeTranscript } from './ground.js'
 import { quoteInvalidOutput } from './validate.js'
 
@@ -98,7 +98,7 @@ outside the three allowed values.`
 
 export const TRIAGE_PROMPT_FINGERPRINT = fingerprint(TRIAGE_SYSTEM_PROMPT)
 
-/** One milestone of the failing test's flow, as triage sees the journey. */
+/** One milestone of the failing test's flow, as triage sees the interface. */
 export interface TriageMilestone {
   order: number
   claim: string
@@ -119,7 +119,7 @@ export interface TriageUserContext {
   sectionText: string
   /** The flow's milestones in path order, the failing one marked. */
   milestones: TriageMilestone[]
-  /** The failed test's authored YAML — the exact journey it ran. */
+  /** The failed test's authored YAML — the exact interface it ran. */
   scenarioYaml: string
   /** The failing step (1-based). */
   step: number
@@ -137,7 +137,7 @@ export interface TriageUserContext {
   probes?: ProbeTranscript[]
   /** The plan's inbound request contracts — what each walked operation's handler
    *  actually reads off the request (api tests). */
-  journeyContracts?: JourneyContractHint[]
+  interfaceContracts?: InterfaceContractHint[]
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -151,7 +151,7 @@ function indentBlock(text: string): string {
 }
 
 /** The same trailing request-fields clause the authoring prompt renders. */
-function contractLine(hint: JourneyContractHint): string {
+function contractLine(hint: InterfaceContractHint): string {
   const parts: string[] = []
   for (const [label, fields] of [
     ['body', hint.bodyFields],
@@ -184,7 +184,7 @@ export function buildTriageUserPrompt(ctx: TriageUserContext): string {
     ctx.sectionText,
     '"""',
     '',
-    'SCENARIO (the failed test — the exact journey it ran):',
+    'SCENARIO (the failed test — the exact interface it ran):',
     '"""',
     ctx.scenarioYaml,
     '"""',
@@ -205,11 +205,11 @@ export function buildTriageUserPrompt(ctx: TriageUserContext): string {
       if (!p.stdout && !p.stderr) lines.push('(no output)')
     }
   }
-  if (ctx.journeyContracts && ctx.journeyContracts.length > 0) {
+  if (ctx.interfaceContracts && ctx.interfaceContracts.length > 0) {
     lines.push(
       '',
       "REQUEST SURFACE (what each walked operation's handler actually reads off the request):",
-      ...ctx.journeyContracts.map(contractLine),
+      ...ctx.interfaceContracts.map(contractLine),
     )
   }
   lines.push(
@@ -264,7 +264,7 @@ export interface TriageFlowContext {
   sectionText: string
   milestones: TriageMilestone[]
   probes?: ProbeTranscript[]
-  journeyContracts?: JourneyContractHint[]
+  interfaceContracts?: InterfaceContractHint[]
 }
 
 /**
@@ -301,8 +301,8 @@ export async function runTriage(
     ...(finding.stdout !== undefined ? { stdout: finding.stdout } : {}),
     ...(finding.stderr !== undefined ? { stderr: finding.stderr } : {}),
     ...(flowCtx.probes && flowCtx.probes.length > 0 ? { probes: flowCtx.probes } : {}),
-    ...(flowCtx.journeyContracts && flowCtx.journeyContracts.length > 0
-      ? { journeyContracts: flowCtx.journeyContracts }
+    ...(flowCtx.interfaceContracts && flowCtx.interfaceContracts.length > 0
+      ? { interfaceContracts: flowCtx.interfaceContracts }
       : {}),
   }
   const verdict = await callTriageWithReask(ctx, runner)

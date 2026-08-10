@@ -541,7 +541,7 @@ describe('runGuard — tests committed FAILING at birth', () => {
             { id: 'flow.cli.1', surface: 'cli', status: 'failing' },
             { id: 'flow.cli.2', surface: 'cli', status: 'failing' },
           ],
-          journeys: [],
+          interfaces: [],
           generationInputsHash: 'sha256:gen',
           gaps: [],
         },

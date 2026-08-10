@@ -374,7 +374,7 @@ NAME the blocker with the right noun — the classes are triaged differently:
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "cli"); the engine
-assigns the scenario's id, its flow/journey references, and its section bindings
+assigns the scenario's id, its flow/interface references, and its section bindings
 itself, so do not emit any field that is not in the schema.
 ${SCENARIO_JSON_SCHEMA}
 
@@ -664,7 +664,7 @@ proves nothing about the doc and reports as a false failure.
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
 It contains ONLY the fields you author (\`driver\` is always "api"); the engine
-assigns the scenario's id, its flow/journey references, and its section bindings
+assigns the scenario's id, its flow/interface references, and its section bindings
 itself, so do not emit any field that is not in the schema.
 ${API_SCENARIO_JSON_SCHEMA}
 
@@ -743,7 +743,7 @@ export interface AuthorMilestone {
   /**
    * The realization the matcher picked, already translated through the driver
    * adapter (`invoke` → cli `run`, `request` → api `request`) — one line per
-   * journey step. Empty when no journey was matched to this milestone.
+   * interface step. Empty when no interface was matched to this milestone.
    */
   realization: string[]
   /**
@@ -791,7 +791,7 @@ export interface ExternalServiceHint {
  * request. `required: 'unknown'` is a real answer — the field is read, and nothing
  * in the source says whether it may be absent.
  */
-export interface JourneyContractHint {
+export interface InterfaceContractHint {
   method: string
   path: string
   bodyFields?: { name: string; required: boolean | 'unknown' }[]
@@ -824,8 +824,8 @@ export interface AuthorUserContext {
   flow: { id: string; title: string; goal: string }
   /** The flow's path, in order — the assertion source and the milestone numbers. */
   milestones: AuthorMilestone[]
-  /** The journey ids the realization plan walks, in order (provenance for the model). */
-  journeyPath: string[]
+  /** The interface ids the realization plan walks, in order (provenance for the model). */
+  interfacePath: string[]
   /** Canonical area ids the flow's docs cover, from the corpus (may be empty). */
   areaTags: string[]
   /** The surface this scenario runs on — selects the system prompt + the
@@ -876,19 +876,19 @@ export interface AuthorUserContext {
    * exact path + the request fields the handler reads, requiredness included when
    * the source states it. Grounds three measured failures: invented
    * paths, bodies missing a required field, and a setup step that 400s before the
-   * claim is reached. Empty/absent (no api journeys, a degraded mapping, cli) keeps
+   * claim is reached. Empty/absent (no api interfaces, a degraded mapping, cli) keeps
    * the prompt byte-identical. USER-prompt only.
    */
-  journeyContracts?: JourneyContractHint[]
+  interfaceContracts?: InterfaceContractHint[]
   /**
    * api scenarios: the REST of the app's operations — everything the api catalog
-   * offers that THIS flow's journeys do not walk. A flow's SETUP steps
+   * offers that THIS flow's interfaces do not walk. A flow's SETUP steps
    * routinely need one (signing up before signing in), and with only the flow's own
    * operations listed the model invented the rest and got a 404 on step 1. Same
-   * rendering and same verbatim-path rule as {@link journeyContracts}; empty/absent
+   * rendering and same verbatim-path rule as {@link interfaceContracts}; empty/absent
    * keeps the prompt byte-identical. USER-prompt only.
    */
-  otherOperations?: JourneyContractHint[]
+  otherOperations?: InterfaceContractHint[]
   /** How many other operations the cap dropped, so the block can say so. */
   otherOperationsOverflow?: number
   /**
@@ -976,7 +976,7 @@ export interface AuthorUserContext {
  * requiredness the source does not state — never rendered as "optional", which
  * would be a claim the analysis did not make.
  */
-function contractSummary(hint: JourneyContractHint): string {
+function contractSummary(hint: InterfaceContractHint): string {
   const parts: string[] = []
   for (const [label, fields] of [
     ['body', hint.bodyFields],
@@ -1185,16 +1185,16 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     `goal: ${ctx.flow.goal}`,
     `milestones: ${ctx.milestones.length}`,
   )
-  if (ctx.journeyPath.length > 0) {
+  if (ctx.interfacePath.length > 0) {
     lines.push(
-      `realized through: ${ctx.journeyPath.join(' → ')}  (the surfaces matching chose; the`,
+      `realized through: ${ctx.interfacePath.join(' → ')}  (the surfaces matching chose; the`,
       'per-milestone lines below say which serves which)',
     )
   }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and
   // gated on non-empty, so a cli batch or a degraded mapping is byte-identical.
-  if (ctx.driver === 'api' && ctx.journeyContracts && ctx.journeyContracts.length > 0) {
+  if (ctx.driver === 'api' && ctx.interfaceContracts && ctx.interfaceContracts.length > 0) {
     lines.push(
       '',
       "OPERATIONS THIS FLOW WALKS — read out of the app's own route registrations. Use",
@@ -1203,7 +1203,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'carrying each field marked `required` — a missing one is a 400 before any',
       'assertion of yours runs:',
     )
-    for (const j of ctx.journeyContracts) {
+    for (const j of ctx.interfaceContracts) {
       lines.push(`- ${j.method} ${j.path}${contractSummary(j)}`)
     }
     // The rest of the surface. A flow's SETUP steps live here — the
@@ -2243,7 +2243,7 @@ export function buildFlowsUserPrompt(ctx: FlowsUserContext): string {
 export const FLOWS_EPIC_SYSTEM_PROMPT = `\
 You are given the FLOWS a product's specification areas produced — each a user-goal
 path, summarized as its title, its goal, and its milestones. Your one job: decide
-whether any of them chain into an EPIC — a single journey a real user performs
+whether any of them chain into an EPIC — a single interface a real user performs
 end-to-end ACROSS areas ("sign up → create a first project → invite a teammate").
 You return JSON only.
 
@@ -2261,10 +2261,10 @@ nothing (the individual flows already cover their claims).
   DIFFERENT areas. Copy the refs exactly as listed below.
 - \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a
   milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`doc\`, \`anchor\`,
-  \`claimTitle\`). You may drop a composed flow's milestones that the journey doesn't
+  \`claimTitle\`). You may drop a composed flow's milestones that the interface doesn't
   need, but you may never introduce one from elsewhere or write new text.
 - Keep the chain to at most ~12 milestones, in a single coherent order.
-- \`title\`: the journey in user terms. \`goal\`: one sentence for what the user achieves.
+- \`title\`: the interface in user terms. \`goal\`: one sentence for what the user achieves.
 - Never emit an epic that is just one flow restated, and never emit two epics with the
   same chain.
 
@@ -2274,7 +2274,7 @@ validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences
 ${FLOWS_EPIC_JSON_SCHEMA}
 Concretely:
   { "epics": [
-      { "title": "<the cross-area journey>",
+      { "title": "<the cross-area interface>",
         "goal": "<one sentence>",
         "composedOf": ["F1", "F4"],
         "milestones": [
@@ -2337,35 +2337,35 @@ export function buildFlowsEpicUserPrompt(ctx: FlowsEpicUserContext): string {
 }
 
 // ---------------------------------------------------------------------------
-// Realization matching — one flow against one surface's journey catalog
+// Realization matching — one flow against one surface's interface catalog
 // ---------------------------------------------------------------------------
 
 export const MATCH_SYSTEM_PROMPT = `\
 You decide HOW a spec FLOW could be walked on ONE of an application's surfaces. You
 are given the flow — a user goal and an ordered list of MILESTONES — and that
-surface's JOURNEY CATALOG: every entry point the surface actually offers, with the
+surface's INTERFACE CATALOG: every entry point the surface actually offers, with the
 steps each one performs. Your one job: return the ordered plan that walks the
-milestones through those journeys, or say plainly that the surface cannot do it. You
+milestones through those interfaces, or say plainly that the surface cannot do it. You
 return JSON only.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
 # What you are matching
 - A MILESTONE is something the product should do for a user, stated by the spec.
-- A JOURNEY is something the code actually offers: a command a user can run, an
+- A INTERFACE is something the code actually offers: a command a user can run, an
   endpoint they can call, a screen they can reach. It is derived from the code, so
   the catalog is the complete list of what this surface can do.
-- A PLAN pairs them: for each milestone, the journey (or journeys) a test would use
+- A PLAN pairs them: for each milestone, the interface (or interfaces) a test would use
   to reach it, in the order a user would walk them.
 
 # The rules
-- Use ONLY journeys from the catalog below, addressed by their \`id\` copied VERBATIM.
+- Use ONLY interfaces from the catalog below, addressed by their \`id\` copied VERBATIM.
   An id that is not in the catalog invalidates your whole answer.
 - Every milestone must appear in the plan at least once. A milestone may take two
-  journeys (do it, then observe it); a journey may serve two milestones.
+  interfaces (do it, then observe it); an interface may serve two milestones.
 - Keep the plan in milestone order — it is a path, and each step acts on the state
   the previous one left.
-- Match on BEHAVIOR, not on wording. A journey whose entry is \`tasks add\` realizes
+- Match on BEHAVIOR, not on wording. An interface whose entry is \`tasks add\` realizes
   "creating a task returns its id" even though neither text quotes the other.
 
 # The api surface also owns the SERVER PROCESS
@@ -2373,27 +2373,27 @@ The api surface does not only send requests: a test on it starts the service (wi
 any environment it likes), signals it, reads what it writes to stdout/stderr, and
 restarts it. So a milestone about STARTUP, CONFIGURATION defaults, a failed start,
 boot-time migrations, request LOGGING, graceful SHUTDOWN, or state SURVIVING a
-restart is realizable on \`api\` even though no journey in the catalog names it —
-journeys are entry points, not the process's whole life. Plan such a milestone
-against the journey the test observes it THROUGH (the endpoint whose data must
+restart is realizable on \`api\` even though no interface in the catalog names it —
+interfaces are entry points, not the process's whole life. Plan such a milestone
+against the interface the test observes it THROUGH (the endpoint whose data must
 survive the restart, the endpoint whose request produces the log line, or the
-service's health/entry journey when it is the boot itself under test) and say so in
+service's health/entry interface when it is the boot itself under test) and say so in
 the \`note\`. Only a milestone about a DIFFERENT program — a package script, a build
 or test command the docs tell a user to run — is outside this surface.
 
 # A route the app does NOT have is still the api surface's behavior
 A milestone about how the service answers a request it does not serve — an unknown
 path, an unsupported method on a real path, the shape of a 404 or 405 — IS realizable
-on the api surface even though no journey names it: the catalog lists the routes that
+on the api surface even though no interface names it: the catalog lists the routes that
 EXIST, and the claim is precisely about what happens off that list. Plan it against
-the journey it sits nearest (the operation whose path or family the claim names) and
+the interface it sits nearest (the operation whose path or family the claim names) and
 say so in the \`note\`. Do not call it unrealizable.
 
 # When the surface cannot do it — say so, and say why
-If any milestone has NO journey that could plausibly serve it, do NOT stretch an
-unrelated journey to cover it and do NOT return a partial plan. Return
+If any milestone has NO interface that could plausibly serve it, do NOT stretch an
+unrelated interface to cover it and do NOT return a partial plan. Return
 \`unrealizable\` with ONE sentence naming the milestone(s) nothing serves and what is
-missing (e.g. "no journey creates a project — the catalog only reads them"). That
+missing (e.g. "no interface creates a project — the catalog only reads them"). That
 verdict is a first-class, useful answer: it is how a spec promise with no code
 surface behind it becomes visible. A wrong plan, by contrast, produces a test that
 checks the wrong thing.
@@ -2403,7 +2403,7 @@ This JSON Schema is generated from the engine's Zod definition; your reply must
 validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
 ${MATCH_JSON_SCHEMA}
 Concretely:
-  { "plan": [ { "journeyId": "<copied verbatim from the catalog>",
+  { "plan": [ { "interfaceId": "<copied verbatim from the catalog>",
                 "milestone": <the milestone's number>,
                 "note": "<optional: how it serves that milestone>" } ] }
 or:
@@ -2421,11 +2421,11 @@ export interface MatchMilestoneLine {
 }
 
 /**
- * One journey as the matcher sees it: the DIGEST — id, title, entry descriptor, and
+ * One interface as the matcher sees it: the DIGEST — id, title, entry descriptor, and
  * a one-line summary per step. Never file paths, symbols, or source: the matcher
- * reads what a USER can reach, exactly like the journey fingerprint.
+ * reads what a USER can reach, exactly like the interface fingerprint.
  */
-export interface JourneyDigest {
+export interface InterfaceDigest {
   id: string
   title: string
   /** The entry descriptor as the surface declares it (a command path, a route). */
@@ -2436,8 +2436,8 @@ export interface JourneyDigest {
 
 /** What the engine tells the matcher on its ONE corrective re-ask. */
 export interface MatchIssues {
-  /** Journey ids the plan named that are not in the catalog. */
-  unknownJourneys: string[]
+  /** Interface ids the plan named that are not in the catalog. */
+  unknownInterfaces: string[]
   /** Milestone numbers the plan never covered. */
   uncoveredMilestones: number[]
   /** `milestone` values that match no milestone of this flow. */
@@ -2451,8 +2451,8 @@ export interface MatchUserContext {
   milestones: MatchMilestoneLine[]
   /** The surface being matched (a driver-registry id, e.g. `cli`). */
   surface: string
-  /** The surface's whole journey catalog, as digests. */
-  journeys: JourneyDigest[]
+  /** The surface's whole interface catalog, as digests. */
+  interfaces: InterfaceDigest[]
   /** On a re-ask after engine validation, exactly what was wrong. */
   issues?: MatchIssues
   /** On a re-ask after invalid output, the prior output quoted back. */
@@ -2473,10 +2473,10 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
   }
   lines.push(
     '',
-    `JOURNEY CATALOG for ${ctx.surface} — everything this surface offers. Copy an \`id\``,
+    `INTERFACE CATALOG for ${ctx.surface} — everything this surface offers. Copy an \`id\``,
     'verbatim into every plan entry:',
   )
-  for (const j of ctx.journeys) {
+  for (const j of ctx.interfaces) {
     lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`)
     if (j.steps.length > 0) {
       lines.push('steps:')
@@ -2484,13 +2484,13 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
     }
   }
   if (ctx.issues) {
-    if (ctx.issues.unknownJourneys.length > 0) {
+    if (ctx.issues.unknownInterfaces.length > 0) {
       lines.push(
         '',
-        'CORRECTION — these journey ids are NOT in the catalog above. Every `journeyId`',
+        'CORRECTION — these interface ids are NOT in the catalog above. Every `interfaceId`',
         'is copied verbatim from a catalog entry:',
       )
-      for (const id of ctx.issues.unknownJourneys) lines.push(`- ${id}`)
+      for (const id of ctx.issues.unknownInterfaces) lines.push(`- ${id}`)
     }
     if (ctx.issues.unknownMilestones.length > 0) {
       lines.push(
@@ -2503,8 +2503,8 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
     if (ctx.issues.uncoveredMilestones.length > 0) {
       lines.push(
         '',
-        'CORRECTION — your plan covered no journey for these milestones. Either give each',
-        'one a journey from the catalog, or answer `unrealizable` naming what is missing:',
+        'CORRECTION — your plan covered no interface for these milestones. Either give each',
+        'one an interface from the catalog, or answer `unrealizable` naming what is missing:',
         `  ${ctx.issues.uncoveredMilestones.join(', ')}`,
       )
     }
@@ -2515,8 +2515,8 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
       '',
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
-      'Return exactly ONE JSON object: { "plan": [ { "journeyId", "milestone" }, … ] }',
-      'with journey ids copied verbatim from the catalog, or { "unrealizable": "<one',
+      'Return exactly ONE JSON object: { "plan": [ { "interfaceId", "milestone" }, … ] }',
+      'with interface ids copied verbatim from the catalog, or { "unrealizable": "<one',
       'sentence>" }. Nothing else.',
     )
   }

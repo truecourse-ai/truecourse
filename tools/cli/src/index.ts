@@ -446,7 +446,7 @@ guardCmd
 const guardFlowsCmd = guardCmd
   .command("flows")
   .description("List the synthesized flows with their per-surface coverage (LLM-free)")
-  .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, journeys, gaps")
+  .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, interfaces, gaps")
   .action(async (options) => {
     await runGuardFlows({ show: options.show });
   });

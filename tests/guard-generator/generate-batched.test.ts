@@ -21,9 +21,9 @@ import {
   extractBy,
   authorBy,
   runGenerate,
-  journeysOf,
-  cliJourney,
-  apiJourney,
+  interfacesOf,
+  cliInterface,
+  apiInterface,
   stampMilestones,
   PASSING_STEPS,
   FAILING_STEPS,
@@ -93,7 +93,7 @@ const apiExtract = extractBy({
   alpha: [{ driver: 'api', claim: 'GET /a returns 200', reason: 'status' }],
   beta: [{ driver: 'api', claim: 'GET /b returns 200', reason: 'status' }],
 })
-const apiJourneys = (r: string) => journeysOf(r, apiJourney('GET', '/a'), apiJourney('GET', '/b'))
+const apiInterfaces = (r: string) => interfacesOf(r, apiInterface('GET', '/a'), apiInterface('GET', '/b'))
 
 /** Two docs → two independent single-claim cli flows. */
 function twoDocs(r: string): void {
@@ -205,7 +205,7 @@ describe('generateGuards — isolated re-confirmation of birth findings (layer d
       repoRoot: r,
       executor: exec,
       concurrency: 4,
-      journeys: apiJourneys(r),
+      interfaces: apiInterfaces(r),
       extractRunner: apiExtract,
       generateRunner: authorBy({ alpha: rawApi('flipA', FAILING_API_STEPS), beta: rawApi('flipB', FAILING_API_STEPS) }),
     })
@@ -235,7 +235,7 @@ describe('generateGuards — isolated re-confirmation of birth findings (layer d
       executor: exec,
       isolationCap: 1,
       concurrency: 4,
-      journeys: apiJourneys(r),
+      interfaces: apiInterfaces(r),
       extractRunner: apiExtract,
       generateRunner: authorBy({ alpha: rawApi('fa', FAILING_API_STEPS), beta: rawApi('fb', FAILING_API_STEPS) }),
     })
@@ -269,7 +269,7 @@ describe('generateGuards — isolated re-confirmation of birth findings (layer d
       repoRoot: r,
       executor: exec,
       concurrency: 4,
-      journeys: journeysOf(r, cliJourney(['relkit']), apiJourney('GET', '/todos')),
+      interfaces: interfacesOf(r, cliInterface(['relkit']), apiInterface('GET', '/todos')),
       extractRunner: extractBy({}),
       generateRunner: perSurface,
     })

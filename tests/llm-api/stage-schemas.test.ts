@@ -341,7 +341,7 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
       flow,
       milestones: [{ order: 1, claim: 'prints the version' }],
       surface: 'cli',
-      journeys: [{ id: 'j1', title: 'version', entry: 'relkit --version', steps: ['invoke relkit --version'] }],
+      interfaces: [{ id: 'j1', title: 'version', entry: 'relkit --version', steps: ['invoke relkit --version'] }],
     };
     await spawnMatchRunner(t)(matchCtx);
     push('guard.match', c.reqs.splice(0));
@@ -358,7 +358,7 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
           realization: ['run --version'],
         },
       ],
-      journeyPath: ['j1'],
+      interfacePath: ['j1'],
       areaTags: ['core/checkout'],
       driver: 'cli',
       recipeEntry: ['node', 'dist/cli.js'],

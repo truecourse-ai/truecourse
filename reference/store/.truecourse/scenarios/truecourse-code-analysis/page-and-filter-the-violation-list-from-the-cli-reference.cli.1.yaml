@@ -5,7 +5,7 @@ promise: A developer analyzes a repository and pages, windows and filters the vi
 flow:
   id: page-and-filter-the-violation-list-from-the-cli-reference
   fingerprint: sha256:5dd990547e853427bc447578a8cdb043a8ae85b3cddcd361896bb1411feb315e
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list

@@ -148,10 +148,10 @@ describe('NavigationContext — guard section routing', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
   });
 
-  it('a ?gjourney=<journey> deep link opens guard/journeys', () => {
-    renderAt('/repos/abc?gjourney=cli%2Ftasks-add');
+  it('a ?ginterface=<interface> deep link opens guard/interfaces', () => {
+    renderAt('/repos/abc?ginterface=cli%2Ftasks-add');
     expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('journeys');
+    expect(screen.getByTestId('tab')).toHaveTextContent('interfaces');
   });
 
   // The retired Guard Spec tab (merged into Coverage) — old links must still land.

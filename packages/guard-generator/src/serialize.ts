@@ -1,7 +1,7 @@
 /**
  * Turn a model's raw scenario into a committed, engine-owned `.tc` scenario:
  * assign a collision-safe `<flow-id>.<surface>.<n>` id, OVERWRITE the flow,
- * journey, and section references from the engine's own state (never trust what
+ * interface, and section references from the engine's own state (never trust what
  * the model wrote), validate against the strict schema, and serialize to YAML.
  * Ownership is tracked by scenario id so regenerating a flow replaces only ITS
  * prior generated files and never a hand-written one.
@@ -14,11 +14,11 @@ import {
   GuardScenarioSchema,
   GUARD_FORMAT_VERSION,
   isRunnableDriver,
-  journeyFingerprint,
+  interfaceFingerprint,
   type GuardDriverId,
   type GuardFlow,
   type GuardScenario,
-  type Journey,
+  type Interface,
 } from '@truecourse/shared'
 import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
 import type { RawGeneratedScenario } from './schemas.js'
@@ -52,7 +52,7 @@ export function areaOrDocSlug(section: SectionInput): string {
 
 /**
  * Build the final scenario for one (flow, surface): engine-assigned `id`, the
- * flow's id+fingerprint, the journey path it grounds on (ids + fingerprints), and
+ * flow's id+fingerprint, the interface path it grounds on (ids + fingerprints), and
  * the flow's section bindings DENORMALIZED into `binds` so the runner resolves
  * staleness with no flow lookup. The model's behavioral fields (title, setup,
  * steps with their `milestone` annotations, normalize) are kept as authored.
@@ -60,7 +60,7 @@ export function areaOrDocSlug(section: SectionInput): string {
  */
 export function buildFlowScenario(opts: {
   flow: GuardFlow
-  journeys: readonly Journey[]
+  interfaces: readonly Interface[]
   raw: RawGeneratedScenario
   id: string
   /**
@@ -72,14 +72,14 @@ export function buildFlowScenario(opts: {
   server?: string
   defaultServer?: string
 }): GuardScenario {
-  const { flow, journeys, raw, id, server, defaultServer } = opts
+  const { flow, interfaces, raw, id, server, defaultServer } = opts
   // A scenario carries its own driver (a runnable one — you can only author + run
   // for a driver that ships). Validated against the registry, not a hardcoded 'cli'.
   if (!isRunnableDriver(raw.driver)) {
     throw new Error(`scenario driver "${raw.driver}" is not a runnable guard driver`)
   }
-  if (journeys.length === 0) {
-    throw new Error(`scenario "${id}" has no grounding journey — every generated scenario realizes a journey path`)
+  if (interfaces.length === 0) {
+    throw new Error(`scenario "${id}" has no grounding interface — every generated scenario realizes an interface path`)
   }
   const candidate: unknown = {
     guard: GUARD_FORMAT_VERSION,
@@ -90,9 +90,9 @@ export function buildFlowScenario(opts: {
     // resolving `flow.id` against a `flows.json` that re-synthesis may have moved.
     promise: flow.goal,
     flow: { id: flow.id, fingerprint: flow.fingerprint },
-    journey: {
-      path: journeys.map((j) => j.id),
-      fingerprints: journeys.map((j) => j.fingerprint || journeyFingerprint(j)),
+    interface: {
+      path: interfaces.map((j) => j.id),
+      fingerprints: interfaces.map((j) => j.fingerprint || interfaceFingerprint(j)),
     },
     binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
     driver: raw.driver,

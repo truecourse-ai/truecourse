@@ -4,7 +4,7 @@
  * There is no Tests tab and no standalone test destination — a flow and its test
  * are one entity. What this file covers is the SCENARIO RENDERING inside that
  * merged detail: it reads in the order a reader asks — what it checks → result →
- * setup → steps → evidence → the journey it drives, last. It creates no dismissal
+ * setup → steps → evidence → the interface it drives, last. It creates no dismissal
  * of its own (that ruling is the flow's "don't test this flow", the only MANUAL
  * unit — see `guard-flows.test.tsx`), but it surfaces an EXISTING dismissal
  * already recorded against the failing milestone's claim, with its undo.
@@ -34,7 +34,7 @@ import type {
   GuardFlowDetail,
   GuardFlowListItem,
   GuardFlowsView,
-  GuardJourneyRow,
+  GuardInterfaceRow,
   GuardRecipeCard,
   GuardScenarioResult,
   GuardScenarioSetupView,
@@ -163,7 +163,7 @@ const FLOW_ROWS: GuardFlowListItem[] = [...FLOW_TITLES].map(([flowId, title]) =>
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 }));
 
 const FLOW_DETAIL: GuardFlowDetail = {
@@ -196,11 +196,11 @@ const FLOW_DETAIL: GuardFlowDetail = {
       durationMs: 412,
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${PASSING_ID}`,
       hasEvidence: true,
-      journeyPath: ['cli/tasks-add'],
+      interfacePath: ['cli/tasks-add'],
     },
   ],
   gaps: [],
-  journeyIds: ['cli/tasks-add'],
+  interfaceIds: ['cli/tasks-add'],
   findings: [],
   errors: [],
   generatedAt: '2026-07-24T13:40:00.000Z',
@@ -258,13 +258,13 @@ const BIRTH_FLOW_DETAIL: GuardFlowDetail = {
       },
       evidencePath: '.truecourse/guard/evidence/birth/pathological',
       hasEvidence: true,
-      journeyPath: [],
+      interfacePath: [],
     },
   ],
-  journeyIds: [],
+  interfaceIds: [],
 };
 
-const JOURNEYS: GuardJourneyRow[] = [
+const INTERFACES: GuardInterfaceRow[] = [
   {
     id: 'cli/tasks-add',
     type: 'cli',
@@ -527,12 +527,12 @@ function TestsHarness({
         recipe={recipe}
         recipeOpen={recipeOpen}
         onCloseRecipe={() => setRecipeOpen(false)}
-        journeys={JOURNEYS}
+        interfaces={INTERFACES}
         {...(claimTitles ? { claimTitles } : {})}
         binds={BINDS}
         decisions={decisions}
         tabs={tabs}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         onOpenSpec={(doc, section) => openedSpec.push([doc, section])}
       />
     </div>
@@ -591,11 +591,11 @@ describe('the test, read inside its flow', () => {
     expect(await findSteps()).toBeInTheDocument();
   });
 
-  it('reads what it checks → verdict → steps → evidence → journey, in that order', async () => {
+  it('reads what it checks → verdict → steps → evidence → interface, in that order', async () => {
     renderTest(PASSING_ID);
     const steps = await findSteps();
 
-    const order = ['What it checks', 'Verdict', 'Steps', 'Evidence', 'Journey'];
+    const order = ['What it checks', 'Verdict', 'Steps', 'Evidence', 'Interface'];
     const positions = order.map((label) => {
       const el = screen.getByText(label);
       return { label, top: Array.from(document.querySelectorAll('*')).indexOf(el) };
@@ -628,8 +628,8 @@ describe('the test, read inside its flow', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('evidence transcript')).toHaveTextContent('$ tasks add "write the spec"'),
     );
-    // The journey renders LAST, as a sequence diagram.
-    const diagram = await screen.findByRole('group', { name: 'Journey cli/tasks-add' });
+    // The interface renders LAST, as a sequence diagram.
+    const diagram = await screen.findByRole('group', { name: 'Interface cli/tasks-add' });
     expect(within(diagram).getByText('User')).toBeInTheDocument();
   });
 

@@ -47,6 +47,7 @@ const TAB_SCOPED_PARAMS = [
   'gdrift',
   'gflow',
   'gfind',
+  'ginterface',
   'gjourney',
   'gclaim',
   'gview',
@@ -91,8 +92,9 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   if (searchParams?.get('guard') || searchParams?.get('gconf')) return 'coverage';
   // A Guard flow (`?gflow=`) or finding (`?gfind=`) deep-link implies the Flows tab.
   if (searchParams?.get('gflow') || searchParams?.get('gfind')) return 'guardflows';
-  // A journey deep-link (`?gjourney=<id>`) implies the Journeys tab.
-  if (searchParams?.get('gjourney')) return 'journeys';
+  // An interface deep-link (`?ginterface=<id>`) implies the Interfaces tab. The
+  // pre-rename `?gjourney=` spelling is still honoured so old bookmarks land.
+  if (searchParams?.get('ginterface') || searchParams?.get('gjourney')) return 'interfaces';
   // A claim deep-link (`?gclaim=<id>`) implies Coverage: a claim's one home is the
   // section that states it, and the coverage page resolves the id to that section.
   if (searchParams?.get('gclaim')) return 'coverage';

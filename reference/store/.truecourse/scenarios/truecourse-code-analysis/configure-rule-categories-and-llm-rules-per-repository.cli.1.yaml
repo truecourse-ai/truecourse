@@ -5,13 +5,15 @@ promise: A developer registers a repository and sets its rule policy
 flow:
   id: configure-rule-categories-and-llm-rules-per-repository
   fingerprint: sha256:90fbe2b43c1a92f677c4348f54db83573f074ae5975ca7106a63452e690d0487
-journey:
+interface:
   path:
     - cli/add
-    - cli/rules
+    - cli/rules-categories
+    - cli/rules-llm
   fingerprints:
     - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
-    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+    - sha256:7c34c13f1388399e8fef9e49a52d4f25d1b4c525cdc32ec1b827007a6be170d6
+    - sha256:23ad6cb2a11da30f8f40226ccd122367e3fe43b2b4cdde3ee7ab696f047cbf78
 binds:
   - doc: reference/spec-docs/analyze/overview.mdx
     section: commands

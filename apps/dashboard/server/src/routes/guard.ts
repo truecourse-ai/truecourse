@@ -11,11 +11,11 @@
  *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
  *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab)
  *   GET /:id/guard/flows/:flowId one flow: milestones, per-surface scenarios, gaps, findings
- *   GET /:id/guard/journeys      the code-derived journey catalog + its reverse index
+ *   GET /:id/guard/interfaces      the code-derived interface catalog + its reverse index
  *   GET /:id/guard/scenarios     the committed-scenario inventory + recipe card
  *   GET /:id/guard/scenario      a scenario's YAML source + step list by ?id= (+ per-step
  *                                actuals when ?runId= / ?evidencePath= names where it ran)
- *   GET /:id/guard/journey/raw   one journey's entry in guard/journeys.json by ?id=
+ *   GET /:id/guard/interface/raw   one interface's entry in guard/interfaces.json by ?id=
  *   GET /:id/guard/flow/raw      one flow's entry in scenarios/flows.json by ?id=
  *   GET /:id/guard/claim/raw     one claim's entry in scenarios/claims.json by ?id=
  *   GET /:id/guard/dependency/raw one catalog entry in scenarios/dependencies.json by ?id=<name>
@@ -43,7 +43,7 @@ import {
   readGuardRun,
   readGuardHistoryForPr,
   readGuardScenarioSource,
-  readGuardJourneyRaw,
+  readGuardInterfaceRaw,
   readGuardFlowRaw,
   readGuardClaimRaw,
   readGuardDependencyRaw,
@@ -57,7 +57,7 @@ import {
   listGuardFlows,
   readGuardFlowDetail,
   readGuardFlowsForView,
-  readGuardJourneys,
+  readGuardInterfaces,
   readGuardClaims,
   readGuardClaimsForView,
   readGuardRunFlows,
@@ -242,14 +242,14 @@ router.get('/:id/guard/flows/:flowId', async (req: Request, res: Response, next:
   }
 });
 
-// The Journeys tab payload — the derived catalog, its reverse index onto the
+// The Interfaces tab payload — the derived catalog, its reverse index onto the
 // flows, and the detected-surface banner. Always 200: no snapshot yet reads as
 // `mapped: false` with an empty catalog (the Map CTA state), and a store with no
 // working tree reports `unavailable: 'no-working-tree'`.
-router.get('/:id/guard/journeys', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id/guard/interfaces', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    res.json(await readGuardJourneys(repo.path, refOf(req)));
+    res.json(await readGuardInterfaces(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }
@@ -347,8 +347,8 @@ const rawArtifactRoute = (
   };
 
 router.get(
-  '/:id/guard/journey/raw',
-  rawArtifactRoute((repoPath, id) => readGuardJourneyRaw(repoPath, id), 'journey'),
+  '/:id/guard/interface/raw',
+  rawArtifactRoute((repoPath, id) => readGuardInterfaceRaw(repoPath, id), 'interface'),
 );
 router.get('/:id/guard/flow/raw', rawArtifactRoute(readGuardFlowRaw, 'flow'));
 router.get('/:id/guard/claim/raw', rawArtifactRoute(readGuardClaimRaw, 'claim'));

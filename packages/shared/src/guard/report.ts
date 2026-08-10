@@ -60,10 +60,10 @@ export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
  * noise/won't-fix in `scenarios/decisions.json`, so generate settles it explicitly
  * instead of silently disappearing it), or the two REALIZATION kinds a flow's
  * surface can end in:
- *  - `no-journey` — the surface's journey catalog is EMPTY: nothing was mapped
+ *  - `no-interface` — the surface's interface catalog is EMPTY: nothing was mapped
  *    that could serve the flow. Usually "the mapper can't see your code" (an
  *    extraction gap), and must never read as "your product lacks the feature".
- *  - `unrealizable` — the catalog is healthy, matching examined it, and no journey
+ *  - `unrealizable` — the catalog is healthy, matching examined it, and no interface
  *    path serves the flow's milestones: the real "the spec claims this; no code
  *    surface offers it" signal.
  * Both stay GAPS (never findings) while matcher precision is unmeasured — a bogus
@@ -80,7 +80,7 @@ export const GuardCoverageGapKindSchema = z.enum([
   'no-claim',
   'blocked-on',
   'dismissed',
-  'no-journey',
+  'no-interface',
   'unrealizable',
 ])
 export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
@@ -101,7 +101,7 @@ export const GuardCoverageGapSchema = z
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
     /**
-     * The FLOW the gap belongs to, when it is a flow-level gap (`no-journey`,
+     * The FLOW the gap belongs to, when it is a flow-level gap (`no-interface`,
      * `unrealizable`, `awaiting-driver` on a mapped-but-unrunnable surface, a
      * dismissed flow). `doc`/`anchor` then name the flow's PRIMARY binding (its
      * first milestone's section) so every gap still pivots on a section. Absent
@@ -195,7 +195,7 @@ export type GuardTriageConfidence = z.infer<typeof GuardTriageConfidenceSchema>
 
 /**
  * A triage verdict on ONE failing test — the post-birth judgment call over the
- * test's own evidence (the journey transcript: steps, expected vs actual, raw
+ * test's own evidence (the interface transcript: steps, expected vs actual, raw
  * output; the flow's spec text; and the request-surface grounding). It attaches to
  * the TEST — two tests of one flow may carry different verdicts, and a flow-level
  * verdict would lie about one of them; flow surfaces show the rollup.
@@ -229,7 +229,7 @@ export type GuardTriage = z.infer<typeof GuardTriageSchema>
  * RE-DERIVED from it at persist
  * ({@link carryForwardBirthFindings}), never carried from a prior report.
  *
- * It carries the failing journey-step identity (`step` + `failedMilestone`, and
+ * It carries the failing interface-step identity (`step` + `failedMilestone`, and
  * the milestone's own `doc`/`anchor`/`claim`), expected vs actual, the raw output
  * excerpts, the evidence pointer, and the triage verdict — everything a reader
  * needs to explain the red test without `guard/result.json`. NOT `.strict()`: a
@@ -743,18 +743,18 @@ export const GuardFlowsReportSchema = z
 export type GuardFlowsReport = z.infer<typeof GuardFlowsReportSchema>
 
 /**
- * The journey catalog the run grounded on — deterministic, free, and re-derived
- * every generate. An empty surface is exactly what a `no-journey` gap reports, so
+ * The interface catalog the run grounded on — deterministic, free, and re-derived
+ * every generate. An empty surface is exactly what a `no-interface` gap reports, so
  * the counts are the first thing to read when flows settle unrealized.
  */
-export const GuardJourneysReportSchema = z
+export const GuardInterfacesReportSchema = z
   .object({
     total: z.number().int().nonnegative(),
-    /** Journey type (a driver id) → how many journeys were mapped for it. */
+    /** Interface type (a driver id) → how many interfaces were mapped for it. */
     bySurface: z.record(z.string(), z.number().int().nonnegative()),
   })
   .strict()
-export type GuardJourneysReport = z.infer<typeof GuardJourneysReportSchema>
+export type GuardInterfacesReport = z.infer<typeof GuardInterfacesReportSchema>
 
 /** A bound section whose scenarios remain but the section itself is gone. */
 export const GuardOrphanedSectionSchema = z
@@ -959,11 +959,11 @@ export const GuardGenerateReportSchema = z
      * Optional so reports written before flows existed keep parsing.
      */
     flows: GuardFlowsReportSchema.optional(),
-    /** The journey catalog the run matched against. Optional, same reason. */
-    journeys: GuardJourneysReportSchema.optional(),
+    /** The interface catalog the run matched against. Optional, same reason. */
+    interfaces: GuardInterfacesReportSchema.optional(),
     /**
      * The third parties the repo imports — detected from the same working-tree
-     * analysis the journeys came from, so it costs nothing extra. Independent of the
+     * analysis the interfaces came from, so it costs nothing extra. Independent of the
      * gaps: it answers "what does this app talk to" even when no flow was blocked.
      * Optional so reports written before detection existed keep parsing.
      */

@@ -5,11 +5,15 @@ promise: A developer browses the rule catalogue and narrows it five different wa
 flow:
   id: browse-and-filter-the-rule-catalogue
   fingerprint: sha256:998cb24616a16be2e69df1e2b3b16445f89536b043eb33888674f913391345c2
-journey:
+interface:
   path:
-    - cli/rules
+    - cli/add
+    - cli/rules-disable
+    - cli/rules-list
   fingerprints:
-    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:9473e87965b8ca6a84302cc600b2776e92e066b2ee4f940555b4a98fb71c9c3b
+    - sha256:a78a30d5a44c112fb60d3104f8b1fa6556c740d8676a7750c706406e276cd282
 binds:
   - doc: reference/spec-docs/reference/cli.mdx
     section: rules

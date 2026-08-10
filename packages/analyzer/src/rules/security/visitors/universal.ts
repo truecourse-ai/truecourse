@@ -321,7 +321,7 @@ const BIP39_COMMON_WORDS = new Set([
   'input', 'inquiry', 'insane', 'insect', 'inside', 'inspire', 'install', 'intact', 'interest', 'into',
   'invest', 'invite', 'involve', 'iron', 'island', 'isolate', 'issue', 'item', 'ivory', 'jacket',
   'jaguar', 'jar', 'jazz', 'jealous', 'jeans', 'jelly', 'jewel', 'job', 'join', 'joke',
-  'journey', 'joy', 'judge', 'juice', 'jungle', 'junior', 'junk', 'kangaroo', 'keen', 'keep',
+  'interface', 'joy', 'judge', 'juice', 'jungle', 'junior', 'junk', 'kangaroo', 'keen', 'keep',
   'ketchup', 'key', 'kick', 'kid', 'kidney', 'kind', 'kingdom', 'kiss', 'kit', 'kitchen',
   'kite', 'kitten', 'kiwi', 'knee', 'knife', 'knock', 'know', 'lab', 'label', 'labor',
   'ladder', 'lady', 'lake', 'lamp', 'language', 'laptop', 'large', 'later', 'latin', 'laugh',

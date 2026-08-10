@@ -571,7 +571,7 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
             findings: 0,
             toolDefects: 0,
             errors: 0,
-            journeyDrifted: false,
+            interfaceDrifted: false,
           } as unknown as GuardFlowListItem,
         ]}
         loading={false}

@@ -6,7 +6,7 @@
  *
  *  - cli — `run` is argv APPENDED to the recipe entrypoint, so `run[0]` must be an
  *    argument, never the program's own name and never a foreign binary;
- *  - api — a journey is a chain: a `${var}` must come from an EARLIER step's
+ *  - api — an interface is a chain: a `${var}` must come from an EARLIER step's
  *    capture, and a `${HTTP_STUB:…}` must name a stub the scenario declares.
  *
  * Left uncaught, every one of these dies as a run-level INFRASTRUCTURE error after
@@ -88,7 +88,7 @@ describe('cliCompositionDefect — `run` is argv, not a command line', () => {
   })
 })
 
-describe('apiCompositionDefect — a journey has to chain with itself', () => {
+describe('apiCompositionDefect — an interface has to chain with itself', () => {
   it('accepts a ${var} the previous step captured, from a body or a header', () => {
     expect(
       apiCompositionDefect(

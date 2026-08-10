@@ -76,7 +76,7 @@ function manifestWith(
         flowFingerprint: 'sha256:f1',
         bindings: [{ doc: 'README.md', anchor: 'a/b', fingerprint: 'sha256:s1' }],
         scenarios: scenarios.map((s) => ({ surface: 'api' as const, status: 'passing' as const, ...s })),
-        journeys: [],
+        interfaces: [],
         generationInputsHash: flow.generationInputsHash === undefined ? 'sha256:g1' : flow.generationInputsHash,
         gaps: flow.gaps ?? [],
       },

@@ -16,11 +16,11 @@
 import type {
   ApiRequestContract,
   DetectedExternalService,
-  Journey,
+  Interface,
   OutboundRequest,
   RequestField,
 } from '@truecourse/shared'
-import type { JourneyContractHint, OutboundRequestHint } from './prompts.js'
+import type { InterfaceContractHint, OutboundRequestHint } from './prompts.js'
 
 /** Caps: enough to ground, never a dump. The prompt states the truncated count. */
 export const MAX_OUTBOUND_REQUESTS = 8
@@ -36,20 +36,20 @@ export const MAX_OTHER_OPERATIONS = 30
 /**
  * The flow's own operations, in the order matching walks them: exact method + path
  * (verbatim, so a request never has to be invented) plus the contract when the
- * repo's routes declare one. Non-api journeys and duplicates are dropped.
+ * repo's routes declare one. Non-api interfaces and duplicates are dropped.
  */
-export function buildJourneyContractHints(
-  journeys: readonly Journey[],
+export function buildInterfaceContractHints(
+  interfaces: readonly Interface[],
   contracts: readonly ApiRequestContract[],
-): JourneyContractHint[] {
+): InterfaceContractHint[] {
   const byOperation = new Map<string, ApiRequestContract>()
   for (const contract of contracts) byOperation.set(`${contract.method} ${contract.path}`, contract)
 
   const seen = new Set<string>()
-  const hints: JourneyContractHint[] = []
-  for (const journey of journeys) {
-    const entry = journey.entry as { method?: string; path?: string }
-    if (journey.type !== 'api' || !entry?.method || !entry?.path) continue
+  const hints: InterfaceContractHint[] = []
+  for (const iface of interfaces) {
+    const entry = iface.entry as { method?: string; path?: string }
+    if (iface.type !== 'api' || !entry?.method || !entry?.path) continue
     const key = `${entry.method.toUpperCase()} ${entry.path}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -66,19 +66,19 @@ export function buildJourneyContractHints(
 
 /**
  * The REST of the app's api surface — every operation the catalog offers that this
- * flow's own journeys do NOT walk, with the same contract rendering. A flow reaches
+ * flow's own interfaces do NOT walk, with the same contract rendering. A flow reaches
  * for these on SETUP steps (a favorites flow has to sign up and sign in first, and
  * neither is one of its milestones), which is exactly the world the flow's own
  * operations list cannot describe. Capped, with the dropped count reported so the
  * prompt never pretends the list is complete.
  */
 export function buildOtherOperationHints(
-  catalogJourneys: readonly Journey[],
+  catalogInterfaces: readonly Interface[],
   contracts: readonly ApiRequestContract[],
-  own: readonly JourneyContractHint[],
-): { operations: JourneyContractHint[]; overflow: number } {
+  own: readonly InterfaceContractHint[],
+): { operations: InterfaceContractHint[]; overflow: number } {
   const walked = new Set(own.map((o) => `${o.method} ${o.path}`))
-  const rest = buildJourneyContractHints(catalogJourneys, contracts).filter(
+  const rest = buildInterfaceContractHints(catalogInterfaces, contracts).filter(
     (hint) => !walked.has(`${hint.method} ${hint.path}`),
   )
   return {

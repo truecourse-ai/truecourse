@@ -5,11 +5,15 @@ promise: A developer chooses how TrueCourse reaches the model, reads it back, an
 flow:
   id: choose-and-flip-the-llm-transport
   fingerprint: sha256:f2dae5b6ab5bbadbefd55cd341bbed79dcdf27036ff0370dbdceee0529e6ee56
-journey:
+interface:
   path:
-    - cli/config
+    - cli/config-llm-setup
+    - cli/config-llm-show
+    - cli/config-llm-use
   fingerprints:
-    - sha256:fd58e236b50daea8bc5799cfdff4228e9a6d3ef9a54529b14fa09ec45b47a9ed
+    - sha256:ba1b3c947df367c66dfd393f3d81ec1adf0190b020a009dac1cf0eab64d6d526
+    - sha256:451106df5bf860a602f1feb5ecc1f2cea68e82b0f2f78231ef24a0b25faad50c
+    - sha256:f5b5899cf51c121b1c318fa20e9485ee5ece5a94f8d6299ba5d2c76ae6660eb7
 binds:
   - doc: reference/spec-docs/reference/cli.mdx
     section: config

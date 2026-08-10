@@ -5,13 +5,17 @@ promise: A developer runs the same LLM rules through a provider API key instead
 flow:
   id: run-llm-rules-through-the-provider-api-transport
   fingerprint: sha256:2b4b4d6f216000918f315a3a60a3a4ecb17928df955c9b21677a883327e5bde2
-journey:
+interface:
   path:
+    - cli/config-llm-setup
+    - cli/add
+    - cli/rules-llm
     - cli/analyze
-    - cli/rules
   fingerprints:
+    - sha256:ba1b3c947df367c66dfd393f3d81ec1adf0190b020a009dac1cf0eab64d6d526
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:23ad6cb2a11da30f8f40226ccd122367e3fe43b2b4cdde3ee7ab696f047cbf78
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
-    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
 binds:
   - doc: reference/spec-docs/analyze/rules.mdx
     section: llm-powered-rules
@@ -60,7 +64,7 @@ steps:
       setup` probes the provider live before saving, so with no key the step exits 1
       and every later step is unreached. That is this variant's correct state, not a
       failure of the scenario. The command walks `cli/config`, which the flow's own
-      journey path does not claim, so it is not listed there.
+      interface path does not claim, so it is not listed there.
   - run:
       - add
       - '--no-skills'

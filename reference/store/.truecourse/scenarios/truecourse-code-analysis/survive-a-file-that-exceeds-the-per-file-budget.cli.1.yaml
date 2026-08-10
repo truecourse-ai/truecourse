@@ -5,13 +5,11 @@ promise: A repository with a file the scanner cannot finish still produces a rep
 flow:
   id: survive-a-file-that-exceeds-the-per-file-budget
   fingerprint: sha256:f1895c375f4ee352655d61d9e6eb00dd3345ea2f6a7b305850de1fa0c2d597f4
-journey:
+interface:
   path:
     - cli/analyze
-    - cli/list
   fingerprints:
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
-    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
 binds:
   - doc: reference/spec-docs/analyze/overview.mdx
     section: rule-coverage

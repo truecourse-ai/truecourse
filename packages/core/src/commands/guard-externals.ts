@@ -219,7 +219,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
   };
 
   // DETECTION comes from `guard setup`: it is a deterministic
-  // `mapJourneys` pass setup pays for before the first generate, so the page is
+  // `mapInterfaces` pass setup pays for before the first generate, so the page is
   // populated from the start. A repo whose last setup predates this file — or that
   // only ever ran a generate — falls back to the generate report's own list, which
   // is where detection used to live. BLOCKED FLOWS stay generate's: only authoring

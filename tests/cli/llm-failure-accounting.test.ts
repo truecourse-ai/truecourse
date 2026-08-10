@@ -228,8 +228,8 @@ describe('guard generate — every fidelity review was lost', () => {
         });
       }
       if (req.stage === 'guard.match') {
-        const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
-        return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
+        const interfaceId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
+        return JSON.stringify({ plan: [{ interfaceId, milestone: 1 }] });
       }
       if (req.stage === 'guard.generate') {
         return JSON.stringify({
@@ -287,8 +287,8 @@ describe('guard generate — every authoring reply was unusable', () => {
       if (req.stage === 'guard.match') {
         // The catalog is the real mapped one, so the plan copies its first id back
         // out of the prompt rather than inventing one.
-        const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
-        return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
+        const interfaceId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
+        return JSON.stringify({ plan: [{ interfaceId, milestone: 1 }] });
       }
       if (req.stage === 'guard.generate') return '{"scenarios":[]}';
       return '{}';

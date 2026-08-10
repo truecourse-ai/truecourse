@@ -74,7 +74,7 @@ import { runCredentialRequests, CredentialRequestError } from './api/credential-
 import {
   appendGuardHistory,
   readGuardLatest,
-  readJourneyCatalog,
+  readInterfaceCatalog,
   recipePath,
   writeGuardLatest,
   writeGuardRun,
@@ -90,7 +90,7 @@ import {
   type DocSectionIndex,
   type ScenarioBindingVerdict,
 } from './section-index.js'
-import { isJourneyDrifted } from './journey-drift.js'
+import { isInterfaceDrifted } from './interface-drift.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
 
@@ -416,15 +416,15 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const executable = planned.filter((p) => p.verdict.kind === 'executable')
   const nonExecutable = planned.filter((p) => p.verdict.kind !== 'executable')
 
-  // The journey grounding check — a per-scenario ANNOTATION, computed once against
+  // The interface grounding check — a per-scenario ANNOTATION, computed once against
   // the mapping snapshot (absent snapshot ⇒ no annotation anywhere). It never gates
   // execution: a scenario whose surface moved still runs its frozen steps.
-  const journeyCatalog = readJourneyCatalog(repoRoot)
+  const interfaceCatalog = readInterfaceCatalog(repoRoot)
   const drifted = new Set(
-    selected.filter((s) => isJourneyDrifted(s, journeyCatalog)).map((s) => s.id),
+    selected.filter((s) => isInterfaceDrifted(s, interfaceCatalog)).map((s) => s.id),
   )
-  const annotate = (scenario: GuardScenario): { journeyDrifted?: true } =>
-    drifted.has(scenario.id) ? { journeyDrifted: true } : {}
+  const annotate = (scenario: GuardScenario): { interfaceDrifted?: true } =>
+    drifted.has(scenario.id) ? { interfaceDrifted: true } : {}
 
   // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
   // scenario needs the `api` block. A scenario whose preparation is missing

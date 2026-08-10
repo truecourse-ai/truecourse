@@ -5,11 +5,13 @@ promise: A team turns a rule category off for their repository and puts it back
 flow:
   id: override-rule-categories-from-the-cli-reference
   fingerprint: sha256:62a7f6e2a6da64ae7296ebef84f513edac43390d0efcd5b0237eb5b08ba04bff
-journey:
+interface:
   path:
-    - cli/rules
+    - cli/add
+    - cli/rules-categories
   fingerprints:
-    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:7c34c13f1388399e8fef9e49a52d4f25d1b4c525cdc32ec1b827007a6be170d6
 binds:
   - doc: reference/spec-docs/reference/cli.mdx
     section: rules

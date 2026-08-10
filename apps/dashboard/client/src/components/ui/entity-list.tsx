@@ -1,7 +1,7 @@
 /**
  * THE list surface. Every list in the dashboard — the flow inventory, the test
- * inventory, the journey catalog, a run's results, the corpus sidebar, the claims
- * a doc section states, a journey's commands — is this component configured, not
+ * inventory, the interface catalog, a run's results, the corpus sidebar, the claims
+ * a doc section states, an interface's commands — is this component configured, not
  * a list built again.
  *
  * What it owns, so no surface decides it twice:

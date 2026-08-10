@@ -5,7 +5,7 @@ promise: A developer runs a full analysis with uncommitted changes in the tree
 flow:
   id: analyze-a-dirty-working-tree
   fingerprint: sha256:48f58f9207b32fdb8db798662389c1b85f4442d7a2c42ac24012df478b1dc661
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list

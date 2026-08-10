@@ -17,7 +17,7 @@
 
 import { useMemo } from 'react';
 import { Loader2, FlaskConical } from 'lucide-react';
-import type { GuardFlowsView, GuardJourneyRow, GuardRecipeCard as GuardRecipeCardData } from '@truecourse/shared';
+import type { GuardFlowsView, GuardInterfaceRow, GuardRecipeCard as GuardRecipeCardData } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
@@ -41,14 +41,14 @@ export function GuardFlowsPane({
   recipe = null,
   recipeOpen = false,
   onCloseRecipe,
-  journeys = null,
+  interfaces = null,
   claimTitles,
   binds,
   reloadKey = 0,
   prRef,
   decisions,
   onOpenSpec,
-  onOpenJourney,
+  onOpenInterface,
   onOpenExternals,
 }: {
   repoId: string;
@@ -62,8 +62,8 @@ export function GuardFlowsPane({
   recipeOpen?: boolean;
   /** Drop the recipe — a flow selection takes the body back. */
   onCloseRecipe?: () => void;
-  /** The mapped journey catalog, for the diagrams a test drives; null = unmapped. */
-  journeys?: GuardJourneyRow[] | null;
+  /** The mapped interface catalog, for the diagrams a test drives; null = unmapped. */
+  interfaces?: GuardInterfaceRow[] | null;
   /** Claim id → its sentence, for a step group named by claim identity. */
   claimTitles?: Readonly<Record<string, string>>;
   /** scenarioId → the spec section it binds to (the inventory join). */
@@ -78,7 +78,7 @@ export function GuardFlowsPane({
    */
   decisions?: GuardDecisionsState;
   onOpenSpec: (doc: string, section: string) => void;
-  onOpenJourney: (journeyId: string) => void;
+  onOpenInterface: (interfaceId: string) => void;
   /**
    * Jump to the Dependencies tab, on the named service's card — the needs-setup
    * CTA a flow's why-no-test block carries.
@@ -117,13 +117,13 @@ export function GuardFlowsPane({
             key={detail.flowId}
             repoId={repoId}
             detail={detail}
-            journeys={journeys}
+            interfaces={interfaces}
             {...(claimTitles ? { claimTitles } : {})}
             {...(binds ? { binds } : {})}
             {...(decisions ? { decisions } : {})}
             {...(prRef ? { prRef } : {})}
             onOpenSpec={onOpenSpec}
-            onOpenJourney={onOpenJourney}
+            onOpenInterface={onOpenInterface}
             {...(onOpenExternals ? { onOpenExternals } : {})}
           />
         );

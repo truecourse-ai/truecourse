@@ -69,7 +69,7 @@ import {
 } from '@truecourse/shared';
 import {
   loadRecipe,
-  readJourneyCatalog,
+  readInterfaceCatalog,
   readManifest as readGuardManifest,
   recipePath,
   type Recipe,
@@ -292,7 +292,7 @@ const GUARD_FLOWS_AREA_CHARS = 6000;
 const GUARD_FLOWS_OUTPUT_TOKENS = 1200; // ~an area's flows + no-flow reasons
 // Matching reads one flow's milestones + one surface's catalog DIGEST (ids, entries,
 // step summaries — never code); a digest line is short by construction.
-const GUARD_JOURNEY_DIGEST_CHARS = 220; // ~one journey's digest block
+const GUARD_INTERFACE_DIGEST_CHARS = 220; // ~one interface's digest block
 const GUARD_MATCH_CATALOG_CHARS = 12_000; // cold-cache fallback for a catalog digest
 const GUARD_MATCH_OUTPUT_TOKENS = 300; // ~a plan over a handful of milestones
 // A flow's authoring prompt carries every milestone's section text once; sections
@@ -402,7 +402,7 @@ interface GuardRealizationPlan {
   surfaces: number;
   /** Chars one surface's catalog digest carries. */
   catalogChars: number;
-  /** True when the flow set AND the journey catalog were known offline. */
+  /** True when the flow set AND the interface catalog were known offline. */
   exact: boolean;
 }
 
@@ -410,7 +410,7 @@ interface GuardRealizationPlan {
  * Plan `guard.match` + `guard.generate` — the two stages whose work count is an
  * earlier stage's OUTPUT. Exact whenever the flow corpus is settled (every area's
  * synthesis cached, so `scenarios/flows.json` IS what the run will use) AND the
- * journey snapshot exists: matching then probes the SAME `.cache/guard/match`
+ * interface snapshot exists: matching then probes the SAME `.cache/guard/match`
  * entries the run reads, and authoring counts the flows whose composition moved
  * since the manifest. Otherwise both fall back to the honest ceiling — flows ≤
  * runnable claims, one authoring call per (flow, surface).
@@ -424,16 +424,16 @@ async function planGuardRealizationStages(
   flowStage: GuardFlowStagePlan,
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
-  const catalog = readJourneyCatalog(repoRoot);
-  const catalogs = catalog ? buildSurfaceCatalogs(catalog.journeys) : null;
-  // Only surfaces with journeys reach the matcher; without a snapshot we cannot
+  const catalog = readInterfaceCatalog(repoRoot);
+  const catalogs = catalog ? buildSurfaceCatalogs(catalog.interfaces) : null;
+  // Only surfaces with interfaces reach the matcher; without a snapshot we cannot
   // know which do, so every prepared surface counts (a ceiling, never a shortfall).
   const matchable: SurfaceCatalog[] = catalogs
-    ? surfaces.map((s) => catalogs.get(s)).filter((c): c is SurfaceCatalog => c !== undefined && c.journeys.length > 0)
+    ? surfaces.map((s) => catalogs.get(s)).filter((c): c is SurfaceCatalog => c !== undefined && c.interfaces.length > 0)
     : [];
   const catalogChars = catalogs
     ? Math.max(
-        ...[...catalogs.values()].map((c) => c.journeys.length * GUARD_JOURNEY_DIGEST_CHARS),
+        ...[...catalogs.values()].map((c) => c.interfaces.length * GUARD_INTERFACE_DIGEST_CHARS),
         0,
       )
     : GUARD_MATCH_CATALOG_CHARS;
@@ -450,9 +450,9 @@ async function planGuardRealizationStages(
     let authorCalls = 0;
     for (const flow of flows) {
       // Reconstruct the flow's realization from the SAME match cache the run reads:
-      // the journeys it grounds on are what its inputs hash folds, so an uncached
+      // the interfaces it grounds on are what its inputs hash folds, so an uncached
       // pair is the only unknown — and it is counted as both a match and an author call.
-      const journeyFingerprints: string[] = [];
+      const interfaceFingerprints: string[] = [];
       let plannedPairs = 0;
       let unknown = false;
       for (const catalog of matchable) {
@@ -464,12 +464,12 @@ async function planGuardRealizationStages(
         }
         if (!cached.plan) continue; // an `unrealizable` surface authors nothing
         plannedPairs++;
-        journeyFingerprints.push(...cached.plan.journeys.map((j) => j.fingerprint));
+        interfaceFingerprints.push(...cached.plan.interfaces.map((j) => j.fingerprint));
       }
       const inputsHash = flowGenerationInputsHash({
         flowFingerprint: flow.fingerprint,
         sectionKeys: flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint),
-        journeyFingerprints,
+        interfaceFingerprints,
         recipeFingerprint: plan.recipeFingerprint,
       });
       const prior = priorByFlow.get(flow.id);
@@ -522,7 +522,7 @@ async function planGuardRealizationStages(
  * pure over the working tree (manifests, lockfiles, scripts — no LLM, no analysis
  * pass, no process), so it costs nothing here and predicts the recipe the run will
  * most likely write. The route surface is deliberately NOT supplied: deriving it
- * means a full journey-mapping pass, and it only ranks the health path — never
+ * means a full interface-mapping pass, and it only ranks the health path — never
  * which surfaces exist. When the proposer refuses to decide, the model could
  * propose either surface, so the estimate quotes EVERY runnable one — the ceiling
  * convention the whole realization plan is priced at (never a shortfall).
@@ -560,7 +560,7 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
  *  - SYNTHESIS shares `planFlowSynthesis` (one call per area whose claim inventory
  *    isn't already synthesized, plus at most one epic pass).
  *  - MATCHING shares `planFlowMatching` whenever the flow corpus is settled and the
- *    journey snapshot exists; otherwise it quotes the claim-derived flow bound.
+ *    interface snapshot exists; otherwise it quotes the claim-derived flow bound.
  *  - AUTHORING is one call per (changed flow, surface), priced at the ceiling of
  *    every flow on every prepared surface — the bill a prompt change would produce.
  *  - FIDELITY reviews one scenario per authoring call; the evidence RETRY is at most
@@ -688,8 +688,8 @@ export async function estimateGuardTokens(
         : 'flows ≤ runnable claims — flow count is a synthesis output',
     },
     {
-      // Matching: one call per (flow, surface with journeys). Exact when the flow
-      // corpus is settled and the journey snapshot exists — it probes the same
+      // Matching: one call per (flow, surface with interfaces). Exact when the flow
+      // corpus is settled and the interface snapshot exists — it probes the same
       // match cache the run reads; otherwise the claim-derived ceiling.
       stage: 'guardMatch',
       model: resolveModel('guard.match', undefined, repoRoot, opts.mode),

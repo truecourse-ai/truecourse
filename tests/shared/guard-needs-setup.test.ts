@@ -89,7 +89,7 @@ describe('needs-setup RANKING — the gap tier, most actionable first', () => {
   })
 
   it('outranks every other gap — it is the one a user can clear today', () => {
-    for (const gap of ['blocked-on', 'unrealizable', 'no-journey', 'untestable', 'no-claim', 'dismissed', 'unguarded']) {
+    for (const gap of ['blocked-on', 'unrealizable', 'no-interface', 'untestable', 'no-claim', 'dismissed', 'unguarded']) {
       expect(rank('needs-setup'), gap).toBeLessThan(rank(gap))
     }
   })

@@ -100,7 +100,7 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // optimized until sonnet handles it; a weak composition is never fixed by a
   // bigger model.
   'guard.flows': 'sonnet',
-  // Realization matching picks, per flow milestone, which of a surface's journeys
+  // Realization matching picks, per flow milestone, which of a surface's interfaces
   // could realize it — structured SELECTION over digests, not authoring. The same
   // judgement family as `guard.flows`/`guard.extract`, so sonnet: haiku under-reasons
   // nuanced judgement (the weakness that moved `spec.areaTag` off it), and a wrong
@@ -120,7 +120,7 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // reasons nuanced faithfulness comparisons (the same weakness that moved
   // `spec.areaTag` off haiku).
   'guard.fidelity': 'sonnet',
-  // Failing-test triage: read a failing test's full evidence (the journey
+  // Failing-test triage: read a failing test's full evidence (the interface
   // transcript, the flow's spec text, the request-surface grounding) and decide
   // doc-drift vs code-drift vs generation-defect, with a quoted recommendation. A
   // judgment whose verdict decides whether the red test commits and, at high

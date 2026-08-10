@@ -26,7 +26,7 @@ describe('GuardManifestSchema', () => {
           flowFingerprint: 'sha256:flow',
           bindings: [{ doc: 'docs/spec.md', anchor: 'a/b', fingerprint: 'sha256:1' }],
           scenarios: [{ id: 'task-lifecycle.cli.1', surface: 'cli', status: 'passing' }],
-          journeys: [{ surface: 'cli', journeyIds: ['cli/tasks-add'] }],
+          interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-add'] }],
           generationInputsHash: null,
           gaps: [],
         },
@@ -36,14 +36,14 @@ describe('GuardManifestSchema', () => {
     expect(reparsed).toEqual(manifest)
   })
 
-  it('defaults the generation-inputs hash slot to null, and gaps/journeys to []', () => {
+  it('defaults the generation-inputs hash slot to null, and gaps/interfaces to []', () => {
     const parsed = GuardManifestSchema.parse({
       version: 3,
       flows: [{ flowId: 'f', flowFingerprint: 'sha256:x', bindings: [], scenarios: [] }],
     })
     expect(parsed.flows[0].generationInputsHash).toBeNull()
     expect(parsed.flows[0].gaps).toEqual([])
-    expect(parsed.flows[0].journeys).toEqual([])
+    expect(parsed.flows[0].interfaces).toEqual([])
   })
 
   it('carries a test committed FAILING at birth, and defaults a status-less entry to passing', () => {
@@ -83,7 +83,7 @@ describe('rebuildManifestFromScenarios', () => {
         id: 'task-lifecycle.cli.2',
         flow,
         binds: bindsFor('one'),
-        journey: { path: ['cli/tasks-list'], fingerprints: ['sha256:j2'] },
+        interface: { path: ['cli/tasks-list'], fingerprints: ['sha256:j2'] },
         steps: [{ run: [], expect: { exit: 0 } }],
       }),
     )
@@ -102,9 +102,9 @@ describe('rebuildManifestFromScenarios', () => {
         { id: 'task-lifecycle.cli.1', surface: 'cli', status: 'passing' },
         { id: 'task-lifecycle.cli.2', surface: 'cli', status: 'passing' },
       ],
-      // Rebuilt from the committed scenarios: only journeys they actually ground
+      // Rebuilt from the committed scenarios: only interfaces they actually ground
       // on can be recovered (a blocked surface left no file to read a plan from).
-      journeys: [{ surface: 'cli', journeyIds: ['cli/tasks-list'] }],
+      interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-list'] }],
       generationInputsHash: null,
       gaps: [],
     })

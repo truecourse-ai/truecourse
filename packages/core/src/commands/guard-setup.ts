@@ -21,7 +21,7 @@ import {
   GUARD_SETUP_STEPS,
   type GuardSetupResult,
   type GuardSetupStepKey,
-  type JourneyProvider,
+  type InterfaceProvider,
   type RecipeRunner,
   type SeedRunner,
 } from '@truecourse/guard-generator';
@@ -51,7 +51,7 @@ import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
-import { mapJourneys } from '../services/journey.service.js';
+import { mapInterfaces } from '../services/interface.service.js';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
@@ -90,7 +90,7 @@ export interface GuardSetupInProcessOptions {
   // --- test seams (production spawns the transport) ---
   recipeRunner?: RecipeRunner;
   seedRunner?: SeedRunner;
-  journeys?: JourneyProvider;
+  interfaces?: InterfaceProvider;
 }
 
 export interface GuardSetupInProcessResult {
@@ -252,13 +252,13 @@ export async function guardSetupInProcess(
           model: resolveModel('guard.seed', undefined, repoRoot, mode),
           fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
         }),
-      journeys:
-        options.journeys ??
+      interfaces:
+        options.interfaces ??
         (async () => {
           // ONE working-tree analysis feeds every step, exactly as generate does it.
-          const mapped = await mapJourneys(repoRoot);
+          const mapped = await mapInterfaces(repoRoot);
           return {
-            journeys: mapped.catalog.journeys,
+            interfaces: mapped.catalog.interfaces,
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,

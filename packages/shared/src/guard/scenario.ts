@@ -4,16 +4,16 @@
  * `.truecourse/scenarios/<area>/`.
  *
  * A scenario is the executable product of a FLOW (spec-side: what to test) and a
- * JOURNEY path (code-side: how to test it): assertions come from the flow's spec
- * claims, steps from the journey, the driver from the journey's surface. It
- * carries `flow` (id + fingerprint), `journey` (the realization path + its
+ * INTERFACE path (code-side: how to test it): assertions come from the flow's spec
+ * claims, steps from the interface, the driver from the interface's surface. It
+ * carries `flow` (id + fingerprint), `interface` (the realization path + its
  * fingerprints), and the flow's section bindings DENORMALIZED into `binds`, so the
  * runner resolves staleness with no flow lookup. Hand-written scenarios omit
- * `flow`/`journey` and group under the Manual pseudo-flow.
+ * `flow`/`interface` and group under the Manual pseudo-flow.
  *
  * Ids are `<flow-id>.<surface>.<n>`.
  *
- * The envelope (`guard`, `id`, `title`, `flow`, `journey`, `binds`, `driver`,
+ * The envelope (`guard`, `id`, `title`, `flow`, `interface`, `binds`, `driver`,
  * `setup`, `steps`, `normalize`) is frozen across drivers; only the per-driver
  * verb sub-schema (keyed by `driver`) grows. The `cli` driver has five step
  * kinds — `run` (argv appended to the recipe entrypoint), `git` (argv handed to
@@ -120,7 +120,7 @@ export const GuardExpectSchema = z
     stderr: GuardStreamMatcherSchema.optional(),
     /**
      * Matcher on stdout and stderr TOGETHER (stdout first, then stderr), compared
-     * post-normalization. The honest matcher for a message no journey pins to a
+     * post-normalization. The honest matcher for a message no interface pins to a
      * stream — a warning or an error text the contract never places — where
      * asserting one stream would encode a guess. It is also the whole output of a
      * `tty: true` step, whose pseudo-terminal carries one channel by construction.
@@ -291,7 +291,7 @@ export function runArgvWords(run: readonly GuardRunArg[]): string[] {
 
 /**
  * ONE scripted terminal answer, KEYED TO THE QUESTION IT ANSWERS: the marker is
- * the question's stable substring (the journey contract's `prompts[].marker`),
+ * the question's stable substring (the interface contract's `prompts[].marker`),
  * and the answer is the keystrokes typed once that marker has appeared in the
  * child's output — submit key included, because which key submits is part of the
  * answer (`y` for a confirm that takes a printable, `\r` for a select that only
@@ -1330,12 +1330,12 @@ export const GuardScenarioFlowRefSchema = z
   .strict()
 
 /**
- * The journey path that grounds this scenario — the realization plan's journey
+ * The interface path that grounds this scenario — the realization plan's interface
  * ids and their fingerprints at authoring time. A fingerprint mismatch against the
  * live catalog is a DRIFT ANNOTATION, never a run outcome: the steps are frozen
  * and remain a valid probe of the spec claims.
  */
-export const GuardScenarioJourneyRefSchema = z
+export const GuardScenarioInterfaceRefSchema = z
   .object({
     path: z.array(z.string().min(1)).min(1),
     fingerprints: z.array(z.string().min(1)).min(1),
@@ -1358,13 +1358,13 @@ const envelope = {
    * against `flows.json`, which is regenerated and may no longer name it. Written
    * by the engine, never authored by the model. Additive and optional, so no
    * format bump — absent on a hand-written scenario and on any file written
-   * before the field (the `journeyDrifted`/`server` precedent).
+   * before the field (the `interfaceDrifted`/`server` precedent).
    */
   promise: z.string().min(1).optional(),
   /** The flow realized here; absent on a hand-written scenario (Manual pseudo-flow). */
   flow: GuardScenarioFlowRefSchema.optional(),
-  /** The grounding journey path; absent on a hand-written scenario. */
-  journey: GuardScenarioJourneyRefSchema.optional(),
+  /** The grounding interface path; absent on a hand-written scenario. */
+  interface: GuardScenarioInterfaceRefSchema.optional(),
   /** Every section the flow's milestones come from — denormalized at write time. */
   binds: z.array(GuardBindsSchema).min(1),
   /**
@@ -1402,7 +1402,7 @@ export const GuardApiScenarioSchema = z
      * ENGINE-ASSIGNED at authoring from the app that serves the flow's operations;
      * absent ⇒ the recipe's default server, which is what every pre-multi-server
      * scenario means. An additive optional field, so no format bump — the
-     * `journeyDrifted`/`corpusFingerprint` precedent.
+     * `interfaceDrifted`/`corpusFingerprint` precedent.
      */
     server: z.string().min(1).optional(),
     steps: z.array(GuardApiStepSchema).min(1),
@@ -1458,7 +1458,7 @@ export type GuardExternals = z.infer<typeof GuardExternalsSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
 export type GuardScenarioFlowRef = z.infer<typeof GuardScenarioFlowRefSchema>
-export type GuardScenarioJourneyRef = z.infer<typeof GuardScenarioJourneyRefSchema>
+export type GuardScenarioInterfaceRef = z.infer<typeof GuardScenarioInterfaceRefSchema>
 export type GuardCliScenario = z.infer<typeof GuardCliScenarioSchema>
 export type GuardApiScenario = z.infer<typeof GuardApiScenarioSchema>
 export type GuardScenario = z.infer<typeof GuardScenarioSchema>

@@ -2543,7 +2543,7 @@
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "text": "Flags: `--llm-transport`, `--io` (on `spec scan`)",
-      "reason": "Grammar-only mention: the row names the flags without stating what they do, so there is no falsifiable sentence. The flag set is the journey contract's grammar, not a spec claim."
+      "reason": "Grammar-only mention: the row names the flags without stating what they do, so there is no falsifiable sentence. The flag set is the interface contract's grammar, not a spec claim."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",

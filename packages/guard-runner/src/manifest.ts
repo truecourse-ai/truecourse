@@ -74,8 +74,8 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
       flowFingerprint: string
       bindings: Map<string, GuardFlowBinding>
       scenarios: GuardManifestScenario[]
-      /** Surface → the journeys its scenarios ground on, first-seen order. */
-      journeys: Map<GuardDriverId, string[]>
+      /** Surface → the interfaces its scenarios ground on, first-seen order. */
+      interfaces: Map<GuardDriverId, string[]>
     }
   >()
 
@@ -83,7 +83,7 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
     const flow = s.flow ?? manualFlow(s)
     let entry = byFlow.get(flow.id)
     if (!entry) {
-      entry = { flowFingerprint: flow.fingerprint, bindings: new Map(), scenarios: [], journeys: new Map() }
+      entry = { flowFingerprint: flow.fingerprint, bindings: new Map(), scenarios: [], interfaces: new Map() }
       byFlow.set(flow.id, entry)
     }
     for (const b of s.binds) {
@@ -97,14 +97,14 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
     // (the manifest is where that lives), so a recovered entry reads as passing —
     // the next run states the truth.
     entry.scenarios.push({ id: s.id, surface: s.driver, status: 'passing' })
-    // Rebuilding from the COMMITTED scenarios can only recover the journeys they
+    // Rebuilding from the COMMITTED scenarios can only recover the interfaces they
     // actually ground on — a plan the generator made for a surface that authored
     // nothing left no file to read it back from.
-    const path = s.journey?.path ?? []
+    const path = s.interface?.path ?? []
     if (path.length > 0) {
-      const ids = entry.journeys.get(s.driver) ?? []
+      const ids = entry.interfaces.get(s.driver) ?? []
       for (const id of path) if (!ids.includes(id)) ids.push(id)
-      entry.journeys.set(s.driver, ids)
+      entry.interfaces.set(s.driver, ids)
     }
   }
 
@@ -116,8 +116,8 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
         (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor),
       ),
       scenarios: e.scenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
-      journeys: [...e.journeys.entries()]
-        .map(([surface, journeyIds]) => ({ surface, journeyIds }))
+      interfaces: [...e.interfaces.entries()]
+        .map(([surface, interfaceIds]) => ({ surface, interfaceIds }))
         .sort((a, b) => a.surface.localeCompare(b.surface)),
       generationInputsHash: null,
       gaps: [],

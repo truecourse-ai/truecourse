@@ -10,7 +10,7 @@ import type {
   GuardFlowsView,
   GuardGenerateReport,
   GuardHistory,
-  GuardJourneysView,
+  GuardInterfacesView,
   GuardLatestResponse,
   GuardLatestWithRunFlows,
   GuardScenarioInventory,
@@ -1127,18 +1127,18 @@ export function getGuardClaims(repoId: string, ref?: string): Promise<GuardClaim
   return fetchApi<GuardClaimsView>(withRef(`/api/repos/${repoId}/guard/claims`, ref));
 }
 
-/** The code-derived journey catalog + its reverse index onto the flows. Always 200. */
-export function getGuardJourneys(repoId: string, ref?: string): Promise<GuardJourneysView> {
-  return fetchApi<GuardJourneysView>(withRef(`/api/repos/${repoId}/guard/journeys`, ref));
+/** The code-derived interface catalog + its reverse index onto the flows. Always 200. */
+export function getGuardInterfaces(repoId: string, ref?: string): Promise<GuardInterfacesView> {
+  return fetchApi<GuardInterfacesView>(withRef(`/api/repos/${repoId}/guard/interfaces`, ref));
 }
 
 /**
- * Map the working tree's surfaces to journeys — deterministic, LLM-free, free.
+ * Map the working tree's surfaces to interfaces — deterministic, LLM-free, free.
  * The response IS the fresh catalog view, so the tab swaps state from it (no
  * refetch, no socket).
  */
-export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
-  return fetchApi<GuardJourneysView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
+export function mapGuardInterfaces(repoId: string): Promise<GuardInterfacesView> {
+  return fetchApi<GuardInterfacesView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
 }
 
 /**
@@ -1226,12 +1226,12 @@ export async function getGuardScenarioSource(
 }
 
 /** Which artifact-backed entity a raw read addresses — the route's own segment. */
-export type GuardArtifactKind = 'journey' | 'flow' | 'claim' | 'dependency' | 'recipe';
+export type GuardArtifactKind = 'interface' | 'flow' | 'claim' | 'dependency' | 'recipe';
 
 /**
  * The stored artifact behind one entity — its own pretty-printed slice of the
  * JSON store file, for the detail's raw mode. `null` on 404 (no store yet, or no
- * entry with that id). `ref` scopes to a PR head (EE); the journey catalog is
+ * entry with that id). `ref` scopes to a PR head (EE); the interface catalog is
  * working-tree-only and ignores it.
  *
  * `recipe` is the SINGLETON kind: a repo has one recipe, so it is addressed by no

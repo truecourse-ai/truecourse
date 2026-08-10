@@ -52,7 +52,7 @@ describe('loadScenarios', () => {
   it('rejects an out-of-date scenario format with one actionable line, not a schema dump', () => {
     const r = repo()
     writeRecipe(r)
-    // A v1 file: single-object `binds`, no flow/journey refs.
+    // A v1 file: single-object `binds`, no flow/interface refs.
     writeScenarioFile(
       r,
       'old.yaml',

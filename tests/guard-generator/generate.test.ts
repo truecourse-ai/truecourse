@@ -13,7 +13,7 @@ import {
   type AuthorUserContext,
   type ProbeTranscript,
 } from '@truecourse/guard-generator'
-import type { GuardBirthFinding, GuardFlow, Journey } from '@truecourse/shared'
+import type { GuardBirthFinding, GuardFlow, Interface } from '@truecourse/shared'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   loadScenarios,
@@ -51,8 +51,8 @@ import {
   flowPerClaim,
   matchAll,
   matchBy,
-  cliJourney,
-  journeysOf,
+  cliInterface,
+  interfacesOf,
   stampMilestones,
   PASSING_STEPS,
   FAILING_STEPS,
@@ -177,12 +177,12 @@ describe('generateGuards — extraction honesty + gaps', () => {
 })
 
 describe('generateGuards — realization gaps', () => {
-  it('an EMPTY surface catalog settles as a `no-journey` gap on the flow, never a refusal', async () => {
+  it('an EMPTY surface catalog settles as a `no-interface` gap on the flow, never a refusal', async () => {
     const r = seed()
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r), // the mapper found nothing
+      interfaces: interfacesOf(r), // the mapper found nothing
       extractRunner: versionCliBgUntestable,
       matchRunner: async () => {
         throw new Error('matching must never run against an empty catalog')
@@ -190,15 +190,15 @@ describe('generateGuards — realization gaps', () => {
     })
 
     expect(res.written).toEqual([])
-    const gap = res.coverageGaps.find((g) => g.kind === 'no-journey')!
+    const gap = res.coverageGaps.find((g) => g.kind === 'no-interface')!
     expect(gap.flowId).toBe('version')
     expect(gap.surface).toBe('cli')
-    expect(gap.reason).toContain('no cli journey was mapped')
+    expect(gap.reason).toContain('no cli interface was mapped')
     // The manifest records it per surface, so the flow reads as accounted-for.
     expect(flowEntry(r, 'version')?.gaps).toEqual([
-      { surface: 'cli', kind: 'no-journey', reason: gap.reason },
+      { surface: 'cli', kind: 'no-interface', reason: gap.reason },
     ])
-    expect(res.journeys).toEqual({ total: 0, bySurface: {} })
+    expect(res.interfaces).toEqual({ total: 0, bySurface: {} })
   })
 
   it('a matcher refusal settles as an `unrealizable` gap carrying its stated reason', async () => {
@@ -207,7 +207,7 @@ describe('generateGuards — realization gaps', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      matchRunner: matchBy({ version: 'no journey prints a version — the catalog only lists `boom`' }),
+      matchRunner: matchBy({ version: 'no interface prints a version — the catalog only lists `boom`' }),
     })
 
     expect(res.written).toEqual([])
@@ -218,7 +218,7 @@ describe('generateGuards — realization gaps', () => {
     expect(res.flows.settled).toBe(1)
   })
 
-  it('a milestone no journey realizes is unrealizable after ONE corrective re-ask', async () => {
+  it('a milestone no interface realizes is unrealizable after ONE corrective re-ask', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -234,19 +234,19 @@ describe('generateGuards — realization gaps', () => {
       // that walks only half the path.
       matchRunner: async (ctx) => {
         calls++
-        return { plan: [{ journeyId: ctx.journeys[0].id, milestone: 1 }] }
+        return { plan: [{ interfaceId: ctx.interfaces[0].id, milestone: 1 }] }
       },
     })
 
     expect(calls).toBe(2) // the call + exactly one corrective re-ask
     expect(res.written).toEqual([])
     const gap = res.coverageGaps.find((g) => g.kind === 'unrealizable')!
-    expect(gap.reason).toContain('no journey realizes milestone 2')
+    expect(gap.reason).toContain('no interface realizes milestone 2')
   })
 
-  it('a surface with journeys but no driver yet is an awaiting-driver gap on the flow', async () => {
+  it('a surface with interfaces but no driver yet is an awaiting-driver gap on the flow', async () => {
     const r = seed()
-    const webJourney: Journey = {
+    const webInterface: Interface = {
       id: 'web/board',
       type: 'web',
       title: 'Board',
@@ -257,7 +257,7 @@ describe('generateGuards — realization gaps', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit']), webJourney),
+      interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface),
       extractRunner: versionCliBgUntestable,
     })
 
@@ -292,13 +292,13 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     expect(entry.scenarios).toEqual([])
     expect(entry.gaps.map((g) => g.kind)).toEqual(['blocked-on'])
     expect(entry.generationInputsHash).not.toBeNull()
-    // …and the journeys its plan matched are PERSISTED even though no scenario
-    // was written, so the journeys view can say "used by <flow> — blocked" rather
+    // …and the interfaces its plan matched are PERSISTED even though no scenario
+    // was written, so the interfaces view can say "used by <flow> — blocked" rather
     // than "the spec never mentions this code path".
-    expect(entry.journeys).toEqual([{ surface: 'cli', journeyIds: ['cli/relkit'] }])
+    expect(entry.interfaces).toEqual([{ surface: 'cli', interfaceIds: ['cli/relkit'] }])
   })
 
-  it('persists the matched journeys for an AUTHORED flow too', async () => {
+  it('persists the matched interfaces for an AUTHORED flow too', async () => {
     const r = seed()
 
     await runGenerate({
@@ -309,10 +309,10 @@ describe('generateGuards — blocked-on world-state gaps', () => {
 
     const entry = flowEntry(r, 'version')!
     expect(entry.scenarios.map((s) => s.surface)).toEqual(['cli'])
-    expect(entry.journeys).toEqual([{ surface: 'cli', journeyIds: ['cli/relkit'] }])
+    expect(entry.interfaces).toEqual([{ surface: 'cli', interfaceIds: ['cli/relkit'] }])
   })
 
-  it('carries the matched journeys forward on a no-op (unchanged) re-generate', async () => {
+  it('carries the matched interfaces forward on a no-op (unchanged) re-generate', async () => {
     const r = seed()
     const opts = {
       repoRoot: r,
@@ -325,7 +325,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     // Nothing re-authored — the entry is rewritten from the cached match verdict,
     // so the plan record must survive the cache-hit path.
     expect(second.flows.skipped).toBe(1)
-    expect(flowEntry(r, 'version')!.journeys).toEqual([{ surface: 'cli', journeyIds: ['cli/relkit'] }])
+    expect(flowEntry(r, 'version')!.interfaces).toEqual([{ surface: 'cli', interfaceIds: ['cli/relkit'] }])
   })
 
   it('carries the AUTHOR-stage gap forward on a no-op re-generate', async () => {
@@ -515,33 +515,33 @@ describe('generateGuards — change detection', () => {
     expect(authorCalls).toBe(0)
   })
 
-  it('a MOVED journey re-authors only the flow that grounds on it', async () => {
+  it('a MOVED interface re-authors only the flow that grounds on it', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: TWO_CLI_DOC }])
     writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
 
-    // Two flows, each matched to its OWN journey.
-    const twoJourneys = [cliJourney(['relkit', 'version']), cliJourney(['relkit', 'help'])]
+    // Two flows, each matched to its OWN interface.
+    const twoInterfaces = [cliInterface(['relkit', 'version']), cliInterface(['relkit', 'help'])]
     const perFlow = async (ctx: Parameters<ReturnType<typeof matchAll>>[0]) => ({
       plan: ctx.milestones.map((m) => ({
-        journeyId: ctx.journeys.find((j) => j.id.endsWith(ctx.flow.id))?.id ?? ctx.journeys[0].id,
+        interfaceId: ctx.interfaces.find((j) => j.id.endsWith(ctx.flow.id))?.id ?? ctx.interfaces[0].id,
         milestone: m.order,
       })),
     })
 
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, ...twoJourneys),
+      interfaces: interfacesOf(r, ...twoInterfaces),
       extractRunner: extractBy({}),
       matchRunner: perFlow,
     })
 
-    // `version`'s journey gained a flag; `help`'s is untouched.
+    // `version`'s interface gained a flag; `help`'s is untouched.
     let authored: string[] = []
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit', 'version'], ['--json']), twoJourneys[1]),
+      interfaces: interfacesOf(r, cliInterface(['relkit', 'version'], ['--json']), twoInterfaces[1]),
       extractRunner: extractBy({}),
       matchRunner: perFlow,
       generateRunner: authorBy({}, (ctx) => authored.push(ctx.flow.id)),
@@ -553,7 +553,7 @@ describe('generateGuards — change detection', () => {
 })
 
 describe('generateGuards — the committed scenario', () => {
-  it('writes valid YAML carrying the flow, the journey path, and every bound section', async () => {
+  it('writes valid YAML carrying the flow, the interface path, and every bound section', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
@@ -582,13 +582,13 @@ describe('generateGuards — the committed scenario', () => {
     // The flow's own goal rides the artifact, so a reader of the file
     // alone knows what it is FOR — `flows.json` may no longer name this flow.
     expect(written.promise).toBe('walk 2 milestone(s)')
-    // The flow + journey references the runner reads for drift.
+    // The flow + interface references the runner reads for drift.
     expect(written.flow).toEqual({
       id: 'a-user-checks-the-version-then-the-help',
       fingerprint: expect.stringMatching(/^sha256:/),
     })
-    expect(written.journey!.path).toEqual(['cli/relkit'])
-    expect(written.journey!.fingerprints[0]).toMatch(/^sha256:/)
+    expect(written.interface!.path).toEqual(['cli/relkit'])
+    expect(written.interface!.fingerprints[0]).toMatch(/^sha256:/)
     // Every milestone is attributed to a step.
     expect(written.steps.map((s) => s.milestone)).toEqual([1, 2])
     // Written under the area slug directory.
@@ -960,10 +960,10 @@ describe('generateGuards — failure output excerpts (Fix 1)', () => {
 describe('retryCacheKey — evidence sensitivity (Fix 1)', () => {
   const flow = { fingerprint: 'sha256:flow' }
   const sectionKeys = ['sha256:s']
-  const journeys = ['sha256:j']
+  const interfaces = ['sha256:j']
   const base: GuardBirthFinding = { doc: DOC, anchor: 'add', title: 't', step: 1, expected: 'exit 3', actual: 'exit 2' }
   const keyFor = (evidence: GuardBirthFinding) =>
-    retryCacheKey(flow, 'cli', sectionKeys, journeys, 'fp', evidence)
+    retryCacheKey(flow, 'cli', sectionKeys, interfaces, 'fp', evidence)
 
   it('moves when the evidence excerpts differ', () => {
     expect(keyFor({ ...base, stderr: 'usage A' })).not.toBe(keyFor({ ...base, stderr: 'usage B' }))
@@ -1453,7 +1453,7 @@ describe('generateGuards — manifest + orphans', () => {
       bindings: [{ doc: 'docs/gone.md', anchor: `${flowId}/section`, fingerprint: 'sha256:old' }],
       scenarios: [],
       generationInputsHash: 'sha256:x',
-      gaps: [{ surface: 'cli' as const, kind: 'no-journey' as const, reason: 'no cli journey does this' }],
+      gaps: [{ surface: 'cli' as const, kind: 'no-interface' as const, reason: 'no cli interface does this' }],
       ...extra,
     })
     writeManifest(r, {
@@ -1638,7 +1638,7 @@ function candidate(repoRoot: string, id: string, steps: GuardScenario['steps']):
     id,
     title: id,
     flow: { id: flow.id, fingerprint: flow.fingerprint },
-    journey: { path: ['cli/relkit'], fingerprints: ['sha256:j'] },
+    interface: { path: ['cli/relkit'], fingerprints: ['sha256:j'] },
     binds,
     driver: 'cli',
     steps,
@@ -1695,7 +1695,7 @@ describe('birthValidate — progress forwarding', () => {
 })
 
 describe('generateGuards — live progress', () => {
-  it('reports the journey catalog, then ticks synthesis and matching', async () => {
+  it('reports the interface catalog, then ticks synthesis and matching', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: TWO_CLI_DOC }])
@@ -1707,13 +1707,13 @@ describe('generateGuards — live progress', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      onJourneys: (journeys, surfaces) => (mapped = [journeys, surfaces]),
+      onInterfaces: (interfaces, surfaces) => (mapped = [interfaces, surfaces]),
       onFlowProgress: (done, total) => flows.push([done, total]),
       onMatchProgress: (done, total) => matches.push([done, total]),
     })
 
     expect(res.written).toHaveLength(2)
-    expect(mapped).toEqual([2, 1]) // two cli journeys, one surface
+    expect(mapped).toEqual([2, 1]) // two cli interfaces, one surface
     expect(flows).toEqual([[0, 1], [1, 1]]) // one area, announced then settled
     // Two flows × one matchable surface — the denominator is known up front.
     expect(matches).toEqual([[0, 2], [1, 2], [2, 2]])
@@ -2048,10 +2048,10 @@ describe('spawnGenerateRunner — retry stage attribution', () => {
         doc: DOC,
         sectionHeading: 'version',
         sectionText: '`relkit --version` prints the version.',
-        realization: ['run: ["--version"]   (journey cli/relkit)'],
+        realization: ['run: ["--version"]   (interface cli/relkit)'],
       },
     ],
-    journeyPath: ['cli/relkit'],
+    interfacePath: ['cli/relkit'],
     areaTags: [],
     driver: 'cli',
     recipeEntry: ['node', 'bin.mjs'],

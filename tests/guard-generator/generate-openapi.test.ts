@@ -15,8 +15,8 @@ import {
   authorBy,
   rawApi,
   runGenerate,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
 } from './helpers.js'
 
 const FIXTURE_OPENAPI = fileURLToPath(new URL('../fixtures/guard-fixture-api/openapi.yaml', import.meta.url))
@@ -43,8 +43,8 @@ const LIST_STEPS = [
   { request: { method: 'GET', path: '/todos' }, expect: { status: 200, json: { todos: { equals: [] } } } },
 ] as never
 
-/** The fixture's two write/read operations, as the journey mapper would derive them. */
-const todoJourneys = (r: string) => journeysOf(r, apiJourney('GET', '/todos'), apiJourney('POST', '/todos'))
+/** The fixture's two write/read operations, as the interface mapper would derive them. */
+const todoInterfaces = (r: string) => interfacesOf(r, apiInterface('GET', '/todos'), apiInterface('POST', '/todos'))
 
 describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
   it('extracts api claims per operation, authors, and births them against the fixture server', async () => {
@@ -55,7 +55,7 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: todoJourneys(r),
+      interfaces: todoInterfaces(r),
       extractRunner: extractBy({
         'paths/get-listtodos': [{ driver: 'api', claim: 'GET /todos returns 200 with the todo list', reason: 'HTTP status + body' }],
         'paths/post-createtodo': [{ driver: 'api', claim: 'POST /todos creates a todo and returns 201', reason: 'HTTP status + body' }],
@@ -106,7 +106,7 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
 
     let authorCalls = 0
     const runner = {
-      journeys: todoJourneys(r),
+      interfaces: todoInterfaces(r),
       extractRunner: extractBy({
         'paths/get-listtodos': [{ driver: 'api', claim: 'GET /todos returns 200 with the todo list', reason: 'HTTP status + body' }],
         'paths/get-gethealth': { untestable: 'probe' },

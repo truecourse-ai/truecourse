@@ -5,13 +5,13 @@ promise: A developer starts a worktree and a fresh clone and gets the baseline f
 flow:
   id: work-from-a-fresh-worktree-and-clone
   fingerprint: sha256:622a40e69e55ea6005605d89262d7a4f6ca00a21316e58bc51290516efedc71d
-journey:
+interface:
   path:
     - cli/analyze
-    - cli/hooks
+    - cli/hooks-install
   fingerprints:
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
-    - sha256:d46deb69bdb72e3221bf9395fc98b670c62aae96df97d8df07c5aa19fcc8dd70
+    - sha256:1038639e4b6df928f00ecbcf7f8ddcecf6a249c62ae109d2838192aa506ac539
 binds:
   - doc: reference/spec-docs/analyze/baseline-and-diff.mdx
     section: worktrees-and-fresh-clones

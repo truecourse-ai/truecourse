@@ -453,21 +453,21 @@ export type EpicSynthesis = z.infer<typeof EpicSynthesisSchema>
 // Realization matching (one call per flow × surface)
 // ---------------------------------------------------------------------------
 
-/** One step of a realization plan: the journey that realizes a milestone. */
+/** One step of a realization plan: the interface that realizes a milestone. */
 export const RealizationStepSchema = z.object({
-  /** A journey id copied verbatim from the surface's catalog digest. */
-  journeyId: z.string().min(1),
-  /** The flow milestone (`order`) this journey realizes. */
+  /** An interface id copied verbatim from the surface's catalog digest. */
+  interfaceId: z.string().min(1),
+  /** The flow milestone (`order`) this interface realizes. */
   milestone: z.number().int().positive(),
-  /** Optional one-liner on how the journey serves the milestone. */
+  /** Optional one-liner on how the interface serves the milestone. */
   note: z.string().optional(),
 })
 export type RealizationStep = z.infer<typeof RealizationStepSchema>
 
 /**
  * One flow's realization verdict on ONE surface: an ordered `plan` walking its
- * milestones through the surface's journeys, or an explicit `unrealizable` reason
- * (no journey path serves the flow). Exactly one of the two — a reply carrying
+ * milestones through the surface's interfaces, or an explicit `unrealizable` reason
+ * (no interface path serves the flow). Exactly one of the two — a reply carrying
  * both, or neither, is malformed and earns the corrective re-ask, so "this surface
  * cannot do it" is always a STATED answer rather than an empty plan.
  */

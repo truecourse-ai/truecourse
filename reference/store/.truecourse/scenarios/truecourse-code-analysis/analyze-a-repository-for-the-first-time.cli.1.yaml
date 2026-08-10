@@ -5,7 +5,7 @@ promise: A developer analyzes a repository for the first time and reads the repo
 flow:
   id: analyze-a-repository-for-the-first-time
   fingerprint: sha256:08ce63f954d273c1e5ae8c9d40cb08b6f6ff27d41977d7f507a6292ee95d3bf3
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list
@@ -66,7 +66,7 @@ steps:
       the falsifiable form of "analysis reports <Category> violations", with no
       finding title anywhere in the assertion. The matcher spans BOTH streams because
       the progress block is written to stderr while the summary line is written to
-      stdout, and no journey fact places either. The store claims are asserted as what
+      stdout, and no interface fact places either. The store claims are asserted as what
       they are: the `.truecourse/` directory, the `analyses/` directory the per-run
       snapshot lands in, `history.json`, and `LATEST.json` holding this run's parsed
       modules. The run planned no LLM call and printed no cost, which is the

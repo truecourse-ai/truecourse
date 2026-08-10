@@ -5,7 +5,7 @@ promise: A developer registers a directory and finds there is nothing to list ye
 flow:
   id: list-violations-before-any-analysis-has-run
   fingerprint: sha256:453e5193b6618d2b0705c0bc11be96993b8e0a69c97d964d9e95066073327b1c
-journey:
+interface:
   path:
     - cli/add
     - cli/list

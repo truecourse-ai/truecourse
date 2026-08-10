@@ -5,7 +5,7 @@ promise: A developer pages through a long violation list and narrows it by sever
 flow:
   id: filter-the-violation-list-and-mistype-a-flag
   fingerprint: sha256:af5d44a77801582a31e602724fc9f0156aac9f1e38ae3b3068592ba91a4439db
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list

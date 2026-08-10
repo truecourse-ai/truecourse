@@ -53,7 +53,7 @@ import { STAGE_DEFAULTS } from '../../packages/core/src/config/llm-models.js';
 import { guardGenerateInProcess } from '../../packages/core/src/commands/guard-in-process.js';
 import { curateInProcess, CURATE_STEPS } from '../../packages/core/src/commands/spec-in-process.js';
 import { StepTracker } from '../../packages/core/src/progress.js';
-import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe, DEFAULT_JOURNEYS } from '../guard-generator/helpers.js';
+import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe, DEFAULT_INTERFACES } from '../guard-generator/helpers.js';
 
 const FAKE_CLAUDE = fileURLToPath(new URL('../fixtures/fake-claude/claude.mjs', import.meta.url));
 const API_MODEL = 'gpt-5.5';
@@ -155,7 +155,7 @@ describe('guard generate — the models follow the run transport', () => {
 
     await guardGenerateInProcess(r, {
       llm: 'cli',
-      journeys: DEFAULT_JOURNEYS(r),
+      interfaces: DEFAULT_INTERFACES(r),
       stopAfterFlows: true,
     });
 
@@ -175,7 +175,7 @@ describe('guard generate — the models follow the run transport', () => {
 
     await guardGenerateInProcess(r, {
       llm: 'api',
-      journeys: DEFAULT_JOURNEYS(r),
+      interfaces: DEFAULT_INTERFACES(r),
       stopAfterFlows: true,
     });
 

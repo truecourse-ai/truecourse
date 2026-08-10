@@ -5,7 +5,7 @@ promise: A developer keeps generated, vendored and ignored files out of the anal
 flow:
   id: exclude-generated-and-ignored-files-from-analysis
   fingerprint: sha256:899ea49bb4366b5c1ffe132177ab145b505293510b83f1acd1d3016860bccfb1
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list
@@ -126,7 +126,7 @@ steps:
       - '--no-skills'
     expect:
       exit: 0
-    note: 'Every exclusion source this flow tests is an UNTRACKED or working-tree-only file (`.truecourseignore`, `.globalexcludes`, `.git/info/exclude`), so the tree is dirty at every analyze step by construction. A non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze journey''s stdin contract), and stashing would be the wrong answer anyway: the tree AS IT STANDS is what carries the exclusion files. `--no-stash` is the only flag that lets the claim be reached.'
+    note: 'Every exclusion source this flow tests is an UNTRACKED or working-tree-only file (`.truecourseignore`, `.globalexcludes`, `.git/info/exclude`), so the tree is dirty at every analyze step by construction. A non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze interface''s stdin contract), and stashing would be the wrong answer anyway: the tree AS IT STANDS is what carries the exclusion files. `--no-stash` is the only flag that lets the claim be reached.'
   - run:
       - list
       - '--limit'

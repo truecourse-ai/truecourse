@@ -8,7 +8,7 @@
  *  1. DETECTION IS EXPENSIVE-ISH AND SHARED. The externals view used to read the
  *     detected third-party list out of `guard/result.json` — i.e. it could only
  *     answer "what does this repo talk to" AFTER a full generate. Setup detects the
- *     same list for free (one `mapJourneys` pass) and records it here, so the
+ *     same list for free (one `mapInterfaces` pass) and records it here, so the
  *     External APIs surfaces work before the first generate. `result.json` stays
  *     generate's own artifact.
  *  2. `guard status` needs a first-class setup row — what ran, what passed, and what
@@ -129,7 +129,7 @@ export const GuardSetupReportSchema = z
       .strict()
       .optional(),
     /**
-     * THE DETECTION SNAPSHOT (step 2) — one `mapJourneys` pass, deterministic and
+     * THE DETECTION SNAPSHOT (step 2) — one `mapInterfaces` pass, deterministic and
      * free. `readGuardExternalsView` reads its detected list from here.
      */
     detection: z

@@ -8,7 +8,7 @@
  *   guard/history.json           per-run summaries, append-only (gitignored)
  *   guard/result.json            last `guard generate` report (gitignored)
  *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
- *   guard/journeys.json          last journey-mapping catalog (gitignored, re-derived)
+ *   guard/interfaces.json        last interface-mapping catalog (gitignored, re-derived)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  *
  * The committable corpus files live one level over, under `scenarios/`:
@@ -32,7 +32,7 @@ import {
   GuardHistorySchema,
   GuardLatestSchema,
   GuardSetupReportSchema,
-  JourneysFileSchema,
+  InterfacesFileSchema,
   type GuardAutoResolutions,
   type GuardClaimsFile,
   type GuardFlowsFile,
@@ -41,7 +41,7 @@ import {
   type GuardHistoryEntry,
   type GuardLatest,
   type GuardSetupReport,
-  type JourneysFile,
+  type InterfacesFile,
 } from '@truecourse/shared'
 
 const TRUECOURSE_DIR = '.truecourse'
@@ -54,7 +54,7 @@ const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
 const SETUP_FILE = 'setup.json'
 const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
-const JOURNEYS_FILE = 'journeys.json'
+const INTERFACES_FILE = 'interfaces.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
@@ -94,9 +94,9 @@ export function guardSetupPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), SETUP_FILE)
 }
 
-/** The journey catalog the last mapping wrote — derived, gitignored, may be absent. */
-export function guardJourneysPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), JOURNEYS_FILE)
+/** The interface catalog the last mapping wrote — derived, gitignored, may be absent. */
+export function guardInterfacesPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), INTERFACES_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -267,22 +267,22 @@ export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
 }
 
 /**
- * Read the journey catalog the last mapping wrote, or `null` when it is absent or
+ * Read the interface catalog the last mapping wrote, or `null` when it is absent or
  * unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
- * simply "no journey knowledge" — it never fails a run, it only means the drift
+ * simply "no interface knowledge" — it never fails a run, it only means the drift
  * annotation has nothing to compare against.
  */
-export function readJourneyCatalog(repoRoot: string): JourneysFile | null {
-  return readJsonOr(guardJourneysPath(repoRoot), JourneysFileSchema, null)
+export function readInterfaceCatalog(repoRoot: string): InterfacesFile | null {
+  return readJsonOr(guardInterfacesPath(repoRoot), InterfacesFileSchema, null)
 }
 
 /**
- * The catalog file's own TEXT, unvalidated — what the dashboard's raw journey
+ * The catalog file's own TEXT, unvalidated — what the dashboard's raw interface
  * mode shows a slice of. Schema-free on purpose: the raw reading must be the
  * bytes on disk, not a re-serialization of what the schema kept.
  */
-export function readJourneyCatalogRaw(repoRoot: string): string | null {
-  const file = guardJourneysPath(repoRoot)
+export function readInterfaceCatalogRaw(repoRoot: string): string | null {
+  const file = guardInterfacesPath(repoRoot)
   if (!fs.existsSync(file)) return null
   try {
     return fs.readFileSync(file, 'utf-8')

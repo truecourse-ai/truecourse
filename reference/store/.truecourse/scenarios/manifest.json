@@ -18,10 +18,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -52,10 +52,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -106,10 +106,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -135,10 +135,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze"
           ]
         }
@@ -163,12 +163,11 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/add",
-            "cli/root"
+          "interfaceIds": [
+            "cli/add"
           ]
         }
       ],
@@ -192,11 +191,13 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/rules"
+          "interfaceIds": [
+            "cli/add",
+            "cli/rules-disable",
+            "cli/rules-list"
           ]
         }
       ],
@@ -220,11 +221,13 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/config"
+          "interfaceIds": [
+            "cli/config-llm-setup",
+            "cli/config-llm-show",
+            "cli/config-llm-use"
           ]
         }
       ],
@@ -253,10 +256,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze"
           ]
         }
@@ -306,12 +309,13 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/add",
-            "cli/rules"
+            "cli/rules-categories",
+            "cli/rules-llm"
           ]
         }
       ],
@@ -335,11 +339,11 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/hooks",
+          "interfaceIds": [
+            "cli/hooks-install",
             "cli/analyze"
           ]
         }
@@ -374,10 +378,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -408,10 +412,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -437,10 +441,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -486,12 +490,14 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/hooks",
-            "cli/analyze"
+          "interfaceIds": [
+            "cli/hooks-status",
+            "cli/hooks-install",
+            "cli/analyze",
+            "cli/hooks-uninstall"
           ]
         }
       ],
@@ -515,10 +521,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/add",
             "cli/list"
           ]
@@ -544,12 +550,15 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/hooks",
-            "cli/analyze"
+          "interfaceIds": [
+            "cli/hooks-status",
+            "cli/analyze",
+            "cli/hooks-install",
+            "cli/hooks-run",
+            "cli/hooks-uninstall"
           ]
         }
       ],
@@ -573,12 +582,13 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/rules",
-            "cli/root"
+          "interfaceIds": [
+            "cli/add",
+            "cli/rules-enable",
+            "cli/rules-disable"
           ]
         }
       ],
@@ -602,11 +612,12 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/rules"
+          "interfaceIds": [
+            "cli/add",
+            "cli/rules-categories"
           ]
         }
       ],
@@ -635,10 +646,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -664,10 +675,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/root"
           ]
         }
@@ -697,10 +708,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -726,10 +737,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/add"
           ]
         }
@@ -754,10 +765,10 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list"
           ]
@@ -783,12 +794,13 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/hooks",
-            "cli/analyze"
+          "interfaceIds": [
+            "cli/analyze",
+            "cli/hooks-install",
+            "cli/hooks-status"
           ]
         }
       ],
@@ -812,12 +824,13 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/hooks",
-            "cli/analyze"
+          "interfaceIds": [
+            "cli/analyze",
+            "cli/hooks-install",
+            "cli/hooks-status"
           ]
         }
       ],
@@ -846,12 +859,11 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/analyze",
-            "cli/list"
+          "interfaceIds": [
+            "cli/analyze"
           ]
         }
       ],
@@ -875,12 +887,14 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/analyze",
-            "cli/rules"
+          "interfaceIds": [
+            "cli/config-llm-setup",
+            "cli/add",
+            "cli/rules-llm",
+            "cli/analyze"
           ]
         }
       ],
@@ -904,13 +918,12 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/add",
-            "cli/list",
-            "cli/root"
+            "cli/list"
           ]
         }
       ],
@@ -934,13 +947,16 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
             "cli/list",
-            "cli/rules"
+            "cli/rules-list",
+            "cli/rules-disable",
+            "cli/rules-enable",
+            "cli/rules-reset"
           ]
         }
       ],
@@ -964,12 +980,11 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/analyze",
-            "cli/list"
+          "interfaceIds": [
+            "cli/analyze"
           ]
         }
       ],
@@ -993,11 +1008,15 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/rules"
+          "interfaceIds": [
+            "cli/add",
+            "cli/rules-disable",
+            "cli/rules-list",
+            "cli/rules-enable",
+            "cli/rules-reset"
           ]
         }
       ],
@@ -1021,11 +1040,12 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
-            "cli/rules"
+          "interfaceIds": [
+            "cli/add",
+            "cli/rules-llm"
           ]
         }
       ],
@@ -1054,12 +1074,12 @@
           "status": "never-run"
         }
       ],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "cli",
-          "journeyIds": [
+          "interfaceIds": [
             "cli/analyze",
-            "cli/hooks"
+            "cli/hooks-install"
           ]
         }
       ],
@@ -1082,10 +1102,10 @@
         }
       ],
       "scenarios": [],
-      "journeys": [
+      "interfaces": [
         {
           "surface": "web",
-          "journeyIds": [
+          "interfaceIds": [
             "web/open-repo-report",
             "web/silence-rule-from-violation-card",
             "web/reenable-rule-from-rules-panel"

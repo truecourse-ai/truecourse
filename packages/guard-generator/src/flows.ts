@@ -7,7 +7,7 @@
  *
  * THE INDEPENDENCE INVARIANT: synthesis sees ONLY spec-derived text — claims,
  * their sections, and heading outlines. No code, no probe transcripts, no recipe,
- * no journey catalog ever enters these prompts. Flow-vs-journey independence is
+ * no interface catalog ever enters these prompts. Flow-vs-interface independence is
  * what makes an unrealizable milestone a real signal instead of a tautology.
  *
  * The model may only ORDER and GROUP claims: every milestone is SNAPPED back onto

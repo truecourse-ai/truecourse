@@ -29,8 +29,8 @@ import {
   writeDoc,
   extractBy,
   runGenerate,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -44,7 +44,7 @@ function repo(): string {
 }
 
 const FLOW = { fingerprint: 'sha256:flow' }
-const JOURNEYS = ['sha256:journey']
+const INTERFACES = ['sha256:interface']
 
 function section(endpointSchemaFingerprint: string): SectionInput {
   return {
@@ -73,7 +73,7 @@ function authorKeyOracle(sectionKeys: string[], extra: string[] = []): string {
         'api',
         FLOW.fingerprint,
         [...sectionKeys, ...extra].sort().join('~'),
-        JOURNEYS.join('~'),
+        INTERFACES.join('~'),
       ].join('::'),
     )
     .digest('hex')
@@ -81,14 +81,14 @@ function authorKeyOracle(sectionKeys: string[], extra: string[] = []): string {
 
 describe('authorCacheKey — endpoint-schema fold', () => {
   it('is byte-identical to the pre-B4 key when the section matches no write op', () => {
-    const key = authorCacheKey(FLOW, 'api', [sectionInputsKey(section(''))], JOURNEYS, 'sha256:recipe')
+    const key = authorCacheKey(FLOW, 'api', [sectionInputsKey(section(''))], INTERFACES, 'sha256:recipe')
     // Independent oracle: an unmatched section's content key is exactly its fingerprint.
     expect(key).toBe(authorKeyOracle(['sha256:sec']))
   })
 
   it('moves once a write-op schema is matched and again when that schema changes', () => {
     const key = (fp: string) =>
-      authorCacheKey(FLOW, 'api', [sectionInputsKey(section(fp))], JOURNEYS, 'sha256:recipe')
+      authorCacheKey(FLOW, 'api', [sectionInputsKey(section(fp))], INTERFACES, 'sha256:recipe')
     expect(key('sha256:schemaA')).not.toBe(key(''))
     expect(key('sha256:schemaB')).not.toBe(key('sha256:schemaA'))
   })
@@ -105,7 +105,7 @@ describe('sectionInputsKey / flowGenerationInputsHash — endpoint-schema fold',
       flowGenerationInputsHash({
         flowFingerprint: FLOW.fingerprint,
         sectionKeys: [sectionKey],
-        journeyFingerprints: JOURNEYS,
+        interfaceFingerprints: INTERFACES,
         recipeFingerprint: 'sha256:recipe',
       })
     expect(hash(sectionInputsKey({ fingerprint: 'sha256:fp', endpointSchemaFingerprint: 'sha256:schema' }))).not.toBe(
@@ -180,7 +180,7 @@ describe('planGuardWork — markdown → OpenAPI write-op enrichment', () => {
         generationInputsHash: flowGenerationInputsHash({
           flowFingerprint: s.fingerprint,
           sectionKeys: [sectionInputsKey(s)],
-          journeyFingerprints: JOURNEYS,
+          interfaceFingerprints: INTERFACES,
           recipeFingerprint: plan0.recipeFingerprint,
         }),
         gaps: [],
@@ -218,7 +218,7 @@ describe('generateGuards — the api author prompt carries the matched request s
     const { byFlow, runner } = collectCtxs()
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('POST', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('POST', '/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
@@ -241,7 +241,7 @@ describe('generateGuards — the api author prompt carries the matched request s
     const { byFlow, runner } = collectCtxs()
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('POST', '/api/v1/todos')),
+      interfaces: interfacesOf(r, apiInterface('POST', '/api/v1/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
@@ -262,7 +262,7 @@ describe('generateGuards — the api author prompt carries the matched request s
     const { byFlow, runner } = collectCtxs()
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('POST', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('POST', '/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
@@ -292,7 +292,7 @@ describe('retryCacheKey — endpoint-schema fold', () => {
   }
 
   it('is the round-1 key plus the birth evidence, and folds nothing extra for an unmatched section', () => {
-    const key = retryCacheKey(FLOW, 'api', [sectionInputsKey(section(''))], JOURNEYS, 'sha256:recipe', EVIDENCE)
+    const key = retryCacheKey(FLOW, 'api', [sectionInputsKey(section(''))], INTERFACES, 'sha256:recipe', EVIDENCE)
     // Independent oracle: the documented retry formula (round-1 key + evidence hash).
     const evidenceHash = createHash('sha256')
       .update(['t', '1', '', 'status 201', 'status 400', '', ''].join('|'))
@@ -305,7 +305,7 @@ describe('retryCacheKey — endpoint-schema fold', () => {
 
   it('moves once a write-op schema is matched and again when that schema changes', () => {
     const key = (fp: string) =>
-      retryCacheKey(FLOW, 'api', [sectionInputsKey(section(fp))], JOURNEYS, 'sha256:recipe', EVIDENCE)
+      retryCacheKey(FLOW, 'api', [sectionInputsKey(section(fp))], INTERFACES, 'sha256:recipe', EVIDENCE)
     expect(key('sha256:schemaA')).not.toBe(key(''))
     expect(key('sha256:schemaB')).not.toBe(key('sha256:schemaA'))
   })

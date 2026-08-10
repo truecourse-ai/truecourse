@@ -738,9 +738,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
-      '@truecourse/journey-mapper':
+      '@truecourse/interface-mapper':
         specifier: workspace:*
-        version: link:../journey-mapper
+        version: link:../interface-mapper
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm
@@ -856,7 +856,7 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  packages/journey-mapper:
+  packages/interface-mapper:
     dependencies:
       '@truecourse/guard-runner':
         specifier: workspace:*

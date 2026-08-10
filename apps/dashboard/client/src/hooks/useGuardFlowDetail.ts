@@ -1,6 +1,6 @@
 /**
  * One flow's detail (`guard/flows/:flowId`) — milestones bound to their live
- * sections, the per-surface scenario rows, gaps, journeys and findings. Fetched
+ * sections, the per-surface scenario rows, gaps, interfaces and findings. Fetched
  * per opened flow tab; `null` detail with no error means the id is gone (404),
  * which the pane renders as an honest "flow not found" rather than a hollow panel.
  */

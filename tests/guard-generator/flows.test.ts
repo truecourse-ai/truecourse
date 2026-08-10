@@ -295,9 +295,9 @@ describe('synthesizeFlows — milestone snapping and validation', () => {
           },
         ],
         noFlowClaims: [
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD_EMPTY, reason: 'an error path no user journey walks' },
+          { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD_EMPTY, reason: 'an error path no user flow walks' },
           { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'covered by the completion flow later' },
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a journey step' },
+          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' },
         ],
       },
     })
@@ -387,7 +387,7 @@ describe('synthesizeFlows — coverage honesty rule', () => {
               doc: TASKS_DOC,
               anchor: TASKS.anchors['Creating tasks'],
               claimTitle: ADD_EMPTY,
-              reason: 'a validation error no user journey walks through',
+              reason: 'a validation error no user flow walks through',
             },
           ],
         },
@@ -401,7 +401,7 @@ describe('synthesizeFlows — coverage honesty rule', () => {
         doc: TASKS_DOC,
         anchor: TASKS.anchors['Creating tasks'],
         claimTitle: ADD_EMPTY,
-        reason: 'a validation error no user journey walks through',
+        reason: 'a validation error no user flow walks through',
       },
     ])
     expect(readFlowsFile(r)!.noFlowClaims).toHaveLength(1)
@@ -752,7 +752,7 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
         TASK_LIFECYCLE.flows[1],
       ],
       noFlowClaims: [
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a journey step' },
+        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' },
       ],
     }
     const res = await synth(r, [tasksArea], flowsRunner({ tasks: shortened }), { previous })

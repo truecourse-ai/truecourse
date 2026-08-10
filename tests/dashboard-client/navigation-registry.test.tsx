@@ -69,10 +69,10 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / sources / tests / journeys / dependencies / runs tabs', () => {
+  it('the guard section carries coverage / sources / tests / interfaces / dependencies / runs tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
     // sites those docs can come from → the flow-and-test inventory those docs
-    // claim), then the code half (journeys) and what that code talks to
+    // claim), then the code half (interfaces) and what that code talks to
     // (dependencies), then history (runs). The Tests id is `guardflows`, not
     // `flows`: tab ids are global and Code Analysis owns `flows` — the same
     // collision rule that named the Runs tab `guarddrifts`. There is NO claims
@@ -82,7 +82,7 @@ describe('navigation registry — pure lookups', () => {
       'coverage',
       'sources',
       'guardflows',
-      'journeys',
+      'interfaces',
       'externals',
       'guarddrifts',
     ]);
@@ -90,7 +90,7 @@ describe('navigation registry — pure lookups', () => {
       'Coverage',
       'Sources',
       'Tests',
-      'Journeys',
+      'Interfaces',
       'Dependencies',
       'Runs',
     ]);
@@ -142,7 +142,7 @@ describe('navigation registry — pure lookups', () => {
     for (const t of ['home', 'graphs', 'files', 'flows', 'databases', 'analyses', 'settings']) {
       expect(ids.has(t)).toBe(true);
     }
-    for (const t of ['coverage', 'sources', 'guardflows', 'journeys', 'guarddrifts']) {
+    for (const t of ['coverage', 'sources', 'guardflows', 'interfaces', 'guarddrifts']) {
       expect(ids.has(t)).toBe(true);
     }
   });
@@ -269,7 +269,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,sources,guardflows,journeys,externals,guarddrifts$/,
+      /^coverage,sources,guardflows,interfaces,externals,guarddrifts$/,
     );
     unmount();
 
@@ -281,7 +281,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,guardflows,journeys,guarddrifts$/,
+      /^coverage,guardflows,interfaces,guarddrifts$/,
     );
   });
 

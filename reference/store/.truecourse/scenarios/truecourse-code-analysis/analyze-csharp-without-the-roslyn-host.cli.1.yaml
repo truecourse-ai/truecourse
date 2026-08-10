@@ -5,7 +5,7 @@ promise: A developer analyzes a repository containing C# without building the Ro
 flow:
   id: analyze-csharp-without-the-roslyn-host
   fingerprint: sha256:94679cba0d9b985a57c6e7ff5e68372d61b424f0530ba0d16aaca5051a2fe96a
-journey:
+interface:
   path:
     - cli/analyze
   fingerprints:

@@ -5,13 +5,11 @@ promise: A first-time user is asked how TrueCourse should reach the LLM, and ans
 flow:
   id: answer-the-first-run-llm-transport-question
   fingerprint: sha256:2c588bf8abc29a3b1d2f8e3bff07a3af88d0634689d2b8e950042f3005e61758
-journey:
+interface:
   path:
     - cli/add
-    - cli/root
   fingerprints:
     - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
-    - sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757
 binds:
   - doc: reference/spec-docs/reference/cli.mdx
     section: cli-reference

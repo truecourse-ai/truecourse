@@ -147,9 +147,9 @@ const PROPOSAL: SeedProposal = {
   seed: { command: 'node scripts/guard-seed.mjs', provides: { fixtures: { org: ['id', 'slug'] } } },
 };
 
-const journeys = () =>
+const interfaces = () =>
   async () => ({
-    journeys: [],
+    interfaces: [],
     externalServices: [
       { service: 'stripe', category: 'payment' as const, evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
     ],
@@ -293,7 +293,7 @@ describe('guardSetupInProcess', () => {
     let seedCalls = 0;
 
     const { report, reportPath } = await guardSetupInProcess(r, {
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       seedRunner: async () => {
         seedCalls++;
@@ -321,7 +321,7 @@ describe('guardSetupInProcess', () => {
 
     await guardSetupInProcess(r, {
       tracker,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       seedRunner: async () => PROPOSAL,
     });
@@ -346,7 +346,7 @@ describe('guardSetupInProcess', () => {
     writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
 
     const { report } = await guardSetupInProcess(r, {
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       seedRunner: neverCalled,
     });
@@ -362,7 +362,7 @@ describe('guardSetupInProcess', () => {
 
     await expect(
       guardSetupInProcess(r, {
-        journeys: journeys(),
+        interfaces: interfaces(),
         recipeRunner: neverCalled,
         seedRunner: neverCalled,
         onLlmEstimate: async () => false,
@@ -414,7 +414,7 @@ describe('guardSetupInProcess — API mode', () => {
     apiTransport.reply = JSON.stringify(PROPOSAL);
 
     const { report } = await guardSetupInProcess(r, {
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
     });
 
@@ -463,7 +463,7 @@ describe('guardSetupInProcess — API mode', () => {
 
     const { report } = await guardSetupInProcess(r, {
       llm: 'api',
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
     });
 
@@ -492,7 +492,7 @@ describe('guardSetupInProcess — API mode', () => {
     try {
       const { report } = await guardSetupInProcess(r, {
         llm: 'cli',
-        journeys: journeys(),
+        interfaces: interfaces(),
         recipeRunner: neverCalled,
       });
 
@@ -528,7 +528,7 @@ describe('guardSetupInProcess — API mode', () => {
 
     const run = guardSetupInProcess(r, {
       llm: 'cli',
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       seedRunner: neverCalled,
       onLlmEstimate: async () => {

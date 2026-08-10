@@ -5,7 +5,7 @@ promise: A developer filters by every documented severity, then mistypes one
 flow:
   id: reject-a-severity-value-the-cli-does-not-define
   fingerprint: sha256:b05cd78e73905ae286eee3a88b010801c95f40460f1e5f9fcb4c79eb019cf99e
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list

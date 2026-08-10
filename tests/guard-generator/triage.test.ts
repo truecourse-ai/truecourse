@@ -95,7 +95,7 @@ describe('triage — prompt + identity', () => {
     expect(TRIAGE_SYSTEM_PROMPT).toContain('"recommendation"')
   })
 
-  it('the user prompt shows the journey: milestones, the failing one marked, and the transcript', () => {
+  it('the user prompt shows the interface: milestones, the failing one marked, and the transcript', () => {
     const ctx: TriageUserContext = {
       ...FLOW_CTX,
       doc: DOC,
@@ -127,7 +127,7 @@ describe('triage — prompt + identity', () => {
       step: 1,
       expected: '201',
       actual: '400',
-      journeyContracts: [
+      interfaceContracts: [
         { method: 'POST', path: '/todos', bodyFields: [{ name: 'title', required: true }] },
       ],
     })

@@ -16,7 +16,7 @@
  *                                                    (deterministic → LLM → verify by
  *                                                    running) plus a live endpoint
  *                                                    probe per declared server.
- *   2    detect                                    — one `mapJourneys` pass; free.
+ *   2    detect                                    — one `mapInterfaces` pass; free.
  *   3    the externals declaration skeleton        — SOFT, never blocks.
  *   4    the one seed (data AND auth)              — SOFT, never blocks.
  * The credential↔spec `satisfies` check is reported here too, where fixing it costs
@@ -52,7 +52,7 @@ import type {
   GuardSetupServerProbe,
 } from '@truecourse/shared'
 import { discoverRecipe, type RecipeDiscoveryPhase } from './recipe-discovery.js'
-import { routesFromJourneys, type ApiRouteRef } from './recipe-propose.js'
+import { routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
 import {
@@ -64,7 +64,7 @@ import {
 } from './seed-draft.js'
 import { hasGuardUniverse, corpusOpenApiDocs, readCorpusAreaTags } from './section-plan.js'
 import { recipeAuthCredentials, validateCredentialSatisfies } from './openapi-security.js'
-import type { JourneyProvider } from './generate.js'
+import type { InterfaceProvider } from './generate.js'
 import type { RecipeRunner, SeedRunner } from './runners.js'
 
 /** How many spec docs the seed draft is shown, and how much of each. */
@@ -73,8 +73,8 @@ const SPEC_EXCERPT_CHARS = 1500
 
 export interface GuardSetupOptions {
   repoRoot: string
-  /** Journey mapping seam — the same one generate uses; see {@link JourneyProvider}. */
-  journeys?: JourneyProvider
+  /** Interface mapping seam — the same one generate uses; see {@link InterfaceProvider}. */
+  interfaces?: InterfaceProvider
   recipeRunner: RecipeRunner
   seedRunner: SeedRunner
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
@@ -143,11 +143,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // depends on the repo (step 1 derives a recipe from the route surface; a repo that
   // already has one first needs it at step 2), so the phase is reported from here,
   // against whichever step is running when the pass actually starts.
-  let mappedOnce: ReturnType<JourneyProvider> | null = null
-  const mapOnce = (): ReturnType<JourneyProvider> => {
+  let mappedOnce: ReturnType<InterfaceProvider> | null = null
+  const mapOnce = (): ReturnType<InterfaceProvider> => {
     if (!mappedOnce) {
       phases.enter({ running: 'analyzing the repository', done: 'analysis' })
-      mappedOnce = mapSafely(opts.journeys)
+      mappedOnce = mapSafely(opts.interfaces)
     }
     return mappedOnce
   }
@@ -164,7 +164,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const authored = opts.refresh ? authoredBlocks(reloadRecipe(repoRoot)) : null
   const discovery = await discoverRecipe(repoRoot, opts.recipeRunner, {
     ...(opts.refresh ? { ignoreExisting: true } : {}),
-    routes: async () => routesFromJourneys((await mapOnce()).journeys),
+    routes: async () => routesFromInterfaces((await mapOnce()).interfaces),
     database: async () => {
       const db = (await mapOnce()).database
       return db ? { type: db.type, driver: db.driver } : null
@@ -262,7 +262,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     opts,
     recipe: current,
     database,
-    routes: routesFromJourneys(mapped.journeys),
+    routes: routesFromInterfaces(mapped.interfaces),
     schemes: collectSecuritySchemes(openApiDocs),
     onPhase: (phase) => phases.enter(seedPhase(phase)),
   })
@@ -690,19 +690,19 @@ function failed(reason: string, parts: { recipe?: GuardSetupRecipeStep } = {}): 
   }
 }
 
-/** The journey mapping, degraded to "nothing detected" rather than a failed setup. */
-async function mapSafely(provider?: JourneyProvider): Promise<{
-  journeys: Awaited<ReturnType<JourneyProvider>>['journeys']
+/** The interface mapping, degraded to "nothing detected" rather than a failed setup. */
+async function mapSafely(provider?: InterfaceProvider): Promise<{
+  interfaces: Awaited<ReturnType<InterfaceProvider>>['interfaces']
   externalServices: DetectedExternalService[]
   database: SeedDraftDatabase | null
   datastoreUrls: DatastoreUrlRef[]
 }> {
-  const empty = { journeys: [], externalServices: [], database: null, datastoreUrls: [] }
+  const empty = { interfaces: [], externalServices: [], database: null, datastoreUrls: [] }
   if (!provider) return empty
   try {
     const mapped = await provider()
     return {
-      journeys: mapped.journeys,
+      interfaces: mapped.interfaces,
       externalServices: mapped.externalServices ?? [],
       database: mapped.database ?? null,
       datastoreUrls: mapped.datastoreUrls ?? [],

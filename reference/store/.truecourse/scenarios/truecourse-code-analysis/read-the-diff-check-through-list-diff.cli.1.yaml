@@ -5,7 +5,7 @@ promise: A developer diffs a change against the committed baseline and reads the
 flow:
   id: read-the-diff-check-through-list-diff
   fingerprint: sha256:e887d894b6f6ce3d4311728c98ad22a0745fd4962a93609636e96871aa6cb7b8
-journey:
+interface:
   path:
     - cli/analyze
     - cli/list

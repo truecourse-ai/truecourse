@@ -5,11 +5,13 @@ promise: A team turns LLM rules off for their repository, back on, and then to t
 flow:
   id: turn-llm-rules-on-and-off-from-the-cli-reference
   fingerprint: sha256:02184154f03da86813105edaa93b540372ab60144a4139fe4807cf92041737bd
-journey:
+interface:
   path:
-    - cli/rules
+    - cli/add
+    - cli/rules-llm
   fingerprints:
-    - sha256:a1cb5505112364f829d0346050d74816873fbd3f73c3eedb7730015c7d1f4008
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:23ad6cb2a11da30f8f40226ccd122367e3fe43b2b4cdde3ee7ab696f047cbf78
 binds:
   - doc: reference/spec-docs/reference/cli.mdx
     section: rules

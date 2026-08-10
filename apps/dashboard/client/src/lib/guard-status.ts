@@ -24,7 +24,7 @@
  *          `authoring-error` (our engine failing to do its job);
  *   GREEN  proven — `pass`, and `guarded` (proven by an earlier execution);
  *   BLUE   NOT YET, and someone can move it — the Blocked tier a user can clear
- *          (`blocked`, `needs-setup`, `blocked-on`, `no-journey`, `unguarded`) plus
+ *          (`blocked`, `needs-setup`, `blocked-on`, `no-interface`, `unguarded`) plus
  *          `never-run`, which is the same shape of fact;
  *   GREY   nothing to act on — the settled non-testables (`unrealizable`,
  *          `untestable`, `no-claim`, `dismissed`), the drivers we haven't built
@@ -73,7 +73,7 @@ const GAP_COLOUR: GuardStatusColour = {
 
 /**
  * BLOCKED — the one blue. A state nothing has ruled on yet AND someone can move:
- * register the dependency, provide the account, map the journey, run the tests.
+ * register the dependency, provide the account, map the interface, run the tests.
  * It is deliberately the same blue as `never-run` and `guarded`: all of them are
  * "no verdict here yet", and a reader scanning for colour must not read one of
  * them as a result. The WORD tells them apart.
@@ -148,7 +148,7 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
   // path nothing maps yet. Blue, and `blocked-on` is what the five-word "Blocked"
   // chip borrows its paint from (see BADGE_SOURCE), so BLOCKED IS BLUE everywhere.
   'blocked-on': BLOCKED_COLOUR,
-  'no-journey': BLOCKED_COLOUR,
+  'no-interface': BLOCKED_COLOUR,
   // Settled answers: nothing here can be proven, by anybody. Grey — nobody's to-do.
   untestable: GAP_COLOUR,
   'no-claim': GAP_COLOUR,

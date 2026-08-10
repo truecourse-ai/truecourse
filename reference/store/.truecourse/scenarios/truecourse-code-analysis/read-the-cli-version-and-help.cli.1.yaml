@@ -5,7 +5,7 @@ promise: A developer asks the CLI which version it is and what it can do
 flow:
   id: read-the-cli-version-and-help
   fingerprint: sha256:974bd6c4e3ac239a247a12b3ee8564013f11822e8d65166e4896243fa9f31d86
-journey:
+interface:
   path:
     - cli/root
   fingerprints:

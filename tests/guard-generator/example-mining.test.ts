@@ -147,7 +147,7 @@ describe('the authoring prompts carry the verbatim-example contract', () => {
           examples: [{ lang: 'sql', content: 'select 1' }],
         },
       ],
-      journeyPath: [],
+      interfacePath: [],
       areaTags: [],
       driver: 'cli',
       recipeEntry: ['node', 'cli.js'],

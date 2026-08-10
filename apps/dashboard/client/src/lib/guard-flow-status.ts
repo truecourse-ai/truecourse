@@ -152,15 +152,15 @@ const VOCAB = {
   // so are their WORDS: an empty catalog is an EXTRACTION gap that mapping the
   // surface clears (Blocked), while `unrealizable` is the settled "the spec
   // promises this, no code surface offers it" (Not testable).
-  'no-journey': {
+  'no-interface': {
     label: 'No code path mapped',
     sentence: 'no code path mapped',
-    hint: 'Nothing was mapped for this surface — the flow may be realizable, but no journey was found to realize it with.',
+    hint: 'Nothing was mapped for this surface — the flow may be realizable, but no interface was found to realize it with.',
   },
   unrealizable: {
     label: 'No code path does this',
     sentence: 'no code path does this',
-    hint: 'The surface was examined and no journey path serves this flow.',
+    hint: 'The surface was examined and no interface path serves this flow.',
   },
   // The user dismissed this claim's finding (won't-fix / noise) — an honest,
   // muted status, never a fail.
@@ -443,7 +443,7 @@ export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string 
 
 /**
  * The COMPACT phrase a needs-setup gap wears where a line is all there is: a
- * surface chip ("API · needs setup: open-meteo"), a journey's need, a section's
+ * surface chip ("API · needs setup: open-meteo"), an interface's need, a section's
  * flow row. Three sub-states, and they say different things: an external service
  * to provide, seed data the existing seed script doesn't create yet, or an
  * account already provided whose flows the next generate will author.

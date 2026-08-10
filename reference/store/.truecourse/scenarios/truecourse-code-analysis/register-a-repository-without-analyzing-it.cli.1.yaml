@@ -5,7 +5,7 @@ promise: A developer registers a directory with TrueCourse and skips the skills 
 flow:
   id: register-a-repository-without-analyzing-it
   fingerprint: sha256:5985f1d0963c4795f409ee7d4000635d321b06056408618a1f80cd607a716714
-journey:
+interface:
   path:
     - cli/add
   fingerprints:

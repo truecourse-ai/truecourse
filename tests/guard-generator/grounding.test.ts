@@ -11,7 +11,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  buildJourneyContractHints,
+  buildInterfaceContractHints,
   buildOtherOperationHints,
   buildOutboundRequestHints,
   outboundOverflow,
@@ -21,7 +21,7 @@ import {
   MAX_RESPONSE_FIELDS,
 } from '../../packages/guard-generator/src/grounding';
 import { buildAuthorUserPrompt, type AuthorUserContext } from '../../packages/guard-generator/src/prompts';
-import type { ApiRequestContract, DetectedExternalService, Journey, OutboundRequest } from '../../packages/shared/src';
+import type { ApiRequestContract, DetectedExternalService, Interface, OutboundRequest } from '../../packages/shared/src';
 import {
   makeTempRepo,
   rmrf,
@@ -31,8 +31,8 @@ import {
   extractBy,
   authorBy,
   runGenerate,
-  journeysOf,
-  apiJourney as helperApiJourney,
+  interfacesOf,
+  apiInterface as helperApiInterface,
   withCodeTruth,
   rawApi,
   PASSING_API_STEPS,
@@ -40,7 +40,7 @@ import {
 
 const LOCATION = { filePath: '/repo/src/upstream/forecast.ts', startLine: 1, endLine: 1, startColumn: 0, endColumn: 1 };
 
-function apiJourney(method: string, path: string): Journey {
+function apiInterface(method: string, path: string): Interface {
   return {
     id: `api/${method.toLowerCase()}${path.replace(/\W+/g, '-')}`,
     type: 'api',
@@ -48,7 +48,7 @@ function apiJourney(method: string, path: string): Journey {
     entry: { method, path },
     steps: [{ kind: 'request', method, path }],
     fingerprint: `fp-${method}-${path}`,
-  } as Journey;
+  } as Interface;
 }
 
 const FORECAST: OutboundRequest = {
@@ -72,7 +72,7 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
   return {
     flow: { id: 'f', title: 'Flow', goal: 'goal' },
     milestones: [{ order: 1, claim: 'c', doc: 'd.md', sectionHeading: 'h', sectionText: 't', realization: [] }],
-    journeyPath: [],
+    interfacePath: [],
     areaTags: [],
     driver: 'api',
     recipeBuild: 'npm run build',
@@ -80,7 +80,7 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
   };
 }
 
-describe('buildJourneyContractHints', () => {
+describe('buildInterfaceContractHints', () => {
   const contracts: ApiRequestContract[] = [
     {
       method: 'POST',
@@ -94,19 +94,19 @@ describe('buildJourneyContractHints', () => {
   ];
 
   it('carries the contract onto the operation the plan walks', () => {
-    const [hint] = buildJourneyContractHints([apiJourney('POST', '/v1/auth/signup')], contracts);
+    const [hint] = buildInterfaceContractHints([apiInterface('POST', '/v1/auth/signup')], contracts);
     expect(hint.bodyFields).toEqual(contracts[0].bodyFields);
   });
 
   it('still lists an operation with NO contract — the exact path is itself the grounding', () => {
-    const hints = buildJourneyContractHints([apiJourney('GET', '/v1/favorites')], contracts);
+    const hints = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')], contracts);
     expect(hints).toEqual([{ method: 'GET', path: '/v1/favorites' }]);
   });
 
-  it('ignores non-api journeys and collapses a repeated operation', () => {
-    const cli = { ...apiJourney('GET', '/x'), type: 'cli', entry: { command: ['x'] } } as unknown as Journey;
-    const hints = buildJourneyContractHints(
-      [apiJourney('POST', '/v1/auth/signup'), apiJourney('POST', '/v1/auth/signup'), cli],
+  it('ignores non-api interfaces and collapses a repeated operation', () => {
+    const cli = { ...apiInterface('GET', '/x'), type: 'cli', entry: { command: ['x'] } } as unknown as Interface;
+    const hints = buildInterfaceContractHints(
+      [apiInterface('POST', '/v1/auth/signup'), apiInterface('POST', '/v1/auth/signup'), cli],
       contracts,
     );
     expect(hints).toHaveLength(1);
@@ -118,13 +118,13 @@ describe('buildOtherOperationHints — the setup surface', () => {
     { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
   ];
   const catalog = [
-    apiJourney('POST', '/v1/auth/signup'),
-    apiJourney('POST', '/v1/auth/signin'),
-    apiJourney('GET', '/v1/favorites'),
+    apiInterface('POST', '/v1/auth/signup'),
+    apiInterface('POST', '/v1/auth/signin'),
+    apiInterface('GET', '/v1/favorites'),
   ];
 
   it('offers the rest of the surface, with contracts, minus what the flow walks', () => {
-    const own = buildJourneyContractHints([apiJourney('GET', '/v1/favorites')], contracts);
+    const own = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')], contracts);
     const { operations, overflow } = buildOtherOperationHints(catalog, contracts, own);
     expect(operations).toEqual([
       { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
@@ -134,12 +134,12 @@ describe('buildOtherOperationHints — the setup surface', () => {
   });
 
   it('is empty when the flow already walks the whole surface', () => {
-    const own = buildJourneyContractHints(catalog, contracts);
+    const own = buildInterfaceContractHints(catalog, contracts);
     expect(buildOtherOperationHints(catalog, contracts, own).operations).toEqual([]);
   });
 
   it('caps the list and counts what it dropped', () => {
-    const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiJourney('GET', `/v1/r${i}`));
+    const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiInterface('GET', `/v1/r${i}`));
     const { operations, overflow } = buildOtherOperationHints(many, [], []);
     expect(operations).toHaveLength(MAX_OTHER_OPERATIONS);
     expect(overflow).toBe(4);
@@ -202,7 +202,7 @@ describe('the authoring prompt blocks', () => {
   it('states the exact operation, its required fields, and the verbatim-path rule', () => {
     const prompt = buildAuthorUserPrompt(
       ctx({
-        journeyContracts: [
+        interfaceContracts: [
           {
             method: 'POST',
             path: '/v1/auth/signup',
@@ -244,7 +244,7 @@ describe('the authoring prompt blocks', () => {
   it('lists the OTHER operations as setup material, under the same rules', () => {
     const prompt = buildAuthorUserPrompt(
       ctx({
-        journeyContracts: [{ method: 'GET', path: '/v1/favorites' }],
+        interfaceContracts: [{ method: 'GET', path: '/v1/favorites' }],
         otherOperations: [
           { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
         ],
@@ -259,7 +259,7 @@ describe('the authoring prompt blocks', () => {
   });
 
   it('renders no OTHER-operations block when the flow walks everything', () => {
-    const prompt = buildAuthorUserPrompt(ctx({ journeyContracts: [{ method: 'GET', path: '/x' }] }));
+    const prompt = buildAuthorUserPrompt(ctx({ interfaceContracts: [{ method: 'GET', path: '/x' }] }));
     expect(prompt).toContain('OPERATIONS THIS FLOW WALKS');
     expect(prompt).not.toContain('OTHER OPERATIONS AVAILABLE');
   });
@@ -272,7 +272,7 @@ describe('the authoring prompt blocks', () => {
       ctx({
         driver: 'cli',
         recipeEntry: ['node', 'cli.js'],
-        journeyContracts: [{ method: 'POST', path: '/v1/auth/signup' }],
+        interfaceContracts: [{ method: 'POST', path: '/v1/auth/signup' }],
         outboundRequests: buildOutboundRequestHints([FORECAST], []),
       }),
     );
@@ -284,13 +284,13 @@ describe('the authoring prompt blocks', () => {
   });
 });
 
-describe('generateGuards — the grounding rides the SAME provider the journeys do', () => {
+describe('generateGuards — the grounding rides the SAME provider the interfaces do', () => {
   const repos: string[] = [];
   afterEach(() => {
     while (repos.length) rmrf(repos.pop()!);
   });
 
-  it('reaches the api authoring context per journey, and never a cli one', async () => {
+  it('reaches the api authoring context per interface, and never a cli one', async () => {
     const r = makeTempRepo();
     repos.push(r);
     writeApiRecipe(r, { entry: null });
@@ -300,7 +300,7 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
 
     await runGenerate({
       repoRoot: r,
-      journeys: withCodeTruth(journeysOf(r, helperApiJourney('GET', '/todos')), {
+      interfaces: withCodeTruth(interfacesOf(r, helperApiInterface('GET', '/todos')), {
         requestContracts: [
           { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
           // An operation this flow does NOT walk must not leak into its prompt.
@@ -317,11 +317,11 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
     });
 
     const api = contexts.find((c) => c.driver === 'api')!;
-    expect(api.journeyContracts).toEqual([
+    expect(api.interfaceContracts).toEqual([
       { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
     ]);
     expect(api.outboundRequests?.[0].path).toBe('/v1/forecast');
-    // The flow walks the only api journey, so there is no OTHER-operations block.
+    // The flow walks the only api interface, so there is no OTHER-operations block.
     expect(api.otherOperations ?? []).toEqual([]);
     const prompt = buildAuthorUserPrompt(api);
     expect(prompt).toContain('- GET /todos — query also reads limit');
@@ -339,8 +339,8 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
 
     await runGenerate({
       repoRoot: r,
-      journeys: withCodeTruth(
-        journeysOf(r, helperApiJourney('GET', '/todos'), helperApiJourney('POST', '/signup')),
+      interfaces: withCodeTruth(
+        interfacesOf(r, helperApiInterface('GET', '/todos'), helperApiInterface('POST', '/signup')),
         {
           requestContracts: [
             { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
@@ -357,7 +357,7 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
 
     const api = contexts.find((c) => c.driver === 'api')!;
     // The flow's plan walks /todos; /signup is the setup surface it may reach for.
-    expect(api.journeyContracts?.map((j) => j.path)).toEqual(['/todos']);
+    expect(api.interfaceContracts?.map((j) => j.path)).toEqual(['/todos']);
     expect(api.otherOperations).toEqual([
       { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
     ]);

@@ -109,7 +109,7 @@ export function blockedDetailLines(s: GuardScenarioResult): string[] {
  * renders. A failure the path can't place (plumbing step, hand-written scenario,
  * a flow the corpus no longer has) falls back to the step line. The annotations
  * ride one extra line each — never outcomes: a blocked precondition (the failing
- * step only prepared the world, so no specified behavior was reached) and journey
+ * step only prepared the world, so no specified behavior was reached) and interface
  * drift (a re-ground hint).
  */
 export function failureDetailLines(
@@ -126,8 +126,8 @@ export function failureDetailLines(
       "    ⊘ blocked precondition — a setup step failed before any specified behavior was reached",
     );
   }
-  if (s.journeyDrifted) {
-    lines.push("    ⟳ journey drifted — the code surface this was grounded on moved; re-generate to re-ground");
+  if (s.interfaceDrifted) {
+    lines.push("    ⟳ interface drifted — the code surface this was grounded on moved; re-generate to re-ground");
   }
   return lines;
 }
@@ -668,7 +668,7 @@ function testsLine(g: GuardLastGenerateSummary): string {
   return parts.join(" · ");
 }
 
-/** `1 no journey · 1 awaiting web driver · 2 blocked-on (git 2)` — gaps by display kind. */
+/** `1 no interface · 1 awaiting web driver · 2 blocked-on (git 2)` — gaps by display kind. */
 function gapBreakdown(g: { coverageGapsByKind: Record<string, number>; blockedOnCapabilities: Record<string, number> }): string {
   return Object.entries(g.coverageGapsByKind)
     .filter(([, n]) => n > 0)
@@ -913,7 +913,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       const detail: string[] = [];
       if (gapTotal > 0) {
         // The gap breakdown is the WHY behind the blocked/not-testable counts
-        // above, so it names each gap in words (`no journey`), never as the wire
+        // above, so it names each gap in words (`no interface`), never as the wire
         // kind token it is keyed by.
         const kinds = Object.entries(g.coverageGapsByKind)
           .filter(([, n]) => n > 0)

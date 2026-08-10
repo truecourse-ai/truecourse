@@ -197,7 +197,7 @@ function emptyClassification(): GuardCoverageSummary['classification'] {
  * One line naming a gap, the SINGLE copy the CLI (`guard flows`, the generate
  * summary, `guard status`) and the dashboard both render: an `awaiting-driver`
  * gap names the driver it waits on, every other kind reads as its own kind with
- * the hyphens spelled out (`no-journey` → `no journey`).
+ * the hyphens spelled out (`no-interface` → `no interface`).
  */
 export function guardGapLabel(kind: GuardCoverageGapKind, driver?: GuardDriverId): string {
   if (kind === 'awaiting-driver') return driver ? `awaiting ${driver} driver` : 'awaiting driver'
@@ -226,7 +226,7 @@ export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string
 /**
  * What the user does about it, said the same way everywhere. The flows are left
  * UNSETTLED for exactly this reason (a settled flow carries its inputs hash and the
- * next generate skips it), and authoring is cached per flow+sections+journeys+recipe,
+ * next generate skips it), and authoring is cached per flow+sections+interfaces+recipe,
  * so an unchanged corpus re-adjudicates without paying for authoring again.
  */
 export const GUARD_UNADJUDICATED_REMEDY =

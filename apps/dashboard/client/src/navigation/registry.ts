@@ -125,10 +125,10 @@ export const SECTIONS: SectionDescriptor[] = [
     // Spec-section scenario coverage as a top-level module (OSS — never gated).
     id: 'guard',
     label: 'Spec Guard',
-    description: 'Spec-flow coverage, generation, journeys, runs',
+    description: 'Spec-flow coverage, generation, interfaces, runs',
     icon: FlaskConical,
     defaultTab: 'coverage',
-    // One action per tab: Coverage → Scan, Tests → Generate, Journeys → Map (free,
+    // One action per tab: Coverage → Scan, Tests → Generate, Interfaces → Map (free,
     // deterministic — no estimate modal), Runs → Run.
     tabs: [
       // Coverage-over-doc surface — the doc-picker + conflict list sidebar (the
@@ -164,11 +164,11 @@ export const SECTIONS: SectionDescriptor[] = [
       // Analysis already owns a `flows` tab and tab ids are global (the same
       // reason the Runs tab is `guarddrifts`).
       { id: 'guardflows', label: 'Tests', icon: FlaskConical },
-      // Code-side journey catalog — the free Map action's read surface: detected
+      // Code-side interface catalog — the free Map action's read surface: detected
       // surfaces banner, per-surface catalog with the reverse index onto flows, and
-      // the sequence diagram per journey. It sits AFTER Tests: it is the code half,
+      // the sequence diagram per interface. It sits AFTER Tests: it is the code half,
       // read once the spec half (coverage -> tests) has been read.
-      { id: 'journeys', label: 'Journeys', icon: Route },
+      { id: 'interfaces', label: 'Interfaces', icon: Route },
       // The third parties this repo calls, and the real/sandbox account the user
       // hands guard for each. Reads and writes the WORKING TREE
       // (recipe.json + the gitignored overlay + the host env), so it is

@@ -16,9 +16,9 @@ import {
   extractBy,
   authorBy,
   runGenerate,
-  journeysOf,
-  cliJourney,
-  apiJourney,
+  interfacesOf,
+  cliInterface,
+  apiInterface,
   flowOfAll,
   faithfulReviewer,
   stampMilestones,
@@ -82,7 +82,7 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['silent'])),
+      interfaces: interfacesOf(r, cliInterface(['silent'])),
       extractRunner: extractBy({}),
       generateRunner: gen,
       fidelityRunner: faithfulReviewer(() => fidelityCalls++),
@@ -151,7 +151,7 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
 
-    // One flow over both claims; the authored journey asserts the stub's uniform
+    // One flow over both claims; the authored interface asserts the stub's uniform
     // 404 on both routes, so WITHOUT the gate all 20 steps would PASS and a green
     // corpus proving nothing would be committed.
     const steps = [
@@ -163,7 +163,7 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/alpha'), apiJourney('POST', '/beta')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/alpha'), apiInterface('POST', '/beta')),
       extractRunner: extractBy({
         alpha: [{ driver: 'api', claim: 'GET /alpha answers the alpha resource', reason: 'HTTP status' }],
         beta: [{ driver: 'api', claim: 'POST /beta records a beta event', reason: 'HTTP status' }],

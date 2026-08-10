@@ -1180,7 +1180,7 @@
       "synthesisInputsHash": "sha256:6abff9438acdd502a80ab062e67e937eda61881177ff0c465675dd05cb5b6a94",
       "kind": "variant",
       "variantOf": "install-the-pre-commit-hook-and-enforce-it",
-      "notes": "The second configuration path of the hook policy, and a live product finding. `hooks status` does report the policy (\"LLM rules on commit: enabled (tokens per commit)\"), but EXECUTION has no public observation at all: `hooks run` prints one progressive line and a verdict, carries no usage or cost line, writes no analyze log, and — verified 2026-08-08 — produces byte-identical output and exit code under `llm: true` with a broken transport and under `llm: false`. The scenario asserts the DOC's promise (a gate that runs the LLM rules cannot hand back the deterministic-only pass when the transport cannot run) and stays red on the contradiction, which is the policy this corpus follows wherever a journey fact contradicts a doc promise.",
+      "notes": "The second configuration path of the hook policy, and a live product finding. `hooks status` does report the policy (\"LLM rules on commit: enabled (tokens per commit)\"), but EXECUTION has no public observation at all: `hooks run` prints one progressive line and a verdict, carries no usage or cost line, writes no analyze log, and — verified 2026-08-08 — produces byte-identical output and exit code under `llm: true` with a broken transport and under `llm: false`. The scenario asserts the DOC's promise (a gate that runs the LLM rules cannot hand back the deterministic-only pass when the transport cannot run) and stays red on the contradiction, which is the policy this corpus follows wherever an interface fact contradicts a doc promise.",
       "startingState": {
         "stepCreatable": [
           "the baseline, the hook and the policy file"
@@ -2198,7 +2198,7 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       "kind": "happy",
-      "notes": "The whole `config llm` row of the CLI reference, proved through the command family itself. Everything this family writes lives under the per-user home, which is outside the sandbox working tree and therefore outside anything a scenario may assert files on — so every verdict here is read off `config llm show`, whose row templates the journey records (`transport  <mode> (<source>)`, `key        <masked> (<origin>)`, one `<stage> <model> <source>` line per stage). Each mutation is proved by the SUBSEQUENT read, and `use` is exercised in BOTH directions because a command that always saved the same transport would pass a single flip. The API key passed here is a throwaway string and no provider is ever contacted (`--no-test` skips the live probe): the claim under test is how a stored string is RENDERED, so the string is transient flow-specific state, not a supplied credential. `config llm test` is the one claim of this section that cannot join — one live call needs a real account, so it stays a gap naming the supplied dependency that would clear it.",
+      "notes": "The whole `config llm` row of the CLI reference, proved through the command family itself. Everything this family writes lives under the per-user home, which is outside the sandbox working tree and therefore outside anything a scenario may assert files on — so every verdict here is read off `config llm show`, whose row templates the interface records (`transport  <mode> (<source>)`, `key        <masked> (<origin>)`, one `<stage> <model> <source>` line per stage). Each mutation is proved by the SUBSEQUENT read, and `use` is exercised in BOTH directions because a command that always saved the same transport would pass a single flip. The API key passed here is a throwaway string and no provider is ever contacted (`--no-test` skips the live probe): the claim under test is how a stored string is RENDERED, so the string is transient flow-specific state, not a supplied credential. `config llm test` is the one claim of this section that cannot join — one live call needs a real account, so it stays a gap naming the supplied dependency that would clear it.",
       "startingState": {
         "stepCreatable": [
           "the saved transport and the API block — `config llm setup` and `config llm use` are the public commands that create them, which is why this flow needs no seeding at all"
@@ -2259,7 +2259,7 @@
       "composedOf": [],
       "synthesisInputsHash": "sha256:5d1d76ef87817bd6b34c414773d19a7063aeccfb763eefc9c49f92bbea0af252",
       "kind": "happy",
-      "notes": "The dashboard half of the analyze area, promoted from the untestable ledger for the web wave (plan §10.6): the four dashboard-UI statements the CLI wave consciously refused as out of CLI scope. A MIXED flow: a CLI `truecourse analyze --no-llm` arranges the store against the same supplied analysis-target the CLI flows bind (the dashboard renders what analyze wrote; nothing here re-proves analyze itself), and every milestone is then proved off what the browser shows. The walk: open the analyzed repo’s page and read the report — the violation cards are the visual results, asserted by presence and count, never by card prose; silence a noisy rule from a violation card’s ⋮ menu (“Disable rule for this repo”); watch that rule’s cards leave the list with no re-analysis; re-enable it from the Rules panel toggle, which proves the panel’s toggle claim and the “until re-enabled” tail of the hidden claim in one step. Doc-drift watch: the docs place the Rules panel behind a “Shield icon in the top-right”, but the current client renders a “Browse Rules” control in the violations toolbar (apps/dashboard/client/src/components/pages/HomePanel.tsx) — the milestone stays authored to the doc, so the eventual run surfaces the drift instead of the flow hiding it. No scenario exists yet: web is a recorded, non-runnable driver, and the manifest carries the awaiting-driver gap; the recipe also cannot yet describe how the dashboard’s web surface starts (plan §10.5 — recorded as a transform gap). Journeys, in walk order: web/open-repo-report (arrive at the report), web/silence-rule-from-violation-card (milestones 2–3), web/reenable-rule-from-rules-panel (milestone 4 and the “until re-enabled” tail of milestone 3) — task journeys per the 2026-08-11 re-scope, each carrying its own starting and end state.",
+      "notes": "The dashboard half of the analyze area, promoted from the untestable ledger for the web wave (plan §10.6): the four dashboard-UI statements the CLI wave consciously refused as out of CLI scope. A MIXED flow: a CLI `truecourse analyze --no-llm` arranges the store against the same supplied analysis-target the CLI flows bind (the dashboard renders what analyze wrote; nothing here re-proves analyze itself), and every milestone is then proved off what the browser shows. The walk: open the analyzed repo’s page and read the report — the violation cards are the visual results, asserted by presence and count, never by card prose; silence a noisy rule from a violation card’s ⋮ menu (“Disable rule for this repo”); watch that rule’s cards leave the list with no re-analysis; re-enable it from the Rules panel toggle, which proves the panel’s toggle claim and the “until re-enabled” tail of the hidden claim in one step. Doc-drift watch: the docs place the Rules panel behind a “Shield icon in the top-right”, but the current client renders a “Browse Rules” control in the violations toolbar (apps/dashboard/client/src/components/pages/HomePanel.tsx) — the milestone stays authored to the doc, so the eventual run surfaces the drift instead of the flow hiding it. No scenario exists yet: web is a recorded, non-runnable driver, and the manifest carries the awaiting-driver gap; the recipe also cannot yet describe how the dashboard’s web surface starts (plan §10.5 — recorded as a transform gap). Interfaces, in walk order: web/open-repo-report (arrive at the report), web/silence-rule-from-violation-card (milestones 2–3), web/reenable-rule-from-rules-panel (milestone 4 and the “until re-enabled” tail of milestone 3) — task interfaces per the 2026-08-11 re-scope, each carrying its own starting and end state.",
       "startingState": {
         "stepCreatable": [
           "the `.truecourse/` store with an analysis snapshot (`LATEST.json`) — written by the arranging `truecourse analyze --no-llm` step, settled CLI ground this flow does not re-prove",
@@ -2345,7 +2345,7 @@
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "language-support",
       "claimTitle": "C# semantic rules need the Roslyn host built once",
-      "reason": "needs dotnet-sdk, and the documented build command (`dotnet build -c Release tools/csharp-roslyn-host`) points INSIDE the TrueCourse source tree, which a user who installed from npm does not have. Blocked on both the supplied SDK and a doc/journey answer to \"where does an installed user build the host from\"."
+      "reason": "needs dotnet-sdk, and the documented build command (`dotnet build -c Release tools/csharp-roslyn-host`) points INSIDE the TrueCourse source tree, which a user who installed from npm does not have. Blocked on both the supplied SDK and a doc/interface answer to \"where does an installed user build the host from\"."
     },
     {
       "doc": "reference/spec-docs/analyze/rules.mdx",
@@ -2357,7 +2357,7 @@
       "doc": "reference/spec-docs/analyze/excluding-files.mdx",
       "anchor": "truecourseignore",
       "claimTitle": ".truecourseignore also narrows spec scan doc discovery",
-      "reason": "out of the authored journey set — the proof runs through `truecourse spec scan` and `.truecourse/specs/corpus.json`, and no `cli/spec` journey exists in reference/journeys (the reference covers the code-analysis surface: analyze, add, list, rules, hooks, root). It also needs an LLM transport for a full scan. The claim belongs to a spec-scan area flow once that surface's journeys are authored."
+      "reason": "out of the authored interface set — the proof runs through `truecourse spec scan` and `.truecourse/specs/corpus.json`, and no `cli/spec` interface exists in reference/interfaces (the reference covers the code-analysis surface: analyze, add, list, rules, hooks, root). It also needs an LLM transport for a full scan. The claim belongs to a spec-scan area flow once that surface's interfaces are authored."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
@@ -2375,13 +2375,13 @@
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "analyze",
       "claimTitle": "--llm-transport picks how the LLM is reached for this run",
-      "reason": "blocked-on the supplied `llm-transport` dependency, and partly unrealizable: the doc's value set includes `agent`, which the post-Phase-0 target deletes (journey decision `phase-0-transport`), so one of the three documented values has no supported path to test."
+      "reason": "blocked-on the supplied `llm-transport` dependency, and partly unrealizable: the doc's value set includes `agent`, which the post-Phase-0 target deletes (interface decision `phase-0-transport`), so one of the three documented values has no supported path to test."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "analyze",
       "claimTitle": "--io sets the mailbox dir for the agent transport",
-      "reason": "unrealizable against the post-Phase-0 target: `--io` exists only to serve `--llm-transport agent`, which Phase 0 removes (journey decision `phase-0-transport`). The doc row is drift and is reported as such rather than tested."
+      "reason": "unrealizable against the post-Phase-0 target: `--io` exists only to serve `--llm-transport agent`, which Phase 0 removes (interface decision `phase-0-transport`). The doc row is drift and is reported as such rather than tested."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
@@ -2399,349 +2399,349 @@
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec curates scattered docs into a corpus",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec scan curates docs into corpus.json",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec scan -y skips the cost-estimate confirmation",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec status summarizes docs, areas, relations and overlaps",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec conflicts list lists flagged overlaps, numbered",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec conflicts show prints the disputed passages with path:line anchors",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec conflicts resolve resolves overlaps",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec docs list lists the kept docs with area tags",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec docs skipped lists the docs the relevance filter excluded",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec docs include force-includes skipped docs and re-scans",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec docs uninclude removes the force-include override",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec docs exclude force-excludes kept docs and re-scans",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec docs unexclude removes the force-exclude override",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec source add fetches llms.txt and snapshots its markdown pages",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec source add --id sets the source slug",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec source list lists sources with page counts and last fetch",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec source refresh refetches a source and reports the diff",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec source refresh refreshes every source when the id is omitted",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "spec",
       "claimTitle": "spec source remove deletes a source snapshot and its registry entry",
-      "reason": "blocked-on layer 2: no `cli/spec` journey has been derived. A scenario may only step through a public journey, and the reference corpus has journeys for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
+      "reason": "blocked-on layer 2: no `cli/spec` interface has been derived. A scenario may only step through a public interface, and the reference corpus has interfaces for the code-analysis area only (cli/root, cli/analyze, cli/add, cli/list, cli/rules, cli/hooks). Several of these claims additionally need a live LLM transport or network access."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard runs spec-section-bound scenario tests",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard setup is a prerequisite for generate",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard setup derives and proves the recipe",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard setup declares the external APIs",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard setup drafts the data/auth seed",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard setup --refresh asks before replacing an existing seed script",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard generate authors scenarios from spec sections",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard run builds via the recipe and runs the committed scenarios",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard run exits non-zero on any drift",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard run --scenario runs one scenario",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard recipe is read-only",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard recipe masks secrets",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard recipe reports whether its discovery inputs drifted",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard seed is read-only",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard seed shows the seed, its script and the blocked flows",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard externals is read-only",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard externals shows each service with state, URL, requirements and blocked flows",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard flows lists the synthesized flows with per-surface coverage",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard flows makes no LLM calls",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard flows --show shows one flow",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard flows --story tells the flow's committed tests in plain words",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard flows dismiss rules a flow out of testing",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "a dismissed flow is dropped and its tests deleted at the next generate",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard flows undismiss puts a dismissed flow back",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard findings groups the last generate's findings by flow",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard findings shows the auto-resolved ledger",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard status prints a compact summary of the guard state",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard status makes no LLM calls",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "guard",
       "claimTitle": "guard drifts lists the latest run's non-pass scenarios, most severe first",
-      "reason": "blocked-on layer 2: no `cli/guard` journey has been derived, and a scenario may only step through a public journey. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
+      "reason": "blocked-on layer 2: no `cli/guard` interface has been derived, and a scenario may only step through a public interface. Testing guard through guard would also need a second repository under test as a supplied dependency, which the reference corpus does not bind."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "dashboard",
       "claimTitle": "dashboard starts the web UI",
-      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+      "reason": "blocked-on layer 2: no `cli/dashboard` interface has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no interface binds it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "dashboard",
       "claimTitle": "dashboard starts and opens the UI",
-      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+      "reason": "blocked-on layer 2: no `cli/dashboard` interface has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no interface binds it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "dashboard",
       "claimTitle": "dashboard stop stops the running dashboard",
-      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+      "reason": "blocked-on layer 2: no `cli/dashboard` interface has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no interface binds it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "dashboard",
       "claimTitle": "dashboard status reports the dashboard state",
-      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+      "reason": "blocked-on layer 2: no `cli/dashboard` interface has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no interface binds it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "dashboard",
       "claimTitle": "dashboard logs shows the dashboard logs",
-      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+      "reason": "blocked-on layer 2: no `cli/dashboard` interface has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no interface binds it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "dashboard",
       "claimTitle": "dashboard uninstall removes the background service",
-      "reason": "blocked-on layer 2: no `cli/dashboard` journey has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no journey binds it."
+      "reason": "blocked-on layer 2: no `cli/dashboard` interface has been derived. The command also starts a long-lived server and opens a browser, which the cli driver has no verb for — the api driver's boot/signal lifecycle would be the surface, and no interface binds it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "config",
       "claimTitle": "config llm test makes one live call",
-      "reason": "blocked-on a supplied dependency: one live call needs a real provider account, so the claim is realizable only once an instance of `llm-api-credentials` is registered. The `cli/config` journey now exists and the other four `config llm` claims are covered by `choose-and-flip-the-llm-transport`; this one alone cannot be, because `--no-test` (the flag that makes the rest of the family assertable without an account) is exactly what `config llm test` has no equivalent of. Registering the instance clears it."
+      "reason": "blocked-on a supplied dependency: one live call needs a real provider account, so the claim is realizable only once an instance of `llm-api-credentials` is registered. The `cli/config` interface now exists and the other four `config llm` claims are covered by `choose-and-flip-the-llm-transport`; this one alone cannot be, because `--no-test` (the flag that makes the rest of the family assertable without an account) is exactly what `config llm test` has no equivalent of. Registering the instance clears it."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "telemetry",
       "claimTitle": "telemetry status inspects the telemetry setting",
-      "reason": "blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+      "reason": "blocked-on layer 2: no `cli/telemetry` interface has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "telemetry",
       "claimTitle": "telemetry enable turns telemetry on",
-      "reason": "blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+      "reason": "blocked-on layer 2: no `cli/telemetry` interface has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "telemetry",
       "claimTitle": "telemetry disable turns telemetry off",
-      "reason": "blocked-on layer 2: no `cli/telemetry` journey has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
+      "reason": "blocked-on layer 2: no `cli/telemetry` interface has been derived. The setting also lives under the per-user home, outside the tree a scenario may assert on."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
@@ -2789,19 +2789,19 @@
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "environment-variables",
       "claimTitle": "TRUECOURSE_MAX_CONCURRENCY also caps the guard runner's parallel sandboxes",
-      "reason": "blocked-on layer 2 (no `cli/guard` journey) and unobservable: the sandbox count is never printed."
+      "reason": "blocked-on layer 2 (no `cli/guard` interface) and unobservable: the sandbox count is never printed."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "environment-variables",
       "claimTitle": "TRUECOURSE_MAX_API_CONCURRENCY caps resident api-driver servers",
-      "reason": "blocked-on layer 2 (no `cli/guard` journey) and unobservable: the resident-server count is never printed."
+      "reason": "blocked-on layer 2 (no `cli/guard` interface) and unobservable: the resident-server count is never printed."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",
       "anchor": "environment-variables",
       "claimTitle": "the api-driver server cap defaults to min(TRUECOURSE_MAX_CONCURRENCY, 3)",
-      "reason": "blocked-on layer 2 (no `cli/guard` journey) and unobservable: the derived default is never printed."
+      "reason": "blocked-on layer 2 (no `cli/guard` interface) and unobservable: the derived default is never printed."
     },
     {
       "doc": "reference/spec-docs/reference/cli.mdx",

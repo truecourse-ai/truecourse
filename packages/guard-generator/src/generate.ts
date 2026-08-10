@@ -9,7 +9,7 @@
  *   3. extract  one cached call per document view → claims + untestable notes,
  *               anchors snapped to the live index. Claims are no longer the
  *               generation unit — they are the milestone vocabulary.
- *   4. journeys deterministic, free: the app's own surfaces, mapped from the tree.
+ *   4. interfaces deterministic, free: the app's own surfaces, mapped from the tree.
  *   5. flows    per-area synthesis + the epic pass → `scenarios/flows.json`.
  *   6. match    per (flow, surface with a catalog): the realization plan, or an
  *               explicit `unrealizable` — the join of the two halves.
@@ -29,7 +29,7 @@
  * A flow whose `generationInputsHash` still matches the manifest is a no-op: it is
  * matched from cache (free), its committed scenarios stand, and the gaps only
  * AUTHORING could have derived are carried forward from its entry. Everything a
- * flow cannot realize lands as a per-surface gap (`no-journey` / `unrealizable` /
+ * flow cannot realize lands as a per-surface gap (`no-interface` / `unrealizable` /
  * `awaiting-driver` / `blocked-on`) in both the report and the manifest.
  *
  * THE SETTLE INVARIANT binds every write: a flow that records its hash accounts for
@@ -57,7 +57,7 @@ import {
   readGuardDecisions,
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
-  readJourneyCatalog,
+  readInterfaceCatalog,
   manifestPath,
   runBuild,
   runInstall,
@@ -112,7 +112,7 @@ import {
   type GuardFlow,
   type GuardFlowsReport,
   type GuardGenerateError,
-  type GuardJourneysReport,
+  type GuardInterfacesReport,
   type GuardManifestFlow,
   type GuardManifestGap,
   type GuardManifestScenario,
@@ -124,7 +124,7 @@ import {
   type GuardTestStatus,
   type GuardUnadjudicatedStage,
   milestoneOrder,
-  type Journey,
+  type Interface,
 } from '@truecourse/shared'
 import {
   planGuardWork,
@@ -148,7 +148,7 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
-  type JourneyContractHint,
+  type InterfaceContractHint,
   type OutboundRequestHint,
   type BirthRetryContext,
   type ExternalServiceHint,
@@ -200,10 +200,10 @@ import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from '
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
-import { routesFromJourneys } from './recipe-propose.js'
+import { routesFromInterfaces } from './recipe-propose.js'
 import { enrichBlockedOn } from './external-blocked.js'
 import {
-  buildJourneyContractHints,
+  buildInterfaceContractHints,
   buildOtherOperationHints,
   buildOutboundRequestHints,
   outboundOverflow,
@@ -407,13 +407,13 @@ export interface GuardGenerateResult {
   autoResolved: GuardAutoResolved[]
   /** The flow-led counts — the run's headline under flow-keyed generation. */
   flows: GuardFlowsReport
-  /** The journey catalog the run matched against. */
-  journeys: GuardJourneysReport
+  /** The interface catalog the run matched against. */
+  interfaces: GuardInterfacesReport
   /**
    * The third parties this repo imports — the whole detected list, not
    * only the ones a blocked flow named, so a reader sees "this repo talks to stripe
    * and sendgrid" independently of whether any flow was blocked. Empty when nothing
-   * was detected OR when journey mapping degraded to the snapshot.
+   * was detected OR when interface mapping degraded to the snapshot.
    */
   externalServices: DetectedExternalService[]
   manifestPath?: string
@@ -457,17 +457,17 @@ export interface GuardGenerateModels {
 }
 
 /**
- * Where the journey catalog comes from. Mapping needs the ANALYZER, which lives
- * above this package, so the caller injects it (core's `mapJourneys`). Omitted, the
+ * Where the interface catalog comes from. Mapping needs the ANALYZER, which lives
+ * above this package, so the caller injects it (core's `mapInterfaces`). Omitted, the
  * generator falls back to the last mapping's snapshot and then to an empty catalog:
  * degradation is defined, never inherited — an empty surface settles as an honest
- * `no-journey` gap instead of failing the spec half of the pipeline.
+ * `no-interface` gap instead of failing the spec half of the pipeline.
  */
-export type JourneyProvider = () => Promise<{
-  journeys: Journey[]
+export type InterfaceProvider = () => Promise<{
+  interfaces: Interface[]
   /**
    * The repo's detected third-party dependencies. Derived from the SAME
-   * analysis pass as the journeys — a pure read of the analyzer's import registry —
+   * analysis pass as the interfaces — a pure read of the analyzer's import registry —
    * so it rides this seam rather than opening a second one that would re-analyze the
    * tree. Omitted (a provider that predates it, or the snapshot fallback) reads as
    * "not detected": every blocked-on reason keeps its generic noun.
@@ -490,7 +490,7 @@ export type JourneyProvider = () => Promise<{
   /**
    * What each api operation's handler reads off the request, off the same pass
    * again — the exact paths + required body fields the authoring prompt shows
-   * per journey. Omitted (an older provider, the snapshot fallback) ⇒ the prompt
+   * per interface. Omitted (an older provider, the snapshot fallback) ⇒ the prompt
    * renders no contract block, exactly as it did before this grounding existed.
    */
   requestContracts?: ApiRequestContract[]
@@ -533,8 +533,8 @@ export interface GenerateGuardsOptions {
    * tests lower it to observe escalation in fewer runs.
    */
   escalateAutoResolveAfter?: number
-  /** Journey mapping seam — see {@link JourneyProvider}. */
-  journeys?: JourneyProvider
+  /** Interface mapping seam — see {@link InterfaceProvider}. */
+  interfaces?: InterfaceProvider
   /**
    * The hard gate: refuse to run without a committed `recipe.json` instead of
    * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
@@ -544,7 +544,7 @@ export interface GenerateGuardsOptions {
    */
   requireExistingRecipe?: boolean
   /**
-   * INTERNAL test seam: stop after flow synthesis, before journey matching and
+   * INTERNAL test seam: stop after flow synthesis, before interface matching and
    * authoring. Not a user-facing option and not exposed by any command — flow
    * curation is `dismissedFlows` and cost control is the estimate gate.
    */
@@ -565,8 +565,8 @@ export interface GenerateGuardsOptions {
    *  counter. Fires `(0, total)` as soon as the view plan is known (views are
    *  planned per doc upfront), then once per completed view. */
   onExtractViewProgress?: (done: number, total: number) => void
-  /** Journey mapping settled: how many journeys were derived, across all surfaces. */
-  onJourneys?: (journeys: number, surfaces: number) => void
+  /** Interface mapping settled: how many interfaces were derived, across all surfaces. */
+  onInterfaces?: (interfaces: number, surfaces: number) => void
   /** Flow synthesis progress, ticking per area as it settles. */
   onFlowProgress?: (done: number, total: number) => void
   /** Realization-matching progress, ticking per (flow, surface) pair. */
@@ -618,14 +618,14 @@ function authorPromptFingerprint(surface: GuardDriverId): string {
  * Per-(flow, surface) authoring cache key: it moves when the flow's milestone
  * composition changes, when any bound section's content key moves (text, a
  * suppressed quote, a referenced OpenAPI schema, its security context), when the
- * realization plan's journeys move, when the recipe or the format version changes,
+ * realization plan's interfaces move, when the recipe or the format version changes,
  * or when that surface's authoring prompt changes. Nothing else re-authors.
  */
 export function authorCacheKey(
   flow: Pick<GuardFlow, 'fingerprint'>,
   surface: GuardDriverId,
   sectionKeys: readonly string[],
-  journeyFingerprints: readonly string[],
+  interfaceFingerprints: readonly string[],
   recipeFingerprint: string,
 ): string {
   const parts = [
@@ -635,7 +635,7 @@ export function authorCacheKey(
     surface,
     flow.fingerprint,
     [...sectionKeys].sort().join('~'),
-    [...journeyFingerprints].sort().join('~'),
+    [...interfaceFingerprints].sort().join('~'),
   ]
   return createHash('sha256').update(parts.join('::')).digest('hex')
 }
@@ -646,7 +646,7 @@ export function retryCacheKey(
   flow: Pick<GuardFlow, 'fingerprint'>,
   surface: GuardDriverId,
   sectionKeys: readonly string[],
-  journeyFingerprints: readonly string[],
+  interfaceFingerprints: readonly string[],
   recipeFingerprint: string,
   evidence: GuardBirthFinding,
 ): string {
@@ -666,7 +666,7 @@ export function retryCacheKey(
   return createHash('sha256')
     .update(
       [
-        authorCacheKey(flow, surface, sectionKeys, journeyFingerprints, recipeFingerprint),
+        authorCacheKey(flow, surface, sectionKeys, interfaceFingerprints, recipeFingerprint),
         evidenceHash,
       ].join('::'),
     )
@@ -724,23 +724,23 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const recipeRunner =
     options.recipeRunner ??
     spawnRecipeRunner({ transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
-  // Journey mapping is memoized: the deterministic recipe proposer ranks its health
+  // Interface mapping is memoized: the deterministic recipe proposer ranks its health
   // path over the SAME route surface stage 4 walks, so a repo with no recipe maps
-  // its journeys once, earlier — never twice.
-  let mappedJourneys: Promise<MappedSurface> | null = null
-  const journeysOnce = (): Promise<MappedSurface> => (mappedJourneys ??= mapJourneysSafely(repoRoot, options.journeys))
+  // its interfaces once, earlier — never twice.
+  let mappedInterfaces: Promise<MappedSurface> | null = null
+  const interfacesOnce = (): Promise<MappedSurface> => (mappedInterfaces ??= mapInterfacesSafely(repoRoot, options.interfaces))
 
   const recipeResult = await discoverRecipe(repoRoot, recipeRunner, {
-    routes: async () => routesFromJourneys((await journeysOnce()).journeys),
+    routes: async () => routesFromInterfaces((await interfacesOnce()).interfaces),
     // The datastore half of the SAME memoized pass — read only when a boot
     // verification failed, so the failure can name the dependency it died on.
     database: async () => {
-      const db = (await journeysOnce()).database
+      const db = (await interfacesOnce()).database
       return db ? { type: db.type, driver: db.driver } : null
     },
     // The connection URLs the SAME pass harvested: with no compose file in the
     // repo, the proposer derives one from them.
-    datastores: async () => (await journeysOnce()).datastoreUrls,
+    datastores: async () => (await interfacesOnce()).datastoreUrls,
   })
   if (recipeResult.status === 'verify-failed') {
     // A failed proposal call already aborts the run loudly through this channel, so
@@ -1027,9 +1027,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     .filter((d) => extractedDocs.has(d.doc) && !extractedClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)))
     .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
-  // 4. Journeys — deterministic, free, and independent of everything spec-side.
-  const mapped = await journeysOnce()
-  const catalog = mapped.journeys
+  // 4. Interfaces — deterministic, free, and independent of everything spec-side.
+  const mapped = await interfacesOnce()
+  const catalog = mapped.interfaces
   // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
@@ -1052,16 +1052,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const catalogs = buildSurfaceCatalogs(catalog)
   // The WHOLE api surface, so a flow can reach for the operations it does
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
-  // favorites). Empty for a repo with no api journeys — the block simply renders not.
-  const apiJourneys = catalogs.get('api')?.journeys ?? []
-  options.onJourneys?.(catalog.length, catalogs.size)
-  const journeysReport: GuardJourneysReport = {
+  // favorites). Empty for a repo with no api interfaces — the block simply renders not.
+  const apiInterfaces = catalogs.get('api')?.interfaces ?? []
+  options.onInterfaces?.(catalog.length, catalogs.size)
+  const interfacesReport: GuardInterfacesReport = {
     total: catalog.length,
-    bySurface: Object.fromEntries([...catalogs].map(([surface, c]) => [surface, c.journeys.length])),
+    bySurface: Object.fromEntries([...catalogs].map(([surface, c]) => [surface, c.interfaces.length])),
   }
 
   // 5. Flow synthesis — the spec-side generation unit. Reads claims and outlines
-  // only; the journey catalog above never enters its prompts.
+  // only; the interface catalog above never enters its prompts.
   const areas = buildFlowAreas(areaInputs)
   let areasDone = 0
   options.onFlowProgress?.(0, areas.length)
@@ -1166,7 +1166,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       orphanedFlowDismissals,
       autoResolved: [],
       flows: flowsReport,
-      journeys: journeysReport,
+      interfaces: interfacesReport,
       externalServices,
     }
   }
@@ -1212,20 +1212,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const serverBySurface = new Map<GuardDriverId, string>()
     for (const surface of surfaces) {
       const surfaceCatalog = catalogs.get(surface)
-      const journeyCount = surfaceCatalog?.journeys.length ?? 0
+      const interfaceCount = surfaceCatalog?.interfaces.length ?? 0
       if (!isRunnableDriver(surface)) {
-        if (journeyCount > 0) {
+        if (interfaceCount > 0) {
           gaps.push({
             surface,
             kind: 'awaiting-driver',
             driver: surface,
-            reason: `${journeyCount} ${surface} journey(s) could realize this flow — ${guardDriver(surface)?.waitingLabel ?? `needs the ${surface} driver`}`,
+            reason: `${interfaceCount} ${surface} interface(s) could realize this flow — ${guardDriver(surface)?.waitingLabel ?? `needs the ${surface} driver`}`,
           })
         }
         continue
       }
       if (!driverPrepared(recipe, surface)) {
-        if (journeyCount > 0) {
+        if (interfaceCount > 0) {
           gaps.push({
             surface,
             kind: 'blocked-on',
@@ -1234,13 +1234,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
         continue
       }
-      if (!surfaceCatalog || journeyCount === 0) {
+      if (!surfaceCatalog || interfaceCount === 0) {
         // An EMPTY catalog never reaches the matcher: with nothing to choose from a
         // verdict would be noise. This is the extraction gap, stated as such.
         gaps.push({
           surface,
-          kind: 'no-journey',
-          reason: `no ${surface} journey was mapped from this repository — the flow may be realizable, but nothing was found to realize it with`,
+          kind: 'no-interface',
+          reason: `no ${surface} interface was mapped from this repository — the flow may be realizable, but nothing was found to realize it with`,
         })
         continue
       }
@@ -1271,7 +1271,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // than authored, because the scenario it would produce could only ask the
         // wrong service and report a false failure.
         if (surface === 'api') {
-          const bound = bindFlowServer(journeyPaths(outcome.plan), serverIndex)
+          const bound = bindFlowServer(interfacePaths(outcome.plan), serverIndex)
           if (bound.kind === 'missing-server') {
             gaps.push({
               surface,
@@ -1300,11 +1300,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
     }
 
-    const journeyFingerprints = [...plans.values()].flatMap((p) => p.journeys.map((j) => j.fingerprint))
+    const interfaceFingerprints = [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint))
     const inputsHash = flowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
       sectionKeys,
-      journeyFingerprints,
+      interfaceFingerprints,
       recipeFingerprint,
     })
     const prior = priorFlows.get(flow.id)
@@ -1336,7 +1336,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     })
   }
 
-  // Matching decides which journeys each flow's scenario walks: with no plan the
+  // Matching decides which interfaces each flow's scenario walks: with no plan the
   // flow authors nothing, and persist below DELETES its prior scenario files before
   // settling it as "nothing to test" — an outage silently erasing coverage and then
   // skipping the flow forever on its recorded hash. So a stage that lost every call
@@ -1358,7 +1358,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       orphanedDismissals,
       orphanedFlowDismissals,
       flows: flowsReport,
-      journeys: journeysReport,
+      interfaces: interfacesReport,
       externalServices,
     }
     const head = audit.isSystemicFailure('guard.match')
@@ -1531,7 +1531,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             ground: groundClaims,
             externalServices: externalServiceHints,
             requestContracts,
-            apiJourneys,
+            apiInterfaces,
             outboundRequests: outboundRequestHints,
             outboundRequestsOverflow,
             serverIndex,
@@ -1601,7 +1601,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       orphanedDismissals,
       orphanedFlowDismissals,
       flows: flowsReport,
-      journeys: journeysReport,
+      interfaces: interfacesReport,
       externalServices,
     }
     // A thrown-call wipeout reads its reason off the tally; an unusable-output one
@@ -1639,7 +1639,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   /**
    * The server-binding SAFETY NET, for the flows the route gates could not classify at
-   * generate time (a path the manifest did not attribute, a plan whose journeys
+   * generate time (a path the manifest did not attribute, a plan whose interfaces
    * carry no path): birth ran the scenario, the bound server 404ed a path another
    * app serves, and the runner annotated the outcome `unservedRoute`. That is the
    * SAME fact Gate B blocks on, arriving later — so it settles as the same
@@ -1789,7 +1789,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     ground: groundClaims,
                     externalServices: externalServiceHints,
                     requestContracts,
-                    apiJourneys,
+                    apiInterfaces,
                     outboundRequests: outboundRequestHints,
                     outboundRequestsOverflow,
                     serverIndex,
@@ -1922,7 +1922,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // generate skips it as unchanged, so a corpus that shipped unadjudicated would
   // stay unadjudicated forever — the very outcome the old abort existed to prevent.
   // Left unsettled, the next generate re-works the flow and adjudicates it for real,
-  // and re-authoring is a CACHE hit (the flow, its sections, its journeys and the
+  // and re-authoring is a CACHE hit (the flow, its sections, its interfaces and the
   // recipe are unchanged), so the re-run pays for the verdicts and nothing else.
   const unadjudicatedRefs = new Set<string>()
   if (fidelityPlanned > 0) {
@@ -2013,7 +2013,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 ground: groundClaims,
                 externalServices: externalServiceHints,
                 requestContracts,
-                apiJourneys,
+                apiInterfaces,
                 outboundRequests: outboundRequestHints,
                 outboundRequestsOverflow,
                 serverIndex,
@@ -2174,9 +2174,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const probes =
               candidate.surface === 'cli' && finding.claim ? await groundClaims([finding.claim]) : []
             const plan = taskByKey.get(candidate.ref)?.plan
-            const journeyContracts =
+            const interfaceContracts =
               candidate.surface === 'api' && plan
-                ? buildJourneyContractHints(plan.journeys, requestContracts)
+                ? buildInterfaceContractHints(plan.interfaces, requestContracts)
                 : []
             const triage = await runTriage(
               repoRoot,
@@ -2188,7 +2188,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 sectionText: section ? section.fullText || section.ownText : '',
                 milestones,
                 probes,
-                journeyContracts,
+                interfaceContracts,
               },
               triageRunner,
             )
@@ -2502,7 +2502,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     orphanedFlowDismissals,
     autoResolved,
     flows: flowsReport,
-    journeys: journeysReport,
+    interfaces: interfacesReport,
     externalServices,
     manifestPath: manifestPath(repoRoot),
     ...(entryPreflightFailure ? { entryPreflight: entryPreflightFailure } : {}),
@@ -2510,12 +2510,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
 }
 
-/** Every path a plan's journeys enter through — what the flow will actually drive,
+/** Every path a plan's interfaces enter through — what the flow will actually drive,
  *  and therefore what decides its server (Gate B, the post-match server binding). */
-function journeyPaths(plan: RealizationPlan): string[] {
+function interfacePaths(plan: RealizationPlan): string[] {
   const paths: string[] = []
-  for (const journey of plan.journeys) {
-    const entry = journey.entry as { path?: string }
+  for (const iface of plan.interfaces) {
+    const entry = iface.entry as { path?: string }
     if (typeof entry?.path === 'string') paths.push(entry.path)
   }
   return paths
@@ -2575,13 +2575,13 @@ function manifestEntry(
     flowFingerprint: work.flow.fingerprint,
     bindings: work.flow.bindings,
     scenarios: scenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
-    // Every surface that got a PLAN records the journeys it walks — including the
+    // Every surface that got a PLAN records the interfaces it walks — including the
     // surfaces that then failed to author (blocked-on / errored) and contribute no
     // scenario. That is the only record that the spec DOES reach this code path,
-    // so the journeys view never calls a matched-but-blocked path unmentioned.
-    journeys: [...work.plans.entries()]
-      .map(([surface, plan]) => ({ surface, journeyIds: plan.journeys.map((j) => j.id) }))
-      .filter((j) => j.journeyIds.length > 0)
+    // so the interfaces view never calls a matched-but-blocked path unmentioned.
+    interfaces: [...work.plans.entries()]
+      .map(([surface, plan]) => ({ surface, interfaceIds: plan.interfaces.map((j) => j.id) }))
+      .filter((j) => j.interfaceIds.length > 0)
       .sort((a, b) => a.surface.localeCompare(b.surface)),
     generationInputsHash,
     gaps: work.gaps.slice().sort((a, b) => a.surface.localeCompare(b.surface) || a.kind.localeCompare(b.kind)),
@@ -2600,7 +2600,7 @@ function primarySection(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput
 
 /**
  * The surfaces a flow is accounted for: every runnable driver the recipe prepares
- * (where a scenario could exist) UNION every surface the journey mapper detected
+ * (where a scenario could exist) UNION every surface the interface mapper detected
  * (so a mapped-but-unrunnable surface is visible coverage, not silence). Registry
  * order, so the accounting is deterministic.
  */
@@ -2616,7 +2616,7 @@ function matchable(
   recipe: Recipe,
   catalogs: ReadonlyMap<GuardDriverId, SurfaceCatalog>,
 ): boolean {
-  return isRunnableDriver(surface) && driverPrepared(recipe, surface) && (catalogs.get(surface)?.journeys.length ?? 0) > 0
+  return isRunnableDriver(surface) && driverPrepared(recipe, surface) && (catalogs.get(surface)?.interfaces.length ?? 0) > 0
 }
 
 /**
@@ -2678,11 +2678,11 @@ function providedHint(account: ResolvedExternal): ExternalServiceHint {
   }
 }
 
-/** What ONE analysis pass of the working tree yields this run — see {@link JourneyProvider}. */
+/** What ONE analysis pass of the working tree yields this run — see {@link InterfaceProvider}. */
 interface MappedSurface {
-  journeys: Journey[]
+  interfaces: Interface[]
   externalServices: DetectedExternalService[]
-  /** Per-operation inbound request contracts — the per-journey authoring grounding. */
+  /** Per-operation inbound request contracts — the per-interface authoring grounding. */
   requestContracts: ApiRequestContract[]
   /** The app's own outbound request construction — the stub-fidelity grounding. */
   outboundRequests: OutboundRequest[]
@@ -2693,17 +2693,17 @@ interface MappedSurface {
 }
 
 /**
- * The journey catalog for this run: the injected mapper, else the last mapping's
+ * The interface catalog for this run: the injected mapper, else the last mapping's
  * snapshot, else empty. A mapper that throws degrades to the snapshot for the same
  * reason it degrades to empty — the spec half of the pipeline must keep working on
  * a repo the mapper chokes on.
  */
-async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): Promise<MappedSurface> {
+async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvider): Promise<MappedSurface> {
   if (provider) {
     try {
       const mapped = await provider()
       return {
-        journeys: mapped.journeys,
+        interfaces: mapped.interfaces,
         externalServices: mapped.externalServices ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
@@ -2714,11 +2714,11 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
       /* fall through to the snapshot */
     }
   }
-  // The snapshot carries journeys only — external services are derived from the
+  // The snapshot carries interfaces only — external services are derived from the
   // working tree, never persisted, so a degraded run reports none rather than a
   // stale list.
   return {
-    journeys: readJourneyCatalog(repoRoot)?.journeys ?? [],
+    interfaces: readInterfaceCatalog(repoRoot)?.interfaces ?? [],
     externalServices: [],
     database: null,
     datastoreUrls: [],
@@ -2823,7 +2823,7 @@ function emptyResult(
       noFlowClaims: 0,
       unsettledAreas: [],
     },
-    journeys: { total: 0, bySurface: {} },
+    interfaces: { total: 0, bySurface: {} },
     externalServices: [],
     ...extra,
   }
@@ -2922,14 +2922,14 @@ async function authorFlowScenario(opts: {
   /** The third parties this repo imports — canonical name + base-URL env var when
    *  one was detected (a `setup.http` stub's precondition). Api prompts only. */
   externalServices: ExternalServiceHint[]
-  /** Per-operation inbound contracts, joined to THIS flow's journeys below. */
+  /** Per-operation inbound contracts, joined to THIS flow's interfaces below. */
   requestContracts: ApiRequestContract[]
   /**
-   * The WHOLE api journey catalog, so the prompt can offer the operations
+   * The WHOLE api interface catalog, so the prompt can offer the operations
    * this flow does NOT walk as setup material (signing up before signing in). Empty
    * on a cli batch or a repo with no api surface.
    */
-  apiJourneys: Journey[]
+  apiInterfaces: Interface[]
   /** The repo's outbound request construction, already capped. */
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
@@ -2961,14 +2961,14 @@ async function authorFlowScenario(opts: {
       attempt,
       willRetry,
     })
-  const journeyFingerprints = plan.journeys.map((j) => j.fingerprint)
+  const interfaceFingerprints = plan.interfaces.map((j) => j.fingerprint)
   const cacheKey = retry
-    ? retryCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint, {
+    ? retryCacheKey(work.flow, surface, work.sectionKeys, interfaceFingerprints, recipeFingerprint, {
         ...emptyFinding(),
         ...retry,
         title: retry.scenarioTitle,
       })
-    : authorCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint)
+    : authorCacheKey(work.flow, surface, work.sectionKeys, interfaceFingerprints, recipeFingerprint)
 
   // D3 — the flow's doc-example blocks, mined once for the byte-fidelity
   // validator (the same mining feeds the per-milestone DOC EXAMPLE prompt
@@ -3005,7 +3005,7 @@ async function authorFlowScenario(opts: {
   // Probes ground CLI commands against the built entry — api scenarios are authored
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
-  const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
+  const interfaceContracts = buildInterfaceContractHints(plan.interfaces, opts.requestContracts)
   // The setup catalog is the BOUND server's own surface. An operation the
   // route manifest positively attributes to ANOTHER app is unreachable from this
   // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
@@ -3013,13 +3013,13 @@ async function authorFlowScenario(opts: {
   // unknown is not foreign (R6). The flow's OWN operations need no such filter:
   // Gate B already bound the server from those very paths.
   const boundApp = appDirOfServer(opts.serverIndex, task.server)
-  const reachableJourneys = boundApp
-    ? opts.apiJourneys.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, journeyEntryPath(j)))
-    : opts.apiJourneys
-  const other = buildOtherOperationHints(reachableJourneys, opts.requestContracts, journeyContracts)
+  const reachableInterfaces = boundApp
+    ? opts.apiInterfaces.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, interfaceEntryPath(j)))
+    : opts.apiInterfaces
+  const other = buildOtherOperationHints(reachableInterfaces, opts.requestContracts, interfaceContracts)
   const base: AuthorUserContext = {
     ...buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
-      journeyContracts,
+      interfaceContracts,
       otherOperations: other.operations,
       otherOperationsOverflow: other.overflow,
       outboundRequests: opts.outboundRequests,
@@ -3141,7 +3141,7 @@ function authorFailureReason(raw: string): string {
 /**
  * One authored scenario's composition defect against THIS recipe, or null. The
  * cli rule needs the entrypoint (a step's `run` is argv appended to it); the api
- * rules are self-contained (a journey has to chain with itself).
+ * rules are self-contained (an interface has to chain with itself).
  */
 function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): string | null {
   return scenarioCompositionDefect(
@@ -3198,8 +3198,8 @@ function buildAuthorCtx(
   externalServices: ExternalServiceHint[],
   serverIndex: ServerRouteIndex,
   grounding: {
-    journeyContracts: JourneyContractHint[]
-    otherOperations: JourneyContractHint[]
+    interfaceContracts: InterfaceContractHint[]
+    otherOperations: InterfaceContractHint[]
     otherOperationsOverflow: number
     outboundRequests: OutboundRequestHint[]
     outboundRequestsOverflow: number
@@ -3217,7 +3217,7 @@ function buildAuthorCtx(
   return {
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: authorMilestones(work, plan, surface),
-    journeyPath: plan.journeys.map((j) => j.id),
+    interfacePath: plan.interfaces.map((j) => j.id),
     areaTags: [...new Set(sections.flatMap((s) => s.areaTags))],
     driver: surface === 'api' ? 'api' : 'cli',
     ...(surface === 'api'
@@ -3241,7 +3241,7 @@ function buildAuthorCtx(
           ...(externalServices.length > 0 ? { externalServices } : {}),
           // The code-truth grounding blocks — each gated on non-empty, so a repo the
           // extractors read nothing out of renders exactly the prompt it did before.
-          ...(grounding.journeyContracts.length > 0 ? { journeyContracts: grounding.journeyContracts } : {}),
+          ...(grounding.interfaceContracts.length > 0 ? { interfaceContracts: grounding.interfaceContracts } : {}),
           ...(grounding.otherOperations.length > 0
             ? {
                 otherOperations: grounding.otherOperations,
@@ -3274,7 +3274,7 @@ function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardD
       const section = work.sections.get(m.order)
       const realization = plan.steps
         .filter((s) => s.milestone === m.order)
-        .flatMap((s) => realizationLines(s.journey, surface))
+        .flatMap((s) => realizationLines(s.interface, surface))
       // D3 — the section's fenced example blocks, mined deterministically from
       // the same text embedded above so the prompt's DOC EXAMPLE bytes can never
       // drift from the section they came from.
@@ -3367,9 +3367,9 @@ function recipeCredentialCapabilities(
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** One journey's entry path (`''` when it has none) — the route-manifest lookup key. */
-function journeyEntryPath(journey: Journey): string {
-  const entry = journey.entry as { path?: string }
+/** One interface's entry path (`''` when it has none) — the route-manifest lookup key. */
+function interfaceEntryPath(iface: Interface): string {
+  const entry = iface.entry as { path?: string }
   return typeof entry?.path === 'string' ? entry.path : ''
 }
 
@@ -3446,7 +3446,7 @@ function safeBuild(
   try {
     const scenario = buildFlowScenario({
       flow: task.work.flow,
-      journeys: task.plan.journeys,
+      interfaces: task.plan.interfaces,
       raw,
       id,
       ...(task.server ? { server: task.server } : {}),
@@ -3693,7 +3693,7 @@ function normalizeFidelity(r: {
 }
 
 /** A scenario's BEHAVIORAL identity — the fields the reviewer judges, excluding the
- *  engine-assigned `id`/`binds`/`flow`/`journey`/`guard` bookkeeping (which churns on
+ *  engine-assigned `id`/`binds`/`flow`/`interface`/`guard` bookkeeping (which churns on
  *  re-allocation without changing what the scenario verifies). */
 function scenarioBehavior(scenario: GuardScenario): string {
   return JSON.stringify({

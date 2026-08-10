@@ -17,7 +17,7 @@
 
 import { ArrowUpRight } from 'lucide-react';
 import { guardResultRunId } from '@truecourse/shared';
-import type { GuardJourneyRow, GuardRunFlow, GuardScenarioResult } from '@truecourse/shared';
+import type { GuardInterfaceRow, GuardRunFlow, GuardScenarioResult } from '@truecourse/shared';
 import { guardTestStatusView } from '@/lib/guard-flow-status';
 import { GuardTestView, type GuardTestViewModel } from './GuardTestView';
 
@@ -26,7 +26,7 @@ export function GuardDriftDetail({
   scenario,
   runId,
   runFlow = null,
-  journeys = null,
+  interfaces = null,
   onOpenSpec,
   onOpenFlow,
 }: {
@@ -36,7 +36,7 @@ export function GuardDriftDetail({
   /** The flow this result instantiates, joined onto the run payload (`runFlows`). */
   runFlow?: GuardRunFlow | null;
   /** The mapped catalog, when the view has one; null = unmapped. */
-  journeys?: GuardJourneyRow[] | null;
+  interfaces?: GuardInterfaceRow[] | null;
   onOpenSpec: (doc: string, section: string) => void;
   /** Jump to the test's own home — its flow. Omitted in read-only embeds. */
   onOpenFlow?: (flowId: string) => void;
@@ -57,7 +57,7 @@ export function GuardDriftDetail({
     // The chain the step list is grouped under — each section headed by the claim
     // its steps realize.
     ...(runFlow ? { milestones: runFlow.milestones } : {}),
-    ...(scenario.journeyDrifted ? { journeyDrifted: true } : {}),
+    ...(scenario.interfaceDrifted ? { interfaceDrifted: true } : {}),
     ...(scenario.blockedPrecondition ? { blockedPrecondition: true } : {}),
     ...(runFlow?.goal ? { goal: runFlow.goal } : {}),
     ...(runFlow ? { flow: { id: runFlow.flowId, title: runFlow.title } } : {}),
@@ -66,7 +66,7 @@ export function GuardDriftDetail({
       section: scenario.binds.section,
       fingerprint: scenario.binds.fingerprint,
     },
-    journeyPath: [],
+    interfacePath: [],
     // Any executed outcome that captured a transcript renders it — passes
     // included. A non-executed stale/orphaned, or an older pass without one, has
     // no evidencePath, so no evidence section renders. The transcript is addressed
@@ -83,7 +83,7 @@ export function GuardDriftDetail({
     <GuardTestView
       repoId={repoId}
       test={model}
-      journeys={journeys}
+      interfaces={interfaces}
       onOpenSpec={onOpenSpec}
       headerAction={
         onOpenFlow && flowId ? (

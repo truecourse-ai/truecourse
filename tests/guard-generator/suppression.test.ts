@@ -124,7 +124,7 @@ describe('suppression helpers', () => {
       flowGenerationInputsHash({
         flowFingerprint: 'sha256:flow',
         sectionKeys: [sectionKey],
-        journeyFingerprints: ['sha256:journey'],
+        interfaceFingerprints: ['sha256:interface'],
         recipeFingerprint: 'sha256:recipe',
       })
     expect(hash(clean)).not.toBe(hash(suppressed))
@@ -221,7 +221,7 @@ describe('a side verdict re-keys the losing section', () => {
       flowGenerationInputsHash({
         flowFingerprint: s.fingerprint,
         sectionKeys: [sectionInputsKey(s)],
-        journeyFingerprints: [],
+        interfaceFingerprints: [],
         recipeFingerprint,
       })
     writeManifest(repo, {

@@ -7,7 +7,7 @@
  * a stage with nothing to do. This drives `guardGenerateInProcess` with NO injected
  * runner and no installed transport (the OSS Claude Code shape: the engine
  * materializes its cli default), answering every stage through a fake `claude`
- * binary. The journey catalog is still supplied — it is the deterministic analyzer
+ * binary. The interface catalog is still supplied — it is the deterministic analyzer
  * seam, not a runner, and holding it fixed keeps the surfaces stable.
  *
  * What it pins: a birth-FAILING flow commits with a triage verdict on its
@@ -24,7 +24,7 @@ import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-proce
 import { readManifest } from '@truecourse/guard-runner'
 import { getDefaultTransport, setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm'
 import { resolveModel } from '../../packages/core/src/config/llm-models.js'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, DEFAULT_JOURNEYS } from '../guard-generator/helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, DEFAULT_INTERFACES } from '../guard-generator/helpers.js'
 
 const FAKE_CLAUDE = fileURLToPath(new URL('../fixtures/fake-claude/claude.mjs', import.meta.url))
 
@@ -74,8 +74,8 @@ const SCRIPT = {
     },
   ],
   'guard.match': [
-    { match: `FLOW: ${GREEN_FLOW}`, reply: { plan: [{ journeyId: 'cli/relkit', milestone: 1 }] } },
-    { match: `FLOW: ${RED_FLOW}`, reply: { plan: [{ journeyId: 'cli/relkit-boom', milestone: 1 }] } },
+    { match: `FLOW: ${GREEN_FLOW}`, reply: { plan: [{ interfaceId: 'cli/relkit', milestone: 1 }] } },
+    { match: `FLOW: ${RED_FLOW}`, reply: { plan: [{ interfaceId: 'cli/relkit-boom', milestone: 1 }] } },
   ],
   'guard.generate': [
     {
@@ -174,7 +174,7 @@ describe('guardGenerateInProcess — the adjudication stages reach the model', (
   it('triages the birth-failing test and fidelity-reviews the green one, on their own models', async () => {
     const r = seed()
 
-    const { guard } = await guardGenerateInProcess(r, { journeys: DEFAULT_JOURNEYS(r) })
+    const { guard } = await guardGenerateInProcess(r, { interfaces: DEFAULT_INTERFACES(r) })
 
     expect(guard.status).toBe('ok')
 

@@ -13,7 +13,7 @@
  *                already groups the steps under those same claims and links those
  *                same sections, and two renderings of one chain is one too many
  *   ————— and then everything the test itself has to say ({@link GuardScenarioBody}):
- *   what it checks · verdict · setup · steps · evidence · journey · footer
+ *   what it checks · verdict · setup · steps · evidence · interface · footer
  *   ————— and last, the ruling:
  *   dismissed    "don't test this flow", or the note and its undo
  *
@@ -58,7 +58,7 @@ import type {
   GuardFlowMilestoneView,
   GuardFlowScenarioRow,
   GuardGenerateError,
-  GuardJourneyRow,
+  GuardInterfaceRow,
 } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -389,12 +389,12 @@ function scenarioModel(
     // its steps realize, addressed by position (`milestones`) or by claim id
     // (`claimTitles`, the claim corpus). A test may use either.
     milestones: detail.milestones,
-    ...(row.journeyDrifted ? { journeyDrifted: true } : {}),
+    ...(row.interfaceDrifted ? { interfaceDrifted: true } : {}),
     ...(row.blockedPrecondition ? { blockedPrecondition: true } : {}),
     // NO `goal`: the flow's goal is already the header, one screen above. What the
     // body leads with is the TEST's own sentence — the level below it.
     ...(binds ? { binds } : {}),
-    journeyPath: row.journeyPath,
+    interfacePath: row.interfacePath,
     evidence,
   };
 }
@@ -402,20 +402,20 @@ function scenarioModel(
 export function GuardFlowDetail({
   repoId,
   detail,
-  journeys = null,
+  interfaces = null,
   claimTitles,
   binds,
   decisions,
   prRef,
   onOpenSpec,
-  onOpenJourney,
+  onOpenInterface,
   onOpenExternals,
 }: {
   /** Whose store the raw mode reads the artifact out of. */
   repoId: string;
   detail: GuardFlowDetailData;
-  /** The mapped journey catalog, for the diagrams the test drives; null = unmapped. */
-  journeys?: GuardJourneyRow[] | null;
+  /** The mapped interface catalog, for the diagrams the test drives; null = unmapped. */
+  interfaces?: GuardInterfaceRow[] | null;
   /** Claim id → its sentence — what a claim-identity step group is headed with. */
   claimTitles?: Readonly<Record<string, string>>;
   /** scenarioId → the spec section it binds to (the inventory join). */
@@ -425,7 +425,7 @@ export function GuardFlowDetail({
   /** The PR head the raw read is scoped to (EE); absent = the repo baseline. */
   prRef?: string;
   onOpenSpec: (doc: string, section: string) => void;
-  onOpenJourney: (journeyId: string) => void;
+  onOpenInterface: (interfaceId: string) => void;
   /** Jump to the Dependencies tab, on the named service's card. */
   onOpenExternals?: (service?: string) => void;
 }) {
@@ -447,7 +447,7 @@ export function GuardFlowDetail({
   const rows: GuardFlowScenarioRow[] =
     detail.surfaces.length > 0
       ? detail.surfaces
-      : [{ status: 'unguarded', birthPassed: false, hasEvidence: false, journeyPath: [] }];
+      : [{ status: 'unguarded', birthPassed: false, hasEvidence: false, interfacePath: [] }];
 
   // The flow's TRUTH ON DISK: its test's YAML when it has one, else its own entry
   // in the flow corpus. One switch, whichever artifact exists.
@@ -526,7 +526,7 @@ export function GuardFlowDetail({
             <GuardScenarioBody
               repoId={repoId}
               test={models.get(test.scenarioId!)!}
-              journeys={journeys}
+              interfaces={interfaces}
               raw
               onOpenSpec={onOpenSpec}
             />
@@ -565,8 +565,8 @@ export function GuardFlowDetail({
                     <GuardScenarioBody
                       repoId={repoId}
                       test={{ ...model, ...(claimTitles ? { claimTitles } : {}) }}
-                      journeys={journeys}
-                      onOpenJourney={onOpenJourney}
+                      interfaces={interfaces}
+                      onOpenInterface={onOpenInterface}
                       onOpenSpec={onOpenSpec}
                       {...(claim && decisions
                         ? { action: <ClaimDismissalNote claim={claim} decisions={decisions} /> }
@@ -596,18 +596,18 @@ export function GuardFlowDetail({
               );
             })}
 
-            {/* A flow with no test still has a realization plan — the journeys it
-                WOULD walk. With a test, its own Journey section above says it
+            {/* A flow with no test still has a realization plan — the interfaces it
+                WOULD walk. With a test, its own Interface section above says it
                 (and draws each one), so this never renders twice. */}
-            {!test && detail.journeyIds.length > 0 && (
+            {!test && detail.interfaceIds.length > 0 && (
               <div>
-                <div className={LABEL}>Journeys</div>
+                <div className={LABEL}>Interfaces</div>
                 <div className="flex flex-col items-start gap-1">
-                  {detail.journeyIds.map((id) => (
+                  {detail.interfaceIds.map((id) => (
                     <button
                       key={id}
                       type="button"
-                      onClick={() => onOpenJourney(id)}
+                      onClick={() => onOpenInterface(id)}
                       className="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left font-mono text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                     >
                       <Route className="h-3 w-3 shrink-0" />

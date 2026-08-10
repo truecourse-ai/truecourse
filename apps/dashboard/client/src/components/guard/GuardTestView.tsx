@@ -17,7 +17,7 @@
  *                      what it drives (`cli`, `git`, `file`, `api`) and carries its
  *                      own expected/actual/output INLINE
  *   5 evidence         ONE transcript block
- *   6 journey          the code path it drives
+ *   6 interface          the code path it drives
  *   footer             labelled rows: Test · File · Flow · Spec
  *
  * {@link GuardScenarioBody} is that body — the flow detail embeds it under the
@@ -64,7 +64,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronRight, Copy, Route } from 'lucide-react';
 import type {
   GuardFailureDetail,
-  GuardJourneyRow,
+  GuardInterfaceRow,
   GuardScenarioSetupView,
   GuardScenarioStepView,
   GuardTriage,
@@ -74,7 +74,7 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { formatGuardDuration } from '@/lib/guard-drifts';
 import type { GuardTestStatusView } from '@/lib/guard-flow-status';
-import { GuardJourneyDiagram } from './GuardJourneyDiagram';
+import { GuardInterfaceDiagram } from './GuardInterfaceDiagram';
 import { GuardLongText } from './GuardLongText';
 import { GuardTestSetup } from './GuardTestSetup';
 import { GuardTriageChip } from './GuardTriageChip';
@@ -139,7 +139,7 @@ export interface GuardTestViewModel {
    * "Prepare".
    */
   claimTitles?: Readonly<Record<string, string>>;
-  journeyDrifted?: boolean;
+  interfaceDrifted?: boolean;
   /**
    * True when the failing step was an UNMILESTONED preparation step — a prerequisite
    * the spec never asserts. Renders beside the failure so a red test that never
@@ -155,7 +155,7 @@ export interface GuardTestViewModel {
    * test walks, and a flow with no inventory row behind it has nothing to point at.
    */
   binds?: { doc: string; section: string; headingText?: string; fingerprint?: string };
-  journeyPath: readonly string[];
+  interfacePath: readonly string[];
   evidence: GuardEvidenceRef | null;
 }
 
@@ -417,18 +417,18 @@ export function groupStepsByMilestone(steps: readonly GuardScenarioStepView[]): 
 export function GuardScenarioBody({
   repoId,
   test,
-  journeys,
+  interfaces,
   raw = false,
   action,
   notes,
   onOpenFlow,
-  onOpenJourney,
+  onOpenInterface,
   onOpenSpec,
 }: {
   repoId: string;
   test: GuardTestViewModel;
-  /** The mapped catalog, for the journeys this test drives; null = unmapped. */
-  journeys: GuardJourneyRow[] | null;
+  /** The mapped catalog, for the interfaces this test drives; null = unmapped. */
+  interfaces: GuardInterfaceRow[] | null;
   /** The parent's artifact mode: true renders the stored YAML instead of the page. */
   raw?: boolean;
   /** The one ruling the page offers (the entity view only). */
@@ -436,7 +436,7 @@ export function GuardScenarioBody({
   /** Extra verdict-card notes (stale/orphaned bindings, "no result yet"). */
   notes?: ReactNode;
   onOpenFlow?: (flowId: string) => void;
-  onOpenJourney?: (journeyId: string) => void;
+  onOpenInterface?: (interfaceId: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   const [source, setSource] = useState<{
@@ -514,7 +514,7 @@ export function GuardScenarioBody({
   // "failed (birth)" is the plan's own wording for a test committed red: it ran
   // once, at authoring time, and disagreed with the code.
   const verdictWord = failed ? (test.status.birth ? 'failed (birth)' : 'failed') : passed ? 'passed' : test.status.word.toLowerCase();
-  const byId = new Map((journeys ?? []).map((j) => [j.id, j]));
+  const byId = new Map((interfaces ?? []).map((j) => [j.id, j]));
   const milestones = new Map((test.milestones ?? []).map((m) => [m.order, m]));
   // WHICH step is the open one is a fact about the VIEWED RESULT, so the step list
   // is keyed on it: reading another test — or this same test as another run's
@@ -581,17 +581,17 @@ export function GuardScenarioBody({
               </div>
             )}
 
-            {test.journeyDrifted && (
+            {test.interfaceDrifted && (
               <HoverPopover portal
                 align="start"
                 width="wide"
-                content="The live journey catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
+                content="The live interface catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
               >
                 {/* Never a verdict, so never a verdict colour: an unknown reads
                     grey, like every other state nothing has ruled on. */}
                 <div className="mt-2 flex items-center gap-2 text-[12px] text-muted-foreground">
                   <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />
-                  Journey drift — the mapped surface moved since this test was written
+                  Interface drift — the mapped surface moved since this test was written
                 </div>
               </HoverPopover>
             )}
@@ -728,33 +728,33 @@ export function GuardScenarioBody({
           </div>
         )}
 
-        {/* 6. The journey it drives — context, not verdict, so it comes last. */}
+        {/* 6. The interface it drives — context, not verdict, so it comes last. */}
         <div>
-          <div className={LABEL}>Journey</div>
-          {test.journeyPath.length === 0 ? (
+          <div className={LABEL}>Interface</div>
+          {test.interfacePath.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
-              This test records no journey path (hand-written, or written before mapping).
+              This test records no interface path (hand-written, or written before mapping).
             </p>
           ) : (
             <div className="space-y-2">
-              {test.journeyPath.map((id) => {
-                const journey = byId.get(id);
+              {test.interfacePath.map((id) => {
+                const iface = byId.get(id);
                 return (
                   <div key={id}>
                     <button
                       type="button"
-                      onClick={() => onOpenJourney?.(id)}
-                      disabled={!onOpenJourney}
+                      onClick={() => onOpenInterface?.(id)}
+                      disabled={!onOpenInterface}
                       className="mb-1 inline-flex items-center gap-1 font-mono text-[11px] text-primary hover:underline disabled:no-underline"
                     >
                       <Route className="h-3 w-3" />
                       {id}
                     </button>
-                    {journey ? (
-                      <GuardJourneyDiagram journey={journey} label={journey.id} />
+                    {iface ? (
+                      <GuardInterfaceDiagram interface={iface} label={iface.id} />
                     ) : (
                       <p className="text-[12px] text-muted-foreground">
-                        Not in the current catalog — run Map on the Journeys tab to re-derive it.
+                        Not in the current catalog — run Map on the Interfaces tab to re-derive it.
                       </p>
                     )}
                   </div>
@@ -819,23 +819,23 @@ export function GuardScenarioBody({
 export function GuardTestView({
   repoId,
   test,
-  journeys,
+  interfaces,
   action,
   headerAction,
   notes,
   onOpenFlow,
-  onOpenJourney,
+  onOpenInterface,
   onOpenSpec,
 }: {
   repoId: string;
   test: GuardTestViewModel;
-  journeys: GuardJourneyRow[] | null;
+  interfaces: GuardInterfaceRow[] | null;
   action?: ReactNode;
   /** A link out of this page (the run instance's "open this flow"). */
   headerAction?: ReactNode;
   notes?: ReactNode;
   onOpenFlow?: (flowId: string) => void;
-  onOpenJourney?: (journeyId: string) => void;
+  onOpenInterface?: (interfaceId: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   // The two readings of ONE file: this page, or the YAML it was read from.
@@ -861,12 +861,12 @@ export function GuardTestView({
         <GuardScenarioBody
           repoId={repoId}
           test={test}
-          journeys={journeys}
+          interfaces={interfaces}
           raw={raw}
           {...(action ? { action } : {})}
           {...(notes ? { notes } : {})}
           {...(onOpenFlow ? { onOpenFlow } : {})}
-          {...(onOpenJourney ? { onOpenJourney } : {})}
+          {...(onOpenInterface ? { onOpenInterface } : {})}
           onOpenSpec={onOpenSpec}
         />
       </div>

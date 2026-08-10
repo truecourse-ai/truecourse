@@ -5,7 +5,7 @@ promise: A team commits the analysis baseline so it travels with the repository
 flow:
   id: commit-a-baseline-and-refresh-it
   fingerprint: sha256:89e62a3de6d00e4a30c676b3c7e2693ce27a62a5e29cb55d8541e46edf69f355
-journey:
+interface:
   path:
     - cli/analyze
   fingerprints:

@@ -16,7 +16,7 @@ const API_SCENARIO = {
   id: 'todo-lifecycle.api.1',
   title: 'POST /todos creates a todo',
   flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
-  journey: { path: ['api/create-todo'], fingerprints: ['sha256:journey'] },
+  interface: { path: ['api/create-todo'], fingerprints: ['sha256:interface'] },
   binds: BINDS,
   driver: 'api',
   steps: [
@@ -51,7 +51,7 @@ describe('guard scenario schema — api driver', () => {
 
   it('the api driver is runnable in the registry', () => {
     expect(runnableDriverIds).toEqual(['cli', 'api'])
-    // desktop + mobile are recorded journey types, appended last (the enum order
+    // desktop + mobile are recorded interface types, appended last (the enum order
     // is fingerprinted into the extraction prompt).
     expect(awaitingDriverIds).toEqual(['web', 'tui', 'library', 'desktop', 'mobile'])
     expect(isRunnableDriver('api')).toBe(true)
@@ -132,7 +132,7 @@ describe('guard scenario envelope v3', () => {
     id: 'todo-lifecycle.cli.1',
     title: 'todos are added and listed',
     flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
-    journey: { path: ['cli/todos-add', 'cli/todos-list'], fingerprints: ['sha256:a', 'sha256:b'] },
+    interface: { path: ['cli/todos-add', 'cli/todos-list'], fingerprints: ['sha256:a', 'sha256:b'] },
     binds: [
       { doc: 'docs/cli.md', section: 'todos/add', fingerprint: 'sha256:add' },
       { doc: 'docs/cli.md', section: 'todos/list', fingerprint: 'sha256:list' },
@@ -152,7 +152,7 @@ describe('guard scenario envelope v3', () => {
     const parsed = GuardScenarioSchema.parse(CLI_SCENARIO)
     expect(parsed.binds).toHaveLength(2)
     expect(parsed.flow).toEqual({ id: 'todo-lifecycle', fingerprint: 'sha256:flow' })
-    expect(parsed.journey?.path).toEqual(['cli/todos-add', 'cli/todos-list'])
+    expect(parsed.interface?.path).toEqual(['cli/todos-add', 'cli/todos-list'])
   })
 
   it('rejects a v1 scenario (clean cut — no union)', () => {
@@ -168,16 +168,16 @@ describe('guard scenario envelope v3', () => {
     expect(() => GuardScenarioSchema.parse({ ...CLI_SCENARIO, binds: [] })).toThrow()
   })
 
-  it('a hand-written scenario may omit flow + journey (the Manual pseudo-flow)', () => {
-    const { flow: _f, journey: _j, ...handWritten } = CLI_SCENARIO
+  it('a hand-written scenario may omit flow + interface (the Manual pseudo-flow)', () => {
+    const { flow: _f, interface: _j, ...handWritten } = CLI_SCENARIO
     const parsed = GuardScenarioSchema.parse(handWritten)
     expect(parsed.flow).toBeUndefined()
-    expect(parsed.journey).toBeUndefined()
+    expect(parsed.interface).toBeUndefined()
   })
 
-  it('a journey ref carries a non-empty path and fingerprints', () => {
+  it('an interface ref carries a non-empty path and fingerprints', () => {
     expect(() =>
-      GuardScenarioSchema.parse({ ...CLI_SCENARIO, journey: { path: [], fingerprints: [] } }),
+      GuardScenarioSchema.parse({ ...CLI_SCENARIO, interface: { path: [], fingerprints: [] } }),
     ).toThrow()
   })
 

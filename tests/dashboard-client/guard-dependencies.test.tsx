@@ -5,7 +5,7 @@
  * The house shape: the shared list on the LEFT (name, class, and whether an
  * instance is registered), the chosen one's detail on the RIGHT under the shared
  * guard TAB STRIP — single-click previews, double-click pins, `?gext` mirrors the
- * active one, exactly as Flows / Coverage / Journeys do. What the detail
+ * active one, exactly as Flows / Coverage / Interfaces do. What the detail
  * owes a reader, in order: the rolled-up requirement with the flow that
  * contributed each part (a real jump), when the dependency applies, what it holds
  * back today, and THE FORM — rendered by the registration's own shape, one masked
@@ -487,7 +487,7 @@ describe('GuardDependenciesPane — the list', () => {
 
 // ---------------------------------------------------------------------------
 // THE TAB MECHANISM — the same one every other guard pane wears (Flows,
-// Coverage, Journeys, Runs): the shared `useGuardTabs` reducer over a
+// Coverage, Interfaces, Runs): the shared `useGuardTabs` reducer over a
 // `GuardTabStrip`, single-click previewing an italic tab, double-click pinning
 // it, the active one mirrored to the URL, and no Overview chip in front of them.
 // ---------------------------------------------------------------------------

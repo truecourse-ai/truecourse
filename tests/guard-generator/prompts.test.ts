@@ -55,7 +55,7 @@ function milestone(overrides: Partial<AuthorMilestone> = {}): AuthorMilestone {
     doc: 'docs/cli.md',
     sectionHeading: 'done',
     sectionText: '`done <id>` prints `Completed t<N> ✓`.',
-    realization: ['run: ["done"]   (journey cli:done)'],
+    realization: ['run: ["done"]   (interface cli:done)'],
     ...overrides,
   }
 }
@@ -64,7 +64,7 @@ function authorCtx(overrides: Partial<AuthorUserContext> = {}): AuthorUserContex
   return {
     flow: FLOW,
     milestones: [milestone()],
-    journeyPath: ['cli:done'],
+    interfacePath: ['cli:done'],
     areaTags: [],
     driver: 'cli',
     recipeEntry: ['node', 'cli.js'],
@@ -79,14 +79,14 @@ function apiAuthorCtx(overrides: Partial<AuthorUserContext> = {}): AuthorUserCon
     recipeEntry: undefined,
     recipeServe: ['node', 'server.js'],
     recipeHealthPath: '/health',
-    journeyPath: ['api:create-user'],
+    interfacePath: ['api:create-user'],
     milestones: [
       milestone({
         claim: 'POST /users creates a user',
         doc: 'docs/api.md',
         sectionHeading: 'users',
         sectionText: 'POST /users creates a user and returns 201.',
-        realization: ['request: POST /users   (journey api:create-user)'],
+        realization: ['request: POST /users   (interface api:create-user)'],
       }),
     ],
     ...overrides,
@@ -118,7 +118,7 @@ function matchCtx(overrides: Partial<MatchUserContext> = {}): MatchUserContext {
       { order: 2, claim: '`done <id>` prints `Completed t<N> ✓`', note: 'observe the completion' },
     ],
     surface: 'cli',
-    journeys: [
+    interfaces: [
       {
         id: 'cli:tasks-add',
         title: 'Add a task',
@@ -181,7 +181,7 @@ describe('guard-generator prompts', () => {
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
     // Pinned literal: the prompt renders the driver registry's ids, so the
-    // desktop + mobile journey-type rows moved this from 40e35f8ec26c72cb (the api
+    // desktop + mobile interface-type rows moved this from 40e35f8ec26c72cb (the api
     // driver becoming authorable). It must not move again silently.
     // Rolled once: the `api` driver row now covers the SERVER PROCESS
     // (startup under a configuration, a failed start, boot migrations, request
@@ -384,12 +384,12 @@ describe('guard-generator prompts', () => {
             claim: '`add <title>` creates a task',
             sectionHeading: 'add',
             sectionText: '`add <title>` creates a task and prints its id.',
-            realization: ['run: ["add"]   (journey cli:add)'],
+            realization: ['run: ["add"]   (interface cli:add)'],
           }),
           milestone({
             order: 2,
             note: 'observe the completion the previous step enabled',
-            realization: ['run: ["done"]   (journey cli:done)', 'run: ["list"]   (journey cli:list)'],
+            realization: ['run: ["done"]   (interface cli:done)', 'run: ["list"]   (interface cli:list)'],
           }),
         ],
       }),
@@ -405,8 +405,8 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('--- milestone 2')
     expect(p).toContain('note: observe the completion the previous step enabled')
     expect(p).toContain('realize with:')
-    expect(p).toContain('  run: ["done"]   (journey cli:done)')
-    expect(p).toContain('  run: ["list"]   (journey cli:list)')
+    expect(p).toContain('  run: ["done"]   (interface cli:done)')
+    expect(p).toContain('  run: ["list"]   (interface cli:list)')
     // In path order.
     expect(p.indexOf('--- milestone 1')).toBeLessThan(p.indexOf('--- milestone 2'))
   })
@@ -440,7 +440,7 @@ describe('guard-generator prompts', () => {
   })
 
   it('buildAuthorUserPrompt omits the realization lines for an unmatched milestone', () => {
-    const p = buildAuthorUserPrompt(authorCtx({ milestones: [milestone({ realization: [] })], journeyPath: [] }))
+    const p = buildAuthorUserPrompt(authorCtx({ milestones: [milestone({ realization: [] })], interfacePath: [] }))
     expect(p).toContain('--- milestone 1')
     expect(p).not.toContain('realize with:')
     expect(p).not.toContain('realized through:')
@@ -691,8 +691,12 @@ describe('guard-generator prompts', () => {
     // authored cli vocabulary is the `run` step alone — see AuthoredCliStepSchema —
     // so nothing the model may write changed, and re-authoring every cli flow over a
     // vocabulary they cannot use would be a bill with no verdict behind it.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bc5f2f2d3cb5064c')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bc5f2f2d3cb5064c')
+    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
+    // "journey" retired in favour of "interface" across stores, schemas and copy,
+    // and this prompt renders that vocabulary, so its text moved without a single
+    // rule moving with it. A rename, not vocabulary growth.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('1ee6cde76c89e1d9')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('1ee6cde76c89e1d9')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -752,7 +756,7 @@ describe('guard-generator prompts', () => {
     const inputs = {
       flowFingerprint: 'sha256:flow',
       sectionKeys: ['sha256:section'],
-      journeyFingerprints: ['sha256:journey'],
+      interfaceFingerprints: ['sha256:interface'],
       recipeFingerprint: 'sha256:recipe',
     }
     const hash = flowGenerationInputsHash(inputs)
@@ -831,7 +835,7 @@ describe('guard-generator prompts', () => {
   it('MATCH_SYSTEM_PROMPT makes a process milestone realizable on api', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('# The api surface also owns the SERVER PROCESS')
     expect(MATCH_SYSTEM_PROMPT).toContain('state SURVIVING a\nrestart')
-    expect(MATCH_SYSTEM_PROMPT).toContain('the journey the test observes it THROUGH')
+    expect(MATCH_SYSTEM_PROMPT).toContain('the interface the test observes it THROUGH')
     expect(MATCH_SYSTEM_PROMPT).toContain('a package script, a build')
   })
 
@@ -920,8 +924,12 @@ describe('guard-generator prompts', () => {
     // atLeast) that makes a captured value assertable. This driver already
     // captured (`capture` / `captureHeaders`); only the assertion side grew, and
     // the rendered schema is the whole of what changed.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('8bc84309fdfa1961')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('8bc84309fdfa1961')
+    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
+    // "journey" retired in favour of "interface" across stores, schemas and copy,
+    // and this prompt renders that vocabulary, so its text moved without a single
+    // rule moving with it. A rename, not vocabulary growth.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('80906df87c31c38a')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('80906df87c31c38a')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1166,8 +1174,8 @@ describe('guard-generator prompts', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
-  it('MATCH_SYSTEM_PROMPT forbids inventing journey ids — the catalog is the closed set', () => {
-    expect(MATCH_SYSTEM_PROMPT).toContain('Use ONLY journeys from the catalog below')
+  it('MATCH_SYSTEM_PROMPT forbids inventing interface ids — the catalog is the closed set', () => {
+    expect(MATCH_SYSTEM_PROMPT).toContain('Use ONLY interfaces from the catalog below')
     expect(MATCH_SYSTEM_PROMPT).toContain('copied VERBATIM')
     expect(MATCH_SYSTEM_PROMPT).toContain('An id that is not in the catalog invalidates your whole answer')
     // Every milestone is covered, in path order, matched on behavior not wording.
@@ -1201,9 +1209,13 @@ describe('guard-generator prompts', () => {
     // `unrealizable` re-matches into a plan.
     // Rolled again for the lifecycle half: the api surface owns the server
     // PROCESS, so a startup/shutdown/logging/restart milestone is planned against the
-    // journey it is observed through instead of settling `unrealizable`.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('df2d1a56fb52b946')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('df2d1a56fb52b946')
+    // interface it is observed through instead of settling `unrealizable`.
+    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
+    // "journey" retired in favour of "interface" across stores, schemas and copy,
+    // and this prompt renders that vocabulary, so its text moved without a single
+    // rule moving with it. A rename, not vocabulary growth.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('3ef011ad233400d1')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('3ef011ad233400d1')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {
@@ -1214,8 +1226,8 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('  1. `add <title>` creates a task')
     // Synthesis' note rides next to the claim.
     expect(p).toContain('  (observe the completion)')
-    expect(p).toContain('JOURNEY CATALOG for cli')
-    // Each journey: its id, title, entry descriptor, and one line per step.
+    expect(p).toContain('INTERFACE CATALOG for cli')
+    // Each interface: its id, title, entry descriptor, and one line per step.
     expect(p).toContain('--- id: cli:tasks-add')
     expect(p).toContain('title: Add a task')
     expect(p).toContain('entry: tasks add')
@@ -1227,34 +1239,34 @@ describe('guard-generator prompts', () => {
     expect(p).not.toContain('CORRECTION —')
   })
 
-  it('buildMatchUserPrompt renders a journey with no steps as id/title/entry only', () => {
+  it('buildMatchUserPrompt renders an interface with no steps as id/title/entry only', () => {
     const p = buildMatchUserPrompt(
-      matchCtx({ journeys: [{ id: 'cli:version', title: 'Print the version', entry: 'version', steps: [] }] }),
+      matchCtx({ interfaces: [{ id: 'cli:version', title: 'Print the version', entry: 'version', steps: [] }] }),
     )
     expect(p).toContain('--- id: cli:version')
     expect(p).toContain('entry: version')
     expect(p).not.toContain('steps:')
   })
 
-  it('buildMatchUserPrompt quotes back the unknown journeys and the milestone gaps', () => {
+  it('buildMatchUserPrompt quotes back the unknown interfaces and the milestone gaps', () => {
     const p = buildMatchUserPrompt(
       matchCtx({
         issues: {
-          unknownJourneys: ['cli:tasks-archive'],
+          unknownInterfaces: ['cli:tasks-archive'],
           uncoveredMilestones: [2],
           unknownMilestones: [9],
         },
       }),
     )
     // The exact invented id, quoted back.
-    expect(p).toContain('CORRECTION — these journey ids are NOT in the catalog above.')
+    expect(p).toContain('CORRECTION — these interface ids are NOT in the catalog above.')
     expect(p).toContain('- cli:tasks-archive')
     // The exact out-of-range milestone, plus the closed number set.
     expect(p).toContain('CORRECTION — these `milestone` values match no milestone of this flow.')
     expect(p).toContain('the numbers listed above (1..2):')
     expect(p).toContain('  9')
     // The uncovered milestone, and the honest way out.
-    expect(p).toContain('CORRECTION — your plan covered no journey for these milestones.')
+    expect(p).toContain('CORRECTION — your plan covered no interface for these milestones.')
     expect(p).toContain('answer `unrealizable` naming what is missing')
     expect(p).toContain('  2')
     expect(p).toContain('Return the COMPLETE answer again as one JSON object matching the schema.')
@@ -1264,7 +1276,7 @@ describe('guard-generator prompts', () => {
     const p = buildMatchUserPrompt(matchCtx({ correction: { invalidOutput: 'here is my plan: …' } }))
     expect(p).toContain('CORRECTION — your previous response was NOT valid. You returned:')
     expect(p).toContain('here is my plan: …')
-    expect(p).toContain('{ "plan": [ { "journeyId", "milestone" }, … ] }')
+    expect(p).toContain('{ "plan": [ { "interfaceId", "milestone" }, … ] }')
     expect(p).toContain('or { "unrealizable": "<one')
   })
 
@@ -1283,7 +1295,7 @@ describe('guard-generator prompts', () => {
     expect(FLOWS_SYSTEM_PROMPT).toContain('You have NO code, NO commands, NO test framework, and NO repository')
     expect(FLOWS_SYSTEM_PROMPT).not.toContain('transcript')
     expect(FLOWS_SYSTEM_PROMPT).not.toContain('recipe')
-    expect(FLOWS_SYSTEM_PROMPT).not.toContain('journey')
+    expect(FLOWS_SYSTEM_PROMPT).not.toContain('interface')
   })
 
   it('FLOWS_SYSTEM_PROMPT states the coverage honesty rule and the granularity spectrum', () => {
@@ -1297,7 +1309,11 @@ describe('guard-generator prompts', () => {
 
   it('FLOWS_PROMPT_FINGERPRINT is pinned — moves only with an intended re-synthesis', () => {
     expect(FLOWS_PROMPT_FINGERPRINT).toBe('654d47c7386fcd58')
-    expect(FLOWS_EPIC_PROMPT_FINGERPRINT).toBe('e49a339b46f07d79')
+    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
+    // "journey" retired in favour of "interface" across stores, schemas and copy,
+    // and this prompt renders that vocabulary, so its text moved without a single
+    // rule moving with it. A rename, not vocabulary growth.
+    expect(FLOWS_EPIC_PROMPT_FINGERPRINT).toBe('fa167e39be3b4a5b')
   })
 
   it('FLOWS_EPIC_SYSTEM_PROMPT defaults to no epics and only chains listed flows', () => {

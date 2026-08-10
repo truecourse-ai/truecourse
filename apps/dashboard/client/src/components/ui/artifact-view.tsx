@@ -1,8 +1,8 @@
 /**
  * THE TWO READINGS OF AN ARTIFACT-BACKED ENTITY.
  *
- * A guard entity whose truth is a file on disk — a test (its YAML), a flow, a
- * journey, a claim (their entries in the JSON stores) — is shown exactly two ways
+ * A guard entity whose truth is a file on disk — a test (its YAML), a flow, an
+ * interface, a claim (their entries in the JSON stores) — is shown exactly two ways
  * and never more:
  *
  *   View   the structured page: the entity read, joined, and explained
