@@ -251,14 +251,14 @@ export function GuardInterfacesPane({
 
         <div className="mt-4">
           <div className={LABEL}>Sequence</div>
-          <GuardInterfaceDiagram interface={active} label={active.id} />
+          <GuardInterfaceDiagram iface={active} label={active.id} />
         </div>
 
         {/* The contract: the full grammar and each command's input/output — what a
             scenario author (and a reader) needs after knowing WHICH command runs.
             The sequence above already showed the steps; a typed list of the same
             steps underneath it is the same reading twice. */}
-        <GuardInterfaceContract interface={active} tabs={commandTabs} />
+        <GuardInterfaceContract iface={active} tabs={commandTabs} />
 
         <div className="mt-4">
           <div className={LABEL}>Used by flows</div>

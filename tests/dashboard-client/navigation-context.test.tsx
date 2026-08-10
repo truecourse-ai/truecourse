@@ -154,6 +154,14 @@ describe('NavigationContext — guard section routing', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('interfaces');
   });
 
+  // The param was `?gjourney=` before the INTERFACE rename (2026-08-10); a
+  // bookmark from then still has to land on the tab it named.
+  it('a retired ?gjourney=<interface> deep link opens guard/interfaces too', () => {
+    renderAt('/repos/abc?gjourney=cli%2Ftasks-add');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('interfaces');
+  });
+
   // The retired Guard Spec tab (merged into Coverage) — old links must still land.
   it('maps the retired ?tab=guardspec to guard/coverage', () => {
     renderAt('/repos/abc?tab=guardspec');

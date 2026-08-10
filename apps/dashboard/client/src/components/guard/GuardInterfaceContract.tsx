@@ -622,7 +622,7 @@ function CommandNav({
   );
 }
 
-export function GuardInterfaceContract({ interface: iface, tabs }: { interface: GuardInterfaceRow; tabs: GuardTabsState }) {
+export function GuardInterfaceContract({ iface, tabs }: { iface: GuardInterfaceRow; tabs: GuardTabsState }) {
   const commands = iface.contract?.commands ?? [];
   const keys = commands.map((command) => command.path.join(' '));
   // The selected command, or the first one. A `?gcmd` naming another interface's

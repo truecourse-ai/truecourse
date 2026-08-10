@@ -751,7 +751,7 @@ export function GuardScenarioBody({
                       {id}
                     </button>
                     {iface ? (
-                      <GuardInterfaceDiagram interface={iface} label={iface.id} />
+                      <GuardInterfaceDiagram iface={iface} label={iface.id} />
                     ) : (
                       <p className="text-[12px] text-muted-foreground">
                         Not in the current catalog — run Map on the Interfaces tab to re-derive it.

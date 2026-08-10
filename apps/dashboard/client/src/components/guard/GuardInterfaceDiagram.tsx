@@ -14,10 +14,10 @@ import type { Interface } from '@truecourse/shared';
 const CELL = 'text-[11px] font-mono text-muted-foreground';
 
 export function GuardInterfaceDiagram({
-  interface: iface,
+  iface,
   label,
 }: {
-  interface: Pick<Interface, 'steps'> & Partial<Pick<Interface, 'type' | 'id'>>;
+  iface: Pick<Interface, 'steps'> & Partial<Pick<Interface, 'type' | 'id'>>;
   /** Accessible name — defaults to the interface id. */
   label?: string;
 }) {

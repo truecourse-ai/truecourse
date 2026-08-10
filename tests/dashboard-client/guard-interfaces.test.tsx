@@ -614,6 +614,18 @@ describe('Interfaces tab — the mapped catalog', () => {
     expect(screen.getByText(/the spec never mentions this code path/)).toBeInTheDocument();
   });
 
+  it('a retired ?gjourney deep link still opens the interface, and a click converges the URL', async () => {
+    // The param was `?gjourney=` before the INTERFACE rename (2026-08-10). It is
+    // READ as an alias so bookmarks survive, and the first write drops it — the
+    // URL never carries both spellings.
+    const user = userEvent.setup();
+    renderTab('/repos/r?tab=interfaces&gjourney=cli%2Ftasks-purge');
+    expect(await screen.findByRole('group', { name: 'Interface cli/tasks-purge' })).toBeInTheDocument();
+    await user.click(await within(screen.getByTestId('panel')).findByText('cli/tasks-list'));
+    expect(search()).toContain('ginterface=cli%2Ftasks-list');
+    expect(search()).not.toContain('gjourney');
+  });
+
   it('pins an interface on double click', async () => {
     const user = userEvent.setup();
     renderTab();
