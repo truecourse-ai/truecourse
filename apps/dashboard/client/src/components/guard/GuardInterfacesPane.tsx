@@ -23,7 +23,7 @@
  * or that entry verbatim ({@link ArtifactModeSwitch}).
  */
 
-import { Cable, Loader2, FlaskConical } from 'lucide-react';
+import { Braces, Loader2, FlaskConical } from 'lucide-react';
 import type { GuardInterfaceRow, GuardInterfacesView } from '@truecourse/shared';
 import { guardDriver, interfaceEntryLabel } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
@@ -147,14 +147,14 @@ export function GuardInterfacesPane({
   }
   if (!view) {
     return (
-      <EmptyState icon={Cable} title="No interface catalog" body="Interfaces are derived from the working tree." />
+      <EmptyState icon={Braces} title="No interface catalog" body="Interfaces are derived from the working tree." />
     );
   }
 
   if (view.unavailable === 'no-working-tree') {
     return (
       <EmptyState
-        icon={Cable}
+        icon={Braces}
         title="No working tree to map"
         body="Hosted repos map their surfaces during the server-side generate."
       />
@@ -166,14 +166,14 @@ export function GuardInterfacesPane({
     ...t,
     label: t.id,
     title: view.interfaces.find((j) => j.id === t.id)?.title ?? t.id,
-    icon: Cable,
+    icon: Braces,
   }));
 
   const body = (() => {
     if (!view.mapped || view.interfaces.length === 0) {
       return (
         <EmptyState
-          icon={Cable}
+          icon={Braces}
           title="No interfaces mapped yet"
           body={
             <button
@@ -191,7 +191,7 @@ export function GuardInterfacesPane({
 
     if (!active) {
       return (
-        <EmptyState icon={Cable} title="Select an interface" body="Select an interface." />
+        <EmptyState icon={Braces} title="Select an interface" body="Select an interface." />
       );
     }
 

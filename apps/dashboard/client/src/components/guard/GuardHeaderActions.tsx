@@ -11,7 +11,7 @@
  * a HoverPopover reason — while any guard job is in flight.
  */
 
-import { Cable, Loader2, Play, Wand2 } from 'lucide-react';
+import { Braces, Loader2, Play, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
 
@@ -56,7 +56,7 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
       ? staleReason
       : null;
 
-  const Icon = busy ? Loader2 : kind === 'generate' ? Wand2 : kind === 'map' ? Cable : Play;
+  const Icon = busy ? Loader2 : kind === 'generate' ? Wand2 : kind === 'map' ? Braces : Play;
 
   return (
     <HoverPopover portal align="end" width="narrow" content={reason}>

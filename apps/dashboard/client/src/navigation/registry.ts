@@ -31,7 +31,7 @@ import {
   ClipboardList,
   FlaskConical,
   Globe,
-  Cable,
+  Braces,
   Settings,
   Plug,
   BarChart3,
@@ -168,7 +168,7 @@ export const SECTIONS: SectionDescriptor[] = [
       // surfaces banner, per-surface catalog with the reverse index onto flows, and
       // the sequence diagram per interface. It sits AFTER Tests: it is the code half,
       // read once the spec half (coverage -> tests) has been read.
-      { id: 'interfaces', label: 'Interfaces', icon: Cable },
+      { id: 'interfaces', label: 'Interfaces', icon: Braces },
       // The third parties this repo calls, and the real/sandbox account the user
       // hands guard for each. Reads and writes the WORKING TREE
       // (recipe.json + the gitignored overlay + the host env), so it is
