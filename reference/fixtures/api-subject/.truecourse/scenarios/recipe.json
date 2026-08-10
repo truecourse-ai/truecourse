@@ -1,0 +1,79 @@
+{
+  "install": "npm ci",
+  "build": "true",
+  "entry": [
+    "node",
+    "./bin/bookclub.js"
+  ],
+  "api": {
+    "serve": [
+      "node",
+      "src/server.js"
+    ],
+    "healthPath": "/healthz",
+    "env": {
+      "DATABASE_URL": "postgres://bookclub:bookclub@localhost:5433/bookclub",
+      "BOOKCLUB_JWT_SECRET": "bookclub-development-secret"
+    },
+    "services": {
+      "up": "docker compose -f docker-compose.guard.yml up -d --wait",
+      "down": "docker compose -f docker-compose.guard.yml down"
+    },
+    "externals": {
+      "openlibrary": {
+        "baseUrlEnv": "COVERS_BASE_URL",
+        "description": "declared by `truecourse guard setup` — detected from an HTTP call; no account provided yet"
+      }
+    },
+    "seed": {
+      "command": "node scripts/guard-seed.mjs",
+      "script": "scripts/guard-seed.mjs",
+      "provides": {
+        "credentials": {
+          "member": {
+            "header": "Authorization",
+            "description": "a club member — the principal allowed to add books to the shelf and mark them finished",
+            "satisfies": "memberToken"
+          }
+        },
+        "fixtures": {
+          "member": [
+            "id",
+            "email"
+          ],
+          "unreadBook": [
+            "id",
+            "isbn",
+            "status",
+            "title",
+            "author"
+          ],
+          "coverBook": [
+            "id",
+            "isbn"
+          ],
+          "finishedBook": [
+            "id",
+            "isbn",
+            "status",
+            "finishedAt"
+          ],
+          "finishTargetBook": [
+            "id",
+            "isbn",
+            "status"
+          ],
+          "missingBook": [
+            "id"
+          ],
+          "newBookRequest": [
+            "isbnInput",
+            "isbn",
+            "title",
+            "author"
+          ]
+        }
+      }
+    }
+  }
+}

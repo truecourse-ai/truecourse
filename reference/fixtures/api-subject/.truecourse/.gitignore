@@ -1,0 +1,16 @@
+analyses/
+history.json
+diff.json
+ui-state.json
+logs/
+.analyze.lock
+.cache/
+contracts/result.json
+guard/runs/
+guard/result.json
+guard/setup.json
+guard/evidence/
+guard/journeys.json
+guard/auto-resolutions.json
+scenarios/externals.local.json
+scenarios/dependencies.local.json

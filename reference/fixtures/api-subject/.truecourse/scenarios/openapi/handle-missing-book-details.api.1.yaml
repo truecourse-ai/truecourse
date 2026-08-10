@@ -1,0 +1,32 @@
+guard: 3
+id: handle-missing-book-details.api.1
+title: Requesting details for a missing book reports that no book has that id
+promise: A user receives a not-found error when requesting details for a book id that does not exist.
+flow:
+  id: handle-missing-book-details
+  fingerprint: sha256:750e58d6daae5fdaf5e9c199323fe1781ce63261c349f2521861e0c003e1b39c
+journey:
+  path:
+    - api/get-books-id
+  fingerprints:
+    - sha256:3065d8df6e9e45c9ae0e578909273758dfafd3af87065d276a428e8890224917
+binds:
+  - doc: docs/openapi.yaml
+    section: paths/get-getbook
+    fingerprint: sha256:0ca74e271807375c35b4cde38b8b29cc5a6c81dc0d4c12ec54a745fe89dd375e
+normalize: []
+driver: api
+steps:
+  - request:
+      method: GET
+      path: /books/{{fixture:missingBook.id}}
+    expect:
+      status: 404
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1

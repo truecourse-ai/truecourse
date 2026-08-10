@@ -1,0 +1,83 @@
+guard: 3
+id: reject-shelf-changes-without-a-valid-member-token.api.1
+title: Unauthorized callers cannot add or finish books or change shelf state
+promise: A non-member or invalid-token caller cannot add or finish books, and no shelf state is written.
+flow:
+  id: reject-shelf-changes-without-a-valid-member-token
+  fingerprint: sha256:cb9489b500e27ff1b112dca3db7cca7f8c4cd13e019fdfddde4c5cb14fb91d70
+journey:
+  path:
+    - api/post-books
+    - api/get-books
+    - api/post-books-id-finish
+  fingerprints:
+    - sha256:669ba831388d19c1887828c546e0ef8d3c0c2dbb324a837285d007ec80ba3906
+    - sha256:14b7488d1cfc312d312da7b7f9151936a1a85f515cb4e3b640fb84c86358a17a
+    - sha256:3462f3a5924acbd0bc7f25e90371a3be89fa11fd3e957d8e9cc18ffe65114b74
+binds:
+  - doc: docs/shelf-rules.md
+    section: shelf-rules/who-may-change-the-shelf
+    fingerprint: sha256:b5ffe03f72dda5183ad0c36d7e457ccf09cf2dc42f45e5455c402321a5e0544b
+normalize: []
+driver: api
+steps:
+  - request:
+      method: POST
+      path: /books
+      json:
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
+        title: Unauthorized Add No Token ${unique}
+        author: Unauthorized Author ${unique}
+    expect:
+      status: 401
+      body:
+        equals: '{"error":"authentication required"}'
+    milestone: 1
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJub3QtYS1tZW1iZXIifQ.invalidsignature
+      json:
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
+        title: Unauthorized Add Invalid Token ${unique}
+        author: Unauthorized Author ${unique}
+    expect:
+      status: 401
+      body:
+        equals: '{"error":"authentication required"}'
+    milestone: 1
+  - request:
+      method: GET
+      path: /books
+    expect:
+      status: 200
+      body:
+        matches: ^(?![\s\S]*Unauthorized Add No Token ${unique})(?![\s\S]*Unauthorized Add Invalid Token ${unique})[\s\S]*$
+    milestone: 1
+  - request:
+      method: POST
+      path: /books/{{fixture:finishTargetBook.id}}/finish
+    expect:
+      status: 401
+      body:
+        equals: '{"error":"authentication required"}'
+    milestone: 1
+  - request:
+      method: POST
+      path: /books/{{fixture:finishTargetBook.id}}/finish
+      headers:
+        Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJub3QtYS1tZW1iZXIifQ.invalidsignature
+    expect:
+      status: 401
+      body:
+        equals: '{"error":"authentication required"}'
+    milestone: 1
+  - request:
+      method: GET
+      path: /books
+    expect:
+      status: 200
+      body:
+        matches: ^(?![\s\S]*Unauthorized Add No Token ${unique})(?![\s\S]*Unauthorized Add Invalid Token ${unique})(?=[\s\S]*\{(?=[^}]*"id"\s*:\s*"?{{fixture:finishTargetBook.id}}"?)(?=[^}]*"status"\s*:\s*"{{fixture:finishTargetBook.status}}")[^}]*\})[\s\S]*$
+    milestone: 1

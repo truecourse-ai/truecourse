@@ -1,0 +1,156 @@
+{
+  "version": 3,
+  "generatedAt": "2026-08-10T04:20:45.147Z",
+  "docs": [
+    {
+      "ref": "README.md",
+      "kind": "readme",
+      "lastTouched": "2026-08-09T20:03:46-07:00",
+      "areaTags": [
+        "core/architecture",
+        "core/configuration",
+        "core/health-endpoint",
+        "core/persistence",
+        "core/service-runtime"
+      ]
+    },
+    {
+      "ref": "docs/cli.md",
+      "kind": "unknown",
+      "lastTouched": "2026-08-09T20:03:46-07:00",
+      "areaTags": [
+        "core/cli",
+        "core/configuration",
+        "core/errors",
+        "core/isbn-validation"
+      ]
+    },
+    {
+      "ref": "docs/shelf-rules.md",
+      "kind": "unknown",
+      "lastTouched": "2026-08-09T20:03:46-07:00",
+      "areaTags": [
+        "core/auth",
+        "core/books-entity",
+        "core/errors",
+        "core/isbn-normalization"
+      ]
+    },
+    {
+      "ref": "docs/openapi.yaml",
+      "kind": "openapi",
+      "lastTouched": "2026-08-09T20:03:46-07:00",
+      "areaTags": []
+    }
+  ],
+  "areas": [
+    {
+      "id": "core/architecture",
+      "product": "core",
+      "concern": "architecture",
+      "docRefs": [
+        "README.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/auth",
+      "product": "core",
+      "concern": "auth",
+      "docRefs": [
+        "docs/shelf-rules.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/books-entity",
+      "product": "core",
+      "concern": "books-entity",
+      "docRefs": [
+        "docs/shelf-rules.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/cli",
+      "product": "core",
+      "concern": "cli",
+      "docRefs": [
+        "docs/cli.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/configuration",
+      "product": "core",
+      "concern": "configuration",
+      "docRefs": [
+        "README.md",
+        "docs/cli.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/errors",
+      "product": "core",
+      "concern": "errors",
+      "docRefs": [
+        "docs/cli.md",
+        "docs/shelf-rules.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/health-endpoint",
+      "product": "core",
+      "concern": "health-endpoint",
+      "docRefs": [
+        "README.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/isbn-normalization",
+      "product": "core",
+      "concern": "isbn-normalization",
+      "docRefs": [
+        "docs/shelf-rules.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/isbn-validation",
+      "product": "core",
+      "concern": "isbn-validation",
+      "docRefs": [
+        "docs/cli.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/persistence",
+      "product": "core",
+      "concern": "persistence",
+      "docRefs": [
+        "README.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/service-runtime",
+      "product": "core",
+      "concern": "service-runtime",
+      "docRefs": [
+        "README.md"
+      ],
+      "overlaps": []
+    }
+  ],
+  "skippedDocs": [
+    {
+      "ref": "docs/plant-rota.md",
+      "reason": "plant watering rota for the reading corner, not behavior or decisions about the bookclub HTTP service or CLI",
+      "category": "process"
+    }
+  ]
+}

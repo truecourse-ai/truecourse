@@ -1,0 +1,22 @@
+{
+  "name": "bookclub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The shared shelf of a book club: an HTTP service over Postgres, plus an operator CLI",
+  "type": "module",
+  "bin": {
+    "bookclub": "./bin/bookclub.js"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.36.4",
+    "express": "4.21.2",
+    "jsonwebtoken": "9.0.2",
+    "pg": "8.13.1"
+  }
+}

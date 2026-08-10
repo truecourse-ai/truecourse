@@ -1,0 +1,29 @@
+guard: 3
+id: reject-an-unsupported-database-scheme.cli.1
+title: Unsupported database schemes are rejected with a clear configuration error
+promise: The user gets a clear configuration error when the database scheme is not Postgres.
+flow:
+  id: reject-an-unsupported-database-scheme
+  fingerprint: sha256:311b142c2bd48d6ffd8eb136560654f2a3aef824267dfb04781e803179c47eb6
+journey:
+  path:
+    - cli/config
+  fingerprints:
+    - sha256:0f5253231732763b4d269f6a8f0b54c14035637ffbb64c9de4dd6c16403c2b60
+binds:
+  - doc: docs/cli.md
+    section: the-bookclub-cli/bookclub-config
+    fingerprint: sha256:28476d9f11959e15a54df328dc703015d20c7ba804d70540f7e631250ab9994a
+setup:
+  env:
+    DATABASE_URL: mysql://bookclub:secret@localhost:5433/bookclub
+normalize: []
+driver: cli
+steps:
+  - run:
+      - config
+    expect:
+      exit: 2
+      stderr:
+        contains: 'error: unsupported database scheme "mysql" — bookclub speaks postgres and postgresql'
+    milestone: 1

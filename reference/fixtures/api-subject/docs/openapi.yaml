@@ -1,0 +1,152 @@
+openapi: 3.0.3
+info:
+  title: bookclub
+  version: 1.0.0
+  description: The shared shelf of a book club.
+servers:
+  - url: http://127.0.0.1:3000
+components:
+  securitySchemes:
+    memberToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A member's bearer token, signed with the club's HMAC secret.
+  schemas:
+    Book:
+      type: object
+      required: [id, isbn, title, author, status, addedAt, finishedAt]
+      properties:
+        id: { type: integer }
+        isbn: { type: string, description: The book's ISBN, always 13 digits. }
+        title: { type: string }
+        author: { type: string }
+        status: { type: string, enum: [unread, finished] }
+        addedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+paths:
+  /healthz:
+    get:
+      operationId: health
+      summary: Report that the service is up.
+      responses:
+        '200':
+          description: The service is listening.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  service: { type: string, enum: [bookclub] }
+  /books:
+    get:
+      operationId: listBooks
+      summary: List the books on the shelf, most recently added first.
+      responses:
+        '200':
+          description: The shelf.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [books]
+                properties:
+                  books:
+                    type: array
+                    items: { $ref: '#/components/schemas/Book' }
+    post:
+      operationId: addBook
+      summary: Put a book on the shelf.
+      security:
+        - memberToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isbn, title, author]
+              properties:
+                isbn: { type: string }
+                title: { type: string }
+                author: { type: string }
+      responses:
+        '201':
+          description: The book that was added.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Book' }
+        '400':
+          description: The isbn, title, or author was missing or unusable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: No valid member token was sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: A book with that ISBN is already on the shelf.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /books/{id}:
+    get:
+      operationId: getBook
+      summary: Fetch one book.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: The book.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Book' }
+        '404':
+          description: No book has that id.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '410':
+          description: The book has been archived.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /books/{id}/finish:
+    post:
+      operationId: finishBook
+      summary: Mark a book as finished.
+      security:
+        - memberToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: The book, now finished.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Book' }
+        '401':
+          description: No valid member token was sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: No book has that id.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }

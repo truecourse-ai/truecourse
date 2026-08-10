@@ -1,0 +1,34 @@
+guard: 3
+id: check-service-health.api.1
+title: Health check reports the bookclub service is up
+promise: A user can confirm that the bookclub service is healthy.
+flow:
+  id: check-service-health
+  fingerprint: sha256:ed0790eabe387146b56f0cf1db7eec695b83b4ef2ccd8226925d40f9d6821401
+journey:
+  path:
+    - api/get-healthz
+  fingerprints:
+    - sha256:36244ec266bb5754e2882d3147b1c99c7e8e6b6f9c1025193f1def023933e234
+binds:
+  - doc: docs/openapi.yaml
+    section: paths/get-health
+    fingerprint: sha256:615bd256a70e64ff68494c61e7521c5d2ed57bab41cb586f0439e6a4783a892c
+normalize: []
+driver: api
+steps:
+  - request:
+      method: GET
+      path: /healthz
+    expect:
+      status: 200
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        status:
+          equals: ok
+        service:
+          equals: bookclub
+      schema: true
+    milestone: 1

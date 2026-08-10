@@ -1,0 +1,70 @@
+guard: 3
+id: add-a-duplicate-isbn.api.1
+title: Adding the same ISBN twice reports that the book is already on the shelf
+promise: The user gets a conflict error when trying to add a book whose ISBN is already on the shelf.
+flow:
+  id: add-a-duplicate-isbn
+  fingerprint: sha256:27bb22305e1e159daaa0cddebb5725d406a1b5b394c325ec5e489f2979ca167f
+journey:
+  path:
+    - api/post-books
+  fingerprints:
+    - sha256:669ba831388d19c1887828c546e0ef8d3c0c2dbb324a837285d007ec80ba3906
+binds:
+  - doc: docs/openapi.yaml
+    section: paths/post-addbook
+    fingerprint: sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815
+normalize: []
+driver: api
+steps:
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
+        title: '{{fixture:newBookRequest.title}}'
+        author: '{{fixture:newBookRequest.author}}'
+    capture:
+      bookId: id
+    expect:
+      status: 201
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        id:
+          exists: true
+        isbn:
+          equals: '{{fixture:newBookRequest.isbn}}'
+        title:
+          equals: '{{fixture:newBookRequest.title}}'
+        author:
+          equals: '{{fixture:newBookRequest.author}}'
+        status:
+          exists: true
+        addedAt:
+          exists: true
+        finishedAt:
+          exists: true
+      schema: true
+    milestone: 1
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
+        title: '{{fixture:newBookRequest.title}}'
+        author: '{{fixture:newBookRequest.author}}'
+    expect:
+      status: 409
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          matches: .+
+    milestone: 2
