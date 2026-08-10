@@ -122,6 +122,42 @@ steps:
       files:
         .truecourse/LATEST.json:
           contains: Dynamic code evaluation
-    note: The snapshot committed a moment ago did not contain this finding; the re-run rewrote LATEST.json, which is what "commit the updated LATEST.json to refresh the baseline" depends on. `--no-stash` keeps the new file in the tree — the stash decision itself belongs to the dirty-tree flow.
+    note: >-
+      The snapshot committed a moment ago did not contain this finding; the
+      re-run rewrote LATEST.json, which is what "commit the updated LATEST.json
+      to refresh the baseline" depends on. `--no-stash` keeps the new file in the
+      tree — the stash decision itself belongs to the dirty-tree flow.
+
+
+      THIS STEP IS RED ON A PRODUCT BUG, verified 2026-08-10 by reproducing the
+      exact sequence outside the harness three times in a plain temp repo (git
+      init, seed the two files, commit, `analyze --no-llm --no-skills`, `git add
+      .truecourse/LATEST.json .truecourse/config.json`, `git commit`, write an
+      `eval()` file, `analyze --no-llm --no-stash --no-skills`): the refreshed
+      LATEST.json never names "Dynamic code evaluation", and the analyze log
+      reads `Code scan: 0 violations from 2 files` — the two files it scanned
+      being `.truecourse/LATEST.json` and `.truecourse/config.json`, not any
+      source file. Refreshing the baseline is what breaks it: the SAME command
+      run once more (a third analyze, when HEAD no longer moved past the
+      baseline commit) finds the eval and reports 4 violations. Root cause:
+      `packages/core/src/commands/analyze-core.ts` derives a full-mode
+      `changedFileSet` from `git diff <baseline commit>..HEAD --name-only` and
+      hands it to the violation pipeline, which scans ONLY those paths
+      (`filesToScan` in `violation-pipeline.service.ts`). Committing the
+      baseline moves HEAD past the analysis it came from, so the next `analyze`
+      rule-scans just the committed `.truecourse/*.json` — the working tree's
+      new and modified source files are parsed into the graph (the run reports
+      `analyzedFiles: 2` and `src/unsafe.js` appears as a module) but no rule
+      ever runs on them, and every prior violation is carried forward
+      unverified as `unchanged`. The optimization is documented in that file as
+      a way "to cut LLM scan cost", yet it also silences the deterministic
+      scan, and it consults commit history only — never the working tree — so
+      an uncommitted change is invisible to it. baseline-and-diff.mdx promises
+      the refresh ("re-run `truecourse analyze` after merging to `main` and
+      commit the updated `LATEST.json`") and `--no-stash` promises "analyze the
+      working tree as-is"; the engine delivers neither on the run that follows
+      a baseline commit. Fixing the scenario would require asserting that a
+      refreshed baseline may silently omit findings, which is the opposite of
+      the promise, so this stays red.
     milestone:
       - rerun-analyze-updates-latest-json

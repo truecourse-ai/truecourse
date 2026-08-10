@@ -93,9 +93,9 @@ steps:
       - add unsafe
     expect:
       exit: 1
-      stdout:
+      stderr:
         contains: BLOCKED
-    note: The starting verdict under the seeded policy — this commit is blocked.
+    note: The starting verdict under the seeded policy — this commit is blocked. The hook prints its verdict on STDERR (git keeps stdout for its own commit summary), so that is the stream the assertion reads.
   - write:
       .truecourse/hooks.yaml: |
         pre-commit:
@@ -111,7 +111,7 @@ steps:
       - add unsafe
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?![\s\S]*BLOCKED)(?=[\s\S]*TrueCourse pre-commit check)[\s\S]*$
     note: 'Nothing changed but the file: the same staged change, the same hook, the same baseline. Narrowing `block-on` let it through, so the policy comes from this file and nowhere else — there is no code-level default quietly overriding it.'
     milestone:
@@ -154,7 +154,7 @@ steps:
       - add notes
     expect:
       exit: 1
-      stdout:
+      stderr:
         matches: ^(?=[\s\S]*BLOCKED)(?=[\s\S]*console\.log call)[\s\S]*$
     note: 'A LOW-severity violation now blocks the commit — a severity the seeded default never blocked on — so the accepted values are honored, not merely parsed. Scope kept honest: this proves acceptance of all five plus enforcement at a non-default one; it does not manufacture one violation per severity, which no seed can guarantee.'
     milestone:

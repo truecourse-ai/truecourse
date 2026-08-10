@@ -109,11 +109,12 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*NEW ISSUES)(?=[\s\S]*Unsafe JSON\.parse)(?=[\s\S]*RESOLVED)(?=[\s\S]*Summary: [0-9]+ new issues, [0-9]+ resolved)[\s\S]*$'
+        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*Summary: 1 new issues, 1 resolved)(?=[\s\S]*list --diff)[\s\S]*$'
       files:
         .truecourse/diff.json:
           contains: Unsafe JSON.parse
-    note: Both docs state the new/resolved sentence, so one observation carries both claim ids. The report's shape — changed files, a new set, a resolved set, a summary — is itself the evidence that the WORKING TREE was compared with the committed baseline rather than re-listed in full.
+    note: >-
+      Both docs state the new/resolved sentence, so one observation carries both claim ids. `analyze --diff` reports that sentence as a COUNTED summary — changed files, `1 new issues, 1 resolved` — and points at `truecourse list --diff` for the itemized report; baseline-and-diff.mdx lists the two commands as a pair for exactly that reason, and the next step is the itemizing half. Counts of 1 and 1 are what make the summary evidence rather than decoration: the working tree was compared with the committed baseline (one violation introduced, one removed) rather than re-listed in full — a full listing would carry the untouched `console.log` finding too. The finding is NAMED in `.truecourse/diff.json`, the result the doc says the run lands in.
     milestone:
       - analyze-diff-reports-new-and-resolved
       - analyze-diff-reports-new-and-resolved-overview

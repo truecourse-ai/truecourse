@@ -87,19 +87,16 @@ steps:
               description: the probe vendor this flow declares, so no bound repository’s own vendors are graded
               env:
                 TC_PROBE_VENDOR_KEY: {}
-                TC_PROBE_VENDOR_REGION:
-                  valueFromEnv: TC_PROBE_VENDOR_REGION
-                TC_PROBE_VENDOR_TENANT:
-                  value: tc-probe-tenant
     cwd: .tc-supplied/api-subject-project
     expect:
       files:
         .tc-supplied/api-subject-project/.truecourse/scenarios/recipe.json:
           contains: TC_PROBE_VENDOR_KEY
     note: >-
-      One declaration, three variable forms: `{}` for the one whose value is a secret nobody may
-      commit, a `valueFromEnv` for one the host exports, and a `value` for a literal that genuinely
-      is not secret. Nothing here is a secret, which is the split the claims below are about.
+      The declaration in its barest form: a base-URL variable and `{}` for a variable whose value is
+      a secret nobody may commit. Deliberately nothing that could resolve — no inline value, no
+      host-exported variable — because the reading below is about the state where NOTHING has been
+      supplied, and `unprovided` means zero of the declaration's requirements resolve.
   - run:
       - guard
       - externals
@@ -122,6 +119,24 @@ steps:
       - externals-empty-object-declares-a-needed-variable
       - externals-unprovided-service-leaves-flows-blocked-on
       - recipe-api-externals-declares-real-third-party-accounts
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        set:
+          api.externals.tc-probe-vendor.env.TC_PROBE_VENDOR_REGION:
+            valueFromEnv: TC_PROBE_VENDOR_REGION
+          api.externals.tc-probe-vendor.env.TC_PROBE_VENDOR_TENANT:
+            value: tc-probe-tenant
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      files:
+        .tc-supplied/api-subject-project/.truecourse/scenarios/recipe.json:
+          contains: TC_PROBE_VENDOR_TENANT
+    note: >-
+      The other two variable forms join the declaration now that the unprovided reading is on
+      record: a `valueFromEnv` the host exports and a `value` for a literal that genuinely is not
+      secret. Both would resolve immediately — which is exactly why they arrive AFTER the reading
+      above — and both are inputs to the estimate below and to the three-source `provided` reading
+      the overlay completes.
   - run:
       - guard
       - generate
@@ -137,13 +152,18 @@ steps:
       exit: 0
       output:
         matches: >-
-          ^(?=[\s\S]*Generate will make ~)(?=[\s\S]*sections changed)(?=[\s\S]*Generate
+          ^(?=[\s\S]*Generate will make ~)(?![\s\S]*Nothing changed)(?=[\s\S]*Generate
           cancelled\.)(?![\s\S]*Wrote )[\s\S]*$
+    capture:
+      callsAfterDeclare:
+        pattern: Generate will make ~([0-9]+) LLM calls
+        from: output
     note: >-
       The declaration entering the recipe fingerprint, priced. The identical command reported
-      "nothing changed" two steps ago and now has sections to buy, and the only thing that moved
-      between the two runs is the `api.externals` entry — so declaring a service is what re-authors
-      the sections it used to block. Declined at the prompt, so the reading costs nothing.
+      "nothing changed" two steps ago and now quotes real work — no doc moved, so the section label
+      still reads cached, and what the declaration re-opened is the FLOWS (the recipe fingerprint
+      folds into every flow's inputs) — and the only thing that moved between the two runs is the
+      `api.externals` entry. Declined at the prompt, so the reading costs nothing.
     milestone:
       - externals-declaration-in-the-fingerprint-values-excluded
       - guard-setup-declaration-enters-the-recipe-fingerprint
@@ -234,39 +254,16 @@ steps:
     expect:
       exit: 0
       output:
-        matches: ^(?=[\s\S]*sections changed)(?![\s\S]*Wrote )[\s\S]*$
-    capture:
-      changedAfterKey:
-        pattern: ([0-9]+) of [0-9]+ sections changed
-        from: output
-    note: >-
-      The same estimate again, now that a key exists. Nothing about the number may move: a value is
-      not a declaration, so it is outside the recipe fingerprint and re-authors nothing. The count
-      is captured here and compared in the next step rather than asserted as a literal, because what
-      the claim is about is the count NOT CHANGING, not what it happens to be for a given
-      repository.
-  - run:
-      - guard
-      - generate
-      - '--llm-transport'
-      - cli
-    cwd: .tc-supplied/api-subject-project
-    tty: true
-    stdin:
-      - marker: Proceed with generate?
-        answer: 'n'
-    timeoutMs: 900000
-    expect:
-      exit: 0
-      output:
         compare:
-          number: ([0-9]+) of [0-9]+ sections changed
-          equals: ${captured:changedAfterKey}
+          number: Generate will make ~([0-9]+) LLM calls
+          equals: ${captured:callsAfterDeclare}
     note: >-
-      The comparison the claim actually makes: the section count the estimate reports with a key in
-      the overlay equals the one it reported before the key existed. A key that had entered the
-      fingerprint would have moved it. This is also the "re-authors nothing" half — an unchanged
-      estimate is unchanged authoring.
+      The comparison the claim actually makes: the call count the estimate quotes with a key in the
+      overlay equals the one it quoted before the key existed — captured at the declaration-only
+      estimate, compared here rather than asserted as a literal, because what the claim is about is
+      the count NOT CHANGING, not what it happens to be for a given repository. A key that had
+      entered the fingerprint would have moved it. This is also the "re-authors nothing" half — an
+      unchanged estimate is unchanged authoring.
     milestone:
       - guard-setup-api-key-does-not-enter-the-fingerprint
       - guard-setup-handing-a-key-later-re-authors-nothing

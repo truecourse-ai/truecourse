@@ -84,6 +84,8 @@ steps:
         answer: 'y'
       - marker: This repository already has an `api.seed` script. Replace it?
         answer: 'n'
+      - marker: have no account yet. Provide one now?
+        answer: 'n'
     timeoutMs: 3600000
     expect:
       exit: 0
@@ -107,12 +109,15 @@ steps:
     cwd: .tc-supplied/api-subject-project
     expect:
       exit: 0
-      stdout:
-        matches: >-
-          ^(?![\s\S]*\n-\s*"ownHosts")(?![\s\S]*\n-\s*"externals")(?![\s\S]*\n-\s*"credentials")(?![\s\S]*\n-\s*"seed")[\s\S]*$
+      files:
+        .tc-supplied/api-subject-project/.truecourse/scenarios/recipe.json:
+          matches: ^(?=[\s\S]*tc-probe-owned\.test)(?=[\s\S]*tc-probe-vendor)(?=[\s\S]*tc-probe-kept)(?=[\s\S]*"seed")[\s\S]*$
     note: >-
-      The four blocks discovery never proposes, read out of the diff as removals that are not there.
-      A refresh that had dropped any of them would show it as a `-` line for that key; the
-      derivation’s own fields may move freely, which is why the assertion is about these four and
-      nothing else.
+      The four blocks discovery never proposes, each read back out of the refreshed file itself: the
+      hand-written ownHosts entry, the hand-declared external, the hand-filled credential — all
+      values this scenario wrote, so naming them is not an assertion about the bound instance — and
+      the `seed` block whose survival step 4 already reported in words. The file is asserted rather
+      than the diff’s `-` lines because a refresh rewrites the recipe in its own key order: a moved
+      block shows a `-` for its old position while its content survives, and only the FILE says
+      which happened.
     milestone: guard-setup-refresh-preserves-the-blocks-discovery-never-proposes

@@ -36,11 +36,7 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: >-
-          ^(?=[\s\S]*\n  command     \S)(?=[\s\S]*\n  script      \S)(?![\s\S]*← MISSING on
-          disk)(?=[\s\S]*\n  fixture     \S+ \([^)]+\))(?=[\s\S]*\n  credential  \S+ → \S+ \(minted
-          at run time\) — \S)(?=[\s\S]*blocked on missing data:)(?=[\s\S]*The seed is yours to
-          edit)[\s\S]*$
+        matches: ^(?=[\s\S]*\n[│ ]*command\s+\S)(?=[\s\S]*\n[│ ]*script\s+\S)(?![\s\S]*← MISSING on disk)(?=[\s\S]*\n[│ ]*fixture\s+\S+ \([^)]+\))(?=[\s\S]*\n[│ ]*credential\s+\S+ → \S+ \(minted at run time\) — \S)(?=[\s\S]*blocked on missing data.)(?=[\s\S]*The seed is yours to edit)[\s\S]*$
     note: >-
       One view, all three of its parts. The `command` row is the single shell command the
       declaration holds; the `script` row is the path the draft recorded, and the absent MISSING
@@ -89,9 +85,7 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: >-
-          ^(?=[\s\S]*\n  command     \S)(?![\s\S]*\n  script      )(?![\s\S]*← MISSING on
-          disk)(?=[\s\S]*\n  fixture     \S+ \()[\s\S]*$
+        matches: ^(?=[\s\S]*\n[│ ]*command\s+\S)(?![\s\S]*\n[│ ]*script\s)(?![\s\S]*← MISSING on disk)(?=[\s\S]*\n[│ ]*fixture\s+\S+ \()[\s\S]*$
     note: >-
       The declaration still loads with no `script` field: the row is gone, the command and the
       promises are unchanged, and nothing reports a missing file — which is the field being optional

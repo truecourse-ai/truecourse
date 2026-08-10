@@ -8,7 +8,7 @@ promise: >-
   was proved first
 flow:
   id: prepare-a-service-repository-with-a-database-and-a-seed
-  fingerprint: sha256:fcb088e3fa2997a6912e95ad2f23a267c2d695f324da3c90580d4c0761a20343
+  fingerprint: sha256:b75519417003f611b21b05190fe25e04e862f5104dd334cf45d2fc2935e06ca1
 journey:
   path:
     - cli/guard
@@ -83,7 +83,7 @@ steps:
         .tc-supplied/api-subject-project/.truecourse/scenarios/recipe.json:
           contains: '"serve"'
         .tc-supplied/api-subject-project/docker-compose.guard.yml:
-          contains: healthcheck
+          matches: '^(?=[\s\S]*\n +image: +\S+:(?!latest[ ]*\n)\S+[ ]*(?:\n|$))(?=[\s\S]*\n +healthcheck:[ ]*(?:\n|$))[\s\S]*$'
         .tc-supplied/api-subject-project/docker-compose.yml:
           absent: true
     note: >-
@@ -96,9 +96,12 @@ steps:
       Verification also takes the datastore back down: a second setup below brings it up again,
       which a still-running container would make impossible. The `datastore wrote` row plus a
       generated file on disk is the compose generation, and the name `docker-compose.yml` is still
-      free — that one belongs to the repository. The sentence about the script having RUN and its
-      manifest having matched is the engine saying, in its own words, that neither artifact was
-      written until it had been proved.
+      free — that one belongs to the repository. That generated file is then read as a SHAPE rather
+      than as bytes: an `image:` whose value carries an explicit tag that is not `latest`, and a
+      `healthcheck:` block — the two halves of the pinning claim, stated so they hold for whichever
+      engine the bound repository turns out to declare rather than for this instance’s postgres. The
+      sentence about the script having RUN and its manifest having matched is the engine saying, in
+      its own words, that neither artifact was written until it had been proved.
     milestone:
       - guard-setup-reads-start-argv-or-framework-invocation
       - guard-setup-reads-the-route-surface-for-the-health-path
@@ -107,6 +110,7 @@ steps:
       - guard-setup-calls-a-real-route-on-every-declared-server
       - guard-pipeline-setup-makes-a-live-call-against-every-declared-server
       - guard-setup-generates-a-compose-file-when-the-repo-has-none
+      - guard-setup-generated-compose-pins-one-container-per-engine-with-a-healthcheck
       - guard-setup-never-writes-docker-compose-yml
       - guard-setup-verifies-the-whole-datastore-chain-before-keeping-it
       - guard-setup-drafts-the-one-seed-script
@@ -124,19 +128,16 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: >-
-          ^(?=[\s\S]*\n  health      /\S)(?=[\s\S]*\n  services    up:
-          [\s\S]*docker-compose\.guard\.yml)(?=[\s\S]*\n  credential  \S+ → \S+: \$\S+)(?=[\s\S]*\n 
-          seed        \S)[\s\S]*$
+        matches: ^(?=[\s\S]*\n[│ ]*health\s+/\S)(?=[\s\S]*\n[│ ]*services\s+up.[\s\S]*docker-compose\.guard\.yml)(?=[\s\S]*\n[│ ]*seeds cred\s+\S+ → \S+ \(minted at run time\))(?=[\s\S]*\n[│ ]*seed\s+\S)[\s\S]*$
     note: >-
       What the derivation decided, read back off the recipe. The health path is a declared route
       rather than the bare default, so it came from the repository’s route surface. The `services`
       row drives the file discovery just generated, which is the generated datastore arriving WITH
-      the commands that run it. The credential row carries an env-var name and no value at all,
-      which is a stub taken from the OpenAPI security schemes: a variable to fill in, never a
-      fabricated secret.
+      the commands that run it. The credential this repository needs is a seed row, minted at run
+      time — the OpenAPI scheme's stub was superseded by the drafted seed in the same setup, so no
+      env-var placeholder survives to the file. The stub claim itself moved to the gap ledger: it
+      only surfaces on a repository whose scheme the seed cannot mint.
     milestone:
-      - guard-setup-reads-openapi-security-schemes-for-credential-stubs
       - guard-setup-generated-compose-comes-with-its-api-services
   - run:
       - guard
@@ -145,12 +146,10 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: >-
-          ^(?=[\s\S]*\n  command     \S)(?=[\s\S]*\n  script      \S)(?![\s\S]*← MISSING on
-          disk)(?=[\s\S]*\n  fixture     \S+ \()(?=[\s\S]*\n  credential  \S+ → \S)[\s\S]*$
+        matches: ^(?=[\s\S]*\n[│ ]*command\s+\S)(?=[\s\S]*\n[│ ]*script\s+\S)(?![\s\S]*← MISSING on disk)(?=[\s\S]*\n[│ ]*fixture\s+\S+ \()(?=[\s\S]*\n[│ ]*credential\s+\S+ → \S)[\s\S]*$
     capture:
       seedScript:
-        pattern: \n  script      (\S+)
+        pattern: \n[│ ]*script\s+(\S+)
     note: >-
       ONE script covering both halves: the drafted seed promises fixtures — rows in the repository’s
       own tables — and principals it mints, and the script it names is on disk. A draft written from

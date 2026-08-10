@@ -2335,7 +2335,7 @@
     },
     {
       "flowId": "prepare-a-service-repository-with-a-database-and-a-seed",
-      "flowFingerprint": "sha256:fcb088e3fa2997a6912e95ad2f23a267c2d695f324da3c90580d4c0761a20343",
+      "flowFingerprint": "sha256:b75519417003f611b21b05190fe25e04e862f5104dd334cf45d2fc2935e06ca1",
       "bindings": [
         {
           "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",

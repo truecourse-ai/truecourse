@@ -131,9 +131,9 @@ steps:
       - add notes
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?![\s\S]*TrueCourse pre-commit check)[\s\S]*$
-    note: The identical commit that the hook refused one step earlier goes through, with no hook output at all. This is also how a developer recovers from the no-baseline state, which is why the two steps sit together.
+    note: The identical commit that the hook refused one step earlier goes through, with no hook output at all — asserted on STDERR, the stream the hook prints its verdict on, so the absence is falsifiable rather than vacuous. This is also how a developer recovers from the no-baseline state, which is why the two steps sit together.
     milestone:
       - no-verify-bypasses-the-hook
   - run:
@@ -177,9 +177,9 @@ steps:
       - add util
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*passed)[\s\S]*$
-    note: 'The change introduces a low-severity violation — a real new finding that does not match `block-on: [critical, high]` — so the diff check runs on this commit AND lets it through. Without this step the flow would only prove the hook blocks everything.'
+    note: 'The hook writes its verdict to STDERR — git''s own commit summary owns stdout — so the assertion reads the stream the hook actually prints on. The change introduces a low-severity violation — a real new finding that does not match `block-on: [critical, high]` — so the diff check runs on this commit AND lets it through. Without this step the flow would only prove the hook blocks everything.'
     milestone:
       - hook-runs-analyze-diff-on-every-commit
       - hook-allows-commit-without-matching-violation
@@ -203,7 +203,7 @@ steps:
       - add unsafe
     expect:
       exit: 1
-      stdout:
+      stderr:
         matches: ^(?=[\s\S]*BLOCKED)(?=[\s\S]*Dynamic code evaluation)(?=[\s\S]*Commit blocked)[\s\S]*$
     note: 'Same policy, same hook, higher severity: blocked, with the offending violation named. The commit is refused — `git log` still ends at "add util".'
     milestone:
@@ -216,8 +216,12 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: ^(?=[\s\S]*NEW ISSUES)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$
-    note: Run by hand, `analyze --diff` reports exactly what the hook just reported. Both read the same committed LATEST.json, which is the sentence three docs state three ways.
+        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*Summary: 2 new issues, 0 resolved)[\s\S]*$'
+      files:
+        .truecourse/diff.json:
+          contains: Dynamic code evaluation
+    note: >-
+      Run by hand, `analyze --diff` reports exactly what the hook just reported. Both read the same committed LATEST.json, which is the sentence three docs state three ways. The command itself prints the changed-file count and the new/resolved summary and then points at `truecourse list --diff` for the itemized report — that is the documented division of labour (baseline-and-diff.mdx lists the two commands as a pair), so the named finding is asserted where `analyze --diff` actually puts it: `.truecourse/diff.json`, the result the doc says the run lands in.
     milestone:
       - hook-runs-the-same-diff-check
       - hook-diffs-against-latest-json
@@ -235,8 +239,8 @@ steps:
       - add unsafe
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?![\s\S]*TrueCourse pre-commit check)[\s\S]*$
-    note: 'The behavioral proof the claim asks for: the very commit that was blocked two steps ago now completes, with no hook output. Asserting only that a file disappeared would be a weaker test of the same sentence.'
+    note: 'The behavioral proof the claim asks for: the very commit that was blocked two steps ago now completes, with no hook output on the stream the hook prints on. Asserting only that a file disappeared would be a weaker test of the same sentence.'
     milestone:
       - hooks-uninstall-removes-precommit-hook

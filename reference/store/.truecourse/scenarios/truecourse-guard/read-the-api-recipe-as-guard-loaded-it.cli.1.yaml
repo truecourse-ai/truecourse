@@ -46,10 +46,7 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: >-
-          ^(?=[\s\S]*\n  serve       \S)(?=[\s\S]*\n  health      /)(?=[\s\S]*\n  seed       
-          \S)(?=[\s\S]*\n  seeds cred  \S+ → \S+ \(minted at run time\))(?=[\s\S]*\n  seeds data 
-          \S+ \()[\s\S]*$
+        matches: ^(?=[\s\S]*\n[│ ]*serve\s+\S)(?=[\s\S]*\n[│ ]*health\s+/)(?=[\s\S]*\n[│ ]*seed\s+\S)(?=[\s\S]*\n[│ ]*seeds cred\s+\S+ → \S+ \(minted at run time\))(?=[\s\S]*\n[│ ]*seeds data\s+\S+ \()[\s\S]*$
     note: >-
       The api block, printed. `serve` and `health` are rows only an `api` block produces — a
       CLI-only recipe prints install/build/entry and stops — so their presence IS "the optional api
@@ -92,11 +89,7 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: >-
-          ^(?![\s\S]*tc-probe-inline-secret-value)(?=[\s\S]*\n  credential  tc-probe-inline →
-          X-Tc-Probe-Inline: •+ \(inline value, masked\))(?=[\s\S]*\n  credential  tc-probe-env →
-          X-Tc-Probe-Env: \$TC_PROBE_KEY)(?=[\s\S]*\n  credential  tc-probe-login →
-          X-Tc-Probe-Login: POST /tc-guard-probe/login \(minted at run start\))[\s\S]*$
+        matches: ^(?![\s\S]*tc-probe-inline-secret-value)(?=[\s\S]*\n[│ ]*credential\s+tc-probe-inline → X-Tc-Probe-Inline. •+ \(inline value, masked\))(?=[\s\S]*\n[│ ]*credential\s+tc-probe-env → X-Tc-Probe-Env. \$TC_PROBE_KEY)(?=[\s\S]*\n[│ ]*credential\s+tc-probe-login → X-Tc-Probe-Login. POST /tc-guard-probe/login \(minted at run start\))[\s\S]*$
     note: >-
       Three rows, three sources, one secret that does not appear. Each row carries a header and
       exactly one source spelling: the inline value is replaced by the mask, the env source prints
@@ -139,7 +132,7 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: ^[\s\S]*\n  health      /\n[\s\S]*$
+        matches: ^[\s\S]*\n[│ ]*health\s+/\n[\s\S]*$
     note: >-
       With no `api.healthPath` in the file, the row still prints and reads exactly `/`. The trailing
       newline in the pattern is what makes it the ROOT path rather than the prefix of the one that

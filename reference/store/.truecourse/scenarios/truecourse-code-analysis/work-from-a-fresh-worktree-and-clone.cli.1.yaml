@@ -126,12 +126,14 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: '^(?=[\s\S]*NEW ISSUES)(?=[\s\S]*console\.log call)(?=[\s\S]*Summary: )[\s\S]*$'
+        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*Summary: 1 new issues, 0 resolved)[\s\S]*$'
       files:
+        feat-x/.truecourse/diff.json:
+          contains: console.log call
         feat-x/.truecourse/history.json:
           absent: true
     cwd: feat-x
-    note: 'First command in this checkout, and it produces a result. The absent `history.json` is the public evidence that no full analysis ever ran here: the comparison was made against the baseline committed on main, not against a locally computed one.'
+    note: 'First command in this checkout, and it produces a result. `analyze --diff` prints the changed-file count and the new/resolved summary and defers the itemized report to `truecourse list --diff` (baseline-and-diff.mdx lists the pair), so the finding this checkout''s in-flight change introduces is asserted where this command puts it — `.truecourse/diff.json`, written inside the worktree. The absent `history.json` is the public evidence that no full analysis ever ran here: the comparison was made against the baseline committed on main, not against a locally computed one.'
     milestone:
       - diff-works-immediately-in-a-new-worktree
       - diff-compares-worktree-against-committed-baseline
@@ -147,9 +149,9 @@ steps:
       - add notes
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*passed)[\s\S]*$
     cwd: feat-x
-    note: The hook installed in the main checkout runs on the worktree's FIRST commit — linked worktrees share the common git dir — and reaches a verdict with no per-checkout cold start. The change is deliberately a low-severity one so this flow proves reachability, not blocking; blocking belongs to `install-the-pre-commit-hook-and-enforce-it`.
+    note: The hook prints its verdict on STDERR (git keeps stdout for its own commit summary), so that is the stream this assertion reads. The hook installed in the main checkout runs on the worktree's FIRST commit — linked worktrees share the common git dir — and reaches a verdict with no per-checkout cold start. The change is deliberately a low-severity one so this flow proves reachability, not blocking; blocking belongs to `install-the-pre-commit-hook-and-enforce-it`.
     milestone:
       - hook-works-on-first-commit-in-a-new-worktree

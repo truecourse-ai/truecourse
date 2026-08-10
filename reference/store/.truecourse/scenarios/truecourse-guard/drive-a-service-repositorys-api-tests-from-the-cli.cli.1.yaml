@@ -56,10 +56,10 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: \n  health      /\S*
+        matches: \n[│ ]*health\s+/\S*
     capture:
       healthPath:
-        pattern: \n  health      (/\S*)
+        pattern: \n[│ ]*health\s+(/\S*)
     note: >-
       The one route the probe scenarios below may drive without knowing anything about the
       repository: its declared health path, taken out of the recipe view rather than written down.

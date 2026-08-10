@@ -49,12 +49,22 @@ steps:
       pseudo-terminal, which is why this step has one; "nothing changed" is the run's own statement
       that every section is still covered by the tests it already has, and the absent `Wrote` line is
       those tests being kept rather than re-authored.
-      PRODUCT FINDING (2026-08-09, kept red on purpose): the pre-flight estimate counts a
-      section as "changed" when no flow binds it — including sections settled as PERMANENT gaps
-      (untestable intros, no-claim orientation prose) — so a fully settled corpus with any gap
-      section always re-prompts and this claim cannot pass. Same root as the sibling finding in
-      the authoring flow; Guard Generate workstream territory. The step burns its full budget
-      waiting on a prompt the claim says must not appear — the cost of keeping the truth-teller.
+      PRODUCT FINDING (2026-08-10, kept red on purpose; two stacked roots). The 2026-08-09
+      estimate root — gap sections counted as "changed" forever — was FIXED this wave (the
+      committed manifest carries `gapSections`; the re-minted api-subject fixture proves it:
+      its re-generate estimate is empty and the confirm is skipped). It stays unobservable
+      HERE because (1) this fixture's committed manifest predates that schema — no
+      `gapSections` — so its four unbound orientation sections (README intro ×2,
+      cli-reference, configuration) still read as "4 of 24 changed" and the prompt still
+      appears; and (2) even re-minted, the claim cannot pass on this sandbox: the supplied
+      copy is UNBUILT, journey mapping silently degrades (1 of 3 journeys — the cli probes
+      cannot spawn the recipe entry), and the run-side no-op gate correctly declines on the
+      moved journey fingerprints — same root as the sibling finding in the authoring flow.
+      Re-minting now would only convert this red from a $0 prompt-timeout into a real
+      re-authoring spend every run, so the stale mint is kept deliberately until the mapping
+      degradation is fixed. Guard Generate/Setup workstream territory. The step burns its
+      full budget waiting on a prompt the claim says must not appear — the cost of keeping
+      the truth-teller.
     milestone:
       - guard-generate-nothing-to-confirm-when-nothing-changed
       - guard-generate-unchanged-sections-keep-their-scenarios-and-cost-nothing

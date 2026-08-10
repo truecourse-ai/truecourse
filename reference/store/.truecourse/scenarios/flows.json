@@ -5342,7 +5342,7 @@
       "id": "prepare-a-service-repository-with-a-database-and-a-seed",
       "title": "A developer prepares a service repository: the recipe is derived and proved, a datastore is generated, and the seed is drafted and run",
       "goal": "A developer prepares an HTTP service repository for guard in one command, and everything it wrote was proved first",
-      "fingerprint": "sha256:fcb088e3fa2997a6912e95ad2f23a267c2d695f324da3c90580d4c0761a20343",
+      "fingerprint": "sha256:b75519417003f611b21b05190fe25e04e862f5104dd334cf45d2fc2935e06ca1",
       "milestones": [
         {
           "order": 1,
@@ -5362,50 +5362,50 @@
           "order": 3,
           "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
           "anchor": "guard-setup/how-discovery-works",
-          "claimTitle": "credential stubs come from OpenAPI securitySchemes as a valueFromEnv name plus a TODO",
-          "note": "The deterministic proposer takes credential stubs from the repository’s OpenAPI `securitySchemes`, writing a `valueFromEnv` name and printing a TODO, never a fabricated secret."
-        },
-        {
-          "order": 4,
-          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
-          "anchor": "guard-setup/how-discovery-works",
           "claimTitle": "verification brings api.services up and back down afterwards, pass or fail",
           "note": "Verification brings the proposal’s `api.services` up and back down afterwards, whether it passed or failed."
         },
         {
-          "order": 5,
+          "order": 4,
           "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
           "anchor": "guard-setup/how-discovery-works",
           "claimTitle": "verification boots the API server to its health path",
           "note": "Verification boots the API server and waits for its health path."
         },
         {
-          "order": 6,
+          "order": 5,
           "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
           "anchor": "guard-setup/how-discovery-works",
           "claimTitle": "the live endpoint probe passes on any HTTP status, 401 and 404 included",
           "note": "The live endpoint probe passes on any HTTP status, 401 and 404 included."
         },
         {
-          "order": 7,
+          "order": 6,
           "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
           "anchor": "guard-setup",
           "claimTitle": "setup makes a live call against a real route of every declared server",
           "note": "After the boot, `truecourse guard setup` makes a live call against a real route of every declared server."
         },
         {
-          "order": 8,
+          "order": 7,
           "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
           "anchor": "overview/the-pipeline",
           "claimTitle": "guard setup makes a live call against a real route of every declared server",
           "note": "After the boot, `truecourse guard setup` makes a live call against a real route of every declared server."
         },
         {
-          "order": 9,
+          "order": 8,
           "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
           "anchor": "guard-setup/how-discovery-works",
           "claimTitle": "a datastore compose file is generated when the app needs a database and the repo ships none",
           "note": "When the app needs a database and the repository ships no compose file, discovery writes `docker-compose.guard.yml` at the repository root."
+        },
+        {
+          "order": 9,
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/how-discovery-works",
+          "claimTitle": "the generated compose file declares one pinned container per engine, with a healthcheck",
+          "note": "The generated compose file declares one pinned container per engine — Postgres, MySQL/MariaDB, MongoDB or Redis — each with a healthcheck."
         },
         {
           "order": 10,
@@ -6908,12 +6908,6 @@
     {
       "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
       "anchor": "guard-setup/how-discovery-works",
-      "claimTitle": "the generated compose file declares one pinned container per engine, with a healthcheck",
-      "reason": "Blocked-on a file matcher that can read a SHAPE: the claim has two halves — one pinned container per detected engine, and a healthcheck on it — and `expect.files` offers only `exists` / `absent` / `equals` / `contains`. The healthcheck half is assertable by substring (and is, in `prepare-a-service-repository-with-a-database-and-a-seed`); the pinned-image-tag half needs a pattern, and a claim proved on one of its two halves is not proved. Clearing it needs a `matches` matcher on `expect.files`."
-    },
-    {
-      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
-      "anchor": "guard-setup/how-discovery-works",
       "claimTitle": "the generated container listens on the port the connection URL names",
       "reason": "Unrealizable without content-exact knowledge of the bound repository: matching the published port against the port of the app’s connection URL means reading that URL. A scenario may assert only what it knows structurally about a supplied instance; asserting the value itself would grade the fixture instead of the product."
     },
@@ -7480,6 +7474,12 @@
       "anchor": "guard-run/in-ci",
       "claimTitle": "TRUECOURSE_MAX_API_CONCURRENCY separately bounds resident api-driver servers",
       "reason": "Blocked-on a cli observation of the SERVER PROCESS: the residents the variable bounds are server children, and no surface reports how many were alive at once. `guard run` reports a per-scenario verdict and writes an evidence transcript of the HTTP exchange; neither carries the server's environment, its working directory, its port, its exit code, or how many processes the run started. Clearing it needs the run store to record the per-scenario server facts (port, cwd, env keys, restarts) the way it records steps."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "anchor": "guard-setup/how-discovery-works",
+      "claimTitle": "credential stubs come from OpenAPI securitySchemes as a valueFromEnv name plus a TODO",
+      "reason": "Blocked-on a second registered instance (the G64 class): the stub and its TODO only surface when the OpenAPI declares a security scheme the drafted seed CANNOT mint a principal for — on the bound repository the seed answers its only scheme, so the engine (correctly) supersedes the stub in the same setup and nothing observable remains to assert. Needs an instance with a scheme outside the seed's reach."
     }
   ]
 }

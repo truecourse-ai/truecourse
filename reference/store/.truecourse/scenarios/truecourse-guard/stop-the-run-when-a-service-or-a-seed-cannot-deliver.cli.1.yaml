@@ -33,49 +33,23 @@ driver: cli
 steps:
   - patch:
       .truecourse/scenarios/recipe.json:
-        set:
-          api.externals:
-            tc-probe-vendor:
-              baseUrlEnv: TC_PROBE_VENDOR_BASE_URL
-              baseUrl: https://sandbox.tc-probe-vendor.test
-              env:
-                TC_PROBE_VENDOR_KEY: {}
-    cwd: .tc-supplied/api-subject-project
-    note: >-
-      A base URL and a variable with nothing behind it: the service is supplied in part, which is
-      the state the run is supposed to refuse rather than half-honour.
-  - run:
-      - guard
-      - run
-    cwd: .tc-supplied/api-subject-project
-    timeoutMs: 900000
-    expect:
-      exit: 1
-      output:
-        matches: ^(?=[\s\S]*TC_PROBE_VENDOR_KEY)(?![\s\S]*Running scenarios)(?![\s\S]* passed)[\s\S]*$
-    note: >-
-      The run stops, and stops EARLY. The unmet variable is named, the scenario phase never starts
-      and no pass count is printed — so nothing was booted against a service that would have been
-      called with half its configuration.
-    milestone: externals-incomplete-service-stops-the-run-with-missing-external-env
-  - patch:
-      .truecourse/scenarios/recipe.json:
         remove:
           - api.externals
     cwd: .tc-supplied/api-subject-project
     note: >-
-      Every external declaration withdrawn — the probe’s and whatever the repository had — so the
-      seed refusals below are the run’s first objection rather than its second.
+      The repository’s own external declarations withdrawn, so every refusal this scenario
+      constructs below is the run’s first objection rather than its second.
   - patch:
       .truecourse/scenarios/recipe.json:
         set:
-          api.seed.provides.fixtures:
-            tc-probe-ghost:
-              - tc_probe_missing_field
+          api.seed.provides.fixtures.tc-probe-ghost:
+            - tc_probe_missing_field
     cwd: .tc-supplied/api-subject-project
     note: >-
       A fixture the repository’s real seed script cannot emit, because this scenario invented its
-      name. The declaration is the contract; the manifest is what the script actually wrote.
+      name — added BESIDE the real fixtures, so everything the script does deliver still checks
+      out and the one gap is the one this scenario declared. The declaration is the contract; the
+      manifest is what the script actually wrote.
   - run:
       - guard
       - run
@@ -97,13 +71,15 @@ steps:
   - patch:
       .truecourse/scenarios/recipe.json:
         remove:
-          - api.seed.provides.fixtures
+          - api.seed.provides.fixtures.tc-probe-ghost
         set:
-          api.seed.provides.credentials:
-            tc-probe-ghost-principal:
-              header: X-Tc-Probe-Ghost
+          api.seed.provides.credentials.tc-probe-ghost-principal:
+            header: X-Tc-Probe-Ghost
     cwd: .tc-supplied/api-subject-project
-    note: 'The same over-declaration on the other half of `provides`: a principal the script never mints.'
+    note: >-
+      The same over-declaration on the other half of `provides`: a principal the script never
+      mints, again beside the real one — and the fixture ghost withdrawn, so this run’s stop can
+      only be the credential’s.
   - run:
       - guard
       - run
@@ -148,3 +124,43 @@ steps:
       source. It is reported as a load failure rather than as a seed failure, which is the collision
       being caught by the file’s own shape instead of by whichever stage happened to read it first.
     milestone: seed-credential-name-has-exactly-one-source
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        remove:
+          - api.credentials
+          - api.seed.provides.credentials.tc-probe-ghost-principal
+        set:
+          api.externals:
+            tc-probe-vendor:
+              baseUrlEnv: TC_PROBE_VENDOR_BASE_URL
+              baseUrl: https://sandbox.tc-probe-vendor.test
+              env:
+                TC_PROBE_VENDOR_KEY: {}
+    cwd: .tc-supplied/api-subject-project
+    note: >-
+      Every invented seed declaration withdrawn — the recipe is coherent again, exactly as setup
+      proved it — and in its place one external service supplied in part: a base URL and a variable
+      with nothing behind it, which is the state the run below is supposed to refuse rather than
+      half-honour.
+  - run:
+      - guard
+      - run
+    cwd: .tc-supplied/api-subject-project
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: ^(?=[\s\S]*TC_PROBE_VENDOR_KEY)(?![\s\S]*Running scenarios)(?![\s\S]* passed)[\s\S]*$
+    note: >-
+      The run stops, and stops EARLY. The unmet variable is named, the scenario phase never starts
+      and no pass count is printed — so nothing was booted against a service that would have been
+      called with half its configuration. PRODUCT FINDING (2026-08-10): the docs
+      (external-services.md, "real accounts") promise `guard run` stops with `missing-external-env`
+      whenever a declared service is incomplete, but the engine DELIBERATELY scopes the refusal to
+      scenarios that name the service in `setup.externals` (packages/guard-runner/src/run.ts —
+      field evidence: a run-wide stop turned one half-configured service on the cal.diy bench into
+      zero tests across 93 flows) and refuses the whole run only when nothing else is left. No
+      scenario here names the probe service, so the run proceeds and exits 0. The doc and the
+      engine disagree; the scenario asserts the doc’s promise and stays red until one side is
+      reconciled — the verdict on which side is wrong is the user’s.
+    milestone: externals-incomplete-service-stops-the-run-with-missing-external-env
