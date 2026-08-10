@@ -73,6 +73,15 @@ Binding decisions:
   stays per-milestone inside the one scenario (a blocked claim is a
   milestone-scoped gap, and the scenario grows when blockers clear).
   Supersedes the N-files requirement briefly recorded on #868.
+- **Journeys realize, never originate** (foundational; decided
+  2026-08-10). Flows come from the SPECS and nowhere else; journeys
+  answer only "with what can this flow be realized". A surface the docs
+  do not promise (today, the dashboard server's HTTP API — it exists to
+  serve the UI) is a REALIZATION surface: its journeys are derived and
+  recorded, including the UI-to-API relation, so a scenario can act
+  through it — but it grows flows of its own only on the day the docs
+  promise it as a feature. Testing through the promised surface is
+  enough; the un-promised one is a tool, not a subject.
 - **The driver belongs to the STEP, not the scenario** (foundational;
   decided 2026-08-09). A scenario is driver-agnostic: each step declares
   how it acts (a CLI invocation, an API request), and the sandbox is ONE
@@ -235,21 +244,29 @@ driver enters the corpus the same way (hand-authored journeys, flows, and
 scenarios, reviewed in the dashboard, run by the real runner) before any
 generation is designed for it.
 
-STATUS (2026-08-09) — the current work is the API surface, and its
-finish line is the CLI surface's standard: COMPLETE flows for every
-claim the surface can carry, and a board where every red is exactly one
-of two things — a real product bug (marked as a finding in the failing
-scenario's own note) or a limitation this plan explicitly accepted.
-Nothing else may stay red: an authoring defect gets fixed, an incoherent
-test world gets rebuilt, an environmental red gets rerun. Where the
-wave stands: the api-family flows are authored (8 flows, 76 claims
-placed; the re-reasoned remainder is in the gap ledger by capability
-class); the api-subject fixture mint is next, then the runner grows —
-under the step-level-driver foundation of §2 — until every authored
-flow RUNS. When the API surface meets the finish line, the web surface
-(§10) begins the same ladder. The reference corpus for both is authored
-by agent sessions against this document; generation design still comes
-last, per workstream.
+STATUS (2026-08-10, supersedes the 2026-08-09 block) — the corpus is
+ANALYZE-ONLY by decision: the spec-consolidation and guard coverage
+authored on 2026-08-08/09 is deleted, because it tested the current
+scan/setup/generate engines, which this plan reimplements — a red
+against a doomed engine measures the wrong thing. (The work paid for
+itself before deletion: it forced the §9 runner builds, battle-tested
+the format, and produced the engine-defect findings recorded in PR #872;
+the fixtures it minted are kept on disk for future use, unregistered.)
+
+The current work is covering ANALYZE on its remaining surfaces — the
+dashboard (web, §10) and the dashboard server's HTTP API — under the
+realization ontology of §2: flows come from the specs (the published
+Dashboard doc, AS IT STANDS — a stale doc is wanted test material, and
+its flows failing IS the deliverable; the docs are never pre-fixed to
+help a flow pass), journeys for both surfaces say how flows are
+realized (web scenarios; api or mixed steps through the recorded
+UI-to-API relation), and API-specific flows exist only if the docs ever
+promise an API feature. Split: api journeys derive from the dashboard
+server's routes; the web driver machinery and the web journey contract
+shape are §10's first stage, buildable in parallel (no shared files).
+The finish line is unchanged: a board where every red is a marked
+product finding or an accepted limitation, nothing else. Generation
+design still comes last, per workstream.
 
 We hand-author the IDEAL output for one real repository: TrueCourse
 itself. The spec source (decision 2026-08-06) is TrueCourse's published
