@@ -369,8 +369,8 @@ What Phase 0 still deletes:
 ### 6.1 Scope
 
 The corpus-path scan (relevance, area-tags, vocabulary reconciliation,
-overlap, chains, curation) re-shaped as agent sessions, over a doc
-universe this workstream also acquires.
+overlap, curation) re-shaped as agent sessions, over a doc universe
+this workstream also acquires.
 
 STATUS: design in progress (owner: Doil, from 2026-08-08).
 
@@ -386,10 +386,15 @@ layer built on them belong to §8, by two standing decisions of
 Generate" (§4), and are "produced by this workstream's planning layer"
 (§8.2), which §8.3 keeps as `sections → claims → flows`. The scan's
 output contract is therefore `specs/corpus.json` — the kept docs, their
-area tags, the doc-to-doc relations, and the relevance-dropped docs with
-their reasons — consumed by §8's planning layer as its doc universe.
-`specs/decisions.json`, the user's curated resolutions over that corpus,
-is this workstream's user-decision surface and stays here.
+area tags, the within-area overlaps still awaiting a verdict, and the
+relevance-dropped docs with their reasons — consumed by §8's planning
+layer as its doc universe. `specs/decisions.json`, the user's curated
+resolutions over that corpus, is this workstream's user-decision surface
+and stays here; its verdicts are section-scoped (`conflictResolutions`,
+alongside the manual include/exclude/area overrides). Doc-to-doc
+relations are NOT part of the contract: they existed in an earlier
+version, nothing consumes them now, and a legacy `relations` array is
+dropped on parse — so the scope sentence above names no chains.
 
 **Architecture principle: budget-bounded, never silently thinned**
 (decision 2026-08-08). The scan's cost grows with the corpus, and the
@@ -473,32 +478,85 @@ into a per-doc session; its disposition is settled in §6.3.
 
 ### 6.3 Sessions
 
-Per §3.2, every LLM task is an agent session; these are the seed
-definitions for the owner to refine.
+Per §3.2, every LLM task is an agent session. Common rules: one model
+(§3.4), the standard malformed-turn policy (§3.3), a per-session turn
+budget (defaults below, provisional until the reference benchmark run
+calibrates them) and token ceiling.
 
-- **Doc curation session** (one per doc). Prompt: a spec curator deciding
-  whether this doc describes user-facing behavior worth verifying, and
-  which areas it belongs to. Inputs: the doc's content, the corpus's
-  current area vocabulary, and the corpus doc list (titles and paths).
-  Tools: read another doc (to resolve a reference, or to compare against
-  an area's existing docs before tagging). Done: keep or drop with a
-  reason, plus area tags. This session absorbs today's separate relevance
-  and area-tag calls.
-- **Overlap session** (one per area). Prompt: find the real overlaps and
-  conflicting statements among this area's docs. Inputs: the area's kept
-  docs as titles and outlines, not full contents. Tools: read a doc
-  section. Done: the overlap/conflict set with section anchors, or an
-  explicit "none found". This session is also the answer to the scaling
-  problem above: the engine stops enumerating candidate pairs entirely,
-  and the session narrows its own reading (outlines first, drilling in
-  only where topics collide) under a per-area turn budget, so the bound
-  is an explicit budget, never a silent thinning of what is considered.
-- **Relation session** (one per flagged group). Prompt: decide the
-  doc-to-doc relation (replaces, takes precedence, keep both) for a group
-  the overlap sessions flagged. Inputs: the flagged group with its
-  anchors. Tools: read the disputed sections in full. Done: a proposed
-  relation for every flagged pair, feeding the same curated corpus and
-  user decision surfaces as today.
+Two rules follow from §6.1's principle. A session's turn budget IS the
+bound, so a session that exhausts it ends on a structured
+`budget-exhausted` outcome naming what it did not reach — never an "I
+found nothing" that reads like completeness; the loop already emits the
+matching transcript event (§3.3), and the corpus field for it is the
+§6.2 schema addition. And a step whose deterministic path settles
+everything runs NO session: discovery (the repo walk plus the registered
+web sources), area grouping, the heading-widened membership net, and
+persistence are free string work and stay that way.
+
+Three sessions, in order; each consumes the one before it.
+
+- **Doc curation session** (one per doc, turn budget 5). Prompt: a spec
+  curator deciding whether this doc describes user-facing behavior worth
+  verifying, and which areas it belongs to. Inputs: the doc's content,
+  the corpus's current area vocabulary, and the corpus doc list (titles
+  and paths). Tools: read another doc (to resolve a reference, or to
+  compare against an area's existing docs before tagging). Done: keep or
+  drop with a reason, plus area tags, each a `product/concern` pair. It
+  PROPOSES the axis and does not adjudicate it: labelling each doc
+  independently, it cannot see what the other docs chose, so consistency
+  and the `core` verdict belong to the next session. This session
+  absorbs today's separate relevance and area-tag calls, and that merge
+  is where the scan's cost concentrates: two cheap one-shot calls, each
+  cached per doc content, become one flagship-model session of up to
+  five turns, multiplied by every doc. §6.4 must model it as the
+  dominant term.
+- **Area settling session** (one per corpus, turn budget 8). The only
+  stage that sees the whole area vocabulary at once, so it runs after
+  every doc-curation session and closes both consistency problems. It
+  runs when either axis carries two distinct values (a collision is
+  possible) OR any product is not `core` (a verdict is owed); zero
+  sessions otherwise. The second half of that gate is load-bearing:
+  today's vocabulary normalizer skips whenever BOTH axes have fewer than
+  two values, which is exactly the single-area, single-product shape the
+  reference has — the corpus whose invented `truecourse` product is the
+  defect §6.2 records. Prompt: reconcile the emergent area vocabulary of
+  this corpus. Inputs: the product and concern label sets, and nothing
+  else — today's normalizer is cached on the vocabulary set alone, so a
+  doc edit that does not move a label is free, and that property is kept
+  by keeping doc-level detail OUT of the inputs. Tools: look up which
+  docs carry a label, and read a doc (to decide whether two labels
+  really name one concept) — tool calls do not enter the cache key.
+  Done: the concern merges, the product merges, and a verdict on every
+  non-`core` product — justified, naming the second separately-deployed
+  application, or collapsed to `core`. That collapse is the one mapping
+  today's normalizer forbids ("never to `core`/`process`"); the
+  prohibition exists because no stage had the authority to make the
+  call, and this session does. This is where §6.2's product-axis rule
+  stops being a prompt sentence.
+- **Overlap session** (one per area, turn budget 12). Prompt: find the
+  real overlaps and conflicting statements among this area's docs.
+  Inputs: the area's kept docs PLUS the heading-widened outside docs, as
+  titles and outlines, not full contents. The widening stays: the doc
+  sessions label independently, so the same subject lands under
+  different concerns and the pair would never share an area to be
+  compared. It is free string work, and dropping it would be exactly the
+  silent thinning §6.1 refuses. Tools: read a doc section. Done: the
+  overlap/conflict set with section anchors, an explicit "none found",
+  or `budget-exhausted` naming the docs it did not reach. This session
+  is also the answer to §6.2's scaling problem: the engine stops
+  enumerating and judging candidate PAIRS — it still computes area
+  membership, widening included, deterministically — and the session
+  narrows its own reading (outlines first, drilling in only where topics
+  collide) under the per-area budget, so the bound is an explicit
+  budget, never a silent thinning of what is considered.
+
+There is no relation session. Doc-to-doc relations were removed from the
+design (§6.1) and resolution is section-scoped: the overlap session
+already returns section anchors, and the user resolves each flagged
+disagreement with a `conflictResolutions` verdict carrying both docs and
+both anchors. Reinstating doc-level relations would need its own schema,
+store, and surface, and a reason to reverse the removal; neither exists
+today.
 
 ### 6.4 Estimation algorithm
 
