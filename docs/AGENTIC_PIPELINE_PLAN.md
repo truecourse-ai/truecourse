@@ -235,6 +235,22 @@ driver enters the corpus the same way (hand-authored journeys, flows, and
 scenarios, reviewed in the dashboard, run by the real runner) before any
 generation is designed for it.
 
+STATUS (2026-08-09) — the current work is the API surface, and its
+finish line is the CLI surface's standard: COMPLETE flows for every
+claim the surface can carry, and a board where every red is exactly one
+of two things — a real product bug (marked as a finding in the failing
+scenario's own note) or a limitation this plan explicitly accepted.
+Nothing else may stay red: an authoring defect gets fixed, an incoherent
+test world gets rebuilt, an environmental red gets rerun. Where the
+wave stands: the api-family flows are authored (8 flows, 76 claims
+placed; the re-reasoned remainder is in the gap ledger by capability
+class); the api-subject fixture mint is next, then the runner grows —
+under the step-level-driver foundation of §2 — until every authored
+flow RUNS. When the API surface meets the finish line, the web surface
+(§10) begins the same ladder. The reference corpus for both is authored
+by agent sessions against this document; generation design still comes
+last, per workstream.
+
 We hand-author the IDEAL output for one real repository: TrueCourse
 itself. The spec source (decision 2026-08-06) is TrueCourse's published
 documentation site (the Mintlify-hosted docs): the documentation users
