@@ -73,8 +73,19 @@ Binding decisions:
   stays per-milestone inside the one scenario (a blocked claim is a
   milestone-scoped gap, and the scenario grows when blockers clear).
   Supersedes the N-files requirement briefly recorded on #868.
-- **Journeys realize, never originate** (foundational; decided
-  2026-08-10). Flows come from the SPECS and nowhere else; journeys
+- **The concept is named INTERFACE, one entry per invocable thing**
+  (foundational; decided 2026-08-10). What the catalog stores is the
+  code-derived calling interface, not a user's path — so the word
+  "journey" retires everywhere (stores, schemas, views, CLI copy) in
+  favor of "interface". Granularity follows the api precedent: ONE
+  entry per command or operation, carrying its own fingerprint, with an
+  explicit GROUP for the family it belongs to (the `rules` command
+  tree, the `analyses` route family) — never a tree of commands in one
+  entry, and never independent invocations rendered as sequential
+  steps. Flows reference the exact entries their scenarios invoke. The
+  web surface's contract shape adopts this vocabulary from birth.
+- **Interfaces realize, never originate** (foundational; decided
+  2026-08-10, recorded under the pre-rename word). Flows come from the SPECS and nowhere else; journeys
   answer only "with what can this flow be realized". A surface the docs
   do not promise (today, the dashboard server's HTTP API — it exists to
   serve the UI) is a REALIZATION surface: its journeys are derived and
