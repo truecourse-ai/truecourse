@@ -296,7 +296,7 @@ describe('runGuardFlows --show — the drill-down', () => {
     expect(out).toContain('→ 4 Done tasks appear und…')
     expect(out).toContain('binds       docs/specs/tasks.md  §tasks/creating-tasks · §tasks/listing-tasks · §tasks/completing-tasks')
     expect(out).toContain('surfaces    api → task-lifecycle.api.1 (birth ✓) · web → awaiting driver')
-    expect(out).toContain('interfaces    api/create-task · api/list-tasks · api/complete-task')
+    expect(out).toContain('interfaces  api/create-task · api/list-tasks · api/complete-task')
     expect(out).toContain('gaps        web: awaiting web driver')
   })
 
