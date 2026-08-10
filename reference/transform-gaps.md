@@ -3634,6 +3634,10 @@ its two halves is not proved. The same hole makes every other generated artifact
 there".
 **Owner:** Guard Generate / runner (a `matches` matcher on `GuardFileMatcherSchema`,
 compiled and reported exactly as the stream matchers' is).
+**RESOLVED (2026-08-10):** `matches` landed on the file matcher; the gapped claim moved into
+`prepare-a-service-repository-with-a-database-and-a-seed`, where the regenerated compose file is
+now read as a shape — a pinned `image:` tag that is not `latest`, plus a `healthcheck:` block —
+on the `guard setup --refresh` step that writes it.
 
 ### G61. Nothing can edit a NON-JSON file the scenario does not own
 **What:** G56 asked for a partial-file edit and got one: the `patch` step sets and
@@ -3696,6 +3700,13 @@ mutually exclusive in one recipe by construction.
 **What that costs:** 15 claims gapped, none of them for want of a capability — only for
 want of a SECOND registered repository of the same class: 12 multi-service ones plus
 the compose-file pair, the `${PORT}`-template one, and the three-way seed-draft gate.
+**Grew by one (2026-08-10):** the OpenAPI credential-stub claim
+(`guard-setup-reads-openapi-security-schemes-for-credential-stubs`) joined this class.
+The engine now supersedes a scheme's stub when the drafted seed mints that scheme's
+principal in the same setup (the correct behavior — the stub collision used to abort
+the draft), so on the bound repository, whose only scheme the seed answers, nothing
+observable remains: proving the stub needs an instance with a scheme outside the
+seed's reach.
 **Owner:** Guard Setup (a supplied entry that accepts several named instances, with each
 flow's need naming the one it wants; the local overlay already keys by entry name and
 would key by `<entry>.<instance>`).

@@ -235,21 +235,31 @@ driver enters the corpus the same way (hand-authored journeys, flows, and
 scenarios, reviewed in the dashboard, run by the real runner) before any
 generation is designed for it.
 
-STATUS (2026-08-09) — the current work is the API surface, and its
-finish line is the CLI surface's standard: COMPLETE flows for every
-claim the surface can carry, and a board where every red is exactly one
-of two things — a real product bug (marked as a finding in the failing
-scenario's own note) or a limitation this plan explicitly accepted.
-Nothing else may stay red: an authoring defect gets fixed, an incoherent
-test world gets rebuilt, an environmental red gets rerun. Where the
-wave stands: the api-family flows are authored (8 flows, 76 claims
-placed; the re-reasoned remainder is in the gap ledger by capability
-class); the api-subject fixture mint is next, then the runner grows —
-under the step-level-driver foundation of §2 — until every authored
-flow RUNS. When the API surface meets the finish line, the web surface
-(§10) begins the same ladder. The reference corpus for both is authored
-by agent sessions against this document; generation design still comes
-last, per workstream.
+STATUS (2026-08-10) — the API surface REACHED the finish line. All 8
+api-family flows run; the engine defects the wave surfaced are fixed at
+the root, tests-first: setup's endpoint probe brings `api.services` up,
+`--refresh` preserves hand-authored `api.env`/credentials (a seed-minted
+credential supersedes an unfilled stub), the estimate's three D3 roots
+(epic-call pricing, `gapSections` in the committed manifest, the
+zero-work clone no-op in generate AND estimate), `${supplied:…}` values
+reaching api-driver runs, a `matches` file matcher, scenarios sharing a
+supplied path instance serialized (the port-collision fix), and the
+seed/externals/status/dependencies read surfaces now reading the
+committed manifest instead of gitignored run records — clone-safe. The
+api-subject fixture was re-minted through the real pipeline (the
+original was flows↔manifest incoherent): its own board is 20/20 from a
+cold datastore and a re-generate is a deterministic no-op with an EMPTY
+estimate. The full 70-flow board: 61 green, 9 red, every red a marked
+product finding in the failing scenario's own note — the five inherited
+ones, the externals doc-vs-engine stop conflict, the baseline-commit
+diff-range under-report, and two reds sharing one NEW root: journey
+mapping silently degrades on an UNBUILT working copy (cli probes cannot
+spawn an unbuilt recipe entry) and the first generate manifests that
+partial catalog, so the documented free re-run is unreachable on
+exactly the fresh clones the committed manifest travels for — Guard
+Generate/Setup workstream work. The web surface (§10) begins the same
+ladder next. The reference corpus is authored by agent sessions against
+this document; generation design still comes last, per workstream.
 
 We hand-author the IDEAL output for one real repository: TrueCourse
 itself. The spec source (decision 2026-08-06) is TrueCourse's published
