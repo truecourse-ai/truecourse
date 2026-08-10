@@ -73,6 +73,17 @@ Binding decisions:
   stays per-milestone inside the one scenario (a blocked claim is a
   milestone-scoped gap, and the scenario grows when blockers clear).
   Supersedes the N-files requirement briefly recorded on #868.
+- **The driver belongs to the STEP, not the scenario** (foundational;
+  decided 2026-08-09). A scenario is driver-agnostic: each step declares
+  how it acts (a CLI invocation, an API request), and the sandbox is ONE
+  world that can both start the service and run the CLI — because real
+  promises span surfaces ("create it through the API, the CLI lists it")
+  and a scenario locked to one driver cannot state them. The
+  scenario-level driver is derived, "the drivers its steps use". Every
+  workstream designs against this; nothing new may deepen the
+  scenario-level-driver assumption. Migration details (what "per
+  surface" coverage counts under mixed scenarios) live with the §9
+  entry.
 - **The word is "scenario", never "test"**, in every user-facing surface (CLI
   copy, dashboard copy, summaries, docs). "passing/failing" remain the verdict
   words.
