@@ -708,13 +708,13 @@ source and grouped per vendor (`geocoding-api.open-meteo.com` and `api.open-mete
 service, `open-meteo`). Localhost, `example.com`, private suffixes and XML/JSON-schema namespace
 URLs are never counted. Each service carries the env var(s) the app reads its base URL from,
 with the default URL each falls back to — which is exactly what a `setup.http` stub or an
-`api.externals` account has to override, and what the dashboard's **Dependencies** form and
+`api.externals` account has to override, and what the dashboard's **External APIs** form and
 `truecourse guard externals` pre-fill for you. (URL-literal detection is JS/TS only today;
 Python and C# still detect their SDK imports only.) Guard tells the authoring model about all of
 them and stamps them into the gap — so a blocked flow reads `blocked on stripe: <claim>` and `guard status`
 breaks the blocked count down per service instead of one opaque "external-service" bucket. The
 full detected list also rides `guard/result.json` (`externalServices`) and the dashboard's
-**Dependencies** tab. The other recurring hole has a canonical name too: when what's missing is
+generate overview. The other recurring hole has a canonical name too: when what's missing is
 **pre-existing data** — a record the API can't create through its own endpoints and no fixture
 provides — the flow settles on `missing-data` plus the entity it needed (`blocked on
 missing-data, an already-cancelled booking: <claim>`), which the dashboard reads as "needs seed
@@ -855,8 +855,8 @@ declared with a fabricated variable name, and a service you already declared is 
 
 **"Needs setup" in the dashboard.** A `blocked-on` flow whose missing capability is a service you
 can provide is not the same as one that can never be tested, so Coverage paints it differently: an
-blue **Needs setup** status, ranked directly below real failures, with the service named
-("needs setup: open-meteo") and a **Provide open-meteo → Dependencies** link that goes straight to
+orange **Needs setup** status, ranked directly below real failures, with the service named
+("needs setup: open-meteo") and a **Provide open-meteo → External APIs** link that goes straight to
 the form. Provide the account and those flows author themselves on the next `guard generate` — in
 the window between the two, the same rows say "set up — re-run guard generate" instead. Nothing
 about the gap itself changes: it is still a `blocked-on` gap, still not a failure, and the pass/fail
@@ -865,7 +865,7 @@ counts do not move.
 **Two ways to fill this in without hand-editing JSON.** `truecourse guard setup` walks you through
 provisioning a service (pick it from the detected list, give it a base URL, then paste a key — the
 prompt says which file each answer lands in, and a pasted value is never echoed back). The
-dashboard's **Dependencies** tab (Spec Guard section) is the same thing as a page: one card per
+dashboard's **External APIs** tab (Spec Guard section) is the same thing as a page: one card per
 service with its state, blocked test count and detection evidence, and an inline form that writes
 the declaration to `recipe.json` and the secret to the gitignored overlay.
 `truecourse guard externals` is the read-only view of the same data (its `--list` flag is kept for
@@ -965,6 +965,7 @@ truecourse guard recipe                           # Read-only: the preparation r
 truecourse guard seed                             # Read-only: the database seed (api.seed), the script it names, and the flows blocked on missing data
 truecourse guard externals                        # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
+truecourse guard flows --show <id> --story        # Read that flow's committed tests in plain words (the promise, the world, every assertion)
 truecourse guard flows dismiss <flow-id>          # Rule a flow out of testing (--note <text>); the next generate drops it and deletes its tests
 truecourse guard flows undismiss <flow-id>        # Put a dismissed flow back — the next generate authors tests for it again
 truecourse guard findings                         # The last generate's findings by flow: drift (the repo's) vs tool defect (ours), + the auto-resolved ledger
@@ -983,16 +984,12 @@ defect is a muted marker beside the flow's status, never a red one, and each fai
 carries its triage verdict — *code drift*, *doc drift*, *our defect* — with the concrete
 unblock beside it.
 
-**Every artifact-backed entity is read exactly two ways.** A test, a flow, a journey, a
-claim and the recipe each have a file on disk behind them, so each detail carries the same
-two-mode switch: **View** (the structured page — the entity read, joined and explained) and
-the **stored artifact itself**, read-only, labelled by its format — `YAML` for a test's
-scenario file, `JSON` for a flow's entry in `scenarios/flows.json`, a journey's in
-`guard/journeys.json`, a claim's in `scenarios/claims.json`, and the whole of
-`scenarios/recipe.json` behind the **Recipe** button in the Tests tab's header. The raw pane
-is served from the real file, so what you read in the dashboard is what is committed in the
-repo — with one deliberate exception: an inline credential value in `recipe.json` is masked
-before it leaves the server, exactly as `truecourse guard recipe` masks it in the terminal.
+**Every committed test can be read in plain words.** A test's YAML carries the flow's
+promise, and one shared renderer turns the whole file into sentences — the world it is
+placed in (seeded files, a git history, scripted third-party stubs), what each step does,
+what it remembers for later steps, and what must be true. The dashboard's test detail
+offers it as `View · Story · YAML`; the terminal prints the same words with
+`truecourse guard flows --show <id> --story`.
 
 ---
 
@@ -1010,7 +1007,7 @@ truecourse dashboard uninstall        # Remove the background service
 ```
 
 - **Code Analysis** — architecture graph, violations list, severity/category analytics, code hotspots, trend over time; toggle rules and silence noisy ones inline.
-- **Guard** — Coverage shows each spec doc's sections with their scenario coverage (blocked sections waiting only on a providable third party show as blue **Needs setup**, with a link to the Dependencies form) and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Sources manages the llms.txt documentation sites registered as spec docs — add one by its URL (with a preview of what would be fetched before anything is written), see the pages each fetch wrote and the links it passed over, refresh or remove; Tests lists the committed test corpus with the recipe and last-generate summary; Dependencies shows the third parties the app calls and lets you hand guard a real or sandbox account for each (declaration committed to `recipe.json`, secrets to the gitignored overlay); Runs shows each run's drifts with per-failure evidence.
+- **Guard** — Coverage shows each spec doc's sections with their scenario coverage (blocked sections waiting only on a providable third party show as orange **Needs setup**, with a link to the External APIs form) and walks you through resolving spec conflicts (pick / write custom / mark superseded / include skipped doc); Sources manages the llms.txt documentation sites registered as spec docs — add one by its URL (with a preview of what would be fetched before anything is written), see the pages each fetch wrote and the links it passed over, refresh or remove; Scenarios lists the committed scenario corpus with the recipe and last-generate summary; External APIs shows the third parties the app calls and lets you hand guard a real or sandbox account for each (declaration committed to `recipe.json`, secrets to the gitignored overlay); Runs shows each run's drifts with per-failure evidence.
 
 ---
 
