@@ -549,7 +549,7 @@ unknown, never guessed.
   can read what a command takes and returns at a glance. Facts the
   deterministic extraction and probes cannot establish are recorded as
   unknown, never guessed.
-  Decided 2026-08-09: for an INTERACTIVE command, the contract also
+  Decided 2026-08-09, LANDED 2026-08-09: for an INTERACTIVE command, the contract also
   carries the question sequence — the prompts in order, each with its
   answer kind (pick / free text / confirm) and, where a question only
   appears after a particular earlier answer, that condition. It is a
@@ -1442,7 +1442,7 @@ fixes to the run machinery itself.
 
 ### 9.2 Known problems the design must solve
 
-- **A scoped run replaces the whole board** (field evidence 2026-08-08).
+- **A scoped run replaces the whole board** (field evidence 2026-08-08). STATUS: LANDED 2026-08-09 (mergeGuardBoard).
   Running a single scenario overwrites the recorded current-state view
   with just that one result: every other flow's last verdict is lost and
   reads "never run", even when a full board ran minutes earlier. A scoped
@@ -1453,7 +1453,7 @@ fixes to the run machinery itself.
   produced it. Corollary: a scenario deleted from the corpus drops out of
   the merged view rather than surviving as a stale verdict.
 - **A step cannot reuse what an earlier step produced** (decided
-  2026-08-09: build it, both drivers). Real workflows chain — a CLI
+  2026-08-09: build it, both drivers). STATUS: LANDED 2026-08-09 (capture + comparisons). Real workflows chain — a CLI
   prints an id and the next command takes it; an API response carries an
   id and the next request uses it. A scenario today cannot express that:
   every argument is literal, so any claim of the form "take what it
@@ -1502,7 +1502,7 @@ fixes to the run machinery itself.
   current api-family flows do not need mixing; the first flow that
   states a cross-surface promise does.
 - **A step can edit only whole files — grow a patch step** (decided
-  2026-08-09: build). A flow that must change ONE field of a supplied
+  2026-08-09: build). STATUS: LANDED 2026-08-09 (JSON patch step, runner-only vocabulary). A flow that must change ONE field of a supplied
   instance's structured file (break the build command in the registered
   subject's recipe to prove the error path) cannot: the write step
   replaces whole files, and the test may not invent the rest of a file it
@@ -1511,7 +1511,7 @@ fixes to the run machinery itself.
   patch against a missing file, an unparseable file, or an absent key
   path is that step failing — never a silent create or a partial apply.
 - **Scripted terminal answers must be keyed to their prompts** (field
-  evidence 2026-08-09: build). Today an interactive step's answers are
+  evidence 2026-08-09: build). STATUS: LANDED 2026-08-09 (marker-gated delivery). Today an interactive step's answers are
   typed on a silence heuristic — the child goes quiet, an answer is
   typed — with a bounded retry when the terminal echoes it back. A long
   non-prompt phase before the question (an LLM login preflight with a
