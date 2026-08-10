@@ -1476,6 +1476,20 @@ fixes to the run machinery itself.
   the output shows X" verb, so the resume-from-cache promises (an
   interrupted scan or generate resumes from cache on the next run) stay
   recorded gaps rather than growing process-control machinery.
+- **The driver belongs to the STEP, not the scenario** (decided
+  2026-08-09). A real promise often spans surfaces — "create it through
+  the API, the CLI lists it" — and a scenario that is wholly one driver
+  cannot state it. The target: a scenario is driver-agnostic; each step
+  declares how it acts (a CLI invocation, an API request), the sandbox
+  is ONE world that can both start the service and run the CLI, and the
+  step detail already renders its driver as a per-step chip. The
+  scenario-level driver field becomes derived ("the drivers its steps
+  use"); what "one scenario per (flow, surface)" and per-driver coverage
+  counting mean under mixed scenarios is redefined by the owning
+  workstreams when they land this — the decision here is the principle,
+  not the migration. Sequenced behind the api reference wave: the
+  current api-family flows do not need mixing; the first flow that
+  states a cross-surface promise does.
 - **A step can edit only whole files — grow a patch step** (decided
   2026-08-09: build). A flow that must change ONE field of a supplied
   instance's structured file (break the build command in the registered
