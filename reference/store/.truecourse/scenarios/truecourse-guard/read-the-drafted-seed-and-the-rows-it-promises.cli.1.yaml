@@ -1,0 +1,99 @@
+guard: 3
+id: read-the-drafted-seed-and-the-rows-it-promises.cli.1
+title: A developer reads the drafted seed, what it promises to emit, and the script behind it
+promise: A developer reads the declared seed and what it promises, and changes nothing by reading it
+flow:
+  id: read-the-drafted-seed-and-the-rows-it-promises
+  fingerprint: sha256:00e9e47e12411e703aa61cbdc856f1ed0649465be9c2f7f83e49067dfeb2b65c
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/setup.md
+    section: guard-setup/read-only-companions
+    fingerprint: sha256:dc22b6b0681472c08614422384cbb4f341dffb0b81a3e76965392952bba4e69f
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md
+    section: seeding/let-guard-draft-it
+    fingerprint: sha256:8b4e6125dde7f92c9abb1386ea564f91a92f2cc98c9fc6ebaeba8ccd525c775f
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md
+    section: seeding
+    fingerprint: sha256:e438e2d202aa647532d8f44cd8dfdbfd2c2aedb4a55733cf8e3ea267a1a14576
+needs:
+  - api-subject-project
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - seed
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*\n  command     \S)(?=[\s\S]*\n  script      \S)(?![\s\S]*← MISSING on
+          disk)(?=[\s\S]*\n  fixture     \S+ \([^)]+\))(?=[\s\S]*\n  credential  \S+ → \S+ \(minted
+          at run time\) — \S)(?=[\s\S]*blocked on missing data:)(?=[\s\S]*The seed is yours to
+          edit)[\s\S]*$
+    note: >-
+      One view, all three of its parts. The `command` row is the single shell command the
+      declaration holds; the `script` row is the path the draft recorded, and the absent MISSING
+      marker is that path resolving on disk. The `fixture` row is the `name → [field, …]` shape
+      rendered — a name and a parenthesised field list — and the `credential` row is a name, the
+      header it will be injected under, and the role description that lets authoring pick the right
+      principal. Neither row carries a value anywhere: a credential prints "minted at run time"
+      where a secret would be, which is the declaration being names-only. The third part is the
+      blocked-on-missing-data section, which is the read-only view joining the last generate’s gaps
+      to the seed that would clear them — the reason this command is a view and not a dump of
+      `api.seed`.
+    milestone:
+      - guard-seed-companion-prints-the-seed-and-blocked-flows
+      - seed-command-is-one-shell-command-in-the-repo-root
+      - seed-provides-is-the-static-declaration-of-what-it-emits
+      - seed-declared-credentials-carry-a-header
+      - seed-credential-description-names-the-principal
+      - seed-fixtures-are-name-to-field-list
+      - seed-no-secret-reaches-the-recipe-or-its-fingerprint
+      - seed-drafted-seed-records-the-script-path
+  - git:
+      - status
+      - '--porcelain'
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^\s*$
+    note: >-
+      What the view did NOT do. The whole working tree is clean after it — not just the recipe — so
+      the command that printed a seed, a script path and a fixture list wrote nothing at all. Read
+      against the repository as it was registered, before anything below edits it.
+    milestone: seed-guard-seed-is-read-only
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        remove:
+          - api.seed.script
+    cwd: .tc-supplied/api-subject-project
+    note: >-
+      The optional half taken away. `remove` fails on a key that is not there, so this step is also
+      the proof that the drafted seed had recorded one.
+  - run:
+      - guard
+      - seed
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*\n  command     \S)(?![\s\S]*\n  script      )(?![\s\S]*← MISSING on
+          disk)(?=[\s\S]*\n  fixture     \S+ \()[\s\S]*$
+    note: >-
+      The declaration still loads with no `script` field: the row is gone, the command and the
+      promises are unchanged, and nothing reports a missing file — which is the field being optional
+      rather than merely absent. That the RUNNER ignores it is the run below.
+    milestone: seed-script-field-is-optional-and-ignored-by-the-runner

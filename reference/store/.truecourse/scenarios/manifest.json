@@ -2160,6 +2160,330 @@
       ],
       "generationInputsHash": null,
       "gaps": []
+    },
+    {
+      "flowId": "read-the-api-recipe-as-guard-loaded-it",
+      "flowFingerprint": "sha256:69aeca9644c2a7870f02d3a4e714796d309a2eb1b62ad6ee0e67f266391969c0",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+          "anchor": "the-recipe",
+          "fingerprint": "sha256:ae697b9a5acc171679466c1d729cb0a80a4ec09779ffceebf23f87756f457e1c"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+          "anchor": "the-recipe/the-api-driver-api",
+          "fingerprint": "sha256:a4458acbc6feccae8b2ed2bfe57f95d8028989119cd1db00e635d889f57282b8"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/read-only-companions",
+          "fingerprint": "sha256:dc22b6b0681472c08614422384cbb4f341dffb0b81a3e76965392952bba4e69f"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+          "anchor": "the-recipe/the-api-driver-api/credentials-api-credentials",
+          "fingerprint": "sha256:ce884ce32a4b733d893582ebe0b2d037f73d34a866fd9bdca36a9819e7fff867"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+          "anchor": "the-recipe/the-file-is-yours",
+          "fingerprint": "sha256:07ed5da5f336c433f90aa5c90cfb372b4095a85ac020a3d6029ce40878b0389e"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "read-the-api-recipe-as-guard-loaded-it.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "read-the-drafted-seed-and-the-rows-it-promises",
+      "flowFingerprint": "sha256:00e9e47e12411e703aa61cbdc856f1ed0649465be9c2f7f83e49067dfeb2b65c",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/read-only-companions",
+          "fingerprint": "sha256:dc22b6b0681472c08614422384cbb4f341dffb0b81a3e76965392952bba4e69f"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+          "anchor": "seeding/let-guard-draft-it",
+          "fingerprint": "sha256:8b4e6125dde7f92c9abb1386ea564f91a92f2cc98c9fc6ebaeba8ccd525c775f"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+          "anchor": "seeding",
+          "fingerprint": "sha256:e438e2d202aa647532d8f44cd8dfdbfd2c2aedb4a55733cf8e3ea267a1a14576"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "read-the-drafted-seed-and-the-rows-it-promises.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "declare-a-third-party-account-and-supply-its-key-later",
+      "flowFingerprint": "sha256:a605fe33d9ce70bb62e76872ade7b5790c8ea82ac00175ab0a625fcc2a661e15",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+          "anchor": "external-services/3-real-accounts-api-externals",
+          "fingerprint": "sha256:2f64db9f8bde4762bdf74876c94f9018f37e4786cde16dcb13801b2fc726dd42"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup",
+          "fingerprint": "sha256:1c25a017a3cc551c20ba1eea67733304054bb612e3a95c8f925120a6e3b27bf6"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+          "anchor": "overview/the-pipeline",
+          "fingerprint": "sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+          "anchor": "the-recipe/the-api-driver-api",
+          "fingerprint": "sha256:a4458acbc6feccae8b2ed2bfe57f95d8028989119cd1db00e635d889f57282b8"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/why-a-separate-stage",
+          "fingerprint": "sha256:fade9a94004b2881f478019e08d9fcb9c66e28f52fc2de674782099a9cc575be"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "declare-a-third-party-account-and-supply-its-key-later.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "stop-the-run-when-a-service-or-a-seed-cannot-deliver",
+      "flowFingerprint": "sha256:b396518e602f80c4127e146d8c4dfbc5608b345b055052c60389fecf89d6a832",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+          "anchor": "external-services/3-real-accounts-api-externals",
+          "fingerprint": "sha256:2f64db9f8bde4762bdf74876c94f9018f37e4786cde16dcb13801b2fc726dd42"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+          "anchor": "seeding/the-manifest",
+          "fingerprint": "sha256:fd27b1e468baf1ee689652e4fea4f312a9ccb38a82a1aa1044bc4c45b9ae8b86"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+          "anchor": "seeding",
+          "fingerprint": "sha256:e438e2d202aa647532d8f44cd8dfdbfd2c2aedb4a55733cf8e3ea267a1a14576"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "stop-the-run-when-a-service-or-a-seed-cannot-deliver.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "prepare-a-service-repository-with-a-database-and-a-seed",
+      "flowFingerprint": "sha256:fcb088e3fa2997a6912e95ad2f23a267c2d695f324da3c90580d4c0761a20343",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/how-discovery-works",
+          "fingerprint": "sha256:f1ec6e42fdca1cec95c2638db30cac0eac9e53c2ecc2ee79527695e597baf25e"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup",
+          "fingerprint": "sha256:1c25a017a3cc551c20ba1eea67733304054bb612e3a95c8f925120a6e3b27bf6"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+          "anchor": "overview/the-pipeline",
+          "fingerprint": "sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+          "anchor": "seeding/let-guard-draft-it",
+          "fingerprint": "sha256:8b4e6125dde7f92c9abb1386ea564f91a92f2cc98c9fc6ebaeba8ccd525c775f"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/idempotence-and-refresh",
+          "fingerprint": "sha256:4717a000c23ae63271c0e34cff1170f77f43865b0c5475c6f4aaaa5c36e99b50"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/output",
+          "fingerprint": "sha256:c0026ba7e1b49f7ccb79cef1b9569c3cc9a1fef8de89ce1e5e8bdc2ea0d652b3"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "prepare-a-service-repository-with-a-database-and-a-seed.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "keep-a-hand-edited-seed-when-a-refresh-is-declined",
+      "flowFingerprint": "sha256:c2524ee5b31c6b56cd501887ae05b9032e385c7dc3b742e19eda3c5196067b1a",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+          "anchor": "guard-setup/idempotence-and-refresh",
+          "fingerprint": "sha256:4717a000c23ae63271c0e34cff1170f77f43865b0c5475c6f4aaaa5c36e99b50"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+          "anchor": "seeding/let-guard-draft-it",
+          "fingerprint": "sha256:8b4e6125dde7f92c9abb1386ea564f91a92f2cc98c9fc6ebaeba8ccd525c775f"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "keep-a-hand-edited-seed-when-a-refresh-is-declined.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "drive-a-service-repositorys-api-tests-from-the-cli",
+      "flowFingerprint": "sha256:50d19c5235bd522142446cc3ff8d151c9ab56a40f928f22307ad81b7acfdd868",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+          "anchor": "overview/the-pipeline",
+          "fingerprint": "sha256:7b0a3547044c55b0c8aadb328173114e460eea8e5d069389d14a9aeaa9e0c5ca"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+          "anchor": "guard-generate",
+          "fingerprint": "sha256:5f8270c0033ba9a92d284036f60f5d6ce90de01b75a74d330c1aee8c176adcee"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+          "anchor": "the-recipe/the-api-driver-api",
+          "fingerprint": "sha256:a4458acbc6feccae8b2ed2bfe57f95d8028989119cd1db00e635d889f57282b8"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "drive-a-service-repositorys-api-tests-from-the-cli.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
+    },
+    {
+      "flowId": "reject-an-api-recipe-guard-cannot-load",
+      "flowFingerprint": "sha256:936920e99ef56978c37cdbf0c080c85fb92799460c13ff2f9bce548f5491646d",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+          "anchor": "the-recipe/the-api-driver-api/multiple-services-api-servers",
+          "fingerprint": "sha256:a0aa62493ecdc5e86685fcde3f8e2a2d95ab42c07f8c50ba751eec55de04c682"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-an-api-recipe-guard-cannot-load.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/guard"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
     }
   ]
 }

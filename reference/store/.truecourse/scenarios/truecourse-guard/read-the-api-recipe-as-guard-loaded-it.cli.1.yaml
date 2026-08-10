@@ -1,0 +1,178 @@
+guard: 3
+id: read-the-api-recipe-as-guard-loaded-it.cli.1
+title: A developer reads the api block of a prepared service repository and its masked credentials
+promise: >-
+  A developer reads the api half of the recipe, credentials included, without a secret leaving the
+  file
+flow:
+  id: read-the-api-recipe-as-guard-loaded-it
+  fingerprint: sha256:69aeca9644c2a7870f02d3a4e714796d309a2eb1b62ad6ee0e67f266391969c0
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe
+    fingerprint: sha256:ae697b9a5acc171679466c1d729cb0a80a4ec09779ffceebf23f87756f457e1c
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe/the-api-driver-api
+    fingerprint: sha256:a4458acbc6feccae8b2ed2bfe57f95d8028989119cd1db00e635d889f57282b8
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/setup.md
+    section: guard-setup/read-only-companions
+    fingerprint: sha256:dc22b6b0681472c08614422384cbb4f341dffb0b81a3e76965392952bba4e69f
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe/the-api-driver-api/credentials-api-credentials
+    fingerprint: sha256:ce884ce32a4b733d893582ebe0b2d037f73d34a866fd9bdca36a9819e7fff867
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe/the-file-is-yours
+    fingerprint: sha256:07ed5da5f336c433f90aa5c90cfb372b4095a85ac020a3d6029ce40878b0389e
+needs:
+  - api-subject-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+    TRUECOURSE_NO_PRICE_FETCH: '1'
+normalize: []
+driver: cli
+steps:
+  - run:
+      - guard
+      - recipe
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?=[\s\S]*\n  serve       \S)(?=[\s\S]*\n  health      /)(?=[\s\S]*\n  seed       
+          \S)(?=[\s\S]*\n  seeds cred  \S+ → \S+ \(minted at run time\))(?=[\s\S]*\n  seeds data 
+          \S+ \()[\s\S]*$
+    note: >-
+      The api block, printed. `serve` and `health` are rows only an `api` block produces — a
+      CLI-only recipe prints install/build/entry and stops — so their presence IS "the optional api
+      block holds the api driver’s preparation". The seed rows carry the other claim whole: one
+      `seed` command line, at least one principal it mints and at least one fixture it emits, which
+      is the data AND auth half of `api.seed` in one reading.
+    milestone:
+      - recipe-api-block-is-the-api-driver-preparation
+      - recipe-api-seed-is-the-data-and-auth-seed
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        set:
+          api.credentials:
+            tc-probe-inline:
+              header: X-Tc-Probe-Inline
+              value: tc-probe-inline-secret-value
+            tc-probe-env:
+              header: X-Tc-Probe-Env
+              valueFromEnv: TC_PROBE_KEY
+            tc-probe-login:
+              header: X-Tc-Probe-Login
+              fromRequest:
+                method: POST
+                path: /tc-guard-probe/login
+                capture: token
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      files:
+        .tc-supplied/api-subject-project/.truecourse/scenarios/recipe.json:
+          contains: tc-probe-inline-secret-value
+    note: >-
+      One credential per declared source: an inline `value`, a `valueFromEnv`, and a `fromRequest`
+      login. A patch rather than a write because the recipe is the repository’s own file and the
+      rest of it must stay exactly as setup left it. The assertion is that the secret really is in
+      the file — without it the masking step below would be reading an absence.
+  - run:
+      - guard
+      - recipe
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?![\s\S]*tc-probe-inline-secret-value)(?=[\s\S]*\n  credential  tc-probe-inline →
+          X-Tc-Probe-Inline: •+ \(inline value, masked\))(?=[\s\S]*\n  credential  tc-probe-env →
+          X-Tc-Probe-Env: \$TC_PROBE_KEY)(?=[\s\S]*\n  credential  tc-probe-login →
+          X-Tc-Probe-Login: POST /tc-guard-probe/login \(minted at run start\))[\s\S]*$
+    note: >-
+      Three rows, three sources, one secret that does not appear. Each row carries a header and
+      exactly one source spelling: the inline value is replaced by the mask, the env source prints
+      the variable NAME (a capability, not a secret), and the login source prints the request that
+      mints it. The leading negative lookahead is the masking claim itself — the literal this
+      scenario wrote into the file is nowhere in what the command printed.
+    milestone:
+      - recipe-credential-carries-a-header-plus-one-source
+      - guard-recipe-masks-inline-credential-values
+      - guard-recipe-companion-prints-the-recipe-with-secrets-masked
+  - git:
+      - check-ignore
+      - '-v'
+      - '--'
+      - .truecourse/scenarios/recipe.json
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 1
+      stdout:
+        matches: ^\s*$
+    note: >-
+      Where the `fromRequest` block lives, in git’s own terms: `check-ignore` exits 1 and names
+      nothing for a path no ignore rule covers, so the file the login declaration was just read out
+      of is a committed one. The value it mints never touches it — only the request that produces it
+      does.
+    milestone: recipe-fromrequest-lives-in-committed-recipe-json
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        remove:
+          - api.healthPath
+    cwd: .tc-supplied/api-subject-project
+    note: >-
+      The declared health path taken away, so the printed one below can only be the default. A
+      `remove` fails when the key is not there, which is what makes this step also a check that the
+      repository had one to lose.
+  - run:
+      - guard
+      - recipe
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: ^[\s\S]*\n  health      /\n[\s\S]*$
+    note: >-
+      With no `api.healthPath` in the file, the row still prints and reads exactly `/`. The trailing
+      newline in the pattern is what makes it the ROOT path rather than the prefix of the one that
+      was just removed.
+    milestone: recipe-api-healthpath-defaults-to-root
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        set:
+          api.credentials.tc-probe-inline.satisfies: tc-guard-probe-no-such-scheme
+    cwd: .tc-supplied/api-subject-project
+    note: >-
+      A `satisfies` naming a scheme the corpus cannot possibly declare. The name is this scenario’s
+      own, so the refusal below is about the declaration and not about anything the bound repository
+      happens to be called.
+  - run:
+      - guard
+      - generate
+      - '--llm-transport'
+      - cli
+      - '-y'
+    cwd: .tc-supplied/api-subject-project
+    timeoutMs: 900000
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*credential "tc-probe-inline" declares `satisfies:
+          "tc-guard-probe-no-such-scheme"`)(?=[\s\S]*names no security scheme in any OpenAPI
+          document of the corpus)(?=[\s\S]*Known scheme)(?![\s\S]*Wrote )[\s\S]*$
+    note: >-
+      The stop, and what it tells the reader. Generate exits non-zero naming the offending
+      credential, says the scheme resolves in no OpenAPI document of the corpus, and then lists the
+      ones that DO exist — which is only printable because the bound repository curates an OpenAPI
+      document with at least one security scheme. Nothing was authored: the absent `Wrote` line is
+      the run stopping before the first paid call.
+    milestone: recipe-unknown-satisfies-stops-generate-with-the-known-scheme-names

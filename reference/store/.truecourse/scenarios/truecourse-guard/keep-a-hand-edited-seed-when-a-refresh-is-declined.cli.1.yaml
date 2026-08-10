@@ -1,0 +1,118 @@
+guard: 3
+id: keep-a-hand-edited-seed-when-a-refresh-is-declined.cli.1
+title: A developer refreshes the recipe but declines to replace a hand-edited seed script
+promise: A developer refreshes preparation without losing the seed script they edited by hand
+flow:
+  id: keep-a-hand-edited-seed-when-a-refresh-is-declined
+  fingerprint: sha256:c2524ee5b31c6b56cd501887ae05b9032e385c7dc3b742e19eda3c5196067b1a
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/setup.md
+    section: guard-setup/idempotence-and-refresh
+    fingerprint: sha256:4717a000c23ae63271c0e34cff1170f77f43865b0c5475c6f4aaaa5c36e99b50
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md
+    section: seeding/let-guard-draft-it
+    fingerprint: sha256:8b4e6125dde7f92c9abb1386ea564f91a92f2cc98c9fc6ebaeba8ccd525c775f
+needs:
+  - api-subject-project
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+    TRUECOURSE_NO_PRICE_FETCH: '1'
+normalize: []
+driver: cli
+steps:
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        set:
+          ownHosts:
+            - tc-probe-owned.test
+          api.credentials:
+            tc-probe-kept:
+              header: X-Tc-Probe-Kept
+              valueFromEnv: TC_PROBE_KEPT
+          api.externals:
+            tc-probe-vendor:
+              baseUrlEnv: TC_PROBE_VENDOR_BASE_URL
+              env:
+                TC_PROBE_VENDOR_KEY: {}
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      files:
+        .tc-supplied/api-subject-project/.truecourse/scenarios/recipe.json:
+          contains: tc-probe-owned.test
+    note: >-
+      Three of the four blocks discovery never proposes, written by hand the way a user would. The
+      fourth — `api.seed` — is the registered repository’s own, which is what makes the question
+      below get asked.
+  - git:
+      - add
+      - '--'
+      - .truecourse/scenarios/recipe.json
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+    note: >-
+      The hand-written blocks staged, so the refresh below is measured against a recipe that already
+      contains them rather than against the one the repository was registered with.
+  - git:
+      - commit
+      - '-m'
+      - 'probe: hand-written recipe blocks'
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+    note: >-
+      Committed for the same reason: the diff after the refresh has to be the refresh’s, not this
+      flow’s.
+  - run:
+      - guard
+      - setup
+      - '--refresh'
+      - '--llm-transport'
+      - cli
+    cwd: .tc-supplied/api-subject-project
+    tty: true
+    stdin:
+      - marker: Proceed with setup?
+        answer: 'y'
+      - marker: This repository already has an `api.seed` script. Replace it?
+        answer: 'n'
+    timeoutMs: 3600000
+    expect:
+      exit: 0
+      output:
+        matches: >-
+          ^(?=[\s\S]*This repository already has an `api\.seed` script\. Replace
+          it\?)(?=[\s\S]*seed        skipped: )(?=[\s\S]*replacing it was not confirmed — the
+          existing seed script is untouched)[\s\S]*$
+    note: >-
+      The question is asked before anything is replaced, and answering no is honoured in the run’s
+      own words: the seed step reports itself SKIPPED and says the existing script was left alone.
+      `--refresh` on its own is not consent — the flag re-derives what discovery proposes and stops
+      at the file a human wrote.
+    milestone:
+      - guard-setup-replacing-a-seed-always-asks-first
+      - seed-refresh-replaces-an-existing-seed-and-asks-first
+  - git:
+      - diff
+      - '--'
+      - .truecourse/scenarios/recipe.json
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 0
+      stdout:
+        matches: >-
+          ^(?![\s\S]*\n-\s*"ownHosts")(?![\s\S]*\n-\s*"externals")(?![\s\S]*\n-\s*"credentials")(?![\s\S]*\n-\s*"seed")[\s\S]*$
+    note: >-
+      The four blocks discovery never proposes, read out of the diff as removals that are not there.
+      A refresh that had dropped any of them would show it as a `-` line for that key; the
+      derivation’s own fields may move freely, which is why the assertion is about these four and
+      nothing else.
+    milestone: guard-setup-refresh-preserves-the-blocks-discovery-never-proposes

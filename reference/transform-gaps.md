@@ -3605,3 +3605,105 @@ the scenario sandbox, or a `repo:` file matcher).
 | Guard Setup | G59 (shared with the runner) |
 | Guard Generate | G55, G56, G57 (shared with the runner), G58 |
 | Phase 0 | the externals-need-api decoupling (18 claims) and the two-drivers doc edits (4 claims) |
+
+## The api surface wave (2026-08-09)
+
+The plan's §5 reversal put the api surface back, so the 197 gaps whose reason blamed
+its deletion were re-read against the engine that actually exists. 76 of them became
+milestones of 8 new flows, all cli-driver, all bound to the new supplied class
+`api-subject-project`; 121 kept a gap with a reason naming the capability that really
+stands in the way. Two earlier items are partly overtaken by that re-reading and are
+left standing rather than edited: **G56**'s missing JSON edit now exists as the `patch`
+step (its non-JSON half survives as G61 below), **G57**'s missing cli `capture` now
+exists (the flow-curation claims it covers are still gapped for their own reasons), and
+**G58**'s "182 of this area's gaps are blocked on the api driver" is now zero — which is
+itself the argument for the `blockedBy` key that item asks for, since nothing but a
+grep could have found those 182 sentences to rewrite.
+
+### G60. `expect.files` has no pattern matcher, so a generated file can only be read by substring
+**What:** `GuardFileMatcherSchema` offers `exists` / `absent` / `equals` / `contains`.
+`equals` needs the whole file, which for a file the ENGINE generated is content nobody
+authored; `contains` is a fixed substring. There is no `matches`, which the stream
+matchers have had all along.
+**What that costs:** one claim gapped
+(`guard-setup-generated-compose-pins-one-container-per-engine-with-a-healthcheck`): the
+healthcheck half is a substring and is asserted, but "one PINNED container per detected
+engine" is `image: <name>:<tag>` — a shape, not a string — and a claim proved on one of
+its two halves is not proved. The same hole makes every other generated artifact
+(a drafted seed script, a written compose file) readable only as "this exact word is in
+there".
+**Owner:** Guard Generate / runner (a `matches` matcher on `GuardFileMatcherSchema`,
+compiled and reported exactly as the stream matchers' is).
+
+### G61. Nothing can edit a NON-JSON file the scenario does not own
+**What:** G56 asked for a partial-file edit and got one: the `patch` step sets and
+removes key paths in JSON documents, which is what made most of this wave's recipe
+manipulation possible. It is JSON only, on purpose. `write` replaces a whole file.
+**What that costs:** two claims gapped —
+`guard-setup-generated-compose-is-committable-and-in-the-fingerprint` (the committable
+half is proved; the fingerprint half needs the generated YAML edited, and rewriting it
+wholesale would destroy the generated content the claim is about) and
+`seed-script-content-is-hashed-into-the-recipe-fingerprint` (the hashed file is the
+repository's own seed script, in whatever language its ORM lives in).
+**Owner:** Guard Generate / runner (a line-anchored append, or a `patch` that also
+speaks YAML).
+
+### G62. A `path` registration carries a description and nothing else, so a supplied repository cannot say what a probe may drive
+**What:** `GuardDependencyRegistrationSchema` is a closed union: `env` (named variables),
+`path` (one directory) and `config-dir`. A `path` instance therefore resolves exactly one
+token, `${supplied:<name>.path}`. Everything a scenario would need to KNOW about that
+repository — which operation to call, which route sets a cookie, which one redirects,
+which variable breaks its boot — has nowhere to be registered.
+**What that costs:** the largest gap cluster of this wave, 43 claims — 24 that need a
+second route of the bound repository and 19 that need the app to CALL a third party on
+a route the scenario may name. Every api-driver
+behaviour that needs a second route (capture, `captureHeaders`, redirects, the cookie
+jar and its attributes, `{{cred:…}}` and `{{fixture:…}}` resolution and their masking,
+the `fromRequest` login, the `Authorization` warning) is reachable only through the ONE
+route an api recipe always declares — its health path, which this wave captures out of
+`guard recipe` and drives a probe scenario against. A registration that let an instance
+name a handful of its own operations by ROLE (`a create returning an id`, `a session
+login`, `a redirect`) would clear the cluster without any scenario naming a path.
+**Owner:** Guard Setup (a `path` registration that also declares named facts, or a
+fourth registration kind for "a repository plus the roles its operations play").
+
+### G63. The run store records no per-scenario SERVER facts, so the api driver's whole process half is invisible from outside
+**What:** a run snapshot carries per-scenario verdicts, steps and evidence transcripts of
+the HTTP exchange. It records nothing about the process the api driver started: no port,
+no working directory, no environment keys, no restart count, no exit code, and no count
+of how many servers were alive at once.
+**What that costs:** 33 claims gapped — every sentence the docs write about the server
+process. `PORT` allocation and injection, `api.cwd`'s default and its `repo` mode,
+`api.env` being server-only, `readyTimeoutMs`'s default, one fresh server per scenario,
+a restart on a fresh port, `signal` delivery and its exit code, `api.services` up/down
+running once per run, the seed's ordering and its inherited environment, and the
+externals precedence that resolves into that same environment. A cli scenario can prove
+that the machinery WORKS (the wave does: a probe boots, polls, requests and asserts);
+it cannot prove any statement about HOW.
+**Owner:** Guard Run (a `servers[]` block on the per-scenario run record: per boot the
+port, cwd, the env KEYS applied and where each came from, the exit code, and the
+sequence — the same shape the step list already has).
+
+### G64. One supplied class cannot carry two mutually exclusive instances
+**What:** a catalog entry has one registration and one rolled-up requirement, so all its
+flows share one instance. Two pairs of api claims are contradictory ABOUT THE SUBJECT:
+`guard-setup-reads-docker-compose-for-services` needs a repository that ships a
+datastore-declaring compose file while `guard-setup-generates-a-compose-file-when-the-repo-has-none`
+needs one that ships none, and `recipe-api-port-template-keeps-the-fingerprint-stable`
+needs a server that does NOT read `PORT` while every other api flow needs one that does.
+The multi-service claims (13 of them) are a third case: `api.serve` and `api.servers` are
+mutually exclusive in one recipe by construction.
+**What that costs:** 15 claims gapped, none of them for want of a capability — only for
+want of a SECOND registered repository of the same class: 12 multi-service ones plus
+the compose-file pair, the `${PORT}`-template one, and the three-way seed-draft gate.
+**Owner:** Guard Setup (a supplied entry that accepts several named instances, with each
+flow's need naming the one it wants; the local overlay already keys by entry name and
+would key by `<entry>.<instance>`).
+
+### H-index (api surface wave). Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Setup | G62, G64 |
+| Guard Generate / runner | G60, G61 |
+| Guard Run | G63 |

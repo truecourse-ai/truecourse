@@ -1,0 +1,76 @@
+guard: 3
+id: reject-an-api-recipe-guard-cannot-load.cli.1
+title: A developer writes an api block in both shapes at once and guard refuses to load it
+promise: >-
+  A developer is told exactly why an api block that mixes the one-server and many-server shapes
+  cannot be used
+flow:
+  id: reject-an-api-recipe-guard-cannot-load
+  fingerprint: sha256:936920e99ef56978c37cdbf0c080c85fb92799460c13ff2f9bce548f5491646d
+journey:
+  path:
+    - cli/guard
+  fingerprints:
+    - sha256:e9a6be7d4d84647db4b4451f8c57149baebd34a8d257f0f579db7b57877136bc
+binds:
+  - doc: .truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md
+    section: the-recipe/the-api-driver-api/multiple-services-api-servers
+    fingerprint: sha256:a0aa62493ecdc5e86685fcde3f8e2a2d95ab42c07f8c50ba751eec55de04c682
+needs:
+  - api-subject-project
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    CLAUDE_CODE_BINARY: /tc-guard-probe/no-such-claude
+normalize: []
+driver: cli
+steps:
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        set:
+          api.servers:
+            tc-probe-web:
+              serve:
+                - node
+                - tc-guard-probe/serve.js
+    cwd: .tc-supplied/api-subject-project
+    note: >-
+      A named server map added next to the serve argv the repository already declares. Nothing is
+      removed, so the file now says both things at once.
+  - run:
+      - guard
+      - recipe
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*does not parse:)(?=[\s\S]*a recipe declares either one `api\.serve` or a named
+          `api\.servers` map, never both)[\s\S]*$
+    note: >-
+      Refused, with the rule quoted. The two shapes are alternatives and the file is rejected before
+      anything reads a server out of it, which is what "mutually exclusive" means for a recipe.
+    milestone: recipe-api-serve-and-servers-are-mutually-exclusive
+  - patch:
+      .truecourse/scenarios/recipe.json:
+        remove:
+          - api.serve
+    cwd: .tc-supplied/api-subject-project
+    note: >-
+      The single-server argv withdrawn, leaving a legal `api.servers` map — and, still at the api
+      level, the companions that belong to a server entry.
+  - run:
+      - guard
+      - recipe
+    cwd: .tc-supplied/api-subject-project
+    expect:
+      exit: 1
+      output:
+        matches: >-
+          ^(?=[\s\S]*does not parse:)(?=[\s\S]*belongs to a server entry when the recipe declares
+          `api\.servers` — move it under the server it describes)[\s\S]*$
+    note: >-
+      The second rule, named by the loader: with `api.servers` declared, a health path (or a cwd, or
+      a ready timeout) left at the api level is refused and the reader is told where it goes. That
+      is the field having MOVED into each server entry rather than merely being allowed there.
+    milestone: recipe-api-per-server-cwd-healthpath-readytimeout

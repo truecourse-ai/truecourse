@@ -119,6 +119,22 @@
         {
           "flowId": "detect-the-third-parties-the-repository-calls",
           "need": "a token that answers the login probe setup runs before each of this flow’s three detection passes"
+        },
+        {
+          "flowId": "read-the-api-recipe-as-guard-loaded-it",
+          "need": "a token that answers the login probe `guard generate` runs before it validates the recipe — the run stops at that gate, before the first paid stage, so nothing else is spent"
+        },
+        {
+          "flowId": "declare-a-third-party-account-and-supply-its-key-later",
+          "need": "a token that passes the login probe of the four generate runs this flow prices — every one of them is declined at the confirm or reports nothing to buy, so no stage is ever paid for"
+        },
+        {
+          "flowId": "prepare-a-service-repository-with-a-database-and-a-seed",
+          "need": "a token that answers the login probe setup runs before any work, twice in one session, plus the up-to-two proposal calls a repository whose own manifests do not settle the recipe costs"
+        },
+        {
+          "flowId": "keep-a-hand-edited-seed-when-a-refresh-is-declined",
+          "need": "a token that answers the login probe of one `--refresh` setup driven on a terminal"
         }
       ],
       "services": [
@@ -336,6 +352,49 @@
         {
           "flowId": "detect-the-third-parties-the-repository-calls",
           "need": "a committed `.truecourse/specs/corpus.json` (setup refuses to run without one) and a `recipe.json` with no `api` block, so the three setup runs this flow makes reach the detection step without deriving or verifying anything"
+        }
+      ]
+    },
+    {
+      "name": "api-subject-project",
+      "class": "supplied",
+      "summary": "a repository with a real HTTP API already carried through `spec scan`, `guard setup` and `guard generate` — the api subject guard is pointed AT, and the one thing an api flow can never fabricate: a service that really boots, a database a seed really fills, and a recipe whose `api` block was proved against them",
+      "registration": {
+        "kind": "path",
+        "description": "path to a checked-out project on this machine that serves HTTP and has been through `truecourse spec scan`, `truecourse guard setup` (a recipe WITH an `api` block, a drafted and proved `api.seed`, the detected third parties declared) and `truecourse guard generate` (api-driver scenarios authored and settled); it is COPIED into the sandbox in full (gitignored files included), so the run never touches the original. MAINTENANCE: these flows PATCH the copy’s recipe — credentials, externals, seed declarations — and run real setups against it, so the instance must be one whose install, build, datastore and server all work from a cold checkout on this machine."
+      },
+      "needs": [
+        {
+          "flowId": "read-the-api-recipe-as-guard-loaded-it",
+          "need": "a recipe whose `api` block declares a SINGLE `api.serve` server with an explicit `api.healthPath`, and an `api.seed` that provides at least one fixture and at least one credential — those are the rows this flow reads back; plus a curated OpenAPI document declaring at least one security scheme, so the refusal for an unknown `satisfies` has known names to list"
+        },
+        {
+          "flowId": "read-the-drafted-seed-and-the-rows-it-promises",
+          "need": "an `api.seed` carrying a `script` that exists on disk, at least one fixture with a named field list, and at least one credential with a `description` naming its principal; a last `guard generate` that left at least one flow blocked on missing data, which is the third part of the seed view; and a COMMITTED, clean working tree, so the read-only proof is an empty `git status` rather than a diff that was already there"
+        },
+        {
+          "flowId": "declare-a-third-party-account-and-supply-its-key-later",
+          "need": "a corpus whose last generate settled every section, so the estimate reports “nothing changed” before this flow declares a service and a changed-section count after it; a `guard setup` record whose detection found at least one third party, so the declaration skeleton is there to read before anything is written; and an `api` block to hang the probe declaration off"
+        },
+        {
+          "flowId": "stop-the-run-when-a-service-or-a-seed-cannot-deliver",
+          "need": "at least one committed api scenario, so a run reaches its seed stage at all, and an `api.seed` whose script runs to completion and satisfies its own `provides` — every stop this flow constructs has to be the one it declared, not a seed that was already failing"
+        },
+        {
+          "flowId": "prepare-a-service-repository-with-a-database-and-a-seed",
+          "need": "a real HTTP service over a database: a plain `scripts.start` (or the uvicorn / flask / manage.py / dotnet run invocation its framework implies), a declared route surface carrying a health-shaped route, an OpenAPI document with a `securitySchemes` entry, a connection URL in its own source, migrations that run against a cold datastore, and NO compose file of its own; a machine that can run containers; and a repository small enough for two full setups in one session"
+        },
+        {
+          "flowId": "keep-a-hand-edited-seed-when-a-refresh-is-declined",
+          "need": "a recipe that already declares an `api.seed` with a `script` on disk, so `--refresh` asks the replacement question at all, and a repository whose recipe re-derives successfully, so the refresh reaches the seed step"
+        },
+        {
+          "flowId": "drive-a-service-repositorys-api-tests-from-the-cli",
+          "need": "a committed corpus holding at least one `cli` and at least one `api` scenario, so both drivers are counted; and a declared `api.healthPath` whose route answers 200 with a JSON object body, served by a process that writes at least one non-blank line to its stdout"
+        },
+        {
+          "flowId": "reject-an-api-recipe-guard-cannot-load",
+          "need": "a recipe carrying a single-server `api.serve` block alongside an api-level `healthPath`, `cwd` or `readyTimeoutMs`, so adding an `api.servers` map beside it produces both refusals in turn"
         }
       ]
     }
