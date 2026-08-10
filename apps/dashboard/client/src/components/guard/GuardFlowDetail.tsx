@@ -50,7 +50,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpRight, Ban, Layers, PenLine, Route } from 'lucide-react';
+import { ArrowUpRight, Ban, Cable, Layers, PenLine } from 'lucide-react';
 import { guardFindingClass } from '@truecourse/shared';
 import type {
   GuardClaimIdentity,
@@ -610,7 +610,7 @@ export function GuardFlowDetail({
                       onClick={() => onOpenInterface(id)}
                       className="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left font-mono text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                     >
-                      <Route className="h-3 w-3 shrink-0" />
+                      <Cable className="h-3 w-3 shrink-0" />
                       <span className="truncate">{id}</span>
                     </button>
                   ))}

@@ -1,9 +1,10 @@
 /**
  * The Interfaces tab's LEFT PANEL — the code-derived catalog, grouped by surface
- * (a driver-registry id) with a sticky header per group. Each row is one interface:
- * its id, its entry descriptor, and how many FLOWS use it (the reverse index —
- * realized or matched-but-blocked; zero means code the spec never mentions, the
- * future infer signal).
+ * (a driver-registry id) and, inside a surface, by FAMILY (the catalog's `group`:
+ * the `rules` command tree, the `analyses` route family), with a sticky header per
+ * group. Each row is one interface: its id, its entry descriptor, and how many
+ * FLOWS use it (the reverse index — realized or matched-but-blocked; zero means
+ * code the spec never mentions, the future infer signal).
  *
  * The list — its search, its grouping chrome, its preview/pin rows and the
  * scroll-to-selection a cross-navigation jump needs — is the shared
@@ -29,20 +30,47 @@ function usageHint(iface: GuardInterfaceRow): string {
   return `Used by ${n} flow(s); ${blocked} blocked before a test could be written.`;
 }
 
-/** One interface per surface group, in first-seen order. */
-function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterfaceRow>[] {
-  const groups = new Map<string, GuardInterfaceRow[]>();
-  for (const j of interfaces) {
-    const list = groups.get(j.type) ?? [];
-    list.push(j);
-    groups.set(j.type, list);
+/** Bucket rows by a key, keeping both the buckets and their rows in first-seen order. */
+function bucket(
+  rows: GuardInterfaceRow[],
+  keyOf: (row: GuardInterfaceRow) => string | undefined,
+): Map<string, GuardInterfaceRow[]> {
+  const buckets = new Map<string, GuardInterfaceRow[]>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (key === undefined) continue;
+    const list = buckets.get(key) ?? [];
+    list.push(row);
+    buckets.set(key, list);
   }
-  return [...groups.entries()].map(([surface, rows]) => ({
-    key: surface,
-    label: `${guardDriver(surface)?.label ?? surface}${rows[0]?.source ? ` · ${rows[0].source}` : ''}`,
-    count: rows.length,
-    items: rows,
-  }));
+  return buckets;
+}
+
+/**
+ * The surface outside, the FAMILY inside — both in first-seen order, so the panel
+ * reads in the catalog's own order. Family is scoped to the surface, as the catalog
+ * scopes it: a cli `rules` tree and an api `rules` route family are two families.
+ * An entry the derivation left ungrouped belongs to no family and is not invented
+ * one — it sits at its surface's top under no header at all.
+ */
+function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterfaceRow>[] {
+  return [...bucket(interfaces, (j) => j.type).entries()].map(([surface, rows]) => {
+    const group: EntityListGroup<GuardInterfaceRow> = {
+      key: surface,
+      label: guardDriver(surface)?.label ?? surface,
+      count: rows.length,
+    };
+    const families = bucket(rows, (j) => j.group);
+    if (families.size === 0) return { ...group, items: rows };
+    const loose = rows.filter((j) => !j.group);
+    return {
+      ...group,
+      groups: [
+        ...(loose.length > 0 ? [{ key: '', label: '', items: loose }] : []),
+        ...[...families.entries()].map(([family, items]) => ({ key: family, label: family, items })),
+      ],
+    };
+  });
 }
 
 export function GuardInterfacesPanel({

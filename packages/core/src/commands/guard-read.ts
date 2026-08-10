@@ -1504,6 +1504,9 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
     id: j.id,
     type: j.type,
     title: j.title,
+    // The family passes through verbatim — a catalog that established none carries
+    // none, and the panel groups by what is there.
+    ...(j.group ? { group: j.group } : {}),
     entry: j.entry,
     steps: j.steps,
     ...(j.startingState ? { startingState: j.startingState } : {}),

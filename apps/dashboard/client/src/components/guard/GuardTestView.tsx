@@ -61,7 +61,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowUpRight, ChevronDown, ChevronRight, Copy, Route } from 'lucide-react';
+import { ArrowUpRight, Cable, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import type {
   GuardFailureDetail,
   GuardInterfaceRow,
@@ -747,7 +747,7 @@ export function GuardScenarioBody({
                       disabled={!onOpenInterface}
                       className="mb-1 inline-flex items-center gap-1 font-mono text-[11px] text-primary hover:underline disabled:no-underline"
                     >
-                      <Route className="h-3 w-3" />
+                      <Cable className="h-3 w-3" />
                       {id}
                     </button>
                     {iface ? (

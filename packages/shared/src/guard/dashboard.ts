@@ -1027,6 +1027,13 @@ export const GuardInterfaceRowSchema = z
     /** The surface — a driver-registry id. */
     type: GuardDriverIdSchema,
     title: z.string(),
+    /**
+     * The FAMILY this entry belongs to (the `rules` command tree, the `analyses`
+     * route family) — passed through from the catalog verbatim and scoped to
+     * `type`, so the panel can show the tree the per-entry granularity dissolved.
+     * Absent where the derivation established no family.
+     */
+    group: z.string().optional(),
     entry: InterfaceEntrySchema,
     steps: z.array(InterfaceStepSchema),
     /** The state the task starts from — passed through from the catalog verbatim. */

@@ -17,12 +17,16 @@ import { setupTestFixture, teardownTestFixture, type TestFixture } from '../help
  *    unchanged and grows no empty `contract` key — absence must survive the
  *    compose, or the view can't tell "not derived" from "nothing";
  *  - an interface WITH one arrives byte-identical, `unknown` exit statuses included.
+ *
+ * The entry's FAMILY (`group`) rides the same wire — the panel groups the catalog
+ * by it — and follows the same absence rule.
  */
 
 const CONTRACT_INTERFACE = {
   id: 'cli/tasks-add',
   type: 'cli',
   title: 'tasks add',
+  group: 'tasks',
   entry: { command: ['tasks', 'add'] },
   steps: [{ kind: 'invoke', command: ['tasks', 'add'], flags: ['--json', '--priority'] }],
   fingerprint: 'sha256:j1',
@@ -121,6 +125,13 @@ describe('Guard interfaces — the contract passthrough', () => {
     expect(produces.exits.map((e: { exit: string }) => e.exit)).toEqual(['0', 'unknown']);
     // An authored EMPTY list is a fact ("none"), so it must not be dropped.
     expect(produces.writes).toEqual([]);
+  });
+
+  it('carries the entry’s family through, and invents none where the catalog has none', async () => {
+    const res = await request(app).get(url('interfaces')).expect(200);
+    const rows = res.body.interfaces as { id: string; group?: string }[];
+    expect(rows.find((j) => j.id === 'cli/tasks-add')!.group).toBe('tasks');
+    expect('group' in rows.find((j) => j.id === 'cli/tasks-list')!).toBe(false);
   });
 
   it('an interface with no contract grows no empty one — absence survives the compose', async () => {

@@ -4,8 +4,8 @@
  * fresh catalog, so the tab re-renders from the response — no refetch, no socket),
  * the detected-surface banner (only surfaces this repo actually has: runnable ✓ /
  * awaiting ⚠ / interface count), the per-surface catalog with the reverse index onto
- * the flows, the sequence diagram, and the "Used by flows" click-through into the
- * Flows tab.
+ * the flows, the per-surface FAMILIES the catalog groups its entries into, the
+ * sequence diagram, and the "Used by flows" click-through into the Flows tab.
  *
  * Fixture: the plan's taskbird cli catalog — three grounded interfaces plus one no
  * flow mentions (the candidate spec gap).
@@ -106,6 +106,35 @@ const CLI_AND_WEB: GuardInterfacesView = {
     s.surface === 'web' ? { ...s, interfaces: 1, detected: true, source: 'probes' as const } : s,
   ),
   totals: { interfaces: 6, detectedSurfaces: 2, grounded: 4, ungrounded: 2 },
+};
+
+/**
+ * A catalog whose entries carry the FAMILY the derivation put them in: two cli
+ * trees, one entry in no family at all (`version`), and — on the web surface — a
+ * family that happens to share the `rules` name and means its own thing.
+ */
+const FAMILIES: GuardInterfacesView = {
+  ...MAPPED,
+  interfaces: [
+    iface('version', 'version', [], []),
+    { ...iface('rules-list', 'rules list', [], []), group: 'rules' },
+    { ...iface('analyses-list', 'analyses list', [], []), group: 'analyses' },
+    { ...iface('rules-disable', 'rules disable', [], []), group: 'rules' },
+    {
+      id: 'web/rules-page',
+      type: 'web',
+      title: 'Rules page',
+      group: 'rules',
+      entry: { command: ['web'] },
+      steps: [{ kind: 'navigate', route: '/rules' }],
+      fingerprint: 'sha256:web-rules-page',
+      flows: [],
+      scenarioIds: [],
+      source: 'probes',
+    },
+  ],
+  surfaces: CLI_AND_WEB.surfaces,
+  totals: { interfaces: 5, detectedSurfaces: 2, grounded: 0, ungrounded: 5 },
 };
 
 /**
@@ -392,6 +421,20 @@ const renderPane = (view: GuardInterfacesView, url = '/repos/r?tab=interfaces') 
 
 const search = () => screen.getByTestId('search').textContent ?? '';
 
+/**
+ * The catalog panel in render order: every group header as `# label`, interleaved
+ * with the row ids between them — the one reading that shows WHAT nests under WHAT.
+ */
+const catalogOutline = () =>
+  Array.from(
+    screen
+      .getByRole('list', { name: 'Interface catalog' })
+      .querySelectorAll<HTMLElement>('.sticky, [role="listitem"]'),
+  ).map((el) => {
+    const text = el.querySelector('span')?.textContent ?? '';
+    return el.getAttribute('role') === 'listitem' ? text : `# ${text}`;
+  });
+
 describe('Interfaces tab — unmapped → Map → mapped', () => {
   it('offers the free Map CTA while nothing is mapped, then swaps in the response', async () => {
     const user = userEvent.setup();
@@ -420,6 +463,14 @@ describe('Interfaces tab — the detected-surface banner', () => {
     // The wire still carries API / Desktop rows; undetected, they say nothing.
     expect(screen.queryByText(/API · /)).not.toBeInTheDocument();
     expect(screen.queryByText(/Needs desktop driver/)).not.toBeInTheDocument();
+  });
+
+  it('names the surfaces and nothing else — how a catalog was derived is store data', () => {
+    renderPane(CLI_AND_WEB, '/repos/r?tab=interfaces&ginterface=web%2Ftasks-board');
+    // `tree` / `probes` is a degradation marker the store keeps; no reading of the
+    // page — chip, hover or the open interface's byline — says it.
+    expect(screen.getByText('Web interfaces are mapped.')).toBeInTheDocument();
+    expect(screen.queryByText(/\btree\b|\bprobes\b/)).not.toBeInTheDocument();
   });
 
   it('renders nothing at all when no surface was detected — not an empty banner shell', () => {
@@ -452,7 +503,7 @@ describe('Interfaces tab — the mapped catalog', () => {
   it('groups the catalog by surface and carries the reverse index onto the flows', async () => {
     renderTab();
     const list = await screen.findByRole('list', { name: 'Interface catalog' });
-    expect(within(list).getByText('CLI · tree')).toBeInTheDocument();
+    expect(within(list).getByText('CLI')).toBeInTheDocument();
     // Four interfaces are used by one flow each — the three realized ones AND the
     // one whose flow matched but was blocked before a scenario could be written.
     expect(within(list).getAllByText('1 flow')).toHaveLength(4);
@@ -657,6 +708,70 @@ describe('Interfaces tab — the mapped catalog', () => {
     await user.click(screen.getByLabelText('Close cli/tasks-add'));
     expect(await screen.findByText('Select an interface')).toBeInTheDocument();
     expect(screen.getByText('Detected surfaces')).toBeInTheDocument();
+  });
+});
+
+/**
+ * One entry is one invocable thing, so the tree a reader knows — `rules`,
+ * `analyses` — only survives in the catalog's per-entry FAMILY. The panel shows it
+ * as the inner level of the one grouping mechanism: surface outside, family inside.
+ */
+describe('Interfaces tab — the families inside a surface', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(FAMILIES) : json({}))),
+    );
+  });
+
+  it('nests each family under its surface, in first-seen order and scoped to it', async () => {
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+    // Families read in the order the catalog first names them, never alphabetically,
+    // and the two `rules` headers are two families — one per surface.
+    expect(catalogOutline()).toEqual([
+      '# CLI',
+      'cli/version',
+      '# rules',
+      'cli/rules-list',
+      'cli/rules-disable',
+      '# analyses',
+      'cli/analyses-list',
+      '# Web',
+      '# rules',
+      'web/rules-page',
+    ]);
+  });
+
+  it('keeps the surface as the outer level and the interface rows as they were', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const list = await screen.findByRole('list', { name: 'Interface catalog' });
+    // The surface header still carries its own tally over every row beneath it.
+    expect(within(list).getByText('CLI').closest('div')).toHaveTextContent('4');
+    // A family header is the group NAME and nothing else — no tally line of its own
+    // beside it, no count of flows, no prose.
+    expect(within(list).getByText('analyses').closest('div')?.textContent).toBe('analyses1');
+    // Rows are unchanged: a click still previews the interface into the URL.
+    await user.click(within(list).getByText('cli/rules-disable'));
+    expect(search()).toContain('ginterface=cli%2Frules-disable');
+  });
+
+  it('leaves a catalog with no families flat — no invented "other" group', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(MAPPED) : json({}))),
+    );
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+    expect(catalogOutline()).toEqual([
+      '# CLI',
+      'cli/tasks-add',
+      'cli/tasks-list',
+      'cli/tasks-done',
+      'cli/tasks-purge',
+      'cli/telemetry',
+    ]);
   });
 });
 

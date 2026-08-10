@@ -23,7 +23,7 @@
  * or that entry verbatim ({@link ArtifactModeSwitch}).
  */
 
-import { Loader2, Route, FlaskConical } from 'lucide-react';
+import { Cable, Loader2, FlaskConical } from 'lucide-react';
 import type { GuardInterfaceRow, GuardInterfacesView } from '@truecourse/shared';
 import { guardDriver, interfaceEntryLabel } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
@@ -92,7 +92,7 @@ function SurfaceBanner({ view }: { view: GuardInterfacesView }) {
           <HoverPopover portal
             key={s.surface}
             width="narrow"
-            content={`${s.label} interfaces are mapped${s.source ? ` from the ${s.source}` : ''}.`}
+            content={`${s.label} interfaces are mapped.`}
           >
             <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${tone}`}>
               {s.label} · {state}
@@ -147,14 +147,14 @@ export function GuardInterfacesPane({
   }
   if (!view) {
     return (
-      <EmptyState icon={Route} title="No interface catalog" body="Interfaces are derived from the working tree." />
+      <EmptyState icon={Cable} title="No interface catalog" body="Interfaces are derived from the working tree." />
     );
   }
 
   if (view.unavailable === 'no-working-tree') {
     return (
       <EmptyState
-        icon={Route}
+        icon={Cable}
         title="No working tree to map"
         body="Hosted repos map their surfaces during the server-side generate."
       />
@@ -166,14 +166,14 @@ export function GuardInterfacesPane({
     ...t,
     label: t.id,
     title: view.interfaces.find((j) => j.id === t.id)?.title ?? t.id,
-    icon: Route,
+    icon: Cable,
   }));
 
   const body = (() => {
     if (!view.mapped || view.interfaces.length === 0) {
       return (
         <EmptyState
-          icon={Route}
+          icon={Cable}
           title="No interfaces mapped yet"
           body={
             <button
@@ -191,7 +191,7 @@ export function GuardInterfacesPane({
 
     if (!active) {
       return (
-        <EmptyState icon={Route} title="Select an interface" body="Select an interface." />
+        <EmptyState icon={Cable} title="Select an interface" body="Select an interface." />
       );
     }
 
@@ -216,7 +216,6 @@ export function GuardInterfacesPane({
         <h2 className="mt-1 text-sm font-semibold text-foreground">{active.title}</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
           entry {interfaceEntryLabel(active.entry)}
-          {active.source ? ` · derived from the ${active.source}` : ''}
           {view.generatedAt ? ` · mapped ${formatGuardTime(view.generatedAt)}` : ''}
         </p>
         {active.specOnly ? (
