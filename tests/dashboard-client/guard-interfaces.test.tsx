@@ -770,12 +770,12 @@ describe('Interfaces tab — the families inside a surface', () => {
     // second full-weight header the eye reads as another surface.
     expect(header('analyses').className).toMatch(/font-medium/);
     expect(header('analyses').className).not.toMatch(/font-semibold/);
-    expect(header('analyses').className).toMatch(/pl-6/);
+    expect(header('analyses').className).not.toMatch(/pl-6/);
 
     // …and its rows line up under its label, while an entry in no family stays at
     // the surface's own edge — so which rows a family owns is readable off the gutter.
     const row = (id: string) => within(list).getByText(id).closest('[role="listitem"]') as HTMLElement;
-    expect(row('cli/analyses-list').className).toMatch(/pl-6/);
+    expect(row('cli/analyses-list').className).not.toMatch(/pl-6/);
     expect(row('cli/version').className).not.toMatch(/pl-6/);
   });
 

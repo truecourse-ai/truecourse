@@ -236,7 +236,7 @@ function GroupHeader<T>({ group, depth, open, onToggle }: {
   // A subordinate header is the SAME header, one step down: lighter weight, a
   // hairline rule and the label indented, so the level it heads is legible at a
   // glance. It stays opaque — it sticks, and rows must not read through it.
-  const level = group.subordinate ? 'pl-6 border-border/60 font-medium' : 'border-border font-semibold';
+  const level = group.subordinate ? 'border-border/60 font-medium' : 'border-border font-semibold';
   const tone =
     group.tone ?? (group.subordinate ? 'bg-card text-muted-foreground/80' : 'bg-card text-muted-foreground');
   const body = (

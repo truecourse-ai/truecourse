@@ -103,7 +103,6 @@ export function GuardInterfacesPanel({
       itemId={(j) => j.id}
       // An entry in a family sits under its family header; one in no family stays
       // at the surface's own edge.
-      rowClassName={(j) => (j.group ? 'pl-6' : undefined)}
       activeId={activeId}
       onOpen={onOpen}
       loading={loading}
