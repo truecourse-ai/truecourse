@@ -3875,3 +3875,160 @@ so no journey identity moves).
 |---|---|
 | Guard Setup | G65, G66, G67, G68, G69, G70, G71, G73 |
 | Guard Setup with Web Driver (§10) | G72 |
+
+## The web surface wave (2026-08-10)
+
+The §10 reference ladder's stage 1, opened on the plan's first subject: the
+dashboard's analyze page. One mixed flow
+(`review-analysis-and-silence-a-rule-in-the-dashboard`) composed of the four
+dashboard-UI statements the CLI wave consciously refused (promoted out of
+`untestable[]`), and the manifest entry that records the web driver as the
+awaiting gap.
+
+**Re-scope 2026-08-11 (user review).** The first draft's journey
+(`web/repo-analyze`) was a page-rooted ELEMENT INVENTORY — 64 steps, one per
+interactive element — and the review rejected it: an inventory does not read
+as a journey and is not one. Replaced by three TASK journeys, each one thing
+a user can do from a specific state, walked in order by the flow:
+`web/open-repo-report`, `web/silence-rule-from-violation-card`,
+`web/reenable-rule-from-rules-panel`. Two consequences for the ledger below:
+
+- `startingState` / `endState` landed on `JourneySchema` (and the journeys
+  view renders them) — the state-contract half of what G75 said had no home
+  is now carried; G75's remaining substance is the consumes/effects half.
+- The fingerprint now covers only the entry route and the task's steps. The
+  full element inventory (the G76 material) is no longer stored ANYWHERE —
+  it reverts to extraction-time material per §10.4, and "does the fingerprint
+  under-cover the surface" moves from G76 into the owner's segmentation
+  design. G76's dynamic-name facts still bite wherever a task step needs a
+  data-driven target (`link "{repoName}"`, `switch "Enable {rule}"` — both
+  in the task journeys today, leaning on substring name matching).
+
+Everything below is what the authored ideal states and the store schemas
+cannot yet carry; the journeys' steps, state contracts, and the flow itself
+are carried in full.
+
+### G74. A web journey has no route-rooted entry
+**What:** §10.4 defines a web journey's identity as "the route (path pattern +
+the surface serving it)". `JourneyEntrySchema` is a union of the command entry
+(argv path) and the operation entry (method + path) — there is no route entry.
+`web/repo-analyze` is authored with the operation entry `GET /repos/{repoId}`
+as the closest parseable shape: a browser does GET that URL, but the method is
+noise (it is a client-side React Router route, not an HTTP operation), and
+`journeyEntryLabel` renders it as an api operation.
+**What that costs:** the journey's identity carries a fact nobody established
+(the method), and the entry cannot say WHICH surface serves the route.
+**Owner:** Web Driver (§10.4 — a `{ route }` entry shape; when it lands, the
+entry-identity fold must either keep this journey's fingerprint where it is or
+move it once, deliberately, before any web scenario exists to re-author).
+
+### G75. The journey contract cannot carry a page's calling interface
+**What:** `JourneyContractSchema.commands` is argv-shaped — options,
+positionals, stdout/stderr markers, exit codes, TTY prompts. A page's contract
+per §10.4 is none of those, so `web/repo-analyze` carries NO contract block and
+the interface facts live only here:
+- **Consumes (route + query):** `repoId` (route param; empty ⇒ redirect `/`);
+  query params `section` (codequality|guard), `tab`, `gview`, `file`, `flow`,
+  `guard`, `gconf`, `gflow`, `gfind`, `gjourney`, `gclaim`, `view` (=diff),
+  `mode`, `scopeService`, `scopeModule` (`NavigationContext.tsx`,
+  `ViewModeContext.tsx`, `GraphViewContext.tsx`). Tab-scoped params are
+  deleted on tab/section switches; `view=diff` survives tab switches only.
+- **Element kind nuance:** the step vocabulary collapses §10.4's
+  click/submit/input/navigate kinds into `activate`/`input`, and a step target
+  is one string (`role "name"`) — role and accessible name are not separate
+  facts, and the owning component has no field at all.
+- **Produces (navigations):** brand link → `/`; missing `repoId` → `/`;
+  section switcher → `?section=&tab=<default>`; left-rail tab → `?tab=`;
+  diff toggle → `?view=diff`; depth/scope → `?mode`/`?scopeService`/
+  `?scopeModule`; "Open" on a violation card → `?file=<path>`; GitHub/Discord
+  → external, new tab. Run-history select and every violations filter are
+  state-only (no URL change).
+- **Produces (API effects, one-hop through `lib/api.ts` `fetchApi`):** on
+  load `GET /api/capabilities`, `GET /api/repos/{repoId}`,
+  `GET /api/repos/{repoId}/violations`, `…/analyses`, `…/spec/staleness`,
+  `…/guard/staleness`, `…/analytics/{trend,breakdown,top-offenders,resolution}`,
+  `…/violations/code-summary`; `?view=diff` adds `…/analyses/diff`; tab-gated
+  `…/graph`, `…/flows`. Per interaction: Analyze →
+  `POST /api/repos/{repoId}/analyses` `{mode:'full'|'diff'}` (202); Cancel →
+  `POST …/analyses/cancel`; Disable rule → `PATCH …/rules/{ruleKey}`
+  `{enabled:false}`; Browse Rules → `GET …/rules`; Delete analysis →
+  `DELETE …/analyses/{analysisId}`; node drag / auto-layout →
+  `PUT`/`DELETE …/graph/positions`. Theme and graph display toggles are
+  localStorage-only.
+- **Produces (socket, socket.io same origin):** client emits `joinRepo`,
+  `leaveRepo`, `analysis:llm-proceed`, `analysis:stash-confirm-response`;
+  server pushes `analysis:{progress,complete,canceled,llm-estimate,
+  llm-resolved,stash-confirm-request}`, `violations:ready`, `spec:{progress,
+  complete}`, `files:changed`. The estimate and stash dialogs open ONLY off
+  server pushes — no client element leads to them, which no static grammar
+  can say today.
+- **Readiness ("the page settled"):** no polling anywhere; settled =
+  `analysis:progress` stream ended (progress overlay gone), the Analyze
+  button's accessible name is back to "Analyze" and it is enabled, and the
+  violations list is past its spinner. Run state is restored server-side on
+  load (`repo.latestAnalysis.status`).
+**Owner:** Web Driver (§10.4's elements/effects contract regions; the
+frontend→API join is the one-hop resolution over the analyzer's cross-file
+call data).
+
+### G76. Element steps cannot carry dynamic accessible names, so a real page's surface is only partly steppable
+**What:** a step's target is a literal string, and nothing marks a name as
+state-flipping, count-suffixed, data-driven, title-only, placeholder-only, or
+colliding. Stepped with their RESTING names and the caveat lost: "Analyze"
+(⇄ "Analyzing..."), "Copy Fix" (⇄ "Copied!"), "Code Analysis" (section
+trigger, ⇄ "Spec Guard"), "Latest" (run-history trigger, ⇄ a locale-formatted
+date), category/severity filters ("Security" renders "Security {count}"),
+"Disable rule for this repo" (renders with `{ruleKey}` + explainer appended).
+Not stepped at all, each for a stated reason:
+- **Dynamic name pairs with no restable form:** the graph edge/animation/
+  collapse/select-mode toggles ("Show all edges"⇄"Show edges on hover only",
+  "Expand All"⇄"Collapse All", …), the scope pickers (name = current
+  selection), per-run history items (locale dates), per-rule switches in the
+  Rules panel (`aria-label` "Enable {rule.name}"/"Disable {rule.name}").
+- **Unlocatable (no role, no accessible name — the §10.3 policy refuses to
+  guess):** the icon-only back-arrow link, the sidebar resize handle, every
+  ReactFlow node/edge/minimap/pane, node collapse chevrons, recharts slices
+  and bars, sortable `<th onClick>` headers, `<tr onClick>` analytics rows,
+  the Live/Offline pill.
+- **Name collisions on one surface:** two `button "All"` (detection-type vs
+  category filter) — stepped once; `button "Cancel"` names three distinct
+  controls (estimate cancel, progress cancel, modal close-by-title).
+- **Dialogs with `role="dialog"` and no accessible name:** the LLM estimate
+  and stash modals — `getByRole('dialog', {name})` cannot address them.
+**What that costs:** the fingerprint under-covers the surface (a renamed
+toggle pair moves nothing), and a future generator cannot learn the
+answer-a-dialog path from the journey alone.
+**Owner:** Web Driver (element facts with role + name + dynamism separated),
+plus a dashboard a11y debt list the diagnostics channel should carry (G78).
+
+### G77. The recipe cannot describe how a web surface starts
+**What:** `recipe.json` carries the cli build + entry (and the api wave's
+serve block); §10.5 needs "how the web surface starts and how readiness is
+observed (URL probe)". The reference flow's scenario will need the dashboard
+server AND the built client serving against the sandbox store before its
+first web step, and no recipe field can say so.
+**What that costs:** the flow's starting state names the serving dashboard in
+prose only; nothing machine-readable blocks or boots it.
+**Owner:** Web Driver / Guard Setup (the web-surface recipe kind of §10.5,
+reusing the api server-boot machinery).
+
+### G78. Web mapper diagnostics have no store home (G37's web form)
+**What:** authoring surfaced doc-vs-code and a11y findings with nowhere to
+live: the docs' "Rules panel (Shield icon in the top-right)" is rendered as a
+"Browse Rules" control in the violations toolbar (`HomePanel.tsx`) — the flow
+is authored to the doc and will run red as doc drift; the a11y debts of G76
+(nameless dialogs, unlocatable graph region, placeholder-only inputs) are
+exactly what §10.4 calls recorded mapper diagnostics feeding reconciliation.
+**What that costs:** the findings ride this ledger and the flow's `notes`
+instead of a queryable channel; nothing will clear them when the code or the
+docs move.
+**Owner:** Journey mapping (the same run-reporting channel G37 asks for,
+driver-agnostic).
+
+### I-index (web surface wave). Owning workstream
+
+| workstream | items |
+|---|---|
+| Web Driver | G74, G75, G76 (element facts), G77 |
+| Guard Setup | G77 (recipe kind) |
+| Journey mapping | G76 (diagnostics half), G78 |

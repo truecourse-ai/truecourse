@@ -1506,6 +1506,8 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
     title: j.title,
     entry: j.entry,
     steps: j.steps,
+    ...(j.startingState ? { startingState: j.startingState } : {}),
+    ...(j.endState ? { endState: j.endState } : {}),
     fingerprint: j.fingerprint,
     flows: flowRefs.get(j.id) ?? [],
     scenarioIds: scenarioIdsByJourney.get(j.id) ?? [],

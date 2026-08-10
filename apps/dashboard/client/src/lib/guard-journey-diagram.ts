@@ -22,6 +22,12 @@ export interface JourneyMessage {
   /** The message text (mono) — the surface-visible payload of the step. */
   label: string;
   kind: JourneyStep['kind'];
+  /**
+   * A REPLY: the step's `output` — the interaction change the action produced
+   * (a dropdown opened, the cards gone), flowing surface → user. Prose about
+   * state, rendered dashed and unmono to keep it apart from the actions.
+   */
+  reply?: boolean;
 }
 
 export interface JourneyDiagramModel {
@@ -65,6 +71,12 @@ export function journeyStepLabel(step: JourneyStep): string {
  * touch (first-seen order), and one message per step. `input` steps are
  * self-messages on their surface (a value typed into a field never crosses a
  * boundary).
+ *
+ * A step that states its `output` (the state handoff) is followed by a REPLY
+ * message flowing back to the actor — the interaction change the action
+ * produced. The step's `input` is not drawn: the chain invariant makes it the
+ * previous reply (or the journey's starting state, which the pane already
+ * shows above the diagram), so drawing it would say everything twice.
  */
 export function journeyDiagramModel(
   journey: Pick<Journey, 'steps'> & Partial<Pick<Journey, 'type'>>,
@@ -77,14 +89,17 @@ export function journeyDiagramModel(
     return participants.length - 1;
   };
 
-  const messages = journey.steps.map((step) => {
+  const messages = journey.steps.flatMap((step) => {
     const to = indexOf(targetOf(step));
-    return {
+    const action = {
       from: step.kind === 'input' ? to : 0,
       to,
       label: journeyStepLabel(step),
       kind: step.kind,
     };
+    return step.output
+      ? [action, { from: to, to: 0, label: step.output, kind: step.kind, reply: true }]
+      : [action];
   });
 
   return { participants, messages };

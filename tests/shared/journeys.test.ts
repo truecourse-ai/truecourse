@@ -80,6 +80,48 @@ describe('journey schemas', () => {
     expect(() => JourneySchema.parse({ ...journey([INVOKE]), steps: [] })).toThrow()
   })
 
+  it('a step’s state handoff must chain — start, through every step, to end', () => {
+    const MENU: JourneyStep = { kind: 'activate', target: 'menuitem "Disable rule for this repo"' }
+    const chained = journey(
+      [
+        { ...ACTIVATE, input: 'on the page', output: 'the dropdown is open' },
+        { ...MENU, input: 'the dropdown is open', output: 'the rule is off' },
+      ],
+      { startingState: 'on the page', endState: 'the rule is off' },
+    )
+    expect(() => JourneySchema.parse(chained)).not.toThrow()
+
+    // Whitespace never breaks a handoff — the corpus-wide prose rule.
+    expect(() =>
+      JourneySchema.parse(
+        journey([{ ...ACTIVATE, input: '  on   the page ' }], { startingState: 'on the page' }),
+      ),
+    ).not.toThrow()
+
+    // A middle handoff that doesn't connect: step 2 needs a state step 1 never produced.
+    expect(() =>
+      JourneySchema.parse(
+        journey([
+          { ...ACTIVATE, output: 'the dropdown is open' },
+          { ...MENU, input: 'the panel is open' },
+        ]),
+      ),
+    ).toThrow()
+
+    // The boundary restatements: first input = startingState, last output = endState.
+    expect(() =>
+      JourneySchema.parse(journey([{ ...ACTIVATE, input: 'somewhere else' }], { startingState: 'on the page' })),
+    ).toThrow()
+    expect(() =>
+      JourneySchema.parse(journey([{ ...ACTIVATE, output: 'half done' }], { endState: 'done' })),
+    ).toThrow()
+
+    // A step that states neither side is tolerated — older catalogs, cli trees.
+    expect(() =>
+      JourneySchema.parse(journey([ACTIVATE], { startingState: 's', endState: 'e' })),
+    ).not.toThrow()
+  })
+
   it('round-trips a journeys file through JSON', () => {
     const file = {
       version: 1 as const,
@@ -150,6 +192,12 @@ describe('journeyFingerprint', () => {
   it('specOnly is provenance, never identity', () => {
     const shape = { type: 'api' as const, entry: { method: 'GET' as const, path: '/t' }, steps: [REQUEST] }
     expect(journeyFingerprint(shape)).toBe(journeyFingerprint({ ...shape }))
+  })
+
+  it('the state handoff is prose about the world, never identity', () => {
+    expect(fp([{ ...ACTIVATE, input: 'the dropdown is open', output: 'the rule is off' }])).toBe(
+      fp([ACTIVATE]),
+    )
   })
 
   it('a label is cosmetic — it never moves the fingerprint', () => {
@@ -780,6 +828,12 @@ describe('the question sequence', () => {
 describe('the reference catalog', () => {
   const file = path.resolve(__dirname, '../../reference/store/.truecourse/guard/journeys.json')
   const catalog = JourneysFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8')))
+  // Three surfaces live here now: the cli trees and the api operations carry
+  // the command contract (`contracted`); the web task journeys carry a state
+  // contract instead (steps + starting/end state, no command grammar).
+  const cli = catalog.journeys.filter((j) => j.type === 'cli')
+  const web = catalog.journeys.filter((j) => j.type === 'web')
+  const contracted = catalog.journeys.filter((j) => j.type !== 'web')
   const commands = (id: string) => catalog.journeys.find((j) => j.id === id)!.contract!.commands
   const reads = (id: string, commandPath: string) =>
     commands(id).find((c) => c.path.join(' ') === commandPath)!.io!.consumes!.reads!
@@ -833,11 +887,14 @@ describe('the reference catalog', () => {
       'api/get-api-repos-id-analytics-top-offenders',
       'api/get-api-repos-id-analytics-resolution',
       'api/get-api-rules',
+      'web/open-repo-report',
+      'web/silence-rule-from-violation-card',
+      'web/reenable-rule-from-rules-panel',
     ])
     // Every command of every tree now answers "what do I read?" — none is silent.
     // 22 over the cli seven; 54 with the api surface's 32 operations (2026-08-10),
     // each of which is one contract entry, because an operation is not a tree.
-    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    const all = contracted.flatMap((j) => j.contract!.commands)
     expect(all).toHaveLength(54)
     expect(all.every((c) => c.io?.consumes?.reads !== undefined)).toBe(true)
     // 67 cli reads + 105 api reads (the registry lookup, the store files each route
@@ -845,8 +902,44 @@ describe('the reference catalog', () => {
     expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(172)
   })
 
+  it('the web task journeys carry their state contract, one task each', () => {
+    expect(web.map((j) => j.id)).toEqual([
+      'web/open-repo-report',
+      'web/silence-rule-from-violation-card',
+      'web/reenable-rule-from-rules-panel',
+    ])
+    for (const j of web) {
+      // A task from a specific state: both ends of the state contract present.
+      expect(j.startingState).toBeTruthy()
+      expect(j.endState).toBeTruthy()
+      // Steps are the user's interactions, each locating by role + accessible
+      // name (the §10.3 locator policy) — never a page inventory.
+      expect(j.steps.length).toBeLessThanOrEqual(3)
+      for (const step of j.steps) {
+        expect(step.kind === 'activate' || step.kind === 'input').toBe(true)
+        if ('target' in step) expect(step.target).toMatch(/^[a-z]+ ".+"$/)
+      }
+      // The state CHAIN, every side stated: the first step consumes the
+      // journey's starting state, each step's output is the next step's input
+      // (a dropdown opened is what the menu click needs), and the last step
+      // yields the journey's end state.
+      expect(j.steps[0].input).toBe(j.startingState)
+      j.steps.forEach((step, i) => {
+        expect(step.input).toBeTruthy()
+        expect(step.output).toBeTruthy()
+        const next = j.steps[i + 1]
+        if (next) expect(next.input).toBe(step.output)
+      })
+      expect(j.steps[j.steps.length - 1].output).toBe(j.endState)
+      // The identity recomputes through the real fold.
+      expect(j.fingerprint).toBe(journeyFingerprint(j))
+      // No command contract: a page task has no argv grammar to carry.
+      expect(j.contract).toBeUndefined()
+    }
+  })
+
   it('is 100% structured facts — no command carries a sentence about behavior', () => {
-    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    const all = contracted.flatMap((j) => j.contract!.commands)
     for (const command of all) {
       expect(Object.keys(command)).not.toContain('notes')
     }
@@ -870,7 +963,7 @@ describe('the reference catalog', () => {
     // 25 shapes of the 7-journey catalog with those trees gone (2026-08-10).
     // The api surface adds none and the number holds: a row grammar is the shape
     // of a PRINTED line, and a JSON response has no such thing.
-    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    const all = contracted.flatMap((j) => j.contract!.commands)
     expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(25)
     expect(rowsOf('cli/analyze', 'truecourse analyze')).toHaveLength(3)
     expect(rowsOf('cli/list', 'truecourse list')).toHaveLength(9)
@@ -915,7 +1008,7 @@ describe('the reference catalog', () => {
   it('says how every prompt is answered — select and text on Enter, a confirm on a keypress', () => {
     // 40, and the api surface leaves it there: an HTTP operation asks nothing on
     // stdin, so its contracts carry no prompt list at all (2026-08-10).
-    const prompts = catalog.journeys
+    const prompts = contracted
       .flatMap((j) => j.contract!.commands)
       .flatMap((c) => c.io?.consumes?.prompts ?? [])
     expect(prompts).toHaveLength(40)
@@ -1051,7 +1144,7 @@ describe('the reference catalog', () => {
   })
 
   it('every INTERACTIVE command carries its question sequence, and no other command does', () => {
-    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    const all = cli.flatMap((j) => j.contract!.commands)
     const interactive = all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) > 0)
     // 40 while the spec and guard trees were in the catalog; 13 over the
     // analyze-only corpus (2026-08-10).
@@ -1081,7 +1174,7 @@ describe('the reference catalog', () => {
     // The decision the pins above encode: a sequence entry is the ORDER over
     // questions the prompt facts already carry, so counting it would count every
     // question twice. 997 io facts with sequences, 997 without.
-    const all = catalog.journeys.flatMap((j) => j.contract!.commands)
+    const all = contracted.flatMap((j) => j.contract!.commands)
     const facts = (command: JourneyCommandContract) => {
       const io = command.io ?? {}
       return [io.consumes ?? {}, io.produces ?? {}].reduce(
@@ -1123,7 +1216,7 @@ describe('the reference catalog', () => {
   it('puts the first-run question first on every command that can be asked it', () => {
     // It is asked in the program's `preAction` hook, so it precedes the command's
     // own work — every sequence that carries it opens with it.
-    const asked = catalog.journeys
+    const asked = cli
       .flatMap((j) => j.contract!.commands)
       // `?? []` because a contract may carry no prompt list at all — the api
       // operations do not, having no stdin to ask on (2026-08-10).
@@ -1184,9 +1277,10 @@ describe('the reference catalog', () => {
     expect(fingerprints['cli/config']).toBe(
       'sha256:fd58e236b50daea8bc5799cfdff4228e9a6d3ef9a54529b14fa09ec45b47a9ed',
     )
-    // 7 while the catalog was cli-only; 39 with the api surface (2026-08-10). No
-    // two journeys share an identity — an operation and a command never can.
-    expect(new Set(Object.values(fingerprints)).size).toBe(39)
+    // 7 while the catalog was cli-only; 39 with the api surface (2026-08-10); 42
+    // with the three web task journeys (2026-08-11). No two journeys share an
+    // identity — an operation, a command and a page task never can.
+    expect(new Set(Object.values(fingerprints)).size).toBe(42)
   })
 
   /**

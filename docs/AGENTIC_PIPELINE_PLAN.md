@@ -1627,6 +1627,23 @@ the verification loop. The first subject is TrueCourse's own dashboard,
 through the reference corpus: the dashboard's documentation page gains its
 claims, flows, and hand-authored web scenarios like any other area.
 
+STATUS: design drafted 2026-08-10 (§§10.3–10.9); owner TBD. Three
+sequencing questions await the user's decision — flagged in §10.9.
+Stage-1 reference authoring OPENED 2026-08-10 on the dashboard's analyze
+page and RE-SCOPED 2026-08-11 to task journeys (§10.4): three web
+journeys with starting/end states (`web/open-repo-report`,
+`web/silence-rule-from-violation-card`,
+`web/reenable-rule-from-rules-panel`), walked in order by the mixed flow
+`review-analysis-and-silence-a-rule-in-the-dashboard` over four claims
+promoted out of the analyze area's `untestable[]`; its manifest entry
+settles as the `awaiting-driver` gap. The Journeys pane renders the
+state contract. Store-schema gaps G74–G78 recorded in
+`reference/transform-gaps.md` (route entry, page contract, dynamic
+accessible names, web-surface recipe boot, mapper diagnostics) with the
+re-scope note; first doc-drift candidate logged there (the docs'
+"Shield icon" Rules-panel entry point vs the client's "Browse Rules"
+control).
+
 Sequencing and method are the same reference-first ladder as CLI and API,
 and strictly after the API path is stable:
 
@@ -1660,3 +1677,209 @@ it up without vocabulary changes.
 - **Evidence is visual.** A failing step's evidence is a screenshot, the
   relevant page excerpt, and the browser console — captured per failure,
   stored like CLI evidence, and rendered by the same drift surfaces.
+
+### 10.3 Design decisions (2026-08-10)
+
+- **Web verbs are STEP verbs, never a scenario class.** This workstream
+  lands entirely after the step-level-driver foundation (§2, §9), so it
+  never builds the scenario-level-driver assumption it would then have
+  to unbuild. A step declares `navigate` / `click` / `fill` / `expect`
+  the same way a step declares a CLI invocation or an API request; a
+  scenario freely mixes them ("create it through the API, the browser
+  shows it"). The sandbox is ONE world: it can boot the service, run the
+  CLI, and drive the browser.
+- **Dependency shape: `playwright-core` + on-demand browser.**
+  `playwright-core` (small, no bundled binaries) is a normal dependency
+  of the runner. The browser binary installs on demand, at `guard
+  setup`, only when the subject has a web surface; the install outcome
+  is recorded in the setup record like every step. A scenario with web
+  steps and no installed browser settles **Blocked** naming the browser
+  — the standard loud, actionable gap; the engine never auto-downloads
+  mid-run.
+- **Locator policy: roles and labels only.** The step schema's locator
+  is a closed shape — role plus accessible name
+  (`getByRole`/`getByLabel` semantics), never raw CSS or XPath.
+  Extraction and authoring both work from accessible names; an element
+  with no role and no label is not guessed at — the claim that needs it
+  settles as a gap naming the unlocatable element. Deliberate side
+  effect: coverage rewards accessible markup.
+- **Boot model: identical to the API driver.** Each scenario's sandbox
+  boots its own server(s) and launches its own browser with one clean
+  context; nothing is shared between scenarios. Boot amortization
+  remains ONE shared open item across the API and web paths, solved
+  once for both or not at all.
+- **Extraction scope v1: React Router and Next.js.** The runtime layer
+  (Playwright over a real DOM) is framework-agnostic; the grounding
+  layer (deriving web journeys from source) is framework-specific by
+  nature. V1 extractors read React Router route configuration and
+  Next.js file-system routes. A repo on another framework yields no web
+  journeys and its flows settle **Blocked** ("awaiting a `<framework>`
+  journey extractor") — honest and self-unlocking, the
+  registered-surface pattern.
+- **The frontend→API edge is in scope, wrapper resolution included.**
+  Literal `fetch`/axios call extraction alone leaves real apps (wrapper
+  clients, generated SDKs, react-query) as page shells with no API
+  effects. The mapper follows the call ONE hop into the app's
+  api-client module using the analyzer's existing cross-file call data.
+  Where the hop still resolves nothing, the journey records the effect
+  as `unknown` — never guessed — and the gap copy names the limitation.
+- **No model in the verification loop** (restating §10.1 as binding):
+  scenario execution is deterministic Playwright driving; sessions
+  exist only at journey reconciliation and generation time, per §3.2.
+
+### 10.4 Web journeys (one task from one state)
+
+The §7 journey contract, translated — and RE-SCOPED 2026-08-11 after
+the reference review: the first draft modeled a journey as a
+page-rooted element inventory (64 steps for the repo page), and the
+review rejected it — an inventory does not read as a journey and is
+not one. A web journey is ONE TASK a user can perform from a specific
+state ("navigate into a project", "silence a rule from a violation
+card", "delete a project"), derived from code only (§7.3's 2026-08-09
+decision applies unchanged — the mapper never reads docs):
+
+- **Identity**: the entry route plus the task's interaction steps
+  (activate / input, role + accessible-name targets). Several journeys
+  share a route; the steps distinguish them.
+- **State contract**: `startingState` / `endState`, one plain sentence
+  each — the world the task assumes and the observable world it leaves
+  (schema fields landed 2026-08-11, optional, never fingerprinted).
+  The starting state is what a scenario must arrange (or an earlier
+  journey must have produced); the end state is what it asserts.
+  Each STEP carries the same contract in miniature (`input`/`output`,
+  landed the same day): the state the action needs and the interaction
+  change it produces (clicking "More actions" outputs "the dropdown is
+  open"; the menu click inputs it). The schema enforces the chain —
+  first input restates `startingState`, each output is the next input,
+  last output restates `endState` — so a stated path whose middle
+  doesn't connect is refused at parse.
+- **Consumes/produces analog**: route parameters and form inputs
+  consumed; navigations produced (which route a click leads to) and API
+  effects produced (which operations an interaction triggers, via the
+  one-hop wrapper resolution, joined to the API journeys behind them
+  through the route-handler lookup). Facts extraction cannot establish
+  are `unknown`.
+- **Fingerprint**: over the entry route and the task's steps — same
+  incrementality contract as CLI journeys. The page's FULL element
+  inventory is extraction material (the union below) and a mapper
+  artifact, never journey steps; how tasks are segmented out of the
+  inventory is part of the generation design reserved for the owner.
+
+Setup owns derivation (the journeys step of §7.6), through three
+deterministic extractors: the frontend route table (`uiRoutes`), typed
+interaction edges with accessible names (`uiInteractions` — the raw JSX
+event data already exists in `extractJsxReferences`; this work types
+it), and the frontend→API join.
+
+**Completeness cross-check (the §7.3 union, web form).** The static
+extraction is one source; the runtime probe analog is the browser
+itself: load each extracted route in the sandboxed subject and take the
+accessibility snapshot. Journey = the union; every discrepancy (an
+element the snapshot sees that extraction missed, a route that renders
+nothing) is a recorded mapper diagnostic. The probe requires the
+subject to boot, which setup already verifies. Discrepancies feed the
+same journey reconciliation session (§7.4) — no new session type.
+
+### 10.5 Schema and runner
+
+- **Step vocabulary** (closed): `navigate` (route, with readiness = URL
+  reached and the page settled), `click` / `fill` (locator; fill
+  carries the value, `${...}` interpolation and captured values
+  included), `expect` (visible text under a locator, and/or the
+  address). Waits are readiness-based and bounded by the step's
+  declared time limit (§8.2's step-limit decision applies); no sleeps,
+  no retries — a flaky pass is worse than a red (§10.2).
+- **Capture on web steps**: a web step may capture visible text under a
+  locator or a URL segment, joining §9's capture/comparison machinery
+  unchanged — a mixed scenario can capture an id from an API response
+  and expect it visible on the page.
+- **Recipe**: the recipe describes how the web surface starts and how
+  readiness is observed (URL probe), reusing the server-boot machinery
+  the API path already has; the web surface is a served process like
+  any other, plus the browser the sandbox provides.
+- **Evidence** (per §10.2): on failure — screenshot, the
+  accessible-tree excerpt around the failing locator, the browser
+  console, and the network log; stored like CLI evidence, rendered by
+  the same drift surfaces. Normalizer additions for dynamic content
+  (timestamps, generated ids) extend the existing normalize vocabulary.
+
+### 10.6 The reference-first ladder, concretized
+
+Strictly after the API surface meets its finish line (§4). Same three
+stages as §10.1, with the subject fixed:
+
+1. **Reference authoring.** The subject is TrueCourse's own dashboard.
+   Hand-author its web journeys, extend the flows of the areas its
+   documentation already covers (many flows will be MIXED: API/CLI
+   steps arranging state, web steps proving what the user sees), and
+   author the scenarios; review in the dashboard. Store-schema
+   transform gaps are recorded as work items, per §4's discovery rule.
+2. **Represent and run.** Grow the step schema, recipe, runner, and
+   evidence store (§10.5) until every reference scenario executes in a
+   sandbox, produces a verdict, and leaves evidence. Every red on the
+   board is a product bug or an accepted limitation — the §4 standard.
+3. **Extraction, then generation.** The deterministic extractors and
+   the journey union land in setup (§10.4). Only then is web generation
+   designed, from this document: the expectation is the §8.4 flow
+   worker unchanged — same loop, same outcomes, `run_scenario` already
+   executing web steps by then — plus an authoring-prompt extension
+   teaching the locator policy. That design is reserved for the owner.
+
+### 10.7 Estimation
+
+Per §3.5, defined by the owner with the generation design. Already
+known: journey extraction and the accessibility-snapshot probe are
+deterministic and estimate as free; web flow authoring reuses the
+flow-worker session economics of §8.8.
+
+### 10.8 Testing strategy
+
+- **Fixture**: `guard-fixture-web` — a minimal React Router app served
+  over the existing `guard-fixture-api` todos server, so web
+  extraction, the frontend→API join, and mixed API+web scenarios are
+  all exercised by one fixture pair.
+- **Runner units**: scripted scenarios against the fixture, headless;
+  locator misses, readiness timeouts, capture, and evidence shape all
+  asserted deterministically.
+- **Extractor units**: route-table and interaction extraction over
+  fixture sources, including the wrapper-resolution hop and an
+  `unknown`-effect case.
+- **Self-verify gate** (the §7.5 analog): extract the dashboard
+  client's own route table and diff it against the React Router
+  registry — breaks when an extractor regresses or a new registration
+  idiom appears.
+- **CI**: the browser binary is cached by the setup action; everything
+  runs headless in the sharded suite.
+
+### 10.9 Risks and open questions
+
+- **The dashboard as first subject is itself a boot problem**: a
+  sandboxed dashboard needs a server, a client, and a populated
+  `.truecourse/` store to render anything. The store is a
+  supplied/seedable dependency from §7's catalog — the reference
+  authoring stage must settle its shape first.
+- **Authenticated web state**: the dashboard is auth-less, so v1 dodges
+  it; the general mechanism (a supplied catalog entry materialized as
+  browser storage state, the §7.6 copy-in pattern) is designed when the
+  first auth-gated subject appears, not speculatively.
+- **Animation and streaming views** (the dashboard has live-updating
+  surfaces): readiness-based expects may still race a view that never
+  settles; the reference wave will show whether an explicit "stable"
+  readiness notion is needed.
+- **Wrapper-resolution depth**: one hop is a bet; tRPC/generated-SDK
+  repos may need more. The `unknown` recording keeps the failure honest
+  until field data says whether to deepen it.
+- **Sequencing vs §§6–8 (decision needed, flagged 2026-08-10)**: the
+  ladder says "after the API finish line", but the generation
+  workstreams are also in flight — does web reference authoring start
+  as soon as the API surface is stable, or only after generate is
+  rebuilt?
+- **Mixed-scenario coverage accounting (decision needed, flagged
+  2026-08-10)**: §9 leaves "per surface" counting under mixed scenarios
+  to the owning workstreams — is the web wave the moment it gets
+  redefined, or does the API wave settle it first?
+- **Fixture vs dashboard ordering (decision needed, flagged
+  2026-08-10)**: author the reference against the dashboard first
+  (real, messy) or prove the runner on `guard-fixture-web` first
+  (small, controlled)? The CLI wave went reference-first; the
+  dashboard's boot problem may argue for the fixture.

@@ -225,6 +225,30 @@ export function GuardJourneysPane({
           </p>
         ) : null}
 
+        {/* The task's state contract: the world it assumes and the world it
+            leaves. Rendered before the sequence so the steps read as the path
+            from one to the other. */}
+        {(active.startingState || active.endState) && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {active.startingState && (
+              <div>
+                <div className={LABEL}>Starting state</div>
+                <p className="rounded border border-border bg-card/40 px-2.5 py-2 text-[12px] leading-snug text-muted-foreground">
+                  {active.startingState}
+                </p>
+              </div>
+            )}
+            {active.endState && (
+              <div>
+                <div className={LABEL}>End state</div>
+                <p className="rounded border border-border bg-card/40 px-2.5 py-2 text-[12px] leading-snug text-muted-foreground">
+                  {active.endState}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-4">
           <div className={LABEL}>Sequence</div>
           <GuardJourneyDiagram journey={active} label={active.id} />

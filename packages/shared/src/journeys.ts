@@ -29,6 +29,23 @@ export const JourneyStepKindSchema = z.enum([
 ])
 export type JourneyStepKind = z.infer<typeof JourneyStepKindSchema>
 
+/**
+ * A step's STATE HANDOFF — every step is one user action, and these two fields
+ * are the observable world on either side of it: `input` the state the action
+ * needs (a dropdown already open, a panel visible), `output` the interaction
+ * change it produces (the dropdown IS open, the rule's cards are gone). They
+ * chain: the first step's input restates the journey's `startingState`, each
+ * step's output is the next step's input, and the last step's output restates
+ * the journey's `endState` — {@link JourneySchema} enforces all three, so a
+ * journey can never claim a path whose middle doesn't connect. One plain
+ * sentence each; optional (a catalog written before them parses unchanged);
+ * prose about state, so never fingerprinted — see {@link stepIdentity}.
+ */
+const journeyStepStateFields = {
+  input: z.string().min(1).optional(),
+  output: z.string().min(1).optional(),
+}
+
 /** Run a command (cli / tui): the argv PATH plus the flags that command accepts. */
 export const JourneyInvokeStepSchema = z
   .object({
@@ -39,6 +56,7 @@ export const JourneyInvokeStepSchema = z
     flags: z.array(z.string()).default([]),
     /** Human one-liner for display; cosmetic — never fingerprinted. */
     label: z.string().optional(),
+    ...journeyStepStateFields,
   })
   .strict()
 
@@ -50,6 +68,7 @@ export const JourneyRequestStepSchema = z
     /** Path template as the surface declares it, e.g. `/tasks/:id`. */
     path: z.string().min(1),
     label: z.string().optional(),
+    ...journeyStepStateFields,
   })
   .strict()
 
@@ -59,6 +78,7 @@ export const JourneyNavigateStepSchema = z
     kind: z.literal('navigate'),
     route: z.string().min(1),
     label: z.string().optional(),
+    ...journeyStepStateFields,
   })
   .strict()
 
@@ -68,6 +88,7 @@ export const JourneyInputStepSchema = z
     kind: z.literal('input'),
     target: z.string().min(1),
     label: z.string().optional(),
+    ...journeyStepStateFields,
   })
   .strict()
 
@@ -77,6 +98,7 @@ export const JourneyActivateStepSchema = z
     kind: z.literal('activate'),
     target: z.string().min(1),
     label: z.string().optional(),
+    ...journeyStepStateFields,
   })
   .strict()
 
@@ -668,6 +690,22 @@ export const JourneySchema = z
     title: z.string().min(1),
     entry: JourneyEntrySchema,
     steps: z.array(JourneyStepSchema).min(1),
+    /**
+     * The world the journey ASSUMES, one plain sentence — a journey is one task a
+     * user can perform from a specific state ("on an analyzed repository's page
+     * with violation cards visible"), and this is that state. Decided 2026-08-11
+     * for the web surface; optional so cli/api catalogs written before it parse
+     * unchanged. Never fingerprinted: prose about the state is not WHICH task
+     * the journey is.
+     */
+    startingState: z.string().min(1).optional(),
+    /**
+     * The observable world the task LEAVES behind, one plain sentence ("the rule
+     * is disabled and its violation cards have left the list") — what a scenario
+     * asserts after walking the steps. Same optionality and fingerprint rules as
+     * `startingState`.
+     */
+    endState: z.string().min(1).optional(),
     /** `sha256:…` over the surface-visible shape — see {@link journeyFingerprint}. */
     fingerprint: z.string().min(1),
     /** An OpenAPI operation with NO matching route registration: declared surface the
@@ -679,6 +717,34 @@ export const JourneySchema = z
     contract: JourneyContractSchema.optional(),
   })
   .strict()
+  .superRefine((journey, ctx) => {
+    // THE STATE CHAIN — where both sides of a handoff are stated, they must
+    // agree (whitespace-normalized, the corpus-wide prose rule): the first
+    // step's input restates `startingState`, each step's output is the next
+    // step's input, and the last step's output restates `endState`. A step
+    // that states neither side is tolerated (older catalogs, cli trees); a
+    // stated mismatch is a path whose middle doesn't connect, refused here
+    // rather than discovered by a scenario that hangs on a dropdown that was
+    // never opened.
+    const same = (a: string, b: string) => normalizeToken(a) === normalizeToken(b)
+    const refuse = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path, message })
+
+    const first = journey.steps[0]
+    if (journey.startingState && first?.input && !same(journey.startingState, first.input)) {
+      refuse(['steps', 0, 'input'], 'the first step’s input must restate the journey’s startingState')
+    }
+    journey.steps.forEach((step, i) => {
+      const next = journey.steps[i + 1]
+      if (next && step.output && next.input && !same(step.output, next.input)) {
+        refuse(['steps', i + 1, 'input'], `step ${i + 2}’s input must restate step ${i + 1}’s output — the handoff doesn’t connect`)
+      }
+    })
+    const last = journey.steps[journey.steps.length - 1]
+    if (journey.endState && last?.output && !same(journey.endState, last.output)) {
+      refuse(['steps', journey.steps.length - 1, 'output'], 'the last step’s output must restate the journey’s endState')
+    }
+  })
 export type Journey = z.infer<typeof JourneySchema>
 
 /**
@@ -743,7 +809,10 @@ function normalizeToken(text: string): string {
 /**
  * A step's fingerprinted identity: its kind plus the SURFACE-VISIBLE payload —
  * the command path and its flag set, the method + path template, the route, the
- * target. `label` is cosmetic and never folded in. Flags fold as a SET (sorted):
+ * target. `label` is cosmetic and never folded in, and the state handoff
+ * (`input`/`output`) is prose about the world around the action, not WHICH
+ * action it is — rewording a dropdown's description must never re-author a
+ * scenario. Flags fold as a SET (sorted):
  * which flags a command accepts is the surface, the order help prints them is not.
  */
 function stepIdentity(step: JourneyStep): string {

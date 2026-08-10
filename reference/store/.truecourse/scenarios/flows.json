@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-08T04:10:11.057Z",
+  "generatedAt": "2026-08-10T20:49:52.736Z",
   "flows": [
     {
       "id": "analyze-a-repository-for-the-first-time",
@@ -2207,6 +2207,70 @@
           "env — `TRUECOURSE_TELEMETRY=0`"
         ],
         "supplied": []
+      }
+    },
+    {
+      "id": "review-analysis-and-silence-a-rule-in-the-dashboard",
+      "title": "A developer reviews analysis results in the dashboard and silences a noisy rule",
+      "goal": "A developer reviews analysis results in the dashboard and silences a noisy rule",
+      "fingerprint": "sha256:b9e6494703d4da17f3bdffdcc10aced6fd37e19b833edf3d5cb8836d737e87be",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/analyze/overview.mdx",
+          "anchor": "overview",
+          "claimTitle": "the dashboard shows analysis results visually",
+          "note": "Analysis results can be viewed visually with `truecourse dashboard`."
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/analyze/rules.mdx",
+          "anchor": "individual-rules",
+          "claimTitle": "a violation card’s ⋮ menu disables its rule for the repo",
+          "note": "A noisy rule can be silenced directly from any violation card via the ⋮ menu → “Disable rule for this repo”."
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/analyze/rules.mdx",
+          "anchor": "individual-rules",
+          "claimTitle": "existing violations from a disabled rule are hidden from the dashboard",
+          "note": "Existing violations from a rule are hidden from the dashboard once that rule is disabled, until it is re-enabled."
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/analyze/rules.mdx",
+          "anchor": "individual-rules",
+          "claimTitle": "the dashboard Rules panel toggles rules",
+          "note": "In the dashboard, rules can be toggled from the Rules panel, opened via the Shield icon in the top-right."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/analyze/overview.mdx",
+          "anchor": "overview",
+          "fingerprint": "sha256:a190d81681a869fb10582940aa88c9fa6324f2f1d62979cbc383cbf014ac1f51"
+        },
+        {
+          "doc": "reference/spec-docs/analyze/rules.mdx",
+          "anchor": "individual-rules",
+          "fingerprint": "sha256:63ed2c715dab23022d9cea81043abda2b6a14e02da95a6b033520c544407c26d"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:5d1d76ef87817bd6b34c414773d19a7063aeccfb763eefc9c49f92bbea0af252",
+      "kind": "happy",
+      "notes": "The dashboard half of the analyze area, promoted from the untestable ledger for the web wave (plan §10.6): the four dashboard-UI statements the CLI wave consciously refused as out of CLI scope. A MIXED flow: a CLI `truecourse analyze --no-llm` arranges the store against the same supplied analysis-target the CLI flows bind (the dashboard renders what analyze wrote; nothing here re-proves analyze itself), and every milestone is then proved off what the browser shows. The walk: open the analyzed repo’s page and read the report — the violation cards are the visual results, asserted by presence and count, never by card prose; silence a noisy rule from a violation card’s ⋮ menu (“Disable rule for this repo”); watch that rule’s cards leave the list with no re-analysis; re-enable it from the Rules panel toggle, which proves the panel’s toggle claim and the “until re-enabled” tail of the hidden claim in one step. Doc-drift watch: the docs place the Rules panel behind a “Shield icon in the top-right”, but the current client renders a “Browse Rules” control in the violations toolbar (apps/dashboard/client/src/components/pages/HomePanel.tsx) — the milestone stays authored to the doc, so the eventual run surfaces the drift instead of the flow hiding it. No scenario exists yet: web is a recorded, non-runnable driver, and the manifest carries the awaiting-driver gap; the recipe also cannot yet describe how the dashboard’s web surface starts (plan §10.5 — recorded as a transform gap). Journeys, in walk order: web/open-repo-report (arrive at the report), web/silence-rule-from-violation-card (milestones 2–3), web/reenable-rule-from-rules-panel (milestone 4 and the “until re-enabled” tail of milestone 3) — task journeys per the 2026-08-11 re-scope, each carrying its own starting and end state.",
+      "startingState": {
+        "stepCreatable": [
+          "the `.truecourse/` store with an analysis snapshot (`LATEST.json`) — written by the arranging `truecourse analyze --no-llm` step, settled CLI ground this flow does not re-prove",
+          "the `~/.truecourse/registry.json` entry (analyze registers the repo the dashboard resolves)"
+        ],
+        "seedable": [
+          "env — `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": [
+          "analysis-target — the project whose report the dashboard renders, carrying at least one rule with existing violations to silence; the runner copies it into the sandbox and the arranging analyze runs inside the copy"
+        ]
       }
     }
   ],

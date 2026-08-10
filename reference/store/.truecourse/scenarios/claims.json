@@ -48,6 +48,15 @@
       "verifyVia": "stdout: diff output that references the committed baseline rather than the full violation set"
     },
     {
+      "id": "dashboard-shows-analysis-results",
+      "doc": "reference/spec-docs/analyze/overview.mdx",
+      "anchor": "overview",
+      "title": "the dashboard shows analysis results visually",
+      "claim": "Analysis results can be viewed visually with `truecourse dashboard`.",
+      "contentHash": "sha256:bf42ba0d10aca4b351654ed28c65251a4e292af8e609f8d604397dbcbbff1593",
+      "verifyVia": "web: after an analyze, the dashboard’s repo page renders the analysis report for the analyzed repository"
+    },
+    {
       "id": "catches-architecture-violations",
       "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "what-it-catches",
@@ -829,6 +838,33 @@
       "claim": "The keys of disabled rules are stored in `<repo>/.truecourse/config.json` under `disabledRules`.",
       "contentHash": "sha256:0c99e1c3319036f677ef695ab2c528c8529d7c6a6c49f395136b9b9b56b76b52",
       "verifyVia": "file: the disabled rule's key appears in the `disabledRules` array of config.json"
+    },
+    {
+      "id": "dashboard-rules-panel-toggles-rules",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "the dashboard Rules panel toggles rules",
+      "claim": "In the dashboard, rules can be toggled from the Rules panel, opened via the Shield icon in the top-right.",
+      "contentHash": "sha256:1560e556be9e9aee0c7c30acb5a837edbce79902b7abedfdb87cd8695ef56505",
+      "verifyVia": "web: the Shield icon opens the Rules panel and a rule’s toggle flips its on/off state"
+    },
+    {
+      "id": "dashboard-violation-card-disables-rule",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "a violation card’s ⋮ menu disables its rule for the repo",
+      "claim": "A noisy rule can be silenced directly from any violation card via the ⋮ menu → “Disable rule for this repo”.",
+      "contentHash": "sha256:953fe0d91cf8a9ac780cd81d0bb61b38c43a82b7c5eabac19c3262b5869a4acd",
+      "verifyVia": "web: a violation card’s ⋮ menu offers “Disable rule for this repo”, and choosing it disables that rule for the repository"
+    },
+    {
+      "id": "disabled-rule-violations-hidden-from-dashboard",
+      "doc": "reference/spec-docs/analyze/rules.mdx",
+      "anchor": "individual-rules",
+      "title": "existing violations from a disabled rule are hidden from the dashboard",
+      "claim": "Existing violations from a rule are hidden from the dashboard once that rule is disabled, until it is re-enabled.",
+      "contentHash": "sha256:8004a1a834cee25bb77686283b8f715fe296bc9428a6cb128b4287046c799783",
+      "verifyVia": "web: after disabling a rule, its violation cards leave the dashboard without re-running the analysis, and reappear when it is re-enabled"
     },
     {
       "id": "hook-blocks-commits-introducing-new-violations",
@@ -2289,12 +2325,6 @@
     },
     {
       "doc": "reference/spec-docs/analyze/overview.mdx",
-      "anchor": "overview",
-      "text": "View results visually with `truecourse dashboard`.",
-      "reason": "dashboard-UI surface, out of CLI scope; a cross-link to the dashboard page."
-    },
-    {
-      "doc": "reference/spec-docs/analyze/overview.mdx",
       "anchor": "rule-coverage",
       "text": "Deterministic rules run via tree-sitter AST visitors.",
       "reason": "Internal implementation detail with no public observation; the user-visible consequences (no API calls, zero cost) are claimed separately."
@@ -2406,24 +2436,6 @@
       "anchor": "individual-rules",
       "text": "`disabledRules` ... is intended to be committed.",
       "reason": "Authoring recommendation, not a program behavior; config.json's committability is claimed in baseline-and-diff.mdx."
-    },
-    {
-      "doc": "reference/spec-docs/analyze/rules.mdx",
-      "anchor": "individual-rules",
-      "text": "Any existing violations from disabled rules are hidden from the dashboard.",
-      "reason": "dashboard-UI surface, out of CLI scope; the `truecourse list` half is claimed."
-    },
-    {
-      "doc": "reference/spec-docs/analyze/rules.mdx",
-      "anchor": "individual-rules",
-      "text": "In the dashboard you can also toggle rules from the Rules panel (Shield icon in the top-right).",
-      "reason": "dashboard-UI surface, out of CLI scope."
-    },
-    {
-      "doc": "reference/spec-docs/analyze/rules.mdx",
-      "anchor": "individual-rules",
-      "text": "... or silence a noisy rule directly from any violation card via the ⋮ menu → Disable rule for this repo.",
-      "reason": "dashboard-UI surface, out of CLI scope."
     },
     {
       "doc": "reference/spec-docs/analyze/rules.mdx",

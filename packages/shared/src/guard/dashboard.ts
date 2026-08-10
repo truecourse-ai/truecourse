@@ -1029,6 +1029,10 @@ export const GuardJourneyRowSchema = z
     title: z.string(),
     entry: JourneyEntrySchema,
     steps: z.array(JourneyStepSchema),
+    /** The state the task starts from — passed through from the catalog verbatim. */
+    startingState: z.string().optional(),
+    /** The observable state the task leaves behind — passed through verbatim. */
+    endState: z.string().optional(),
     fingerprint: z.string(),
     /**
      * Flows that use this journey — realized (a scenario grounds on it) or merely

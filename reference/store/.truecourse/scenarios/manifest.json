@@ -1065,6 +1065,42 @@
       ],
       "generationInputsHash": null,
       "gaps": []
+    },
+    {
+      "flowId": "review-analysis-and-silence-a-rule-in-the-dashboard",
+      "flowFingerprint": "sha256:b9e6494703d4da17f3bdffdcc10aced6fd37e19b833edf3d5cb8836d737e87be",
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/analyze/overview.mdx",
+          "anchor": "overview",
+          "fingerprint": "sha256:a190d81681a869fb10582940aa88c9fa6324f2f1d62979cbc383cbf014ac1f51"
+        },
+        {
+          "doc": "reference/spec-docs/analyze/rules.mdx",
+          "anchor": "individual-rules",
+          "fingerprint": "sha256:63ed2c715dab23022d9cea81043abda2b6a14e02da95a6b033520c544407c26d"
+        }
+      ],
+      "scenarios": [],
+      "journeys": [
+        {
+          "surface": "web",
+          "journeyIds": [
+            "web/open-repo-report",
+            "web/silence-rule-from-violation-card",
+            "web/reenable-rule-from-rules-panel"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": [
+        {
+          "surface": "web",
+          "kind": "awaiting-driver",
+          "reason": "The dashboard-UI claims are observable only through a browser, and the web driver is recorded, not runnable — the scenario is authored when the driver ships (plan §10).",
+          "driver": "web"
+        }
+      ]
     }
   ]
 }
