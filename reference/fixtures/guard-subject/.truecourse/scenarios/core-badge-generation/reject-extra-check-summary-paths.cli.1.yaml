@@ -1,0 +1,28 @@
+guard: 3
+id: reject-extra-check-summary-paths.cli.1
+title: Rejecting more than one summary path for check reports the documented usage error
+promise: The user receives the documented error when check is given more than one summary path.
+flow:
+  id: reject-extra-check-summary-paths
+  fingerprint: sha256:b7a3090e0107ae8594b14933012796a23367136328ce98acd50cba7c4811aaf9
+journey:
+  path:
+    - cli/check
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/where-the-report-is-read-from
+    fingerprint: sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+      - coverage/coverage-summary.json
+      - other-summary.json
+    expect:
+      exit: 2
+      stderr:
+        contains: 'covergate: check takes at most one summary path'
+    milestone: 1

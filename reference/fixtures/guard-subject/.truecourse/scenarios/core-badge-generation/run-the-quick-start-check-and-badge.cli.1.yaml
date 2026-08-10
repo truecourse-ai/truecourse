@@ -1,0 +1,43 @@
+guard: 3
+id: run-the-quick-start-check-and-badge.cli.1
+title: Quick start gates the sample report at the default minimum and prints the badge
+promise: The user gates the example report against the default minimum and then prints its coverage badge.
+flow:
+  id: run-the-quick-start-check-and-badge
+  fingerprint: sha256:bfebcbd615f6fccb0875f07cdea4a3e42576d65f80ba869c14c51759e4fef744
+journey:
+  path:
+    - cli/check
+    - cli/badge
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+    - sha256:4908ef34443952702a6417f3a24c0a2bfad4399407ffb8a734e76af255b24239
+binds:
+  - doc: README.md
+    section: covergate/quick-start
+    fingerprint: sha256:b386935940e8aab397db50e60fe3c4a0fb72130dff7098465a074e2a49e82199
+setup:
+  files:
+    examples/coverage-summary.json: |
+      {"total":{"lines":{"total":80,"covered":70,"skipped":0,"pct":87.5},"statements":{"total":80,"covered":70,"skipped":0,"pct":87.5},"functions":{"total":8,"covered":7,"skipped":0,"pct":87.5},"branches":{"total":16,"covered":14,"skipped":0,"pct":87.5}}}
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+      - examples/coverage-summary.json
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          PASS lines 87.50% (minimum 80.00%)
+    milestone: 1
+  - run:
+      - badge
+      - examples/coverage-summary.json
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          ![lines coverage](https://img.shields.io/badge/lines-87.50%25-green)
+    milestone: 2

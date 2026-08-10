@@ -1,0 +1,127 @@
+{
+  "version": 3,
+  "generatedAt": "2026-08-09T02:17:32.475Z",
+  "docs": [
+    {
+      "ref": "README.md",
+      "kind": "readme",
+      "lastTouched": "2026-08-08T16:53:37-07:00",
+      "areaTags": [
+        "core/badge-generation",
+        "core/configuration",
+        "core/coverage-gating"
+      ]
+    },
+    {
+      "ref": "docs/cli-reference.md",
+      "kind": "unknown",
+      "lastTouched": "2026-08-08T18:54:25-07:00",
+      "areaTags": [
+        "core/badge-generation",
+        "core/cli",
+        "core/coverage-check",
+        "core/errors",
+        "core/flag-parsing",
+        "core/report-input"
+      ]
+    },
+    {
+      "ref": "docs/configuration.md",
+      "kind": "unknown",
+      "lastTouched": "2026-08-08T17:55:01-07:00",
+      "areaTags": [
+        "core/configuration",
+        "core/errors"
+      ]
+    }
+  ],
+  "areas": [
+    {
+      "id": "core/badge-generation",
+      "product": "core",
+      "concern": "badge-generation",
+      "docRefs": [
+        "README.md",
+        "docs/cli-reference.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/cli",
+      "product": "core",
+      "concern": "cli",
+      "docRefs": [
+        "docs/cli-reference.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/configuration",
+      "product": "core",
+      "concern": "configuration",
+      "docRefs": [
+        "README.md",
+        "docs/configuration.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/coverage-check",
+      "product": "core",
+      "concern": "coverage-check",
+      "docRefs": [
+        "docs/cli-reference.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/coverage-gating",
+      "product": "core",
+      "concern": "coverage-gating",
+      "docRefs": [
+        "README.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/errors",
+      "product": "core",
+      "concern": "errors",
+      "docRefs": [
+        "docs/cli-reference.md",
+        "docs/configuration.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/flag-parsing",
+      "product": "core",
+      "concern": "flag-parsing",
+      "docRefs": [
+        "docs/cli-reference.md"
+      ],
+      "overlaps": []
+    },
+    {
+      "id": "core/report-input",
+      "product": "core",
+      "concern": "report-input",
+      "docRefs": [
+        "docs/cli-reference.md"
+      ],
+      "overlaps": []
+    }
+  ],
+  "skippedDocs": [
+    {
+      "ref": "CONTRIBUTING.md",
+      "reason": "contribution and style guide for working on covergate, not a product behavior spec",
+      "category": "process"
+    },
+    {
+      "ref": "docs/team-lunch-rota.md",
+      "reason": "team lunch/snack rota, not product behavior or decisions for covergate",
+      "category": "status-tracking"
+    }
+  ]
+}

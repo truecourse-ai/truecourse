@@ -1,0 +1,45 @@
+guard: 3
+id: write-the-badge-to-a-file.cli.1
+title: Writing a generated badge to an output file creates missing parent directories and reports the write
+promise: The user writes the generated Markdown badge to an output file instead of stdout.
+flow:
+  id: write-the-badge-to-a-file
+  fingerprint: sha256:1d77cfdaad870b811e775f22e59d1337ebd06927efafbb1c88fbb9de55b2ba98
+journey:
+  path:
+    - cli/badge
+  fingerprints:
+    - sha256:4908ef34443952702a6417f3a24c0a2bfad4399407ffb8a734e76af255b24239
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/writing-the-badge-to-a-file
+    fingerprint: sha256:1ba59d4b91a74ab7cf41325cded7afdb5105616260bf0d6b146760101d4b4f2d
+setup:
+  files:
+    coverage/coverage-summary.json: |
+      {
+        "total": {
+          "lines": { "total": 1, "covered": 1, "skipped": 0, "pct": 100 },
+          "statements": { "total": 1, "covered": 1, "skipped": 0, "pct": 100 },
+          "functions": { "total": 1, "covered": 1, "skipped": 0, "pct": 100 },
+          "branches": { "total": 1, "covered": 1, "skipped": 0, "pct": 100 }
+        }
+      }
+normalize: []
+driver: cli
+steps:
+  - run:
+      - badge
+      - coverage/coverage-summary.json
+      - '--out'
+      - generated/${unique}/badges/coverage.md
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          covergate: wrote generated/${unique}/badges/coverage.md
+      files:
+        generated/${unique}/badges/coverage.md:
+          equals: |
+            ![lines coverage](https://img.shields.io/badge/lines-100.00%25-brightgreen)
+    milestone: 1

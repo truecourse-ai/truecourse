@@ -1,0 +1,5 @@
+# Slate Ops Docs
+> Operational runbook pages for Slate.
+
+- [No-show handling](http://127.0.0.1:4173/ops/no-shows.md): Recording no-shows and issuing vouchers.
+- [Refund runbook](http://127.0.0.1:4173/ops/refunds.md): The 14-day refund window, step by step.

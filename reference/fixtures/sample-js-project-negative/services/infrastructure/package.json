@@ -1,0 +1,8 @@
+{
+  "name": "@sample/infrastructure",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "aws-cdk-lib": "^2.0.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "manualIncludes": [],
+  "manualExcludes": [
+    "docs/team-lunch-rota.md"
+  ],
+  "manualAreas": [],
+  "conflictResolutions": []
+}

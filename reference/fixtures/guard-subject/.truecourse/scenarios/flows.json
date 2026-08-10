@@ -1,0 +1,657 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-09T15:54:34.243Z",
+  "flows": [
+    {
+      "id": "run-the-quick-start-check-and-badge",
+      "title": "Run the quick start check and badge",
+      "goal": "The user gates the example report against the default minimum and then prints its coverage badge.",
+      "fingerprint": "sha256:bfebcbd615f6fccb0875f07cdea4a3e42576d65f80ba869c14c51759e4fef744",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "README.md",
+          "anchor": "covergate/quick-start",
+          "claimTitle": "`covergate check examples/coverage-summary.json` gates the report against the default minimum of 80% and prints `PASS lines 87.50% (minimum 80.00%)`.",
+          "note": "The quick start first verifies that the example report passes the default gate."
+        },
+        {
+          "order": 2,
+          "doc": "README.md",
+          "anchor": "covergate/quick-start",
+          "claimTitle": "`covergate badge examples/coverage-summary.json` reads the report and prints `![lines coverage](https://img.shields.io/badge/lines-87.50%25-green)`.",
+          "note": "After the report is checked, the user prints the badge for the same report."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "README.md",
+          "anchor": "covergate/quick-start",
+          "fingerprint": "sha256:b386935940e8aab397db50e60fe3c4a0fb72130dff7098465a074e2a49e82199"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "check-a-selected-report-successfully",
+      "title": "Check a selected report successfully",
+      "goal": "The user checks a report from the working directory with equivalent flag syntax and receives a passing result.",
+      "fingerprint": "sha256:0c4ea55f590b4c1378eba94b5237297c162f4a38e7dcef41406a1bcd34531045",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/where-the-report-is-read-from",
+          "claimTitle": "The optional positional argument to `covergate check` is the path to the report, resolved against the working directory.",
+          "note": "The user chooses which coverage summary to check."
+        },
+        {
+          "order": 2,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "claimTitle": "A flag value supplied separated from the flag and a flag value supplied joined with `=` mean the same thing.",
+          "note": "The user can provide option values in either documented form before running the check."
+        },
+        {
+          "order": 3,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-check",
+          "claimTitle": "When the selected `total.<metric>.pct` is at or above the minimum, including exactly equal to it, `covergate check` writes `PASS <metric> <pct>% (minimum <min>%)` to stdout with both numbers to two decimals and exits `0`.",
+          "note": "The selected coverage meets the threshold."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/where-the-report-is-read-from",
+          "fingerprint": "sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-check",
+          "fingerprint": "sha256:a1697b3bbf51ebca257bb95d37aba61c3ffee457c0a755a683795641b6dbcdc8"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "report-a-badge-even-when-coverage-fails-the-gate",
+      "title": "Report a badge even when coverage fails the gate",
+      "goal": "The user sees that a failed coverage gate does not prevent badge reporting.",
+      "fingerprint": "sha256:cb0ab6302f2c939ffaf56e0854d3e7f5df4be04129c97c1c0a23e7c65c7e6766",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-check",
+          "claimTitle": "When the selected `total.<metric>.pct` is below the minimum, `covergate check` writes `FAIL <metric> <pct>% (minimum <min>%)` to stdout with both numbers to two decimals and exits `1`.",
+          "note": "The report is below the requested minimum."
+        },
+        {
+          "order": 2,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/badge-is-a-reporter-not-a-gate",
+          "claimTitle": "`badge` has no minimum of its own and exits `0` with a badge printed even for a report that `check --min 90` rejects with exit `1`.",
+          "note": "The same low-coverage report can still be used to print a badge."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-check",
+          "fingerprint": "sha256:a1697b3bbf51ebca257bb95d37aba61c3ffee457c0a755a683795641b6dbcdc8"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/badge-is-a-reporter-not-a-gate",
+          "fingerprint": "sha256:04f97d6353d6b3f957000d6d6818685676cc4e9cf281f63d619ee18ffe794a6f"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "print-a-coverage-badge",
+      "title": "Print a coverage badge",
+      "goal": "The user selects a report and metric and gets a Markdown image badge with the documented colour.",
+      "fingerprint": "sha256:90743e277964f554b23d2cf3384fa213b70df9ade171ea75b66fdb6101be4459",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-badge",
+          "claimTitle": "`covergate badge` takes the positional report path and `--metric` values exactly as `check` does.",
+          "note": "The user selects the report and metric for badge generation."
+        },
+        {
+          "order": 2,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-badge",
+          "claimTitle": "`covergate badge` reads the selected coverage percentage and prints a Markdown image to stdout whose alt text is `<metric> coverage` and whose URL is `https://img.shields.io/badge/<metric>-<pct>%25-<colour>` with the percentage to two decimals.",
+          "note": "The command turns the selected percentage into the badge Markdown."
+        },
+        {
+          "order": 3,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/badge-colours",
+          "claimTitle": "The badge colour is `brightgreen` for percentages 90 and above, `green` for 80 up to 90, `yellow` for 60 up to 80, and `red` below 60.",
+          "note": "The generated badge uses the documented colour band for the percentage."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-badge",
+          "fingerprint": "sha256:eeeb48ff8164b5f690aa6e27cb6c328544e8944986381c9b82f4f248e97cf516"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/badge-colours",
+          "fingerprint": "sha256:48eca2daddc0869e569292a72b674dc043b8031413f2bbd0e0c855f5e7a35099"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "write-the-badge-to-a-file",
+      "title": "Write the badge to a file",
+      "goal": "The user writes the generated Markdown badge to an output file instead of stdout.",
+      "fingerprint": "sha256:1d77cfdaad870b811e775f22e59d1337ebd06927efafbb1c88fbb9de55b2ba98",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/writing-the-badge-to-a-file",
+          "claimTitle": "With `--out <path>`, covergate writes the Markdown plus a newline to that file, creates any missing parent directories, and prints `covergate: wrote <path>` to stdout instead of the badge.",
+          "note": "This is the file-output variant of badge generation."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/writing-the-badge-to-a-file",
+          "fingerprint": "sha256:1ba59d4b91a74ab7cf41325cded7afdb5105616260bf0d6b146760101d4b4f2d"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "initialize-configuration-and-refuse-to-overwrite-it",
+      "title": "Initialize configuration and refuse to overwrite it",
+      "goal": "The user creates the documented configuration file once and is protected from overwriting it on a later init.",
+      "fingerprint": "sha256:bb70c980357c24698b0949c826df98f96c77dbad5969b30e799cbb4a0c721edc",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "claimTitle": "`covergate init` prints `covergate: created .covergaterc.json` and writes the documented `.covergaterc.json` file, comments included, into the working directory.",
+          "note": "The user creates the initial configuration file."
+        },
+        {
+          "order": 2,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/refusing-to-overwrite",
+          "claimTitle": "When `.covergaterc.json` already exists, `init` leaves its bytes exactly as they were and exits `2` with `covergate: .covergaterc.json already exists`.",
+          "note": "A later init preserves the existing configuration exactly."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "fingerprint": "sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/refusing-to-overwrite",
+          "fingerprint": "sha256:ab039c8417514e6c5f5311239ee3551776109f73b0640009bd3a237cfbab74c1"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "view-usage-command-help-and-version",
+      "title": "View usage, command help, and version",
+      "goal": "The user can discover the top-level commands, inspect command-specific flags, and print the installed version.",
+      "fingerprint": "sha256:8ef05f380c9a9c368397794ff64eaecd56e20af4464215124bd194ec3ec5ce96",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/usage-and-version",
+          "claimTitle": "`covergate --help` and `covergate` with no arguments print the usage block that lists the three commands and exit `0`.",
+          "note": "The user starts by viewing the top-level usage."
+        },
+        {
+          "order": 2,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/command-help",
+          "claimTitle": "`covergate <command> --help` prints that command's usage, lists only that command's defined flags, and exits `0`.",
+          "note": "The user then asks for help on one command."
+        },
+        {
+          "order": 3,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/usage-and-version",
+          "claimTitle": "`covergate --version` prints `covergate <version>` and exits `0`.",
+          "note": "The user can also verify the installed version."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/usage-and-version",
+          "fingerprint": "sha256:874335c007e2b76879826438ace16cdcaff0ae90c77084d247b75367b146d4ad"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/command-help",
+          "fingerprint": "sha256:f55d9f3b0b0d4db5f6364d40e6356be99360b5808b2e65eec346163c1baa80e6"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-init-arguments",
+      "title": "Reject init arguments",
+      "goal": "The user receives the documented error when passing arguments to init.",
+      "fingerprint": "sha256:bf6a6b0cd6ed18e88d53f2ba9190f54f077569f11437a59f31a929e5ee530538",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "claimTitle": "`covergate init` with any argument exits `2` with `covergate: init takes no arguments`.",
+          "note": "This is an init-specific argument error."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "fingerprint": "sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "get-consistently-formatted-errors",
+      "title": "Format errors consistently",
+      "goal": "The user receives errors on stderr with the documented covergate prefix.",
+      "fingerprint": "sha256:ff9e4d129526c4a46b0558040e3dc436f0600762f879b3330fab320492d0a88f",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/errors",
+          "claimTitle": "Every error message covergate prints goes to stderr and begins with `covergate: `.",
+          "note": "This cross-cutting behavior applies to the CLI error cases."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/errors",
+          "fingerprint": "sha256:81e44d29cfb1dcddba7c1121eaa6664d09320fc718671a6966b3c4e2cf95c2aa"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-a-flag-with-no-value",
+      "title": "Reject a flag with no value",
+      "goal": "The user receives the documented error when a value-taking flag is left last without a value.",
+      "fingerprint": "sha256:e6791eddfa5e1aa37447d611efb4df18fb921e56a3433a2804810d337f7ea619",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "claimTitle": "A flag written last with nothing after it exits `2` with `covergate: --<name> needs a value`.",
+          "note": "This is a flag syntax error path."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-a-flag-the-command-does-not-define",
+      "title": "Reject a flag the command does not define",
+      "goal": "The user receives the documented error when using an unsupported flag for a command.",
+      "fingerprint": "sha256:a61cc15a1c1b46132627c051f6db801e8acaef75e440374a0f7c8549037b5d7a",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "claimTitle": "A flag the command does not define exits `2` with `covergate: <command> does not accept --<name>`.",
+          "note": "This is a command-specific flag validation path."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-an-unknown-metric",
+      "title": "Reject an unknown metric",
+      "goal": "The user receives the documented error when selecting an unsupported metric.",
+      "fingerprint": "sha256:4aa7f0e3048495dcd89e6a8c7637310af2bff45e85379b0e21c7e0d6d2278fe4",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/invalid-flag-values",
+          "claimTitle": "A `--metric` value that is not one of `lines`, `statements`, `functions`, or `branches` exits `2` with `covergate: unknown metric \"<name>\" (expected one of: lines, statements, functions, branches)`.",
+          "note": "This validates the metric value before coverage is read."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/invalid-flag-values",
+          "fingerprint": "sha256:4ed87f2f494e69dd597b4362e3295742e09837652e830aaf090539204701fb3a"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-an-invalid-minimum",
+      "title": "Reject an invalid minimum",
+      "goal": "The user receives the documented error when the minimum is not a number from 0 to 100.",
+      "fingerprint": "sha256:3b59a70e314ef81f4a14437427a805f0605c9eee5d5b97ecc3e029879dcf52f4",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/invalid-flag-values",
+          "claimTitle": "A `--min` value that is not a number between 0 and 100 exits `2` with `covergate: the minimum must be a number between 0 and 100`.",
+          "note": "This validates the minimum value before a gate result is reported."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/invalid-flag-values",
+          "fingerprint": "sha256:4ed87f2f494e69dd597b4362e3295742e09837652e830aaf090539204701fb3a"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-an-unknown-command",
+      "title": "Reject an unknown command",
+      "goal": "The user receives the documented error when the first command word is not defined.",
+      "fingerprint": "sha256:d809ec80846a4637d6f525e5d4190fc4ecc6f46a72f97c619cc7db23a111def3",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/unknown-commands",
+          "claimTitle": "A first word covergate does not define exits `2` with `covergate: unknown command \"<name>\"`.",
+          "note": "This is the top-level command validation path."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/unknown-commands",
+          "fingerprint": "sha256:cc0f618d609e07d69002464b0d67e4a694aab92ceef1b3470e4f1cab1f1cb49d"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-unreadable-reports",
+      "title": "Reject unreadable reports",
+      "goal": "The user receives a documented covergate error when the selected report cannot provide the requested coverage percentage.",
+      "fingerprint": "sha256:64bfb4057bf94c405624f0092aab797f4428f69c6a93ca21bbbed3855e6d49ed",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/unreadable-reports",
+          "claimTitle": "If the report file is missing, not valid JSON, or lacks `total.<metric>.pct`, the command exits `2` and prints the corresponding documented `covergate:` error message.",
+          "note": "This covers report input failures before a check or badge can be produced."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/unreadable-reports",
+          "fingerprint": "sha256:edacd384335efdfe5a73ed5f8b243deb8bafb809e96df659b5a1a3ed30b7bd6c"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "reject-extra-check-summary-paths",
+      "title": "Reject extra check summary paths",
+      "goal": "The user receives the documented error when check is given more than one summary path.",
+      "fingerprint": "sha256:b7a3090e0107ae8594b14933012796a23367136328ce98acd50cba7c4811aaf9",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/where-the-report-is-read-from",
+          "claimTitle": "A second positional argument to `covergate check` exits `2` with `covergate: check takes at most one summary path`.",
+          "note": "This is the positional-argument validation path for check."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/where-the-report-is-read-from",
+          "fingerprint": "sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "daf6f04dd4dd2e45f497a0d7fec1efc393526751e948b92079c0c93ad81707d0"
+    },
+    {
+      "id": "use-covergaterc-json-settings-when-gating-coverage",
+      "title": "Use `.covergaterc.json` settings when gating coverage",
+      "goal": "The user can run covergate with a local `.covergaterc.json` whose comments, omitted fields, and command-line overrides are handled consistently when gating coverage.",
+      "fingerprint": "sha256:166afe49c5a40dad98a52ff00dd7a460de3f383b582396ca15b7e43e020fc111",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/comments",
+          "claimTitle": "covergate strips `//` line comments and `/* */` block comments from `.covergaterc.json` before parsing it.",
+          "note": "A commented configuration file must be accepted before its settings can be used."
+        },
+        {
+          "order": 2,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/settings",
+          "claimTitle": "covergate reads `.covergaterc.json` from the directory the command runs in and uses its settings when gating coverage.",
+          "note": "After parsing, the local configuration supplies settings for coverage gating."
+        },
+        {
+          "order": 3,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/settings",
+          "claimTitle": "When `.covergaterc.json` leaves out a field, covergate falls back to the built-in defaults: `min` 80, `metric` `lines`, and `summary` `coverage/coverage-summary.json`.",
+          "note": "Missing configuration fields are completed with defaults before gating."
+        },
+        {
+          "order": 4,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/precedence",
+          "claimTitle": "For each setting, covergate uses the command-line value before the `.covergaterc.json` value before the built-in default.",
+          "note": "The final setting value follows the documented precedence."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/comments",
+          "fingerprint": "sha256:ab96bb073959a7156d0a3ffb4a7eab1389a3360f74bdf2b1fafaa97cad85af0a"
+        },
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/settings",
+          "fingerprint": "sha256:df4c3eef4b72ad55cdab48f2f333b74265cd5397d65080df4810a5f71abb2128"
+        },
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/precedence",
+          "fingerprint": "sha256:b0ef8bd2663513e65d6d9d8c5b368aee1985fcb926243c330424403058f2ac89"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "e2fc53f6a751827accd8f5b30d803dbaa48b209606cf02bf0929569f06a02c2b"
+    },
+    {
+      "id": "reject-covergaterc-json-that-is-not-valid-json",
+      "title": "Reject `.covergaterc.json` that is not valid JSON",
+      "goal": "The user gets a clear failure when `.covergaterc.json` cannot be parsed as JSON after comments are stripped.",
+      "fingerprint": "sha256:af48a0a798e8a61d92718d40f0f84a90eca997bfa3804ea53368ff708b0e0db6",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/when-the-file-is-wrong",
+          "claimTitle": "If `.covergaterc.json` does not parse as JSON after comments are stripped, covergate exits with code 2 and prints `covergate: .covergaterc.json is not valid JSON`.",
+          "note": "This is an error path for an invalid configuration file."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/when-the-file-is-wrong",
+          "fingerprint": "sha256:bc70f6c2258a63caaefbe790ec89d1072730d35b3dcd107ca2d2fc814d90451b"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "e2fc53f6a751827accd8f5b30d803dbaa48b209606cf02bf0929569f06a02c2b"
+    },
+    {
+      "id": "reject-covergaterc-json-that-is-not-an-object",
+      "title": "Reject `.covergaterc.json` that is not an object",
+      "goal": "The user gets a clear failure when `.covergaterc.json` parses but does not contain a JSON object.",
+      "fingerprint": "sha256:a2ad69366b16175a1d404f92e7b91cdb5788cac7e05d12403c20c4eae85adb31",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/when-the-file-is-wrong",
+          "claimTitle": "If `.covergaterc.json` parses but is not an object, covergate exits with code 2 and prints `covergate: .covergaterc.json must contain a JSON object`.",
+          "note": "This is an error path for a configuration file with the wrong top-level type."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/when-the-file-is-wrong",
+          "fingerprint": "sha256:bc70f6c2258a63caaefbe790ec89d1072730d35b3dcd107ca2d2fc814d90451b"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "e2fc53f6a751827accd8f5b30d803dbaa48b209606cf02bf0929569f06a02c2b"
+    },
+    {
+      "id": "create-a-local-covergate-configuration-and-use-it-for-a-5bdb5f81",
+      "title": "Initialize configuration and gate coverage with it",
+      "goal": "The user creates a local covergate configuration file and then runs coverage gating that reads and applies that configuration with documented defaults and overrides.",
+      "fingerprint": "sha256:9a6ddd9cfbde3811c5c7c3d73192a80117c7be72de4328711d96249445cf6cab",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "claimTitle": "`covergate init` prints `covergate: created .covergaterc.json` and writes the documented `.covergaterc.json` file, comments included, into the working directory.",
+          "note": "Creates the configuration file used by the later gating command."
+        },
+        {
+          "order": 2,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/comments",
+          "claimTitle": "covergate strips `//` line comments and `/* */` block comments from `.covergaterc.json` before parsing it.",
+          "note": "The initialized file may include comments, so parsing must handle them before use."
+        },
+        {
+          "order": 3,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/settings",
+          "claimTitle": "covergate reads `.covergaterc.json` from the directory the command runs in and uses its settings when gating coverage.",
+          "note": "The gating command depends on the file created in the working directory."
+        },
+        {
+          "order": 4,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/settings",
+          "claimTitle": "When `.covergaterc.json` leaves out a field, covergate falls back to the built-in defaults: `min` 80, `metric` `lines`, and `summary` `coverage/coverage-summary.json`.",
+          "note": "The generated or edited configuration can omit settings while still producing a complete gate."
+        },
+        {
+          "order": 5,
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/precedence",
+          "claimTitle": "For each setting, covergate uses the command-line value before the `.covergaterc.json` value before the built-in default.",
+          "note": "The final gate uses command-line overrides, then configuration, then defaults."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "fingerprint": "sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19"
+        },
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/comments",
+          "fingerprint": "sha256:ab96bb073959a7156d0a3ffb4a7eab1389a3360f74bdf2b1fafaa97cad85af0a"
+        },
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/settings",
+          "fingerprint": "sha256:df4c3eef4b72ad55cdab48f2f333b74265cd5397d65080df4810a5f71abb2128"
+        },
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/precedence",
+          "fingerprint": "sha256:b0ef8bd2663513e65d6d9d8c5b368aee1985fcb926243c330424403058f2ac89"
+        }
+      ],
+      "composedOf": [
+        "initialize-configuration-and-refuse-to-overwrite-it",
+        "use-covergaterc-json-settings-when-gating-coverage"
+      ],
+      "synthesisInputsHash": "2f97481769c08d1ec4cdd3b1d6c56fbdfb58d6df964626900d7ca58baf80f4e1"
+    }
+  ],
+  "noFlowClaims": []
+}

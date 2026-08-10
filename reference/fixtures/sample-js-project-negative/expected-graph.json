@@ -1,0 +1,1839 @@
+{
+  "services": [
+    {
+      "name": "api-gateway",
+      "type": "api-server"
+    },
+    {
+      "name": "infrastructure",
+      "type": "unknown"
+    },
+    {
+      "name": "notification-service",
+      "type": "worker"
+    },
+    {
+      "name": "user-service",
+      "type": "api-server"
+    },
+    {
+      "name": "utils",
+      "type": "library"
+    },
+    {
+      "name": "web",
+      "type": "frontend"
+    }
+  ],
+  "serviceDependencies": [
+    {
+      "source": "api-gateway",
+      "target": "user-service"
+    },
+    {
+      "source": "api-gateway",
+      "target": "utils"
+    },
+    {
+      "source": "user-service",
+      "target": "api-gateway"
+    },
+    {
+      "source": "user-service",
+      "target": "utils"
+    },
+    {
+      "source": "web",
+      "target": "api-gateway"
+    }
+  ],
+  "modules": [
+    {
+      "name": "applyDefaultBudget",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "assertEverything",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "attachOpener",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "attachUserMiddleware",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "authMiddleware",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "buildAuthHeader",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "error-handler",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "EventHandler",
+      "service": "api-gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "handleEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "handleParse",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "HealthService",
+      "service": "api-gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "helpers",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "insecure-random-prod-token",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "loadProfiles",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "loadUserPyramid",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "logger",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "logImplicitGlobalEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "logPayload",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "maybeIndex",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "performance",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "promise-all-no-error-handling",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "rate-limiter",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "recordAuditEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "redis",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "registerAdminRoutes",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "reliability",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "reportFailureHandler",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "serveTemplate",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "StringFormatter",
+      "service": "api-gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UserController",
+      "service": "api-gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "UserService",
+      "service": "api-gateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "AnyPrincipal",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ApolloServer",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "aws-resources",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "browser-security",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Bucket",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CfnNotebookInstance",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DatabaseInstance",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Domain",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DOMParser",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FileSystem",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "graphql-xml",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "iam-policies",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ManagedPolicy",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "network-tls",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PolicyStatement",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Queue",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RestApi",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "s3-buckets",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SignedXml",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Topic",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Volume",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EmailTemplates",
+      "service": "notification-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationProcessor",
+      "service": "notification-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "pruneStaleCacheEntries",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "queue-worker",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "sender",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "src",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "subscribeIfNew",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "Animal",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "applyConfig",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "array-bugs",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "AuditEventsClient",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "AuditLogRepository",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "authenticateApiKey",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "BadConstructor",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "Base",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "comparisons",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "computeOrphanedAggregate",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Config",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "Config",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ConfigStore",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "connection",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "createPostIfAuthorMissing",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "createSessionWithAudit",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "createWidgetWithAudit",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "Dog",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "errors",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "EventEmitter",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "getTokenService",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "isPriorityHigher",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Mergeable",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "migrations",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "queries",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "query-builder",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "QueryBuilder",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "registerUser",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "runLs",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "scope-bugs",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "setExternalProperty",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SetterWithReturn",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "src",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "Subject",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "subscribeWebhook",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "summarizeAuditLogEntries",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "TaskHandlers",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "TokenService",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "types",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "user.handler",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "UserRepository",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "UserService",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "validation",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "verifyWebhook",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Aliaser",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "array-delete-array-receiver",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "AsyncInit",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Base",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BaseHandler",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BatchProcessor",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "buildApiUrl",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Builder",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "buildRecordLabel",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Calculator",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CaseHelpers",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "checkContact",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ChildHandler",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassA",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassB",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassC",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassD",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "classify",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "classifyRequest",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "clear-text-protocol-hardcoded-host",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-advanced",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-basics",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-complexity",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-misc",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-modern",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-typescript",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-unused",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "computeDefaultTimeout",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "confusing-void-expression-non-void-caller",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Constants",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ConstructorNoReturn",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "consumeCounter",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Container",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CounterBox",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "crypto",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "declarations-in-global-scope-mutable",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Derived",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "describe",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describeFlag",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describeOwner",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describePayload",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describeShape",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "describeUserRow",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "dispatchRoute",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "dumpKeys",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "duplicate-string-error-message",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "duplicate-string-sql-fragment",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "EarlyThis",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EmptyStatic",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "evaluateGate",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "fetchAllRecords",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "fetchInvoiceReport",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "fireAndForget",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "firstSquareUnder",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "firstStringOver",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "formatTaskRunId",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "formatters",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "FriendlyGreeter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "function-in-loop-var-binding",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "GeometryHelpers",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "getParser",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "god-module-business-helpers",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Greeter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "GreeterBase",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "greetLength",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "hardcoded-ip-internal-host",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "HealthcheckService",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "http-call-no-timeout-external",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "isLeading",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "isSelectedBuggy",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "js-style-preference-var",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "jwt-no-expiry-options-without-expiresin",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "legacy",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "loadHelper",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "loadRelated",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "logFirstField",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "logger",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "looksLikeRoute",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "magic-number-arbitrary-threshold",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "misc-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "MissingGetterReturn",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MissingSuperCall",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "nameAt",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "namespace-usage-internal-module",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "negatedConfigValue",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "no-alert-browser-dialog",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "OffscreenRenderer",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "OnlyStatic",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ParamAssign",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "passThroughPromise",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "pickStatusLabel",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Plain",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "processAbandonedQueue",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "processOrder",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PropertyStore",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RateLimiter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "readGreeting",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "readOnce",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "readWithFallback",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ReassignableClass",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "recipientNameFor",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "redos-vulnerable-regex-nested-quantifiers",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "redundant-template-expression-bare",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "regex-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "regex-duplicate-char-class-unicode-escapes",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "regex-empty-group-bare",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "remaining-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "renameUser",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "required-type-annotations-bare-arrow",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "reservedHook",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "resolveDocument",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "runWithoutRelease",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Salutation",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Secretive",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "security",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Service",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ServiceWorker",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "setEntry",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SetterNoReturn",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "shouldDispatchAsApiCall",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "shoutLabel",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "squareAll",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "style",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "sumBytes",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "summarize",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "summarizeAccount",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "todoHandler",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "toSortedNumeric",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "totalScore",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "totalSummaryBytes",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "type-guard-preference-typeof",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unbounded-array-growth-no-bound",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "undefined-passed-as-optional",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unnecessary-condition-literal",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unnecessary-type-conversion-bool",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "UnreadAttribute",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "unsafe-json-parse-untrusted",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unsafe-type-assertion-runtime-string",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unused-function-parameter-trailing-and-dollar",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "UselessDefault",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "validators",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "waitForFlag",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "web-security",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Widget",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WidgetWriter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "wireResize",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "wrapSync",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "WrongNameClass",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WrongNameClass",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "BillingDashboard",
+      "service": "web",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BucketRanking",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ClientCard",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "CompletelyUnrelatedWidget",
+      "service": "web",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DangerouslyUserContent",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Dashboard",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "DataTable",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Greeting",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "IdenticalFunctionsBlockBody",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "LeafProviderEmpty",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Links",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "MultiStageChain",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationList",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ReactBugs",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ReactPerformance",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "RemainingReact",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SuspenseQueryView",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "useNotifications",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "UserForm",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "WindowSizeWatcher",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    }
+  ],
+  "moduleDependencies": [
+    {
+      "source": "assertEverything",
+      "sourceService": "api-gateway",
+      "target": "HealthService",
+      "targetService": "api-gateway",
+      "importedNames": [
+        "HealthService"
+      ]
+    },
+    {
+      "source": "assertEverything",
+      "sourceService": "api-gateway",
+      "target": "UserController",
+      "targetService": "api-gateway",
+      "importedNames": [
+        "UserController"
+      ]
+    },
+    {
+      "source": "recordAuditEvent",
+      "sourceService": "api-gateway",
+      "target": "AuditLogRepository",
+      "targetService": "user-service",
+      "importedNames": [
+        "AuditLogRepository"
+      ]
+    },
+    {
+      "source": "UserController",
+      "sourceService": "api-gateway",
+      "target": "UserService",
+      "targetService": "api-gateway",
+      "importedNames": [
+        "UserService"
+      ]
+    },
+    {
+      "source": "UserService",
+      "sourceService": "api-gateway",
+      "target": "formatters",
+      "targetService": "utils",
+      "importedNames": [
+        "formatUser"
+      ]
+    },
+    {
+      "source": "NotificationProcessor",
+      "sourceService": "notification-service",
+      "target": "EmailTemplates",
+      "targetService": "notification-service",
+      "importedNames": [
+        "EmailTemplates"
+      ]
+    },
+    {
+      "source": "NotificationProcessor",
+      "sourceService": "notification-service",
+      "target": "sender",
+      "targetService": "notification-service",
+      "importedNames": [
+        "sendEmail"
+      ]
+    },
+    {
+      "source": "src",
+      "sourceService": "notification-service",
+      "target": "EmailTemplates",
+      "targetService": "notification-service",
+      "importedNames": [
+        "EmailTemplates"
+      ]
+    },
+    {
+      "source": "src",
+      "sourceService": "notification-service",
+      "target": "NotificationProcessor",
+      "targetService": "notification-service",
+      "importedNames": [
+        "NotificationProcessor"
+      ]
+    },
+    {
+      "source": "AuditLogRepository",
+      "sourceService": "user-service",
+      "target": "AuditEventsClient",
+      "targetService": "user-service",
+      "importedNames": [
+        "AuditEventsClient"
+      ]
+    },
+    {
+      "source": "src",
+      "sourceService": "user-service",
+      "target": "connection",
+      "targetService": "user-service",
+      "importedNames": [
+        "connectDatabase"
+      ]
+    },
+    {
+      "source": "user.handler",
+      "sourceService": "user-service",
+      "target": "UserService",
+      "targetService": "user-service",
+      "importedNames": [
+        "UserService"
+      ]
+    },
+    {
+      "source": "user.handler",
+      "sourceService": "user-service",
+      "target": "validators",
+      "targetService": "utils",
+      "importedNames": [
+        "validateEmail"
+      ]
+    },
+    {
+      "source": "UserRepository",
+      "sourceService": "user-service",
+      "target": "user.handler",
+      "targetService": "user-service",
+      "importedNames": [
+        "getUsers"
+      ]
+    },
+    {
+      "source": "UserService",
+      "sourceService": "user-service",
+      "target": "UserRepository",
+      "targetService": "user-service",
+      "importedNames": [
+        "UserRepository"
+      ]
+    },
+    {
+      "source": "checkContact",
+      "sourceService": "utils",
+      "target": "validators",
+      "targetService": "utils",
+      "importedNames": [
+        "validateEmail"
+      ]
+    },
+    {
+      "source": "Dashboard",
+      "sourceService": "web",
+      "target": "NotificationList",
+      "targetService": "web",
+      "importedNames": [
+        "NotificationList"
+      ]
+    }
+  ]
+}

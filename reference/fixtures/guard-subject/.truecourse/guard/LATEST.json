@@ -1,0 +1,416 @@
+{
+  "run": {
+    "runId": "2026-08-09T15-53-32Z_71df1d1c",
+    "ranAt": "2026-08-09T15:53:32.786Z",
+    "branch": "main",
+    "commit": "83bc04bced71643152bc8f203b885c8ba7c104db",
+    "recipeFingerprint": "sha256:03b48b6d09ed7613363aa60914cd047d7f3aee8553050168f57b00a18e9ff85a",
+    "scenarioFormat": 3
+  },
+  "summary": {
+    "total": 18,
+    "pass": 18,
+    "fail": 0,
+    "stale": 0,
+    "orphaned": 0,
+    "error": 0,
+    "blocked": 0
+  },
+  "scenarios": [
+    {
+      "id": "check-a-selected-report-successfully.cli.1",
+      "title": "Checking a selected working-directory report accepts equivalent flag value syntax and passes at the threshold",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/where-the-report-is-read-from",
+        "fingerprint": "sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16"
+      },
+      "flowId": "check-a-selected-report-successfully",
+      "outcome": "pass",
+      "durationMs": 294,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/check-a-selected-report-successfully.cli.1"
+    },
+    {
+      "id": "get-consistently-formatted-errors.cli.1",
+      "title": "Errors are written to stderr with the covergate prefix",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/errors",
+        "fingerprint": "sha256:81e44d29cfb1dcddba7c1121eaa6664d09320fc718671a6966b3c4e2cf95c2aa"
+      },
+      "flowId": "get-consistently-formatted-errors",
+      "outcome": "pass",
+      "durationMs": 181,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/get-consistently-formatted-errors.cli.1"
+    },
+    {
+      "id": "initialize-configuration-and-refuse-to-overwrite-it.cli.1",
+      "title": "Initializing configuration creates the documented file once and later refuses to overwrite it",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/covergate-init",
+        "fingerprint": "sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19"
+      },
+      "flowId": "initialize-configuration-and-refuse-to-overwrite-it",
+      "outcome": "pass",
+      "durationMs": 143,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/initialize-configuration-and-refuse-to-overwrite-it.cli.1"
+    },
+    {
+      "id": "print-a-coverage-badge.cli.1",
+      "title": "Badge uses the chosen report and metric to print Markdown with the documented colour",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/covergate-badge",
+        "fingerprint": "sha256:eeeb48ff8164b5f690aa6e27cb6c328544e8944986381c9b82f4f248e97cf516"
+      },
+      "flowId": "print-a-coverage-badge",
+      "outcome": "pass",
+      "durationMs": 412,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/print-a-coverage-badge.cli.1"
+    },
+    {
+      "id": "reject-a-flag-the-command-does-not-define.cli.1",
+      "title": "Unsupported command-specific flags are rejected with the documented error",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/flag-syntax",
+        "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+      },
+      "flowId": "reject-a-flag-the-command-does-not-define",
+      "outcome": "pass",
+      "durationMs": 82,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-a-flag-the-command-does-not-define.cli.1"
+    },
+    {
+      "id": "reject-a-flag-with-no-value.cli.1",
+      "title": "Rejecting a value-taking flag left without a value reports the documented flag syntax error",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/flag-syntax",
+        "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+      },
+      "flowId": "reject-a-flag-with-no-value",
+      "outcome": "pass",
+      "durationMs": 92,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-a-flag-with-no-value.cli.1"
+    },
+    {
+      "id": "reject-an-invalid-minimum.cli.1",
+      "title": "Rejecting an invalid minimum reports the documented usage error",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/invalid-flag-values",
+        "fingerprint": "sha256:4ed87f2f494e69dd597b4362e3295742e09837652e830aaf090539204701fb3a"
+      },
+      "flowId": "reject-an-invalid-minimum",
+      "outcome": "pass",
+      "durationMs": 99,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-an-invalid-minimum.cli.1"
+    },
+    {
+      "id": "reject-an-unknown-metric.cli.1",
+      "title": "Rejecting an unsupported coverage metric reports the documented usage error",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/invalid-flag-values",
+        "fingerprint": "sha256:4ed87f2f494e69dd597b4362e3295742e09837652e830aaf090539204701fb3a"
+      },
+      "flowId": "reject-an-unknown-metric",
+      "outcome": "pass",
+      "durationMs": 105,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-an-unknown-metric.cli.1"
+    },
+    {
+      "id": "reject-covergaterc-json-that-is-not-an-object.cli.1",
+      "title": "Rejects a parsed .covergaterc.json whose top level is not an object",
+      "binds": {
+        "doc": "docs/configuration.md",
+        "section": "configuration/when-the-file-is-wrong",
+        "fingerprint": "sha256:bc70f6c2258a63caaefbe790ec89d1072730d35b3dcd107ca2d2fc814d90451b"
+      },
+      "flowId": "reject-covergaterc-json-that-is-not-an-object",
+      "outcome": "pass",
+      "durationMs": 114,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-covergaterc-json-that-is-not-an-object.cli.1"
+    },
+    {
+      "id": "reject-covergaterc-json-that-is-not-valid-json.cli.1",
+      "title": "Invalid configuration JSON is rejected before checking coverage",
+      "binds": {
+        "doc": "docs/configuration.md",
+        "section": "configuration/when-the-file-is-wrong",
+        "fingerprint": "sha256:bc70f6c2258a63caaefbe790ec89d1072730d35b3dcd107ca2d2fc814d90451b"
+      },
+      "flowId": "reject-covergaterc-json-that-is-not-valid-json",
+      "outcome": "pass",
+      "durationMs": 54,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-covergaterc-json-that-is-not-valid-json.cli.1"
+    },
+    {
+      "id": "reject-extra-check-summary-paths.cli.1",
+      "title": "Rejecting more than one summary path for check reports the documented usage error",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/where-the-report-is-read-from",
+        "fingerprint": "sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16"
+      },
+      "flowId": "reject-extra-check-summary-paths",
+      "outcome": "pass",
+      "durationMs": 68,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-extra-check-summary-paths.cli.1"
+    },
+    {
+      "id": "reject-init-arguments.cli.1",
+      "title": "Init rejects any argument with its documented usage error",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/covergate-init",
+        "fingerprint": "sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19"
+      },
+      "flowId": "reject-init-arguments",
+      "outcome": "pass",
+      "durationMs": 69,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-init-arguments.cli.1"
+    },
+    {
+      "id": "reject-unreadable-reports.cli.1",
+      "title": "Unreadable reports are rejected with documented covergate errors",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/unreadable-reports",
+        "fingerprint": "sha256:edacd384335efdfe5a73ed5f8b243deb8bafb809e96df659b5a1a3ed30b7bd6c"
+      },
+      "flowId": "reject-unreadable-reports",
+      "outcome": "pass",
+      "durationMs": 375,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/reject-unreadable-reports.cli.1"
+    },
+    {
+      "id": "report-a-badge-even-when-coverage-fails-the-gate.cli.1",
+      "title": "A failed coverage gate still allows reporting a coverage badge",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/covergate-check",
+        "fingerprint": "sha256:a1697b3bbf51ebca257bb95d37aba61c3ffee457c0a755a683795641b6dbcdc8"
+      },
+      "flowId": "report-a-badge-even-when-coverage-fails-the-gate",
+      "outcome": "pass",
+      "durationMs": 180,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/report-a-badge-even-when-coverage-fails-the-gate.cli.1"
+    },
+    {
+      "id": "run-the-quick-start-check-and-badge.cli.1",
+      "title": "Quick start gates the sample report at the default minimum and prints the badge",
+      "binds": {
+        "doc": "README.md",
+        "section": "covergate/quick-start",
+        "fingerprint": "sha256:b386935940e8aab397db50e60fe3c4a0fb72130dff7098465a074e2a49e82199"
+      },
+      "flowId": "run-the-quick-start-check-and-badge",
+      "outcome": "pass",
+      "durationMs": 160,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/run-the-quick-start-check-and-badge.cli.1"
+    },
+    {
+      "id": "use-covergaterc-json-settings-when-gating-coverage.cli.1",
+      "title": "Coverage gating resolves local commented config, omitted defaults, and command-line overrides from the run directory",
+      "binds": {
+        "doc": "docs/configuration.md",
+        "section": "configuration/comments",
+        "fingerprint": "sha256:ab96bb073959a7156d0a3ffb4a7eab1389a3360f74bdf2b1fafaa97cad85af0a"
+      },
+      "flowId": "use-covergaterc-json-settings-when-gating-coverage",
+      "outcome": "pass",
+      "durationMs": 288,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/use-covergaterc-json-settings-when-gating-coverage.cli.1"
+    },
+    {
+      "id": "view-usage-command-help-and-version.cli.1",
+      "title": "View top-level usage, command-specific help, and installed version",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/usage-and-version",
+        "fingerprint": "sha256:874335c007e2b76879826438ace16cdcaff0ae90c77084d247b75367b146d4ad"
+      },
+      "flowId": "view-usage-command-help-and-version",
+      "outcome": "pass",
+      "durationMs": 341,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/view-usage-command-help-and-version.cli.1"
+    },
+    {
+      "id": "write-the-badge-to-a-file.cli.1",
+      "title": "Writing a generated badge to an output file creates missing parent directories and reports the write",
+      "binds": {
+        "doc": "docs/cli-reference.md",
+        "section": "cli-reference/writing-the-badge-to-a-file",
+        "fingerprint": "sha256:1ba59d4b91a74ab7cf41325cded7afdb5105616260bf0d6b146760101d4b4f2d"
+      },
+      "flowId": "write-the-badge-to-a-file",
+      "outcome": "pass",
+      "durationMs": 115,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-09T15-53-32Z_71df1d1c/write-the-badge-to-a-file.cli.1"
+    }
+  ],
+  "sections": [
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/badge-colours",
+      "status": "pass",
+      "scenarioIds": [
+        "print-a-coverage-badge.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/badge-is-a-reporter-not-a-gate",
+      "status": "pass",
+      "scenarioIds": [
+        "report-a-badge-even-when-coverage-fails-the-gate.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/command-help",
+      "status": "pass",
+      "scenarioIds": [
+        "view-usage-command-help-and-version.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/covergate-badge",
+      "status": "pass",
+      "scenarioIds": [
+        "print-a-coverage-badge.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/covergate-check",
+      "status": "pass",
+      "scenarioIds": [
+        "check-a-selected-report-successfully.cli.1",
+        "report-a-badge-even-when-coverage-fails-the-gate.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/covergate-init",
+      "status": "pass",
+      "scenarioIds": [
+        "initialize-configuration-and-refuse-to-overwrite-it.cli.1",
+        "reject-init-arguments.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/errors",
+      "status": "pass",
+      "scenarioIds": [
+        "get-consistently-formatted-errors.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/flag-syntax",
+      "status": "pass",
+      "scenarioIds": [
+        "check-a-selected-report-successfully.cli.1",
+        "reject-a-flag-the-command-does-not-define.cli.1",
+        "reject-a-flag-with-no-value.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/invalid-flag-values",
+      "status": "pass",
+      "scenarioIds": [
+        "reject-an-invalid-minimum.cli.1",
+        "reject-an-unknown-metric.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/refusing-to-overwrite",
+      "status": "pass",
+      "scenarioIds": [
+        "initialize-configuration-and-refuse-to-overwrite-it.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/unreadable-reports",
+      "status": "pass",
+      "scenarioIds": [
+        "reject-unreadable-reports.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/usage-and-version",
+      "status": "pass",
+      "scenarioIds": [
+        "view-usage-command-help-and-version.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/where-the-report-is-read-from",
+      "status": "pass",
+      "scenarioIds": [
+        "check-a-selected-report-successfully.cli.1",
+        "reject-extra-check-summary-paths.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/cli-reference.md",
+      "section": "cli-reference/writing-the-badge-to-a-file",
+      "status": "pass",
+      "scenarioIds": [
+        "write-the-badge-to-a-file.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "configuration/comments",
+      "status": "pass",
+      "scenarioIds": [
+        "use-covergaterc-json-settings-when-gating-coverage.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "configuration/precedence",
+      "status": "pass",
+      "scenarioIds": [
+        "use-covergaterc-json-settings-when-gating-coverage.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "configuration/settings",
+      "status": "pass",
+      "scenarioIds": [
+        "use-covergaterc-json-settings-when-gating-coverage.cli.1"
+      ]
+    },
+    {
+      "doc": "docs/configuration.md",
+      "section": "configuration/when-the-file-is-wrong",
+      "status": "pass",
+      "scenarioIds": [
+        "reject-covergaterc-json-that-is-not-an-object.cli.1",
+        "reject-covergaterc-json-that-is-not-valid-json.cli.1"
+      ]
+    },
+    {
+      "doc": "README.md",
+      "section": "covergate/quick-start",
+      "status": "pass",
+      "scenarioIds": [
+        "run-the-quick-start-check-and-badge.cli.1"
+      ]
+    }
+  ]
+}

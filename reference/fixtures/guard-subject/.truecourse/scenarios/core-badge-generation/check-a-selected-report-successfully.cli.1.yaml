@@ -1,0 +1,73 @@
+guard: 3
+id: check-a-selected-report-successfully.cli.1
+title: Checking a selected working-directory report accepts equivalent flag value syntax and passes at the threshold
+promise: The user checks a report from the working directory with equivalent flag syntax and receives a passing result.
+flow:
+  id: check-a-selected-report-successfully
+  fingerprint: sha256:0c4ea55f590b4c1378eba94b5237297c162f4a38e7dcef41406a1bcd34531045
+journey:
+  path:
+    - cli/check
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/where-the-report-is-read-from
+    fingerprint: sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16
+  - doc: docs/cli-reference.md
+    section: cli-reference/flag-syntax
+    fingerprint: sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e
+  - doc: docs/cli-reference.md
+    section: cli-reference/covergate-check
+    fingerprint: sha256:a1697b3bbf51ebca257bb95d37aba61c3ffee457c0a755a683795641b6dbcdc8
+setup:
+  files:
+    reports-${unique}/coverage-summary.json: |
+      {
+        "total": {
+          "lines": { "total": 1000, "covered": 875, "skipped": 0, "pct": 87.5 },
+          "statements": { "total": 1000, "covered": 875, "skipped": 0, "pct": 87.5 },
+          "functions": { "total": 1000, "covered": 875, "skipped": 0, "pct": 87.5 },
+          "branches": { "total": 1000, "covered": 875, "skipped": 0, "pct": 87.5 }
+        }
+      }
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+      - reports-${unique}/coverage-summary.json
+    expect:
+      exit: 0
+      stdout:
+        contains: PASS lines 87.50% (minimum 80.00%)
+    milestone: 1
+  - run:
+      - check
+      - reports-${unique}/coverage-summary.json
+      - '--min'
+      - '87.5'
+    expect:
+      exit: 0
+      stdout:
+        contains: PASS lines 87.50% (minimum 87.50%)
+    milestone: 2
+  - run:
+      - check
+      - reports-${unique}/coverage-summary.json
+      - '--min=87.5'
+    expect:
+      exit: 0
+      stdout:
+        contains: PASS lines 87.50% (minimum 87.50%)
+    milestone: 2
+  - run:
+      - check
+      - reports-${unique}/coverage-summary.json
+      - '--metric=lines'
+      - '--min=87.5'
+    expect:
+      exit: 0
+      stdout:
+        contains: PASS lines 87.50% (minimum 87.50%)
+    milestone: 3

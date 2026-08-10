@@ -1,0 +1,103 @@
+guard: 3
+id: use-covergaterc-json-settings-when-gating-coverage.cli.1
+title: Coverage gating resolves local commented config, omitted defaults, and command-line overrides from the run directory
+promise: The user can run covergate with a local `.covergaterc.json` whose comments, omitted fields, and command-line overrides are handled consistently when gating coverage.
+flow:
+  id: use-covergaterc-json-settings-when-gating-coverage
+  fingerprint: sha256:166afe49c5a40dad98a52ff00dd7a460de3f383b582396ca15b7e43e020fc111
+journey:
+  path:
+    - cli/check
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+binds:
+  - doc: docs/configuration.md
+    section: configuration/comments
+    fingerprint: sha256:ab96bb073959a7156d0a3ffb4a7eab1389a3360f74bdf2b1fafaa97cad85af0a
+  - doc: docs/configuration.md
+    section: configuration/settings
+    fingerprint: sha256:df4c3eef4b72ad55cdab48f2f333b74265cd5397d65080df4810a5f71abb2128
+  - doc: docs/configuration.md
+    section: configuration/precedence
+    fingerprint: sha256:b0ef8bd2663513e65d6d9d8c5b368aee1985fcb926243c330424403058f2ac89
+setup:
+  files:
+    .covergaterc.json: |
+      {"metric":"lines","min":100,"summary":"coverage/coverage-summary.json"}
+    coverage/coverage-summary.json: |
+      {"total":{"lines":{"total":100,"covered":0,"skipped":0,"pct":0},"statements":{"total":100,"covered":0,"skipped":0,"pct":0},"functions":{"total":100,"covered":0,"skipped":0,"pct":0},"branches":{"total":100,"covered":0,"skipped":0,"pct":0}}}
+    comments-${unique}/.covergaterc.json: |
+      /* project coverage settings */
+      {
+        // the branch total is the one we are behind on
+        "metric": "branches",
+        "min": 60
+      }
+    comments-${unique}/coverage/coverage-summary.json: |
+      {"total":{"lines":{"total":100,"covered":0,"skipped":0,"pct":0},"statements":{"total":100,"covered":0,"skipped":0,"pct":0},"functions":{"total":100,"covered":0,"skipped":0,"pct":0},"branches":{"total":100,"covered":60,"skipped":0,"pct":60}}}
+    defaults-pass-${unique}/.covergaterc.json: |
+      {}
+    defaults-pass-${unique}/coverage/coverage-summary.json: |
+      {"total":{"lines":{"total":100,"covered":80,"skipped":0,"pct":80},"statements":{"total":100,"covered":0,"skipped":0,"pct":0},"functions":{"total":100,"covered":0,"skipped":0,"pct":0},"branches":{"total":100,"covered":0,"skipped":0,"pct":0}}}
+    defaults-fail-${unique}/.covergaterc.json: |
+      {}
+    defaults-fail-${unique}/coverage/coverage-summary.json: |
+      {"total":{"lines":{"total":100,"covered":79,"skipped":0,"pct":79},"statements":{"total":100,"covered":100,"skipped":0,"pct":100},"functions":{"total":100,"covered":100,"skipped":0,"pct":100},"branches":{"total":100,"covered":100,"skipped":0,"pct":100}}}
+    precedence-config-${unique}/.covergaterc.json: |
+      {"metric":"branches","min":70,"summary":"coverage/config-summary.json"}
+    precedence-config-${unique}/coverage/config-summary.json: |
+      {"total":{"lines":{"total":100,"covered":70,"skipped":0,"pct":70},"statements":{"total":100,"covered":0,"skipped":0,"pct":0},"functions":{"total":100,"covered":0,"skipped":0,"pct":0},"branches":{"total":100,"covered":0,"skipped":0,"pct":0}}}
+    precedence-config-${unique}/coverage/coverage-summary.json: |
+      {"total":{"lines":{"total":100,"covered":0,"skipped":0,"pct":0},"statements":{"total":100,"covered":0,"skipped":0,"pct":0},"functions":{"total":100,"covered":0,"skipped":0,"pct":0},"branches":{"total":100,"covered":0,"skipped":0,"pct":0}}}
+    precedence-cli-${unique}/.covergaterc.json: |
+      {"metric":"branches","min":90,"summary":"coverage/bad-summary.json"}
+    precedence-cli-${unique}/coverage/bad-summary.json: |
+      {"total":{"lines":{"total":100,"covered":0,"skipped":0,"pct":0},"statements":{"total":100,"covered":0,"skipped":0,"pct":0},"functions":{"total":100,"covered":0,"skipped":0,"pct":0},"branches":{"total":100,"covered":100,"skipped":0,"pct":100}}}
+    precedence-cli-${unique}/coverage/cli-summary.json: |
+      {"total":{"lines":{"total":100,"covered":70,"skipped":0,"pct":70},"statements":{"total":100,"covered":0,"skipped":0,"pct":0},"functions":{"total":100,"covered":0,"skipped":0,"pct":0},"branches":{"total":100,"covered":0,"skipped":0,"pct":0}}}
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+    cwd: comments-${unique}
+    expect:
+      exit: 0
+    milestone: 1
+  - run:
+      - check
+    cwd: comments-${unique}
+    expect:
+      exit: 0
+    milestone: 2
+  - run:
+      - check
+    cwd: defaults-pass-${unique}
+    expect:
+      exit: 0
+    milestone: 3
+  - run:
+      - check
+    cwd: defaults-fail-${unique}
+    expect:
+      exit: 1
+    milestone: 3
+  - run:
+      - check
+      - '--metric'
+      - lines
+    cwd: precedence-config-${unique}
+    expect:
+      exit: 0
+    milestone: 4
+  - run:
+      - check
+      - coverage/cli-summary.json
+      - '--metric'
+      - lines
+      - '--min'
+      - '70'
+    cwd: precedence-cli-${unique}
+    expect:
+      exit: 0
+    milestone: 4

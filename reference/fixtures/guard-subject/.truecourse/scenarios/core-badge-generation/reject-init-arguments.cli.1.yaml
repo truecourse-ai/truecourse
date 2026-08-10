@@ -1,0 +1,27 @@
+guard: 3
+id: reject-init-arguments.cli.1
+title: Init rejects any argument with its documented usage error
+promise: The user receives the documented error when passing arguments to init.
+flow:
+  id: reject-init-arguments
+  fingerprint: sha256:bf6a6b0cd6ed18e88d53f2ba9190f54f077569f11437a59f31a929e5ee530538
+journey:
+  path:
+    - cli/init
+  fingerprints:
+    - sha256:5ccef841d61a4744cd5214d8bbfb107ee6fce9e994403a8b53dfa8a0a4aca163
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/covergate-init
+    fingerprint: sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19
+normalize: []
+driver: cli
+steps:
+  - run:
+      - init
+      - extra-${unique}
+    expect:
+      exit: 2
+      stderr:
+        contains: 'covergate: init takes no arguments'
+    milestone: 1

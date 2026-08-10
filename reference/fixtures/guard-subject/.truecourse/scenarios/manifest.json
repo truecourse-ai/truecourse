@@ -1,0 +1,577 @@
+{
+  "version": 3,
+  "flows": [
+    {
+      "flowId": "check-a-selected-report-successfully",
+      "flowFingerprint": "sha256:0c4ea55f590b4c1378eba94b5237297c162f4a38e7dcef41406a1bcd34531045",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/where-the-report-is-read-from",
+          "fingerprint": "sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-check",
+          "fingerprint": "sha256:a1697b3bbf51ebca257bb95d37aba61c3ffee457c0a755a683795641b6dbcdc8"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "check-a-selected-report-successfully.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:d7b70c5305869ccbe316af05d4cacc5e8174909654e533f214c0814ceaa06d6c",
+      "gaps": []
+    },
+    {
+      "flowId": "get-consistently-formatted-errors",
+      "flowFingerprint": "sha256:ff9e4d129526c4a46b0558040e3dc436f0600762f879b3330fab320492d0a88f",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/errors",
+          "fingerprint": "sha256:81e44d29cfb1dcddba7c1121eaa6664d09320fc718671a6966b3c4e2cf95c2aa"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "get-consistently-formatted-errors.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/badge",
+            "cli/check",
+            "cli/init"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:8096798b7630a7b01030f180776b67c5d0104341024f74f54689a6183e33ee97",
+      "gaps": []
+    },
+    {
+      "flowId": "initialize-configuration-and-refuse-to-overwrite-it",
+      "flowFingerprint": "sha256:bb70c980357c24698b0949c826df98f96c77dbad5969b30e799cbb4a0c721edc",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "fingerprint": "sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/refusing-to-overwrite",
+          "fingerprint": "sha256:ab039c8417514e6c5f5311239ee3551776109f73b0640009bd3a237cfbab74c1"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "initialize-configuration-and-refuse-to-overwrite-it.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/init"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:46b254ee3afc7702b90f488b177db17c48cfdb50d1410fde559d3e03c7d118e2",
+      "gaps": []
+    },
+    {
+      "flowId": "print-a-coverage-badge",
+      "flowFingerprint": "sha256:90743e277964f554b23d2cf3384fa213b70df9ade171ea75b66fdb6101be4459",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-badge",
+          "fingerprint": "sha256:eeeb48ff8164b5f690aa6e27cb6c328544e8944986381c9b82f4f248e97cf516"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/badge-colours",
+          "fingerprint": "sha256:48eca2daddc0869e569292a72b674dc043b8031413f2bbd0e0c855f5e7a35099"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "print-a-coverage-badge.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/badge"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:d97852a112cc02d466812a58326e7b415a518134bbfa734bb8fc3a40af8b773b",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-a-flag-the-command-does-not-define",
+      "flowFingerprint": "sha256:a61cc15a1c1b46132627c051f6db801e8acaef75e440374a0f7c8549037b5d7a",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-a-flag-the-command-does-not-define.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:692cdc29c24c0446d953f5d204b738c89b2d8251f5180a0a5d61bf0b5ee154fd",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-a-flag-with-no-value",
+      "flowFingerprint": "sha256:e6791eddfa5e1aa37447d611efb4df18fb921e56a3433a2804810d337f7ea619",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/flag-syntax",
+          "fingerprint": "sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-a-flag-with-no-value.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:35119733c8b18b08e1e6f95bc00dd3b944453aa57f35ddcc3b84c6c3fa44cf44",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-an-invalid-minimum",
+      "flowFingerprint": "sha256:3b59a70e314ef81f4a14437427a805f0605c9eee5d5b97ecc3e029879dcf52f4",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/invalid-flag-values",
+          "fingerprint": "sha256:4ed87f2f494e69dd597b4362e3295742e09837652e830aaf090539204701fb3a"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-an-invalid-minimum.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:a7dc50855ac33064c19ed5ca63b736f69b58a0677f3be72702b989fc6553016e",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-an-unknown-command",
+      "flowFingerprint": "sha256:d809ec80846a4637d6f525e5d4190fc4ecc6f46a72f97c619cc7db23a111def3",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/unknown-commands",
+          "fingerprint": "sha256:cc0f618d609e07d69002464b0d67e4a694aab92ceef1b3470e4f1cab1f1cb49d"
+        }
+      ],
+      "scenarios": [],
+      "journeys": [],
+      "generationInputsHash": "sha256:1086f756b1f346b59aa2b75aedaeeea3e1b5469e9b70a75640d98501392c1271",
+      "gaps": [
+        {
+          "surface": "cli",
+          "kind": "unrealizable",
+          "reason": "No journey exercises an undefined first-word command; the catalog only offers badge, check, and init."
+        }
+      ]
+    },
+    {
+      "flowId": "reject-an-unknown-metric",
+      "flowFingerprint": "sha256:4aa7f0e3048495dcd89e6a8c7637310af2bff45e85379b0e21c7e0d6d2278fe4",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/invalid-flag-values",
+          "fingerprint": "sha256:4ed87f2f494e69dd597b4362e3295742e09837652e830aaf090539204701fb3a"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-an-unknown-metric.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:9ccd017d79e97e70825edf9533df79b405adbf6a6a12ba40c085608adbe32d9d",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-covergaterc-json-that-is-not-an-object",
+      "flowFingerprint": "sha256:a2ad69366b16175a1d404f92e7b91cdb5788cac7e05d12403c20c4eae85adb31",
+      "bindings": [
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/when-the-file-is-wrong",
+          "fingerprint": "sha256:bc70f6c2258a63caaefbe790ec89d1072730d35b3dcd107ca2d2fc814d90451b"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-covergaterc-json-that-is-not-an-object.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:80463f3dacd901fafafc86ea8c9a4b5e76c21e37838d8f09681a0d95c400a54b",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-covergaterc-json-that-is-not-valid-json",
+      "flowFingerprint": "sha256:af48a0a798e8a61d92718d40f0f84a90eca997bfa3804ea53368ff708b0e0db6",
+      "bindings": [
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/when-the-file-is-wrong",
+          "fingerprint": "sha256:bc70f6c2258a63caaefbe790ec89d1072730d35b3dcd107ca2d2fc814d90451b"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-covergaterc-json-that-is-not-valid-json.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:dd904daa0214a4307b5b98e719008718351579fb27aa4a37c6d75692b14b22ac",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-extra-check-summary-paths",
+      "flowFingerprint": "sha256:b7a3090e0107ae8594b14933012796a23367136328ce98acd50cba7c4811aaf9",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/where-the-report-is-read-from",
+          "fingerprint": "sha256:2ede783326769b1a5b73ed1ee98e91a0bfe6d32922482b950e91e952d92dae16"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-extra-check-summary-paths.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:b4c4189345fd2188540266681716cd3d90fff0bec26eeaecb5f281efe9db29bc",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-init-arguments",
+      "flowFingerprint": "sha256:bf6a6b0cd6ed18e88d53f2ba9190f54f077569f11437a59f31a929e5ee530538",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-init",
+          "fingerprint": "sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-init-arguments.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/init"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:8c8a6fd1a1a89cda706504b4c7bc84c8de8214e330c8be4fd9bd0730df8e790a",
+      "gaps": []
+    },
+    {
+      "flowId": "reject-unreadable-reports",
+      "flowFingerprint": "sha256:64bfb4057bf94c405624f0092aab797f4428f69c6a93ca21bbbed3855e6d49ed",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/unreadable-reports",
+          "fingerprint": "sha256:edacd384335efdfe5a73ed5f8b243deb8bafb809e96df659b5a1a3ed30b7bd6c"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-unreadable-reports.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check",
+            "cli/badge"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:2679431c6c0ad3f974f4549fb1d78fd795f68cb3bac02eeb8d4c3ab419f83dbf",
+      "gaps": []
+    },
+    {
+      "flowId": "report-a-badge-even-when-coverage-fails-the-gate",
+      "flowFingerprint": "sha256:cb0ab6302f2c939ffaf56e0854d3e7f5df4be04129c97c1c0a23e7c65c7e6766",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/covergate-check",
+          "fingerprint": "sha256:a1697b3bbf51ebca257bb95d37aba61c3ffee457c0a755a683795641b6dbcdc8"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/badge-is-a-reporter-not-a-gate",
+          "fingerprint": "sha256:04f97d6353d6b3f957000d6d6818685676cc4e9cf281f63d619ee18ffe794a6f"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "report-a-badge-even-when-coverage-fails-the-gate.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check",
+            "cli/badge"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:251feba392fead7e02e1a76f0e83915df82e90f634c550e8d52ce19002a6b4b3",
+      "gaps": []
+    },
+    {
+      "flowId": "run-the-quick-start-check-and-badge",
+      "flowFingerprint": "sha256:bfebcbd615f6fccb0875f07cdea4a3e42576d65f80ba869c14c51759e4fef744",
+      "bindings": [
+        {
+          "doc": "README.md",
+          "anchor": "covergate/quick-start",
+          "fingerprint": "sha256:b386935940e8aab397db50e60fe3c4a0fb72130dff7098465a074e2a49e82199"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "run-the-quick-start-check-and-badge.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check",
+            "cli/badge"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:380a7cd5f3d0190d472f2af4f2a63025ae31af551196ad8ac4d9ac5563a42a90",
+      "gaps": []
+    },
+    {
+      "flowId": "use-covergaterc-json-settings-when-gating-coverage",
+      "flowFingerprint": "sha256:166afe49c5a40dad98a52ff00dd7a460de3f383b582396ca15b7e43e020fc111",
+      "bindings": [
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/comments",
+          "fingerprint": "sha256:ab96bb073959a7156d0a3ffb4a7eab1389a3360f74bdf2b1fafaa97cad85af0a"
+        },
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/settings",
+          "fingerprint": "sha256:df4c3eef4b72ad55cdab48f2f333b74265cd5397d65080df4810a5f71abb2128"
+        },
+        {
+          "doc": "docs/configuration.md",
+          "anchor": "configuration/precedence",
+          "fingerprint": "sha256:b0ef8bd2663513e65d6d9d8c5b368aee1985fcb926243c330424403058f2ac89"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "use-covergaterc-json-settings-when-gating-coverage.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/check"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:35bef90b9ace0d609e19b65a829d7cea8a133cbb74ed836a875a8feb0fe3b2b4",
+      "gaps": []
+    },
+    {
+      "flowId": "view-usage-command-help-and-version",
+      "flowFingerprint": "sha256:8ef05f380c9a9c368397794ff64eaecd56e20af4464215124bd194ec3ec5ce96",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/usage-and-version",
+          "fingerprint": "sha256:874335c007e2b76879826438ace16cdcaff0ae90c77084d247b75367b146d4ad"
+        },
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/command-help",
+          "fingerprint": "sha256:f55d9f3b0b0d4db5f6364d40e6356be99360b5808b2e65eec346163c1baa80e6"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "view-usage-command-help-and-version.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/badge",
+            "cli/check",
+            "cli/init"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:50eb535868ab4bf80f939ca07605c2e7185486c1dd7808d40557f5480b1cfe4a",
+      "gaps": []
+    },
+    {
+      "flowId": "write-the-badge-to-a-file",
+      "flowFingerprint": "sha256:1d77cfdaad870b811e775f22e59d1337ebd06927efafbb1c88fbb9de55b2ba98",
+      "bindings": [
+        {
+          "doc": "docs/cli-reference.md",
+          "anchor": "cli-reference/writing-the-badge-to-a-file",
+          "fingerprint": "sha256:1ba59d4b91a74ab7cf41325cded7afdb5105616260bf0d6b146760101d4b4f2d"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "write-the-badge-to-a-file.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/badge"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:60112e296f803be98f50fc9bc066b41df6c94f9dbb2a0fa12fb336c87c19a8cf",
+      "gaps": []
+    }
+  ]
+}

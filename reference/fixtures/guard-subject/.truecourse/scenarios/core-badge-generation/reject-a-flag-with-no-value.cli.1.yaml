@@ -1,0 +1,27 @@
+guard: 3
+id: reject-a-flag-with-no-value.cli.1
+title: Rejecting a value-taking flag left without a value reports the documented flag syntax error
+promise: The user receives the documented error when a value-taking flag is left last without a value.
+flow:
+  id: reject-a-flag-with-no-value
+  fingerprint: sha256:e6791eddfa5e1aa37447d611efb4df18fb921e56a3433a2804810d337f7ea619
+journey:
+  path:
+    - cli/check
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/flag-syntax
+    fingerprint: sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+      - '--min'
+    expect:
+      exit: 2
+      stderr:
+        contains: 'covergate: --min needs a value'
+    milestone: 1

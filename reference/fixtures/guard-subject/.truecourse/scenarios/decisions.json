@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "dismissedClaims": [],
+  "dismissedFlows": [
+    {
+      "flowId": "create-a-local-covergate-configuration-and-use-it-for-a-5bdb5f81",
+      "title": "Create a local Covergate configuration and use it for a coverage check",
+      "dismissedAt": "2026-08-09T02:11:18.168Z",
+      "note": "Redundant composite: every claim it binds is already guarded by create-the-default-configuration-once (init) and use-covergaterc-json-settings-when-gating-coverage (comments, settings, precedence)."
+    }
+  ]
+}
