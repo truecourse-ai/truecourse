@@ -39,6 +39,14 @@ const EMPTY: ProjectConfig = {};
 export interface RepoConfigStore {
   readProjectConfig(repoDir: string): Promise<ProjectConfig>;
   writeProjectConfig(repoDir: string, config: ProjectConfig): Promise<void>;
+  /**
+   * Materialize the per-repo config if it isn't there yet, leaving an existing
+   * one untouched. Only the file-backed store implements it: `config.json` is a
+   * committable file the docs tell people to `git add` after their first
+   * analyze, so a completed analyze must leave one on disk. Optional because a
+   * DB-backed store (EE) has no file to scaffold — absent means no-op.
+   */
+  ensureProjectConfig?(repoDir: string): Promise<void>;
 }
 
 class FileRepoConfigStore implements RepoConfigStore {
@@ -55,6 +63,12 @@ class FileRepoConfigStore implements RepoConfigStore {
   async writeProjectConfig(repoDir: string, config: ProjectConfig): Promise<void> {
     ensureRepoTruecourseDir(repoDir);
     fs.writeFileSync(getRepoConfigPath(repoDir), JSON.stringify(config, null, 2), 'utf-8');
+  }
+
+  async ensureProjectConfig(repoDir: string): Promise<void> {
+    if (fs.existsSync(getRepoConfigPath(repoDir))) return;
+    // Reuse the writer so the on-disk shape has exactly one owner.
+    await this.writeProjectConfig(repoDir, { ...EMPTY });
   }
 }
 
@@ -77,6 +91,9 @@ export const readProjectConfig = (repoDir: string): Promise<ProjectConfig> =>
   active.readProjectConfig(repoDir);
 export const writeProjectConfig = (repoDir: string, config: ProjectConfig): Promise<void> =>
   active.writeProjectConfig(repoDir, config);
+/** Create the per-repo config if absent; never touch an existing one. */
+export const ensureProjectConfig = (repoDir: string): Promise<void> =>
+  active.ensureProjectConfig?.(repoDir) ?? Promise.resolve();
 
 /** Read-modify-write a patch over the current config. Returns the merged result. */
 export async function updateProjectConfig(

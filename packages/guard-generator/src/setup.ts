@@ -156,8 +156,9 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   opts.onStep?.('recipe')
   phases.step('recipe')
   // A REFRESH re-derives, and discovery writes what it derived — which knows nothing
-  // about the blocks it never proposes (`api.seed`, `api.externals`,
-  // `api.credentials`, `ownHosts`). Those are user- and setup-authored CAPABILITY
+  // about the blocks it never proposes (`api.seed`, `api.externals`, `ownHosts`) nor
+  // about the hand-written half of the ones it partly does (`api.env`,
+  // `api.credentials`). Those are user- and setup-authored CAPABILITY
   // declarations; losing them to a refresh would be silent data loss, and it would
   // also defeat the seed confirmation below (a wiped `api.seed` is not a seed anyone
   // is asked about replacing). Captured before, merged back after.
@@ -268,8 +269,19 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   })
   opts.onStepDone?.('seed', seedSummary(seedStep))
 
+  // Step 1's TODOs were written before step 4 ran. A credential fill-in the drafted
+  // seed has since ANSWERED (its stub is gone from the recipe) is work nobody has to
+  // do, and printing it would send the user hunting for a variable that is no longer
+  // read anywhere.
+  const settled = reloadRecipe(repoRoot) ?? current
+  if (recipeStep.todos) {
+    const remaining = pruneAnsweredCredentialTodos(recipeStep.todos, settled)
+    if (remaining.length > 0) recipeStep.todos = remaining
+    else delete recipeStep.todos
+  }
+
   return {
-    recipe: reloadRecipe(repoRoot) ?? current,
+    recipe: settled,
     report: {
       ranAt: new Date().toISOString(),
       status: 'ok',
@@ -294,7 +306,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 interface AuthoredBlocks {
   seed?: unknown
   externals?: unknown
-  credentials?: unknown
+  /** `api.env`. Discovery DOES propose env (a serve variable, a generated
+   *  `DATABASE_URL`), but only ever its own keys — every other key in there was
+   *  written by a human, so this one is restored per KEY rather than wholesale. */
+  env?: Record<string, unknown>
+  /** `api.credentials`. Merged per key like `env`: a credential a human filled in
+   *  must survive, while a stub for a scheme that is genuinely new still lands. */
+  credentials?: Record<string, unknown>
   ownHosts?: unknown
 }
 
@@ -305,6 +323,7 @@ function authoredBlocks(recipe: Recipe | null): AuthoredBlocks | null {
   const blocks: AuthoredBlocks = {
     ...(api?.seed !== undefined ? { seed: api.seed } : {}),
     ...(api?.externals !== undefined ? { externals: api.externals } : {}),
+    ...(api?.env !== undefined ? { env: api.env } : {}),
     ...(api?.credentials !== undefined ? { credentials: api.credentials } : {}),
     ...(recipe.ownHosts !== undefined ? { ownHosts: recipe.ownHosts } : {}),
   }
@@ -336,12 +355,42 @@ function restoreAuthoredBlocks(repoRoot: string, blocks: AuthoredBlocks): Recipe
   if (api && typeof api === 'object') {
     if (blocks.seed !== undefined) api.seed = blocks.seed
     if (blocks.externals !== undefined) api.externals = blocks.externals
-    if (blocks.credentials !== undefined) api.credentials = blocks.credentials
+    // `env` and `credentials` have MIXED provenance — discovery derives some keys and
+    // a human authors the rest — so they merge per key with the authored value
+    // winning: the hand-written `DATABASE_URL` or filled-in credential survives, and
+    // a key the re-derivation newly learned still lands.
+    if (blocks.env !== undefined) api.env = mergeAuthored(api.env, blocks.env)
+    if (blocks.credentials !== undefined) api.credentials = mergeAuthored(api.credentials, blocks.credentials)
   }
   const validated = RecipeSchema.safeParse(doc)
   if (!validated.success) return null
   fs.writeFileSync(file, JSON.stringify(doc, null, 2) + (raw.endsWith('\n') ? '\n' : ''))
   return validated.data
+}
+
+/**
+ * Drop the "set `GUARD_CRED_*`" TODOs whose credential is no longer in the recipe —
+ * i.e. the stubs the drafted seed superseded (see `dropSupersededStubs`). Matched on
+ * the variable each TODO names against the variables the FINAL recipe still awaits,
+ * so a TODO is only ever dropped because the thing it asks for stopped existing;
+ * every other TODO (an unmappable scheme, a datastore note) is untouched.
+ */
+function pruneAnsweredCredentialTodos(todos: readonly string[], recipe: Recipe): string[] {
+  const awaited = new Set(
+    Object.values(recipe.api?.credentials ?? {})
+      .map((c) => c.valueFromEnv)
+      .filter((v): v is string => typeof v === 'string'),
+  )
+  return todos.filter((todo) => {
+    const named = todo.match(/GUARD_CRED_[A-Z0-9_]+/)
+    return !named || awaited.has(named[0])
+  })
+}
+
+/** The re-derived map with the authored entries laid over it — authored wins. */
+function mergeAuthored(derived: unknown, authored: Record<string, unknown>): Record<string, unknown> {
+  const base = derived && typeof derived === 'object' && !Array.isArray(derived) ? (derived as Record<string, unknown>) : {}
+  return { ...base, ...authored }
 }
 
 // ---------------------------------------------------------------------------

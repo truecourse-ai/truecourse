@@ -237,7 +237,7 @@ export function matchComparison(
  * a store is created as a directory, and `exists: true` on one is the plainest way
  * to say so — reporting it "missing" (what a file-only stat did) reads like a
  * product failure and pushes authors onto a proxy file. CONTENT is file-only,
- * because a directory has none: `contains`/`equals` on one is an authoring mistake
+ * because a directory has none: `contains`/`equals`/`matches` on one is an authoring mistake
  * and says so, rather than throwing EISDIR out of `readFileSync`.
  */
 function matchFile(
@@ -257,7 +257,7 @@ function matchFile(
     if (exists) return fileMiss(rel, 'to be absent', stat.isDirectory() ? 'present (a directory)' : 'present')
   }
 
-  if (matcher.equals !== undefined || matcher.contains !== undefined) {
+  if (matcher.equals !== undefined || matcher.contains !== undefined || matcher.matches !== undefined) {
     if (!exists) return fileMiss(rel, 'to exist for a content check', 'missing')
     if (stat.isDirectory()) {
       return {
@@ -285,6 +285,26 @@ function matchFile(
         expected: `${rel} contains ${JSON.stringify(matcher.contains)}`,
         actual: `${rel} was ${JSON.stringify(truncate(content))}`,
         detail: [`expected ${rel} to contain:`, matcher.contains, `--- actual ${rel} ---`, content],
+      }
+    }
+    // The stream matcher's semantics, on the file's whole text: one bare
+    // `new RegExp`, no flags, and a source that does not compile is REPORTED (the
+    // loader already rejects it) rather than thrown out of a step.
+    if (matcher.matches !== undefined) {
+      let re: RegExp | null = null
+      let reError = ''
+      try {
+        re = new RegExp(matcher.matches)
+      } catch (e) {
+        reError = e instanceof Error ? e.message : String(e)
+      }
+      if (!re || !re.test(content)) {
+        return {
+          subject: 'files',
+          expected: `${rel} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+          actual: `${rel} was ${JSON.stringify(truncate(content))}`,
+          detail: [`expected ${rel} to match /${matcher.matches}/`, `--- actual ${rel} ---`, content],
+        }
       }
     }
   }

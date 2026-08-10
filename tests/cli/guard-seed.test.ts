@@ -12,8 +12,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { recipePath, writeGuardResult } from '@truecourse/guard-runner'
-import type { GuardGenerateReport } from '@truecourse/shared'
+import { recipePath, writeManifest } from '@truecourse/guard-runner'
+import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
 import { runGuardSeed } from '../../tools/cli/src/commands/guard-seed'
 import { rmrf } from '../guard-runner/helpers.js'
 
@@ -48,23 +48,29 @@ function writeRecipe(r: string, seed?: unknown): void {
   fs.writeFileSync(target, JSON.stringify(recipe, null, 2) + '\n')
 }
 
-/** A generate report whose one gap is blocked on missing data. */
-function writeBlockedReport(r: string, reason = 'blocked on missing-data, an already-cancelled booking: cancel a booking'): void {
-  const report: GuardGenerateReport = {
-    generatedAt: '2026-07-29T00:00:00.000Z',
-    status: 'ok',
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
-    noChanges: false,
-    written: [],
-    coverageGaps: [{ doc: 'docs/orgs.md', anchor: 'cancel', kind: 'blocked-on', flowId: 'cancel', reason }],
-    birthFindings: [],
-    errors: [],
-    extractionFailures: [],
-    orphaned: [],
-  }
-  writeGuardResult(r, report)
+/**
+ * The COMMITTED manifest whose one flow gap is blocked on missing data — the record
+ * a teammate inherits through git (`guard/result.json` is gitignored, so a fresh
+ * clone has none).
+ */
+function writeBlockedManifest(
+  r: string,
+  reason = 'blocked on missing-data, an already-cancelled booking: cancel a booking',
+): void {
+  writeManifest(r, {
+    version: GUARD_FORMAT_VERSION,
+    flows: [
+      {
+        flowId: 'cancel',
+        flowFingerprint: 'sha256:deadbeef',
+        bindings: [{ doc: 'docs/orgs.md', anchor: 'cancel', fingerprint: 'sha256:cafe' }],
+        scenarios: [],
+        journeys: [],
+        generationInputsHash: 'sha256:feed',
+        gaps: [{ surface: 'api', kind: 'blocked-on', reason }],
+      },
+    ],
+  })
 }
 
 const SCRIPT = [
@@ -106,7 +112,7 @@ async function run(opts: Parameters<typeof runGuardSeed>[0]): Promise<void> {
 describe('runGuardSeed — showing the seed', () => {
   it('says there is no seed yet, and names the flows waiting on one', async () => {
     const r = fixtureRepo()
-    writeBlockedReport(r)
+    writeBlockedManifest(r)
 
     await run({ cwd: r })
 
@@ -155,7 +161,7 @@ describe('runGuardSeed — showing the seed', () => {
 describe('runGuardSeed --init — removed, drafting now lives in `guard setup`', () => {
   it('refuses, names `guard setup`, and writes nothing', async () => {
     const r = fixtureRepo()
-    writeBlockedReport(r)
+    writeBlockedManifest(r)
     const before = fs.readFileSync(recipePath(r), 'utf-8')
 
     await run({ cwd: r, init: true })

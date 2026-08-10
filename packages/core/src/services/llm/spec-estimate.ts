@@ -32,6 +32,7 @@ import {
 } from '@truecourse/spec-consolidator';
 import {
   planGuardWork,
+  planGuardNoOp,
   proposeRecipe,
   collectWorkDocs,
   countExtractViews,
@@ -66,6 +67,7 @@ import {
   violatesSettleInvariant,
   type GuardDriverId,
   type GuardFlow,
+  type Journey,
 } from '@truecourse/shared';
 import {
   loadRecipe,
@@ -74,6 +76,7 @@ import {
   recipePath,
   type Recipe,
 } from '@truecourse/guard-runner';
+import { mapJourneys } from '../journey.service.js';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import type { LlmTransportMode } from '../../config/global-config.js';
@@ -621,13 +624,76 @@ export async function estimateGuardSetup(
   return estimateStageTokens(withLabels(stages), 'preparation', prices);
 }
 
+/**
+ * The journey catalog for the no-op gate when no snapshot exists — THE SAME
+ * mapper the run uses, injected by the caller when it already has one in flight
+ * (`guardGenerateInProcess` memoizes one pass across the estimate and the run, so
+ * the two can never disagree and the tree is analyzed once) and defaulting to
+ * `mapJourneys` otherwise.
+ *
+ * A mapping that cannot run (no analyzable tree, a mapper that throws) yields
+ * `null` — the gate then declines and every stage below is quoted as before,
+ * because an unverifiable input must never buy a zero quote.
+ */
+async function deriveJourneysForEstimate(
+  repoRoot: string,
+  provider?: () => Promise<{ journeys: Journey[] }>,
+): Promise<Journey[] | null> {
+  try {
+    if (provider) return (await provider()).journeys;
+    return (await mapJourneys(repoRoot)).catalog.journeys;
+  } catch {
+    return null;
+  }
+}
+
 export async function estimateGuardTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { mode?: LlmTransportMode } = {},
+  opts: {
+    mode?: LlmTransportMode;
+    /** The run's own journey mapping, when the caller already has one in flight. */
+    journeys?: () => Promise<{ journeys: Journey[] }>;
+  } = {},
 ): Promise<LlmEstimate> {
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
+
+  // THE COMMITTED-STATE NO-OP: the run short-circuits before its first stage when
+  // every flow's generation-inputs hash still matches the committed manifest, so
+  // the estimate must quote nothing — no stages ⇒ no cost ⇒ the confirm prompt is
+  // skipped, for a run that cannot make a call. Crucially this is decided from
+  // COMMITTED state, not from the KV caches: on a clone (caches gone) the old
+  // cold-cache path quoted the whole extraction bill with a dollar figure for a
+  // run that does nothing at all.
+  //
+  // The journey half prefers the last mapping's SNAPSHOT, but `guard/journeys.json`
+  // is gitignored — a real clone has neither it nor the caches, which is exactly
+  // the state this gate exists for. So when it is absent the estimate DERIVES the
+  // catalog through the same mapper generate runs moments later: journeys are
+  // code-derived, the pass makes no LLM call, and a deterministic step is free by
+  // the estimate's own convention. The gate is asked cheaply FIRST, so the mapping
+  // is only ever paid for in the one state where it decides the answer — a corpus
+  // that is otherwise fully settled, i.e. the run that is about to quote $0.
+  // Declining stays correct only when the mapping cannot run at all.
+  const noOpInput = { plan, recipeFingerprint: plan.recipeFingerprint };
+  const snapshot = readJourneyCatalog(repoRoot);
+  let noOp = planGuardNoOp(repoRoot, {
+    ...noOpInput,
+    journeyFingerprints: snapshot ? new Map(snapshot.journeys.map((j) => [j.id, j.fingerprint])) : null,
+  });
+  if (!noOp.noOp && noOp.reason === 'journeys-unknown') {
+    const derived = await deriveJourneysForEstimate(repoRoot, opts.journeys);
+    if (derived) {
+      noOp = planGuardNoOp(repoRoot, {
+        ...noOpInput,
+        journeyFingerprints: new Map(derived.map((j) => [j.id, j.fingerprint])),
+      });
+    }
+  }
+  if (noOp.noOp) {
+    return estimateStageTokens([], changedSubject(plan.sections.length, 0, 'section'), prices);
+  }
 
   // Extraction: one call per uncached view across EVERY document of the universe —
   // synthesis reads a whole area's claims, so the run extracts them all (cached).

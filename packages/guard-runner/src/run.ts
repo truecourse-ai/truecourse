@@ -52,6 +52,7 @@ import {
   DependencyCatalogError,
   dependencyBlockFor,
   resolveDependencies,
+  sharedWorldGroupsFor,
   suppliedInstancesFor,
   type DependencyBlock,
   type ResolvedDependencies,
@@ -975,7 +976,21 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return view
     }
 
-    const runOne = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
+    // SHARED-WORLD SERIALIZATION. Two scenarios that bind the same supplied `path`
+    // instance share one real-world footprint — the instance's fixed host ports, the
+    // datastore behind them, its on-disk locks — even though each runs on its own
+    // sandbox COPY. Overlapping them is the observed field defect (two sandboxes
+    // racing for one datastore port: ECONNREFUSED, a server that "crashes before it
+    // runs", one teardown stranding the other mid-run), so the dispatcher holds a
+    // per-group lock for the scenario's duration. Everything else keeps full
+    // parallelism: different instances, no instance, and `env` supplies (a key is a
+    // value, not a world) never take a lock.
+    const worldLocks = createGroupLocks()
+
+    const runOne = async (item: (typeof runnable)[number]): Promise<GuardScenarioResult | null> =>
+      worldLocks.withGroups(sharedWorldGroupsFor(item.scenario, resolvedDependencies), () => runOneNow(item))
+
+    const runOneNow = async ({ scenario, verdict }: (typeof runnable)[number]): Promise<GuardScenarioResult | null> => {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
@@ -993,6 +1008,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               externalSecrets,
               externalTargets,
               fixtures: apiFixtures,
+              // Same gate, same materialization as the cli branch below: every
+              // binding here is `provided` by construction, so a registered
+              // instance reaches an api run's env, requests and expectations.
+              supplied: suppliedInstancesFor(scenario, resolvedDependencies),
               responseSchemas: resolveScenarioResponseSchemas(
                 operationSchemaIndex,
                 scenario as GuardApiScenario,
@@ -1320,6 +1339,47 @@ function buildRunId(): string {
   const iso = new Date().toISOString().replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z')
   const short = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
   return `${iso}_${short}`
+}
+
+/**
+ * A set of named mutexes: work tagged with the same key never overlaps, work with
+ * disjoint keys runs at full width.
+ *
+ * Used for the shared-world groups (see `sharedWorldGroupsFor`). A task holding
+ * SEVERAL keys acquires them in sorted order, so two tasks that overlap on two
+ * groups can never take them in opposite orders and deadlock.
+ */
+function createGroupLocks(): {
+  withGroups<T>(keys: readonly string[], fn: () => Promise<T>): Promise<T>
+} {
+  // Per key, the promise that resolves when the last-queued holder releases it.
+  const tails = new Map<string, Promise<void>>()
+  const acquire = async (key: string): Promise<() => void> => {
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const ahead = tails.get(key) ?? Promise.resolve()
+    tails.set(
+      key,
+      ahead.then(() => held),
+    )
+    await ahead
+    return release
+  }
+  return {
+    async withGroups<T>(keys: readonly string[], fn: () => Promise<T>): Promise<T> {
+      const ordered = [...new Set(keys)].sort()
+      if (ordered.length === 0) return fn()
+      const releases: (() => void)[] = []
+      try {
+        for (const key of ordered) releases.push(await acquire(key))
+        return await fn()
+      } finally {
+        for (const release of releases.reverse()) release()
+      }
+    },
+  }
 }
 
 async function mapWithConcurrency<T, R>(

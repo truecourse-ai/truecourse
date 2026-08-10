@@ -38,6 +38,13 @@ export {
 } from './section-plan.js'
 
 export {
+  planGuardNoOp,
+  type GuardNoOpDecision,
+  type GuardNoOpInput,
+  type GuardNoOpDeclineReason,
+} from './no-op.js'
+
+export {
   matchFlow,
   planFlowMatching,
   readCachedMatch,
@@ -135,6 +142,8 @@ export {
   rankHealthPath,
   credentialStubs,
   credentialEnvName,
+  isCredentialStub,
+  CREDENTIAL_STUB_MARKER,
   detectComposeServices,
   detectEcosystems,
   tokenizeCommand,

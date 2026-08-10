@@ -11,7 +11,7 @@
 
 import path from "node:path";
 import * as p from "@clack/prompts";
-import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
+import { guardResultPath, readGuardFlowsCorpus, runFailureMessage } from "@truecourse/guard-runner";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import { readGuardSetup } from "@truecourse/core/commands/guard-setup";
@@ -668,6 +668,17 @@ function testsLine(g: GuardLastGenerateSummary): string {
   return parts.join(" · ");
 }
 
+/**
+ * The last-generate inventory: the run-result's own tests line, or — when the row
+ * came from the COMMITTED corpus (a clone, where `guard/result.json` never
+ * travelled) — the committed test count alone. The pass/fail split is a fact about
+ * a RUN, and the manifest speaks for no run, so it is not printed there.
+ */
+function inventoryLine(g: GuardLastGenerateSummary): string {
+  if (g.source === "result") return testsLine(g);
+  return `${g.written} test${g.written === 1 ? "" : "s"} committed`;
+}
+
 /** `1 no journey · 1 awaiting web driver · 2 blocked-on (git 2)` — gaps by display kind. */
 function gapBreakdown(g: { coverageGapsByKind: Record<string, number>; blockedOnCapabilities: Record<string, number> }): string {
   return Object.entries(g.coverageGapsByKind)
@@ -845,6 +856,9 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     await readManifest(repoRoot),
     latest,
     await readGuardResult(repoRoot),
+    // The clone-safe floor for the last-generate row: `result.json` is gitignored,
+    // the flow corpus is committed, so a fresh clone still knows it was generated.
+    readGuardFlowsCorpus(repoRoot),
   );
 
   // Setup — the FIRST row, because it is the first stage and the gate for
@@ -896,7 +910,8 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     for (const line of blockedDependencyLines(latest?.scenarios ?? [])) p.log.message(`    ${line}`);
   }
 
-  // Last generate — guard/result.json.
+  // Last generate — guard/result.json when this machine generated, else the
+  // COMMITTED corpus (flows.json + manifest.json), which a clone always has.
   if (!summary.lastGenerate) {
     p.log.info("last gen    (none) — run `truecourse guard generate`");
   } else {
@@ -908,7 +923,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       printStatusLlmFailures(g.llmFailures);
       printStatusUnadjudicated(g.unadjudicated);
     } else {
-      p.log.step(`last gen    ${g.generatedAt} · ${testsLine(g)}`);
+      p.log.step(`last gen    ${g.generatedAt} · ${inventoryLine(g)}`);
       const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
       const detail: string[] = [];
       if (gapTotal > 0) {

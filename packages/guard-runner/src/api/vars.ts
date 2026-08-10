@@ -14,6 +14,7 @@ import type {
   GuardStreamMatcher,
 } from '@truecourse/shared'
 import { mapComparisonStrings } from '../sandbox-token.js'
+import { applySupplied, type SuppliedValues } from '../dependencies.js'
 
 /** Thrown when a template references a variable no earlier step captured. */
 export class UnknownVariableError extends Error {
@@ -34,13 +35,31 @@ export class UnknownVariableError extends Error {
  * predating the token keeps working, and a scenario written today reads the same
  * on either surface.
  */
-const VAR_REFERENCE = /\$\{(?:captured:)?([A-Za-z_][A-Za-z0-9_]*)\}/g
+const VAR_REFERENCE = /\$\{supplied:([a-z0-9][a-z0-9-]*\.[A-Za-z0-9_.-]+)\}|\$\{(?:captured:)?([A-Za-z_][A-Za-z0-9_]*)\}/g
 
-/** Replace every captured-value reference with its value; unknown names throw. */
-export function interpolate(template: string, vars: ReadonlyMap<string, string>): string {
-  return template.replace(VAR_REFERENCE, (token, name: string) => {
-    const value = vars.get(name)
-    if (value === undefined) throw new UnknownVariableError(name, token)
+/** Shared empty supplied set — text with no `${supplied:…}` resolves unchanged. */
+const NO_SUPPLIED: SuppliedValues = {}
+
+/**
+ * Replace every captured-value reference with its value, and every
+ * `${supplied:<name>.<field>}` with the registered instance's value.
+ *
+ * ONE vocabulary across drivers: the supplied token is the same one a cli argv, env
+ * value or seeded file carries, resolved by the same {@link applySupplied} (so an
+ * undeclared field is the same loud infrastructure error here). Both kinds resolve
+ * in a SINGLE regex pass, so a substituted value is never re-scanned — a captured
+ * value that happens to contain `${supplied:…}` lands on the wire as literal text,
+ * exactly as it already does for `{{cred:…}}` / `{{fixture:…}}`.
+ */
+export function interpolate(
+  template: string,
+  vars: ReadonlyMap<string, string>,
+  supplied: SuppliedValues = NO_SUPPLIED,
+): string {
+  return template.replace(VAR_REFERENCE, (token, suppliedRef: string | undefined, name: string | undefined) => {
+    if (suppliedRef !== undefined) return applySupplied(token, supplied)
+    const value = vars.get(name!)
+    if (value === undefined) throw new UnknownVariableError(name!, token)
     return value
   })
 }
@@ -73,23 +92,24 @@ export function interpolateRequest(
   credentials: ReadonlyMap<string, string> = NO_CREDENTIALS,
   fixtures: ReadonlyMap<string, Record<string, unknown>> = NO_FIXTURES,
   nativeVars: ReadonlyMap<string, unknown> = NO_NATIVE_VARS,
+  supplied: SuppliedValues = NO_SUPPLIED,
 ): GuardHttpRequest {
   return {
     ...request,
-    path: resolvePlaceholders(request.path, vars, { fixtures }),
+    path: resolvePlaceholders(request.path, vars, { fixtures, supplied }),
     ...(request.headers
       ? {
           headers: Object.fromEntries(
-            Object.entries(request.headers).map(([k, v]) => [k, resolveHeaderValue(v, vars, credentials, fixtures)]),
+            Object.entries(request.headers).map(([k, v]) => [k, resolveHeaderValue(v, vars, credentials, fixtures, supplied)]),
           ),
         }
       : {}),
-    ...(request.body !== undefined ? { body: resolvePlaceholders(request.body, vars, { fixtures }) } : {}),
+    ...(request.body !== undefined ? { body: resolvePlaceholders(request.body, vars, { fixtures, supplied }) } : {}),
     // JSON body leaves can substitute NATIVE values: a `{{fixture:…}}`/`${var}` that is
     // the WHOLE leaf lands as the fixture/capture's JSON type (a number stays a number,
     // so server validation that requires an integer sees one). Path/headers/raw body stay
     // string surfaces (a url or header IS text), so they never take the native path.
-    ...(request.json !== undefined ? { json: interpolateJson(request.json, vars, fixtures, nativeVars) } : {}),
+    ...(request.json !== undefined ? { json: interpolateJson(request.json, vars, fixtures, nativeVars, supplied) } : {}),
   }
 }
 
@@ -108,8 +128,9 @@ export function interpolateApiExpect(
   vars: ReadonlyMap<string, string>,
   fixtures: ReadonlyMap<string, Record<string, unknown>> = NO_FIXTURES,
   nativeVars: ReadonlyMap<string, unknown> = NO_NATIVE_VARS,
+  supplied: SuppliedValues = NO_SUPPLIED,
 ): GuardApiExpect {
-  const one = (s: string): string => resolvePlaceholders(s, vars, { fixtures })
+  const one = (s: string): string => resolvePlaceholders(s, vars, { fixtures, supplied })
   // A comparison's operands are the captured-value half of an assertion: resolved
   // here so the comparison compares numbers and the failure quotes them.
   const comparison = (c: GuardComparison): GuardComparison => mapComparisonStrings(c, one)
@@ -126,7 +147,7 @@ export function interpolateApiExpect(
     // nested), mirroring how a request `json` body resolves. A WHOLE-leaf placeholder
     // takes the native fixture/capture type, so `equals: "{{fixture:evt.id}}"` compares
     // as the JSON number 3 (the type-strict `equals` matcher no longer rejects `3 ≠ "3"`).
-    ...(m.equals !== undefined ? { equals: interpolateJson(m.equals, vars, fixtures, nativeVars) } : {}),
+    ...(m.equals !== undefined ? { equals: interpolateJson(m.equals, vars, fixtures, nativeVars, supplied) } : {}),
     ...(m.contains !== undefined ? { contains: one(m.contains) } : {}),
     ...(m.matches !== undefined ? { matches: one(m.matches) } : {}),
   })
@@ -158,6 +179,7 @@ function interpolateJson(
   vars: ReadonlyMap<string, string>,
   fixtures: ReadonlyMap<string, Record<string, unknown>>,
   nativeVars: ReadonlyMap<string, unknown>,
+  supplied: SuppliedValues,
 ): unknown {
   if (typeof value === 'string') {
     const whole = wholeValuePlaceholder(value)
@@ -170,12 +192,12 @@ function interpolateJson(
     // Not a whole-value placeholder, or its native value is unavailable (e.g. `${unique}`
     // is string-only): fall through to string interpolation — which also raises the right
     // Unknown{Variable,Fixture}Error when the reference is genuinely undefined.
-    return resolvePlaceholders(value, vars, { fixtures })
+    return resolvePlaceholders(value, vars, { fixtures, supplied })
   }
-  if (Array.isArray(value)) return value.map((v) => interpolateJson(v, vars, fixtures, nativeVars))
+  if (Array.isArray(value)) return value.map((v) => interpolateJson(v, vars, fixtures, nativeVars, supplied))
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, interpolateJson(v, vars, fixtures, nativeVars)]),
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, interpolateJson(v, vars, fixtures, nativeVars, supplied)]),
     )
   }
   return value
@@ -241,6 +263,13 @@ export class UnknownFixtureError extends Error {
 interface PlaceholderMaps {
   credentials?: ReadonlyMap<string, string>
   fixtures?: ReadonlyMap<string, Record<string, unknown>>
+  /**
+   * Registered supplied-instance values. Unlike the two `{{…}}` kinds this is never
+   * position-gated: `${supplied:…}` is a `${…}` reference and resolves wherever a
+   * captured `${var}` does, so it rides the `interpolate` pass rather than the
+   * placeholder scan.
+   */
+  supplied?: SuppliedValues
 }
 
 /**
@@ -258,17 +287,18 @@ function resolvePlaceholders(
   vars: ReadonlyMap<string, string>,
   maps: PlaceholderMaps,
 ): string {
+  const supplied = maps.supplied ?? NO_SUPPLIED
   const kinds: string[] = []
   if (maps.credentials) kinds.push('cred')
   if (maps.fixtures) kinds.push('fixture')
-  if (kinds.length === 0) return interpolate(template, vars)
+  if (kinds.length === 0) return interpolate(template, vars, supplied)
 
   const pattern = new RegExp(`\\{\\{(${kinds.join('|')}):([^{}]+)\\}\\}`, 'g')
   let out = ''
   let last = 0
   let match: RegExpExecArray | null
   while ((match = pattern.exec(template)) !== null) {
-    out += interpolate(template.slice(last, match.index), vars)
+    out += interpolate(template.slice(last, match.index), vars, supplied)
     const [, kind, ident] = match
     if (kind === 'cred') {
       const secret = maps.credentials!.get(ident)
@@ -279,7 +309,7 @@ function resolvePlaceholders(
     }
     last = match.index + match[0].length
   }
-  return out + interpolate(template.slice(last), vars)
+  return out + interpolate(template.slice(last), vars, supplied)
 }
 
 /**
@@ -315,8 +345,9 @@ export function resolveHeaderValue(
   vars: ReadonlyMap<string, string>,
   credentials: ReadonlyMap<string, string>,
   fixtures: ReadonlyMap<string, Record<string, unknown>> = NO_FIXTURES,
+  supplied: SuppliedValues = NO_SUPPLIED,
 ): string {
-  return resolvePlaceholders(template, vars, { credentials, fixtures })
+  return resolvePlaceholders(template, vars, { credentials, fixtures, supplied })
 }
 
 /** A path lookup miss — distinguishes "resolved to undefined" from a bad path. */

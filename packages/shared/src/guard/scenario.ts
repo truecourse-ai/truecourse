@@ -102,6 +102,18 @@ export const GuardFileMatcherSchema = z
     absent: z.boolean().optional(),
     equals: z.string().optional(),
     contains: z.string().optional(),
+    /**
+     * Regex source; matched with `RegExp(pattern).test(content)` against the file's
+     * WHOLE text (post-normalization), exactly as the stream matcher's `matches`
+     * works — same compile path, same load-time rejection of a source `new RegExp`
+     * refuses. Anchoring is the pattern's own business.
+     *
+     * What `contains` cannot say: several INDEPENDENT markers in one file, in no
+     * fixed order — `^(?=[\s\S]*alpha)(?=[\s\S]*beta)[\s\S]*$`. Written as separate
+     * `contains` assertions they would need separate paths, and a file matcher is
+     * keyed BY path, so the second would silently replace the first.
+     */
+    matches: z.string().optional(),
   })
   .strict()
   .refine(
@@ -109,8 +121,9 @@ export const GuardFileMatcherSchema = z
       m.exists !== undefined ||
       m.absent !== undefined ||
       m.equals !== undefined ||
-      m.contains !== undefined,
-    { message: 'file matcher needs one of exists | absent | equals | contains' },
+      m.contains !== undefined ||
+      m.matches !== undefined,
+    { message: 'file matcher needs one of exists | absent | equals | contains | matches' },
   )
 
 export const GuardExpectSchema = z
@@ -1493,17 +1506,26 @@ function stepPatterns(step: GuardCliStep | GuardApiStep): Array<{ where: string;
     add(where, m.matches)
     add(`${where}.compare.number`, m.compare?.number)
   }
+  /** A file expectation's regexes, named by the path each sits under. */
+  const files = (expect: { files?: Record<string, { matches?: string }> } | undefined): void => {
+    for (const [path, m] of Object.entries(expect?.files ?? {})) add(`expect.files.${path}`, m.matches)
+  }
   if ('run' in step || 'git' in step) {
     if (step.expect.stdout) matcher('expect.stdout', step.expect.stdout)
     if (step.expect.stderr) matcher('expect.stderr', step.expect.stderr)
     if (step.expect.output) matcher('expect.output', step.expect.output)
+    files(step.expect)
     // A capture pattern runs against real output on a real run; a source that does
     // not compile must die at load like every other one, not mid-scenario.
     for (const [name, c] of Object.entries(step.capture ?? {})) add(`capture.${name}`, c.pattern)
     return out
   }
-  // The file steps assert on file state only — no stream matcher, no regex.
-  if ('write' in step || 'delete' in step || 'patch' in step) return out
+  // The file steps assert on file state only — no stream matcher, but a file
+  // matcher's `matches` is a regex the runner compiles like any other.
+  if ('write' in step || 'delete' in step || 'patch' in step) {
+    files(step.expect)
+    return out
+  }
   if (isApiRequestStep(step)) {
     if (step.expect.body) matcher('expect.body', step.expect.body)
     for (const [name, m] of Object.entries(step.expect.headers ?? {})) matcher(`expect.headers.${name}`, m)
@@ -1718,7 +1740,8 @@ function describeFileMatcher(m: GuardFileMatcher): string {
   if (m.exists) return 'exists'
   if (m.absent) return 'is absent'
   if (m.equals !== undefined) return `is “${m.equals}”`
-  return `contains “${m.contains}”`
+  if (m.contains !== undefined) return `contains “${m.contains}”`
+  return `matches /${m.matches}/`
 }
 
 function describeJsonMatcher(m: GuardJsonMatcher): string {

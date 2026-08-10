@@ -1678,6 +1678,13 @@ ${SEED_JSON_SCHEMA}
 - FAIL LOUDLY. Any error — a failed connection, a rejected insert, a missing
   environment variable — prints a diagnostic and exits with a non-zero status. Never
   swallow an error, never exit 0 on a partial seed.
+- A value you must SHARE with the server (a signing secret, a salt, an issuer) that
+  the app reads from an environment variable WITH A CODE-LEVEL DEFAULT is not a
+  missing input: when that variable is absent from the environment the server boots
+  on its own default, so resolve the SAME value by importing or reading the app's own
+  configuration (the default included). Never invent a value, and never abort over a
+  variable the server itself does not require. Failing loudly is right only when the
+  app has NO readable default — a secret that must genuinely be supplied.
 - No interactive prompts, no network access beyond the datastore, no writes outside
   the datastore and the manifest file.
 

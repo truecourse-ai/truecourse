@@ -30,6 +30,33 @@ describe('firstInvalidMatchPattern — cli steps', () => {
   })
 })
 
+describe('firstInvalidMatchPattern — file matchers', () => {
+  it('reaches an `expect.files` regex on a process step, naming the path it sits under', () => {
+    expect(
+      firstInvalidMatchPattern([
+        cli({ files: { 'out/report.md': { matches: '^(?=[\\s\\S]*alpha)(?=[\\s\\S]*beta)[\\s\\S]*$' } } }),
+      ]),
+    ).toBeNull()
+    const bad = firstInvalidMatchPattern([cli({ files: { 'out/report.md': { matches: 'a[0-9' } } })])
+    expect(bad).toMatchObject({ step: 1, where: 'expect.files.out/report.md', pattern: 'a[0-9' })
+    expect(bad!.error).toBeTruthy()
+  })
+
+  it('reaches the `expect.files` regex of a write / delete / patch step, which carry no stream', () => {
+    const write = { write: { 'a.txt': 'x' }, expect: { files: { 'a.txt': { matches: '(' } } } } as GuardStep
+    expect(firstInvalidMatchPattern([write])).toMatchObject({ step: 1, where: 'expect.files.a.txt' })
+
+    const del = { delete: ['a.txt'], expect: { files: { 'b.txt': { matches: 'a{2,1}' } } } } as unknown as GuardStep
+    expect(firstInvalidMatchPattern([del])).toMatchObject({ step: 1, where: 'expect.files.b.txt' })
+
+    const patch = {
+      patch: { 'config.json': { set: { strict: true } } },
+      expect: { files: { 'config.json': { matches: '[' } } },
+    } as unknown as GuardStep
+    expect(firstInvalidMatchPattern([patch])).toMatchObject({ step: 1, where: 'expect.files.config.json' })
+  })
+})
+
 describe('firstInvalidMatchPattern — api steps', () => {
   const request = (expectBlock: unknown): GuardApiStep =>
     ({ request: { method: 'GET', path: '/todos' }, expect: expectBlock }) as GuardApiStep

@@ -50,6 +50,7 @@ import {
   type GuardGenerateUsage,
   type GuardScenarioResult,
   type CorpusConflict,
+  type Journey,
 } from '@truecourse/shared';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
@@ -283,12 +284,34 @@ export async function guardGenerateInProcess(
   // spend, then fail. Extracting both sides of an open overlap births noise.
   assertNoOpenConflicts(repoRoot);
 
+  // ONE working-tree analysis feeds every half: the journey catalog, the repo's
+  // detected third-party dependencies, and the code-truth grounding authoring
+  // needs. Memoized across the whole invocation, because the PRE-FLIGHT estimate
+  // needs the same journeys the run does — its committed-state no-op gate folds
+  // their fingerprints — and a clone has no `guard/journeys.json` to read them
+  // from. Sharing the one pass means the estimate and the run can never disagree,
+  // and the tree is analyzed once either way.
+  let mappedJourneys: Promise<{ journeys: Journey[] }> | null = null;
+  const journeysOnce = (): Promise<{ journeys: Journey[] }> =>
+    (mappedJourneys ??= (async () => {
+      if (options.journeys) return options.journeys();
+      const mapped = await mapJourneys(repoRoot);
+      return {
+        journeys: mapped.catalog.journeys,
+        externalServices: mapped.externalServices,
+        database: mapped.database,
+        datastoreUrls: mapped.datastoreUrls,
+        requestContracts: mapped.requestContracts,
+        outboundRequests: mapped.outboundRequests,
+      };
+    })());
+
   // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
   // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateGuardTokens(repoRoot, prices, { mode }),
+      estimateGuardTokens(repoRoot, prices, { mode, journeys: journeysOnce }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -408,22 +431,10 @@ export async function guardGenerateInProcess(
       flowsRunner: options.flowsRunner,
       flowsEpicRunner: options.flowsEpicRunner,
       matchRunner: options.matchRunner,
-      journeys:
-        options.journeys ??
-        (async () => {
-          // ONE working-tree analysis feeds every half: the journey catalog, the
-          // repo's detected third-party dependencies, and the code-truth grounding
-          // authoring needs.
-          const mapped = await mapJourneys(repoRoot);
-          return {
-            journeys: mapped.catalog.journeys,
-            externalServices: mapped.externalServices,
-            database: mapped.database,
-            datastoreUrls: mapped.datastoreUrls,
-            requestContracts: mapped.requestContracts,
-            outboundRequests: mapped.outboundRequests,
-          };
-        }),
+      // The memoized pass from above — the estimate's no-op gate already
+      // resolved it on a repo with no snapshot, so the run reuses that catalog
+      // instead of analyzing the tree a second time.
+      journeys: journeysOnce,
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result

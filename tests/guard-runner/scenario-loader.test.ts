@@ -117,6 +117,34 @@ describe('loadScenarios', () => {
     expect(errors[0].message).toContain('not a valid regular expression')
   })
 
+  it('rejects a scenario whose `expect.files` regex does not compile, on a run and on a write step', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'file-run.yaml',
+      scenario({
+        id: 'file-run',
+        steps: [{ run: ['ls'], expect: { files: { 'out.txt': { matches: 'a[0-9' } } } }],
+      }),
+    )
+    writeScenario(
+      r,
+      'file-write.yaml',
+      scenario({
+        id: 'file-write',
+        steps: [{ write: { 'a.txt': 'x' }, expect: { files: { 'a.txt': { matches: '(' } } } }],
+      }),
+    )
+
+    const { scenarios, errors } = loadScenarios(r)
+    expect(scenarios).toEqual([])
+    expect(errors).toHaveLength(2)
+    expect(errors.find((e) => e.file.endsWith('file-run.yaml'))!.message).toContain('expect.files.out.txt')
+    expect(errors.find((e) => e.file.endsWith('file-write.yaml'))!.message).toContain('expect.files.a.txt')
+    expect(errors[0].message).toContain('not a valid regular expression')
+  })
+
   it('rejects an api scenario whose json/log regex does not compile, naming where it sits', () => {
     const r = repo()
     writeRecipe(r)

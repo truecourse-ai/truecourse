@@ -77,6 +77,33 @@ describe('runGuard — the `${unique}` scenario variable', () => {
     expect(res.latest.scenarios[0].outcome).toBe('pass')
   }, 60_000)
 
+  it('interpolates `${unique}` in an `expect.files` REGEX (the `matches` value)', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'cli/unique-expect-files-matches.yaml',
+      scenario({
+        id: 'uni-expect-files-matches',
+        binds: specBinds('cli/version'),
+        steps: [
+          {
+            run: ['note', 'out-${unique}.txt', 'hello ${unique}'],
+            // A file regex is an authored string like every other matcher value: left
+            // verbatim it would look for a literal `${unique}` in the content and miss.
+            expect: { exit: 0, files: { 'out-${unique}.txt': { matches: '^hello ${unique}$' } } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].failure?.actual).toBeUndefined()
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  }, 60_000)
+
   it('interpolates `${unique}` in `setup.files` paths and content', async () => {
     const r = repo()
     writeRecipe(r)

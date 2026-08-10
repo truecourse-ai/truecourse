@@ -71,6 +71,49 @@ describe('evaluateExpect — files', () => {
     expect(evalExpect({ files: { 'out.txt': { equals: 'name=demo\nstrict=no\n' } } })).toBeNull()
     expect(evalExpect({ files: { 'out.txt': { contains: 'strict=yes' } } })?.subject).toBe('files')
   })
+  it('matches (regex) on file content — several independent markers in one file', () => {
+    fs.writeFileSync(path.join(cwd, 'report.md'), '# report\nalpha ok\nbeta ok\n')
+    const both = '^(?=[\\s\\S]*alpha)(?=[\\s\\S]*beta)[\\s\\S]*$'
+    expect(evalExpect({ files: { 'report.md': { matches: both } } })).toBeNull()
+
+    fs.writeFileSync(path.join(cwd, 'half.md'), '# report\nalpha ok\n')
+    const m = evalExpect({ files: { 'half.md': { matches: both } } })
+    expect(m?.subject).toBe('files')
+    // The diff names the PATTERN and excerpts the file, like the stream matcher's.
+    expect(m?.expected).toContain(both)
+    expect(m?.actual).toContain('alpha ok')
+    expect(m?.detail.join('\n')).toContain(both)
+    expect(m?.detail.join('\n')).toContain('alpha ok')
+  })
+
+  it('matches names an uncompilable regex instead of reporting a plain mismatch', () => {
+    fs.writeFileSync(path.join(cwd, 'x.txt'), 'x')
+    const m = evalExpect({ files: { 'x.txt': { matches: 'a[0-9' } } })
+    expect(m?.subject).toBe('files')
+    expect(m?.expected).toContain('invalid regex')
+  })
+
+  it('matches is a CONTENT check — a missing path and a directory are named as such', () => {
+    fs.mkdirSync(path.join(cwd, 'store'))
+    expect(evalExpect({ files: { 'nope.txt': { matches: 'x' } } })?.actual).toContain('missing')
+    expect(evalExpect({ files: { store: { matches: 'x' } } })?.actual).toContain('is a directory')
+  })
+
+  it('normalizes file content before a regex comparison', () => {
+    fs.writeFileSync(path.join(cwd, 'nv.txt'), 'relkit 2.4.1')
+    const stripVersion = (t: string): string => t.replace(/\d+\.\d+\.\d+/g, '<VERSION>')
+    expect(
+      evalExpect({ files: { 'nv.txt': { matches: '^relkit <VERSION>$' } } }, { normalizeText: stripVersion }),
+    ).toBeNull()
+  })
+
+  it('evaluates EVERY declared file matcher — contains passing never skips matches', () => {
+    fs.writeFileSync(path.join(cwd, 'c.txt'), 'alpha\n')
+    const m = evalExpect({ files: { 'c.txt': { contains: 'alpha', matches: 'beta' } } })
+    expect(m?.subject).toBe('files')
+    expect(m?.expected).toContain('beta')
+  })
+
   it('exists / absent are about the PATH — a directory satisfies them', () => {
     fs.mkdirSync(path.join(cwd, 'store', 'analyses'), { recursive: true })
     expect(evalExpect({ files: { store: { exists: true } } })).toBeNull()

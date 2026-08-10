@@ -54,6 +54,28 @@ function baseRecipe(externals?: Record<string, unknown>): Record<string, unknown
   };
 }
 
+/**
+ * The COMMITTED manifest, one flow per blocked-on gap — where the blocked-flow
+ * counts are read from. `guard/result.json` is gitignored, so a clone only ever
+ * inherits this file.
+ */
+function writeBlockedManifest(r: string, gaps: { flowId: string; reason: string; surface?: string }[]): void {
+  const byFlow = new Map<string, { flowId: string; reason: string; surface?: string }[]>();
+  for (const g of gaps) byFlow.set(g.flowId, [...(byFlow.get(g.flowId) ?? []), g]);
+  writeJson(path.join(r, '.truecourse', 'scenarios', 'manifest.json'), {
+    version: 3,
+    flows: [...byFlow].map(([flowId, rows]) => ({
+      flowId,
+      flowFingerprint: `sha256:${flowId}`,
+      bindings: [{ doc: 'docs/a.md', anchor: flowId, fingerprint: `sha256:${flowId}-section` }],
+      scenarios: [],
+      journeys: [],
+      generationInputsHash: `sha256:${flowId}-inputs`,
+      gaps: rows.map((g) => ({ surface: g.surface ?? 'api', kind: 'blocked-on', reason: g.reason })),
+    })),
+  });
+}
+
 /** A generate report carrying detection + two blocked-on gaps naming open-meteo. */
 function writeReport(r: string, report: Partial<GuardGenerateReport> = {}): void {
   const file = path.join(r, '.truecourse', 'guard', 'result.json');
@@ -110,13 +132,13 @@ describe('readGuardExternalsView', () => {
         },
         { service: 'stripe', category: 'payment', evidence: [{ filePath: 'src/pay.ts', importSource: 'stripe' }] },
       ],
-      coverageGaps: [
-        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
-        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on open-meteo, stripe: pay', flowId: 'f2' },
-        // The same flow blocked on the same service twice counts once.
-        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on open-meteo: again', flowId: 'f1' },
-      ],
     });
+    writeBlockedManifest(r, [
+      { flowId: 'f1', reason: 'blocked on open-meteo: forecast' },
+      { flowId: 'f2', reason: 'blocked on open-meteo, stripe: pay' },
+      // The same flow blocked on the same service twice counts once.
+      { flowId: 'f1', reason: 'blocked on open-meteo: again', surface: 'cli' },
+    ]);
 
     const view = readGuardExternalsView(r);
     expect(view.detectionAvailable).toBe(true);
@@ -241,14 +263,14 @@ describe('the needs-setup derivation off the view', () => {
         { service: 'open-meteo', evidence: [{ filePath: 'src/config.ts', url: 'https://api.open-meteo.com' }], source: 'http' },
         { service: 'stripe', category: 'payment', evidence: [{ filePath: 'src/pay.ts', importSource: 'stripe' }] },
       ],
-      coverageGaps: [
-        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
-        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on open-meteo: history', flowId: 'f2' },
-        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f3' },
-        // A generic noun is nobody's service — it must not invent a row.
-        { doc: 'docs/a.md', anchor: 'w', kind: 'blocked-on', reason: 'blocked on external-service: something', flowId: 'f4' },
-      ],
     });
+    writeBlockedManifest(r, [
+      { flowId: 'f1', reason: 'blocked on open-meteo: forecast' },
+      { flowId: 'f2', reason: 'blocked on open-meteo: history' },
+      { flowId: 'f3', reason: 'blocked on stripe: pay' },
+      // A generic noun is nobody's service — it must not invent a row.
+      { flowId: 'f4', reason: 'blocked on external-service: something' },
+    ]);
     return r;
   }
 
@@ -277,13 +299,12 @@ describe('the needs-setup derivation off the view', () => {
         stripe: { baseUrlEnv: 'STRIPE_BASE_URL', baseUrl: 'https://sandbox.stripe.test' },
       }),
     );
-    writeReport(r, {
-      coverageGaps: [
-        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
-        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f2' },
-        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on stripe: refund', flowId: 'f3' },
-      ],
-    });
+    writeReport(r);
+    writeBlockedManifest(r, [
+      { flowId: 'f1', reason: 'blocked on open-meteo: forecast' },
+      { flowId: 'f2', reason: 'blocked on stripe: pay' },
+      { flowId: 'f3', reason: 'blocked on stripe: refund' },
+    ]);
     const view = readGuardExternalsView(r);
     expect(readGuardExternalSetupIndex(r).stripe).toBe('provided');
     // stripe has MORE blocked flows and still sorts last: it needs no setup.
@@ -295,6 +316,24 @@ describe('the needs-setup derivation off the view', () => {
     writeJson(recipeFile(r), baseRecipe({ 'open-meteo': { baseUrlEnv: 'FORECAST_BASE_URL' } }));
     writeReport(r);
     expect(guardNeedsSetupServices(readGuardExternalsView(r))).toEqual([]);
+  });
+
+  // A teammate's clone (and every supplied sandbox instance, which copies the repo)
+  // has the committed manifest and NO gitignored run-result. The blocked counts must
+  // survive that, or the page tells them nothing is waiting on stripe.
+  it('counts blocked flows from the committed manifest alone — no guard/result.json', () => {
+    const r = repo();
+    writeJson(recipeFile(r), baseRecipe({ stripe: { baseUrlEnv: 'STRIPE_BASE_URL' } }));
+    writeBlockedManifest(r, [
+      { flowId: 'f1', reason: 'blocked on stripe: pay' },
+      { flowId: 'f2', reason: 'blocked on stripe: refund' },
+    ]);
+
+    expect(fs.existsSync(path.join(r, '.truecourse', 'guard', 'result.json'))).toBe(false);
+    expect(readGuardExternalsView(r).services).toMatchObject([{ service: 'stripe', blockedFlows: 2 }]);
+    expect(guardNeedsSetupServices(readGuardExternalsView(r))).toEqual([
+      { service: 'stripe', state: 'unprovided', blockedFlows: 2 },
+    ]);
   });
 });
 

@@ -908,6 +908,29 @@ describe('planFlowSynthesis — the planner the estimate and the run share', () 
     expect(plan.epicCalls).toBe(0)
   })
 
+  // Once every area is cached the flows are fixed, so the epic digests are known
+  // offline and the planner probes the SAME entry the run reads — a settled corpus
+  // plans zero calls instead of quoting the ceiling forever.
+  it('plans the epic pass against its real cache once every area is cached', async () => {
+    const r = repo()
+    const areas = [tasksArea, authArea]
+    const epics: FlowsEpicRunner = async () => ({ epics: [] })
+
+    await synth(r, areas, flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), { epicRunner: epics })
+
+    const warm = await planFlowSynthesis(r, areas)
+    expect(warm.areaCalls).toBe(0)
+    expect(warm.epicCalls).toBe(0)
+
+    // ...and the run agrees: nothing calls, epic pass included.
+    const exploding: FlowsEpicRunner = async () => {
+      throw new Error('the epic cache should have answered')
+    }
+    const rerun = await synth(r, areas, flowsRunner({}), { epicRunner: exploding })
+    expect(rerun.calls).toBe(0)
+    expect(rerun.unsettled).toEqual([])
+  })
+
   it('counts only runnable claims toward the flow bound', async () => {
     const area: FlowSynthesisArea = {
       ...tasksArea,

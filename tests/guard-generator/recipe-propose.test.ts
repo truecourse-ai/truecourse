@@ -18,6 +18,7 @@ import {
   rankHealthPath,
   credentialStubs,
   credentialEnvName,
+  isCredentialStub,
   tokenizeCommand,
   routesFromJourneys,
   type ApiRouteRef,
@@ -546,6 +547,21 @@ describe('credential stubs', () => {
     expect(notes[1]).toMatch(/"cookieAuth" \(apiKey in cookie\) has no request-header form/)
   })
 
+  // The stub is recognized STRUCTURALLY — by the variable it names and the marker it
+  // wrote itself — because the only thing that may ever be removed on the user's
+  // behalf is the proposer's own untouched work.
+  it('recognizes its own unfilled stub, and nothing a human touched', () => {
+    const { credentials } = credentialStubs({ bearerAuth: { type: 'http', scheme: 'bearer' } })
+
+    expect(isCredentialStub('bearerAuth', credentials?.bearerAuth)).toBe(true)
+    // A pasted value, their own variable, or a rewritten description: all theirs.
+    expect(isCredentialStub('bearerAuth', { ...credentials!.bearerAuth, value: 'Bearer mine' })).toBe(false)
+    expect(isCredentialStub('bearerAuth', { ...credentials!.bearerAuth, valueFromEnv: 'MY_TOKEN' })).toBe(false)
+    expect(isCredentialStub('bearerAuth', { ...credentials!.bearerAuth, description: 'the member token' })).toBe(false)
+    // The same shape under a DIFFERENT name is not the stub for that name.
+    expect(isCredentialStub('memberToken', credentials?.bearerAuth)).toBe(false)
+  })
+
   it('derives a predictable env-var name from any scheme key', () => {
     expect(credentialEnvName('api-key.v2')).toBe('GUARD_CRED_API_KEY_V2')
   })
@@ -564,6 +580,92 @@ describe('credential stubs', () => {
     if (!outcome.ok) return
     expect(Object.keys(outcome.recipe.api?.credentials ?? {})).toEqual(['bearerAuth'])
     expect(outcome.todos).toHaveLength(2)
+  })
+
+  // A refresh re-derives over a repo that still has its reviewed `recipe.json`: a
+  // credential a human already filled in must not come back as a TODO stub, and the
+  // env-var TODO that goes with it must not be re-issued either.
+  it('never re-stubs a credential the existing recipe already declares', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      '.truecourse/scenarios/recipe.json': json({
+        build: 'true',
+        api: {
+          serve: ['node', 'server.js'],
+          credentials: { bearerAuth: { header: 'Authorization', value: 'Bearer mine', satisfies: 'bearerAuth' } },
+        },
+      }),
+    })
+
+    const outcome = proposeRecipe(repo, {
+      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' }, apiKeyAuth: { type: 'apiKey', in: 'header', name: 'X-Api-Key' } },
+    })
+
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    // Only the scheme nothing has answered for yet is stubbed.
+    expect(Object.keys(outcome.recipe.api?.credentials ?? {})).toEqual(['apiKeyAuth'])
+    expect(outcome.todos).toEqual([expect.stringContaining('GUARD_CRED_APIKEYAUTH')])
+  })
+
+  it('never re-stubs a scheme the existing recipe answers with a SEED-provided credential', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      // No `api.credentials` at all — the principal is minted by the seed at run
+      // time, and its declaration is the only place the scheme is answered.
+      '.truecourse/scenarios/recipe.json': json({
+        build: 'true',
+        api: {
+          serve: ['node', 'server.js'],
+          seed: {
+            command: 'node scripts/guard-seed.mjs',
+            provides: {
+              credentials: {
+                member: { header: 'Authorization', satisfies: 'memberToken', description: 'a regular member' },
+              },
+            },
+          },
+        },
+      }),
+    })
+
+    const outcome = proposeRecipe(repo, {
+      securitySchemes: {
+        memberToken: { type: 'http', scheme: 'bearer' },
+        apiKeyAuth: { type: 'apiKey', in: 'header', name: 'X-Api-Key' },
+      },
+    })
+
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(Object.keys(outcome.recipe.api?.credentials ?? {})).toEqual(['apiKeyAuth'])
+    expect(outcome.todos).toEqual([expect.stringContaining('GUARD_CRED_APIKEYAUTH')])
+  })
+
+  it('never re-stubs a scheme a seed credential answers by its own NAME', () => {
+    const repo = repoOf({
+      'package.json': json({ name: 'svc', scripts: { start: 'node server.js' } }),
+      'server.js': '',
+      '.truecourse/scenarios/recipe.json': json({
+        build: 'true',
+        api: {
+          serve: ['node', 'server.js'],
+          seed: {
+            command: 'node scripts/guard-seed.mjs',
+            provides: { credentials: { bearerAuth: { header: 'Authorization' } } },
+          },
+        },
+      }),
+    })
+
+    const outcome = proposeRecipe(repo, { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } })
+
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.recipe.api?.credentials).toBeUndefined()
+    expect(outcome.todos).toEqual([])
   })
 
   it('reads the schemes off the corpus OpenAPI doc when none are passed in', () => {

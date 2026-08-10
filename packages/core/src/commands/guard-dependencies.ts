@@ -44,6 +44,7 @@ import {
   readGuardDecisions,
   readGuardFlowsCorpus,
   readGuardResult,
+  readManifest,
   recipePath,
   resolveDependencies,
   scenarioDependencyNames,
@@ -436,11 +437,20 @@ function readFlowTitles(repoRoot: string): Map<string, string> {
 }
 
 /**
- * Dependency name → what it holds back, from BOTH honest sources: the committed
- * scenarios that BIND it (a test that exists and cannot run) and the last
- * generate's `blocked-on` gaps naming it (a test that was never written). Neither
- * alone is the answer — a repo can have both, and a reader clearing the
- * dependency clears both.
+ * Dependency name → what it holds back, from the honest sources: the committed
+ * scenarios that BIND it (a test that exists and cannot run) and the `blocked-on`
+ * gaps naming it (a test that was never written). Neither alone is the answer — a
+ * repo can have both, and a reader clearing the dependency clears both.
+ *
+ * The never-written half is read from the COMMITTED `scenarios/manifest.json`
+ * first, exactly as `missingDataBlockedFlows` does: `guard/result.json` is
+ * gitignored, so sourcing it there alone left every clone (and every supplied
+ * prepared repo) reading as if nothing were blocked, while the committed manifest
+ * recorded the very same gaps. The manifest is also the DURABLE record — an
+ * unchanged flow keeps its entry across generates, where the report speaks only for
+ * the last run. The report is kept as ENRICHMENT: it carries the claim-level gaps
+ * (which belong to no flow, so no manifest flow entry holds them) that the manifest
+ * cannot express.
  */
 function blockedIndex(
   repoRoot: string,
@@ -459,6 +469,16 @@ function blockedIndex(
     const title = (flowId ? flowTitles.get(flowId) : undefined) ?? scenario.title;
     for (const name of scenarioDependencyNames(scenario)) {
       push(name, { ...(flowId ? { flowId } : {}), title, kind: 'test-blocked' });
+    }
+  }
+
+  for (const flow of readManifest(repoRoot)?.flows ?? []) {
+    const title = flowTitles.get(flow.flowId) ?? flow.flowId;
+    for (const gap of flow.gaps) {
+      if (gap.kind !== 'blocked-on') continue;
+      for (const capability of parseBlockedOnCapabilities(gap.reason)) {
+        push(capability, { flowId: flow.flowId, title, kind: 'not-authored' });
+      }
     }
   }
 

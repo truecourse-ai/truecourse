@@ -62,7 +62,7 @@ import {
   type SeedRetryContext,
 } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
-import { detectEcosystems, type RecipeEcosystem } from './recipe-propose.js'
+import { detectEcosystems, isCredentialStub, type RecipeEcosystem } from './recipe-propose.js'
 import type { SeedRunner } from './runners.js'
 
 export const SEED_CACHE_NAME = 'guard/seed'
@@ -614,6 +614,42 @@ function toRecipeSeed(proposal: SeedProposal, knownSchemeNames: ReadonlySet<stri
   }
 }
 
+/**
+ * The seed SUPERSEDES the proposer's own unfilled credential stubs.
+ *
+ * The deterministic proposer stubs a credential for every OpenAPI security scheme it
+ * can map to a header — honest when it runs, because no seed exists yet and the only
+ * way to have that credential is for a human to paste one into `GUARD_CRED_*`. Four
+ * steps later the drafted seed MINTS the same principal, and `api.credentials` +
+ * `api.seed.provides.credentials` share ONE namespace: the recipe schema refuses a
+ * name declared in both (correctly — `{{cred:x}}` must have one source). Leaving the
+ * stub in therefore makes the draft unwritable, and a fresh setup on a repo whose
+ * seed can mint its principals could never seed at all whenever the model happened to
+ * pick the scheme's own name.
+ *
+ * So the stub goes, and ONLY the stub: an entry is removed when the seed answers it
+ * (same name, or the same `satisfies` scheme) AND {@link isCredentialStub} recognizes
+ * the proposer's own untouched shape. Anything a human filled in is left exactly
+ * where it is and the load-time refusal stands — two real sources for one name is a
+ * question only the user can settle.
+ */
+function dropSupersededStubs(api: Record<string, unknown>, seed: RecipeApiSeed): void {
+  const seeded = seed.provides.credentials
+  const credentials = api.credentials
+  if (!seeded || !credentials || typeof credentials !== 'object' || Array.isArray(credentials)) return
+  const names = new Set(Object.keys(seeded))
+  const schemes = new Set(Object.values(seeded).map((c) => c.satisfies).filter((s): s is string => typeof s === 'string'))
+  const entries = credentials as Record<string, unknown>
+  for (const [name, credential] of Object.entries(entries)) {
+    const satisfies = (credential as { satisfies?: unknown } | null)?.satisfies
+    const answered = names.has(name) || (typeof satisfies === 'string' && schemes.has(satisfies))
+    if (answered && isCredentialStub(name, credential)) delete entries[name]
+  }
+  // An empty block is noise in a reviewed file — and `{}` is not what "no credentials
+  // beyond the seed's" looks like in a hand-written recipe.
+  if (Object.keys(entries).length === 0) delete api.credentials
+}
+
 /** A repo-relative script path, refused when it escapes the repository. */
 function resolveScriptPath(repoRoot: string, rel: string): { abs: string } | { reason: string } {
   if (path.isAbsolute(rel)) return { reason: `scriptPath must be repo-relative, got ${rel}` }
@@ -658,6 +694,7 @@ function writeSeedArtifacts(
   }
   const seed = toRecipeSeed(proposal, knownSchemeNames)
   api.seed = seed
+  dropSupersededStubs(api, seed)
   const validated = RecipeSchema.safeParse(doc)
   if (!validated.success) {
     return {

@@ -197,6 +197,64 @@ describe('runGuardSetup — the gates', () => {
   }, 60_000)
 })
 
+describe('runGuardSetup — a compose-backed repo', () => {
+  /** A server that refuses to boot until the "datastore" marker exists — the
+   *  dependency-free stand-in for a repo whose app needs `api.services` up. */
+  function gatedRepo(r: string): string {
+    const marker = path.join(r, 'datastore-up')
+    fs.writeFileSync(
+      path.join(r, 'services-up.mjs'),
+      `import fs from 'node:fs'\nfs.writeFileSync(${JSON.stringify(marker)}, 'up')\n`,
+    )
+    fs.writeFileSync(
+      path.join(r, 'services-down.mjs'),
+      `import fs from 'node:fs'\nfs.rmSync(${JSON.stringify(marker)}, { force: true })\n`,
+    )
+    fs.writeFileSync(
+      path.join(r, 'gated-server.mjs'),
+      [
+        "import http from 'node:http'",
+        "import fs from 'node:fs'",
+        `if (!fs.existsSync(${JSON.stringify(marker)})) {`,
+        "  console.error('the datastore is not up')",
+        '  process.exit(1)',
+        '}',
+        'http.createServer((_req, res) => {',
+        "  res.writeHead(200, { 'content-type': 'application/json' })",
+        '  res.end(\'{"ok":true}\')',
+        '}).listen(Number(process.env.PORT))',
+        '',
+      ].join('\n'),
+    )
+    return marker
+  }
+
+  // The live probe boots the SAME server verification boots, so it needs the SAME
+  // world: `api.services` up. Without the bring-up the probe's boot can never reach
+  // a healthy state and the hard gate fails a recipe that is perfectly good.
+  it('brings the datastore up for the live probe, then tears it down', async () => {
+    const r = fixtureRepo()
+    const marker = gatedRepo(r)
+    writeRecipe(r, {
+      serve: ['node', path.join(r, 'gated-server.mjs')],
+      services: { up: 'node services-up.mjs', down: 'node services-down.mjs' },
+      readyTimeoutMs: 8000,
+    })
+
+    const { report } = await runGuardSetup({
+      repoRoot: r,
+      journeys: journeys({ database: null }),
+      recipeRunner: neverCalled('recipe'),
+      seedRunner: neverCalled('seed'),
+    })
+
+    expect(report.status).toBe('ok')
+    expect(report.recipe.probes).toEqual([{ server: 'default', path: '/health', status: 200, ok: true }])
+    // Setup leaves nothing running behind it.
+    expect(fs.existsSync(marker)).toBe(false)
+  }, 120_000)
+})
+
 describe('runGuardSetup — the happy path', () => {
   it('probes the live server, declares the externals, and drafts the one seed', async () => {
     const r = fixtureRepo()
@@ -278,6 +336,156 @@ describe('runGuardSetup — the happy path', () => {
     // No blocked flows on a first setup — authoring has never run, and the draft
     // does not need it to.
     expect(input.blocked).toEqual([])
+  }, 120_000)
+})
+
+// ---------------------------------------------------------------------------
+// The proposer's credential STUB vs the seed that mints the same principal
+// ---------------------------------------------------------------------------
+
+describe('runGuardSetup — a drafted seed over a credential stub', () => {
+  /** The stub the deterministic proposer mints for a bearer scheme, verbatim. */
+  const STUB = {
+    header: 'Authorization',
+    valueFromEnv: 'GUARD_CRED_MEMBERTOKEN',
+    satisfies: 'memberToken',
+    description: 'TODO: fill in — bearer token for the "memberToken" security scheme (include the "Bearer " prefix)',
+  }
+
+  /** A seed that mints a principal under the SAME name as the scheme stub. */
+  const SEEDS_MEMBER_TOKEN: SeedProposal = {
+    scriptPath: 'scripts/guard-seed.mjs',
+    scriptContent: [
+      "import fs from 'node:fs'",
+      'const org = { id: 42, slug: "acme" }',
+      'fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org] }))',
+      'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
+      '  fixtures: { org },',
+      '  credentials: { memberToken: { value: "Bearer minted" } },',
+      '}))',
+      '',
+    ].join('\n'),
+    seed: {
+      command: 'node scripts/guard-seed.mjs',
+      provides: {
+        fixtures: { org: ['id', 'slug'] },
+        credentials: { memberToken: { header: 'Authorization', satisfies: 'memberToken', description: 'a member' } },
+      },
+    },
+  }
+
+  // The stub was honest when it was written (no seed existed yet), and the seed that
+  // arrives minutes later ANSWERS the same scheme. Refusing the draft over the name
+  // collision means a fresh setup can never seed such a repo at all.
+  it('supersedes the unfilled stub instead of refusing the draft', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r, { credentials: { memberToken: STUB } })
+
+    const { report } = await runGuardSetup({
+      repoRoot: r,
+      journeys: journeys(),
+      recipeRunner: neverCalled('recipe'),
+      seedRunner: seedRunnerOf(SEEDS_MEMBER_TOKEN).runner,
+    })
+
+    expect(report.seed).toMatchObject({ status: 'ok', outcome: 'drafted', credentials: ['memberToken'] })
+    const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'))
+    expect(recipe.api.credentials).toBeUndefined()
+    expect(recipe.api.seed.provides.credentials.memberToken.header).toBe('Authorization')
+  }, 120_000)
+
+  // The other half of the rule: only the proposer's OWN unfilled stub is superseded.
+  // A credential a human filled in is a second source for the same name, and the
+  // load-time refusal is exactly right there — nothing of theirs is ever removed.
+  it('still refuses when the colliding credential is one a human filled in', async () => {
+    const r = fixtureRepo()
+    const filled = { header: 'Authorization', value: 'Bearer mine', satisfies: 'memberToken' }
+    writeRecipe(r, { credentials: { memberToken: filled } })
+
+    const { report } = await runGuardSetup({
+      repoRoot: r,
+      journeys: journeys(),
+      recipeRunner: neverCalled('recipe'),
+      seedRunner: seedRunnerOf(SEEDS_MEMBER_TOKEN, SEEDS_MEMBER_TOKEN).runner,
+    })
+
+    expect(report.status).toBe('ok') // the seed is SOFT — it never fails the run
+    expect(report.seed?.status).toBe('failed')
+    expect(report.seed?.reason).toMatch(/a name has exactly one source/)
+    const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'))
+    expect(recipe.api.credentials.memberToken).toEqual(filled)
+    expect(recipe.api.seed).toBeUndefined()
+  }, 120_000)
+})
+
+// The live repro: a repo with NO recipe.json at all. Discovery derives one from the
+// repo's own manifests — including the credential stub the corpus's OpenAPI scheme
+// implies, and the "set GUARD_CRED_*" TODO that goes with it — and the seed drafted
+// four steps later mints exactly that principal.
+describe('runGuardSetup — a fresh setup whose seed answers the derived stub', () => {
+  it('drafts the seed, drops the superseded stub, and stops asking for its env var', async () => {
+    const r = fixtureRepo()
+    // A dependency-free server the DETERMINISTIC proposer can derive and verify.
+    fs.writeFileSync(
+      path.join(r, 'plain.mjs'),
+      [
+        "import http from 'node:http'",
+        'http.createServer((_req, res) => {',
+        "  res.writeHead(200, { 'content-type': 'application/json' })",
+        '  res.end(\'{"ok":true}\')',
+        '}).listen(Number(process.env.PORT))',
+        '',
+      ].join('\n'),
+    )
+    fs.writeFileSync(
+      path.join(r, 'package.json'),
+      JSON.stringify({ name: 'fresh-fixture', private: true, type: 'module', scripts: { start: 'node plain.mjs' } }, null, 2),
+    )
+    fs.writeFileSync(
+      path.join(r, 'openapi.yaml'),
+      [
+        'openapi: 3.0.0',
+        'info: { title: svc, version: "1" }',
+        'paths: {}',
+        'components:',
+        '  securitySchemes:',
+        '    memberToken:',
+        '      type: http',
+        '      scheme: bearer',
+      ].join('\n'),
+    )
+    writeCorpus(r, [{ ref: DOC }, { ref: 'openapi.yaml' }])
+    const seed: SeedProposal = {
+      scriptPath: 'scripts/guard-seed.mjs',
+      scriptContent: [
+        "import fs from 'node:fs'",
+        'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
+        '  credentials: { memberToken: { value: "Bearer minted" } },',
+        '}))',
+        '',
+      ].join('\n'),
+      seed: {
+        command: 'node scripts/guard-seed.mjs',
+        provides: {
+          credentials: { memberToken: { header: 'Authorization', satisfies: 'memberToken', description: 'a member' } },
+        },
+      },
+    }
+
+    const { report } = await runGuardSetup({
+      repoRoot: r,
+      journeys: journeys(),
+      recipeRunner: neverCalled('recipe'),
+      seedRunner: seedRunnerOf(seed).runner,
+    })
+
+    // Step 1 derived the recipe deterministically, stub and TODO included…
+    expect(report.recipe.outcome).toBe('discovered')
+    expect(report.seed).toMatchObject({ status: 'ok', outcome: 'drafted', credentials: ['memberToken'] })
+    const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'))
+    expect(recipe.api.credentials).toBeUndefined()
+    // …and the TODO row does not survive the seed that answered it.
+    expect(report.recipe.todos ?? []).not.toContainEqual(expect.stringContaining('GUARD_CRED_MEMBERTOKEN'))
   }, 120_000)
 })
 
@@ -383,6 +591,34 @@ describe('runGuardSetup — re-run semantics', () => {
     expect(report.seed?.status).toBe('failed')
     expect(fs.readFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'utf-8')).toBe(original)
     expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(before)
+  }, 120_000)
+
+  // A refresh RE-DERIVES the recipe, and the re-derivation knows nothing about the
+  // env a human wrote into `api.env` (a connection string, a feature flag, a
+  // credential value) — losing it is silent data loss, exactly as it would be for
+  // `api.seed` / `api.externals` / `api.credentials`.
+  it('--refresh preserves hand-authored `api.env` and credentials', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r, {
+      env: { SEED_STORE: path.join(r, 'store.json'), MY_FLAG: 'hand-authored' },
+      credentials: { owner: { header: 'Authorization', value: 'Bearer mine', satisfies: 'bearerAuth' } },
+    })
+
+    const { report } = await runGuardSetup({
+      repoRoot: r,
+      refresh: true,
+      journeys: journeys({ database: null }),
+      // The re-derivation proposes only SEED_STORE — the authored key is not its to know.
+      recipeRunner: recipeRunnerFor(r),
+      seedRunner: neverCalled('seed'),
+    })
+
+    expect(report.status).toBe('ok')
+    const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf-8'))
+    expect(recipe.api.env.MY_FLAG).toBe('hand-authored')
+    // The re-derived keys still land — preservation is a merge, not a rollback.
+    expect(recipe.api.env.SEED_STORE).toBe(path.join(r, 'store.json'))
+    expect(recipe.api.credentials.owner.value).toBe('Bearer mine')
   }, 120_000)
 
   // Steps 3 and 4 are SOFT by contract: a repo with no database still gets its

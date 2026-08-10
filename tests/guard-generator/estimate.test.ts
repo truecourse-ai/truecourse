@@ -138,13 +138,56 @@ describe('estimateGuardTokens', () => {
     // Every stage is a cache hit and every flow's inputs hash still matches the
     // manifest, so the estimate has NO stages — the confirm prompt is skipped and
     // the run is a deterministic no-op. (`background` states no claim, so no flow
-    // binds it: it counts as an unguarded section forever, which is honest.)
+    // binds it; the manifest's gap-section record accounts for it, so it reads as
+    // cached rather than as forever-changed — see gap-sections.test.ts.)
     const est = await estimateGuardTokens(r)
     expect(est.stages).toEqual([])
     expect(est.totalEstimatedTokens).toBe(0)
-    expect(est.subjectLabel).toBe('1 of 2 sections changed')
+    expect(est.subjectLabel).toBe('all 2 sections cached')
 
     const second = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: author })
+    expect(second.noChanges).toBe(true)
+    expect(second.written).toEqual([])
+  })
+
+  // D3: a section whose claims all settled as permanent GAPS (untestable here) binds
+  // no flow, so `planGuardWork` reports it as changed work forever. On a MULTI-AREA
+  // corpus that used to drag the whole flow-synthesis stage back into the estimate —
+  // the epic-pass ceiling was quoted off "there is changed work" instead of off the
+  // epic cache the run actually reads — so a fully settled corpus re-prompted with a
+  // dollar figure for a generate that makes no call at all.
+  it('a settled MULTI-AREA corpus whose leftover sections are permanent gaps ⇒ empty estimate', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [
+      { ref: DOC, areaTags: ['cli'] },
+      { ref: AUTH_DOC, areaTags: ['auth'] },
+    ])
+    writeDoc(r, DOC, DOC_CONTENT)
+    writeDoc(r, AUTH_DOC, AUTH_CONTENT)
+
+    const first = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: authorBy({}) })
+    expect(first.written).toHaveLength(2) // one scenario per area's testable section
+
+    // Docs unchanged; every claim either has a committed scenario or settled as a
+    // permanent gap (`background` is untestable). Nothing is left for the run to do.
+    const est = await estimateGuardTokens(r)
+    expect(est.stages).toEqual([])
+    expect(est.totalEstimatedTokens).toBe(0)
+    expect(est.estimatedCostUsd).toBeUndefined()
+
+    // ...and the run agrees: a deterministic no-op that calls nothing.
+    const second = await runGenerate({
+      repoRoot: r,
+      extractRunner: extract,
+      generateRunner: authorBy({}),
+      flowsRunner: async () => {
+        throw new Error('the flows cache should have answered')
+      },
+      flowsEpicRunner: async () => {
+        throw new Error('the epic cache should have answered')
+      },
+    })
     expect(second.noChanges).toBe(true)
     expect(second.written).toEqual([])
   })

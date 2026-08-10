@@ -31,6 +31,7 @@ import {
   milestoneOrder,
 } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from '../sandbox.js'
+import { applySupplied, type SuppliedInstance } from '../dependencies.js'
 import { applyCapabilities, CapabilityError } from '../capabilities/index.js'
 import {
   startHttpStubs,
@@ -162,6 +163,16 @@ export interface RunApiScenarioContext {
    * collision-free identifier.
    */
   unique: string
+  /**
+   * The PROVIDED supplied instances this scenario binds. Materialized into the
+   * sandbox exactly as the cli driver does: an `env` instance's identifier-shaped
+   * variables reach the SERVER's environment, and every registered value is what
+   * `${supplied:<name>.<field>}` resolves to in a request, an expectation, a
+   * `boot.env` overlay, `setup.env` and `setup.files`. Absent ⇒ no instances, and
+   * any `${supplied:…}` is then the loud error {@link applySupplied} raises (the
+   * runner's gate keeps an unprovided binding from ever reaching here).
+   */
+  supplied?: readonly SuppliedInstance[]
   stepTimeoutMs: number
   signal?: AbortSignal
   capturePassEvidence: boolean
@@ -366,6 +377,9 @@ export async function runApiScenario(
       recipeEnv: proxyEnv ? { ...(ctx.recipeEnv ?? {}), ...proxyEnv } : ctx.recipeEnv,
       scenarioEnv: setup?.env,
       setupFiles: setup?.files,
+      // Copy-in BEFORE anything runs: the declared env, the seeded files and the
+      // server's own environment may all name a registered instance.
+      supplied: ctx.supplied,
     })
   } catch (e) {
     await proxies?.stop()
@@ -552,7 +566,12 @@ export async function runApiScenario(
           if (step.boot.env) {
             try {
               const overlay = substituteHttpStubOriginsInEnv(
-                applyUniqueEnv(step.boot.env, ctx.unique),
+                // Same order the sandbox's own env build uses: `${unique}` then
+                // `${supplied:…}`, so a boot overlay reaches a registered instance
+                // exactly as `setup.env` does.
+                mapEnvValues(applyUniqueEnv(step.boot.env, ctx.unique), (v) =>
+                  applySupplied(v, sandbox.supplied),
+                ),
                 stubs?.origins ?? new Map<string, string>(),
                 `step ${stepIndex} boot.env`,
               )
@@ -731,8 +750,8 @@ export async function runApiScenario(
         // name what a scenario created and the failure shows the resolved value.
         let stepExpect = step.expect
         try {
-          request = interpolateRequest(step.request, vars, credentials, fixtures, nativeVars)
-          stepExpect = interpolateApiExpect(step.expect, vars, fixtures, nativeVars)
+          request = interpolateRequest(step.request, vars, credentials, fixtures, nativeVars, sandbox.supplied)
+          stepExpect = interpolateApiExpect(step.expect, vars, fixtures, nativeVars, sandbox.supplied)
         } catch (e) {
           if (e instanceof UnknownVariableError) {
             records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
@@ -1138,6 +1157,11 @@ async function bootWithRetry(
   if (first.ok || !first.timedOut || ctx.signal?.aborted) return { boot: first, attempts: 1 }
   const second = await startApiServer(opts)
   return { boot: second, attempts: 2 }
+}
+
+/** Map an env record's VALUES through `fn`, preserving the variable names. */
+function mapEnvValues(env: Record<string, string>, fn: (value: string) => string): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fn(v)]))
 }
 
 /** The evidence-free `error` a cancelled scenario settles as (result is discarded). */

@@ -7,7 +7,10 @@
  * gaps that explain a missing scenario.
  *
  * Per-SECTION coverage derives at read time from the flows' bindings — see
- * {@link guardManifestSections}.
+ * {@link guardManifestSections}. Alongside the flows it carries `gapSections`: the
+ * sections that settled with NO flow to bind them, so that "accounted for" is
+ * committed state rather than a cache artifact — see
+ * {@link GuardManifestGapSectionSchema}.
  *
  * It travels with the repo (committable, like the scenarios themselves). At run
  * time it is informational — binding truth is the scenarios' own `binds` checked
@@ -140,10 +143,46 @@ export const GuardManifestFlowSchema = z
   .strict()
 export type GuardManifestFlow = z.infer<typeof GuardManifestFlowSchema>
 
+/**
+ * A section generation ACCOUNTED FOR that no flow binds: every claim it states
+ * settled as a coverage gap (untestable, dismissed, awaiting a driver, blocked on
+ * a missing preparation), so there is no flow — and therefore no binding — to
+ * carry its fingerprint.
+ *
+ * Without this record such a section's settledness would live only in the
+ * gitignored `.cache/` KV stores: the machine that generated would see a no-op
+ * while a CLONE of the same corpus re-planned it as work forever. It is the same
+ * clone-safety contract `contracts/manifest.json` gives `contracts generate` —
+ * committed state, not caches, decides what is unchanged.
+ *
+ * It is a pure derivation of the run's live sections, so it needs no reason
+ * field: the WHY of each gap is the generate report's coverage gaps. An entry
+ * whose section was edited re-opens as work (its fingerprint moved) exactly as a
+ * flow binding does, and one whose section was deleted simply stops being written.
+ */
+export const GuardManifestGapSectionSchema = z
+  .object({
+    /** Repo-relative path of the spec document. */
+    doc: z.string().min(1),
+    /** Slugified heading path (the section anchor). */
+    anchor: z.string(),
+    /** `sha256:…` over the normalized section text that was accounted for. */
+    fingerprint: z.string().min(1),
+  })
+  .strict()
+export type GuardManifestGapSection = z.infer<typeof GuardManifestGapSectionSchema>
+
 export const GuardManifestSchema = z
   .object({
     version: z.literal(GUARD_FORMAT_VERSION),
     flows: z.array(GuardManifestFlowSchema),
+    /**
+     * Sections that settled with no flow to bind them — see
+     * {@link GuardManifestGapSectionSchema}. Optional so a manifest written before
+     * the field parses (and behaves) exactly as it did: absent ⇒ no records ⇒ those
+     * sections re-plan as work, the pre-field behaviour.
+     */
+    gapSections: z.array(GuardManifestGapSectionSchema).optional(),
   })
   .strict()
 export type GuardManifest = z.infer<typeof GuardManifestSchema>

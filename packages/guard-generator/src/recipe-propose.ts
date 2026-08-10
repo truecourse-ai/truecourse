@@ -628,7 +628,12 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
   if (signals.serve) {
     const healthPath = rankHealthPath(inputs.routes ?? [])
     const schemes = inputs.securitySchemes ?? readCorpusSecuritySchemes(repoRoot)
-    const { credentials, notes } = credentialStubs(schemes)
+    // A scheme the recipe on disk ALREADY answers for is not stubbed again. The only
+    // way a recipe is present while this proposer runs is a `--refresh`, and a
+    // credential someone filled in is exactly what a refresh must not undo — re-adding
+    // its `TODO: fill in` stub (and re-issuing its "set GUARD_CRED_*" note) tells the
+    // user to do work that is already done.
+    const { credentials, notes } = credentialStubs(schemes, existingCredentialNames(repoRoot))
     todos.push(...notes)
     let services = detectComposeServices(repoRoot)
     let apiEnv: Record<string, string> = { ...(signals.serveEnv ?? {}) }
@@ -683,6 +688,36 @@ function generateDatastore(
   const derived = deriveGuardCompose(datastores)
   if (!derived.ok) return undefined
   return { plan: derived.plan, write: !guardComposeInUse(repoRoot) }
+}
+
+/**
+ * The security schemes a recipe already on disk answers for — by credential NAME
+ * and by what it `satisfies`, since either identifies the scheme a stub would
+ * duplicate. Empty for the ordinary first discovery (no recipe exists); non-empty
+ * only under `--refresh`, which is exactly the case that must not re-stub.
+ *
+ * BOTH declaration sites count: `api.credentials` (a value the user filled in) and
+ * `api.seed.provides.credentials` (a principal the SEED mints at run time). A
+ * seed-minted credential never has a `valueFromEnv` — that is the whole point — so
+ * reading only `api.credentials` made every seed-satisfied scheme look unanswered
+ * and re-stubbed it with a `TODO: fill in` and a `GUARD_CRED_*` note for a secret
+ * nobody has to supply.
+ */
+function existingCredentialNames(repoRoot: string): Set<string> {
+  const api = asRecord(readJson(recipePath(repoRoot))?.api)
+  const declarations = [
+    asRecord(api.credentials),
+    asRecord(asRecord(asRecord(api.seed).provides).credentials),
+  ]
+  const names = new Set<string>()
+  for (const credentials of declarations) {
+    for (const [name, credential] of Object.entries(credentials)) {
+      names.add(name)
+      const satisfies = asRecord(credential).satisfies
+      if (typeof satisfies === 'string') names.add(satisfies)
+    }
+  }
+  return names
 }
 
 /** Does a recipe already on disk run {@link GUARD_COMPOSE_FILE}? */
@@ -746,13 +781,18 @@ export function detectComposeServices(repoRoot: string): { up: string; down: str
  * (oauth2 / openIdConnect / an apiKey in a query or cookie) get no stub — they get
  * a TODO naming what has to be added by hand.
  */
-export function credentialStubs(schemes: Record<string, SecurityScheme>): {
+export function credentialStubs(
+  schemes: Record<string, SecurityScheme>,
+  /** Credential names the recipe already declares — neither stubbed nor TODO'd. */
+  existing: ReadonlySet<string> = new Set(),
+): {
   credentials?: Record<string, RecipeApiCredential>
   notes: string[]
 } {
   const credentials: Record<string, RecipeApiCredential> = {}
   const notes: string[] = []
   for (const [key, scheme] of Object.entries(schemes)) {
+    if (existing.has(key)) continue
     const env = credentialEnvName(key)
     const type = scheme.type.toLowerCase()
     const httpScheme = scheme.scheme?.toLowerCase()
@@ -761,7 +801,7 @@ export function credentialStubs(schemes: Record<string, SecurityScheme>): {
         header: scheme.name,
         valueFromEnv: env,
         satisfies: key,
-        description: `TODO: fill in — apiKey header "${scheme.name}" for the "${key}" security scheme`,
+        description: `${CREDENTIAL_STUB_MARKER} — apiKey header "${scheme.name}" for the "${key}" security scheme`,
       }
       notes.push(`set ${env} — the apiKey sent as the "${scheme.name}" header (scheme "${key}")`)
     } else if (type === 'http' && httpScheme === 'bearer') {
@@ -769,7 +809,7 @@ export function credentialStubs(schemes: Record<string, SecurityScheme>): {
         header: 'Authorization',
         valueFromEnv: env,
         satisfies: key,
-        description: `TODO: fill in — bearer token for the "${key}" security scheme (include the "Bearer " prefix)`,
+        description: `${CREDENTIAL_STUB_MARKER} — bearer token for the "${key}" security scheme (include the "Bearer " prefix)`,
       }
       notes.push(`set ${env} — the Authorization value for the "${key}" bearer scheme (include the "Bearer " prefix)`)
     } else if (type === 'http' && httpScheme === 'basic') {
@@ -777,7 +817,7 @@ export function credentialStubs(schemes: Record<string, SecurityScheme>): {
         header: 'Authorization',
         valueFromEnv: env,
         satisfies: key,
-        description: `TODO: fill in — basic credentials for the "${key}" security scheme (the whole "Basic <base64>" value)`,
+        description: `${CREDENTIAL_STUB_MARKER} — basic credentials for the "${key}" security scheme (the whole "Basic <base64>" value)`,
       }
       notes.push(`set ${env} — the Authorization value for the "${key}" basic scheme (the whole "Basic <base64>" value)`)
     } else {
@@ -787,6 +827,30 @@ export function credentialStubs(schemes: Record<string, SecurityScheme>): {
     }
   }
   return { ...(Object.keys(credentials).length > 0 ? { credentials } : {}), notes }
+}
+
+/** The marker every stub carries in its `description` — the proposer's own signature
+ *  on an UNFILLED credential, and the only honest way to recognize one later. */
+export const CREDENTIAL_STUB_MARKER = 'TODO: fill in'
+
+/**
+ * Is this `api.credentials` entry the proposer's own unfilled stub, exactly as
+ * {@link credentialStubs} minted it? Recognized STRUCTURALLY — the predictable
+ * `GUARD_CRED_*` variable it names AND the marker it wrote into its own description,
+ * with no value of its own. Anything a human touched (a `value`, their own env var,
+ * a rewritten description) fails the check and is therefore never removable: the cost
+ * of a false negative is a stale TODO, the cost of a false positive is deleting
+ * someone's credential.
+ */
+export function isCredentialStub(name: string, credential: unknown): boolean {
+  const cred = asRecord(credential)
+  return (
+    cred.value === undefined &&
+    cred.fromRequest === undefined &&
+    cred.valueFromEnv === credentialEnvName(name) &&
+    typeof cred.description === 'string' &&
+    cred.description.startsWith(CREDENTIAL_STUB_MARKER)
+  )
 }
 
 /** `GUARD_CRED_<SCHEME_KEY>` — predictable, so the printed TODO IS the instruction. */

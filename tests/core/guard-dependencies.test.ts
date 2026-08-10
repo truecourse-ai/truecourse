@@ -132,6 +132,25 @@ function writeFlows(r: string, flows: { id: string; title: string }[]): void {
   });
 }
 
+/**
+ * The COMMITTED manifest — the durable record of what each flow settled as,
+ * including the `blocked-on` gaps a clone inherits (result.json does not travel).
+ */
+function writeManifestFile(r: string, blocked: { flowId: string; reason: string }[]): void {
+  writeJson(scenarios(r, 'manifest.json'), {
+    version: 3,
+    flows: blocked.map((b) => ({
+      flowId: b.flowId,
+      flowFingerprint: 'sha256:aa',
+      bindings: [{ doc: 'docs/spec.md', anchor: 'a', fingerprint: 'sha256:bb' }],
+      scenarios: [],
+      journeys: [],
+      generationInputsHash: null,
+      gaps: [{ surface: 'cli', kind: 'blocked-on', reason: b.reason }],
+    })),
+  });
+}
+
 /** A committed scenario that BINDS a dependency — what "it blocks this" is read from. */
 function writeScenario(r: string, id: string, flowId: string, needs: string[]): void {
   const file = scenarios(r, 'area', `${id}.yaml`);
@@ -253,6 +272,52 @@ describe('readGuardDependenciesView', () => {
     ]);
     expect(view.dependencies[1].blocks).toEqual([
       { flowId: 'run-llm-rules', title: 'run-llm-rules', kind: 'not-authored' },
+    ]);
+  });
+
+  /**
+   * A CLONE carries the committed manifest and NOT the gitignored `result.json`,
+   * so the flows a generate could not author must be read from the manifest's own
+   * `blocked-on` gaps — otherwise every clone reads as if nothing were blocked.
+   */
+  it('names the never-written flows from the COMMITTED manifest when result.json is absent', () => {
+    const r = repo();
+    writeCatalog(r, [LLM_ACCOUNT]);
+    writeFlows(r, [{ id: 'run-llm-rules', title: 'The LLM rules run' }]);
+    writeManifestFile(r, [
+      { flowId: 'run-llm-rules', reason: 'blocked on anthropic: the LLM rules need a key' },
+    ]);
+    expect(fs.existsSync(path.join(r, '.truecourse', 'guard', 'result.json'))).toBe(false);
+
+    const view = readGuardDependenciesView(r);
+    expect(view.dependencies[0].blocks).toEqual([
+      { flowId: 'run-llm-rules', title: 'The LLM rules run', kind: 'not-authored' },
+    ]);
+  });
+
+  it('unions the manifest gaps with the run-result ones when both are present', () => {
+    const r = repo();
+    writeCatalog(r, [LLM_ACCOUNT]);
+    writeFlows(r, [
+      { id: 'run-llm-rules', title: 'The LLM rules run' },
+      { id: 'infer-rules', title: 'The rules are inferred' },
+    ]);
+    writeManifestFile(r, [
+      { flowId: 'run-llm-rules', reason: 'blocked on anthropic: the LLM rules need a key' },
+    ]);
+    writeResult(r, [
+      {
+        doc: 'docs/spec.md',
+        anchor: 'infer',
+        kind: 'blocked-on',
+        reason: 'blocked on anthropic: inference needs a key',
+        flowId: 'infer-rules',
+      },
+    ]);
+    const view = readGuardDependenciesView(r);
+    expect(view.dependencies[0].blocks).toEqual([
+      { flowId: 'run-llm-rules', title: 'The LLM rules run', kind: 'not-authored' },
+      { flowId: 'infer-rules', title: 'The rules are inferred', kind: 'not-authored' },
     ]);
   });
 

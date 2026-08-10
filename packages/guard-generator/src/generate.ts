@@ -56,6 +56,7 @@ import {
   readManifest,
   readGuardDecisions,
   readGuardAutoResolutions,
+  readGuardResult,
   writeGuardAutoResolutions,
   readJourneyCatalog,
   manifestPath,
@@ -115,6 +116,7 @@ import {
   type GuardJourneysReport,
   type GuardManifestFlow,
   type GuardManifestGap,
+  type GuardManifestGapSection,
   type GuardManifestScenario,
   type GuardOrphanedDismissal,
   type GuardOrphanedFlowDismissal,
@@ -128,12 +130,15 @@ import {
 } from '@truecourse/shared'
 import {
   planGuardWork,
+  gapSectionRecords,
   collectWorkDocs,
   hasGuardUniverse,
   sectionInputsKey,
   flowGenerationInputsHash,
+  type GuardWorkPlan,
   type SectionInput,
 } from './section-plan.js'
+import { planGuardNoOp, type GuardNoOpDecision } from './no-op.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
 import {
   resolveSectionAuth,
@@ -185,6 +190,7 @@ import {
   isFlowSynthesisWipeout,
   buildFlowAreas,
   flowSectionKey,
+  readFlowsFile,
   type FlowAreaDocInput,
   type FlowClaimInput,
 } from './flows.js'
@@ -782,6 +788,51 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const opIndex = buildOperationIndex(plan.sections, plan.basePaths)
   options.onPlan?.(plan.sections.length, plan.work.length)
   const orphanedSections = plan.orphaned.map((e) => ({ doc: e.doc, anchor: e.anchor, scenarioIds: e.scenarioIds }))
+
+  // 2b. THE COMMITTED-STATE NO-OP GATE — before the first (paid) stage.
+  //
+  // Extraction and synthesis run over the WHOLE doc universe on every run, and
+  // both are only cheap because their KV caches are warm. Those caches are
+  // gitignored, so a CLONE of a fully generated repo used to pay the entire
+  // extraction bill purely to re-derive change detection that the COMMITTED
+  // records — the manifest's flow bindings and `gapSections`, `flows.json`, the
+  // corpus — had already settled. Same inputs ⇒ same outputs: when every flow's
+  // generation-inputs hash still matches the live inputs (sections, journeys,
+  // recipe, prompts, format) and no section is changed or orphaned, the pipeline
+  // can only reproduce what is committed, so it is skipped WHOLE.
+  //
+  // A flow's hash folds the fingerprints of the journeys its plan walks, so the
+  // verdict needs the mapped catalog — but only once everything cheaper agrees.
+  // The gate is therefore asked twice: once with no catalog (a decline for any
+  // other reason costs a few hash comparisons), then again with the mapping, which
+  // is deterministic, free, and memoized — stage 4 below reuses this exact pass.
+  //
+  // `stopAfterFlows` is excluded on purpose: that caller wants the synthesized
+  // flow corpus reported back, not a no-op verdict.
+  if (!options.stopAfterFlows) {
+    let verdict = planGuardNoOp(repoRoot, { plan, recipeFingerprint, journeyFingerprints: null })
+    if (verdict.noOp || verdict.reason === 'journeys-unknown') {
+      const mappedForNoOp = await journeysOnce()
+      if (!verdict.noOp) {
+        verdict = planGuardNoOp(repoRoot, {
+          plan,
+          recipeFingerprint,
+          journeyFingerprints: new Map(mappedForNoOp.journeys.map((j) => [j.id, j.fingerprint])),
+        })
+      }
+      if (verdict.noOp) {
+        return noChangesResult({
+          repoRoot,
+          plan,
+          recipe: recipeMeta,
+          recipeFingerprint,
+          mapped: mappedForNoOp,
+          decision: verdict,
+          onJourneys: options.onJourneys,
+        })
+      }
+    }
+  }
 
   const limit = pLimit(Math.max(1, options.concurrency ?? defaultConcurrency()))
   const isolationCap = Math.max(0, options.isolationCap ?? ISOLATION_CAP)
@@ -2290,8 +2341,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const settleTotal = changedWorks.length
   const writeWorkingManifest = (): void => {
     const flows = [...workingManifest.values()].sort((a, b) => a.flowId.localeCompare(b.flowId))
-    writeManifest(repoRoot, { version: GUARD_FORMAT_VERSION, flows })
+    writeManifest(repoRoot, { version: GUARD_FORMAT_VERSION, flows, gapSections: gapSectionsFor(flows) })
   }
+
+  const gapSectionsFor = (flows: readonly GuardManifestFlow[]): GuardManifestGapSection[] =>
+    gapSectionRecords(plan.sections, flows)
 
   // THE SETTLE INVARIANT, enforced at the one place a flow settles: an entry may
   // record its inputs hash (and be skipped by every future generate) only when each
@@ -2675,6 +2729,118 @@ function providedHint(account: ResolvedExternal): ExternalServiceHint {
     provided: true,
     ...(account.mode ? { mode: account.mode } : {}),
     ...(account.description ? { description: account.description } : {}),
+  }
+}
+
+/**
+ * The result a run short-circuited by the committed-state gate returns — the
+ * `noChanges` no-op, reconstructed from committed state instead of re-derived by
+ * the LLM stages.
+ *
+ * It MIRRORS what the warm-cache no-op produces, field for field:
+ *  - `manifest.json` is rewritten from the same two ingredients the full run uses
+ *    (the carried flow entries + `gapSections` derived from the LIVE sections), so
+ *    the bytes are identical to what a full run would have written;
+ *  - the flow counts read "every flow skipped, therefore settled";
+ *  - the coverage gaps are the manifest's own per-surface gaps (committed truth,
+ *    attributed to each flow's primary live section) plus the CLAIM-level gaps
+ *    carried from the last report, which is the only place they were ever recorded
+ *    — extraction derives them, and extraction is exactly what was skipped. A
+ *    clone (whose gitignored `guard/result.json` never travelled) simply has none
+ *    to carry, which is the state it was already in.
+ *
+ * Nothing else is written: `flows.json` would be rewritten byte-identically except
+ * for its timestamp, and the auto-resolution ledger is carried unchanged.
+ */
+function noChangesResult(input: {
+  repoRoot: string
+  plan: GuardWorkPlan
+  recipe: NonNullable<GuardGenerateResult['recipe']>
+  recipeFingerprint: string
+  mapped: MappedSurface
+  decision: Extract<GuardNoOpDecision, { noOp: true }>
+  onJourneys?: (journeys: number, surfaces: number) => void
+}): GuardGenerateResult {
+  const { repoRoot, plan, decision } = input
+  const flows = [...decision.flows].sort((a, b) => a.flowId.localeCompare(b.flowId))
+  // The SAME projection a full run writes — the no-op's promise is a byte-identical
+  // manifest, which a second derivation of the gap records could not keep.
+  writeManifest(repoRoot, {
+    version: GUARD_FORMAT_VERSION,
+    flows,
+    gapSections: gapSectionRecords(plan.sections, flows),
+  })
+
+  const catalogs = buildSurfaceCatalogs(input.mapped.journeys)
+  input.onJourneys?.(input.mapped.journeys.length, catalogs.size)
+
+  // Each flow's per-surface gaps, attributed exactly as the run attributes them:
+  // to the flow's PRIMARY (first surviving milestone's) section.
+  const sectionByKey = new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s]))
+  const liveById = new Map(decision.liveFlows.map((f) => [f.id, f]))
+  const coverageGaps: GuardCoverageGap[] = []
+  for (const entry of flows) {
+    const live = liveById.get(entry.flowId)
+    const primary = live ? primarySection(live, sectionByKey) : null
+    const doc = primary?.doc ?? entry.bindings[0]?.doc
+    const anchor = primary?.anchor ?? entry.bindings[0]?.anchor
+    if (doc === undefined || anchor === undefined) continue
+    for (const gap of entry.gaps) {
+      coverageGaps.push({
+        doc,
+        anchor,
+        kind: gap.kind,
+        reason: gap.reason,
+        flowId: entry.flowId,
+        surface: gap.surface,
+        ...(gap.driver ? { driver: gap.driver } : {}),
+      })
+    }
+  }
+  // The claim-level gaps extraction settles live only in the last report.
+  coverageGaps.push(...(readGuardResult(repoRoot)?.coverageGaps ?? []).filter((g) => g.flowId === undefined))
+
+  return {
+    status: 'ok',
+    recipe: input.recipe,
+    recipeFingerprint: input.recipeFingerprint,
+    sectionsTotal: plan.sections.length,
+    sectionsChanged: 0,
+    skippedUnchanged: plan.sections.length,
+    noChanges: true,
+    written: [],
+    coverageGaps,
+    birthFindings: [],
+    errors: [],
+    extractionFailures: [],
+    llmFailures: [],
+    unadjudicated: [],
+    // A carried orphan entry's dead bindings are reported exactly as a full run
+    // reports them — reporting is not work, which is why they never block the gate.
+    orphaned: plan.orphaned.map((e) => ({ doc: e.doc, anchor: e.anchor, scenarioIds: e.scenarioIds })),
+    birthPassed: 0,
+    orphanedDismissals: [],
+    orphanedFlowDismissals: [],
+    autoResolved: [],
+    flows: {
+      total: decision.liveFlows.length,
+      // Every flow was skipped on its hash — and a skipped flow counts as settled,
+      // exactly as `flowsReport.settled += flowsReport.skipped` does in a full run.
+      settled: decision.liveFlows.length,
+      unsettled: 0,
+      skipped: decision.liveFlows.length,
+      dismissed: decision.dismissedFlows,
+      orphaned: 0,
+      subsumed: 0,
+      noFlowClaims: readFlowsFile(repoRoot)?.noFlowClaims.length ?? 0,
+      unsettledAreas: [],
+    },
+    journeys: {
+      total: input.mapped.journeys.length,
+      bySurface: Object.fromEntries([...catalogs].map(([surface, c]) => [surface, c.journeys.length])),
+    },
+    externalServices: input.mapped.externalServices,
+    manifestPath: manifestPath(repoRoot),
   }
 }
 

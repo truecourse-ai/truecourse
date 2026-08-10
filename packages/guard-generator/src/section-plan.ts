@@ -24,7 +24,13 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
+import {
+  GUARD_FORMAT_VERSION,
+  guardManifestSections,
+  type GuardManifestFlow,
+  type GuardManifestGapSection,
+  type GuardManifestSectionView,
+} from '@truecourse/shared'
 import {
   parseOpenApiSpec,
   isOpenApiDoc,
@@ -223,6 +229,43 @@ export function flowGenerationInputsHash(input: {
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }
 
+/**
+ * The manifest's GAP-SECTION records for a set of manifest entries: every live
+ * section those entries leave unaccounted for. Extraction and synthesis both run
+ * over the WHOLE universe on every completed run, so a section no flow binds is one
+ * whose claims all settled as coverage gaps (untestable, dismissed, awaiting a
+ * driver, blocked on a missing preparation) — accounted for, but with nothing to
+ * bind it.
+ *
+ * Recording it is what makes an unchanged corpus a no-op for a CLONE: without it the
+ * section's settledness lives only in the gitignored caches, so a fresh checkout
+ * re-plans it as work (and the estimate re-prices synthesis) forever. It is derived
+ * from the LIVE sections, so a deleted or renamed section's record disappears with
+ * it and an edited one re-opens as work.
+ *
+ * A section counts as bound only by a LIVE entry holding a binding at the section's
+ * CURRENT fingerprint. An orphaned entry is frozen history — synthesis stopped
+ * producing its flow, and its bindings still name the text it was authored against
+ * — so a rewritten section whose flow orphaned out is flowless as of this run, and
+ * its gaps are what accounts for it now.
+ *
+ * ONE derivation, shared by the full run and the no-op short-circuit: the no-op's
+ * promise is a byte-identical manifest, which a second implementation could not keep.
+ */
+export function gapSectionRecords(
+  sections: readonly SectionInput[],
+  flows: readonly GuardManifestFlow[],
+): GuardManifestGapSection[] {
+  const bound = new Set<string>()
+  for (const flow of flows) {
+    if (flow.orphaned) continue
+    for (const b of flow.bindings) bound.add(`${b.doc}\0${b.anchor}\0${b.fingerprint}`)
+  }
+  return sections
+    .filter((s) => !bound.has(`${s.doc}\0${s.anchor}\0${s.fingerprint}`))
+    .map((s) => ({ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }))
+}
+
 /** Whether a corpus exists — the corpus is generation's only doc authority. */
 export function hasGuardUniverse(repoRoot: string): boolean {
   return fs.existsSync(path.join(repoRoot, '.truecourse', 'specs', 'corpus.json'))
@@ -292,24 +335,48 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   }
   sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
 
-  // Section CHANGE detection, projected off the flow-keyed manifest: a section is
-  // changed when its live text fingerprint differs from what the flows binding it
-  // recorded, or when no flow binds it at all (never generated for, or accounted
-  // for as a coverage gap). The incremental GATE is per flow — everything global
-  // (recipe, prompts, format, the journeys a flow grounds on) rides
-  // `flowGenerationInputsHash`, so this stays a pure spec-side question.
-  const manifestSections = guardManifestSections(readManifest(repoRoot))
-  const byKey = new Map(manifestSections.map((e) => [`${e.doc}\0${e.anchor}`, e]))
+  // Section CHANGE detection, off the manifest's TWO accounting records: the
+  // flows' bindings, and the gap sections — the ones that settled with every claim
+  // gapped, so no flow could ever bind them. A section is WORK exactly when NO
+  // record was taken against its current text.
+  //
+  // "No record" is a question about the SET, never about one record: a section is
+  // legitimately bound by several flows at several fingerprints, because an
+  // ORPHANED entry is carried forward untouched with its bindings frozen at the
+  // text it was authored against. Comparing against a single (arbitrarily chosen)
+  // record made a section that a live flow guards today read as changed on every
+  // run and in every estimate, for good — its text never moves again, so nothing
+  // could ever clear it. Both records are committed, so a clone with no caches at
+  // all plans the same (empty) work as the machine that generated.
+  //
+  // The incremental GATE is per flow — everything global (recipe, prompts, format,
+  // the journeys a flow grounds on) rides `flowGenerationInputsHash`, so this
+  // stays a pure spec-side question, and a flow whose own binding went stale
+  // re-authors on its hash whatever this says.
+  const manifest = readManifest(repoRoot)
+  const manifestSections = guardManifestSections(manifest)
+  const accounted = new Map<string, Set<string>>()
+  const account = (doc: string, anchor: string, fingerprint: string): void => {
+    const key = `${doc}\0${anchor}`
+    const fingerprints = accounted.get(key)
+    if (fingerprints) fingerprints.add(fingerprint)
+    else accounted.set(key, new Set([fingerprint]))
+  }
+  for (const flow of manifest?.flows ?? []) for (const b of flow.bindings) account(b.doc, b.anchor, b.fingerprint)
+  for (const g of manifest?.gapSections ?? []) account(g.doc, g.anchor, g.fingerprint)
   const seen = new Set<string>()
 
   const work: SectionInput[] = []
   for (const s of sections) {
     const key = `${s.doc}\0${s.anchor}`
     seen.add(key)
-    const prior = byKey.get(key)
-    if (!prior || prior.fingerprint !== s.fingerprint) work.push(s)
+    if (!accounted.get(key)?.has(s.fingerprint)) work.push(s)
   }
 
+  // Orphans are BOUND sections that vanished — their scenarios are kept and
+  // reported as stale drift. A vanished GAP section has no scenario and no flow
+  // behind it, so it is nothing to report: the next generate derives its records
+  // from the live sections again and it simply stops being written.
   const orphaned = manifestSections.filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
 
   return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, suppressionIndex, basePaths }

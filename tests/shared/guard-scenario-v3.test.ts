@@ -137,6 +137,37 @@ describe('guard scenario format v3 — the step vocabulary', () => {
     ).toMatchObject({ step: 1, where: 'expect.output' })
   })
 
+  it('accepts a `matches` FILE matcher — several independent markers in one file', () => {
+    const step = GuardCliStepSchema.parse({
+      run: ['analyze'],
+      expect: {
+        exit: 0,
+        files: { 'out/report.md': { matches: '^(?=[\\s\\S]*alpha)(?=[\\s\\S]*beta)[\\s\\S]*$' } },
+      },
+    })
+    expect(isRunStep(step) && step.expect.files!['out/report.md'].matches).toContain('alpha')
+    // A write step's file-only expectation carries it too.
+    expect(() =>
+      GuardCliStepSchema.parse({ write: { 'a.txt': 'x' }, expect: { files: { 'a.txt': { matches: 'x' } } } }),
+    ).not.toThrow()
+    // …and the empty matcher still names every alternative it could have been.
+    const empty = GuardCliStepSchema.safeParse({ run: [], expect: { files: { 'a.txt': {} } } })
+    expect(empty.success).toBe(false)
+    expect(JSON.stringify(empty.error)).toContain('exists | absent | equals | contains | matches')
+    // The step list renders it the way the stream matcher is rendered.
+    expect(
+      describeGuardScenarioSteps({
+        guard: GUARD_FORMAT_VERSION,
+        id: 'x',
+        title: 'x',
+        binds: BINDS,
+        driver: 'cli',
+        normalize: [],
+        steps: [{ run: ['analyze'], expect: { files: { 'out.md': { matches: 'a|b' } } } }],
+      })[0].expectation,
+    ).toBe('out.md matches /a|b/')
+  })
+
   it('carries SEVERAL milestones per step, by claim identity or by position', () => {
     const steps = GuardCliScenarioSchema.parse(V3_SCENARIO).steps
     expect(milestoneRefs(steps[0].milestone)).toEqual([

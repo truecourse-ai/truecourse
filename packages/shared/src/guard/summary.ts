@@ -104,8 +104,19 @@ export interface GuardLastRunSummary {
   summary: GuardSummary
 }
 
-/** Last-generate rollup from `guard/result.json`. */
+/**
+ * Last-generate rollup from `guard/result.json` — or, when that gitignored file is
+ * absent, from the COMMITTED corpus (`scenarios/flows.json` + `scenarios/manifest.json`).
+ * {@link GuardLastGenerateSummary.source} says which, because the run-only counters
+ * (birth findings, errors, usage, held work) exist in the report alone.
+ */
 export interface GuardLastGenerateSummary {
+  /**
+   * Where the row was derived from: the run-result of the last generate on THIS
+   * machine, or the committed corpus a clone inherits. A reader must never be told
+   * "never generated" about a repo whose generated corpus is committed.
+   */
+  source: 'result' | 'committed-corpus'
   generatedAt: string
   status: GuardGenerateReport['status']
   noChanges: boolean
@@ -171,18 +182,82 @@ export interface GuardStatusSummary {
   lastGenerate: GuardLastGenerateSummary | null
 }
 
-/** Compose the three store reads into the compact status summary. */
+/**
+ * Compose the store reads into the compact status summary.
+ *
+ * `flows` (the committed `scenarios/flows.json`) is what makes the last-generate row
+ * CLONE-SAFE: `guard/result.json` is gitignored, so a clone — or a supplied prepared
+ * repo — has the generated corpus and none of its run-result. Reading the row from
+ * the report alone made every such repo say "never generated" about a corpus sitting
+ * right there in git. The report stays the richer source when it exists; the
+ * committed corpus is the floor, never the ceiling.
+ */
 export function composeGuardStatus(
   manifest: GuardManifest | null,
   latest: GuardLatest | null,
   result: GuardGenerateReport | null,
+  flows: { generatedAt: string } | null = null,
 ): GuardStatusSummary {
   return {
     coverage: manifest ? summarizeCoverage(manifest, latest) : null,
     lastRun: latest
       ? { ranAt: latest.run.ranAt, branch: latest.run.branch, commit: latest.run.commit, summary: latest.summary }
       : null,
-    lastGenerate: result ? summarizeGenerate(result) : null,
+    lastGenerate: result ? summarizeGenerate(result) : summarizeCommittedGenerate(manifest, flows),
+  }
+}
+
+/**
+ * The last generate as the COMMITTED corpus records it: dated by the flow corpus'
+ * `generatedAt` (the synthesis inside that generate), inventoried by the manifest's
+ * own scenarios and gaps. Null when there is no committed corpus — a repo with
+ * neither a manifest nor a flow corpus genuinely has never generated.
+ *
+ * Everything the report alone knows (the pass/fail split of the written tests,
+ * birth findings, errors, held work, usage) is zeroed rather than guessed: the
+ * manifest records WHAT was settled, never how a single run went. Renderers key off
+ * `source` so those zeros are not printed as facts about a run.
+ */
+function summarizeCommittedGenerate(
+  manifest: GuardManifest | null,
+  flows: { generatedAt: string } | null,
+): GuardLastGenerateSummary | null {
+  if (!manifest || !flows) return null
+  const coverageGapsByKind = emptyGapDisplayTotals()
+  const blockedOnCapabilities: Record<string, number> = {}
+  let written = 0
+  for (const flow of manifest.flows) {
+    written += flow.scenarios.length
+    for (const gap of dedupeGaps(flow.gaps)) {
+      const kind = gapDisplayKind(gap)
+      if (kind) coverageGapsByKind[kind]++
+      if (gap.kind === 'blocked-on') {
+        for (const cap of parseBlockedOnCapabilities(gap.reason)) {
+          blockedOnCapabilities[cap] = (blockedOnCapabilities[cap] ?? 0) + 1
+        }
+      }
+    }
+  }
+  return {
+    source: 'committed-corpus',
+    generatedAt: flows.generatedAt,
+    status: 'ok',
+    noChanges: false,
+    written,
+    testsPassing: 0,
+    testsFailing: 0,
+    testsNeverRun: 0,
+    birthPassed: null,
+    coverageGapsByKind,
+    blockedOnCapabilities,
+    birthFindings: 0,
+    fidelityRejections: 0,
+    errors: 0,
+    readyButHeld: 0,
+    heldByFindings: 0,
+    heldByErrors: 0,
+    llmFailures: [],
+    unadjudicated: [],
   }
 }
 
@@ -405,6 +480,7 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
   const heldByErrors = r.errors.filter((e) => heldKeys.has(`${e.doc}\0${e.anchor}`)).length
 
   return {
+    source: 'result',
     generatedAt: r.generatedAt,
     status: r.status,
     noChanges: r.noChanges,

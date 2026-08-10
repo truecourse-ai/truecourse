@@ -15,6 +15,8 @@ import {
   FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
+  SEED_SYSTEM_PROMPT,
+  SEED_PROMPT_FINGERPRINT,
   flowGenerationInputsHash,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
@@ -693,8 +695,14 @@ describe('guard-generator prompts', () => {
     // authored cli vocabulary is the `run` step alone — see AuthoredCliStepSchema —
     // so nothing the model may write changed, and re-authoring every cli flow over a
     // vocabulary they cannot use would be a bill with no verdict behind it.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bdfbf4ca535fd713')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bdfbf4ca535fd713')
+    // Rolled 2026-08-10 by `matches` on the FILE matcher (ledger G60): a file
+    // expectation may now be a regex, exactly as the stream matchers always could,
+    // so a generated artifact (a drafted seed, a written compose file) is readable
+    // as a SHAPE — "an image pinned to a tag, plus a healthcheck" — instead of by
+    // substring. The AUTHORED expect vocabulary moved, so every flow re-authors
+    // once; unlike the patch step this is a capability the model should use.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('bf2483f97a80d187')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('bf2483f97a80d187')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -1367,5 +1375,32 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('--- F1  (area: tasks)')
     expect(p).toContain('title: Create and complete a task')
     expect(p).toContain('1. docs/tasks.md#tasks/creating-tasks — `add <title>` creates a task')
+  })
+
+  // -------------------------------------------------------------------------
+  // Seed drafting
+  // -------------------------------------------------------------------------
+
+  it('SEED_SYSTEM_PROMPT tells the script to resolve an env-with-default from the app itself', () => {
+    // Field evidence: an app that signs tokens with `process.env.X ?? '<default>'`
+    // boots on that default, but the seed's env layer carries no X — and a script
+    // that hard-requires X exits 1 and no seed is ever drafted.
+    expect(SEED_SYSTEM_PROMPT).toContain('WITH A CODE-LEVEL DEFAULT')
+    expect(SEED_SYSTEM_PROMPT).toContain('the server boots')
+    expect(SEED_SYSTEM_PROMPT).toContain("reading the app's own")
+    // Refusing stays right when there is nothing readable to resolve.
+    expect(SEED_SYSTEM_PROMPT).toContain('app has NO readable default')
+  })
+
+  it('SEED_PROMPT_FINGERPRINT is pinned — moves only with an intended re-draft', () => {
+    // The fingerprint folds into the seed-draft cache key, so a moved value re-drafts
+    // every repository's seed — it changes only when the drafting rules intentionally do.
+    // Moved 2026-08-10: a value the seed must SHARE with the server (a signing secret,
+    // a salt, an issuer) that the app reads from an env variable WITH a code-level
+    // default must be resolved from the app's own configuration rather than invented or
+    // refused — the server itself boots on that default, so the absent variable is not a
+    // missing input. Rolls the seed cache on purpose.
+    expect(SEED_PROMPT_FINGERPRINT).toBe('263491fa59710d1e')
+    expect(fingerprint(SEED_SYSTEM_PROMPT)).toBe('263491fa59710d1e')
   })
 })

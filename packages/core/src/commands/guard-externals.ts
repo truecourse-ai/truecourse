@@ -34,6 +34,7 @@ import {
   externalsLocalPath,
   computeRecipeFingerprint,
   readGuardResult,
+  readManifest,
   readGuardSetup,
   readGuardDecisions,
   resolveDependencies,
@@ -58,6 +59,7 @@ import {
   type GuardDependenciesFile,
   type GuardDependenciesLocal,
   type GuardDependencyEntry,
+  type GuardManifest,
   type GuardDependencyEnvVar,
   type GuardExternalSetupState,
   type GuardExternalSetupIndex,
@@ -222,13 +224,14 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
   // `mapJourneys` pass setup pays for before the first generate, so the page is
   // populated from the start. A repo whose last setup predates this file — or that
   // only ever ran a generate — falls back to the generate report's own list, which
-  // is where detection used to live. BLOCKED FLOWS stay generate's: only authoring
-  // knows what it could not write.
+  // is where detection used to live. BLOCKED FLOWS come from the COMMITTED manifest:
+  // only authoring knows what it could not write, and the manifest is where that
+  // record travels with the repo.
   const report = readGuardResult(repoRoot);
   const setup = readGuardSetup(repoRoot);
   const detected = setup?.detection?.externalServices ?? report?.externalServices ?? [];
   const detectionAvailable = setup?.detection !== undefined || report !== null;
-  const blockedFlows = tallyBlockedFlows(report);
+  const blockedFlows = tallyBlockedFlows(readManifest(repoRoot));
 
   const recipe = readRecipeForView(recipeFile);
   if ('reason' in recipe) {
@@ -534,24 +537,25 @@ function detectedOnlyViews(
 }
 
 /**
- * Flows the last generate left blocked on each named service. A `blocked-on` gap
- * is per (flow, surface) and Phase 3 stamps the SERVICE name into its capability
- * segment, so the tally is over `parseBlockedOnCapabilities` — deduped by flow, so
- * a flow blocked on one service across two surfaces counts once.
+ * Flows the last generate left blocked on each named service, read from the
+ * COMMITTED `scenarios/manifest.json` rather than the gitignored run-result — the
+ * manifest carries the same per-flow `blocked-on` gaps and travels with the repo,
+ * so a clone (or a copied sandbox instance) sees the same counts the repo it came
+ * from does. A `blocked-on` gap is per (flow, surface) and Phase 3 stamps the
+ * SERVICE name into its capability segment, so the tally is over
+ * `parseBlockedOnCapabilities` — deduped by flow, so a flow blocked on one service
+ * across two surfaces counts once.
  */
-function tallyBlockedFlows(
-  report: ReturnType<typeof readGuardResult>,
-): Map<string, number> {
+function tallyBlockedFlows(manifest: GuardManifest | null): Map<string, number> {
   const seen = new Map<string, Set<string>>();
-  for (const gap of report?.coverageGaps ?? []) {
-    if (gap.kind !== 'blocked-on') continue;
-    // A claim-level gap carries no flowId — key on the section it pivots on so
-    // each distinct blocked unit still counts exactly once.
-    const unit = gap.flowId ?? `${gap.doc}\0${gap.anchor}`;
-    for (const capability of parseBlockedOnCapabilities(gap.reason)) {
-      let flows = seen.get(capability);
-      if (!flows) seen.set(capability, (flows = new Set()));
-      flows.add(unit);
+  for (const flow of manifest?.flows ?? []) {
+    for (const gap of flow.gaps) {
+      if (gap.kind !== 'blocked-on') continue;
+      for (const capability of parseBlockedOnCapabilities(gap.reason)) {
+        let flows = seen.get(capability);
+        if (!flows) seen.set(capability, (flows = new Set()));
+        flows.add(flow.flowId);
+      }
     }
   }
   return new Map([...seen].map(([capability, flows]) => [capability, flows.size]));

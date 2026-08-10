@@ -200,7 +200,13 @@ export interface FlowSynthesisPlan {
   areas: FlowAreaPlan[]
   /** Exact number of per-area synthesis calls a run will make (cache misses). */
   areaCalls: number
-  /** Ceiling on epic-pass calls (1 when >1 area can yield flows, else 0). */
+  /**
+   * Epic-pass calls. EXACT (0 or 1) when every area's synthesis is cached — the
+   * flows are then known offline, so this probes the same epic cache entry the run
+   * reads. While any area is uncached its flows are a synthesis OUTPUT, the epic
+   * digests are unknowable, and this is the ceiling (1 when >1 area can yield
+   * flows, else 0).
+   */
   epicCalls: number
   /**
    * The honest upper bound on synthesized flows: milestones partition claims in
@@ -236,9 +242,58 @@ export async function planFlowSynthesis(
   return {
     areas: rows,
     areaCalls: rows.filter((r) => !r.cached).length,
-    epicCalls: areasWithClaims > 1 ? 1 : 0,
+    epicCalls: await planEpicCall(repoRoot, areas, rows, areasWithClaims),
     maxFlows: rows.reduce((n, r) => n + r.runnableClaims, 0),
   }
+}
+
+/**
+ * Plan the epic pass — 0 or 1 calls, mirroring what {@link synthesizeEpics} does.
+ *
+ * Once every area is a cache hit the flows are FIXED (the same cached synthesis the
+ * run replays), so the epic digests — and with them the epic cache key — are known
+ * offline: this reconstructs the drafts exactly as `synthesizeFlows` does (validate
+ * each cached area, then the area-tier subsumption pass) and probes the entry the
+ * run will read. Cache presence is the verdict, exactly as it is for `areaCalls`.
+ *
+ * Without that (an uncached area, or a cached entry that no longer validates and so
+ * re-synthesizes) the flows are a synthesis output and nothing can be reconstructed:
+ * the answer falls back to the CEILING, one call whenever more than one area carries
+ * claims. Never a shortfall.
+ *
+ * This is what keeps a fully settled corpus a zero-stage estimate. Sections whose
+ * claims all settled as permanent gaps bind no flow, so they read as changed work
+ * forever; quoting the epic ceiling off "there is changed work" re-prompted the user
+ * with a price for a generate that makes no call at all.
+ */
+async function planEpicCall(
+  repoRoot: string,
+  areas: readonly FlowSynthesisArea[],
+  rows: readonly FlowAreaPlan[],
+  areasWithClaims: number,
+): Promise<number> {
+  const ceiling = areasWithClaims > 1 ? 1 : 0
+  if (ceiling === 0) return 0
+
+  const drafts: DraftFlow[] = []
+  for (const [i, area] of areas.entries()) {
+    const row = rows[i]
+    if (!row.cached) return ceiling
+    const cached = await getCacheEntry(repoRoot, FLOWS_CACHE_NAME, row.cacheKey)
+    const parsed = FlowSynthesisSchema.safeParse(cached)
+    if (!parsed.success) return ceiling
+    const v = validateAreaSynthesis(area, parsed.data, buildClaimIndex(area.claims), row.cacheKey)
+    // The same acceptance gate `synthesizeArea` applies to a cached entry: one it
+    // would reject means that area calls again, and its flows are unknown.
+    if (v.unknownReferences.length > 0 || v.uncoveredClaims.length > 0) return ceiling
+    drafts.push(...v.flows)
+  }
+
+  // The runtime gate: the epic pass only runs when more than one area produced flows.
+  const kept = applySubsumption(drafts).kept
+  if (new Set(kept.map((f) => f.areaId)).size <= 1) return 0
+  const cachedEpic = await getCacheEntry(repoRoot, FLOWS_CACHE_NAME, flowEpicCacheKey(digestsOf(kept)))
+  return cachedEpic === null ? 1 : 0
 }
 
 // ---------------------------------------------------------------------------

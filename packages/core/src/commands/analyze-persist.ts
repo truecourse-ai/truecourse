@@ -14,6 +14,7 @@
 import path from 'node:path';
 import { log } from '../lib/logger.js';
 import { setLastAnalyzed } from '../config/registry.js';
+import { ensureProjectConfig } from '../config/project-config.js';
 import type { RegistryEntry } from '../config/registry.js';
 import {
   appendHistory,
@@ -85,6 +86,12 @@ export async function persistFullAnalysis(
 
   await writeAnalysis(project.path, snapshot);
   await writeLatest(project.path, latest);
+  // The committable pair travels together: the documented baseline flow is
+  // `truecourse analyze` then `git add .truecourse/LATEST.json
+  // .truecourse/config.json`, so a completed analyze must leave a config.json
+  // next to the baseline it just wrote. Absent-only — an authored config is
+  // never rewritten, and a failed analyze never reaches this point.
+  await ensureProjectConfig(project.path);
   await appendHistory(project.path, buildHistoryEntry(snapshot, filename, core.pipelineResult));
 
   // Baseline moved — any prior diff is obsolete.

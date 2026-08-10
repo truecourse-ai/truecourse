@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SeedBlockedFlow } from '@truecourse/guard-generator';
-import { loadRecipe, recipePath, readGuardResult, type RecipeApiSeed } from '@truecourse/guard-runner';
+import { loadRecipe, recipePath, readManifest, type RecipeApiSeed } from '@truecourse/guard-runner';
 import {
   MISSING_DATA_NOUN,
   parseBlockedOnCapabilities,
@@ -40,7 +40,7 @@ export interface GuardSeedView {
   scriptPath: string | null;
   /** False when `scriptPath` names a file that is not on disk — a broken seed. */
   scriptExists: boolean;
-  /** The flows the last generate left blocked on missing data (empty when none). */
+  /** The flows the committed manifest records blocked on missing data (empty when none). */
   blocked: SeedBlockedFlow[];
 }
 
@@ -69,21 +69,27 @@ export function readGuardSeedView(repoRoot: string): GuardSeedView {
 }
 
 /**
- * The flows the LAST generate settled `blocked-on` missing data, recovered from
- * the persisted gaps. One entry per (flow, surface) gap naming the `missing-data`
- * noun, deduped by flow — the same unit the externals view tallies by, so "3 flows
- * blocked" means three flows, not three gap rows.
+ * The flows the last generate settled `blocked-on` missing data, recovered from
+ * the COMMITTED `scenarios/manifest.json` — one entry per (flow, surface) gap
+ * naming the `missing-data` noun, deduped by flow, so "3 flows blocked" means three
+ * flows, not three gap rows.
+ *
+ * The manifest, not `guard/result.json`: the run-result is gitignored, so reading
+ * it there left every clone (and every supplied sandbox instance, which copies the
+ * repo) with an empty list while the committed manifest recorded the very same
+ * gaps. The manifest is also the DURABLE record — an unchanged flow keeps its entry
+ * across generates, where the report only speaks for the last run.
  */
 export function missingDataBlockedFlows(repoRoot: string): SeedBlockedFlow[] {
-  const report = readGuardResult(repoRoot);
   const byFlow = new Map<string, SeedBlockedFlow>();
-  for (const gap of report?.coverageGaps ?? []) {
-    if (gap.kind !== 'blocked-on') continue;
-    const needs = parseBlockedOnCapabilities(gap.reason);
-    if (!needs.some((n) => n.trim().toLowerCase().replace(/\s+/g, '-') === MISSING_DATA_NOUN)) continue;
-    const flow = parseBlockedOnClaim(gap.reason) || gap.anchor;
-    const key = gap.flowId ?? `${gap.doc}\0${gap.anchor}`;
-    if (!byFlow.has(key)) byFlow.set(key, { flow, needs });
+  for (const flow of readManifest(repoRoot)?.flows ?? []) {
+    for (const gap of flow.gaps) {
+      if (gap.kind !== 'blocked-on') continue;
+      const needs = parseBlockedOnCapabilities(gap.reason);
+      if (!needs.some((n) => n.trim().toLowerCase().replace(/\s+/g, '-') === MISSING_DATA_NOUN)) continue;
+      if (byFlow.has(flow.flowId)) continue;
+      byFlow.set(flow.flowId, { flow: parseBlockedOnClaim(gap.reason) || flow.flowId, needs });
+    }
   }
   return [...byFlow.values()];
 }

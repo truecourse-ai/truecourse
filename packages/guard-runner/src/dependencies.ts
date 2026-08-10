@@ -457,6 +457,36 @@ export function suppliedInstancesFor(
   return out
 }
 
+/**
+ * The SHARED-WORLD groups a scenario belongs to: the supplied `path` instances it
+ * binds, sorted.
+ *
+ * A `path` registration is not a value, it is a WORLD — the runner copies the
+ * instance into the sandbox, but the copy still carries the original's real-world
+ * footprint: the fixed host ports its compose file publishes, the database behind
+ * them, the on-disk locks its tooling takes. Two scenarios in the same world
+ * therefore cannot run at the same time (the field defect: two sandboxes racing
+ * for one datastore port, one teardown stranding the other mid-run), and the
+ * dispatcher serializes them on these keys.
+ *
+ * `env` supplies are deliberately absent: a key or a token IS a value, two
+ * scenarios reading the same one contend for nothing, and serializing them would
+ * cost parallelism for no reason. `config-dir` is likewise a copied login state,
+ * not a live service.
+ *
+ * The NAME is the key because one catalog name is one registered instance by
+ * construction — the overlay is keyed by name.
+ */
+export function sharedWorldGroupsFor(
+  scenario: GuardScenario,
+  resolved: ResolvedDependencies,
+): string[] {
+  return suppliedInstancesFor(scenario, resolved)
+    .filter((i) => i.kind === 'path')
+    .map((i) => i.name)
+    .sort()
+}
+
 /** What `${supplied:<name>.<field>}` resolves to, per dependency. */
 export type SuppliedValues = Record<string, Record<string, string>>
 

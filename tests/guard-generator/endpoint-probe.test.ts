@@ -43,6 +43,21 @@ function recipeFor(r: string, over: Record<string, unknown> = {}): Recipe {
   } as Recipe
 }
 
+/** A server that refuses to boot until the "datastore" marker file exists — the
+ *  dependency-free stand-in for a compose-backed app. */
+function gatedServer(marker: string): string {
+  return [
+    "import http from 'node:http'",
+    "import fs from 'node:fs'",
+    `if (!fs.existsSync(${JSON.stringify(marker)})) {`,
+    "  console.error('the datastore is not up')",
+    '  process.exit(1)',
+    '}',
+    "http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{\"ok\":true}') }).listen(Number(process.env.PORT))",
+    '',
+  ].join('\n')
+}
+
 describe('pickProbePath', () => {
   // The ranking is the deterministic proposer's own (`rankHealthPath`), reused
   // rather than duplicated — a second ranking could disagree with the recipe.
@@ -173,6 +188,42 @@ describe('probeApiServers', () => {
       [0, 1],
       [1, 1],
     ])
+  }, 60_000)
+
+  // A compose-backed repo's server CANNOT boot until `api.services.up` has run —
+  // which is exactly what recipe verification does before its own boot. The probe
+  // boots the same server, so it must prepare the same world (and tear it down again).
+  it('brings `api.services` up around the probe, and tears it down after', async () => {
+    const r = fixtureRepo()
+    const marker = path.join(r, 'datastore-up')
+    fs.writeFileSync(path.join(r, 'services-up.mjs'), `import fs from 'node:fs'\nfs.writeFileSync(${JSON.stringify(marker)}, 'up')\n`)
+    fs.writeFileSync(path.join(r, 'services-down.mjs'), `import fs from 'node:fs'\nfs.rmSync(${JSON.stringify(marker)}, { force: true })\n`)
+    fs.writeFileSync(path.join(r, 'gated-server.mjs'), gatedServer(marker))
+
+    const probes = await probeApiServers({
+      repoRoot: r,
+      recipe: recipeFor(r, {
+        serve: ['node', path.join(r, 'gated-server.mjs')],
+        services: { up: 'node services-up.mjs', down: 'node services-down.mjs' },
+        readyTimeoutMs: 8000,
+      }),
+    })
+
+    expect(probes[0]).toMatchObject({ server: 'default', ok: true, status: 200 })
+    // The world the probe brought up is the probe's to take down again.
+    expect(fs.existsSync(marker)).toBe(false)
+  }, 60_000)
+
+  it('reports the services bring-up failure as the probe failure', async () => {
+    const r = fixtureRepo()
+
+    const probes = await probeApiServers({
+      repoRoot: r,
+      recipe: recipeFor(r, { services: { up: 'exit 3' }, readyTimeoutMs: 4000 }),
+    })
+
+    expect(probes[0].ok).toBe(false)
+    expect(probes[0].error).toMatch(/services `exit 3` failed/)
   }, 60_000)
 
   it('probes nothing for a cli-only recipe', async () => {

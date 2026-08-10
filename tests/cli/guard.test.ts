@@ -9,6 +9,7 @@ import {
   writeGuardResult,
   readGuardResult,
   guardResultPath,
+  guardFlowsPath,
   writeManifest,
 } from '@truecourse/guard-runner'
 import {
@@ -20,6 +21,7 @@ import {
   type GuardScenarioResult,
   type GuardOutcome,
   type GuardGenerateReport,
+  type GuardFlowsFile,
 } from '@truecourse/shared'
 import {
   runGuardRun,
@@ -936,6 +938,35 @@ function sectionFlow(anchor: string, scenarioIds: string[]): GuardManifestFlow {
   }
 }
 
+/** The committed flow corpus — `scenarios/flows.json`, whose `generatedAt` dates
+ *  the generate that produced the committed manifest. */
+function flowsCorpus(generatedAt: string): GuardFlowsFile {
+  return {
+    version: 1,
+    generatedAt,
+    flows: [
+      {
+        id: 'docs/x.md#a',
+        title: 'A flow',
+        goal: 'A flow.',
+        fingerprint: 'sha256:aa',
+        milestones: [{ order: 1, doc: 'docs/x.md', anchor: 'a', claimTitle: 'it works' }],
+        bindings: [{ doc: 'docs/x.md', anchor: 'a', fingerprint: 'sha256:x' }],
+        composedOf: [],
+        synthesisInputsHash: 'sha256:cc',
+      },
+    ],
+    noFlowClaims: [],
+  }
+}
+
+/** Write that corpus into a repo's store — what a clone inherits from git. */
+function writeFlowsCorpus(repoRoot: string, generatedAt: string): void {
+  const file = guardFlowsPath(repoRoot)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(flowsCorpus(generatedAt), null, 2) + '\n')
+}
+
 function report(over: Partial<GuardGenerateReport> = {}): GuardGenerateReport {
   return {
     generatedAt: '2026-01-02T03:04:05.000Z',
@@ -1101,6 +1132,47 @@ describe('composeGuardStatus', () => {
     expect(s.lastGenerate).toBeNull()
     expect(s.lastRun?.summary).toMatchObject({ total: 2, pass: 1, fail: 1 })
   })
+
+  // A CLONE (or a supplied prepared repo) carries the committed corpus and NOT
+  // the gitignored run-result. A repo whose manifest + flow corpus are committed
+  // IS generated, so the last-generate row must speak from them.
+  it('derives the last generate from the COMMITTED corpus when result.json is absent', () => {
+    const blocked: GuardManifestFlow = {
+      ...sectionFlow('b', []),
+      gaps: [{ surface: 'cli', kind: 'blocked-on', reason: 'blocked on git: needs a repo' }],
+    }
+    const s = composeGuardStatus(
+      { version: GUARD_FORMAT_VERSION, flows: [sectionFlow('a', ['a.1']), blocked] },
+      null,
+      null,
+      flowsCorpus('2026-08-01T00:00:00.000Z'),
+    )
+    expect(s.lastGenerate).toMatchObject({
+      generatedAt: '2026-08-01T00:00:00.000Z',
+      source: 'committed-corpus',
+      written: 1,
+      coverageGapsByKind: { 'blocked-on': 1 },
+      blockedOnCapabilities: { git: 1 },
+    })
+  })
+
+  it('prefers the run-result over the committed corpus when both exist', () => {
+    const s = composeGuardStatus(
+      { version: GUARD_FORMAT_VERSION, flows: [sectionFlow('a', ['a.1'])] },
+      null,
+      report({ written: [{ id: 'a.1', title: 't', doc: DOC, anchor: 'a', file: 'a.yaml' }] }),
+      flowsCorpus('2026-08-01T00:00:00.000Z'),
+    )
+    expect(s.lastGenerate).toMatchObject({
+      generatedAt: '2026-01-02T03:04:05.000Z',
+      source: 'result',
+      written: 1,
+    })
+  })
+
+  it('stays null when there is no committed corpus at all', () => {
+    expect(composeGuardStatus(null, null, null, flowsCorpus('2026-08-01T00:00:00.000Z')).lastGenerate).toBeNull()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1224,6 +1296,32 @@ describe('runGuardStatus (printer)', () => {
     expect(out).toContain('coverage    (none)')
   })
 
+  // The clone / supplied-repo shape: committed manifest + flows.json, and the
+  // gitignored result.json never travelled. "last gen (none)" would read as
+  // never-generated about a repo whose generated corpus is right there.
+  it('reads the last generate off the committed corpus when result.json is absent', async () => {
+    const r = repo()
+    writeManifest(r, {
+      version: GUARD_FORMAT_VERSION,
+      flows: [
+        {
+          flowId: 'docs/x.md#a',
+          flowFingerprint: 'sha256:x',
+          bindings: [{ doc: 'docs/x.md', anchor: 'a', fingerprint: 'sha256:x' }],
+          scenarios: [{ id: 'a.1', surface: 'cli' }],
+          journeys: [],
+          generationInputsHash: null,
+          gaps: [],
+        },
+      ],
+    })
+    writeFlowsCorpus(r, '2026-08-01T00:00:00.000Z')
+    expect(fs.existsSync(guardResultPath(r))).toBe(false)
+    await runGuardStatus({ cwd: r })
+    expect(out).not.toContain('last gen    (none)')
+    expect(out).toContain('last gen    2026-08-01T00:00:00.000Z')
+  })
+
   it('renders the blocked-on gap count with its capability breakdown', async () => {
     const r = repo()
     writeGuardResult(
@@ -1288,18 +1386,35 @@ describe('runGuardStatus (printer)', () => {
         2,
       ) + '\n',
     )
+    const blocked = [
+      { flowId: 'f1', reason: 'blocked on open-meteo: forecast' },
+      { flowId: 'f2', reason: 'blocked on open-meteo: history' },
+      // A generic noun names nothing providable — it stays in the raw count only.
+      { flowId: 'f3', reason: 'blocked on network: fetch' },
+    ]
     writeGuardResult(
       r,
       report({
         sectionsChanged: 2,
-        coverageGaps: [
-          { doc: DOC, anchor: 'a', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
-          { doc: DOC, anchor: 'b', kind: 'blocked-on', reason: 'blocked on open-meteo: history', flowId: 'f2' },
-          // A generic noun names nothing providable — it stays in the raw count only.
-          { doc: DOC, anchor: 'c', kind: 'blocked-on', reason: 'blocked on network: fetch', flowId: 'f3' },
-        ],
+        coverageGaps: blocked.map((b, i) => ({
+          doc: DOC,
+          anchor: 'abc'[i],
+          kind: 'blocked-on' as const,
+          reason: b.reason,
+          flowId: b.flowId,
+        })),
       }),
     )
+    // The needs-setup split counts flows off the COMMITTED manifest — the record a
+    // clone inherits — so the gaps live in both files, exactly as a generate writes them.
+    writeManifest(r, {
+      version: GUARD_FORMAT_VERSION,
+      flows: blocked.map((b) => ({
+        ...sectionFlow(b.flowId, []),
+        flowId: b.flowId,
+        gaps: [{ surface: 'api' as const, kind: 'blocked-on' as const, reason: b.reason }],
+      })),
+    })
     await runGuardStatus({ cwd: r })
     expect(out).toContain('3 blocked on')
     expect(out).toContain('2 flows need setup (open-meteo — run: truecourse guard externals)')

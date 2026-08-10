@@ -25,8 +25,13 @@
  * attribution may ever count against a repo): a repo whose route manifest knows
  * nothing probes the health path, i.e. exactly the boot check — never a false failure.
  *
- * Nothing here is a WRITE and nothing is fingerprinted: it boots a throwaway sandbox
- * server, makes GET requests, and reports.
+ * The world the boot needs is the recipe's own: `api.services.up` runs before the
+ * loop and `down` after it, exactly as verification and the run do it. Verification
+ * tears its services down again in its `finally`, so a compose-backed repo whose app
+ * cannot start without a datastore would otherwise fail this probe by construction.
+ *
+ * Nothing here is a WRITE and nothing is fingerprinted: it runs the repo's own
+ * services command, boots a throwaway sandbox server, makes GET requests, and reports.
  */
 
 import {
@@ -34,6 +39,8 @@ import {
   resolveApiServers,
   preflightApiServer,
   buildRouteManifest,
+  runBuild,
+  DEFAULT_BUILD_TIMEOUT_MS,
   type Recipe,
   type ResolvedApiServer,
   type RouteManifest,
@@ -86,19 +93,57 @@ export async function probeApiServers(opts: ProbeApiServersOptions): Promise<Gua
   // "probing live routes 0/0" as the running step's phase line and leave it there.
   if (total > 0) opts.onServer?.(done, total)
 
-  for (const server of resolved.servers.values()) {
-    const routes = appRoutes(manifest, appDirOfServer(index, server.name))
-    const paths = probePaths(server.healthPath, routes)
-    probes.push(
-      await probeOneServer({
-        repoRoot,
-        server,
-        paths,
-        ...(opts.signal ? { signal: opts.signal } : {}),
-        ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
-      }),
-    )
-    opts.onServer?.(++done, total)
+  // The world the boots need, brought up EXACTLY as verification (and the run) bring
+  // it up: the repo's own `api.services.up`, once around the whole loop, torn down on
+  // the way out. Verification's `finally` has already stopped whatever it started, so
+  // on a compose-backed repo the probe's own boot would otherwise have no datastore
+  // to reach and could never become healthy. A recipe with no `services` is untouched.
+  const services = recipe.api.services
+  let servicesUp = false
+  try {
+    if (services) {
+      const up = await runBuild(repoRoot, services.up, recipe.env, DEFAULT_BUILD_TIMEOUT_MS, opts.signal)
+      if (!up.ok) {
+        // A world that will not come up is not a server verdict, and must not read
+        // like one: every declared server reports the bring-up's own output.
+        const tail = up.output.trimEnd().split('\n').slice(-5).join(' / ')
+        const error = `services \`${services.up}\` failed${up.timedOut ? ' (timed out)' : ''}: ${tail}`
+        return [...resolved.servers.values()].map((server) => ({
+          server: server.name,
+          path: probePaths(server.healthPath, appRoutes(manifest, appDirOfServer(index, server.name)))[0],
+          ok: false,
+          error,
+        }))
+      }
+      servicesUp = true
+    }
+
+    for (const server of resolved.servers.values()) {
+      const routes = appRoutes(manifest, appDirOfServer(index, server.name))
+      const paths = probePaths(server.healthPath, routes)
+      probes.push(
+        await probeOneServer({
+          repoRoot,
+          server,
+          paths,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+          ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+        }),
+      )
+      opts.onServer?.(++done, total)
+    }
+  } finally {
+    // Best-effort, and NEVER a verdict — a datastore that will not stop is a warning,
+    // not a reason to call a server that answered unreachable.
+    if (servicesUp && services?.down) {
+      const down = await runBuild(repoRoot, services.down, recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
+      if (!down.ok) {
+        // eslint-disable-next-line no-console -- the probe's one advisory line.
+        console.warn(
+          `[guard setup] \`${services.down}\` failed after the endpoint probe — the services it brought up may still be running.`,
+        )
+      }
+    }
   }
   return probes
 }

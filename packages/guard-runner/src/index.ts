@@ -143,6 +143,7 @@ export {
   scenarioDependencyNames,
   dependencyBlockFor,
   suppliedInstancesFor,
+  sharedWorldGroupsFor,
   materializeSupplied,
   applySupplied,
   applySuppliedExpect,
