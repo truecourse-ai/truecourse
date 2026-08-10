@@ -570,7 +570,16 @@ Three sessions, in order; each consumes the one before it.
   compared. It is free string work, and dropping it would be exactly the
   silent thinning §6.1 refuses. Tools: read a doc section. Done: the
   overlap/conflict set with section anchors, an explicit "none found",
-  or `budget-exhausted` naming the docs it did not reach. This session
+  or `budget-exhausted` naming the docs it did not reach. It absorbs
+  today's separate verify pass, which exists only because detection runs
+  on a cheap model and over-flags, so a stronger model re-reads each
+  flag with full context; §3.4 retires that split, and one flagship
+  session holding a section-reading tool does both jobs in one place.
+  Two properties of the pass survive into this session's outcome: a
+  confirmed overlap carries its RESOLUTION BRIEF (what exactly
+  disagrees, and the recommended action), and ruling is FAIL-OPEN — only
+  an explicit refutation drops a flag, so an overlap the session could
+  not rule on stays flagged rather than vanishing. This session
   is also the answer to §6.2's scaling problem: the engine stops
   enumerating and judging candidate PAIRS — it still computes area
   membership, widening included, deterministically — and the session
@@ -588,9 +597,48 @@ today.
 
 ### 6.4 Estimation algorithm
 
-To be defined by the owner per §3.5: the scan's session types over their
-work items (docs, areas, flagged groups), turn ranges per session type,
-and what the scan's caches exclude from the estimate.
+Per §3.5. Work items are the scan's session units — docs, the corpus,
+and areas — and only the ones whose cached input changed; per changed
+item, its session count × the session type's [min, max] turn range, at
+the one model's prices:
+
+- **doc curation** — 1 × [1, 5] per PROSE doc whose content is not
+  already in the curation cache. Structural docs (OpenAPI) are admitted
+  deterministically and skip every prose stage, so they cost nothing
+  here, exactly as the estimate excludes them today. Exact, and simpler
+  than today: relevance and area-tags are two content-keyed caches
+  gating two calls and the estimate reads both; one session means one
+  cache to read and one count of misses.
+- **area settling** — 0 when no doc-curation session will run: the
+  vocabulary cannot move, so neither gate of §6.3 can open. Otherwise
+  1 × [2, 8], labeled "may be a cache hit at $0". The estimate runs
+  BEFORE the doc sessions, so it cannot know whether re-tagging will
+  actually move a label or leave a non-`core` product standing — the
+  same honesty §7.7 applies to a recipe that may verify clean.
+- **overlap** — 1 × [3, 12] per area whose doc set (its kept docs plus
+  its heading-widened members) holds at least one changed doc.
+  Re-tagging can move a doc between areas, so this counts the areas
+  visible before the run; a doc that changes areas re-runs both.
+
+Deterministic steps — discovery, grouping, the heading-widened
+membership net, persistence — estimate as free.
+
+What this fixes in today's estimator. Today the overlap pass is
+estimated in doc PAIRS: with a corpus on disk it uses the real area
+structure, but the heading-widened cross-area pairs need doc content and
+stay UNMODELED, and the verify pass is scaled by an assumed flag rate.
+Both approximations disappear once the unit is the area and the verify
+pass is absorbed (§6.3): the estimate counts areas, which it knows
+exactly, and nothing is left out of the count. The price is COARSER
+invalidation — today's per-pair cache re-runs only the pairs containing
+an edited doc, while a per-area session re-runs its whole area. That
+trade is accepted, because the pair count is exactly what §6.2's first
+problem says must not be allowed to drive cost.
+
+Unchanged items are excluded and labeled ("N of M docs changed"); when
+nothing changed the estimate has no stages and the confirm prompt is
+skipped — identical presentation to setup and generate. Turn ranges are
+provisional until the reference benchmark run calibrates them.
 
 ### 6.5 Implementation plan
 
