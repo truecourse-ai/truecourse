@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-07T03:24:38.357Z",
+  "generatedAt": "2026-08-10T19:40:00.000Z",
   "recipeFingerprint": "sha256:cce10ba954d77edc4ba4971695141ec5e35cf64ae9a9e1e591a7ac3aa9e9b9c8",
   "journeys": [
     {
@@ -4685,9 +4685,4400 @@
           }
         ]
       }
+    },
+    {
+      "id": "api/get-api-capabilities",
+      "type": "api",
+      "title": "GET /api/capabilities",
+      "entry": {
+        "method": "GET",
+        "path": "/api/capabilities"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/capabilities"
+        }
+      ],
+      "fingerprint": "sha256:35671d6e8a1da21d5d4fabf7b03e39607cea68e7ce3c031377faa655e43f0b97",
+      "contract": {
+        "summary": "The edition the dashboard runs as and the feature gates that are on — the client’s first call, and the only one mounted ABOVE the enterprise auth gate.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/capabilities"
+            ],
+            "description": "Reports `edition` plus the capability list the loaded plugin lit up. Public by mount order: it sits before `enterpriseAuthGate`, so the client can discover the edition before it has a session. The handler touches no store and no registry.",
+            "options": [],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_EDITION",
+                    "when": "the explicit override — `enterprise` or `community` decides on its own"
+                  },
+                  {
+                    "var": "WORKOS_API_KEY",
+                    "when": "no explicit override — both WorkOS variables present implies `enterprise`"
+                  },
+                  {
+                    "var": "WORKOS_CLIENT_ID",
+                    "when": "no explicit override — both WorkOS variables present implies `enterprise`"
+                  }
+                ],
+                "reads": []
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"edition\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"capabilities\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"community\"",
+                    "when": "neither the override nor WorkOS selected enterprise"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"local-filesystem\"",
+                    "when": "the community capability seed — the enterprise plugin overwrites the set and omits it"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "always — the handler reads the environment and nothing else"
+                  }
+                ],
+                "writes": []
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/post-api-repos",
+      "type": "api",
+      "title": "POST /api/repos",
+      "entry": {
+        "method": "POST",
+        "path": "/api/repos"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "POST",
+          "path": "/api/repos"
+        }
+      ],
+      "fingerprint": "sha256:2d10b8ff8cd812c404917d27ef0b89f58cba8f409eb85f1594cecb9f539f6e90",
+      "contract": {
+        "summary": "Register a directory as a project — the home page’s Add repo action.",
+        "commands": [
+          {
+            "path": [
+              "POST",
+              "/api/repos"
+            ],
+            "description": "Validates the body with `CreateRepoSchema`, checks the path exists and is a directory, then registers it. Registration also CREATES `<path>/.truecourse/` (with the store `.gitignore`) if it is not there. An already-registered path keeps its slug and only refreshes `lastOpened`.",
+            "options": [
+              {
+                "flag": "path",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "absolute path",
+                "description": "JSON body field. The directory to register. `CreateRepoSchema` demands a non-empty string and nothing more; existence and directory-ness are checked in the handler, and the path is resolved with `path.resolve` before it enters the registry."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the existing entries — an already-registered path is matched by resolved path"
+                  },
+                  {
+                    "path": "<path>",
+                    "when": "must exist and be a directory, or the request is refused"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\"",
+                    "when": "the assigned slug"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"path\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"lastAnalyzed\"",
+                    "when": "always `null` on this response, even for a path that was already registered and analyzed"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Invalid request body: path is required",
+                    "when": "the body failed `CreateRepoSchema`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Path does not exist: ",
+                    "when": "the named directory is absent"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Path is not a directory: ",
+                    "when": "the path names a file"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "201",
+                    "when": "registered — a re-registration of a known path answers 201 too"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "the body failed `CreateRepoSchema`, or the path is missing or is not a directory"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  },
+                  {
+                    "exit": "500",
+                    "when": "the store directory could not be created — an unexpected filesystem error"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the new (or refreshed) entry"
+                  },
+                  {
+                    "path": "<path>/.truecourse/",
+                    "when": "created with its `.gitignore` when the directory has no store yet"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos",
+      "type": "api",
+      "title": "GET /api/repos",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos"
+        }
+      ],
+      "fingerprint": "sha256:288caeaef838019c725acf5bad3eb1aa8d4d883311e00de99d84a000164952c1",
+      "contract": {
+        "summary": "Every registered project with its most recent lifecycle event — the home page list.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos"
+            ],
+            "description": "Reads the registry and, per entry, composes `latestEvent` from the per-repo stores’ own timestamps (analyze, spec scan, guard generate, guard run). Every one of those reads is isolated and tolerant: a missing, corrupt or unreadable repo contributes nothing and never fails the request.",
+            "options": [],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the entry list"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "per entry — the `analyzed` event candidate"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/specs/corpus.json",
+                    "when": "per entry — the `scanned` event candidate"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/guard/result.json",
+                    "when": "per entry — the `generated` event candidate"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/guard/LATEST.json",
+                    "when": "per entry — the `guarded` event candidate"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"path\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"lastAnalyzed\"",
+                    "when": "straight from the registry — `null` for a project that never analyzed"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"latestEvent\"",
+                    "when": "the newest store timestamp, or `null` when no store and no registry date yields one"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"kind\"",
+                    "when": "inside `latestEvent` — one of `analyzed`, `scanned`, `generated`, `guarded`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"at\"",
+                    "when": "inside `latestEvent` — the ISO timestamp its own store stamped"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "always — the body is a bare array, `[]` when nothing is registered"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": []
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-browse",
+      "type": "api",
+      "title": "GET /api/repos/browse",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/browse"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/browse"
+        }
+      ],
+      "fingerprint": "sha256:f64324d3e86508ed41e97231a1a4e89a5f9074ad29484eaddece2f213724360a",
+      "contract": {
+        "summary": "Subdirectories of one directory, for the Add repo directory picker.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/browse"
+            ],
+            "description": "A general filesystem-read primitive, so it carries two gates the other reads do not: a trusted-Origin check (no Origin, a loopback hostname, or an Origin host equal to the request Host) and the `local-filesystem` capability, whose absence hides the route as a 404. Declared before `GET /:id`, so `browse` is never captured as a project slug.",
+            "options": [
+              {
+                "flag": "path",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "absolute path",
+                "description": "Query parameter. The directory to list. Must be absolute — a relative value is refused BEFORE resolution, so `realpath` can never quietly resolve it against the server’s cwd. Absent or empty falls back to the server user’s home directory. Symlinks are resolved, and the resolved path is what comes back."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "HOME",
+                    "when": "the default root when `path` is absent — `os.homedir()` reads it on posix"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "<path>",
+                    "when": "the directory listing; hidden entries and non-directories are dropped"
+                  },
+                  {
+                    "path": "<path>/<entry>/.git",
+                    "when": "per child — decides the entry’s `isRepo` flag; unreadable reads as false"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"path\"",
+                    "when": "the RESOLVED directory, symlinks followed"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"parent\"",
+                    "when": "`null` at the filesystem root, the parent directory otherwise"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"entries\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"isRepo\"",
+                    "when": "per entry — the child holds a `.git` directory"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Cross-origin requests are not allowed",
+                    "when": "the Origin header is neither absent, loopback, nor the request’s own host"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Not found",
+                    "when": "the `local-filesystem` capability is off — the route is hidden rather than refused"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Invalid query: path must be a string",
+                    "when": "`path` arrived as something other than a string"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Path must be absolute",
+                    "when": "a relative `path`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Path does not exist: ",
+                    "when": "ENOENT, ELOOP or ENOTDIR while resolving"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Permission denied: ",
+                    "when": "EACCES or EPERM while resolving or reading"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Path is not a directory: ",
+                    "when": "the resolved path is a file"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the listing rendered"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "a non-string `path`, a relative `path`, or a path that is not a directory"
+                  },
+                  {
+                    "exit": "403",
+                    "when": "an untrusted Origin, or the directory is unreadable"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "the `local-filesystem` capability is off, or the path does not resolve"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  },
+                  {
+                    "exit": "500",
+                    "when": "an unexpected filesystem error the handler does not map"
+                  }
+                ],
+                "writes": []
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id",
+      "type": "api",
+      "title": "GET /api/repos/{id}",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}"
+        }
+      ],
+      "fingerprint": "sha256:8139eb21d780082c7142d762043d3b9b4ab81bcbe882c6f517e5bbbbc1d0895b",
+      "contract": {
+        "summary": "One project’s details, its branches, and whether it has ever been analyzed.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}"
+            ],
+            "description": "Mounted on the repos router, which carries NO `projectResolver` — the slug is resolved by the handler alone, so this route never touches `lastOpened`. Git is only shelled out to when the registry supplies no `defaultBranch` (the OSS local case); a git failure is caught and reported as `isGitRepo: false` rather than an error.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the slug lookup"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "only when the registry entry carries no `lastAnalyzed`"
+                  },
+                  {
+                    "path": "<repo>/.git",
+                    "when": "the branch list, only when the registry supplies no `defaultBranch`"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"path\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"lastAnalyzed\"",
+                    "when": "the registry value, else the persisted analysis timestamp, else `null` — this field is the client’s `hasAnalysis` gate"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"branches\"",
+                    "when": "empty whenever the registry already supplied a `defaultBranch`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"defaultBranch\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"isGitRepo\"",
+                    "when": "`false` only when git was consulted and failed"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Project not found",
+                    "when": "the repos router’s own 404 wording — not the resolver’s `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the project resolved"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": []
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/delete-api-repos-id",
+      "type": "api",
+      "title": "DELETE /api/repos/{id}",
+      "entry": {
+        "method": "DELETE",
+        "path": "/api/repos/{id}"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "DELETE",
+          "path": "/api/repos/{id}"
+        }
+      ],
+      "fingerprint": "sha256:37af64e610f65cff6459bd51e6674e8b7337b891bd32d16a1233a852d1edb047",
+      "contract": {
+        "summary": "Unregister a project and delete its `.truecourse/` store. The repo source is never touched.",
+        "commands": [
+          {
+            "path": [
+              "DELETE",
+              "/api/repos/{id}"
+            ],
+            "description": "Removes `<repo>/.truecourse/` recursively, then drops the registry entry. Destructive and unconfirmed at this layer — the confirmation is the client’s.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the slug lookup"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "Project not found",
+                    "when": "the repos router’s own 404 wording"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "204",
+                    "when": "unregistered — no body at all, not an empty object"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  },
+                  {
+                    "exit": "500",
+                    "when": "the store directory could not be removed"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/",
+                    "when": "the whole store directory, removed recursively"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the entry, removed"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-rules",
+      "type": "api",
+      "title": "GET /api/repos/{id}/rules",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/rules"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/rules"
+        }
+      ],
+      "fingerprint": "sha256:dfafa6540da39d72e15e6872c15dd11a557df83a196c2cf356cafd34f3e70678",
+      "contract": {
+        "summary": "The rule catalogue with this project’s overrides applied — the Home tab’s rules panel.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/rules"
+            ],
+            "description": "The shipped catalogue, with each rule’s `enabled` recomputed as \"the rule ships enabled AND this project has not disabled it\". On the repos router, so it carries no `projectResolver`: it resolves the slug itself, never touches `lastOpened`, and answers the router’s own `Project not found` wording.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the slug lookup"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules` — subtracted from each rule’s shipped default"
+                  },
+                  {
+                    "path": "built-in rule catalog",
+                    "when": "the rules are TypeScript constants in the analyzer, not a file the repo owns"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"key\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"category\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"domain\"",
+                    "when": "derived from the key’s first segment; absent when that prefix is not a known domain"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"description\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"enabled\"",
+                    "when": "the shipped default AND not in this project’s `disabledRules`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"severity\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"type\"",
+                    "when": "`deterministic` or `llm`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"languageSupport\"",
+                    "when": "per language, `status` and an optional `reason`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"prompt\"",
+                    "when": "only on a rule that declares one"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"engine\"",
+                    "when": "only on a rule that declares one"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"contextRequirement\"",
+                    "when": "only on a rule that declares one"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Project not found",
+                    "when": "the repos router’s own 404 wording"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a bare array of the whole catalogue — never paged, never filtered"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": []
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/patch-api-repos-id-rules-rulekey",
+      "type": "api",
+      "title": "PATCH /api/repos/{id}/rules/{ruleKey}",
+      "entry": {
+        "method": "PATCH",
+        "path": "/api/repos/{id}/rules/{ruleKey}"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "PATCH",
+          "path": "/api/repos/{id}/rules/{ruleKey}"
+        }
+      ],
+      "fingerprint": "sha256:29cd80ceb08a38601d27a8c728d9d9c8dc810971e064349ddd75cab971cbe821",
+      "contract": {
+        "summary": "Turn one rule on or off for this project.",
+        "commands": [
+          {
+            "path": [
+              "PATCH",
+              "/api/repos/{id}/rules/{ruleKey}"
+            ],
+            "description": "Writes `disabledRules` in the project config: enabling removes the key, disabling adds it, and the list is re-sorted on every write. The rule key is validated against the shipped catalogue first, so a typo is a 404 rather than a silently stored entry. The response echoes the requested state, not a re-read.",
+            "options": [
+              {
+                "flag": "enabled",
+                "takesValue": true,
+                "valueRequired": true,
+                "description": "JSON body field. The state to move the rule to. Must be a real boolean — the handler tests `typeof enabled !== \"boolean\"`, so a string `\"true\"` is refused."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              },
+              {
+                "name": "ruleKey",
+                "required": true,
+                "variadic": false,
+                "description": "The rule key, e.g. `architecture/deterministic/circular-service-dependency`. Keys contain slashes, so the segment must be URL-encoded or it will not match this route at all."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the slug lookup"
+                  },
+                  {
+                    "path": "built-in rule catalog",
+                    "when": "the key must name a shipped rule"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "the current `disabledRules`, added to or removed from"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"key\"",
+                    "when": "echoed from the path"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"enabled\"",
+                    "when": "echoed from the body — the response is not a re-read of the stored config"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Body must include `enabled: boolean`",
+                    "when": "`enabled` absent or not a boolean"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Unknown rule: ",
+                    "when": "the key names no shipped rule"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Project not found",
+                    "when": "the repos router’s own 404 wording"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the toggle was stored"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "`enabled` absent or not a boolean"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug, or the key names no shipped rule"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules`, re-sorted on every write"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/post-api-repos-id-analyses",
+      "type": "api",
+      "title": "POST /api/repos/{id}/analyses",
+      "entry": {
+        "method": "POST",
+        "path": "/api/repos/{id}/analyses"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "POST",
+          "path": "/api/repos/{id}/analyses"
+        }
+      ],
+      "fingerprint": "sha256:e2c66d7da2225688a8ab85384cca3038b3c89badf18f54953b39de22ee0fd816",
+      "contract": {
+        "summary": "Start an analyze run — the analyze trigger, in both its modes. Answers 202 and streams the rest over Socket.io.",
+        "commands": [
+          {
+            "path": [
+              "POST",
+              "/api/repos/{id}/analyses"
+            ],
+            "description": "Everything that can be refused is refused BEFORE the 202: the body shape, the diff-mode baseline, and the saved LLM transport when the run will reach a model. After the 202 nothing else reaches this response — progress, the LLM estimate, the dirty-tree question and the final outcome all travel over sockets, and a failure after the accept surfaces as an `analysis:progress` event with `step: \"error\"`.",
+            "options": [
+              {
+                "flag": "mode",
+                "takesValue": true,
+                "valueRequired": true,
+                "choices": [
+                  "full",
+                  "diff"
+                ],
+                "description": "JSON body field. Which run: `full` analyzes the committed state, `diff` compares the working tree against LATEST. Required — `AnalyzeRepoSchema` declares no default, so an absent mode is a 400, never a silent full run."
+              },
+              {
+                "flag": "skipGit",
+                "takesValue": true,
+                "valueRequired": false,
+                "default": false,
+                "description": "JSON body field. Skip branch detection, the commit-hash read and the pre-parse stash. Defaults to `false` inside the schema, so an absent field arrives as false rather than undefined. Honoured on the `full` path only."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  },
+                  {
+                    "var": "TRUECOURSE_DEV",
+                    "when": "`1` tees the analyze log to the server’s own output as well as the file"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "`mode: \"diff\"` — the baseline must exist or the request is refused"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`enabledCategories` and `enableLlmRules`, which decide the step list and whether a model is reached at all"
+                  },
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "the saved LLM transport, re-installed per run (mtime-cached) so a `config llm setup` since boot needs no restart"
+                  },
+                  {
+                    "path": "<repo>/.git",
+                    "when": "branch, commit hash and the working-tree status behind the stash question — unless `skipGit`"
+                  },
+                  {
+                    "path": "<repo>",
+                    "when": "the source tree the analyzer walks"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"message\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"repoId\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"mode\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Analysis started",
+                    "when": "`mode: \"full\"`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Diff check started",
+                    "when": "`mode: \"diff\"`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Invalid request body",
+                    "when": "the body failed `AnalyzeRepoSchema`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Run a full analysis first before checking a diff.",
+                    "when": "`mode: \"diff\"` with no LATEST to diff against"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "202",
+                    "when": "accepted — the run has not started yet, and its outcome never reaches this response"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "the body failed `AnalyzeRepoSchema`, or `mode: \"diff\"` was asked with no baseline analysis"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  },
+                  {
+                    "exit": "500",
+                    "when": "API transport mode is selected with an unusable configuration (`LlmApiConfigError`), refused before the accept"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/.analyze.lock",
+                    "when": "held for the run; a second run while it is held fails after the 202, over sockets"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/logs/analyze.log",
+                    "when": "the run log, pushed for the duration of the run"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`mode: \"full\"` — the run’s snapshot"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "`mode: \"full\"` — the materialized current state"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/history.json",
+                    "when": "`mode: \"full\"` — the appended summary"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`mode: \"full\"` — the entry’s `lastAnalyzed`, at the end of the run"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`mode: \"diff\"` — the diff result, overwritten"
+                  },
+                  {
+                    "path": "git stash",
+                    "when": "`mode: \"full\"` on a dirty tree the user chose to stash — pushed before the parse, popped after"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/post-api-repos-id-analyses-cancel",
+      "type": "api",
+      "title": "POST /api/repos/{id}/analyses/cancel",
+      "entry": {
+        "method": "POST",
+        "path": "/api/repos/{id}/analyses/cancel"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "POST",
+          "path": "/api/repos/{id}/analyses/cancel"
+        }
+      ],
+      "fingerprint": "sha256:8f42693c90bb9a0a813dd872cd0ad18f94c8cad403dc9ebc636bde47c7ae5235",
+      "contract": {
+        "summary": "Abort the active run for this project, in either mode.",
+        "commands": [
+          {
+            "path": [
+              "POST",
+              "/api/repos/{id}/analyses/cancel"
+            ],
+            "description": "Aborts through the in-process analysis registry the POST registered before its 202. Nothing running is not an error — the response says so instead.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"message\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Analysis cancelling",
+                    "when": "a run was registered for this project and its abort signal fired"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "No active analysis",
+                    "when": "nothing was running — still a 200"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "either way — cancelled, or nothing to cancel"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-analyses",
+      "type": "api",
+      "title": "GET /api/repos/{id}/analyses",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/analyses"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/analyses"
+        }
+      ],
+      "fingerprint": "sha256:9f14c34aa3bce7a0b7a932adbcacac3414f81efcbb05332005a13d4d338449a1",
+      "contract": {
+        "summary": "The analysis history list — the Analyses tab.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/analyses"
+            ],
+            "description": "Reads `history.json`, drops diff analyses, keeps the last 20 and reverses them, so the newest is first. `status` is the literal `\"completed\"` on every row and `architecture` is always `null` — neither is read from the entry.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/history.json",
+                    "when": "the summaries; absent reads as an empty list"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"status\"",
+                    "when": "the literal `\"completed\"` on every row — never read from the stored entry"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"branch\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"commitHash\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"architecture\"",
+                    "when": "always `null` on this route"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"createdAt\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"serviceCount\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"violationsBySeverity\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"durationMs\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"totalTokens\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"totalCost\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"provider\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a bare array, newest first, at most 20 entries — `[]` when nothing has been analyzed"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-analyses-diff",
+      "type": "api",
+      "title": "GET /api/repos/{id}/analyses/diff",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/analyses/diff"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/analyses/diff"
+        }
+      ],
+      "fingerprint": "sha256:cab585f7169ec4e0f8071567521d233d19ee5f7a0e7de10d852b334e478ca586",
+      "contract": {
+        "summary": "The stored diff-check result — new and resolved violations against the baseline.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/analyses/diff"
+            ],
+            "description": "Serves `diff.json` with the rule-disabled entries filtered out of both lists and the summary counts recomputed to match. `isStale` says the baseline moved since the diff ran. No stored diff is a 200 whose body is the JSON literal `null`.",
+            "options": [
+              {
+                "flag": "pr",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "n",
+                "description": "Query parameter. The enterprise PR scope: digits only, and anything else falls back to the repo’s own working-tree diff rather than erroring. Present, it reads the PR-scoped diff the gate persisted under `<repoKey>::pr/<n>`."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "the stored diff; absent answers `null`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "`isStale` — the diff’s `baseAnalysisId` against the current LATEST id"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules`, filtered out of both violation lists before the counts are recomputed"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"resolvedViolations\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"newViolations\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"affectedNodeIds\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"summary\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"changedFiles\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"isStale\"",
+                    "when": "`true` when the baseline analysis moved under the stored diff"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"diffAnalysisId\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "null",
+                    "when": "no diff has been run — the whole body is the JSON literal, not an empty object"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a diff, or the `null` body"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-analyses-analysisid-usage",
+      "type": "api",
+      "title": "GET /api/repos/{id}/analyses/{analysisId}/usage",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/analyses/{analysisId}/usage"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/analyses/{analysisId}/usage"
+        }
+      ],
+      "fingerprint": "sha256:91344d31894b1c12d94356e93a840830605cc9adcefc201bf01d9eb949afcb17",
+      "contract": {
+        "summary": "The LLM usage records of one analysis — token and cost rows.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/analyses/{analysisId}/usage"
+            ],
+            "description": "Usage lives on the per-analysis snapshot, never on LATEST, so the route resolves the filename first (from LATEST’s head when the id matches it, otherwise by scanning the analyses directory). An unknown id is NOT a 404: it answers an empty array, exactly like an analysis that spent nothing.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              },
+              {
+                "name": "analysisId",
+                "required": true,
+                "variadic": false,
+                "description": "The analysis uuid, as `GET /api/repos/{id}/analyses` reports it. Unknown ids answer `[]`."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "resolves the head filename when `{analysisId}` is the current analysis"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "the snapshot carrying the usage records"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"provider\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"callType\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"inputTokens\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"outputTokens\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"cacheReadTokens\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"cacheWriteTokens\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"totalTokens\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"costUsd\"",
+                    "when": "a STRING for precision, or `null`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"durationMs\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"createdAt\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a bare array — `[]` for an unknown analysis id, a missing snapshot, or a run that spent nothing"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/delete-api-repos-id-analyses-analysisid",
+      "type": "api",
+      "title": "DELETE /api/repos/{id}/analyses/{analysisId}",
+      "entry": {
+        "method": "DELETE",
+        "path": "/api/repos/{id}/analyses/{analysisId}"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "DELETE",
+          "path": "/api/repos/{id}/analyses/{analysisId}"
+        }
+      ],
+      "fingerprint": "sha256:6424604b6da85b9e841bc352d62d4887f3c6d81b935e6d7a4ea21dcc32b303f5",
+      "contract": {
+        "summary": "Delete one stored analysis, rebuilding LATEST when the head goes.",
+        "commands": [
+          {
+            "path": [
+              "DELETE",
+              "/api/repos/{id}/analyses/{analysisId}"
+            ],
+            "description": "Removes the snapshot file and its history entry. When the deleted analysis WAS the head, LATEST is rebuilt by replaying every remaining snapshot’s added/resolved deltas forward, and `diff.json` is deleted with it because its baseline just moved.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              },
+              {
+                "name": "analysisId",
+                "required": true,
+                "variadic": false,
+                "description": "The analysis uuid. Unknown here IS a 404, unlike the usage route beside it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/",
+                    "when": "the filename lookup, and the forward replay when the head was deleted"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "decides whether the deleted analysis was the head"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"ok\"",
+                    "when": "the literal `{\"ok\":true}`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Analysis not found",
+                    "when": "no snapshot file carries that id"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "deleted"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no stored analysis carries `{analysisId}`"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "removed"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/history.json",
+                    "when": "the entry, removed"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "rebuilt from the remaining snapshots, or deleted when none remain — only when the head went"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "deleted with the head, because its baseline moved"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-graph",
+      "type": "api",
+      "title": "GET /api/repos/{id}/graph",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/graph"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/graph"
+        }
+      ],
+      "fingerprint": "sha256:83cb22b0c26aeab4dc33b3c0264dd45af164c1897d2fa2433082834d93610daa",
+      "contract": {
+        "summary": "The React Flow graph at one level, with the saved node positions and collapsed set merged in.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/graph"
+            ],
+            "description": "Builds the unified graph from LATEST (or the stored diff, or a historical snapshot) and merges the per-user UI state over it. Positions and collapsed ids are stored NAME-keyed and translated back to this analysis’s uuids at read time, so they survive a re-analysis. The success answer carries `Cache-Control: no-store`; the empty answer does not.",
+            "options": [
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to read. Absent, or equal to the current LATEST id, serves LATEST; the id of the stored diff serves the working-tree graph out of `diff.json`; anything else is looked up as a historical per-analysis file. An id that resolves to nothing is not an error — the route serves its empty answer."
+              },
+              {
+                "flag": "level",
+                "takesValue": true,
+                "valueRequired": false,
+                "choices": [
+                  "services",
+                  "modules",
+                  "methods"
+                ],
+                "default": "services",
+                "description": "Query parameter. Which graph level to build. The handler trims one trailing `s` to reach the builder’s level name, and applies `services` when absent; an unrecognised value reaches the builder as-is."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default source, and the fallback identity for a historical read"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`analysisId` naming the stored diff — the working-tree graph, so newly added nodes render"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/ui-state.json",
+                    "when": "the saved positions and collapsed ids, scoped by branch and level"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"nodes\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"edges\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"collapsedIds\"",
+                    "when": "present on a resolved graph only — the empty answer omits it entirely"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"position\"",
+                    "when": "per node — the saved position when one exists, the layout’s otherwise"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"isViolation\"",
+                    "when": "per edge — a dependency violation decorates the edge it runs along"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a graph, or `{\"nodes\":[],\"edges\":[]}` when nothing resolves — an unknown `analysisId` is empty, never a 404"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/put-api-repos-id-graph-positions",
+      "type": "api",
+      "title": "PUT /api/repos/{id}/graph/positions",
+      "entry": {
+        "method": "PUT",
+        "path": "/api/repos/{id}/graph/positions"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "PUT",
+          "path": "/api/repos/{id}/graph/positions"
+        }
+      ],
+      "fingerprint": "sha256:fc644efd752ca011eb5aa2793df28da61cc477223e8ea24eac9a641737e159fb",
+      "contract": {
+        "summary": "Save the dragged node positions for one level.",
+        "commands": [
+          {
+            "path": [
+              "PUT",
+              "/api/repos/{id}/graph/positions"
+            ],
+            "description": "Positions arrive uuid-keyed and are translated to STABLE NAME keys before they are written, so they survive the next analysis. The branch they are stored under is LATEST’s branch, never a query parameter — which is why this route needs an analysis to exist at all.",
+            "options": [
+              {
+                "flag": "level",
+                "takesValue": true,
+                "valueRequired": false,
+                "default": "services",
+                "description": "Query parameter. Which level’s positions these are. Applied as `services` when absent."
+              },
+              {
+                "flag": "positions",
+                "takesValue": true,
+                "valueRequired": true,
+                "description": "JSON body field. A map of node uuid → `{x, y}`. Rejected when absent or not an object; the entries themselves are not validated."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the stable-key map and the branch to scope by — absent is a 404"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/ui-state.json",
+                    "when": "merged with, not replaced"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"ok\"",
+                    "when": "the literal `{\"ok\":true}`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Invalid positions data",
+                    "when": "`positions` absent or not an object"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "No analysis found",
+                    "when": "no LATEST — there is no key map to translate against"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "saved"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "`positions` absent or not an object"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no LATEST analysis, or no registry entry carries the slug"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/ui-state.json",
+                    "when": "the positions, name-keyed, under this branch and level"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/delete-api-repos-id-graph-positions",
+      "type": "api",
+      "title": "DELETE /api/repos/{id}/graph/positions",
+      "entry": {
+        "method": "DELETE",
+        "path": "/api/repos/{id}/graph/positions"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "DELETE",
+          "path": "/api/repos/{id}/graph/positions"
+        }
+      ],
+      "fingerprint": "sha256:c16f6bf87d69f8ba1582c1d25d14b3a18ac1b520e3c1e386695b1b6446d4145c",
+      "contract": {
+        "summary": "Drop the saved positions for one branch and level — the Reset layout action.",
+        "commands": [
+          {
+            "path": [
+              "DELETE",
+              "/api/repos/{id}/graph/positions"
+            ],
+            "description": "The one graph route that reads `branch` from the query: the two PUTs derive it from LATEST instead. It needs no analysis, so it still answers 200 on a project that has never been analyzed.",
+            "options": [
+              {
+                "flag": "branch",
+                "takesValue": true,
+                "valueRequired": false,
+                "description": "Query parameter. Which branch’s saved layout to clear. Absent clears the entry stored under no branch — this is the only graph route that reads the parameter."
+              },
+              {
+                "flag": "level",
+                "takesValue": true,
+                "valueRequired": false,
+                "default": "services",
+                "description": "Query parameter. Which level to clear. Applied as `services` when absent."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/ui-state.json",
+                    "when": "the rest of the state is preserved"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"ok\"",
+                    "when": "the literal `{\"ok\":true}`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "cleared — including on a project with no analysis and nothing saved"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/ui-state.json",
+                    "when": "the branch+level positions entry, removed"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/put-api-repos-id-graph-collapsed",
+      "type": "api",
+      "title": "PUT /api/repos/{id}/graph/collapsed",
+      "entry": {
+        "method": "PUT",
+        "path": "/api/repos/{id}/graph/collapsed"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "PUT",
+          "path": "/api/repos/{id}/graph/collapsed"
+        }
+      ],
+      "fingerprint": "sha256:9661b1e171eb70e9529c93a566070748ca0b5aa96ef37941c6106fe0b5be7d31",
+      "contract": {
+        "summary": "Save which container nodes are collapsed at one level.",
+        "commands": [
+          {
+            "path": [
+              "PUT",
+              "/api/repos/{id}/graph/collapsed"
+            ],
+            "description": "The sibling of the positions PUT, with one difference that matters to a caller: its level defaults to `modules`, not `services`. Ids are translated to stable name keys the same way.",
+            "options": [
+              {
+                "flag": "level",
+                "takesValue": true,
+                "valueRequired": false,
+                "default": "modules",
+                "description": "Query parameter. Which level’s collapsed set this is. Applied as `modules` when absent — NOT `services`, unlike every other graph route."
+              },
+              {
+                "flag": "collapsedIds",
+                "takesValue": true,
+                "valueRequired": true,
+                "description": "JSON body field. An array of node uuids. Rejected when it is not an array; the ids themselves are not validated."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the stable-key map and the branch to scope by — absent is a 404"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/ui-state.json",
+                    "when": "merged with, not replaced"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"ok\"",
+                    "when": "the literal `{\"ok\":true}`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Invalid collapsedIds data",
+                    "when": "`collapsedIds` is not an array"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "No analysis found",
+                    "when": "no LATEST — there is no key map to translate against"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "saved"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "`collapsedIds` is not an array"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no LATEST analysis, or no registry entry carries the slug"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/ui-state.json",
+                    "when": "the collapsed ids, name-keyed, under this branch and level"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-files",
+      "type": "api",
+      "title": "GET /api/repos/{id}/files",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/files"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/files"
+        }
+      ],
+      "fingerprint": "sha256:de470bf9a75200f2934206421bda1344a0afe63d85d5f63505979b2bf07bcfad",
+      "contract": {
+        "summary": "The repo’s tracked file list — the Files tab tree.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/files"
+            ],
+            "description": "A `git ls-files` of the working tree, plus the untracked-but-not-ignored files when the caller asks for the working-tree view. Git-backed, so a directory that is not a git repository is refused with a 400 rather than served empty.",
+            "options": [
+              {
+                "flag": "ref",
+                "takesValue": true,
+                "valueRequired": false,
+                "choices": [
+                  "working-tree"
+                ],
+                "description": "Query parameter. The only value with an effect: `working-tree` appends `git ls-files --others --exclude-standard`, so files that exist but were never committed appear. Any other value, and absence, list tracked files only."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.git",
+                    "when": "the index — `git ls-files`"
+                  },
+                  {
+                    "path": "<repo>",
+                    "when": "the untracked, non-ignored files, under `ref=working-tree` only"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"root\"",
+                    "when": "the repo’s absolute path"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"files\"",
+                    "when": "repo-relative paths, tracked order first"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "The selected folder is not a git repository.",
+                    "when": "the registered directory is not a git working tree"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the listing rendered"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "the registered directory is not a git working tree"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  },
+                  {
+                    "exit": "500",
+                    "when": "the `git ls-files` invocation itself failed"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-file-content",
+      "type": "api",
+      "title": "GET /api/repos/{id}/file-content",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/file-content"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/file-content"
+        }
+      ],
+      "fingerprint": "sha256:1e6872db20b7b3cb33ffeb6af89b08938de05c15d3d4e5cb7965f2430128f669",
+      "contract": {
+        "summary": "One file’s contents plus its editor language — the Files tab viewer.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/file-content"
+            ],
+            "description": "Reads from git HEAD by default and from disk under `ref=working-tree`. The HEAD read falls back to disk when the blob is missing (a new file), so the default view still shows an uncommitted file. The path is resolved and checked against the repo root before anything is read.",
+            "options": [
+              {
+                "flag": "path",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "repo-relative path",
+                "description": "Query parameter. The file to read. REQUIRED — absent is a 400. Resolved against the repo root and refused with a 403 if it escapes it."
+              },
+              {
+                "flag": "ref",
+                "takesValue": true,
+                "valueRequired": false,
+                "choices": [
+                  "working-tree"
+                ],
+                "description": "Query parameter. `working-tree` reads the file from disk. Anything else, including absence, reads `HEAD:<path>` from git and falls back to disk when git has no such blob."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.git",
+                    "when": "the `HEAD:<path>` blob, unless `ref=working-tree`"
+                  },
+                  {
+                    "path": "<repo>/<path>",
+                    "when": "the working-tree file — under `ref=working-tree`, or as the HEAD read’s fallback"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"content\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"language\"",
+                    "when": "from a closed extension map; an unmapped extension reads `text`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Missing \"path\" query parameter",
+                    "when": "no `path`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Path traversal not allowed",
+                    "when": "the resolved path escapes the repo root"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "File not found",
+                    "when": "neither git nor the disk has it"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Path is not a file",
+                    "when": "the path names a directory"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "The selected folder is not a git repository.",
+                    "when": "the default (HEAD) read on a directory that is not a git working tree"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the file read"
+                  },
+                  {
+                    "exit": "400",
+                    "when": "no `path`, the path names a directory, or the repo is not a git working tree"
+                  },
+                  {
+                    "exit": "403",
+                    "when": "the resolved path escapes the repo root"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no such file in git or on disk"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-violations",
+      "type": "api",
+      "title": "GET /api/repos/{id}/violations",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/violations"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/violations"
+        }
+      ],
+      "fingerprint": "sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02",
+      "contract": {
+        "summary": "The violation list, filtered and paged — the Home and Files views read it.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/violations"
+            ],
+            "description": "One route, two response SHAPES: a bare array by default, and a `{violations, total}` envelope as soon as `limit` or `offset` is greater than zero. Rules disabled in `config.json` are filtered out first; results are sorted by severity, then newest first.",
+            "options": [
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to read. Absent, or equal to the current LATEST id, serves LATEST; the id of the stored diff serves the working-tree graph out of `diff.json`; anything else is looked up as a historical per-analysis file. An id that resolves to nothing is not an error — the route serves its empty answer."
+              },
+              {
+                "flag": "file",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "path",
+                "description": "Query parameter. Keep only code violations in this file. Matched against both the absolute path and the value as given, so a repo-relative path works."
+              },
+              {
+                "flag": "status",
+                "takesValue": true,
+                "valueRequired": false,
+                "choices": [
+                  "active",
+                  "resolved",
+                  "all"
+                ],
+                "default": "active",
+                "description": "Query parameter. Which lifecycle states to include. `active` is `new` + `unchanged`. Anything outside the three values reads as `active`, silently — the parse is a two-branch ternary, not a validation."
+              },
+              {
+                "flag": "severity",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "list",
+                "choices": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "info"
+                ],
+                "description": "Query parameter. Comma-separated severities to include. Values are trimmed and lower-cased, and any value outside the five is DROPPED rather than refused — a filter of only unknown values leaves an empty list, which is then treated as no filter at all (probe-verified: `?severity=bogus` returns the unfiltered set)."
+              },
+              {
+                "flag": "limit",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "n",
+                "default": 0,
+                "description": "Query parameter. Page size. `parseInt` with an `|| 0` fallback, so a non-numeric value, a zero, and an absent parameter are all \"no limit\" — the whole filtered set comes back."
+              },
+              {
+                "flag": "offset",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "n",
+                "default": 0,
+                "description": "Query parameter. How many to skip. Same `parseInt || 0` parse. A non-zero offset alone (no limit) switches the response to the envelope shape but pages nothing — the slice only applies when a limit is set."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default violation set"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis — the active set is replayed forward from the delta chain"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules`, filtered out before any other filter"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"violations\"",
+                    "when": "`limit` or `offset` greater than zero — the envelope shape"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"total\"",
+                    "when": "the envelope’s count of the WHOLE filtered set, not of the page"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"ruleKey\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"severity\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"status\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"filePath\"",
+                    "when": "code violations carry it; architecture violations do not"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"lineStart\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"fixPrompt\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a bare array by default, the `{violations,total}` envelope when paged — `[]` when nothing has been analyzed"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-violations-summary",
+      "type": "api",
+      "title": "GET /api/repos/{id}/violations/summary",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/violations/summary"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/violations/summary"
+        }
+      ],
+      "fingerprint": "sha256:b0e7efb3a7cec634dc26a5411d615d13fa03f29d51076f0aa6561974658012dd",
+      "contract": {
+        "summary": "Violation counts by file and by severity — the Files tree’s severity dots.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/violations/summary"
+            ],
+            "description": "Counts only the `new` and `unchanged` states. A historical `analysisId` replays the delta chain so the summary agrees with the list route for the same id. No analysis at all is a 200 whose totals are zero, never a 404.",
+            "options": [
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to read. Absent, or equal to the current LATEST id, serves LATEST; the id of the stored diff serves the working-tree graph out of `diff.json`; anything else is looked up as a historical per-analysis file. An id that resolves to nothing is not an error — the route serves its empty answer."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default set, and the id the `analysisId` is compared against"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules`, filtered out before counting"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"total\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"byFile\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"bySeverity\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"highestSeverityByFile\"",
+                    "when": "critical outranks high outranks medium outranks low outranks info"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the counts — all-zero and all-empty when nothing has been analyzed, or when the historical id resolves to nothing"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-databases",
+      "type": "api",
+      "title": "GET /api/repos/{id}/databases",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/databases"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/databases"
+        }
+      ],
+      "fingerprint": "sha256:b2443cee1c0ac52dfa88bca0dd213539265f7fb492ed38bdcbdba0428c61e669",
+      "contract": {
+        "summary": "The databases in the analyzed graph, with their connected services — the Databases tab.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/databases"
+            ],
+            "description": "Reads the graph the `analysisId` resolves to, so a historical or diff view shows the databases that existed then rather than LATEST’s. `tableCount` is derived here; the tables themselves are on the schema route.",
+            "options": [
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to read. Absent, or equal to the current LATEST id, serves LATEST; the id of the stored diff serves the working-tree graph out of `diff.json`; anything else is looked up as a historical per-analysis file. An id that resolves to nothing is not an error — the route serves its empty answer."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default graph"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`analysisId` naming the stored diff"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"type\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"driver\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"tableCount\"",
+                    "when": "the length of the stored table list, `0` when the graph carries none"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"connectedServices\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"connections\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a bare array — `[]` when no graph resolves, never a 404"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-databases-dbid-schema",
+      "type": "api",
+      "title": "GET /api/repos/{id}/databases/{dbId}/schema",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/databases/{dbId}/schema"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/databases/{dbId}/schema"
+        }
+      ],
+      "fingerprint": "sha256:6e14e97deee5dd83251e680858d732b46be32d8d3086ff359eb626cf352ed00b",
+      "contract": {
+        "summary": "One database’s tables and relations — the schema detail.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/databases/{dbId}/schema"
+            ],
+            "description": "The detail behind a row of the databases list. A graph that does not resolve and an unknown database id answer the same 404, so a caller cannot tell them apart from the response.",
+            "options": [
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to read. Absent, or equal to the current LATEST id, serves LATEST; the id of the stored diff serves the working-tree graph out of `diff.json`; anything else is looked up as a historical per-analysis file. An id that resolves to nothing is not an error — the route serves its empty answer."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              },
+              {
+                "name": "dbId",
+                "required": true,
+                "variadic": false,
+                "description": "The database node’s uuid, as `GET /api/repos/{id}/databases` reports it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default graph"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`analysisId` naming the stored diff"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"type\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"driver\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"tables\"",
+                    "when": "empty for a store the analyzer found no schema for — a redis node, for instance"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"relations\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Database not found",
+                    "when": "no graph resolved, or no database in it carries `{dbId}`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the schema"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no graph resolved, or the graph carries no such database"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-flows",
+      "type": "api",
+      "title": "GET /api/repos/{id}/flows",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/flows"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/flows"
+        }
+      ],
+      "fingerprint": "sha256:bf247f29aeda1c55b3cbb214d494a4b2f33c2b4b454ebb8d5d1141e1ffb66c41",
+      "contract": {
+        "summary": "The code flows of the analyzed graph, each with a computed severity — the Flows tab.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/flows"
+            ],
+            "description": "Flows come from whichever graph the `analysisId` resolves to; the severities are computed against the ACTIVE violation set matching that same id, so the two halves of the response always describe one analysis.",
+            "options": [
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to read. Absent, or equal to the current LATEST id, serves LATEST; the id of the stored diff serves the working-tree graph out of `diff.json`; anything else is looked up as a historical per-analysis file. An id that resolves to nothing is not an error — the route serves its empty answer."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default graph and its active violations"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`analysisId` naming the stored diff — the graph and the composed active set"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules`, filtered out of the set the severities are computed from"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"flows\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"severities\"",
+                    "when": "flow id → the worst severity on its path; a flow with no violation is absent from the map"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"entryService\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"stepCount\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "`{\"flows\":[],\"severities\":{}}` when no graph resolves — never a 404"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-flows-flowid",
+      "type": "api",
+      "title": "GET /api/repos/{id}/flows/{flowId}",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/flows/{flowId}"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/flows/{flowId}"
+        }
+      ],
+      "fingerprint": "sha256:2c194b630858971100167dd46889b7aac43153a0f328ce55e8c575f3df44a941",
+      "contract": {
+        "summary": "One flow with its ordered steps — the flow detail.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/flows/{flowId}"
+            ],
+            "description": "The same graph resolution as the list route. A graph that does not resolve and an unknown flow id answer the same 404.",
+            "options": [
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": true,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to read. Absent, or equal to the current LATEST id, serves LATEST; the id of the stored diff serves the working-tree graph out of `diff.json`; anything else is looked up as a historical per-analysis file. An id that resolves to nothing is not an error — the route serves its empty answer."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              },
+              {
+                "name": "flowId",
+                "required": true,
+                "variadic": false,
+                "description": "The flow’s uuid, as `GET /api/repos/{id}/flows` reports it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default graph"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`analysisId` naming the stored diff"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"description\"",
+                    "when": "`null` until the flow has been enriched"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"entryService\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"entryMethod\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"category\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"trigger\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"stepCount\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"steps\"",
+                    "when": "ordered by `stepOrder`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Flow not found",
+                    "when": "no graph resolved, or no flow in it carries `{flowId}`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "the flow"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no graph resolved, or the graph carries no such flow"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/post-api-repos-id-flows-flowid-enrich",
+      "type": "api",
+      "title": "POST /api/repos/{id}/flows/{flowId}/enrich",
+      "entry": {
+        "method": "POST",
+        "path": "/api/repos/{id}/flows/{flowId}/enrich"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "POST",
+          "path": "/api/repos/{id}/flows/{flowId}/enrich"
+        }
+      ],
+      "fingerprint": "sha256:99023d433bff55e68647d4adae6570bb79b1c7daf17e339b08b629c35d862b13",
+      "contract": {
+        "summary": "Describe one flow with the LLM and persist the description. The one Code Analysis read surface that spends.",
+        "commands": [
+          {
+            "path": [
+              "POST",
+              "/api/repos/{id}/flows/{flowId}/enrich"
+            ],
+            "description": "Scoped to LATEST, because the enrichment is written back into `LATEST.json` and a historical or diff view has no persistence target. The response is the flow re-read AFTER the write, so it carries the new description. Synchronous: unlike the analyze trigger, the model call happens inside the request.",
+            "options": [],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              },
+              {
+                "name": "flowId",
+                "required": true,
+                "variadic": false,
+                "description": "The flow’s uuid. Resolved against LATEST only — a `analysisId` query would not be read here."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the flow, before and again after the write"
+                  },
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "the saved LLM transport, re-installed per call (mtime-cached)"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"description\"",
+                    "when": "the enriched text this call just wrote"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"steps\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Flow not found",
+                    "when": "LATEST carries no flow with that id"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "enriched and persisted"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "LATEST carries no flow with that id"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  },
+                  {
+                    "exit": "500",
+                    "when": "the model call failed, or API transport mode is selected with an unusable configuration"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the flow’s description, persisted in place"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-analytics-trend",
+      "type": "api",
+      "title": "GET /api/repos/{id}/analytics/trend",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/analytics/trend"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/analytics/trend"
+        }
+      ],
+      "fingerprint": "sha256:365626aaf7ec913b9c51d6b315ad7b04e1058e931f311680edf4857b433d7cd5",
+      "contract": {
+        "summary": "The violation count over the last N analyses — the Home tab’s trend chart.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/analytics/trend"
+            ],
+            "description": "Walks `history.json`, drops diff analyses, filters by branch, truncates at `analysisId` INCLUSIVE when one is given, and keeps the LAST `limit` entries. Two paths: with no disabled rules the cached per-entry aggregates are served as they were frozen at analyze time; with any disabled rule every point is recomputed against the live active set, one delta-chain walk per point.",
+            "options": [
+              {
+                "flag": "branch",
+                "takesValue": true,
+                "valueRequired": false,
+                "description": "Query parameter. Keep only history entries recorded on this branch. Read here, unlike on the graph routes — the entry’s own `branch` is what is compared."
+              },
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "uuid",
+                "description": "Query parameter. Truncate the timeline at this analysis, inclusive, so no point sits after the one being viewed. An id absent from the filtered history leaves the window untouched rather than emptying it."
+              },
+              {
+                "flag": "limit",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "n",
+                "default": 20,
+                "description": "Query parameter. How many of the MOST RECENT points to keep. `parseInt` base 10, applied only when the parameter is present — absent means 20. A non-numeric value reaches the slice as NaN."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/history.json",
+                    "when": "the timeline, and the cached per-entry aggregates of the fast path"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules` — a non-empty list switches every point to the recomputed path"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the recomputed path — the baseline each point’s active set is replayed from"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "the recomputed path — one delta-chain walk per point"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"points\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"analysisId\"",
+                    "when": "per point"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"date\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"branch\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"total\"",
+                    "when": "the active count at that point"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"new\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"unchanged\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"resolved\"",
+                    "when": "always the value cached at analyze time — NOT re-filtered on the recomputed path, so a disabled rule can still inflate it"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"critical\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"high\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"medium\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"low\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"info\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "`{\"points\":[]}` when nothing has been analyzed or the branch matches no entry"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-analytics-breakdown",
+      "type": "api",
+      "title": "GET /api/repos/{id}/analytics/breakdown",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/analytics/breakdown"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/analytics/breakdown"
+        }
+      ],
+      "fingerprint": "sha256:739fdb17d885ac61cba1871b29aeadec5cac6a33e6495afb21dff9993cef5e2f",
+      "contract": {
+        "summary": "Active violations counted by rule category and by severity.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/analytics/breakdown"
+            ],
+            "description": "One pass over the active set the `analysisId` resolves to. The category is the rule key’s FIRST SEGMENT, so it is derived, not stored — a key with no slash counts under `unknown`.",
+            "options": [
+              {
+                "flag": "branch",
+                "takesValue": true,
+                "valueRequired": false,
+                "description": "Query parameter. Applies in LATEST mode ONLY: when LATEST sits on another branch the answer is empty. An explicit `analysisId` skips the filter entirely, because the branch is implicit in the analysis."
+              },
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to count. Absent or LATEST’s own id counts LATEST; the stored diff’s id composes the active-if-committed set; anything else replays the historical chain."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default active set, and the branch the filter compares against"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`analysisId` naming the stored diff"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules`, filtered out before counting"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"byCategory\"",
+                    "when": "keyed by the rule key’s first segment — `architecture`, `code-quality`, `security`, and so on"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"bySeverity\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"total\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "all-empty maps and a zero total when nothing resolves — never a 404"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-analytics-top-offenders",
+      "type": "api",
+      "title": "GET /api/repos/{id}/analytics/top-offenders",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/analytics/top-offenders"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/analytics/top-offenders"
+        }
+      ],
+      "fingerprint": "sha256:20d30c8fda90f6423876dc6b99ee8c4fa849502a5a9477da7e58bd99b961c8f5",
+      "contract": {
+        "summary": "The ten services and modules carrying the most violations.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/analytics/top-offenders"
+            ],
+            "description": "Counts only violations that carry BOTH a target id and a target name, so an unattributed one is invisible here. Ranks services and modules separately, takes ten of each, merges the twenty and cuts the merged list to ten — so one kind can crowd the other out entirely.",
+            "options": [
+              {
+                "flag": "branch",
+                "takesValue": true,
+                "valueRequired": false,
+                "description": "Query parameter. Applies in LATEST mode only, exactly as on the breakdown route."
+              },
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "uuid",
+                "description": "Query parameter. Which analysis to rank. Echoed back on the response so a caller can tell which set it got."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the default active set, and the id echoed back when the query named none"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/diff.json",
+                    "when": "`analysisId` naming the stored diff"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "`analysisId` naming a historical analysis"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "`disabledRules`, filtered out before ranking"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"offenders\"",
+                    "when": "at most ten, services and modules interleaved by count"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"analysisId\"",
+                    "when": "the query’s value, else LATEST’s id, else the EMPTY STRING when nothing has been analyzed"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"kind\"",
+                    "when": "per offender — `service` or `module`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"id\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"violationCount\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"criticalCount\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"highCount\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "`{\"offenders\":[],\"analysisId\":\"\"}` when nothing has been analyzed"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-repos-id-analytics-resolution",
+      "type": "api",
+      "title": "GET /api/repos/{id}/analytics/resolution",
+      "entry": {
+        "method": "GET",
+        "path": "/api/repos/{id}/analytics/resolution"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/repos/{id}/analytics/resolution"
+        }
+      ],
+      "fingerprint": "sha256:88225bec5506b91017f0b37c335b03e03a126cd6672764fcb48cd85e58e9a8f6",
+      "contract": {
+        "summary": "How much gets fixed and how fast — resolved, active, rate, and the stale count.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/repos/{id}/analytics/resolution"
+            ],
+            "description": "The one analytics route that reads EVERY stored snapshot: it walks them chronologically, pairing each resolution with the `firstSeenAt` of the violation it closes to average a time-to-resolve, and stops after the analysis `analysisId` names. Staleness is a fixed seven-day threshold, reported alongside the count so a reader never has to know it.",
+            "options": [
+              {
+                "flag": "branch",
+                "takesValue": true,
+                "valueRequired": false,
+                "description": "Query parameter. Filters the SNAPSHOT WALK by each snapshot’s branch. It does not filter the active set the same call reports, so a branch-scoped rate is computed against an unscoped active count."
+              },
+              {
+                "flag": "analysisId",
+                "takesValue": true,
+                "valueRequired": false,
+                "valueHint": "uuid",
+                "description": "Query parameter. Stop the walk after this analysis, and take the active set as of it. Absent, the walk runs to the end and the active set is LATEST’s."
+              }
+            ],
+            "positionals": [
+              {
+                "name": "id",
+                "required": true,
+                "variadic": false,
+                "description": "The registry SLUG of the project (`truecourse`, `acme-api`), not a path and not a uuid — `registerProject` derives it from the directory name and dedupes it."
+              }
+            ],
+            "io": {
+              "consumes": {
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "relocates the user-level directory the project registry lives in"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the `{id}` slug lookup — `projectResolver`, then the handler’s own `resolveProjectForRequest`"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/analyses/<iso>_<short-uuid>.json",
+                    "when": "every snapshot, in order — this route is the store’s heaviest reader"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/LATEST.json",
+                    "when": "the active set when no `analysisId` is given"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/config.json",
+                    "when": "only on the `analysisId` path, through the replay; the default LATEST path does NOT subtract `disabledRules` from the active count"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"avgTimeToResolveMs\"",
+                    "when": "`null` when no resolution could be paired with a first-seen timestamp"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"totalResolved\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"totalActive\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"resolutionRate\"",
+                    "when": "resolved / (resolved + active); exactly `0` when both are zero"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"staleCount\"",
+                    "when": "active violations first seen more than `staleDays` ago"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"staleDays\"",
+                    "when": "the constant 7 — reported so the count is readable without knowing the threshold"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "not found",
+                    "when": "the unknown-slug 404 — `Project \"<id>\" not found`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "zeros and a `null` average when nothing has been analyzed"
+                  },
+                  {
+                    "exit": "404",
+                    "when": "no registry entry carries the slug `{id}`"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "`projectResolver` refreshes the entry’s `lastOpened` on every request it admits"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "api/get-api-rules",
+      "type": "api",
+      "title": "GET /api/rules",
+      "entry": {
+        "method": "GET",
+        "path": "/api/rules"
+      },
+      "steps": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/rules"
+        }
+      ],
+      "fingerprint": "sha256:d3bf12f18ab99c3f23a31127abf9ff58518a01128ee06f238460056e4a25ad0c",
+      "contract": {
+        "summary": "The shipped rule catalogue, with no project in the picture.",
+        "commands": [
+          {
+            "path": [
+              "GET",
+              "/api/rules"
+            ],
+            "description": "The only mapped operation that is not under `/api/repos`. It takes no project, reads no store, and reports each rule’s own shipped default — so `enabled` here answers \"does TrueCourse ship this on\", while the per-project route answers \"is it on for this repo\".",
+            "options": [],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "env": [],
+                "reads": [
+                  {
+                    "path": "built-in rule catalog",
+                    "when": "TypeScript constants in the analyzer — no file, no project, no config"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "\"key\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"category\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"domain\"",
+                    "when": "derived from the key’s first segment; absent when that prefix is not a known domain"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"name\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"description\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"enabled\"",
+                    "when": "the rule’s SHIPPED default — no project override is applied on this route"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"severity\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"type\"",
+                    "when": "`deterministic` or `llm`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"languageSupport\""
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"prompt\"",
+                    "when": "only on a rule that declares one"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"engine\"",
+                    "when": "only on a rule that declares one"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"contextRequirement\"",
+                    "when": "only on a rule that declares one"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "\"error\"",
+                    "when": "every failure status — one envelope, `{ \"error\": \"<message>\" }`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "200",
+                    "when": "a bare array of the whole catalogue"
+                  },
+                  {
+                    "exit": "401",
+                    "when": "an enterprise session layer is active and the request carries no valid session — a transparent pass-through in community"
+                  }
+                ],
+                "writes": []
+              }
+            }
+          }
+        ]
+      }
     }
   ],
   "source": {
-    "cli": "tree"
+    "cli": "tree",
+    "api": "tree"
   }
 }

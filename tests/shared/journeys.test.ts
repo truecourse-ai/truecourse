@@ -785,6 +785,14 @@ describe('the reference catalog', () => {
     commands(id).find((c) => c.path.join(' ') === commandPath)!.io!.consumes!.reads!
 
   it('loads green, every contract included', () => {
+    // The dashboard server's HTTP API joined the catalog as a REALIZATION surface
+    // (2026-08-10): journeys for the routes the Code Analysis section really calls,
+    // so a flow the docs state can be realized through them. Its own flows are not
+    // implied — the docs do not promise the API as a feature. 25 operations in the
+    // first pass, 32 once analytics and the rule catalogue joined the same day —
+    // the whole set the client reaches while serving that section. Order is
+    // REGISTRATION order, which is why the two repos-router rule routes sit up with
+    // the other repos ones and `/api/rules`, mounted last, is last.
     expect(catalog.journeys.map((j) => j.id)).toEqual([
       'cli/add',
       'cli/analyze',
@@ -793,12 +801,48 @@ describe('the reference catalog', () => {
       'cli/list',
       'cli/root',
       'cli/rules',
+      'api/get-api-capabilities',
+      'api/post-api-repos',
+      'api/get-api-repos',
+      'api/get-api-repos-browse',
+      'api/get-api-repos-id',
+      'api/delete-api-repos-id',
+      'api/get-api-repos-id-rules',
+      'api/patch-api-repos-id-rules-rulekey',
+      'api/post-api-repos-id-analyses',
+      'api/post-api-repos-id-analyses-cancel',
+      'api/get-api-repos-id-analyses',
+      'api/get-api-repos-id-analyses-diff',
+      'api/get-api-repos-id-analyses-analysisid-usage',
+      'api/delete-api-repos-id-analyses-analysisid',
+      'api/get-api-repos-id-graph',
+      'api/put-api-repos-id-graph-positions',
+      'api/delete-api-repos-id-graph-positions',
+      'api/put-api-repos-id-graph-collapsed',
+      'api/get-api-repos-id-files',
+      'api/get-api-repos-id-file-content',
+      'api/get-api-repos-id-violations',
+      'api/get-api-repos-id-violations-summary',
+      'api/get-api-repos-id-databases',
+      'api/get-api-repos-id-databases-dbid-schema',
+      'api/get-api-repos-id-flows',
+      'api/get-api-repos-id-flows-flowid',
+      'api/post-api-repos-id-flows-flowid-enrich',
+      'api/get-api-repos-id-analytics-trend',
+      'api/get-api-repos-id-analytics-breakdown',
+      'api/get-api-repos-id-analytics-top-offenders',
+      'api/get-api-repos-id-analytics-resolution',
+      'api/get-api-rules',
     ])
     // Every command of every tree now answers "what do I read?" — none is silent.
+    // 22 over the cli seven; 54 with the api surface's 32 operations (2026-08-10),
+    // each of which is one contract entry, because an operation is not a tree.
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
-    expect(all).toHaveLength(22)
+    expect(all).toHaveLength(54)
     expect(all.every((c) => c.io?.consumes?.reads !== undefined)).toBe(true)
-    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(67)
+    // 67 cli reads + 105 api reads (the registry lookup, the store files each route
+    // opens, the git objects and the rule catalogue it consults) = 172.
+    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(172)
   })
 
   it('is 100% structured facts — no command carries a sentence about behavior', () => {
@@ -808,13 +852,14 @@ describe('the reference catalog', () => {
     }
     // The count the schema now guarantees: every io entry is one of the seven
     // fact kinds. 1530 while cli/spec and cli/guard were in the catalog
-    // (2026-08-09); back to 443 with the analyze-only corpus (2026-08-10).
+    // (2026-08-09); 443 with the analyze-only corpus (2026-08-10); 997 once the
+    // api surface joined the same day (554 of them on its 32 operations).
     const facts = all.reduce((n, c) => {
       const io = c.io ?? {}
       const sides = [io.consumes ?? {}, io.produces ?? {}]
       return n + sides.reduce((m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0), 0)
     }, 0)
-    expect(facts).toBe(443)
+    expect(facts).toBe(997)
   })
 
   it('carries the row grammar of every enumerated listing the CLI prints', () => {
@@ -823,6 +868,8 @@ describe('the reference catalog', () => {
 
     // 89 with the spec and guard trees' listings (2026-08-09); back to the
     // 25 shapes of the 7-journey catalog with those trees gone (2026-08-10).
+    // The api surface adds none and the number holds: a row grammar is the shape
+    // of a PRINTED line, and a JSON response has no such thing.
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
     expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(25)
     expect(rowsOf('cli/analyze', 'truecourse analyze')).toHaveLength(3)
@@ -866,6 +913,8 @@ describe('the reference catalog', () => {
   })
 
   it('says how every prompt is answered — select and text on Enter, a confirm on a keypress', () => {
+    // 40, and the api surface leaves it there: an HTTP operation asks nothing on
+    // stdin, so its contracts carry no prompt list at all (2026-08-10).
     const prompts = catalog.journeys
       .flatMap((j) => j.contract!.commands)
       .flatMap((c) => c.io?.consumes?.prompts ?? [])
@@ -1012,6 +1061,7 @@ describe('the reference catalog', () => {
     }
     // A command established as asking nothing has no dialogue to order — and the
     // catalog states that by carrying no sequence, not by carrying an empty one.
+    // The api operations are in this set too (2026-08-10): no prompts, no sequence.
     for (const command of all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) === 0)) {
       expect(command.sequence, command.path.join(' ')).toBeUndefined()
     }
@@ -1030,7 +1080,7 @@ describe('the reference catalog', () => {
   it('the sequence is a REGION, not a fact — the io tally does not move for it', () => {
     // The decision the pins above encode: a sequence entry is the ORDER over
     // questions the prompt facts already carry, so counting it would count every
-    // question twice. 443 io facts with sequences, 443 without.
+    // question twice. 997 io facts with sequences, 997 without.
     const all = catalog.journeys.flatMap((j) => j.contract!.commands)
     const facts = (command: JourneyCommandContract) => {
       const io = command.io ?? {}
@@ -1039,7 +1089,7 @@ describe('the reference catalog', () => {
         0,
       )
     }
-    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(443)
+    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(997)
     // …and the sequences really are there to have been excluded.
     expect(all.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0)).toBe(40)
   })
@@ -1075,7 +1125,9 @@ describe('the reference catalog', () => {
     // own work — every sequence that carries it opens with it.
     const asked = catalog.journeys
       .flatMap((j) => j.contract!.commands)
-      .filter((c) => c.io!.consumes!.prompts!.some((p) => p.marker.startsWith('How should TrueCourse run')))
+      // `?? []` because a contract may carry no prompt list at all — the api
+      // operations do not, having no stdin to ask on (2026-08-10).
+      .filter((c) => (c.io?.consumes?.prompts ?? []).some((p) => p.marker.startsWith('How should TrueCourse run')))
     // Every interactive command in the catalog can be asked it — 13 of them over
     // the analyze-only corpus (2026-08-10); it was >30 with the spec and guard trees.
     expect(asked).toHaveLength(13)
@@ -1132,7 +1184,310 @@ describe('the reference catalog', () => {
     expect(fingerprints['cli/config']).toBe(
       'sha256:fd58e236b50daea8bc5799cfdff4228e9a6d3ef9a54529b14fa09ec45b47a9ed',
     )
-    expect(new Set(Object.values(fingerprints)).size).toBe(7)
+    // 7 while the catalog was cli-only; 39 with the api surface (2026-08-10). No
+    // two journeys share an identity — an operation and a command never can.
+    expect(new Set(Object.values(fingerprints)).size).toBe(39)
+  })
+
+  /**
+   * The api surface — the dashboard server's HTTP routes, added 2026-08-10 as a
+   * REALIZATION surface (plan §2: journeys realize, never originate). Derived from
+   * the route registrations under `apps/dashboard/server/src/routes/`, narrowed to
+   * what the client really calls while serving the Code Analysis section plus the
+   * repo-level plumbing around it. What is pinned here is the SHAPE the derivation
+   * has to produce for an operation, since nothing else in the corpus fixes it.
+   */
+  describe('the api surface', () => {
+    const api = catalog.journeys.filter((j) => j.type === 'api')
+    const operation = (id: string) => api.find((j) => j.id === id)!
+    const contractOf = (id: string) => operation(id).contract!.commands[0]
+
+    it('is 32 operations, each rooted at its own method + path', () => {
+      expect(api).toHaveLength(32)
+      for (const journey of api) {
+        // Operation-rooted: the entry is the method/path pair, never an argv path.
+        const entry = journey.entry
+        if (!('method' in entry)) throw new Error(`${journey.id} is not operation-rooted`)
+        expect(journeyEntryLabel(entry), journey.id).toBe(journey.title)
+        // One request step, and it restates the entry — an operation is not a tree,
+        // so the catalog's per-command steps have nothing to enumerate here.
+        expect(journey.steps, journey.id).toHaveLength(1)
+        expect(journey.steps[0]).toEqual({ kind: 'request', method: entry.method, path: entry.path })
+        // …and exactly one contract entry, keyed the same way.
+        const commands = journey.contract!.commands
+        expect(commands, journey.id).toHaveLength(1)
+        expect(commands[0].path.join(' '), journey.id).toBe(journey.title)
+      }
+    })
+
+    it('canonicalizes every express param into the `{name}` form', () => {
+      // The identity rule of `canonicalRoutePath`: an operation has ONE identity
+      // whichever side declared it, so `:id` never survives into a journey.
+      for (const journey of api) {
+        const entry = journey.entry
+        if (!('method' in entry)) throw new Error(`${journey.id} is not operation-rooted`)
+        expect(entry.path, journey.id).toBe(canonicalRoutePath(entry.path))
+        expect(entry.path.includes(':'), journey.id).toBe(false)
+      }
+      expect(operation('api/get-api-repos-id-databases-dbid-schema').entry).toEqual({
+        method: 'GET',
+        path: '/api/repos/{id}/databases/{dbId}/schema',
+      })
+    })
+
+    it('carries a path parameter as a positional and a query or body field as an option', () => {
+      // 33 positionals over 32 operations: `{id}` on all 29 repo-scoped ones, plus
+      // the five second params (`analysisId` twice, `dbId`, `flowId`, `ruleKey`),
+      // and none at all on `/api/capabilities` and `/api/rules`.
+      expect(api.reduce((n, j) => n + j.contract!.commands[0].positionals!.length, 0)).toBe(33)
+      expect(contractOf('api/get-api-rules').positionals).toEqual([])
+      expect(contractOf('api/patch-api-repos-id-rules-rulekey').positionals!.map((p) => p.name)).toEqual([
+        'id',
+        'ruleKey',
+      ])
+      expect(contractOf('api/get-api-capabilities').positionals).toEqual([])
+      expect(
+        contractOf('api/get-api-repos-id-analyses-analysisid-usage').positionals!.map((p) => p.name),
+      ).toEqual(['id', 'analysisId'])
+
+      // The grammar of the busiest read surface, complete: its five filters and
+      // the two paging parameters, with the value sets the code really enforces.
+      const violations = contractOf('api/get-api-repos-id-violations')
+      expect(violations.options!.map((o) => o.flag)).toEqual([
+        'analysisId',
+        'file',
+        'status',
+        'severity',
+        'limit',
+        'offset',
+      ])
+      expect(violations.options!.find((o) => o.flag === 'status')!.choices).toEqual([
+        'active',
+        'resolved',
+        'all',
+      ])
+      expect(violations.options!.find((o) => o.flag === 'status')!.default).toBe('active')
+      expect(violations.options!.find((o) => o.flag === 'severity')!.choices).toEqual([
+        'critical',
+        'high',
+        'medium',
+        'low',
+        'info',
+      ])
+
+      // A request BODY has no region of its own in the schema, so its fields ride
+      // the grammar with their location stated in the description — the one place
+      // the transform is lossy, recorded as G65 in `reference/transform-gaps.md`.
+      const analyze = contractOf('api/post-api-repos-id-analyses')
+      expect(analyze.options!.map((o) => o.flag)).toEqual(['mode', 'skipGit'])
+      expect(analyze.options!.find((o) => o.flag === 'mode')!.choices).toEqual(['full', 'diff'])
+      expect(analyze.options!.every((o) => o.description!.startsWith('JSON body field.'))).toBe(true)
+      expect(
+        contractOf('api/get-api-repos-id-violations').options!.every((o) =>
+          o.description!.startsWith('Query parameter.'),
+        ),
+      ).toBe(true)
+    })
+
+    it('records the two defaults that differ between the graph routes', () => {
+      // The trap a scenario author walks into: `level` is `services` everywhere
+      // except the collapsed PUT, where it is `modules`.
+      const level = (id: string) => contractOf(id).options!.find((o) => o.flag === 'level')!.default
+      expect(level('api/get-api-repos-id-graph')).toBe('services')
+      expect(level('api/put-api-repos-id-graph-positions')).toBe('services')
+      expect(level('api/delete-api-repos-id-graph-positions')).toBe('services')
+      expect(level('api/put-api-repos-id-graph-collapsed')).toBe('modules')
+      // And the one graph route that reads `branch` at all.
+      const hasBranch = (id: string) => contractOf(id).options!.some((o) => o.flag === 'branch')
+      expect(hasBranch('api/delete-api-repos-id-graph-positions')).toBe(true)
+      expect(hasBranch('api/get-api-repos-id-graph')).toBe(false)
+      expect(hasBranch('api/put-api-repos-id-graph-positions')).toBe(false)
+      expect(hasBranch('api/put-api-repos-id-graph-collapsed')).toBe(false)
+      // …while all four analytics reads DO read it — the same parameter name,
+      // honoured on one family and ignored on the other.
+      for (const id of [
+        'api/get-api-repos-id-analytics-trend',
+        'api/get-api-repos-id-analytics-breakdown',
+        'api/get-api-repos-id-analytics-top-offenders',
+        'api/get-api-repos-id-analytics-resolution',
+      ]) {
+        expect(hasBranch(id), id).toBe(true)
+      }
+    })
+
+    it('states a response status as an exit fact, one per condition', () => {
+      // 112 statuses over 32 operations. An operation's HTTP status has no fact kind
+      // of its own; it rides `exits`, whose field is deliberately a STRING (G66).
+      expect(api.reduce((n, j) => n + j.contract!.commands[0].io!.produces!.exits!.length, 0)).toBe(112)
+      const exits = (id: string) =>
+        contractOf(id).io!.produces!.exits!.map((e) => e.exit)
+      expect(exits('api/post-api-repos')).toEqual(['201', '400', '401', '500'])
+      expect(exits('api/delete-api-repos-id')).toEqual(['204', '404', '401', '500'])
+      expect(exits('api/post-api-repos-id-analyses')).toEqual(['202', '400', '404', '401', '500'])
+      expect(exits('api/get-api-repos-browse')).toEqual(['200', '400', '403', '404', '401', '500'])
+      // The gate above every `/api` route — and the one route mounted above IT.
+      const gated = api.filter((j) =>
+        j.contract!.commands[0].io!.produces!.exits!.some((e) => e.exit === '401'),
+      )
+      expect(gated).toHaveLength(31)
+      expect(exits('api/get-api-capabilities')).toEqual(['200'])
+      // `/api/rules` takes no project, so its only other answer is the gate's.
+      expect(exits('api/get-api-rules')).toEqual(['200', '401'])
+      // A rule key that names nothing shares the 404 with an unknown project.
+      expect(exits('api/patch-api-repos-id-rules-rulekey')).toEqual(['200', '400', '404', '401'])
+    })
+
+    it('names the store files each route reads, and the write the resolver does behind it', () => {
+      // The resolver's `lastOpened` touch is a real write on every project-scoped
+      // request, so every one of those contracts carries it — 23 of the 32, the
+      // ones mounted under `projectResolver`; the eight on the repos router,
+      // `/api/capabilities` and `/api/rules` are mounted without it.
+      const touching = api.filter((j) =>
+        j.contract!.commands[0].io!.produces!.writes!.some(
+          (w) => w.path === '~/.truecourse/registry.json' && w.when!.includes('lastOpened'),
+        ),
+      )
+      expect(touching).toHaveLength(23)
+      expect(
+        contractOf('api/get-api-repos-id-violations').io!.consumes!.reads!.map((r) => r.path),
+      ).toEqual([
+        '~/.truecourse/registry.json',
+        '<repo>/.truecourse/LATEST.json',
+        '<repo>/.truecourse/analyses/<iso>_<short-uuid>.json',
+        '<repo>/.truecourse/config.json',
+      ])
+      // The trigger is the one Code Analysis route that writes the analyze store.
+      const analyze = contractOf('api/post-api-repos-id-analyses').io!.produces!.writes!.map((w) => w.path)
+      expect(analyze).toContain('<repo>/.truecourse/.analyze.lock')
+      expect(analyze).toContain('<repo>/.truecourse/LATEST.json')
+      expect(analyze).toContain('<repo>/.truecourse/history.json')
+      expect(analyze).toContain('git stash')
+      // Reading is not writing: a read route's only write is the resolver's touch.
+      expect(contractOf('api/get-api-repos-id-graph').io!.produces!.writes!).toHaveLength(1)
+      // …and the four read routes mounted WITHOUT the resolver write nothing at
+      // all (the other two unscoped ones, the create and the delete, write on
+      // purpose).
+      for (const id of [
+        'api/get-api-capabilities',
+        'api/get-api-repos',
+        'api/get-api-repos-browse',
+        'api/get-api-repos-id',
+        'api/get-api-repos-id-rules',
+        'api/get-api-rules',
+      ]) {
+        expect(contractOf(id).io!.produces!.writes!, id).toEqual([])
+      }
+      // The rule toggle is the one mapped write that never leaves the project's
+      // own config — no store file, no registry entry.
+      expect(contractOf('api/patch-api-repos-id-rules-rulekey').io!.produces!.writes!).toEqual([
+        {
+          path: '<repo>/.truecourse/config.json',
+          when: '`disabledRules`, re-sorted on every write',
+        },
+      ])
+    })
+
+    it('carries the response shape as markers, never a schema', () => {
+      const markers = (id: string) =>
+        contractOf(id).io!.produces!.output!.map((o) => o.marker)
+      expect(markers('api/get-api-capabilities')).toContain('"edition"')
+      expect(markers('api/get-api-repos-id-violations-summary')).toEqual([
+        '"total"',
+        '"byFile"',
+        '"bySeverity"',
+        '"highestSeverityByFile"',
+        'not found',
+        '"error"',
+      ])
+      // The one envelope every failing route answers with.
+      const envelope = api.filter((j) =>
+        j.contract!.commands[0].io!.produces!.output!.some((o) => o.marker === '"error"'),
+      )
+      expect(envelope).toHaveLength(31)
+      // The two rule routes answer the same rows and differ in ONE promise, which
+      // is the only reason both exist — so both say it, on the field it is about.
+      const enabledWhen = (id: string) =>
+        contractOf(id).io!.produces!.output!.find((o) => o.marker === '"enabled"')!.when!
+      expect(enabledWhen('api/get-api-repos-id-rules')).toContain('disabledRules')
+      expect(enabledWhen('api/get-api-rules')).toContain('SHIPPED default')
+      // A response body is not a stream; the runner already carries an api response
+      // as the cli `stdout` analog, and the contract follows it (G67).
+      const streams = new Set(
+        api.flatMap((j) => j.contract!.commands[0].io!.produces!.output!.map((o) => o.stream)),
+      )
+      expect([...streams]).toEqual(['stdout'])
+    })
+
+    it('has an identity per operation, derived exactly as a cli journey’s is', () => {
+      // Literals, not a self-check — the same rule the cli seven live by. These are
+      // what an api scenario would ground on, so a moved digit here re-authors it.
+      expect(Object.fromEntries(api.map((j) => [j.id, j.fingerprint]))).toEqual({
+        'api/get-api-capabilities':
+          'sha256:35671d6e8a1da21d5d4fabf7b03e39607cea68e7ce3c031377faa655e43f0b97',
+        'api/post-api-repos':
+          'sha256:2d10b8ff8cd812c404917d27ef0b89f58cba8f409eb85f1594cecb9f539f6e90',
+        'api/get-api-repos':
+          'sha256:288caeaef838019c725acf5bad3eb1aa8d4d883311e00de99d84a000164952c1',
+        'api/get-api-repos-browse':
+          'sha256:f64324d3e86508ed41e97231a1a4e89a5f9074ad29484eaddece2f213724360a',
+        'api/get-api-repos-id':
+          'sha256:8139eb21d780082c7142d762043d3b9b4ab81bcbe882c6f517e5bbbbc1d0895b',
+        'api/delete-api-repos-id':
+          'sha256:37af64e610f65cff6459bd51e6674e8b7337b891bd32d16a1233a852d1edb047',
+        'api/post-api-repos-id-analyses':
+          'sha256:e2c66d7da2225688a8ab85384cca3038b3c89badf18f54953b39de22ee0fd816',
+        'api/post-api-repos-id-analyses-cancel':
+          'sha256:8f42693c90bb9a0a813dd872cd0ad18f94c8cad403dc9ebc636bde47c7ae5235',
+        'api/get-api-repos-id-analyses':
+          'sha256:9f14c34aa3bce7a0b7a932adbcacac3414f81efcbb05332005a13d4d338449a1',
+        'api/get-api-repos-id-analyses-diff':
+          'sha256:cab585f7169ec4e0f8071567521d233d19ee5f7a0e7de10d852b334e478ca586',
+        'api/get-api-repos-id-analyses-analysisid-usage':
+          'sha256:91344d31894b1c12d94356e93a840830605cc9adcefc201bf01d9eb949afcb17',
+        'api/delete-api-repos-id-analyses-analysisid':
+          'sha256:6424604b6da85b9e841bc352d62d4887f3c6d81b935e6d7a4ea21dcc32b303f5',
+        'api/get-api-repos-id-graph':
+          'sha256:83cb22b0c26aeab4dc33b3c0264dd45af164c1897d2fa2433082834d93610daa',
+        'api/put-api-repos-id-graph-positions':
+          'sha256:fc644efd752ca011eb5aa2793df28da61cc477223e8ea24eac9a641737e159fb',
+        'api/delete-api-repos-id-graph-positions':
+          'sha256:c16f6bf87d69f8ba1582c1d25d14b3a18ac1b520e3c1e386695b1b6446d4145c',
+        'api/put-api-repos-id-graph-collapsed':
+          'sha256:9661b1e171eb70e9529c93a566070748ca0b5aa96ef37941c6106fe0b5be7d31',
+        'api/get-api-repos-id-files':
+          'sha256:de470bf9a75200f2934206421bda1344a0afe63d85d5f63505979b2bf07bcfad',
+        'api/get-api-repos-id-file-content':
+          'sha256:1e6872db20b7b3cb33ffeb6af89b08938de05c15d3d4e5cb7965f2430128f669',
+        'api/get-api-repos-id-violations':
+          'sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02',
+        'api/get-api-repos-id-violations-summary':
+          'sha256:b0e7efb3a7cec634dc26a5411d615d13fa03f29d51076f0aa6561974658012dd',
+        'api/get-api-repos-id-databases':
+          'sha256:b2443cee1c0ac52dfa88bca0dd213539265f7fb492ed38bdcbdba0428c61e669',
+        'api/get-api-repos-id-databases-dbid-schema':
+          'sha256:6e14e97deee5dd83251e680858d732b46be32d8d3086ff359eb626cf352ed00b',
+        'api/get-api-repos-id-flows':
+          'sha256:bf247f29aeda1c55b3cbb214d494a4b2f33c2b4b454ebb8d5d1141e1ffb66c41',
+        'api/get-api-repos-id-flows-flowid':
+          'sha256:2c194b630858971100167dd46889b7aac43153a0f328ce55e8c575f3df44a941',
+        'api/post-api-repos-id-flows-flowid-enrich':
+          'sha256:99023d433bff55e68647d4adae6570bb79b1c7daf17e339b08b629c35d862b13',
+        'api/get-api-repos-id-rules':
+          'sha256:dfafa6540da39d72e15e6872c15dd11a557df83a196c2cf356cafd34f3e70678',
+        'api/patch-api-repos-id-rules-rulekey':
+          'sha256:29cd80ceb08a38601d27a8c728d9d9c8dc810971e064349ddd75cab971cbe821',
+        'api/get-api-repos-id-analytics-trend':
+          'sha256:365626aaf7ec913b9c51d6b315ad7b04e1058e931f311680edf4857b433d7cd5',
+        'api/get-api-repos-id-analytics-breakdown':
+          'sha256:739fdb17d885ac61cba1871b29aeadec5cac6a33e6495afb21dff9993cef5e2f',
+        'api/get-api-repos-id-analytics-top-offenders':
+          'sha256:20d30c8fda90f6423876dc6b99ee8c4fa849502a5a9477da7e58bd99b961c8f5',
+        'api/get-api-repos-id-analytics-resolution':
+          'sha256:88225bec5506b91017f0b37c335b03e03a126cd6672764fcb48cd85e58e9a8f6',
+        'api/get-api-rules':
+          'sha256:d3bf12f18ab99c3f23a31127abf9ff58518a01128ee06f238460056e4a25ad0c',
+      })
+    })
   })
 })
 

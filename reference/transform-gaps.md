@@ -3707,3 +3707,171 @@ would key by `<entry>.<instance>`).
 | Guard Setup | G62, G64 |
 | Guard Generate / runner | G60, G61 |
 | Guard Run | G63 |
+
+## API reference journeys (2026-08-10)
+
+Found while authoring the dashboard server's HTTP journeys — the realization
+surface of plan §2 — into `guard/journeys.json`. The journey ENTRY is already
+operation-rooted (`{method, path}`) and `buildApiJourneys` already mints ids and
+fingerprints for it, so the surface itself fits. What does not fit is the
+CONTRACT: every field of `JourneyCommandContractSchema` was shaped for a command,
+and an operation borrows them. Each item below names what the borrowing costs.
+Nothing here was worked around in the schema; the catalog carries the closest
+honest field and the loss is recorded.
+
+### G65. A request BODY has no region, so its fields ride the flag grammar
+**What:** an operation's caller-supplied inputs arrive in three places — the path,
+the query string, and the JSON body — and the contract has two: `positionals` and
+`options`. Path parameters map cleanly onto positionals. Query parameters and body
+fields both have to become `options`, and `JourneyOptionSchema` has no `in`
+discriminator (`query | body | header | cookie`), so the two are one namespace. The
+reference states the location in each option's `description` (`Query parameter.` /
+`JSON body field.`) — prose, which nothing can read.
+**What that costs:** four of the 25 operations take a body (`POST /api/repos`,
+`POST /api/repos/{id}/analyses`, and the two graph PUTs), 8 body fields in all. A
+generator reading this catalog can see the field names, their requiredness, their
+choices and their defaults, but not that they belong in a body — so it cannot build
+the request without parsing English. It also cannot express a body that is not a
+flat object (none of these are, today) or the content type it is sent under.
+**Owner:** Guard Setup (an `in` member on `JourneyOptionSchema`, defaulting to the
+surface's natural location — `command` for cli, `query` for api — so no cli option
+moves; a nested body shape needs more than that and can wait for a case).
+
+### G66. An HTTP status has no fact kind of its own, so it rides `exits`
+**What:** `JourneyExitFactSchema` is `{exit, when?}` and its doc calls `exit` "the
+status", which is exactly what an HTTP response has — but the field is named for a
+process exit code and the dashboard renders the block as "Exit codes". The reference
+carries all 91 response statuses there, one fact per condition, the same rule the
+cli journeys follow.
+**What that costs:** nothing a scenario cannot act on — the api driver's
+`expect.status` takes exactly these numbers. The cost is legibility and typing: a
+reader of the Journeys tab sees an HTTP 404 under "Exit codes", and a consumer
+cannot tell a process status from a response status without looking at the
+journey's `type`.
+**Owner:** Guard Setup (either a surface-aware LABEL for the same fact kind, or a
+`status` sibling; the fact SHAPE is already right, so this is naming, not structure).
+
+### G67. A response body is not a stream, and its shape can only be said as markers
+**What:** `JourneyOutputFactSchema` requires a `stream`, and `JourneyStreamSchema` is
+the closed set `stdout | stderr | combined`. An HTTP response body is none of them.
+The reference records every response marker as `stdout`, following the runner's own
+mapping — `step-actuals.ts` says "an api request's response body rides as `stdout`",
+and `run-api-scenario.ts` files the response body as the failing step's `stdout`
+excerpt — so the vocabulary is at least consistent with what a run reports back.
+**What that costs:** two things. The stream chip on the Journeys tab reads `stdout`
+on 188 HTTP facts, which is the runner's word and not the surface's. And the body's
+SHAPE is reduced to key markers: the reference states `"violations"` and `"total"`
+as stable substrings, but cannot say that `violations` is an array of objects, that
+`total` counts the whole filtered set rather than the page, or that this route has
+TWO response shapes depending on whether it was paged (that last one survives only
+in the `when` of each marker). A schema is deliberately not wanted here — the
+journey is a calling interface, not an OpenAPI document — but "this field is an
+array" is not a schema.
+**Owner:** Guard Setup (a `response` member on the stream vocabulary, and a `kind`
+on an output fact — `substring` today, `json-path` for a body field — so a consumer
+knows whether to reach for `expect.body` or `expect.json`).
+
+### G68. The contract's `path` is argv-shaped, so an operation states its identity twice
+**What:** `JourneyCommandContractSchema.path` is "the argv a user types, program name
+first". An operation has no argv, so the reference writes `["GET",
+"/api/repos/{id}/violations"]` — which joins to exactly the string
+`journeyEntryLabel` produces, and therefore renders correctly everywhere — but it is
+a restatement of the journey's own `entry`, because an operation contract always has
+exactly one entry and no tree beneath it.
+**What that costs:** no information, and one honest oddity: the field a reader meets
+in the artifact is named for a command line. The dashboard inherits it — the contract
+card's nav is labelled "Commands" and its grammar column "Flag", so an api journey's
+query parameters render under a flag heading. Cosmetic, and not worth a redesign
+until the web surface arrives with a third shape.
+**Owner:** Guard Setup (surface-aware labels in `GuardJourneyContract`, or a rename
+of `commands` to something that covers a command AND an operation; the DATA is right
+either way).
+
+### G69. Nothing records a header, on either side of the exchange
+**What:** there is no header fact kind. Three real facts of this surface have
+nowhere to go: `GET /api/repos/{id}/graph` sets `Cache-Control: no-store` on its
+success path and NOT on its empty one (probe-verified); `GET /api/repos/browse`
+gates on the `Origin` header, which is the only reason a cross-origin read is
+refused; and the enterprise auth gate replies with `Set-Cookie` when it rotates a
+session. The Origin gate survives in the reference only as the `when` of a 403 exit
+fact.
+**What that costs:** a scenario cannot be told from the journey that a request needs
+a particular header, nor that a response promises one — and the api driver supports
+both (`request.headers`, `expect.headers`), so this is a fact gap, not a runner gap.
+**Owner:** Guard Setup (`consumes.headers` and `produces.headers`, each
+`{name, when?}` plus a marker on the produces side — the same two-field shape
+`env` already has).
+
+### G70. An accepted-then-streamed route cannot say where its outcome goes
+**What:** `POST /api/repos/{id}/analyses` answers 202 before the run starts, and
+everything that matters afterwards — progress, the LLM estimate, the dirty-tree
+question, the completion, the cancellation, and any failure past the accept —
+travels over Socket.io. The contract can say the status is 202 and can list the
+files the run writes; it cannot say that a caller must listen elsewhere, or name the
+events. The same is true of every future long-running trigger (`guard generate`,
+`spec scan`).
+**What that costs:** read alone, the journey implies the request IS the operation. A
+generator authoring a scenario against it would assert the 202 and stop — which is
+what the reference's own facts support, and which proves almost nothing about
+analyzing. Testing the real outcome means polling a second operation, and nothing in
+the journey says which one.
+**Owner:** Guard Setup (an `async` fact naming the channel and the event markers, or
+— cheaper and more useful — a `settles-at` pointer from the trigger operation to the
+read operation that observes its result).
+
+### G71. OMITTED cannot distinguish "not established" from "cannot apply here"
+**What:** the artifact's rule is that an omitted list means the extraction
+established nothing and an empty list means it established "none". A third case
+appears the moment a second surface exists: a fact kind that CANNOT apply. An HTTP
+operation asks no questions on stdin and prints no enumerated rows, so the reference
+omits `prompts` and `rows` on all 25 — which reads, under the stated rule, as "the
+mapper still owes them".
+**What that costs:** the honesty the rule exists for. A reader of an api journey
+cannot tell a genuinely missing prompt list from one that could never exist, and a
+completeness check over the catalog ("every command answers what it reads") has to
+special-case the surface rather than the fact.
+**Owner:** Guard Setup (either a per-surface declaration of which fact kinds are in
+play, or the smaller fix: let the derivation record `prompts: []`/`rows: []` as an
+established none, and say in the schema that a surface without the concept states it
+as none).
+
+### G72. There is no UI-to-API relation, so a realization surface cannot say what it realizes
+**What:** plan §2 requires a realization surface's journeys to record "the UI-to-API
+relation" — which screen or interaction reaches which operation — so a web scenario
+can act through the API and a reader can see why an un-promised surface is in the
+catalog at all. `JourneySchema` has no such field, and this wave deliberately did not
+add one: the shape has to land together with the web journey contract (§10), not
+ahead of it.
+**What that costs:** today, the 25 api journeys stand unattached. Nothing in the
+catalog says that `GET /api/repos/{id}/violations` is what the Files tab reads, and
+the derivation that WOULD say it (the client's own call sites) was consulted by hand
+to scope this wave and then discarded.
+**Owner:** Guard Setup with §10 (one relation field, authored once for both
+directions, when the web journey shape is decided).
+
+### G73. An option cannot say WHEN it applies, so a conditionally-effective parameter is prose
+**What:** every io fact kind carries an optional one-condition `when`.
+{@link JourneyOptionSchema} does not — it has `flag`, value shape, `choices`,
+`default`, `scope`, `hidden` and a free `description`, and nothing else. A parameter
+that is accepted but only takes effect under a condition therefore has nowhere
+structured to say so.
+**What that costs:** four witnesses in this corpus, all of them traps. `branch` on
+`analytics/breakdown` and `analytics/top-offenders` applies in LATEST mode only — an
+explicit `analysisId` skips the filter, so the same value changes the answer or does
+nothing depending on a SECOND parameter. `branch` on `analytics/resolution` filters
+the snapshot walk but not the active set the same response reports. And on the cli
+side the gap is older than this wave: `truecourse list --diff` silently ignores
+`--limit`, `--offset`, `--all` and `--severity`, which the reference states in the
+`--diff` flag's description because there is nowhere else to put it. A generator
+reading the grammar sees four usable filters and one usable branch scope; only the
+English says otherwise.
+**Owner:** Guard Setup (a `when` on `JourneyOptionSchema`, same shape and same
+one-short-condition rule the fact kinds already obey — additive, never fingerprinted,
+so no journey identity moves).
+
+### H-index (api journeys wave). Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Setup | G65, G66, G67, G68, G69, G70, G71, G73 |
+| Guard Setup with Web Driver (§10) | G72 |
