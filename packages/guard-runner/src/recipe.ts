@@ -1035,6 +1035,16 @@ function forEachInlineSecret(parsed: unknown, visit: (holder: Record<string, unk
 }
 
 /**
+ * How much of a secret any surface may show: bullets to its length, capped so a
+ * long key does not advertise how long it is. The one place the shape of a masked
+ * secret is decided — {@link maskRecipeSecret} and `maskStoredSecret` differ only
+ * in what they say the value IS, never in how much of it they give away.
+ */
+export function secretBullets(value: string): string {
+  return '•'.repeat(Math.min(value.length, 12))
+}
+
+/**
  * ONE inline secret as it may be shown: bullets to the value's length (capped),
  * labelled so it can never be mistaken for the value itself. The single spelling
  * behind every reading of a recipe — the terminal's (`truecourse guard recipe`)
@@ -1042,7 +1052,7 @@ function forEachInlineSecret(parsed: unknown, visit: (holder: Record<string, unk
  * the other.
  */
 export function maskRecipeSecret(value: string): string {
-  return `${'•'.repeat(Math.min(value.length, 12))} (inline value, masked)`
+  return `${secretBullets(value)} (inline value, masked)`
 }
 
 /**

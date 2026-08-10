@@ -108,6 +108,32 @@ const ACCOUNT: GuardDependencyRow = {
 };
 
 /**
+ * The same entry with BOTH variables registered on this machine. What the server
+ * hands back is what a reader may see: the readable variable as it was registered,
+ * and the credential as the MASK the server made of it — never its characters.
+ */
+const ACCOUNT_REGISTERED: GuardDependencyRow = {
+  ...ACCOUNT,
+  state: 'provided',
+  fields: [
+    {
+      field: 'ANTHROPIC_BASE_URL',
+      resolved: true,
+      secret: false,
+      description: 'the base URL the program reads',
+      value: 'https://llm.internal',
+    },
+    {
+      field: 'ANTHROPIC_API_KEY',
+      resolved: true,
+      secret: true,
+      description: 'the credential the program reads',
+      value: '•••••••••••• (stored locally, masked)',
+    },
+  ],
+};
+
+/**
  * The same entry when the recipe ALSO declares it as an external service: it
  * carries both halves at once — the declared variables, and the account the
  * declaration holds (base URL, token, headers).
@@ -194,6 +220,24 @@ const PROJECT: GuardDependencyRow = {
   blocks: [],
   usedBy: 1,
   inCatalog: true,
+};
+
+/**
+ * The path shape with a path registered that this machine no longer has: the entry
+ * is unregistered, and the field still holds what somebody typed — the typo is
+ * visible, which is the only way it gets corrected.
+ */
+const PROJECT_MOVED: GuardDependencyRow = {
+  ...PROJECT,
+  fields: [
+    {
+      field: 'path',
+      resolved: false,
+      reason: 'the registered path does not exist on this machine: /Users/dev/moved-away',
+      secret: false,
+      value: '/Users/dev/moved-away',
+    },
+  ],
 };
 
 /** The config-dir shape: an authenticated state, copied into the sandbox HOME. */
@@ -694,6 +738,58 @@ describe('GuardDependenciesPane — the registration form', () => {
       name: 'anthropic',
       env: { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' },
     });
+  });
+
+  /**
+   * A registered entry must not read like an empty one. What this machine is pointed
+   * at is IN the fields: the readable variable shows its value, and the credential
+   * shows the mask the server made of it — in the placeholder, because the input
+   * holds only what a user typed, and a mask is not something anyone typed.
+   */
+  it('shows what is registered: the readable value in its field, a secret as a mask', async () => {
+    await open(ACCOUNT_REGISTERED);
+
+    expect(screen.getByLabelText('ANTHROPIC_BASE_URL')).toHaveValue('https://llm.internal');
+    const secret = screen.getByLabelText('ANTHROPIC_API_KEY');
+    expect(secret).toHaveValue('');
+    expect(secret).toHaveAttribute('placeholder', '•••••••••••• (stored locally, masked)');
+  });
+
+  /**
+   * The mask is a READING. If the form ever sent it back, a save touching any other
+   * field would overwrite the stored key with a row of bullets and lock the user out
+   * of their own account — so the mask never enters an input's value, and an
+   * untouched secret sends nothing at all.
+   */
+  it('never sends a mask back: an untouched secret survives the save beside it', async () => {
+    const { user, puts } = await open(ACCOUNT_REGISTERED);
+
+    const readable = screen.getByLabelText('ANTHROPIC_BASE_URL');
+    await user.clear(readable);
+    await user.type(readable, 'https://llm.internal/v2');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+
+    expect(puts[0]).toEqual({
+      name: 'anthropic',
+      env: { ANTHROPIC_BASE_URL: 'https://llm.internal/v2' },
+    });
+    const body = JSON.stringify(puts[0]);
+    expect(body).not.toContain('•');
+    expect(body).not.toContain('masked');
+  });
+
+  it('pre-fills the PATH field with the registered path, including one that has moved', async () => {
+    const { user, puts } = await open(PROJECT_MOVED);
+    const field = screen.getByLabelText('Path');
+    expect(field).toHaveValue('/Users/dev/moved-away');
+    expect(screen.getByText(/the registered path does not exist on this machine/)).toBeInTheDocument();
+
+    await user.clear(field);
+    await user.type(field, '/Users/dev/code/project');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({ name: 'supplied-project', path: '/Users/dev/code/project' });
   });
 
   /**

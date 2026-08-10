@@ -5,7 +5,8 @@
  * external-service half where a row is one: the rolled-up requirement with each
  * contributing flow named, when the dependency applies, what it holds back right
  * now (committed tests that cannot run + flows the last generate never wrote), and
- * per-field resolution — never a stored value.
+ * per-field resolution WITH the registered value — the readable ones as they were
+ * registered, a secret only as a mask, so the raw one never leaves the process.
  *
  * The WRITE registers ONE instance: values to the gitignored
  * `dependencies.local.json`, and only the variables the committed registration
@@ -17,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import { maskStoredSecret } from '@truecourse/guard-runner';
 import {
   readGuardDependenciesView,
   writeGuardDependency,
@@ -270,7 +272,7 @@ describe('readGuardDependenciesView', () => {
     expect(dependency.hostPath).toBe(r);
   });
 
-  it('reports each unregistered field with its own reason, and never a value', () => {
+  it('reports each unregistered field with its own reason, and a registered secret as a mask', () => {
     const r = repo();
     writeCatalog(r, [LLM_ACCOUNT]);
     writeJson(scenarios(r, 'dependencies.local.json'), {
@@ -292,10 +294,119 @@ describe('readGuardDependenciesView', () => {
         resolved: true,
         secret: true,
         description: 'the credential the program reads',
+        // Registered, and readable as exactly that much: bullets to its length, said
+        // in words that can never be mistaken for the key itself.
+        value: `${'•'.repeat(12)} (stored locally, masked)`,
       },
     ]);
+    // An UNREGISTERED field carries no value at all — blank is what "nothing here
+    // yet" looks like, and a form's own sample fills the space instead.
+    expect(dependency.fields[0].value).toBeUndefined();
     // The whole view, serialized, never carries the stored key.
     expect(JSON.stringify(readGuardDependenciesView(r))).not.toContain('sk-super-secret');
+  });
+
+  /**
+   * A registered value that never comes back leaves a filled-in entry looking exactly
+   * like an empty one: the form renders blanks, and a reader cannot see what this
+   * machine is pointed at. Everything that is not a secret therefore reads back as it
+   * was registered — and the secret half is withheld by MASKING here, in the view
+   * composition, so the raw value never crosses a wire at all.
+   */
+  it('hands every registered NON-SECRET value back, and a secret only as a mask', () => {
+    const r = repo();
+    writeCatalog(r, [LLM_ACCOUNT]);
+    writeJson(scenarios(r, 'dependencies.local.json'), {
+      anthropic: {
+        env: {
+          ANTHROPIC_BASE_URL: 'https://llm.internal',
+          ANTHROPIC_API_KEY: 'test-key-not-a-real-one',
+        },
+      },
+    });
+    const [dependency] = readGuardDependenciesView(r).dependencies;
+
+    expect(dependency.state).toBe('provided');
+    expect(dependency.fields.map((f) => [f.field, f.value])).toEqual([
+      ['ANTHROPIC_BASE_URL', 'https://llm.internal'],
+      ['ANTHROPIC_API_KEY', maskStoredSecret('test-key-not-a-real-one')],
+    ]);
+    expect(JSON.stringify(readGuardDependenciesView(r))).not.toContain('test-key-not-a-real-one');
+  });
+
+  it('shows a path registration’s path — it IS the registered thing, and no secret', () => {
+    const r = repo();
+    writeCatalog(r, [SUPPLIED_PROJECT]);
+    writeJson(scenarios(r, 'dependencies.local.json'), { 'supplied-project': { path: r } });
+    const [dependency] = readGuardDependenciesView(r).dependencies;
+    expect(dependency.fields).toEqual([
+      { field: 'path', resolved: true, secret: false, description: 'a checkout of a real project', value: r },
+    ]);
+  });
+
+  /**
+   * A path this machine no longer has is still the path somebody registered: showing
+   * it is what lets a reader see the typo and fix it, where blanking the field asks
+   * them to remember what they meant.
+   */
+  it('keeps showing a registered path the machine no longer has', () => {
+    const r = repo();
+    writeCatalog(r, [SUPPLIED_PROJECT]);
+    const gone = path.join(r, 'moved-away');
+    writeJson(scenarios(r, 'dependencies.local.json'), { 'supplied-project': { path: gone } });
+    const [dependency] = readGuardDependenciesView(r).dependencies;
+    expect(dependency.fields[0]).toMatchObject({ resolved: false, value: gone });
+    expect(dependency.hostPath).toBeUndefined();
+  });
+
+  /**
+   * The overlay holds an instance in a shape this registration no longer reads. It is
+   * ignored for the state, and it must be just as ignored for the VALUE — filling
+   * today's field with yesterday's instance would register it by accident.
+   */
+  it('shows nothing from an instance stored in the shape the registration abandoned', () => {
+    const r = repo();
+    writeCatalog(r, [LLM_ACCOUNT]);
+    writeJson(scenarios(r, 'dependencies.local.json'), {
+      anthropic: { path: '/Users/dev/yesterday' },
+    });
+    const [dependency] = readGuardDependenciesView(r).dependencies;
+    expect(dependency.fields.every((f) => f.value === undefined)).toBe(true);
+    expect(JSON.stringify(readGuardDependenciesView(r))).not.toContain('/Users/dev/yesterday');
+  });
+
+  /**
+   * A service's own base URL is not a secret and is what the row is reached at, so it
+   * reads back beside the variable that carries it. Its KEY is held by the externals
+   * engine and never enters this view — resolved is the whole of what it says.
+   */
+  it('shows a recipe-declared service’s base URLs, and nothing of its key', () => {
+    const r = repo();
+    writeJson(scenarios(r, 'recipe.json'), {
+      build: 'true',
+      api: {
+        serve: ['node', 'server.mjs'],
+        externals: {
+          stripe: {
+            baseUrlEnv: 'STRIPE_BASE_URL',
+            baseUrl: 'https://api.stripe.test',
+            endpoints: { STRIPE_FILES_URL: 'https://files.stripe.test' },
+            env: { STRIPE_KEY: {} },
+          },
+        },
+      },
+    });
+    writeJson(scenarios(r, 'externals.local.json'), {
+      stripe: { env: { STRIPE_KEY: 'test-key-not-a-real-one' } },
+    });
+    const [dependency] = readGuardDependenciesView(r).dependencies;
+
+    expect(dependency.fields.map((f) => [f.field, f.value])).toEqual([
+      ['STRIPE_BASE_URL', 'https://api.stripe.test'],
+      ['STRIPE_FILES_URL', 'https://files.stripe.test'],
+      ['STRIPE_KEY', undefined],
+    ]);
+    expect(JSON.stringify(readGuardDependenciesView(r))).not.toContain('test-key-not-a-real-one');
   });
 
   it('never renders an instruction: a reason says what is missing, not what to edit', () => {

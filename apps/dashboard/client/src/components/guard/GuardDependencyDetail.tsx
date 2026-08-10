@@ -18,12 +18,13 @@
  * Detection evidence closes the page for a service (collapsed — it answers "why
  * do you think I depend on this", which is asked once).
  *
- * A stored value never comes back from the server, so no field is pre-filled with
- * one: a registered secret reads `•••• stored locally`, never its characters. That
- * is why a blank secret field means UNCHANGED and never "clear it" — clearing is
- * what removing a row (a header) or blanking a value the page can actually show
- * looks like. A host path is not a secret and IS shown — it is the thing being
- * registered.
+ * What is REGISTERED shows: a field the server sent a value for is filled in with
+ * it, so a provided dependency never reads like an empty one. A SECRET is the
+ * exception in exactly one way — the server sends a mask of it, and a mask goes in
+ * the placeholder, never in the input: an input holds what a user typed, and nothing
+ * that was never typed may be saved back. That is also why a blank secret field
+ * means UNCHANGED and never "clear it" — clearing is what blanking a value the page
+ * can actually show (a host path, a readable header) looks like.
  *
  * The header carries the same two-mode switch every artifact-backed entity has:
  * this page, or the catalog's own committed entry. The gitignored overlay has no
@@ -70,9 +71,33 @@ function sampleFor(name: string): string {
   return '';
 }
 
-/** What a resolved field says instead of its value. */
-function storedNote(field: GuardDependencyField): string {
-  return field.secret ? STORED_SECRET : 'registered';
+/**
+ * The path this dependency is registered with, whether or not the machine still has
+ * it: an unresolvable path is what somebody typed, and showing it is how the typo
+ * gets corrected. `hostPath` is the resolved absolute one, kept as the fallback.
+ */
+function registeredPath(dependency: GuardDependencyRow): string {
+  return dependency.fields.find((f) => f.field === 'path')?.value ?? dependency.hostPath ?? '';
+}
+
+/**
+ * What the input SHOWS before anyone types: the registered value, and NEVER a
+ * secret's — the server masks a stored secret, and a mask that sat in an input could
+ * be saved back over the real one.
+ */
+function shownValue(field: GuardDependencyField | undefined): string {
+  return field && !field.secret ? field.value ?? '' : '';
+}
+
+/**
+ * What an EMPTY field says: the server's mask for a stored secret (there is
+ * something here, and this is all of it a reader gets), otherwise a sample to type
+ * over. A field showing its own value never reads its placeholder at all.
+ */
+function placeholderFor(field: GuardDependencyField | undefined, name: string): string {
+  if (field?.secret && field.resolved) return field.value ?? STORED_SECRET;
+  if (field?.resolved && field.value === undefined) return 'registered';
+  return sampleFor(name);
 }
 
 export function GuardDependencyDetail({
@@ -368,7 +393,7 @@ function RegistrationForm({
   const registration = dependency.registration;
   const service = dependency.service;
   const [env, setEnv] = useState<Record<string, string>>({});
-  const [pathValue, setPathValue] = useState(dependency.hostPath ?? '');
+  const [pathValue, setPathValue] = useState(registeredPath(dependency));
   const [baseUrlEnv, setBaseUrlEnv] = useState(service?.baseUrlEnv ?? '');
   const [baseUrl, setBaseUrl] = useState(service?.baseUrl ?? '');
   const [token, setToken] = useState('');
@@ -471,8 +496,8 @@ function RegistrationForm({
                   id={`tc-dep-${dependency.name}-${variable.name}`}
                   type={variable.secret ? 'password' : 'text'}
                   aria-label={variable.name}
-                  value={env[variable.name] ?? ''}
-                  placeholder={field?.resolved ? storedNote(field) : sampleFor(variable.name)}
+                  value={env[variable.name] ?? shownValue(field)}
+                  placeholder={placeholderFor(field, variable.name)}
                   onChange={(e) => setEnv((v) => ({ ...v, [variable.name]: e.target.value }))}
                 />
                 <p className="mt-1 text-[10px] text-muted-foreground">
@@ -574,8 +599,8 @@ function RegistrationForm({
                       id={`tc-dep-${dependency.name}-${field.field}`}
                       type={field.secret ? 'password' : 'text'}
                       aria-label={field.field}
-                      value={env[field.field] ?? ''}
-                      placeholder={field.resolved ? storedNote(field) : sampleFor(field.field)}
+                      value={env[field.field] ?? shownValue(field)}
+                      placeholder={placeholderFor(field, field.field)}
                       onChange={(e) => setEnv((v) => ({ ...v, [field.field]: e.target.value }))}
                     />
                   </div>

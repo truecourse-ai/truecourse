@@ -27,8 +27,12 @@
  *   - what registering an instance must supply, per field, with the reason each
  *     unresolved one is unresolved.
  *
- * A registered VALUE never comes back out: the view carries `resolved` and
- * `secret` per field and a host path (which is not a secret), never a stored key.
+ * A registered VALUE comes back as much of itself as a reader may see: a field
+ * carries what was registered, and a SECRET carries a mask of it (`maskStoredSecret`)
+ * rather than its characters. The masking happens HERE, in the composition, so the
+ * raw value never crosses a wire — the rule `maskedRecipeText` follows for an inline
+ * recipe secret, one file over. A form that showed nothing for a registered variable
+ * would read exactly like an unregistered one, which is the confusion this closes.
  *
  * Working-tree only, by design: it reads and writes files inside the repo, so the
  * routes gate on `guardsMaterializeInPlace()` exactly as the externals ones do.
@@ -41,13 +45,16 @@ import {
   dependenciesPath,
   loadDependenciesLocal,
   loadScenarios,
+  maskStoredSecret,
   readGuardDecisions,
   readGuardFlowsCorpus,
   readGuardResult,
   recipePath,
   resolveDependencies,
   scenarioDependencyNames,
+  type DependencyRequirement,
   type DependencyState,
+  type ExternalRequirement,
   type ResolvedDependency,
 } from '@truecourse/guard-runner';
 import {
@@ -81,6 +88,15 @@ export interface GuardDependencyFieldView {
   secret: boolean;
   /** What this field must hold, in the declaration's own words. */
   description?: string;
+  /**
+   * The registered value as a reader may see it, absent when nothing is registered.
+   *
+   * A SECRET one arrives {@link maskStoredSecret}-masked and never as itself — the
+   * mask is a reading of what is stored, so a surface must never send it back as a
+   * value. Everything else (a base URL, a provider name, a host path) is registered
+   * in the open and reads back exactly as it was registered.
+   */
+  value?: string;
 }
 
 /** One flow's contribution to the requirement, with the flow it belongs to. */
@@ -209,11 +225,16 @@ export function readGuardDependenciesView(repoRoot: string): GuardDependenciesVi
   const blocked = blockedIndex(repoRoot, flowTitles);
 
   let resolved: ReturnType<typeof resolveDependencies> | null = null;
+  // The overlay itself, for the one thing a resolution does not carry: the path a
+  // user registered that this machine cannot find. It resolves to nothing, and it is
+  // still what they typed — the field shows it so the typo can be corrected.
+  let overlay: GuardDependenciesLocal = {};
   let invalidReason: string | null = externals.invalidReason;
   try {
     resolved = resolveDependencies(repoRoot, {
       dismissedFlows: new Set(readGuardDecisions(repoRoot).dismissedFlows.map((f) => f.flowId)),
     });
+    overlay = loadDependenciesLocal(repoRoot);
   } catch (e) {
     // A catalog that exists but does not parse blanks the CATALOG half only: the
     // services are declared elsewhere and stay readable, exactly as a broken
@@ -233,7 +254,7 @@ export function readGuardDependenciesView(repoRoot: string): GuardDependenciesVi
       .map((name) => services.get(name))
       .filter((s): s is GuardExternalServiceView => s !== undefined);
     for (const service of covered) claimedServices.add(service.service);
-    rows.push(catalogRow(dependency, covered, flowTitles, blocked));
+    rows.push(catalogRow(dependency, overlay[dependency.name], covered, flowTitles, blocked));
   }
 
   for (const service of externals.services) {
@@ -262,6 +283,7 @@ export function readGuardDependenciesView(repoRoot: string): GuardDependenciesVi
 /** A catalog entry, with the service half of every service it names folded in. */
 function catalogRow(
   dependency: ResolvedDependency,
+  overlay: GuardDependenciesLocal[string] | undefined,
   covered: readonly GuardExternalServiceView[],
   flowTitles: ReadonlyMap<string, string>,
   blocked: ReadonlyMap<string, GuardDependencyBlockedFlow[]>,
@@ -289,6 +311,7 @@ function catalogRow(
       ...(r.reason ? { reason: r.reason } : {}),
       secret: r.secret,
       ...(descriptions.has(r.field) ? { description: descriptions.get(r.field)! } : {}),
+      ...registeredValue(r, dependency, overlay),
     })),
     ...(dependency.hostPath ? { hostPath: dependency.hostPath } : {}),
     ...(dependency.staleInstance ? { staleInstance: dependency.staleInstance } : {}),
@@ -323,12 +346,53 @@ function serviceRow(
       resolved: r.resolved,
       ...(r.reason ? { reason: r.reason } : {}),
       secret: r.secret,
+      ...serviceValue(r, service),
     })),
     blocks: service.state === 'provided' ? [] : blocksFor([service.service], blocked),
     usedBy: usedByFlows([service.service], service.catalog?.needs ?? [], blocked),
     service: serviceHalf([service]),
     inCatalog: false,
   };
+}
+
+/**
+ * ONE catalog field's registered value, `{}` when nothing is registered for it.
+ *
+ * A SECRET is masked here rather than dropped: "registered" and "empty" have to look
+ * different, and a mask says which without saying what. The value read is the one
+ * the CURRENT registration shape reads — an instance left over from the shape the
+ * entry abandoned resolves to nothing here exactly as it does for the state, so
+ * yesterday's path can never fill in today's field.
+ */
+function registeredValue(
+  requirement: DependencyRequirement,
+  dependency: ResolvedDependency,
+  overlay: GuardDependenciesLocal[string] | undefined,
+): { value?: string } {
+  const raw =
+    dependency.entry.registration?.kind === 'env'
+      ? dependency.env[requirement.field]
+      : overlay?.path;
+  if (raw === undefined || raw === '') return {};
+  return { value: requirement.secret ? maskStoredSecret(raw) : raw };
+}
+
+/**
+ * ONE service field's value: an ORIGIN, which is not a secret and which the row is
+ * declared to be reached at. The credential half is held by the externals engine and
+ * deliberately never enters this view — `resolved` is the whole of what a key says
+ * here, and the form renders it as the stored-secret marker.
+ */
+function serviceValue(
+  requirement: ExternalRequirement,
+  service: GuardExternalServiceView,
+): { value?: string } {
+  if (requirement.secret) return {};
+  const url =
+    requirement.envVar === service.baseUrlEnv
+      ? service.baseUrl
+      : service.endpoints[requirement.envVar];
+  return url ? { value: url } : {};
 }
 
 /**

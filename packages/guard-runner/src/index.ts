@@ -136,6 +136,7 @@ export type {
 
 export {
   DependencyCatalogError,
+  maskStoredSecret,
   loadDependencyCatalog,
   loadDependenciesLocal,
   resolveDependencies,

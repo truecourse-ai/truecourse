@@ -39,12 +39,24 @@ import {
   type GuardFileExpect,
   type GuardScenario,
 } from '@truecourse/shared'
-import { RecipeError } from './recipe.js'
+import { RecipeError, secretBullets } from './recipe.js'
 import { mapExpectStrings } from './sandbox-token.js'
 import { dependenciesLocalPath, dependenciesPath } from './store.js'
 
 /** A catalog or overlay file that exists but cannot be trusted. */
 export class DependencyCatalogError extends RecipeError {}
+
+/**
+ * ONE registered secret as a reader may see it: bullets to its length (capped), and
+ * the words for what it is — a value this machine holds, not a value being shown.
+ *
+ * The instance-overlay twin of {@link maskRecipeSecret}, and the same rule: a
+ * surface that wants to say "this is registered" says it with a mask rather than
+ * with the characters, so the raw value never leaves the process that read it.
+ */
+export function maskStoredSecret(value: string): string {
+  return `${secretBullets(value)} (stored locally, masked)`
+}
 
 /** Whether a supplied dependency can actually be bound on this machine, right now. */
 export type DependencyState = 'provided' | 'incomplete' | 'unprovided'

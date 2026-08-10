@@ -7,9 +7,11 @@
  * `@truecourse/core` is a Node package (fs, atomic writes) that must never enter
  * the browser bundle. Keep this file in sync when the engine's view grows a field.
  *
- * One rule the shapes enforce by omission: a registered VALUE never travels back.
- * A field says whether it resolved and whether it is a secret; a host path (not a
- * secret) comes back so a form can show what is registered. A key never does.
+ * One rule the shapes enforce: a registered value travels back only as much as a
+ * reader may see. Everything registered in the open (a base URL, a provider name, a
+ * host path) comes back as itself, so a form shows what this machine is pointed at;
+ * a SECRET comes back MASKED by the server and never as its characters — which is
+ * why a mask is a reading, never something a patch may carry.
  */
 
 /** How a scenario may obtain a class of starting state. */
@@ -47,6 +49,11 @@ export interface GuardDependencyField {
   reason?: string;
   secret: boolean;
   description?: string;
+  /**
+   * The registered value as a reader may see it; absent when nothing is registered.
+   * A secret arrives MASKED — a marker to render, never a value to send back.
+   */
+  value?: string;
 }
 
 /** One flow's contribution to the rolled-up requirement. */

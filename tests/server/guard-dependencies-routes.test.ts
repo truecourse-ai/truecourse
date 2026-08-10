@@ -58,6 +58,18 @@ describe('Guard dependencies routes', () => {
     needs: [{ flowId: 'run-llm-rules', need: 'a key with model access' }],
   };
 
+  /** The same account with a readable variable beside the secret one. */
+  const ACCOUNT_WITH_URL = {
+    ...ACCOUNT,
+    registration: {
+      kind: 'env',
+      vars: [
+        { name: 'ANTHROPIC_BASE_URL', description: 'the base URL', secret: false },
+        { name: 'ANTHROPIC_API_KEY', description: 'the credential', secret: true },
+      ],
+    },
+  };
+
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
@@ -90,6 +102,73 @@ describe('Guard dependencies routes', () => {
       needs: [{ flowId: 'run-llm-rules', need: 'a key with model access' }],
       registration: { kind: 'env' },
       inCatalog: true,
+    });
+  });
+
+  /**
+   * The wire carries what is registered, or the page renders a filled-in dependency
+   * as a blank form. The readable half travels as it was registered; the secret half
+   * travels MASKED, masked server-side, so the raw value is never in the payload at
+   * all — not in a field, not in a service, not anywhere a client could read it.
+   */
+  it('GET carries every registered value — the readable one as it is, the key as a mask', async () => {
+    writeJson(CATALOG, { dependencies: [ACCOUNT_WITH_URL] });
+    writeJson(LOCAL, {
+      anthropic: {
+        env: {
+          ANTHROPIC_BASE_URL: 'https://llm.internal',
+          ANTHROPIC_API_KEY: 'test-key-not-a-real-one',
+        },
+      },
+    });
+
+    const res = await request(app).get(url()).expect(200);
+    expect(res.body.dependencies[0].state).toBe('provided');
+    expect(res.body.dependencies[0].fields).toEqual([
+      {
+        field: 'ANTHROPIC_BASE_URL',
+        resolved: true,
+        secret: false,
+        description: 'the base URL',
+        value: 'https://llm.internal',
+      },
+      {
+        field: 'ANTHROPIC_API_KEY',
+        resolved: true,
+        secret: true,
+        description: 'the credential',
+        value: `${'•'.repeat(12)} (stored locally, masked)`,
+      },
+    ]);
+    expect(JSON.stringify(res.body)).not.toContain('test-key-not-a-real-one');
+  });
+
+  it('PUT answers with the fresh values — the one just written, masked if it is a key', async () => {
+    writeJson(CATALOG, { dependencies: [ACCOUNT_WITH_URL] });
+    const res = await request(app)
+      .put(url())
+      .send({
+        name: 'anthropic',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://llm.internal',
+          ANTHROPIC_API_KEY: 'test-key-not-a-real-one',
+        },
+      })
+      .expect(200);
+
+    expect(res.body.dependencies[0].fields.map((f: { value?: string }) => f.value)).toEqual([
+      'https://llm.internal',
+      `${'•'.repeat(12)} (stored locally, masked)`,
+    ]);
+    expect(JSON.stringify(res.body)).not.toContain('test-key-not-a-real-one');
+    // What the overlay holds is the real one — the mask is a reading, never a write.
+    expect(readJson(LOCAL)).toEqual({
+      anthropic: {
+        env: {
+          ANTHROPIC_API_KEY: 'test-key-not-a-real-one',
+          ANTHROPIC_BASE_URL: 'https://llm.internal',
+        },
+      },
     });
   });
 
