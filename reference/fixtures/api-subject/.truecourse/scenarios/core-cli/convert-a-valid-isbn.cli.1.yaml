@@ -1,7 +1,7 @@
 guard: 3
 id: convert-a-valid-isbn.cli.1
-title: Converting valid ISBN-10 and ISBN-13 values normalizes them to thirteen digits
-promise: The user can normalize a valid ISBN-10 or ISBN-13 into its thirteen-digit form.
+title: Valid ISBN-10 and ISBN-13 values print their thirteen-digit form while ignoring hyphens and spaces
+promise: The user can provide a valid ISBN and receive its thirteen-digit form.
 flow:
   id: convert-a-valid-isbn
   fingerprint: sha256:6104f407a296b6713baabadace1368984013da7600a0129547cc98de7e824389
@@ -20,6 +20,24 @@ steps:
   - run:
       - isbn
       - 0-7432-7356-7
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          9780743273565
+    milestone: 1
+  - run:
+      - isbn
+      - 0 7432 7356 7
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          9780743273565
+    milestone: 1
+  - run:
+      - isbn
+      - 978-0-7432-7356-5
     expect:
       exit: 0
       stdout:

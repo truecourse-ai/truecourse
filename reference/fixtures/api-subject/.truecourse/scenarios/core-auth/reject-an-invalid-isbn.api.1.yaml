@@ -1,10 +1,10 @@
 guard: 3
 id: reject-an-invalid-isbn.api.1
-title: Invalid ISBN values are refused when a member adds a book
-promise: A member gets a validation error when trying to add a book with a value that is not a valid ISBN-10 or ISBN-13.
+title: Invalid ISBN submissions are refused with the documented validation error
+promise: A user who submits a value that is not a valid ISBN gets the documented validation error.
 flow:
   id: reject-an-invalid-isbn
-  fingerprint: sha256:aca16517f3cfebfad3cf7d4fcb2a6b7fe4050f3d8b6533e53307b171d85a03d3
+  fingerprint: sha256:a2b2cb3387ea3b6bce494089e116e7ad15c5f0fa202a2b373a4f11f0bece3957
 journey:
   path:
     - api/post-books
@@ -23,9 +23,9 @@ steps:
       headers:
         Authorization: '{{cred:member}}'
       json:
-        isbn: not-an-isbn-${unique}
+        isbn: not-a-valid-isbn
         title: Invalid ISBN ${unique}
-        author: Shelf Tester
+        author: Test Author ${unique}
     expect:
       status: 400
       json:

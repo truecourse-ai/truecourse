@@ -33,7 +33,8 @@
           "kind": "unrealizable",
           "reason": "Milestones 1 and 2 are not realizable on the cli surface because the catalog only offers config/isbn commands and no journey adds books or posts to /books."
         }
-      ]
+      ],
+      "orphaned": true
     },
     {
       "flowId": "book-jackets-when-the-cover-service-is-unavailable",
@@ -106,47 +107,8 @@
       "orphaned": true
     },
     {
-      "flowId": "browse-the-public-shelf-without-credentials",
-      "flowFingerprint": "sha256:c6c1f40f0be7cb79d5a479c61de5a5b6482b35dd223071b7b8f14d6940b9d8f9",
-      "bindings": [
-        {
-          "doc": "docs/shelf-rules.md",
-          "anchor": "shelf-rules/who-may-change-the-shelf",
-          "fingerprint": "sha256:b5ffe03f72dda5183ad0c36d7e457ccf09cf2dc42f45e5455c402321a5e0544b"
-        },
-        {
-          "doc": "docs/shelf-rules.md",
-          "anchor": "shelf-rules/archived-books",
-          "fingerprint": "sha256:9c71579743bdd3e6ff155bdeaa30c2cdaab22ff3c1a3ebe31febc108ef75d3fb"
-        }
-      ],
-      "scenarios": [],
-      "journeys": [
-        {
-          "surface": "api",
-          "journeyIds": [
-            "api/get-books",
-            "api/get-books-id"
-          ]
-        }
-      ],
-      "generationInputsHash": "sha256:64ff4175c4c027daa950ac1e5cbb68695366ac0679d6c412390b499db1d7858b",
-      "gaps": [
-        {
-          "surface": "api",
-          "kind": "blocked-on",
-          "reason": "blocked on missing-data, an archived book: Browse the public shelf without credentials"
-        },
-        {
-          "surface": "cli",
-          "kind": "unrealizable",
-          "reason": "Milestones 1-3 are unrealizable on this CLI surface because the catalog only offers config/isbn commands and no journey lists books, reads a book by id, or reports archived-book status."
-        }
-      ]
-    },
-    {
       "flowId": "check-service-health",
-      "flowFingerprint": "sha256:ed0790eabe387146b56f0cf1db7eec695b83b4ef2ccd8226925d40f9d6821401",
+      "flowFingerprint": "sha256:ee5b70cb5ea568ca6429e4dd58f94fb4663bdb08b9cc78e2d749493e10b4b8e3",
       "bindings": [
         {
           "doc": "docs/openapi.yaml",
@@ -169,12 +131,12 @@
           ]
         }
       ],
-      "generationInputsHash": "sha256:eaf4b8a03118b6a2351a05a5791be6c019f786f2c7611514de52fe1dd13210b2",
+      "generationInputsHash": "sha256:8d53a7701ab6193d2ad7f794c6cfbb26b6be71a3fabf7063d3511f232e139917",
       "gaps": [
         {
           "surface": "cli",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config and isbn CLI commands and no journey can perform or observe GET /healthz."
+          "reason": "Milestone 1 is not realizable on the cli surface: no journey performs or exposes a GET /healthz health check; the catalog only offers config and isbn commands."
         }
       ]
     },
@@ -203,45 +165,12 @@
           ]
         }
       ],
-      "generationInputsHash": "sha256:5312f11fce02efe0b4ba1aee5a0448744579ca60794faa13f7bc23127f38321d",
+      "generationInputsHash": "sha256:ab6fe2b48c1b50ab2ac226d31787fbbb62828f8f99edb80b4b69f8db945a9fbb",
       "gaps": [
         {
           "surface": "api",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable on the api surface because it requires the separate `bookclub isbn <value>` CLI command, while the catalog only offers HTTP API endpoints."
-        }
-      ]
-    },
-    {
-      "flowId": "handle-archived-book-details",
-      "flowFingerprint": "sha256:c6b645449edd868672e0e3809aa491cdd08b44c7716fdc71f4289b79a374aa11",
-      "bindings": [
-        {
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/get-getbook",
-          "fingerprint": "sha256:0ca74e271807375c35b4cde38b8b29cc5a6c81dc0d4c12ec54a745fe89dd375e"
-        }
-      ],
-      "scenarios": [],
-      "journeys": [
-        {
-          "surface": "api",
-          "journeyIds": [
-            "api/get-books-id"
-          ]
-        }
-      ],
-      "generationInputsHash": "sha256:8047bff901ffe43671ccf30a697932bfa5acbfb3f6cdc6f569f755f31a484848",
-      "gaps": [
-        {
-          "surface": "api",
-          "kind": "blocked-on",
-          "reason": "blocked on missing-data, an archived book: Handle archived book details"
-        },
-        {
-          "surface": "cli",
-          "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config/isbn commands and no journey requests book details or observes archived-book 410 JSON errors."
+          "reason": "Milestone 1 is not realizable on the api surface because the catalog only offers HTTP book and health endpoints and no `bookclub isbn` command or ISBN conversion endpoint."
         }
       ]
     },
@@ -277,7 +206,8 @@
           "kind": "unrealizable",
           "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config/isbn commands and no journey can POST /books/{id}/finish or observe its 404 JSON response."
         }
-      ]
+      ],
+      "orphaned": true
     },
     {
       "flowId": "handle-missing-book-cover",
@@ -346,7 +276,8 @@
           "kind": "unrealizable",
           "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config/isbn commands and no journey requests book details or observes HTTP GET /books/{id} responses."
         }
-      ]
+      ],
+      "orphaned": true
     },
     {
       "flowId": "handle-unreachable-cover-service",
@@ -419,6 +350,40 @@
       "orphaned": true
     },
     {
+      "flowId": "print-configuration",
+      "flowFingerprint": "sha256:aacf3a9a6f3d1d6f43efa3e91a8b922a19effe49cedb0a61bca62dcc8dc79f74",
+      "bindings": [
+        {
+          "doc": "docs/cli.md",
+          "anchor": "the-bookclub-cli/bookclub-config",
+          "fingerprint": "sha256:28476d9f11959e15a54df328dc703015d20c7ba804d70540f7e631250ab9994a"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "print-configuration.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/config"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:05d5f21648a2fd128b5b74674bf5f7e7cee427ad8da01d73f119380e6dbbcda4",
+      "gaps": [
+        {
+          "surface": "api",
+          "kind": "unrealizable",
+          "reason": "Milestone 1 is not realizable because no API journey invokes `bookclub config` or observes its stdout/exit status; the catalog only offers HTTP endpoints and server-process behavior."
+        }
+      ]
+    },
+    {
       "flowId": "print-configuration-with-a-redacted-database-password",
       "flowFingerprint": "sha256:87a8f0f03277c522adc3fe439e50499adbe16d7c951ab4e42fcc8c6d64c885c5",
       "bindings": [
@@ -449,6 +414,78 @@
           "surface": "api",
           "kind": "unrealizable",
           "reason": "Milestones 1 and 2 are not realized: the api catalog only exposes HTTP/server behavior and has no bookclub config command to print or redact configuration."
+        }
+      ],
+      "orphaned": true
+    },
+    {
+      "flowId": "read-archived-books",
+      "flowFingerprint": "sha256:1b4ded9cf540fd7a495461d10fdde317e498f8926d21248df09213c38cf97682",
+      "bindings": [
+        {
+          "doc": "docs/shelf-rules.md",
+          "anchor": "shelf-rules/archived-books",
+          "fingerprint": "sha256:9c71579743bdd3e6ff155bdeaa30c2cdaab22ff3c1a3ebe31febc108ef75d3fb"
+        }
+      ],
+      "scenarios": [],
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/get-books",
+            "api/get-books-id"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:024b1212d2d22b60c00347d431bf3c0944abec0943ba32684ae3f320b797aba4",
+      "gaps": [
+        {
+          "surface": "api",
+          "kind": "blocked-on",
+          "reason": "blocked on missing-data, an archived book: Read archived books"
+        },
+        {
+          "surface": "cli",
+          "kind": "unrealizable",
+          "reason": "Milestones 1 and 2 are not realizable on the cli surface because the catalog only offers config/isbn commands and no journey lists or directly reads books or observes archived-book responses."
+        }
+      ]
+    },
+    {
+      "flowId": "read-without-credentials-and-block-unauthenticated-changes",
+      "flowFingerprint": "sha256:f48c22cd497712b532eedb9245a5f0fccc341712a5b8de136a593e67ff2284a4",
+      "bindings": [
+        {
+          "doc": "docs/shelf-rules.md",
+          "anchor": "shelf-rules/who-may-change-the-shelf",
+          "fingerprint": "sha256:b5ffe03f72dda5183ad0c36d7e457ccf09cf2dc42f45e5455c402321a5e0544b"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "read-without-credentials-and-block-unauthenticated-changes.api.1",
+          "surface": "api",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/get-books",
+            "api/get-books-id",
+            "api/post-books",
+            "api/post-books-id-finish"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:9c4b79c8d53caaa6cc132b6568f187b45b6d77c506af5528f7e710670a531a12",
+      "gaps": [
+        {
+          "surface": "cli",
+          "kind": "unrealizable",
+          "reason": "Milestones 1 and 2 are not realizable on the cli surface because the catalog only offers config/isbn commands and no journey reads books or attempts authenticated book changes."
         }
       ]
     },
@@ -484,11 +521,12 @@
           "kind": "unrealizable",
           "reason": "Milestone 1 is not realizable on the api surface because it describes the separate `bookclub isbn <value>` CLI command and stderr/exit-code behavior, while the catalog only offers HTTP API endpoints."
         }
-      ]
+      ],
+      "orphaned": true
     },
     {
       "flowId": "reject-an-invalid-isbn",
-      "flowFingerprint": "sha256:aca16517f3cfebfad3cf7d4fcb2a6b7fe4050f3d8b6533e53307b171d85a03d3",
+      "flowFingerprint": "sha256:a2b2cb3387ea3b6bce494089e116e7ad15c5f0fa202a2b373a4f11f0bece3957",
       "bindings": [
         {
           "doc": "docs/shelf-rules.md",
@@ -511,12 +549,12 @@
           ]
         }
       ],
-      "generationInputsHash": "sha256:0790029a3ffc17ef1f4c2decb1c5c866bbb2c917feda78a4764ecdcf39ed793a",
+      "generationInputsHash": "sha256:159059912cb1c5e029fdca801616b1380136870a9876c4f050abf874877c9f49",
       "gaps": [
         {
           "surface": "cli",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config/isbn commands and no journey performs POST /books or adds a book."
+          "reason": "Milestone 1 is not realizable on the cli surface: no journey adds a book via POST /books or exposes HTTP status/JSON validation errors; the catalog only offers config/isbn CLI commands."
         }
       ]
     },
@@ -531,18 +569,25 @@
         }
       ],
       "scenarios": [],
-      "journeys": [],
-      "generationInputsHash": "sha256:b9a07d67a9300844d55199317ba9b5ded6eba7d4225c4bb9872c6967852d439a",
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/get-healthz"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:1dd8d57431ce06ee8a43131b762ff19604cc1909ccdec8df6d420076b6b54dff",
       "gaps": [
         {
           "surface": "api",
-          "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable on the api surface because it concerns a CLI unknown-command path, while the catalog only offers HTTP API endpoints."
+          "kind": "blocked-on",
+          "reason": "blocked on cli-execution, bookclub unknown command: Reject unknown commands"
         },
         {
           "surface": "cli",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable because the catalog has no journey for invoking an undefined `bookclub` command or any generic unknown-command entry point."
+          "reason": "Milestone 1 is not realizable because the catalog contains only defined commands (`config` and `isbn`) and no journey for invoking an undefined `bookclub` command."
         }
       ]
     },
@@ -578,7 +623,8 @@
           "kind": "unrealizable",
           "reason": "Milestone 1 is not realizable on the api surface because it concerns the separate `bookclub config` command, while the catalog only offers HTTP endpoints and the API server process."
         }
-      ]
+      ],
+      "orphaned": true
     },
     {
       "flowId": "reject-duplicate-isbn-on-the-shelf",
@@ -616,6 +662,74 @@
       "orphaned": true
     },
     {
+      "flowId": "reject-finishing-a-missing-book",
+      "flowFingerprint": "sha256:c4d5a480b4fe084a9edff2bb29ab585cbe2318626215843ef063831c9d1b1d7c",
+      "bindings": [
+        {
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/post-finishbook",
+          "fingerprint": "sha256:d25950d14ed43684f287a2e4f9e5f58b754bbb899fdb7be8f30b58a8dbadf456"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-finishing-a-missing-book.api.1",
+          "surface": "api",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/post-books-id-finish"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:f6500d45b15a989e7a864b8ffca7d9a58f58568e720092a97a911869052aec35",
+      "gaps": [
+        {
+          "surface": "cli",
+          "kind": "unrealizable",
+          "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config/isbn commands and no journey sends or observes POST /books/{id}/finish for a missing book."
+        }
+      ]
+    },
+    {
+      "flowId": "reject-invalid-isbn",
+      "flowFingerprint": "sha256:8ffd36849ea2735bd230301c25ea005cb6171acb9b43a678151bf772c50cdb3c",
+      "bindings": [
+        {
+          "doc": "docs/cli.md",
+          "anchor": "the-bookclub-cli/bookclub-isbn-value",
+          "fingerprint": "sha256:f30c071a7ecc6cdb9f046009a859c5b2d8a000ce293544bde6dac188dfd48922"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-invalid-isbn.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/isbn-isbn"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:ee3a599835015d0b2f69baad739152faa5b46ec0de1482d65a8579b5a86f89f1",
+      "gaps": [
+        {
+          "surface": "api",
+          "kind": "unrealizable",
+          "reason": "Milestone 1 is not realizable on the api surface because no journey runs the `bookclub isbn <value>` CLI command or observes its stderr/exit code; the catalog only offers HTTP API endpoints."
+        }
+      ]
+    },
+    {
       "flowId": "reject-shelf-changes-without-a-valid-member-token",
       "flowFingerprint": "sha256:cb9489b500e27ff1b112dca3db7cca7f8c4cd13e019fdfddde4c5cb14fb91d70",
       "bindings": [
@@ -649,11 +763,52 @@
           "kind": "unrealizable",
           "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config and isbn commands, with no journey that posts to /books or /books/{id}/finish or observes shelf writes."
         }
+      ],
+      "orphaned": true
+    },
+    {
+      "flowId": "reject-unsupported-database-scheme",
+      "flowFingerprint": "sha256:4df03fe49d077168164de42907cac07bc20528bf81b79906f7c55beaae26995e",
+      "bindings": [
+        {
+          "doc": "docs/cli.md",
+          "anchor": "the-bookclub-cli/bookclub-config",
+          "fingerprint": "sha256:28476d9f11959e15a54df328dc703015d20c7ba804d70540f7e631250ab9994a"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "reject-unsupported-database-scheme.cli.1",
+          "surface": "cli",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/get-healthz"
+          ]
+        },
+        {
+          "surface": "cli",
+          "journeyIds": [
+            "cli/config"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:097dd42ee8364006c9612b26e9b505f8007f7723cb4bb3bf8d2275f708a7ee9f",
+      "gaps": [
+        {
+          "surface": "api",
+          "kind": "blocked-on",
+          "reason": "blocked on bookclub config cli: Reject unsupported database scheme"
+        }
       ]
     },
     {
       "flowId": "reject-unusable-book-details",
-      "flowFingerprint": "sha256:9cd7b532753a6c6f54f72c7af46d5175f30fdfb774df02a1842975715962bf12",
+      "flowFingerprint": "sha256:3492ecca016b1dce31e20c6221dd61aa09f8ad838685488a8f206412a426f7d4",
       "bindings": [
         {
           "doc": "docs/openapi.yaml",
@@ -676,12 +831,112 @@
           ]
         }
       ],
-      "generationInputsHash": "sha256:f14629f9649cf7fb88e1485c8fffce5041008bbe09cdfcf5111cfbed4b29d967",
+      "generationInputsHash": "sha256:394a8eae4b3ff287719f155a41aa1aac9bff3a08dc56ffab000fe887715bb8f5",
       "gaps": [
         {
           "surface": "cli",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable on the cli surface because no journey adds books or calls POST /books; the catalog only exposes config and isbn commands."
+          "reason": "Milestone 1 is not realizable on the CLI surface because no journey adds a book or issues POST /books; the catalog only exposes config and isbn commands."
+        }
+      ]
+    },
+    {
+      "flowId": "report-a-missing-book-lookup",
+      "flowFingerprint": "sha256:493f746847d34a4f37dd2c13c9ebe4c3c984949cc5cf6552a9ceb35f76beb8d6",
+      "bindings": [
+        {
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/get-getbook",
+          "fingerprint": "sha256:0ca74e271807375c35b4cde38b8b29cc5a6c81dc0d4c12ec54a745fe89dd375e"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "report-a-missing-book-lookup.api.1",
+          "surface": "api",
+          "status": "passing"
+        }
+      ],
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/get-books-id"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:50f95af00f54309f568dd83bde58fc278ac6dfdf833067e5152468d63083f521",
+      "gaps": [
+        {
+          "surface": "cli",
+          "kind": "unrealizable",
+          "reason": "Milestone 1 is not realizable on the cli surface because no journey requests or observes GET /books/{id}; the catalog only offers config and isbn commands."
+        }
+      ]
+    },
+    {
+      "flowId": "report-an-archived-book-lookup",
+      "flowFingerprint": "sha256:17b1748209ad5b791aa0bf5e9680a313e6f7ef469e1eebcc34966fe3aba1213b",
+      "bindings": [
+        {
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/get-getbook",
+          "fingerprint": "sha256:0ca74e271807375c35b4cde38b8b29cc5a6c81dc0d4c12ec54a745fe89dd375e"
+        }
+      ],
+      "scenarios": [],
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/get-books-id"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:04dceff9e9f3994d0ae3cb48f5ce94e47f49783a89854333b535b3a7b26517dc",
+      "gaps": [
+        {
+          "surface": "api",
+          "kind": "blocked-on",
+          "reason": "blocked on missing-data, an archived book: Report an archived book lookup"
+        },
+        {
+          "surface": "cli",
+          "kind": "unrealizable",
+          "reason": "Milestone 1 is not realizable on the CLI surface because the catalog has only config/isbn commands and no journey that performs or observes GET /books/{id} or archived-book lookup errors."
+        }
+      ]
+    },
+    {
+      "flowId": "require-a-command",
+      "flowFingerprint": "sha256:0258a4f973f9a99c203d08c555e8245e7a389d77693c3fdc86e0ddc8c89c1df2",
+      "bindings": [
+        {
+          "doc": "docs/cli.md",
+          "anchor": "the-bookclub-cli/help-and-version",
+          "fingerprint": "sha256:94ed25a872b1916f49daf51c77d37a877face1f1a24ba9928a69b114fa04d0d2"
+        }
+      ],
+      "scenarios": [],
+      "journeys": [
+        {
+          "surface": "api",
+          "journeyIds": [
+            "api/get-healthz"
+          ]
+        }
+      ],
+      "generationInputsHash": "sha256:dc242f131d0b22db905bc2dff191e76762c48ccb919b66d4268278281403f421",
+      "gaps": [
+        {
+          "surface": "api",
+          "kind": "blocked-on",
+          "reason": "blocked on bookclub cli execution: Require a command"
+        },
+        {
+          "surface": "cli",
+          "kind": "unrealizable",
+          "reason": "Milestone 1 is not realizable because no catalog journey runs the CLI with no arguments; the catalog only offers config and isbn subcommands."
         }
       ]
     },
@@ -710,7 +965,7 @@
           ]
         }
       ],
-      "generationInputsHash": "sha256:b710441772eb7cbd16332e5dffb8904d6bdb3856b165b4eaf5acab8d6b1d1d3b",
+      "generationInputsHash": "sha256:0b32f07ac67085808a71f56ec8f9ab10ad76dd2087d3d0fec3e9edaeab81afad",
       "gaps": [
         {
           "surface": "api",
@@ -788,7 +1043,8 @@
           "kind": "unrealizable",
           "reason": "Milestone 1 is not realizable on the cli surface because the catalog only offers config and isbn commands and no journey sends POST /books or adds a book with member-token authorization."
         }
-      ]
+      ],
+      "orphaned": true
     },
     {
       "flowId": "require-member-token-to-finish-a-book",
@@ -823,11 +1079,12 @@
           "kind": "unrealizable",
           "reason": "Milestone 1 is not realizable on this cli surface because the catalog only offers config and isbn commands and has no journey for finishing a book or sending member-token-protected book requests."
         }
-      ]
+      ],
+      "orphaned": true
     },
     {
       "flowId": "show-help",
-      "flowFingerprint": "sha256:9bdc9df37bdbd437ffc89af28d94ce8217a6ef979c028fcfa1f44d79d67f3ec9",
+      "flowFingerprint": "sha256:9dded1e8a995765ed7b2d39d7413a0fb5a7e5b70850adef2ff2c3e3cb4f2c75a",
       "bindings": [
         {
           "doc": "docs/cli.md",
@@ -844,56 +1101,23 @@
           ]
         }
       ],
-      "generationInputsHash": "sha256:05de29508b7cf574985f4987de1193a08656e99c84082755841bcadc35d79145",
+      "generationInputsHash": "sha256:d5f48bedccbf30ee9302e49aeb225b898705663d1ba4064d851e4f88f87d1359",
       "gaps": [
         {
           "surface": "api",
           "kind": "blocked-on",
-          "reason": "blocked on cli, bookclub --help invocation: Show help"
+          "reason": "blocked on bookclub cli invocation: Show help"
         },
         {
           "surface": "cli",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable because the catalog has help flags only for the config and isbn commands, with no top-level bookclub --help/-h entry that shows global usage, command list, and options."
-        }
-      ]
-    },
-    {
-      "flowId": "show-usage-when-no-arguments-are-provided",
-      "flowFingerprint": "sha256:7bbb962f75cb537a6f22103d041ecaa1512c8b8c7a04d2f965c94ec0596cac8e",
-      "bindings": [
-        {
-          "doc": "docs/cli.md",
-          "anchor": "the-bookclub-cli/help-and-version",
-          "fingerprint": "sha256:94ed25a872b1916f49daf51c77d37a877face1f1a24ba9928a69b114fa04d0d2"
-        }
-      ],
-      "scenarios": [],
-      "journeys": [
-        {
-          "surface": "api",
-          "journeyIds": [
-            "api/get-healthz"
-          ]
-        }
-      ],
-      "generationInputsHash": "sha256:74781bb97eb48ba620ae10fffb587ba674b71e2569f976dfc850803c81556340",
-      "gaps": [
-        {
-          "surface": "api",
-          "kind": "blocked-on",
-          "reason": "blocked on bookclub cli invocation: Show usage when no arguments are provided"
-        },
-        {
-          "surface": "cli",
-          "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable because the catalog has no root/no-arguments `bookclub` invocation journey, only `config` and `isbn` command entries."
+          "reason": "No journey invokes the root `bookclub --help` or `bookclub -h`; the catalog only exposes help flags on the `config` and `isbn` subcommands."
         }
       ]
     },
     {
       "flowId": "show-version",
-      "flowFingerprint": "sha256:be760d70fe1faf9fad5b1d04a5f48dd9a589c220e6b82ddf76d7b341b9e4dc21",
+      "flowFingerprint": "sha256:af8fc04180783172763ffaa28c78dd293f3bd4a575d43d15733279baf43d0d2b",
       "bindings": [
         {
           "doc": "docs/cli.md",
@@ -903,19 +1127,66 @@
       ],
       "scenarios": [],
       "journeys": [],
-      "generationInputsHash": "sha256:9943bbf39cc9238cafab7f400bcf97bdd1acce708cbce790a0f9ec61a8441c7b",
+      "generationInputsHash": "sha256:8c4aabf254ea376db5fd1e0e55825288dcc0f5b25ad3d1617388c6e53170e10d",
       "gaps": [
         {
           "surface": "api",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable on the api surface because it requires running the bookclub CLI with --version or -V, while the catalog only exposes HTTP API routes and server-process observation."
+          "reason": "Milestone 1 is not realizable on the api surface because it requires invoking the CLI version command (`bookclub --version`/`-V`), while the catalog only exposes HTTP API endpoints."
         },
         {
           "surface": "cli",
           "kind": "unrealizable",
-          "reason": "Milestone 1 is not realizable because the catalog has no root `bookclub --version` or `bookclub -V` journey; it only exposes `--version` on subcommand journeys like `config` and `isbn`."
+          "reason": "Milestone 1 is not realizable because no journey invokes the root `bookclub --version` or `bookclub -V`; the catalog only offers `--version` on `config` and `isbn` subcommands."
         }
       ]
+    }
+  ],
+  "gapSections": [
+    {
+      "doc": "docs/cli.md",
+      "anchor": "the-bookclub-cli",
+      "fingerprint": "sha256:db673f546713222ce6a684ead5d0729f8fb5225a2ac81309e6a779f4ec783d39"
+    },
+    {
+      "doc": "docs/openapi.yaml",
+      "anchor": "paths/get-listbooks",
+      "fingerprint": "sha256:6c841d487ccfd6a83d13284a73da329b64b8385357221a34ef2fa4b67a9a66fa"
+    },
+    {
+      "doc": "docs/shelf-rules.md",
+      "anchor": "shelf-rules",
+      "fingerprint": "sha256:deb8c1498456d114f0ade7370f639c29de93f06e2557b2f5de3774ab5f6ea372"
+    },
+    {
+      "doc": "docs/shelf-rules.md",
+      "anchor": "shelf-rules/finishing-a-book",
+      "fingerprint": "sha256:ca3e6c22b6fded3766efef18e60e281dce6cd50401b84457a8a37fb47e7ffff1"
+    },
+    {
+      "doc": "docs/shelf-rules.md",
+      "anchor": "shelf-rules/one-copy-per-isbn",
+      "fingerprint": "sha256:b8e3068b555db53046372c054923bb82b6baa7d1154143191fa3ab0e03d40db0"
+    },
+    {
+      "doc": "README.md",
+      "anchor": "bookclub",
+      "fingerprint": "sha256:e06379d7309c9c81765abb26baa71792b86cbe5da9ea861b8ca276fc66d65e9e"
+    },
+    {
+      "doc": "README.md",
+      "anchor": "bookclub/configuration",
+      "fingerprint": "sha256:42afb3def8c20c1861acc77fdaf4e98fc9457fe7d62d3929c1c51e34034f9422"
+    },
+    {
+      "doc": "README.md",
+      "anchor": "bookclub/layout",
+      "fingerprint": "sha256:8034717e3e4e30d8475a0eed53a4a0a4f81fac6795071ac9b290a49bc661f18a"
+    },
+    {
+      "doc": "README.md",
+      "anchor": "bookclub/running-the-service",
+      "fingerprint": "sha256:b947a1e727a55517b900f411e82c859550b179c566491341e3ae6508cfc924a4"
     }
   ]
 }

@@ -1,10 +1,10 @@
 guard: 3
 id: check-service-health.api.1
-title: Health check reports the bookclub service is up
-promise: A user can confirm that the bookclub service is healthy.
+title: A user can confirm the bookclub service is healthy
+promise: A user can confirm the bookclub service is healthy.
 flow:
   id: check-service-health
-  fingerprint: sha256:ed0790eabe387146b56f0cf1db7eec695b83b4ef2ccd8226925d40f9d6821401
+  fingerprint: sha256:ee5b70cb5ea568ca6429e4dd58f94fb4663bdb08b9cc78e2d749493e10b4b8e3
 journey:
   path:
     - api/get-healthz

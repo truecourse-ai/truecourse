@@ -1,0 +1,28 @@
+guard: 3
+id: reject-invalid-isbn.cli.1
+title: Invalid ISBN values are refused with a clear error
+promise: The user gets a clear error when the provided ISBN value is invalid.
+flow:
+  id: reject-invalid-isbn
+  fingerprint: sha256:8ffd36849ea2735bd230301c25ea005cb6171acb9b43a678151bf772c50cdb3c
+journey:
+  path:
+    - cli/isbn-isbn
+  fingerprints:
+    - sha256:4c7b201cf35ee17bd38ff936470a6fc150113beb7e5fa76a7dca6000fb1f5dd5
+binds:
+  - doc: docs/cli.md
+    section: the-bookclub-cli/bookclub-isbn-value
+    fingerprint: sha256:f30c071a7ecc6cdb9f046009a859c5b2d8a000ce293544bde6dac188dfd48922
+normalize: []
+driver: cli
+steps:
+  - run:
+      - isbn
+      - isbn
+    expect:
+      exit: 2
+      stderr:
+        equals: |
+          error: "isbn" is not a valid ISBN
+    milestone: 1

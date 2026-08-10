@@ -1,7 +1,7 @@
 guard: 3
 id: require-an-isbn-value.cli.1
-title: Calling the ISBN command without a value reports a clear error
-promise: The user gets a clear error when invoking the ISBN command without a value.
+title: Calling ISBN conversion without a value reports the missing ISBN value error
+promise: The user gets a clear error when asking for ISBN conversion without a value.
 flow:
   id: require-an-isbn-value
   fingerprint: sha256:a30717f39d39c2972ef55fefda1596d8c8b561757c38ea5ec2b31ad4e1da3fe9
@@ -22,5 +22,6 @@ steps:
     expect:
       exit: 2
       stderr:
-        contains: 'error: isbn needs a value'
+        equals: |
+          error: isbn needs a value
     milestone: 1

@@ -1,0 +1,34 @@
+guard: 3
+id: reject-finishing-a-missing-book.api.1
+title: Members get a not-found error when finishing a missing book
+promise: A member receives a not-found error when trying to finish a book id that does not exist.
+flow:
+  id: reject-finishing-a-missing-book
+  fingerprint: sha256:c4d5a480b4fe084a9edff2bb29ab585cbe2318626215843ef063831c9d1b1d7c
+journey:
+  path:
+    - api/post-books-id-finish
+  fingerprints:
+    - sha256:3462f3a5924acbd0bc7f25e90371a3be89fa11fd3e957d8e9cc18ffe65114b74
+binds:
+  - doc: docs/openapi.yaml
+    section: paths/post-finishbook
+    fingerprint: sha256:d25950d14ed43684f287a2e4f9e5f58b754bbb899fdb7be8f30b58a8dbadf456
+normalize: []
+driver: api
+steps:
+  - request:
+      method: POST
+      path: /books/{{fixture:missingBook.id}}/finish
+      headers:
+        Authorization: '{{cred:member}}'
+    expect:
+      status: 404
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1

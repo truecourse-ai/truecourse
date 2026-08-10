@@ -1,40 +1,40 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-10T05:08:57.743Z",
+  "generatedAt": "2026-08-10T12:43:39.988Z",
   "flows": [
     {
       "id": "run-the-service",
       "title": "Run the service",
-      "goal": "The user can configure and start the service, have migrations applied before listening, see the masked startup line, and confirm the service is healthy.",
-      "fingerprint": "sha256:1387675c12e15aa8b96639ae619f0aed28293e55152378b719882d135bf517c6",
+      "goal": "The user can start the service with the intended configuration, have the database prepared, see where it is listening, and verify it is healthy.",
+      "fingerprint": "sha256:4030cbea29cc7fbcf330873860a53f2305c28d7c74b9fffa00f080a4a6386096",
       "milestones": [
         {
           "order": 1,
           "doc": "README.md",
           "anchor": "bookclub/configuration",
-          "claimTitle": "Each documented setting uses its default value when its environment variable is unset and is overridden by its own environment variable when set.",
-          "note": "Configuration determines which database and address the service uses before startup."
+          "claimTitle": "Each configuration setting has the documented default value and is overridden by its corresponding environment variable.",
+          "note": "Configuration determines the database and listening settings used when the service starts."
         },
         {
           "order": 2,
           "doc": "README.md",
           "anchor": "bookclub/running-the-service",
-          "claimTitle": "On startup, the service applies every migration in `migrations/` against the database it is configured for before the service is listening.",
-          "note": "Migrations complete before the service begins listening."
+          "claimTitle": "On startup, the service applies every migration in `migrations/` against the configured database before it starts listening.",
+          "note": "The service prepares the configured database before accepting requests."
         },
         {
           "order": 3,
           "doc": "README.md",
           "anchor": "bookclub/running-the-service",
-          "claimTitle": "Once the service is up, it prints one line naming the address it is listening on and the database it is using, with the password masked.",
-          "note": "The startup line confirms the service is listening and reports the configured database safely."
+          "claimTitle": "Once the service is up, it prints one line naming the address it is listening on and the database it is using, with the database password masked.",
+          "note": "After startup completes, the user can see the listening address and database without exposing the password."
         },
         {
           "order": 4,
           "doc": "README.md",
           "anchor": "bookclub/running-the-service",
-          "claimTitle": "`GET /healthz` answers `200` with `{\"status\":\"ok\",\"service\":\"bookclub\"}` as soon as the service is listening.",
-          "note": "The health check confirms the listening service is ready."
+          "claimTitle": "When the service is listening, `GET /healthz` responds with status `200` and body `{\"status\":\"ok\",\"service\":\"bookclub\"}`.",
+          "note": "The health response confirms the listening service is ready."
         }
       ],
       "bindings": [
@@ -50,27 +50,27 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "81e1c2b33c47e20bebb01f7322d36419f14701eb66b0ba45236d837d240fdc9d"
+      "synthesisInputsHash": "a33273eb6a69a72baf729dc0d198c82b843c4e5141dfbf63215abcacea245bf1"
     },
     {
-      "id": "add-a-book-and-prevent-another-copy-of-the-same-isbn",
-      "title": "Add a book and prevent another copy of the same ISBN",
-      "goal": "A member can add a book with a normalized ISBN, and the shelf rejects a second copy without changing the shelf.",
-      "fingerprint": "sha256:03feb55ce62b8543a6a155a31ddbde1ef04f2bda5b6922d1a067ccd4de8f8dcf",
+      "id": "add-a-book-and-prevent-duplicate-isbns",
+      "title": "Add a book and prevent duplicate ISBNs",
+      "goal": "A member can add a book with a normalized ISBN, and the shelf refuses another copy of the same ISBN even when written differently.",
+      "fingerprint": "sha256:0f8942c49b77b3ddb06b844b4018bab7a839a4b5e0adfb531e049f4b49b552f0",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/isbns-are-stored-as-thirteen-digits",
-          "claimTitle": "POST /books accepts an ISBN-10 or an ISBN-13, with or without hyphens and spaces, and stores the thirteen-digit form returned as the book's isbn.",
-          "note": "First the book is added to the shelf."
+          "claimTitle": "POST /books accepts a valid ISBN-10 or ISBN-13 with or without hyphens and spaces and stores the thirteen-digit form returned in the book's isbn field.",
+          "note": "The first add establishes the ISBN on the shelf."
         },
         {
           "order": 2,
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/one-copy-per-isbn",
-          "claimTitle": "Adding an ISBN that is already on the shelf is answered 409 with {\"error\":\"that book is already on the shelf\"}, and the shelf is left as it was.",
-          "note": "Then the same ISBN is added again to confirm one-copy-per-ISBN behavior."
+          "claimTitle": "Adding an ISBN that is already on the shelf is answered 409 with {\"error\":\"that book is already on the shelf\"} and leaves the shelf unchanged, including when the duplicate is only equivalent after ISBN normalisation.",
+          "note": "The duplicate add acts on the ISBN already stored by the previous step."
         }
       ],
       "bindings": [
@@ -86,27 +86,27 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "26bc0dd88f3272f574c5e070a6a46c714d3c985bca7ac7e43e70ea8b2ce857ab"
+      "synthesisInputsHash": "202057765b9897e6e1c33ae137334940bb3cc0594773acb8c589989b69671fff"
     },
     {
-      "id": "finish-and-re-finish-a-book",
-      "title": "Finish and re-finish a book",
-      "goal": "A member can mark a book finished and later mark it finished again so its finished timestamp is updated.",
-      "fingerprint": "sha256:0a94926f2220dcb6cf9b79eca99f6e4b4ff5622ec5973f656e6e5719840018ff",
+      "id": "finish-a-book-and-re-stamp-it",
+      "title": "Finish a book and re-stamp it",
+      "goal": "A member can mark a book finished, and finishing it again updates the finishedAt stamp.",
+      "fingerprint": "sha256:4cb3f53273707d23773fbfd7e1fde463399cebe6b5af07e15b83d55c7b806dbb",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/finishing-a-book",
           "claimTitle": "POST /books/{id}/finish moves a book to finished, stamps finishedAt with the moment it was marked, and answers 200 with the book in its new state.",
-          "note": "The book is first moved into the finished state."
+          "note": "The book first moves into the finished state."
         },
         {
           "order": 2,
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/finishing-a-book",
-          "claimTitle": "POST /books/{id}/finish re-stamps a book that is already finished.",
-          "note": "The same finished book is marked finished again."
+          "claimTitle": "POST /books/{id}/finish re-stamps finishedAt for a book that is already finished.",
+          "note": "The second finish acts on the already-finished book from the previous step."
         }
       ],
       "bindings": [
@@ -117,42 +117,30 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "26bc0dd88f3272f574c5e070a6a46c714d3c985bca7ac7e43e70ea8b2ce857ab"
+      "synthesisInputsHash": "202057765b9897e6e1c33ae137334940bb3cc0594773acb8c589989b69671fff"
     },
     {
-      "id": "browse-the-public-shelf-without-credentials",
-      "title": "Browse the public shelf without credentials",
-      "goal": "A reader can view books without credentials while archived books are hidden or reported as archived.",
-      "fingerprint": "sha256:c6c1f40f0be7cb79d5a479c61de5a5b6482b35dd223071b7b8f14d6940b9d8f9",
+      "id": "read-archived-books",
+      "title": "Read archived books",
+      "goal": "Archived books are hidden from the shelf list and return the archived error when requested directly.",
+      "fingerprint": "sha256:1b4ded9cf540fd7a495461d10fdde317e498f8926d21248df09213c38cf97682",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/shelf-rules.md",
-          "anchor": "shelf-rules/who-may-change-the-shelf",
-          "claimTitle": "GET /books and GET /books/{id} need no credentials.",
-          "note": "The reader uses the public read operations."
+          "anchor": "shelf-rules/archived-books",
+          "claimTitle": "An archived book does not appear in GET /books.",
+          "note": "The list view excludes the archived book."
         },
         {
           "order": 2,
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/archived-books",
-          "claimTitle": "An archived book does not appear in GET /books.",
-          "note": "The public list omits archived books."
-        },
-        {
-          "order": 3,
-          "doc": "docs/shelf-rules.md",
-          "anchor": "shelf-rules/archived-books",
-          "claimTitle": "GET /books/{id} for an archived book answers 410 with {\"error\":\"book archived\"} rather than the book.",
-          "note": "A direct read of an archived book reports that it is archived."
+          "claimTitle": "GET /books/{id} for an archived book answers 410 with {\"error\":\"book archived\"}.",
+          "note": "A direct read of that archived book reports that it is archived."
         }
       ],
       "bindings": [
-        {
-          "doc": "docs/shelf-rules.md",
-          "anchor": "shelf-rules/who-may-change-the-shelf",
-          "fingerprint": "sha256:b5ffe03f72dda5183ad0c36d7e457ccf09cf2dc42f45e5455c402321a5e0544b"
-        },
         {
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/archived-books",
@@ -160,20 +148,51 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "26bc0dd88f3272f574c5e070a6a46c714d3c985bca7ac7e43e70ea8b2ce857ab"
+      "synthesisInputsHash": "202057765b9897e6e1c33ae137334940bb3cc0594773acb8c589989b69671fff"
+    },
+    {
+      "id": "read-without-credentials-and-block-unauthenticated-changes",
+      "title": "Read without credentials and block unauthenticated changes",
+      "goal": "Anyone can read books, while attempts to change the shelf without a valid member token are rejected without writing anything.",
+      "fingerprint": "sha256:f48c22cd497712b532eedb9245a5f0fccc341712a5b8de136a593e67ff2284a4",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/shelf-rules.md",
+          "anchor": "shelf-rules/who-may-change-the-shelf",
+          "claimTitle": "GET /books and GET /books/{id} are answered without requiring credentials.",
+          "note": "The user can read the shelf before authenticating."
+        },
+        {
+          "order": 2,
+          "doc": "docs/shelf-rules.md",
+          "anchor": "shelf-rules/who-may-change-the-shelf",
+          "claimTitle": "POST /books and POST /books/{id}/finish without a member token, or with a token the club's secret does not verify, are answered 401 with {\"error\":\"authentication required\"} and nothing is written.",
+          "note": "The same unauthenticated or invalidly authenticated user cannot change the shelf."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/shelf-rules.md",
+          "anchor": "shelf-rules/who-may-change-the-shelf",
+          "fingerprint": "sha256:b5ffe03f72dda5183ad0c36d7e457ccf09cf2dc42f45e5455c402321a5e0544b"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "202057765b9897e6e1c33ae137334940bb3cc0594773acb8c589989b69671fff"
     },
     {
       "id": "reject-an-invalid-isbn",
       "title": "Reject an invalid ISBN",
-      "goal": "A member gets a validation error when trying to add a book with a value that is not a valid ISBN-10 or ISBN-13.",
-      "fingerprint": "sha256:aca16517f3cfebfad3cf7d4fcb2a6b7fe4050f3d8b6533e53307b171d85a03d3",
+      "goal": "A user who submits a value that is not a valid ISBN gets the documented validation error.",
+      "fingerprint": "sha256:a2b2cb3387ea3b6bce494089e116e7ad15c5f0fa202a2b373a4f11f0bece3957",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/isbns-are-stored-as-thirteen-digits",
-          "claimTitle": "POST /books refuses a value that is neither a valid ISBN-10 nor a valid ISBN-13 with 400 and {\"error\":\"isbn must be a valid ISBN-10 or ISBN-13\"}.",
-          "note": "The add-book attempt fails validation."
+          "claimTitle": "POST /books refuses a value that is neither a valid ISBN-10 nor a valid ISBN-13 with status 400 and {\"error\":\"isbn must be a valid ISBN-10 or ISBN-13\"}.",
+          "note": "This is a validation failure path for adding a book."
         }
       ],
       "bindings": [
@@ -184,36 +203,12 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "26bc0dd88f3272f574c5e070a6a46c714d3c985bca7ac7e43e70ea8b2ce857ab"
-    },
-    {
-      "id": "reject-shelf-changes-without-a-valid-member-token",
-      "title": "Reject shelf changes without a valid member token",
-      "goal": "A non-member or invalid-token caller cannot add or finish books, and no shelf state is written.",
-      "fingerprint": "sha256:cb9489b500e27ff1b112dca3db7cca7f8c4cd13e019fdfddde4c5cb14fb91d70",
-      "milestones": [
-        {
-          "order": 1,
-          "doc": "docs/shelf-rules.md",
-          "anchor": "shelf-rules/who-may-change-the-shelf",
-          "claimTitle": "POST /books and POST /books/{id}/finish without a member token or with a token the club's secret does not verify are answered 401 with {\"error\":\"authentication required\"} and nothing is written.",
-          "note": "The write attempt is denied before changing the shelf."
-        }
-      ],
-      "bindings": [
-        {
-          "doc": "docs/shelf-rules.md",
-          "anchor": "shelf-rules/who-may-change-the-shelf",
-          "fingerprint": "sha256:b5ffe03f72dda5183ad0c36d7e457ccf09cf2dc42f45e5455c402321a5e0544b"
-        }
-      ],
-      "composedOf": [],
-      "synthesisInputsHash": "26bc0dd88f3272f574c5e070a6a46c714d3c985bca7ac7e43e70ea8b2ce857ab"
+      "synthesisInputsHash": "202057765b9897e6e1c33ae137334940bb3cc0594773acb8c589989b69671fff"
     },
     {
       "id": "keep-a-member-token-working-after-restart",
       "title": "Keep a member token working after restart",
-      "goal": "A member can continue using the same token after the service restarts.",
+      "goal": "A member remains able to use the same token after the service restarts.",
       "fingerprint": "sha256:bbc10fb355d465b6abf59e3982479d9cdc50dad476d3c6b7f8193919d3e5ad39",
       "milestones": [
         {
@@ -221,7 +216,7 @@
           "doc": "docs/shelf-rules.md",
           "anchor": "shelf-rules/who-may-change-the-shelf",
           "claimTitle": "A member token keeps working after the service restarts.",
-          "note": "The member token remains valid across restart."
+          "note": "This is the persistence expectation for member authentication."
         }
       ],
       "bindings": [
@@ -232,27 +227,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "26bc0dd88f3272f574c5e070a6a46c714d3c985bca7ac7e43e70ea8b2ce857ab"
+      "synthesisInputsHash": "202057765b9897e6e1c33ae137334940bb3cc0594773acb8c589989b69671fff"
     },
     {
-      "id": "print-configuration-with-a-redacted-database-password",
-      "title": "Print configuration with a redacted database password",
-      "goal": "The user can inspect the service configuration while keeping the database password hidden.",
-      "fingerprint": "sha256:87a8f0f03277c522adc3fe439e50499adbe16d7c951ab4e42fcc8c6d64c885c5",
+      "id": "print-configuration",
+      "title": "Print configuration",
+      "goal": "The user can inspect the configuration the service would use with the database password masked.",
+      "fingerprint": "sha256:aacf3a9a6f3d1d6f43efa3e91a8b922a19effe49cedb0a61bca62dcc8dc79f74",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/bookclub-config",
-          "claimTitle": "`bookclub config` prints the configuration the service would use, one setting per line, and exits `0`.",
-          "note": "First the command prints the configuration."
-        },
-        {
-          "order": 2,
-          "doc": "docs/cli.md",
-          "anchor": "the-bookclub-cli/bookclub-config",
-          "claimTitle": "The database line printed by `bookclub config` always replaces its password with `***`.",
-          "note": "The printed configuration redacts the password."
+          "claimTitle": "`bookclub config` prints the configuration the service would use, one setting per line, with the database password replaced by `***`, and exits `0`.",
+          "note": "This is the successful configuration inspection path."
         }
       ],
       "bindings": [
@@ -263,20 +251,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
-      "id": "reject-an-unsupported-database-scheme",
-      "title": "Reject an unsupported database scheme",
-      "goal": "The user gets a clear configuration error when the database scheme is not Postgres.",
-      "fingerprint": "sha256:311b142c2bd48d6ffd8eb136560654f2a3aef824267dfb04781e803179c47eb6",
+      "id": "reject-unsupported-database-scheme",
+      "title": "Reject unsupported database scheme",
+      "goal": "The user gets a clear error when the configured database scheme is not supported.",
+      "fingerprint": "sha256:4df03fe49d077168164de42907cac07bc20528bf81b79906f7c55beaae26995e",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/bookclub-config",
-          "claimTitle": "If `DATABASE_URL` names a scheme other than Postgres, `bookclub config` writes `error: unsupported database scheme \"<scheme>\" — bookclub speaks postgres and postgresql` to stderr and exits `2`.",
-          "note": "This is an error path for the config command."
+          "claimTitle": "If `DATABASE_URL` names a non-Postgres scheme, `bookclub config` writes `error: unsupported database scheme \"<scheme>\" — bookclub speaks postgres and postgresql` to stderr and exits `2`.",
+          "note": "This is the configuration error path."
         }
       ],
       "bindings": [
@@ -287,12 +275,12 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
       "id": "convert-a-valid-isbn",
-      "title": "Convert a valid ISBN",
-      "goal": "The user can normalize a valid ISBN-10 or ISBN-13 into its thirteen-digit form.",
+      "title": "Print thirteen-digit ISBN",
+      "goal": "The user can provide a valid ISBN and receive its thirteen-digit form.",
       "fingerprint": "sha256:6104f407a296b6713baabadace1368984013da7600a0129547cc98de7e824389",
       "milestones": [
         {
@@ -311,20 +299,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
-      "id": "refuse-an-invalid-isbn",
-      "title": "Refuse an invalid ISBN",
-      "goal": "The user gets a clear error when the ISBN value is invalid.",
-      "fingerprint": "sha256:d7e9ea5fc73b833a29e2f73a36807f9592a232a5eae4bf151d9b4cc71f4ab594",
+      "id": "reject-invalid-isbn",
+      "title": "Reject invalid ISBN",
+      "goal": "The user gets a clear error when the provided ISBN value is invalid.",
+      "fingerprint": "sha256:8ffd36849ea2735bd230301c25ea005cb6171acb9b43a678151bf772c50cdb3c",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/bookclub-isbn-value",
-          "claimTitle": "`bookclub isbn <value>` refuses an invalid ISBN by writing `error: \"<value>\" is not a valid ISBN` to stderr and exiting `2`.",
-          "note": "This is an error path for an invalid ISBN value."
+          "claimTitle": "When `bookclub isbn <value>` receives a value that is not a valid ISBN, it writes `error: \"<value>\" is not a valid ISBN` to stderr and exits `2`.",
+          "note": "This is the invalid ISBN error path."
         }
       ],
       "bindings": [
@@ -335,12 +323,12 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
       "id": "require-an-isbn-value",
-      "title": "Require an ISBN value",
-      "goal": "The user gets a clear error when invoking the ISBN command without a value.",
+      "title": "Require ISBN value",
+      "goal": "The user gets a clear error when asking for ISBN conversion without a value.",
       "fingerprint": "sha256:a30717f39d39c2972ef55fefda1596d8c8b561757c38ea5ec2b31ad4e1da3fe9",
       "milestones": [
         {
@@ -348,7 +336,7 @@
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/bookclub-isbn-value",
           "claimTitle": "Calling `bookclub isbn` with no value writes `error: isbn needs a value` and exits `2`.",
-          "note": "This is an error path for a missing ISBN value."
+          "note": "This is the missing ISBN value error path."
         }
       ],
       "bindings": [
@@ -359,19 +347,19 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
       "id": "show-help",
       "title": "Show help",
-      "goal": "The user can request usage text that includes commands and options.",
-      "fingerprint": "sha256:9bdc9df37bdbd437ffc89af28d94ce8217a6ef979c028fcfa1f44d79d67f3ec9",
+      "goal": "The user can request usage text successfully.",
+      "fingerprint": "sha256:9dded1e8a995765ed7b2d39d7413a0fb5a7e5b70850adef2ff2c3e3cb4f2c75a",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/help-and-version",
-          "claimTitle": "`bookclub --help` or `bookclub -h`, in place of any command, writes the usage, including the command list and options, to stdout and exits `0`.",
+          "claimTitle": "`bookclub --help` or `bookclub -h` writes the usage to stdout and exits `0`.",
           "note": "This is the explicit help path."
         }
       ],
@@ -383,20 +371,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
       "id": "show-version",
       "title": "Show version",
-      "goal": "The user can request the CLI version.",
-      "fingerprint": "sha256:be760d70fe1faf9fad5b1d04a5f48dd9a589c220e6b82ddf76d7b341b9e4dc21",
+      "goal": "The user can request the CLI version successfully.",
+      "fingerprint": "sha256:af8fc04180783172763ffaa28c78dd293f3bd4a575d43d15733279baf43d0d2b",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/help-and-version",
-          "claimTitle": "`bookclub --version` or `bookclub -V`, in place of any command, writes `bookclub` followed by the version and exits `0`.",
-          "note": "This is the version path."
+          "claimTitle": "`bookclub --version` or `bookclub -V` writes `bookclub` followed by the version and exits `0`.",
+          "note": "This is the version reporting path."
         }
       ],
       "bindings": [
@@ -407,20 +395,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
-      "id": "show-usage-when-no-arguments-are-provided",
-      "title": "Show usage when no arguments are provided",
-      "goal": "The user gets usage text as an error when no command or option is provided.",
-      "fingerprint": "sha256:7bbb962f75cb537a6f22103d041ecaa1512c8b8c7a04d2f965c94ec0596cac8e",
+      "id": "require-a-command",
+      "title": "Require a command",
+      "goal": "The user gets usage text as an error when running the CLI without arguments.",
+      "fingerprint": "sha256:0258a4f973f9a99c203d08c555e8245e7a389d77693c3fdc86e0ddc8c89c1df2",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/help-and-version",
-          "claimTitle": "Run with no arguments, `bookclub` writes the same usage text to stderr and exits `2`.",
-          "note": "This is the missing-arguments error path."
+          "claimTitle": "Run with no arguments, `bookclub` writes the usage text to stderr and exits `2`.",
+          "note": "This is the no-arguments error path."
         }
       ],
       "bindings": [
@@ -431,12 +419,12 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
       "id": "reject-an-unknown-command",
-      "title": "Reject an unknown command",
-      "goal": "The user gets a clear error when entering a command the CLI does not define.",
+      "title": "Reject unknown commands",
+      "goal": "The user gets a clear error when entering a command that is not defined.",
       "fingerprint": "sha256:743038ad6980796a6fc97c970ac246601484def6f62f69fa1d4fc9477f92ccbb",
       "milestones": [
         {
@@ -444,7 +432,7 @@
           "doc": "docs/cli.md",
           "anchor": "the-bookclub-cli/unknown-commands",
           "claimTitle": "An undefined `bookclub` command writes `error: unknown command \"<name>\"` to stderr and exits `2`.",
-          "note": "This is the unknown-command error path."
+          "note": "This is the unknown command error path."
         }
       ],
       "bindings": [
@@ -455,72 +443,55 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "413a69975381497a95f0c806613f01a0a71d1c7a4954570023f5f2f14f78837f"
+      "synthesisInputsHash": "71e93c1b2b2da294af29578f266b27248e603a573132239e12109c1bc350f89e"
     },
     {
-      "id": "check-service-health",
-      "title": "GET /healthz returns bookclub ok",
-      "goal": "The user can confirm the service is healthy and identifies itself as bookclub.",
-      "fingerprint": "sha256:ed0790eabe387146b56f0cf1db7eec695b83b4ef2ccd8226925d40f9d6821401",
-      "milestones": [
-        {
-          "order": 1,
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/get-health",
-          "claimTitle": "GET /healthz returns a 200 response with an application/json body whose status is \"ok\" and service is \"bookclub\".",
-          "note": "Health is a standalone availability check."
-        }
-      ],
-      "bindings": [
-        {
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/get-health",
-          "fingerprint": "sha256:615bd256a70e64ff68494c61e7521c5d2ed57bab41cb586f0439e6a4783a892c"
-        }
-      ],
-      "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
-    },
-    {
-      "id": "add-find-view-cover-and-finish-a-book",
-      "title": "Add, list, get, and finish a book",
-      "goal": "The user can add a book, see it on the shelf, retrieve it by id, and mark it finished.",
-      "fingerprint": "sha256:2fc9a977bf13af9f25407e49f1b7c42370241311c6bf13eea6a352ac62902ecb",
+      "id": "add-list-retrieve-and-finish-a-book",
+      "title": "Add, list, retrieve, and finish a book",
+      "goal": "A member can add a book, see it on the shelf with the expected list representation, retrieve it by id, and mark it finished.",
+      "fingerprint": "sha256:30c6cc189c0b3c50b636fe6c56d3306a72fcd9a66cb83a08d7952c39bd4c8691",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/post-addbook",
-          "claimTitle": "POST /books with a valid member token and a JSON body containing isbn, title, and author returns 201 with the book that was added as an application/json object containing id, isbn, title, author, status, addedAt, and finishedAt.",
-          "note": "Adding the book creates the shelf item used by the later steps."
+          "claimTitle": "POST /books with a valid member token and an application/json body containing isbn, title, and author responds with 201 and a JSON representation of the book that was added.",
+          "note": "The path starts with a member adding a book to the shelf."
         },
         {
           "order": 2,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/get-listbooks",
-          "claimTitle": "GET /books returns a 200 application/json response containing a required books array whose items are book objects with required id, isbn, title, author, status, addedAt, and finishedAt fields.",
-          "note": "The shelf listing exposes the added book objects with their required fields."
+          "claimTitle": "GET /books returns a 200 application/json response whose body is an object with a required books array containing book objects with required id, isbn, title, author, status, addedAt, and finishedAt fields.",
+          "note": "After adding a book, the user lists the shelf."
         },
         {
           "order": 3,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/get-listbooks",
           "claimTitle": "GET /books lists the books on the shelf most recently added first.",
-          "note": "The listing order is part of the shelf view after books are added."
+          "note": "The list view should present shelf contents in the documented order."
         },
         {
           "order": 4,
           "doc": "docs/openapi.yaml",
-          "anchor": "paths/get-getbook",
-          "claimTitle": "GET /books/{id} returns 200 with an application/json book object containing id, isbn, title, author, status, addedAt, and finishedAt when the book is found.",
-          "note": "The id from the added book can be used to retrieve that book."
+          "anchor": "paths/get-listbooks",
+          "claimTitle": "Each book object returned by GET /books has integer id, string isbn, string title, string author, status equal to unread or finished, date-time string addedAt, and nullable date-time string finishedAt.",
+          "note": "The listed book objects have the documented field types and values."
         },
         {
           "order": 5,
           "doc": "docs/openapi.yaml",
+          "anchor": "paths/get-getbook",
+          "claimTitle": "GET /books/{id} returns 200 with an application/json book object containing required id, isbn, title, author, status, addedAt, and finishedAt fields.",
+          "note": "The user can open the added book by its id."
+        },
+        {
+          "order": 6,
+          "doc": "docs/openapi.yaml",
           "anchor": "paths/post-finishbook",
-          "claimTitle": "POST /books/{id}/finish with a valid member token marks the book with that integer id as finished and returns 200 with an application/json book object including id, isbn, title, author, status, addedAt, and finishedAt.",
-          "note": "The retrieved book can then be marked finished."
+          "claimTitle": "POST /books/{id}/finish marks the identified book as finished and returns HTTP 200 with the book, now finished, as an application/json object containing the required fields id, isbn, title, author, status, addedAt, and finishedAt.",
+          "note": "The path ends with the identified book marked finished."
         }
       ],
       "bindings": [
@@ -546,27 +517,111 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
     },
     {
-      "id": "add-a-duplicate-isbn",
-      "title": "Add a duplicate ISBN",
-      "goal": "The user gets a conflict error when trying to add a book whose ISBN is already on the shelf.",
-      "fingerprint": "sha256:27bb22305e1e159daaa0cddebb5725d406a1b5b394c325ec5e489f2979ca167f",
+      "id": "check-service-health",
+      "title": "Check service health",
+      "goal": "A user can confirm the bookclub service is healthy.",
+      "fingerprint": "sha256:ee5b70cb5ea568ca6429e4dd58f94fb4663bdb08b9cc78e2d749493e10b4b8e3",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/get-health",
+          "claimTitle": "GET /healthz returns a 200 application/json response with required fields status set to \"ok\" and service set to \"bookclub\".",
+          "note": "This is a standalone health check."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/get-health",
+          "fingerprint": "sha256:615bd256a70e64ff68494c61e7521c5d2ed57bab41cb586f0439e6a4783a892c"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
+    },
+    {
+      "id": "reject-unusable-book-details",
+      "title": "Reject unusable book details",
+      "goal": "A member receives an error when trying to add a book without usable isbn, title, or author details.",
+      "fingerprint": "sha256:3492ecca016b1dce31e20c6221dd61aa09f8ad838685488a8f206412a426f7d4",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/post-addbook",
-          "claimTitle": "POST /books with a valid member token and a JSON body containing isbn, title, and author returns 201 with the book that was added as an application/json object containing id, isbn, title, author, status, addedAt, and finishedAt.",
-          "note": "The first add puts the ISBN on the shelf."
+          "claimTitle": "POST /books responds with 400 and a JSON object containing an error string when the isbn, title, or author is missing or unusable.",
+          "note": "This is a validation error for adding a book."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/post-addbook",
+          "fingerprint": "sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
+    },
+    {
+      "id": "reject-unauthenticated-member-changes",
+      "title": "Reject unauthenticated member changes",
+      "goal": "Requests that require a valid member token return authorization errors when no valid member token is sent.",
+      "fingerprint": "sha256:f63bc34f6b50effbbfa734cc707564277cc7a690e6772df83be658b1e773f29a",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/post-addbook",
+          "claimTitle": "POST /books responds with 401 and a JSON object containing an error string when no valid member token is sent.",
+          "note": "Adding a book is rejected without a valid member token."
+        },
+        {
+          "order": 2,
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/post-finishbook",
+          "claimTitle": "POST /books/{id}/finish returns HTTP 401 with an application/json object containing a required error string when no valid member token is sent.",
+          "note": "Finishing a book is also rejected without a valid member token."
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/post-addbook",
+          "fingerprint": "sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815"
+        },
+        {
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/post-finishbook",
+          "fingerprint": "sha256:d25950d14ed43684f287a2e4f9e5f58b754bbb899fdb7be8f30b58a8dbadf456"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
+    },
+    {
+      "id": "reject-a-duplicate-book-on-the-shelf",
+      "title": "Reject a duplicate book on the shelf",
+      "goal": "After a book is on the shelf, adding another book with that ISBN returns a duplicate error.",
+      "fingerprint": "sha256:fcac842c21105c38d226360002d546eb21a2dc8f084fd4e753052a67412256ae",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "docs/openapi.yaml",
+          "anchor": "paths/post-addbook",
+          "claimTitle": "POST /books with a valid member token and an application/json body containing isbn, title, and author responds with 201 and a JSON representation of the book that was added.",
+          "note": "The duplicate condition starts with a book already on the shelf."
         },
         {
           "order": 2,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/post-addbook",
-          "claimTitle": "POST /books returns 409 with an application/json object containing an error string when a book with the same ISBN is already on the shelf.",
-          "note": "The second add attempts to reuse that ISBN."
+          "claimTitle": "POST /books responds with 409 and a JSON object containing an error string when a book with that ISBN is already on the shelf.",
+          "note": "Adding the same ISBN again returns the documented conflict."
         }
       ],
       "bindings": [
@@ -577,68 +632,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
     },
     {
-      "id": "reject-unusable-book-details",
-      "title": "POST /books missing or unusable fields",
-      "goal": "The user gets a validation error when isbn, title, or author is missing or unusable.",
-      "fingerprint": "sha256:9cd7b532753a6c6f54f72c7af46d5175f30fdfb774df02a1842975715962bf12",
-      "milestones": [
-        {
-          "order": 1,
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/post-addbook",
-          "claimTitle": "POST /books returns 400 with an application/json object containing an error string when the isbn, title, or author is missing or unusable.",
-          "note": "This is a standalone validation failure for adding a book."
-        }
-      ],
-      "bindings": [
-        {
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/post-addbook",
-          "fingerprint": "sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815"
-        }
-      ],
-      "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
-    },
-    {
-      "id": "require-member-token-to-add-a-book",
-      "title": "POST /books without a valid member token",
-      "goal": "The user gets an authentication error when adding a book without a valid member token.",
-      "fingerprint": "sha256:dfa118442a11b5f1ed5b8fa92cc5fc0857c9f6ba537f5b717a42988e8f482561",
-      "milestones": [
-        {
-          "order": 1,
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/post-addbook",
-          "claimTitle": "POST /books returns 401 with an application/json object containing an error string when no valid member token is sent.",
-          "note": "This is a standalone authentication failure for adding a book."
-        }
-      ],
-      "bindings": [
-        {
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/post-addbook",
-          "fingerprint": "sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815"
-        }
-      ],
-      "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
-    },
-    {
-      "id": "handle-missing-book-details",
-      "title": "GET /books/{id} when no book has that id",
-      "goal": "The user gets a not-found error when retrieving a book id that does not exist.",
-      "fingerprint": "sha256:750e58d6daae5fdaf5e9c199323fe1781ce63261c349f2521861e0c003e1b39c",
+      "id": "report-a-missing-book-lookup",
+      "title": "Report a missing book lookup",
+      "goal": "A user receives a not-found error when requesting a book id that does not exist.",
+      "fingerprint": "sha256:493f746847d34a4f37dd2c13c9ebe4c3c984949cc5cf6552a9ceb35f76beb8d6",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/get-getbook",
-          "claimTitle": "GET /books/{id} returns 404 with an application/json object containing an error string when no book has that id.",
-          "note": "This is a standalone not-found case for retrieving a book."
+          "claimTitle": "GET /books/{id} returns 404 with an application/json object containing a required string error field when no book has that id.",
+          "note": "This is a lookup error for an unknown id."
         }
       ],
       "bindings": [
@@ -649,20 +656,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
     },
     {
-      "id": "handle-archived-book-details",
-      "title": "GET /books/{id} when the book has been archived",
-      "goal": "The user gets a gone error when retrieving an archived book.",
-      "fingerprint": "sha256:c6b645449edd868672e0e3809aa491cdd08b44c7716fdc71f4289b79a374aa11",
+      "id": "report-an-archived-book-lookup",
+      "title": "Report an archived book lookup",
+      "goal": "A user receives an unavailable error when requesting a book that has been archived.",
+      "fingerprint": "sha256:17b1748209ad5b791aa0bf5e9680a313e6f7ef469e1eebcc34966fe3aba1213b",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/get-getbook",
-          "claimTitle": "GET /books/{id} returns 410 with an application/json object containing an error string when the book has been archived.",
-          "note": "This is a standalone archived-book retrieval case."
+          "claimTitle": "GET /books/{id} returns 410 with an application/json object containing a required string error field when the book has been archived.",
+          "note": "This is a lookup error for an archived book."
         }
       ],
       "bindings": [
@@ -673,20 +680,20 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
     },
     {
-      "id": "require-member-token-to-finish-a-book",
-      "title": "POST /books/{id}/finish without a valid member token",
-      "goal": "The user gets an authentication error when trying to finish a book without a valid member token.",
-      "fingerprint": "sha256:c343422aef1fd75acf73706f5cb856d73fbdce03cb2603a6d84bca635b336fce",
+      "id": "reject-finishing-a-missing-book",
+      "title": "Reject finishing a missing book",
+      "goal": "A member receives a not-found error when trying to finish a book id that does not exist.",
+      "fingerprint": "sha256:c4d5a480b4fe084a9edff2bb29ab585cbe2318626215843ef063831c9d1b1d7c",
       "milestones": [
         {
           "order": 1,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/post-finishbook",
-          "claimTitle": "POST /books/{id}/finish without a valid member token returns 401 with an application/json object containing an error string.",
-          "note": "This is a standalone authentication failure for finishing a book."
+          "claimTitle": "POST /books/{id}/finish returns HTTP 404 with an application/json object containing a required error string when no book has the supplied id.",
+          "note": "This is a finish request for an unknown id."
         }
       ],
       "bindings": [
@@ -697,91 +704,61 @@
         }
       ],
       "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
+      "synthesisInputsHash": "3b98de1d98ab4dd1d81649046fe6a98977bd11a8de72557217a8a24f4aadf066"
     },
     {
-      "id": "handle-finishing-an-unknown-book",
-      "title": "POST /books/{id}/finish for an id with no book",
-      "goal": "The user gets a not-found error when trying to finish a book id that does not exist.",
-      "fingerprint": "sha256:d27a8fc0a841a1a9f19c61d33106924a30af81841d8ed609131a4c566bc8db04",
-      "milestones": [
-        {
-          "order": 1,
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/post-finishbook",
-          "claimTitle": "POST /books/{id}/finish for an id with no book returns 404 with an application/json object containing an error string.",
-          "note": "This is a standalone not-found case for finishing a book."
-        }
-      ],
-      "bindings": [
-        {
-          "doc": "docs/openapi.yaml",
-          "anchor": "paths/post-finishbook",
-          "fingerprint": "sha256:d25950d14ed43684f287a2e4f9e5f58b754bbb899fdb7be8f30b58a8dbadf456"
-        }
-      ],
-      "composedOf": [],
-      "synthesisInputsHash": "dffdc2104b16c32f6d97d54afcdc3e234ace65aec5347472976c7bc315cc316c"
-    },
-    {
-      "id": "start-the-bookclub-service-and-manage-a-book-on-the-shelf",
-      "title": "Start bookclub and manage a book on the shelf",
-      "goal": "The user starts the service, verifies it is healthy, then adds, views, and finishes a book through the API.",
-      "fingerprint": "sha256:bd0312816eb9ee85caf0bb236a85a80f78cf09085c21a9e5afdea058608c1101",
+      "id": "start-bookclub-and-manage-a-first-book",
+      "title": "Start bookclub and manage a first book",
+      "goal": "A user starts the service, verifies it is healthy, then adds, views, retrieves, and finishes a book through the API.",
+      "fingerprint": "sha256:71ea03ba71ec07408fc878e8bea3adda662839c47096d4e5cbeb92adf2125034",
       "milestones": [
         {
           "order": 1,
           "doc": "README.md",
           "anchor": "bookclub/configuration",
-          "claimTitle": "Each documented setting uses its default value when its environment variable is unset and is overridden by its own environment variable when set."
+          "claimTitle": "Each configuration setting has the documented default value and is overridden by its corresponding environment variable."
         },
         {
           "order": 2,
           "doc": "README.md",
           "anchor": "bookclub/running-the-service",
-          "claimTitle": "On startup, the service applies every migration in `migrations/` against the database it is configured for before the service is listening."
+          "claimTitle": "On startup, the service applies every migration in `migrations/` against the configured database before it starts listening."
         },
         {
           "order": 3,
           "doc": "README.md",
           "anchor": "bookclub/running-the-service",
-          "claimTitle": "Once the service is up, it prints one line naming the address it is listening on and the database it is using, with the password masked."
+          "claimTitle": "Once the service is up, it prints one line naming the address it is listening on and the database it is using, with the database password masked."
         },
         {
           "order": 4,
           "doc": "README.md",
           "anchor": "bookclub/running-the-service",
-          "claimTitle": "`GET /healthz` answers `200` with `{\"status\":\"ok\",\"service\":\"bookclub\"}` as soon as the service is listening."
+          "claimTitle": "When the service is listening, `GET /healthz` responds with status `200` and body `{\"status\":\"ok\",\"service\":\"bookclub\"}`."
         },
         {
           "order": 5,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/post-addbook",
-          "claimTitle": "POST /books with a valid member token and a JSON body containing isbn, title, and author returns 201 with the book that was added as an application/json object containing id, isbn, title, author, status, addedAt, and finishedAt."
+          "claimTitle": "POST /books with a valid member token and an application/json body containing isbn, title, and author responds with 201 and a JSON representation of the book that was added."
         },
         {
           "order": 6,
           "doc": "docs/openapi.yaml",
           "anchor": "paths/get-listbooks",
-          "claimTitle": "GET /books returns a 200 application/json response containing a required books array whose items are book objects with required id, isbn, title, author, status, addedAt, and finishedAt fields."
+          "claimTitle": "GET /books returns a 200 application/json response whose body is an object with a required books array containing book objects with required id, isbn, title, author, status, addedAt, and finishedAt fields."
         },
         {
           "order": 7,
           "doc": "docs/openapi.yaml",
-          "anchor": "paths/get-listbooks",
-          "claimTitle": "GET /books lists the books on the shelf most recently added first."
+          "anchor": "paths/get-getbook",
+          "claimTitle": "GET /books/{id} returns 200 with an application/json book object containing required id, isbn, title, author, status, addedAt, and finishedAt fields."
         },
         {
           "order": 8,
           "doc": "docs/openapi.yaml",
-          "anchor": "paths/get-getbook",
-          "claimTitle": "GET /books/{id} returns 200 with an application/json book object containing id, isbn, title, author, status, addedAt, and finishedAt when the book is found."
-        },
-        {
-          "order": 9,
-          "doc": "docs/openapi.yaml",
           "anchor": "paths/post-finishbook",
-          "claimTitle": "POST /books/{id}/finish with a valid member token marks the book with that integer id as finished and returns 200 with an application/json book object including id, isbn, title, author, status, addedAt, and finishedAt."
+          "claimTitle": "POST /books/{id}/finish marks the identified book as finished and returns HTTP 200 with the book, now finished, as an application/json object containing the required fields id, isbn, title, author, status, addedAt, and finishedAt."
         }
       ],
       "bindings": [
@@ -818,17 +795,10 @@
       ],
       "composedOf": [
         "run-the-service",
-        "add-find-view-cover-and-finish-a-book"
+        "add-list-retrieve-and-finish-a-book"
       ],
-      "synthesisInputsHash": "5db81aa75f4f0f97e4995b7c4055ea3c80082dabd593dd8862cb2344778d38f3"
+      "synthesisInputsHash": "5f727ce975b7d4b8aac9f1319b4b633dd2e1c1ba1bf8745f14e74e122bc8385b"
     }
   ],
-  "noFlowClaims": [
-    {
-      "doc": "docs/cli.md",
-      "anchor": "the-bookclub-cli",
-      "claimTitle": "`bookclub` never opens a database connection and never talks to the service.",
-      "reason": "This describes a static global property of the CLI rather than a user goal path."
-    }
-  ]
+  "noFlowClaims": []
 }

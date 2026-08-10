@@ -3,18 +3,6 @@
   "dismissedClaims": [],
   "dismissedFlows": [
     {
-      "flowId": "start-the-bookclub-service-and-manage-a-book-on-the-shelf",
-      "title": "Start bookclub and manage a book on the shelf",
-      "dismissedAt": "2026-08-10T04:53:57.752Z",
-      "note": "A nine-milestone tour of the whole product in one test. Every milestone it walks is already asserted by a focused flow (check-service-health, require-member-token-to-add-a-book, add-a-duplicate-isbn, handle-missing-book-details); bundling them adds no coverage and no single scenario expresses them faithfully."
-    },
-    {
-      "flowId": "add-find-view-cover-and-finish-a-book",
-      "title": "Add, list, get, and finish a book",
-      "dismissedAt": "2026-08-10T04:53:58.600Z",
-      "note": "A five-milestone tour across four sections, duplicating flows that already pass one behaviour at a time. It also walks the experimental cover endpoint, which is deliberately outside the published contract in docs/openapi.yaml."
-    },
-    {
       "flowId": "run-the-service",
       "title": "Run the service",
       "dismissedAt": "2026-08-10T04:53:59.508Z",
@@ -27,16 +15,40 @@
       "note": "Asserting this needs the service restarted midway through a single scenario, which the api driver cannot express — a scenario boots one server. The statelessness it rests on is a property of the token, not an endpoint response."
     },
     {
-      "flowId": "finish-and-re-finish-a-book",
-      "title": "Finish and re-finish a book",
-      "dismissedAt": "2026-08-10T04:54:01.191Z",
-      "note": "Re-stamping can only be shown by comparing two finishedAt timestamps across steps, which the expectation vocabulary cannot state. The finish behaviour itself is asserted by require-member-token-to-finish-a-book and handle-finishing-an-unknown-book."
+      "flowId": "start-bookclub-and-manage-a-first-book",
+      "title": "Start bookclub and manage a first book",
+      "dismissedAt": "2026-08-10T16:20:00.000Z",
+      "note": "The re-synthesized whole-product tour: every milestone it walks is already asserted by a focused flow (check-service-health, print-configuration, the member-token refusals, the duplicate-ISBN refusal); bundling them adds no coverage and no single scenario expresses them faithfully — the same verdict recorded for its predecessor start-the-bookclub-service-and-manage-a-book-on-the-shelf."
     },
     {
-      "flowId": "add-a-book-and-prevent-another-copy-of-the-same-isbn",
-      "title": "Add a book and prevent another copy of the same ISBN",
-      "dismissedAt": "2026-08-10T05:07:21.403Z",
-      "note": "Bundles ISBN normalisation with the one-copy-per-ISBN refusal; the fidelity reviewer rejects every authored form of the pair. Both halves already pass on their own — reject-an-invalid-isbn covers normalisation and add-a-duplicate-isbn covers the 409."
+      "flowId": "add-list-retrieve-and-finish-a-book",
+      "title": "Add, list, retrieve, and finish a book",
+      "dismissedAt": "2026-08-10T16:20:00.000Z",
+      "note": "A multi-operation tour across sections, duplicating flows that already pass one behaviour at a time; a scenario is bound to one operation, so its response-schema assertions cannot span the tour. Same verdict as its predecessor add-find-view-cover-and-finish-a-book."
+    },
+    {
+      "flowId": "finish-a-book-and-re-stamp-it",
+      "title": "Finish a book and re-stamp it",
+      "dismissedAt": "2026-08-10T16:20:00.000Z",
+      "note": "Re-stamping can only be shown by comparing two finishedAt timestamps across steps, which the expectation vocabulary cannot state. The finish behaviour itself is asserted by require-member-token-to-finish-a-book and handle-finishing-an-unknown-book. Same verdict as its predecessor finish-and-re-finish-a-book."
+    },
+    {
+      "flowId": "add-a-book-and-prevent-duplicate-isbns",
+      "title": "Add a book and prevent duplicate ISBNs",
+      "dismissedAt": "2026-08-10T16:20:00.000Z",
+      "note": "Bundles ISBN normalisation with the one-copy-per-ISBN refusal; the fidelity reviewer rejects every authored form of the pair. Both halves already pass on their own — reject-an-invalid-isbn covers normalisation and add-a-duplicate-isbn covers the 409. Same verdict as its predecessor add-a-book-and-prevent-another-copy-of-the-same-isbn."
+    },
+    {
+      "flowId": "reject-unauthenticated-member-changes",
+      "title": "Reject unauthenticated member changes",
+      "dismissedAt": "2026-08-10T16:20:00.000Z",
+      "note": "States the token refusal across BOTH member operations, and a scenario bound to one operation cannot carry schema assertions for the other. Each operation's refusal is asserted on its own by require-member-token-to-add-a-book and require-member-token-to-finish-a-book."
+    },
+    {
+      "flowId": "reject-a-duplicate-book-on-the-shelf",
+      "title": "Adding a book that is already on the shelf returns a duplicate conflict",
+      "dismissedAt": "2026-08-10T17:05:00.000Z",
+      "note": "Duplicates add-a-duplicate-isbn behaviour-for-behaviour (same 201-then-409 pair on POST /books), and both insert the newBookRequest fixture — on a shared board run whichever dispatches second meets 409 on its FIRST insert and reads as drift. Birth validates each in isolation, so the collision only shows on the board. One flow carries the conflict claim; this one adds no coverage."
     }
   ]
 }

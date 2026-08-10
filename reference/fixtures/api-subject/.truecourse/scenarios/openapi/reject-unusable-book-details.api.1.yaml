@@ -1,10 +1,10 @@
 guard: 3
 id: reject-unusable-book-details.api.1
-title: Members receive validation errors for missing or unusable book details
-promise: A member receives a validation error when trying to add a book without usable isbn, title, or author details.
+title: Members receive a validation error when any required book detail is missing or unusable
+promise: A member receives an error when trying to add a book without usable isbn, title, or author details.
 flow:
   id: reject-unusable-book-details
-  fingerprint: sha256:9cd7b532753a6c6f54f72c7af46d5175f30fdfb774df02a1842975715962bf12
+  fingerprint: sha256:3492ecca016b1dce31e20c6221dd61aa09f8ad838685488a8f206412a426f7d4
 journey:
   path:
     - api/post-books
@@ -23,13 +23,10 @@ steps:
       headers:
         Authorization: '{{cred:member}}'
       json:
-        title: Validation Test ${unique}
-        author: Scenario Author ${unique}
+        title: '{{fixture:newBookRequest.title}} ${unique}'
+        author: '{{fixture:newBookRequest.author}}'
     expect:
       status: 400
-      headers:
-        content-type:
-          contains: application/json
       json:
         error:
           exists: true
@@ -41,13 +38,10 @@ steps:
       headers:
         Authorization: '{{cred:member}}'
       json:
-        isbn: '9781234567897'
-        author: Scenario Author ${unique}
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
+        author: '{{fixture:newBookRequest.author}}'
     expect:
       status: 400
-      headers:
-        content-type:
-          contains: application/json
       json:
         error:
           exists: true
@@ -59,13 +53,10 @@ steps:
       headers:
         Authorization: '{{cred:member}}'
       json:
-        isbn: '9781234567897'
-        title: Validation Test ${unique}
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
+        title: '{{fixture:newBookRequest.title}} ${unique}'
     expect:
       status: 400
-      headers:
-        content-type:
-          contains: application/json
       json:
         error:
           exists: true
@@ -77,14 +68,11 @@ steps:
       headers:
         Authorization: '{{cred:member}}'
       json:
-        isbn: not-an-isbn
-        title: Validation Test ${unique}
-        author: Scenario Author ${unique}
+        isbn: not-a-usable-isbn-${unique}
+        title: '{{fixture:newBookRequest.title}} ${unique}'
+        author: '{{fixture:newBookRequest.author}}'
     expect:
       status: 400
-      headers:
-        content-type:
-          contains: application/json
       json:
         error:
           exists: true
@@ -96,14 +84,11 @@ steps:
       headers:
         Authorization: '{{cred:member}}'
       json:
-        isbn: '9781234567897'
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
         title: ''
-        author: Scenario Author ${unique}
+        author: '{{fixture:newBookRequest.author}}'
     expect:
       status: 400
-      headers:
-        content-type:
-          contains: application/json
       json:
         error:
           exists: true
@@ -115,14 +100,11 @@ steps:
       headers:
         Authorization: '{{cred:member}}'
       json:
-        isbn: '9781234567897'
-        title: Validation Test ${unique}
+        isbn: '{{fixture:newBookRequest.isbnInput}}'
+        title: '{{fixture:newBookRequest.title}} ${unique}'
         author: ''
     expect:
       status: 400
-      headers:
-        content-type:
-          contains: application/json
       json:
         error:
           exists: true

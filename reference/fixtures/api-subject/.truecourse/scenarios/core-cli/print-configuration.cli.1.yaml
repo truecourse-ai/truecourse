@@ -1,0 +1,26 @@
+guard: 3
+id: print-configuration.cli.1
+title: Printing configuration masks the database password
+promise: The user can inspect the configuration the service would use with the database password masked.
+flow:
+  id: print-configuration
+  fingerprint: sha256:aacf3a9a6f3d1d6f43efa3e91a8b922a19effe49cedb0a61bca62dcc8dc79f74
+journey:
+  path:
+    - cli/config
+  fingerprints:
+    - sha256:0f5253231732763b4d269f6a8f0b54c14035637ffbb64c9de4dd6c16403c2b60
+binds:
+  - doc: docs/cli.md
+    section: the-bookclub-cli/bookclub-config
+    fingerprint: sha256:28476d9f11959e15a54df328dc703015d20c7ba804d70540f7e631250ab9994a
+normalize: []
+driver: cli
+steps:
+  - run:
+      - config
+    expect:
+      exit: 0
+      stdout:
+        matches: '^database: postgres://bookclub:\*\*\*@localhost:5433/bookclub\nport: 3000\ncovers: https://covers\.openlibrary\.org\n?$'
+    milestone: 1
