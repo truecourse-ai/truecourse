@@ -1,0 +1,59 @@
+---
+title: "Running an analysis"
+description: "Trigger an analysis from the dashboard: the stash prompt, the LLM cost gate, live progress, and cancelling."
+---
+
+The **Analyze** button in the header runs the same analysis `truecourse analyze` runs, in the dashboard server's own process, against the repository on disk. It reads the same per-repo settings from `.truecourse/config.json`: enabled categories, LLM rules on or off, and disabled rules.
+
+## Before the run starts
+
+Two things can interrupt the start, in this order.
+
+**A dirty working tree.** If your repository has modified or untracked files, a dialog reports the counts and offers:
+
+* **Stash and analyze committed state** keeps the baseline anchored to your last commit.
+* **Don't stash — analyze working tree as-is** analyzes the files as they are.
+
+Closing the dialog (the X, the backdrop, or `Escape`) cancels the run. The prompt is skipped when the tree is clean, when the directory you opened is a subdirectory of a larger git repository, or when git is unavailable. TrueCourse's own `.truecourse/` files never count as changes.
+
+**LLM rules.** If LLM rules are enabled for the repo, a confirm dialog appears before any model call with the number of files, the number of rules, and the estimated tokens. **Run LLM rules** proceeds; **Skip — deterministic rules only** runs the analysis without them. The estimate is the same one the CLI prints.
+
+## While it runs
+
+A progress card sits at the bottom of the screen and stays visible on any tab. It lists the run's steps and ticks them off as they complete, with a detail line on the active step. **Cancel** stops the run.
+
+If the run fails, the card turns red and shows the error; dismiss it with the X.
+
+You do not need to reload. When the run completes, the violations list, analytics, graph, flows and run history all refresh in place.
+
+Logs for dashboard-triggered runs are written to `.truecourse/logs/analyze.log`.
+
+## Which LLM the dashboard uses
+
+Dashboard-triggered work (analysis, flow enrichment, spec scans and guard generates) uses the same saved [LLM transport](/configuration/llm-transport) as the CLI. The dashboard reads that selection; it never edits your credentials.
+
+Running `truecourse config llm setup` while the dashboard is up takes effect on the next run. No restart is needed.
+
+## When Analyze is unavailable
+
+The **Analyze** button and the **Normal / Git Diff** toggle are hidden when:
+
+* you are viewing a past analysis from the run-history dropdown,
+* the directory is not a git repository, or
+* you are in the Spec Guard section rather than Code Analysis.
+
+<Tip>
+  Everything the button does has a CLI equivalent: `truecourse analyze`, plus `--stash` / `--no-stash` and `--llm` / `--no-llm` to pre-answer the two prompts. See the [CLI reference](/reference/cli).
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Run history and diff mode" icon="clock-rotate-left" href="/dashboard/history-and-diff">
+    Past runs, token usage, and comparing your working tree.
+  </Card>
+
+  <Card title="Violations" icon="triangle-exclamation" href="/dashboard/violations">
+    What the run produced, and how to work through it.
+  </Card>
+</CardGroup>

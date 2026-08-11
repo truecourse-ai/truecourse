@@ -1,0 +1,94 @@
+---
+title: "Overview"
+description: "Start the dashboard, pick a repository, and find your way around the Code Analysis views."
+---
+
+`truecourse dashboard` starts a local web server, opens your browser, and lands you on the repository you ran it in.
+
+```bash
+cd <your-repo>
+truecourse dashboard
+```
+
+The dashboard is a read-and-act surface over the same `.truecourse/` store the CLI writes. The server runs on your machine and reads the repository from disk.
+
+## Starting and stopping
+
+```bash
+truecourse dashboard                  # Start + open the dashboard
+truecourse dashboard --reconfigure    # Re-prompt for console vs background service mode
+truecourse dashboard --service        # Run as a background service (skips the mode prompt)
+truecourse dashboard --console        # Run in this terminal (skips the mode prompt)
+truecourse dashboard stop             # Stop the dashboard
+truecourse dashboard status           # Show dashboard status
+truecourse dashboard logs             # Tail dashboard logs (service mode only)
+truecourse dashboard uninstall        # Remove the background service
+```
+
+The first `truecourse dashboard` asks whether to run in this terminal (console) or as a background service; `--reconfigure` re-asks later. A background service keeps running after you close the terminal.
+
+The server listens on `http://localhost:3001`. Set `PORT` to move it.
+
+Whichever mode you pick, the command opens your browser straight at the page for the repository you are standing in, registering it if this is the first time. "Standing in" means the current directory or any directory above it already has a `.truecourse/` directory, which `truecourse add` or `truecourse analyze` creates. Without one, the browser opens the repository list instead.
+
+## The repository list
+
+The dashboard's front page lists every repository you have registered. Each card shows the project name, its path on disk, and when it last did something: **Analyzed**, **Scanned**, **Generated**, or **Guarded**.
+
+To add one:
+
+* run `npx truecourse add` from the project directory, or
+* paste the path into the field on the front page, or
+* click **Browse** and pick a directory.
+
+The trash icon on a card removes the repository from the list **and deletes that repo's `.truecourse/` directory**, which is where every stored analysis, run history and TrueCourse setting lives. Your source code is untouched, but committed store files (such as `config.json` and `LATEST.json`) are deleted from the working tree along with the rest.
+
+## Sections
+
+The dropdown next to the logo switches between the dashboard's two sections:
+
+* **Code Analysis** covers everything `truecourse analyze` produces: the violations list, analytics, the architecture graph, files, flows and databases, and run history.
+* **Spec Guard** covers the spec corpus and scenario coverage. See [Spec Guard](/guard/overview).
+
+These pages document Code Analysis.
+
+## Getting around
+
+Inside a repository, the left icon rail holds the Code Analysis tabs:
+
+| Tab           | What it shows                                                                                            |
+| ------------- | -------------------------------------------------------------------------------------------------------- |
+| **Home**      | [Analytics](/dashboard/analytics) on the left, the [violations list](/dashboard/violations) on the right |
+| **Graphs**    | The [architecture graph](/dashboard/architecture-graph)                                                  |
+| **Flows**     | Detected [execution flows](/dashboard/files-flows-databases#flows) and their sequence diagrams           |
+| **Files**     | The [file tree](/dashboard/files-flows-databases#files) and code viewer                                  |
+| **Databases** | Detected [datastores](/dashboard/files-flows-databases#databases) and their schemas                      |
+| **Analyses**  | [Run history](/dashboard/history-and-diff), token usage, and deletion                                    |
+
+The Home icon carries the number of violations in the current view. Panels that have a sidebar (Flows, Files, Databases) can be dragged wider from their right edge.
+
+The header carries the repository name, the current git branch, the past-run dropdown (once there is more than one analysis to choose from), the **Normal / Git Diff** toggle, and the **Analyze** button. The sun/moon button toggles light and dark mode and remembers your choice in the browser.
+
+## Before the first analysis
+
+A freshly added repository has no analysis data yet. Home shows **No analysis yet** and points at the **Analyze** button (or `truecourse analyze` from the project directory); Graphs offers the same prompt, and the Flows and Databases sidebars are empty. The **Files** tab is the exception: the tree reads your repository directly, so you can browse the code before anything has run; severity coloring appears once an analysis exists.
+
+## Shareable URLs
+
+Where you are is written into the URL, so a link reopens the same view: the section and tab (`?section=`, `?tab=`), the open file (`?file=`), the open flow (`?flow=`), and diff mode (`?view=diff`). Browser Back and Forward move through those views.
+
+## Repositories without git
+
+TrueCourse needs git for commit-anchored baselines, diff and history. If the directory you opened is not a git repository, the dashboard shows an amber banner and hides **Analyze**, the diff toggle, and the spec scan action.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Running an analysis" icon="play" href="/dashboard/running-analyses">
+    The Analyze button, the stash prompt, and the LLM cost gate.
+  </Card>
+
+  <Card title="Violations" icon="triangle-exclamation" href="/dashboard/violations">
+    Filter findings, copy fix prompts, and silence noisy rules.
+  </Card>
+</CardGroup>

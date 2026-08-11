@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-07T03:24:38.348Z",
+  "generatedAt": "2026-08-11T07:46:24.287Z",
   "claims": [
     {
       "id": "analyze-runs-static-and-llm-analysis",
@@ -2656,6 +2656,2715 @@
       "claim": "The first `truecourse dashboard` asks whether to run in this terminal (console) or as a background service.",
       "contentHash": "sha256:d50a89a14809e777363f500286a170824f9b5849b3fd220a057af185d30f522a",
       "verifyVia": "prompt: the run-mode question on the first invocation"
+    },
+    {
+      "id": "dashboard-overview-command-starts-a-local-web-server",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "title": "`truecourse dashboard` starts a local web server",
+      "claim": "`truecourse dashboard` starts a local web server.",
+      "contentHash": "sha256:e995204ecae411624367cfd0b449d5b3b57e882bdc82d901fc8f761d8a2f0c70",
+      "verifyVia": "cli: `truecourse dashboard` exits zero and an HTTP GET of the local dashboard URL returns the dashboard page"
+    },
+    {
+      "id": "dashboard-overview-command-opens-the-browser",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "title": "`truecourse dashboard` opens the browser",
+      "claim": "`truecourse dashboard` opens your browser.",
+      "contentHash": "sha256:1707d924c8ea63bd0dfa2544a1b87a71fc3e7010c5f6cc16c1fb4c0b0e180b42",
+      "verifyVia": "cli: the run reports opening a browser at the dashboard URL, and a browser window lands on that URL"
+    },
+    {
+      "id": "dashboard-overview-lands-on-the-repository-you-ran-it-in",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "title": "the dashboard lands on the repository you ran it in",
+      "claim": "`truecourse dashboard` lands you on the repository you ran it in.",
+      "contentHash": "sha256:a0a2fc195c39df299d27a3d3b03d92c64837dff9cc14c9defa9a2e32e560d63a",
+      "verifyVia": "web: the page opened by the command is the repository page for the directory the command was run in, not the repository list"
+    },
+    {
+      "id": "dashboard-overview-reads-the-same-store-the-cli-writes",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "title": "the dashboard is a surface over the same `.truecourse/` store the CLI writes",
+      "claim": "The dashboard is a read-and-act surface over the same `.truecourse/` store the CLI writes.",
+      "contentHash": "sha256:d6f276feaa8ac6f8b01f90aad1dc12f6ae28f49ba97fd04abeed6c6579c943b1",
+      "verifyVia": "web: after a CLI `truecourse analyze` writes the store, the repository page shows that run's findings without the dashboard running anything itself"
+    },
+    {
+      "id": "dashboard-overview-server-reads-the-repository-from-disk",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "title": "the server reads the repository from disk",
+      "claim": "The server reads the repository from disk.",
+      "contentHash": "sha256:0139e54082f01b072cf2753ba300bab37e826d806dd52eb145c914da24938dcd",
+      "verifyVia": "web: a file written to the repository on disk appears in the dashboard's file tree without any upload step"
+    },
+    {
+      "id": "dashboard-overview-reconfigure-reprompts-for-run-mode",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`--reconfigure` re-prompts for the run mode",
+      "claim": "`truecourse dashboard --reconfigure` re-prompts for console vs background service mode.",
+      "contentHash": "sha256:42d4362fac38441e9af7eb023b10b3921967ae62c1bb48ce3c299c2bf8de8400",
+      "verifyVia": "cli: on a TTY the command asks the console-vs-service question again even though the mode was already chosen once"
+    },
+    {
+      "id": "dashboard-overview-service-runs-as-a-background-service",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`--service` runs as a background service",
+      "claim": "`truecourse dashboard --service` runs the dashboard as a background service.",
+      "contentHash": "sha256:aa66272a3504ca6187936d6d8a28ef644c1f291fc2fc5388baf37a6911574120",
+      "verifyVia": "cli: the command returns to the shell and `truecourse dashboard status` still reports the dashboard running"
+    },
+    {
+      "id": "dashboard-overview-service-skips-the-mode-prompt",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`--service` skips the mode prompt",
+      "claim": "`truecourse dashboard --service` skips the mode prompt.",
+      "contentHash": "sha256:f1b994d8becfbb61862d72800eec82c9dffcc27f6c5505d965d4ab12fe0cb61c",
+      "verifyVia": "cli: on a TTY with no saved mode the console-vs-service question is never printed"
+    },
+    {
+      "id": "dashboard-overview-console-runs-in-this-terminal",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`--console` runs in this terminal",
+      "claim": "`truecourse dashboard --console` runs the dashboard in this terminal.",
+      "contentHash": "sha256:989a09aedf8b4458558358546c9d6faf731cf5490a4a1208131823143a972412",
+      "verifyVia": "cli: the command holds the terminal and the dashboard stops serving when that process is interrupted"
+    },
+    {
+      "id": "dashboard-overview-console-skips-the-mode-prompt",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`--console` skips the mode prompt",
+      "claim": "`truecourse dashboard --console` skips the mode prompt.",
+      "contentHash": "sha256:103a59f40013281fa5406b9ee6f5afee7a7f8564463a61edd93d30ff27a012b4",
+      "verifyVia": "cli: on a TTY with no saved mode the console-vs-service question is never printed"
+    },
+    {
+      "id": "dashboard-overview-stop-stops-the-dashboard",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`dashboard stop` stops the dashboard",
+      "claim": "`truecourse dashboard stop` stops the dashboard.",
+      "contentHash": "sha256:74463e555a84c6012b324e396309a4520785d312df11917a9b3b51cc4f385980",
+      "verifyVia": "cli: the command exits zero and the dashboard URL no longer answers"
+    },
+    {
+      "id": "dashboard-overview-status-shows-dashboard-status",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`dashboard status` shows dashboard status",
+      "claim": "`truecourse dashboard status` shows dashboard status.",
+      "contentHash": "sha256:aed82aba04d85cd63315cca643820057f898b94cc24c19a9b8a8f68f639de0c5",
+      "verifyVia": "cli: stdout reports running vs stopped, matching whether the dashboard was started"
+    },
+    {
+      "id": "dashboard-overview-logs-tails-dashboard-logs-in-service-mode",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`dashboard logs` tails the logs in service mode",
+      "claim": "`truecourse dashboard logs` tails dashboard logs, in service mode only.",
+      "contentHash": "sha256:b44e65f9ec0bac096dbd1f732305184d37d199bad63835c54274cba70c40f206",
+      "verifyVia": "cli: with the dashboard running as a service stdout streams log lines; in console mode the command reports logs are unavailable"
+    },
+    {
+      "id": "dashboard-overview-uninstall-removes-the-background-service",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`dashboard uninstall` removes the background service",
+      "claim": "`truecourse dashboard uninstall` removes the background service.",
+      "contentHash": "sha256:20552bcb9b6fd3b1090b8dfc5db881d695744ef4ebb75b6c0cd0ecbfbc80b8b9",
+      "verifyVia": "cli: after uninstall the service is gone and `truecourse dashboard status` no longer reports an installed service"
+    },
+    {
+      "id": "dashboard-overview-first-run-asks-console-or-service",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "the first run asks console or background service",
+      "claim": "The first `truecourse dashboard` asks whether to run in this terminal (console) or as a background service.",
+      "contentHash": "sha256:b0d67a063eb42a27ad813b936d30740add0e5827e5e2f59b1fba673f510a231d",
+      "verifyVia": "cli: on a first TTY run the prompt offering console vs background service is printed and awaits an answer"
+    },
+    {
+      "id": "dashboard-overview-background-service-outlives-the-terminal",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "a background service keeps running after the terminal closes",
+      "claim": "A background service keeps running after you close the terminal.",
+      "contentHash": "sha256:f51df5843b023ef46b8935b49ba5d7046b646dc03e1460e5444a2d3002e1e86e",
+      "verifyVia": "cli: after the starting shell exits, the dashboard URL still answers"
+    },
+    {
+      "id": "dashboard-overview-server-listens-on-localhost-3001",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "the server listens on `http://localhost:3001`",
+      "claim": "The server listens on `http://localhost:3001`.",
+      "contentHash": "sha256:e67699ffb3c3f959f70bc640c99797c24f7b3de42e91117663f7c65942d127f6",
+      "verifyVia": "cli: an HTTP GET of `http://localhost:3001` returns the dashboard page after the dashboard starts"
+    },
+    {
+      "id": "dashboard-overview-port-env-moves-the-server",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`PORT` moves the server's port",
+      "claim": "Set `PORT` to move the server off `http://localhost:3001`.",
+      "contentHash": "sha256:9361e4cb52df1b58d875c80164a91bed28b07ae9ea67bf4ef548cf2081250eb6",
+      "verifyVia": "cli: with `PORT` set the dashboard answers on that port and not on 3001"
+    },
+    {
+      "id": "dashboard-overview-opens-the-repo-page-in-either-mode",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "either mode opens the browser at the repository page",
+      "claim": "Whichever mode you pick, the command opens your browser straight at the page for the repository you are standing in.",
+      "contentHash": "sha256:1d3338875b6abddb44fdc9afc3e614578f8cf73c256d32743fd8d6ad87aaa271",
+      "verifyVia": "web: started with `--service` and with `--console`, the opened URL is the repository page for the current directory in both cases"
+    },
+    {
+      "id": "dashboard-overview-registers-the-repository-on-first-open",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "the first open registers the repository",
+      "claim": "The command registers the repository you are standing in if this is the first time.",
+      "contentHash": "sha256:6e78f1b309a73ce3203f4e7ecfd22fdc843740077d46b59deac957b0a4b9cf20",
+      "verifyVia": "web: after the first `truecourse dashboard` in an unregistered repository, that repository appears as a card on the front page list"
+    },
+    {
+      "id": "dashboard-overview-standing-in-means-a-truecourse-dir-at-or-above-cwd",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "\"standing in\" means a `.truecourse/` directory at or above the current directory",
+      "claim": "\"Standing in\" means the current directory or any directory above it already has a `.truecourse/` directory.",
+      "contentHash": "sha256:d0d7060b4e2cb7c213b9677c7dccdcaef69e6777393fbddc21bed512970b1f9b",
+      "verifyVia": "web: run from a nested subdirectory of a repository that has `.truecourse/` at its root, the browser still lands on that repository's page"
+    },
+    {
+      "id": "dashboard-overview-add-or-analyze-creates-the-truecourse-dir",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "`truecourse add` or `truecourse analyze` creates the `.truecourse/` directory",
+      "claim": "The `.truecourse/` directory is created by `truecourse add` or `truecourse analyze`.",
+      "contentHash": "sha256:ee3a34b291fd3cd16c7356bc87d57ce157aa257cbd8c3487dff5b35c4011b328",
+      "verifyVia": "cli: in a repository without one, running `truecourse add` (or `truecourse analyze`) leaves a `.truecourse/` directory on disk"
+    },
+    {
+      "id": "dashboard-overview-without-a-truecourse-dir-opens-the-repository-list",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "title": "without a `.truecourse/` directory the browser opens the repository list",
+      "claim": "Without a `.truecourse/` directory, the browser opens the repository list instead.",
+      "contentHash": "sha256:80c7a60c7a0a3a4db3cb7990460274d7d7826c5c2569e7166278debe03f4cee7",
+      "verifyVia": "web: started from a directory with no `.truecourse/` at or above it, the opened page is the repository list, not a repository page"
+    },
+    {
+      "id": "dashboard-overview-front-page-lists-registered-repositories",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "the front page lists every registered repository",
+      "claim": "The dashboard's front page lists every repository you have registered.",
+      "contentHash": "sha256:343db459bee5bc50ce81ec82c95f6d97a1f100ca2ff30cfd23086104f3cf193c",
+      "verifyVia": "web: each registered repository has a card on the front page, and a newly registered one appears there"
+    },
+    {
+      "id": "dashboard-overview-repo-card-shows-name-and-path",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "a repository card shows the project name and path",
+      "claim": "Each card shows the project name and its path on disk.",
+      "contentHash": "sha256:596139607f4d5f780cd2f0c670867e3abbdbfab47a38e82a793d0bbed459b800",
+      "verifyVia": "web: the card for a registered repository carries its project name and its on-disk path"
+    },
+    {
+      "id": "dashboard-overview-repo-card-shows-last-activity",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "a repository card shows when it last did something",
+      "claim": "Each card shows when it last did something: Analyzed, Scanned, Generated, or Guarded.",
+      "contentHash": "sha256:56c48d8e8bcd95e1771a8885b98b8499ea6ac4fe57417db6e2ecf361cc7d7526",
+      "verifyVia": "web: after an analyze, the card carries an Analyzed timestamp; the label is one of Analyzed, Scanned, Generated or Guarded"
+    },
+    {
+      "id": "dashboard-overview-add-a-repo-with-truecourse-add",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "`npx truecourse add` adds a repository to the list",
+      "claim": "A repository can be added by running `npx truecourse add` from the project directory.",
+      "contentHash": "sha256:8cd2de831307a7319eb64b817be7553673f31aefbd67955b7aaf0dcb85c8c94b",
+      "verifyVia": "web: after `truecourse add` in a project directory, that project has a card on the front page"
+    },
+    {
+      "id": "dashboard-overview-add-a-repo-by-pasting-a-path",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "pasting a path adds a repository",
+      "claim": "A repository can be added by pasting the path into the field on the front page.",
+      "contentHash": "sha256:87c819e4055db66ce4ad279ba5ad3d6ec30508ccc9d3df05c24db79920b09b23",
+      "verifyVia": "web: typing a project path into the front-page field and submitting it adds a card for that path"
+    },
+    {
+      "id": "dashboard-overview-add-a-repo-with-browse",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "Browse picks a directory to add",
+      "claim": "A repository can be added by clicking Browse and picking a directory.",
+      "contentHash": "sha256:8fad3314f9d85ad4d4af34072b44056ba4630036cfa0c37361eaff454effa1bc",
+      "verifyVia": "web: the front page offers a Browse control that opens a directory picker and adds the chosen directory"
+    },
+    {
+      "id": "dashboard-overview-trash-removes-the-repository-from-the-list",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "the trash icon removes the repository from the list",
+      "claim": "The trash icon on a card removes the repository from the list.",
+      "contentHash": "sha256:735c21e8f0a2797aa52903220954a744e44bae98eb523045a10b9d82b5ab9d56",
+      "verifyVia": "web: after using the trash icon, that repository no longer has a card on the front page"
+    },
+    {
+      "id": "dashboard-overview-trash-deletes-the-truecourse-directory",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "the trash icon deletes the repo's `.truecourse/` directory",
+      "claim": "The trash icon on a card deletes that repo's `.truecourse/` directory.",
+      "contentHash": "sha256:490c531c6e314d2ed2ca0e68d35cf0d7f151c2c11ebd95eee3b2a0618e2e3fc5",
+      "verifyVia": "web then disk: after using the trash icon, the repository's `.truecourse/` directory is gone from disk"
+    },
+    {
+      "id": "dashboard-overview-trash-leaves-source-code-untouched",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "removing a repository leaves the source code untouched",
+      "claim": "Your source code is untouched when a repository is removed from the list.",
+      "contentHash": "sha256:4cc20941c9b96d9824da7abe8b230ab9aeafaae82b2e41fdc7c8e93adb9a138d",
+      "verifyVia": "web then disk: after using the trash icon, every tracked source file of the repository is still present and unmodified"
+    },
+    {
+      "id": "dashboard-overview-trash-deletes-committed-store-files-too",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "title": "removing a repository deletes committed store files too",
+      "claim": "Committed store files (such as `config.json` and `LATEST.json`) are deleted from the working tree along with the rest.",
+      "contentHash": "sha256:6ea3c261db08be0e83b2195482fdbc807a98b11882560a058e04ece967ab0cef",
+      "verifyVia": "web then git: after using the trash icon, `git status` reports the tracked `.truecourse/config.json` and `.truecourse/LATEST.json` as deleted"
+    },
+    {
+      "id": "dashboard-overview-section-dropdown-switches-sections",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "sections",
+      "title": "the dropdown next to the logo switches sections",
+      "claim": "The dropdown next to the logo switches between the dashboard's two sections.",
+      "contentHash": "sha256:1b97ed6b84e765d65bcf59a6e2bb9c30cef498f11ac3aae46a2f51bf7e4cc569",
+      "verifyVia": "web: choosing the other entry in the dropdown next to the logo moves the page between the Code Analysis and Spec Guard sections"
+    },
+    {
+      "id": "dashboard-overview-code-analysis-section-covers-analyze-output",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "sections",
+      "title": "Code Analysis covers everything `truecourse analyze` produces",
+      "claim": "Code Analysis covers everything `truecourse analyze` produces: the violations list, analytics, the architecture graph, files, flows and databases, and run history.",
+      "contentHash": "sha256:fc40debf237f806748dac5456253e078f531e0db177bfee91878cee1e97b5309",
+      "verifyVia": "web: with Code Analysis selected the tab rail offers the violations list, analytics, graph, files, flows, databases and run history surfaces"
+    },
+    {
+      "id": "dashboard-overview-spec-guard-section-covers-corpus-and-coverage",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "sections",
+      "title": "Spec Guard covers the spec corpus and scenario coverage",
+      "claim": "Spec Guard covers the spec corpus and scenario coverage.",
+      "contentHash": "sha256:4e1ad581df93e9f3395b8f45368b4c4c6a17bd34136eef4395ffdb4b442492d1",
+      "verifyVia": "web: with Spec Guard selected the page shows the spec corpus and scenario-coverage surfaces instead of the Code Analysis tabs"
+    },
+    {
+      "id": "dashboard-overview-left-rail-holds-the-code-analysis-tabs",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the left icon rail holds the Code Analysis tabs",
+      "claim": "Inside a repository, the left icon rail holds the Code Analysis tabs.",
+      "contentHash": "sha256:afab6ba6707d7aad73ef1ec6260304c5b0988250d7902941d50ebc26257d8adf",
+      "verifyVia": "web: the repository page carries a left icon rail whose entries switch between the Code Analysis tabs"
+    },
+    {
+      "id": "dashboard-overview-home-tab-shows-analytics-and-violations",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "Home shows analytics on the left and violations on the right",
+      "claim": "The Home tab shows analytics on the left and the violations list on the right.",
+      "contentHash": "sha256:f5e1edb839d99b640c5c5d8b09e7b37c0fe6edcc2ddddc2812706a8ca4d028a0",
+      "verifyVia": "web: the Home tab renders an analytics column beside a violations list column"
+    },
+    {
+      "id": "dashboard-overview-graphs-tab-shows-the-architecture-graph",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "Graphs shows the architecture graph",
+      "claim": "The Graphs tab shows the architecture graph.",
+      "contentHash": "sha256:e354c437af93079dd44ca89bd8889c3cea342dc2d80b54c468e3678c50d189b1",
+      "verifyVia": "web: selecting Graphs renders the analyzed repository's architecture graph"
+    },
+    {
+      "id": "dashboard-overview-flows-tab-shows-flows-and-sequence-diagrams",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "Flows shows detected execution flows and their sequence diagrams",
+      "claim": "The Flows tab shows detected execution flows and their sequence diagrams.",
+      "contentHash": "sha256:6cef0d1916640fe1446c3b79e5a07144abacfd2fd317d88087613a90acbd5cb9",
+      "verifyVia": "web: selecting Flows lists detected flows, and opening one renders its sequence diagram"
+    },
+    {
+      "id": "dashboard-overview-files-tab-shows-the-tree-and-code-viewer",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "Files shows the file tree and code viewer",
+      "claim": "The Files tab shows the file tree and code viewer.",
+      "contentHash": "sha256:28fd5998aa7f741eeb9d41ed2d750f6118634e2500d585c3fa7f1fe757aac420",
+      "verifyVia": "web: selecting Files renders the repository file tree, and picking a file opens it in the code viewer"
+    },
+    {
+      "id": "dashboard-overview-databases-tab-shows-datastores-and-schemas",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "Databases shows detected datastores and their schemas",
+      "claim": "The Databases tab shows detected datastores and their schemas.",
+      "contentHash": "sha256:c10764fb581ac4066814db4780dae46749e1d60365294309198e2bfb5a6f236d",
+      "verifyVia": "web: selecting Databases lists the detected datastores, and opening one renders its schema"
+    },
+    {
+      "id": "dashboard-overview-analyses-tab-shows-history-usage-and-deletion",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "Analyses shows run history, token usage and deletion",
+      "claim": "The Analyses tab shows run history, token usage, and deletion.",
+      "contentHash": "sha256:95f714ca40b12829e839ec09c00d8062a2c4e25c94db52754ff39862b6ceebca",
+      "verifyVia": "web: selecting Analyses lists past runs with their token usage and offers a delete action per run"
+    },
+    {
+      "id": "dashboard-overview-home-icon-carries-the-violation-count",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the Home icon carries the violation count of the current view",
+      "claim": "The Home icon carries the number of violations in the current view.",
+      "contentHash": "sha256:29a8957979bb49eaf5d710c12279bc767fb59bf04eac157ef487b24b09609b17",
+      "verifyVia": "web: the badge on the Home rail icon equals the number of violations the current view lists, and moves when a filter changes that number"
+    },
+    {
+      "id": "dashboard-overview-sidebar-panels-are-draggable-wider",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "sidebar panels can be dragged wider",
+      "claim": "Panels that have a sidebar (Flows, Files, Databases) can be dragged wider from their right edge.",
+      "contentHash": "sha256:962771e7e6e9ddc5514ba9dd792b23dfb34112aac45dda6e306216a7da06a145",
+      "verifyVia": "web: dragging the right edge of the Files sidebar widens it, and the same works on Flows and Databases"
+    },
+    {
+      "id": "dashboard-overview-header-shows-repository-name-and-branch",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the header carries the repository name and current branch",
+      "claim": "The header carries the repository name and the current git branch.",
+      "contentHash": "sha256:6fb6c07065fa0109e6b6b93e4a567b1620d8b96a815567d0537ea3a8987f317b",
+      "verifyVia": "web: the header shows the repository's name and the branch name `git rev-parse --abbrev-ref HEAD` reports"
+    },
+    {
+      "id": "dashboard-overview-past-run-dropdown-appears-with-more-than-one-analysis",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the past-run dropdown appears once there is more than one analysis",
+      "claim": "The header carries the past-run dropdown once there is more than one analysis to choose from.",
+      "contentHash": "sha256:ae8ff6b4ee0de0b209d65dd32ca73d8c67e8c25bdad006ac9ccdf0c3fad69b4b",
+      "verifyVia": "web: with a single analysis on record the header has no past-run dropdown; after a second analysis it does"
+    },
+    {
+      "id": "dashboard-overview-header-carries-the-normal-git-diff-toggle",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the header carries the Normal / Git Diff toggle",
+      "claim": "The header carries the Normal / Git Diff toggle.",
+      "contentHash": "sha256:baaf4e15204d4a39f75a5a335a16a6e1ecf239b81f9db6c42ea8896ff2ebe753",
+      "verifyVia": "web: the header offers a two-way Normal / Git Diff control that changes the view when used"
+    },
+    {
+      "id": "dashboard-overview-header-carries-the-analyze-button",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the header carries the Analyze button",
+      "claim": "The header carries the Analyze button.",
+      "contentHash": "sha256:41c6dbd57690a7fb940202dc5c60ccec21760ebded9110916fe722fb423636ea",
+      "verifyVia": "web: the header offers an Analyze button that starts a run when pressed"
+    },
+    {
+      "id": "dashboard-overview-theme-button-toggles-light-and-dark",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the sun/moon button toggles light and dark mode",
+      "claim": "The sun/moon button toggles light and dark mode.",
+      "contentHash": "sha256:ff1776ed51922373e3f32a48c2db016036ec21ab98da7f0c73df9ecf86a2288d",
+      "verifyVia": "web: pressing the sun/moon button flips the page between the light and dark palettes"
+    },
+    {
+      "id": "dashboard-overview-theme-choice-is-remembered-in-the-browser",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "title": "the theme choice is remembered in the browser",
+      "claim": "The sun/moon button remembers your choice in the browser.",
+      "contentHash": "sha256:8f9f5698faa6fdf7ec1cda3b06769a8ef8e750648e9679a935f03010f8f92be7",
+      "verifyVia": "web: after choosing dark mode and reloading the page, the page is still in dark mode"
+    },
+    {
+      "id": "dashboard-overview-home-shows-no-analysis-yet",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "before-the-first-analysis",
+      "title": "Home shows No analysis yet before the first run",
+      "claim": "With no analysis data yet, Home shows No analysis yet.",
+      "contentHash": "sha256:0e02cc9bce7fe6a6e5b9b6e746da06b8743204ba287eaf298cf1ee59f8874d7e",
+      "verifyVia": "web: on a freshly added repository the Home tab renders the No analysis yet state instead of a violations list"
+    },
+    {
+      "id": "dashboard-overview-empty-home-points-at-analyze",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "before-the-first-analysis",
+      "title": "the empty Home points at the Analyze button",
+      "claim": "With no analysis data yet, Home points at the Analyze button (or `truecourse analyze` from the project directory).",
+      "contentHash": "sha256:00ba06c4f931fd23c3542c33d3d182e5f0e65da181767c0c054f65969c700b8b",
+      "verifyVia": "web: the empty Home state names the Analyze button and the `truecourse analyze` command as the way to get data"
+    },
+    {
+      "id": "dashboard-overview-graphs-offers-the-same-empty-prompt",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "before-the-first-analysis",
+      "title": "Graphs offers the same empty prompt",
+      "claim": "With no analysis data yet, Graphs offers the same prompt.",
+      "contentHash": "sha256:34c981b6eee597d0bee653b20a13bef1b75a896d69408d24ffbad93268726ab2",
+      "verifyVia": "web: on a freshly added repository the Graphs tab renders the same run-an-analysis prompt rather than a graph"
+    },
+    {
+      "id": "dashboard-overview-flows-and-databases-sidebars-are-empty",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "before-the-first-analysis",
+      "title": "the Flows and Databases sidebars are empty before the first analysis",
+      "claim": "With no analysis data yet, the Flows and Databases sidebars are empty.",
+      "contentHash": "sha256:d5074d7575a2f73bebc044e6f7e3aabec0e0671042bc2f1afa8aeb3da081e62c",
+      "verifyVia": "web: on a freshly added repository the Flows and Databases sidebars list no items"
+    },
+    {
+      "id": "dashboard-overview-files-tree-reads-the-repo-before-any-analysis",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "before-the-first-analysis",
+      "title": "the Files tree works before any analysis has run",
+      "claim": "The Files tab is the exception: the tree reads your repository directly, so you can browse the code before anything has run.",
+      "contentHash": "sha256:6d3dd2b7eacba85c05a6fb30af9e42813b72303d3cf8c7cdf827778ead2d04b0",
+      "verifyVia": "web: on a freshly added repository the Files tree lists the repository's files and a file opens in the viewer"
+    },
+    {
+      "id": "dashboard-overview-severity-coloring-appears-after-an-analysis",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "before-the-first-analysis",
+      "title": "severity coloring in the tree appears once an analysis exists",
+      "claim": "Severity coloring in the Files tree appears once an analysis exists.",
+      "contentHash": "sha256:d49402a4cbcaca2bc4ec4dbe362f93b8970f83d64f35470b277d51cf289e7cf9",
+      "verifyVia": "web: the tree is uncolored before the first analysis and file names carry severity colors after one"
+    },
+    {
+      "id": "dashboard-overview-url-carries-section-and-tab",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "shareable-urls",
+      "title": "the URL carries the section and tab",
+      "claim": "The section and tab are written into the URL (`?section=`, `?tab=`), so a link reopens the same view.",
+      "contentHash": "sha256:c9901329f90eb6154cc748fb6d0b00290e340083477a4cd4a9bee185450d86e8",
+      "verifyVia": "web: switching section and tab changes `?section=` and `?tab=` in the address bar, and reopening that URL lands on the same section and tab"
+    },
+    {
+      "id": "dashboard-overview-url-carries-the-open-file",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "shareable-urls",
+      "title": "the URL carries the open file",
+      "claim": "The open file is written into the URL (`?file=`), so a link reopens the same view.",
+      "contentHash": "sha256:8f23c54eb5859c34e37246c5a6dcb78cd5e12439c8a83e217a4873dc3107dcda",
+      "verifyVia": "web: opening a file sets `?file=` in the address bar, and reopening that URL reopens that file in the viewer"
+    },
+    {
+      "id": "dashboard-overview-url-carries-the-open-flow",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "shareable-urls",
+      "title": "the URL carries the open flow",
+      "claim": "The open flow is written into the URL (`?flow=`), so a link reopens the same view.",
+      "contentHash": "sha256:e4a859d0be4e50a338dec4eafe529ee418ecf4a219b5f7a5cb88c975710994f6",
+      "verifyVia": "web: opening a flow sets `?flow=` in the address bar, and reopening that URL reopens that flow's diagram"
+    },
+    {
+      "id": "dashboard-overview-url-carries-diff-mode",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "shareable-urls",
+      "title": "the URL carries diff mode",
+      "claim": "Diff mode is written into the URL (`?view=diff`), so a link reopens the same view.",
+      "contentHash": "sha256:683766ce978c8921353634139722b3d31c4796e7bddcf41bf7991499423463e2",
+      "verifyVia": "web: switching to Git Diff sets `?view=diff` in the address bar, and reopening that URL comes back up in diff mode"
+    },
+    {
+      "id": "dashboard-overview-back-and-forward-move-through-views",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "shareable-urls",
+      "title": "Back and Forward move through the views",
+      "claim": "Browser Back and Forward move through those views.",
+      "contentHash": "sha256:02f0b44ae59467f711667622cedbb9be071fd98f3d7a9f0a7a30b8d53d2b11bf",
+      "verifyVia": "web: after switching tabs, browser Back returns to the previous tab and Forward returns to the later one"
+    },
+    {
+      "id": "dashboard-overview-non-git-directory-shows-an-amber-banner",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "repositories-without-git",
+      "title": "a non-git directory shows an amber banner",
+      "claim": "If the directory you opened is not a git repository, the dashboard shows an amber banner.",
+      "contentHash": "sha256:5782c90cf60157cfdc1dadf5d60051dd658ef9207c8b680cafe030cb1199535a",
+      "verifyVia": "web: opening a directory with no git repository renders an amber banner saying git is required"
+    },
+    {
+      "id": "dashboard-overview-non-git-directory-hides-analyze-diff-and-spec-scan",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "repositories-without-git",
+      "title": "a non-git directory hides Analyze, the diff toggle and spec scan",
+      "claim": "If the directory you opened is not a git repository, the dashboard hides Analyze, the diff toggle, and the spec scan action.",
+      "contentHash": "sha256:65dcfd2e0f00aefb80e756f6426f8c62b7cadeeb496bc7086e5d0c349b837a63",
+      "verifyVia": "web: on a non-git directory the header has no Analyze button and no Normal / Git Diff toggle, and no spec scan action is offered"
+    },
+    {
+      "id": "dashboard-analyze-button-runs-the-same-analysis-as-the-cli",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "running-an-analysis",
+      "title": "the Analyze button runs the same analysis as `truecourse analyze`",
+      "claim": "The Analyze button in the header runs the same analysis `truecourse analyze` runs, against the repository on disk.",
+      "contentHash": "sha256:4fd0421916d42dd1682edf60ef2a0ca4e1a0f1b8ca9a09f3ba9c0844d82b6a13",
+      "verifyVia": "web then cli: the findings the button produces match the findings a `truecourse analyze` run over the same commit records"
+    },
+    {
+      "id": "dashboard-analyze-runs-in-the-dashboard-server-process",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "running-an-analysis",
+      "title": "the Analyze button runs in the dashboard server's own process",
+      "claim": "The Analyze button runs the analysis in the dashboard server's own process.",
+      "contentHash": "sha256:57e7039bfcafa6c246dfbb2c6c144cf9417fa42ee559103f396a86bc67c823e0",
+      "verifyVia": "web then host: while a dashboard-triggered run is in flight no separate analyze process exists; the work happens inside the running dashboard server"
+    },
+    {
+      "id": "dashboard-analyze-honors-enabled-categories-from-config",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "running-an-analysis",
+      "title": "a dashboard run honors the enabled categories from `config.json`",
+      "claim": "The Analyze button reads the enabled categories from `.truecourse/config.json`.",
+      "contentHash": "sha256:b0d1c3804c97ecf9ca84a22f70ca8ed87bbe53ed2946a07fd856774be86ef99a",
+      "verifyVia": "web: with a category disabled in `.truecourse/config.json`, a run started from the button produces no findings in that category"
+    },
+    {
+      "id": "dashboard-analyze-honors-the-llm-rules-toggle-from-config",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "running-an-analysis",
+      "title": "a dashboard run honors the LLM-rules toggle from `config.json`",
+      "claim": "The Analyze button reads whether LLM rules are on or off from `.truecourse/config.json`.",
+      "contentHash": "sha256:1c74a8d996d8cd45efbcd2c6f933003eee5dac37034019ae51143bab3670c664",
+      "verifyVia": "web: with LLM rules off in `.truecourse/config.json`, a run started from the button makes no model call and produces no LLM findings"
+    },
+    {
+      "id": "dashboard-analyze-honors-disabled-rules-from-config",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "running-an-analysis",
+      "title": "a dashboard run honors the disabled rules from `config.json`",
+      "claim": "The Analyze button reads the disabled rules from `.truecourse/config.json`.",
+      "contentHash": "sha256:41adf25fc73c519b4cdd2fc607d283265594b506bc3e802557147370587c0af1",
+      "verifyVia": "web: with a rule key in `disabledRules`, a run started from the button records no violation of that rule"
+    },
+    {
+      "id": "dashboard-analyze-stash-prompt-precedes-the-llm-prompt",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "the dirty-tree dialog comes before the LLM dialog",
+      "claim": "Two things can interrupt the start, in this order: a dirty working tree, then LLM rules.",
+      "contentHash": "sha256:9431d9646310903300bb59a180851a3472a90b944e7af69b5d1b17405b2a360c",
+      "verifyVia": "web: with a dirty tree and LLM rules enabled, pressing Analyze shows the dirty-tree dialog first and the LLM confirm only after it is answered"
+    },
+    {
+      "id": "dashboard-analyze-dirty-tree-opens-a-dialog",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "a dirty working tree opens a dialog",
+      "claim": "If your repository has modified or untracked files, a dialog appears before the run starts.",
+      "contentHash": "sha256:680ef6c1a43f1abc6c446379b3a9e7262f9fe398889672513a3e4635e2feda8b",
+      "verifyVia": "web: with a modified or untracked file present, pressing Analyze opens the stash dialog instead of starting the run"
+    },
+    {
+      "id": "dashboard-analyze-dirty-tree-dialog-reports-the-counts",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "the dirty-tree dialog reports the counts",
+      "claim": "The dirty working tree dialog reports the counts of modified and untracked files.",
+      "contentHash": "sha256:b476560e43c6b9ba6a465183db1983a9dfe996a4adc398fe5d9360974efe218e",
+      "verifyVia": "web: the dialog's numbers match the modified and untracked file counts `git status --porcelain` reports"
+    },
+    {
+      "id": "dashboard-analyze-stash-option-analyzes-committed-state",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "Stash and analyze committed state anchors the baseline to the last commit",
+      "claim": "Stash and analyze committed state keeps the baseline anchored to your last commit.",
+      "contentHash": "sha256:d2e149cc59c5f170ea2a1d4b2d02043d47e72910d6cefa94c660de9e3707ce06",
+      "verifyVia": "web: choosing it produces findings for the committed content only — a violation existing solely in an uncommitted edit is absent"
+    },
+    {
+      "id": "dashboard-analyze-no-stash-option-analyzes-the-tree-as-is",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "Don't stash analyzes the working tree as-is",
+      "claim": "Don't stash — analyze working tree as-is analyzes the files as they are.",
+      "contentHash": "sha256:ddf549a5dc1eefbae2b43b174ef1e33a58784f516c46868669227868b4143dd3",
+      "verifyVia": "web: choosing it produces a finding that exists only in an uncommitted edit"
+    },
+    {
+      "id": "dashboard-analyze-closing-the-stash-dialog-cancels-the-run",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "closing the dirty-tree dialog cancels the run",
+      "claim": "Closing the dialog (the X, the backdrop, or `Escape`) cancels the run.",
+      "contentHash": "sha256:a30de97d8ab701abdf39dd5ada0656a7257792c8374bf93db76e2f17225c2627",
+      "verifyVia": "web: after dismissing the dialog with the X, with a backdrop click, or with Escape, no progress card appears and no new analysis is recorded"
+    },
+    {
+      "id": "dashboard-analyze-stash-prompt-skipped-on-a-clean-tree",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "the stash prompt is skipped when the tree is clean",
+      "claim": "The dirty-tree prompt is skipped when the tree is clean.",
+      "contentHash": "sha256:653b407682efa6bfee73f911d7ee6032c0eea579690c336d7b8c24d21b031b24",
+      "verifyVia": "web: with nothing modified or untracked, pressing Analyze starts the run with no stash dialog"
+    },
+    {
+      "id": "dashboard-analyze-stash-prompt-skipped-in-a-subdirectory-repo",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "the stash prompt is skipped in a subdirectory of a larger repository",
+      "claim": "The dirty-tree prompt is skipped when the directory you opened is a subdirectory of a larger git repository.",
+      "contentHash": "sha256:cbecb2d4586565efd34675939d71a57092ecdf7af06e975c066719c809f1f6dd",
+      "verifyVia": "web: opened on a subdirectory of a larger git repository with a dirty tree, pressing Analyze starts the run with no stash dialog"
+    },
+    {
+      "id": "dashboard-analyze-stash-prompt-skipped-without-git",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "the stash prompt is skipped when git is unavailable",
+      "claim": "The dirty-tree prompt is skipped when git is unavailable.",
+      "contentHash": "sha256:09622813b49cb0c8ee75a16ac602fc763c26e8e7c474057a52e3f6cbb5432132",
+      "verifyVia": "web: with git unavailable, pressing Analyze starts the run with no stash dialog"
+    },
+    {
+      "id": "dashboard-analyze-truecourse-files-never-count-as-changes",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "`.truecourse/` files never count as changes",
+      "claim": "TrueCourse's own `.truecourse/` files never count as changes.",
+      "contentHash": "sha256:1f7fe2dc6cadd7b33cf69284b00921cc1bb945feb9cb99eb12ef828a4f822a24",
+      "verifyVia": "web: with only `.truecourse/` files modified or untracked, pressing Analyze shows no stash dialog"
+    },
+    {
+      "id": "dashboard-analyze-llm-confirm-appears-before-any-model-call",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "an LLM confirm appears before any model call",
+      "claim": "If LLM rules are enabled for the repo, a confirm dialog appears before any model call.",
+      "contentHash": "sha256:b8508091ced3c69ef71c4cfb1a487141ee4a1b99853f7148704b43df55817bdc",
+      "verifyVia": "web: with LLM rules enabled, pressing Analyze opens the confirm dialog and no model call has been made until it is answered"
+    },
+    {
+      "id": "dashboard-analyze-llm-confirm-shows-files-rules-and-tokens",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "the LLM confirm shows files, rules and estimated tokens",
+      "claim": "The LLM confirm dialog shows the number of files, the number of rules, and the estimated tokens.",
+      "contentHash": "sha256:2550b20d8a4f03af920e037ae8b319d5bb4a9583d871b81b8606afb7f5dbf95b",
+      "verifyVia": "web: the dialog carries a file count, a rule count and a token estimate"
+    },
+    {
+      "id": "dashboard-analyze-run-llm-rules-proceeds",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "Run LLM rules proceeds",
+      "claim": "Run LLM rules proceeds with the analysis.",
+      "contentHash": "sha256:d7435162bd26d9e8d5984eed76b083bea9c6c8dc59e8bbb9d9420dbf98e90087",
+      "verifyVia": "web: choosing it starts the run and the completed analysis records LLM-detected findings"
+    },
+    {
+      "id": "dashboard-analyze-skip-runs-deterministic-rules-only",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "Skip runs deterministic rules only",
+      "claim": "Skip — deterministic rules only runs the analysis without the LLM rules.",
+      "contentHash": "sha256:b528edd2ee073fa16bbe2545ecf500f61d47c4b38ccf38ae155a74b631853189",
+      "verifyVia": "web: choosing it completes the run with no model call, and the Detection filter's LLM side lists nothing"
+    },
+    {
+      "id": "dashboard-analyze-estimate-matches-the-cli",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "title": "the estimate is the same one the CLI prints",
+      "claim": "The estimate in the confirm dialog is the same one the CLI prints.",
+      "contentHash": "sha256:51804e034be5ebd1667dab2a2974712f313aa496cf85e1c791f9221193638920",
+      "verifyVia": "web then cli: the dialog's file, rule and token numbers equal the ones `truecourse analyze --llm` prints for the same repository state"
+    },
+    {
+      "id": "dashboard-analyze-progress-card-sits-at-the-bottom",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "a progress card sits at the bottom while the run is in flight",
+      "claim": "A progress card sits at the bottom of the screen while the run is in flight.",
+      "contentHash": "sha256:57c4f3b9d238f66414d3b1a6eb96a78e1d605f5b353f1d0a498b7141e03aad03",
+      "verifyVia": "web: once the run starts a progress card is rendered at the bottom of the page"
+    },
+    {
+      "id": "dashboard-analyze-progress-card-follows-you-across-tabs",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "the progress card stays visible on any tab",
+      "claim": "The progress card stays visible on any tab.",
+      "contentHash": "sha256:665cb3951f051dbdd7dbdbb76702b63ba64e2a4ea71f4130c5ad668d7c4c72a8",
+      "verifyVia": "web: switching from Home to Graphs and Files during a run leaves the progress card on screen"
+    },
+    {
+      "id": "dashboard-analyze-progress-card-ticks-off-steps",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "the progress card lists the run's steps and ticks them off",
+      "claim": "The progress card lists the run's steps and ticks them off as they complete.",
+      "contentHash": "sha256:9cb820fa41736ea716a278628aba49fd63b8a6125f0bc3815105a5561b2787b7",
+      "verifyVia": "web: the card lists named steps and each is marked complete as the run advances"
+    },
+    {
+      "id": "dashboard-analyze-progress-card-details-the-active-step",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "the progress card shows a detail line on the active step",
+      "claim": "The progress card shows a detail line on the active step.",
+      "contentHash": "sha256:601720c9b1a1f0eab4372e90a2a63a2b1a0394d2ff23248c4cae8f36e4ac42a1",
+      "verifyVia": "web: the step currently running carries a detail line that changes as the run advances"
+    },
+    {
+      "id": "dashboard-analyze-cancel-stops-the-run",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "Cancel stops the run",
+      "claim": "Cancel stops the run.",
+      "contentHash": "sha256:afa313f297f20085934dfbb445d514b7d440e21a80556d9231f30e37087bcb2b",
+      "verifyVia": "web: pressing Cancel ends the run and no new analysis is added to the run history"
+    },
+    {
+      "id": "dashboard-analyze-failed-run-turns-the-card-red",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "a failed run turns the card red and shows the error",
+      "claim": "If the run fails, the card turns red and shows the error.",
+      "contentHash": "sha256:baabce823ed080d4d32cae7aaef784b9d077647abfa8f83d91875a819854947e",
+      "verifyVia": "web: on a run forced to fail the progress card renders in its error color and carries the error text"
+    },
+    {
+      "id": "dashboard-analyze-failed-card-dismissed-with-the-x",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "the failed card is dismissed with the X",
+      "claim": "A failed run's card is dismissed with the X.",
+      "contentHash": "sha256:d8279d336bfbefc90a261640bb2c01e2565d641cce0846157f36cf4dc8bf6e9f",
+      "verifyVia": "web: pressing the X on the failed card removes it from the page"
+    },
+    {
+      "id": "dashboard-analyze-views-refresh-in-place-on-completion",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "every view refreshes in place when the run completes",
+      "claim": "When the run completes, the violations list, analytics, graph, flows and run history all refresh in place.",
+      "contentHash": "sha256:3bff6de2593c4be8cf28ac3592854c1895594867303958c43cc1f072fe6cb367",
+      "verifyVia": "web: without reloading the page, the violations list, analytics numbers, graph, flows and Analyses table all show the new run's data"
+    },
+    {
+      "id": "dashboard-analyze-logs-written-to-analyze-log",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "title": "dashboard-triggered runs log to `.truecourse/logs/analyze.log`",
+      "claim": "Logs for dashboard-triggered runs are written to `.truecourse/logs/analyze.log`.",
+      "contentHash": "sha256:bd7501033d2935cdf932a049c235cce72dc0b98f355ada4773c5f07452be691c",
+      "verifyVia": "web then disk: after a run started from the button, `.truecourse/logs/analyze.log` has grown with that run's lines"
+    },
+    {
+      "id": "dashboard-analyze-uses-the-saved-llm-transport",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "which-llm-the-dashboard-uses",
+      "title": "dashboard-triggered work uses the saved LLM transport",
+      "claim": "Dashboard-triggered work (analysis, flow enrichment, spec scans and guard generates) uses the same saved LLM transport as the CLI.",
+      "contentHash": "sha256:f8c11148cbb0f87fa42196ab7a9612b6c79c3efc0743b8a2d022814cfff896b0",
+      "verifyVia": "web: with the saved transport set to a given provider, a dashboard-triggered run records that provider on the run"
+    },
+    {
+      "id": "dashboard-analyze-never-edits-credentials",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "which-llm-the-dashboard-uses",
+      "title": "the dashboard never edits your credentials",
+      "claim": "The dashboard reads the transport selection; it never edits your credentials.",
+      "contentHash": "sha256:d86284ae82f7637d0d2fb737dc2601d370e5eee67561e87072c20113930c7e50",
+      "verifyVia": "web then disk: after driving the dashboard's LLM-backed actions, the saved global LLM config file is byte-identical to before"
+    },
+    {
+      "id": "dashboard-analyze-transport-change-applies-to-the-next-run",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "which-llm-the-dashboard-uses",
+      "title": "a transport change applies to the next run without a restart",
+      "claim": "Running `truecourse config llm setup` while the dashboard is up takes effect on the next run, with no restart needed.",
+      "contentHash": "sha256:f74869e90fb724a90161b2c4228f4af06c9685adcc92e3f2293bbed47319fe2c",
+      "verifyVia": "web: after changing the saved transport with the dashboard still running, the next dashboard-triggered run uses the new transport"
+    },
+    {
+      "id": "dashboard-analyze-hidden-when-viewing-a-past-analysis",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "title": "Analyze and the diff toggle are hidden on a past analysis",
+      "claim": "The Analyze button and the Normal / Git Diff toggle are hidden when you are viewing a past analysis from the run-history dropdown.",
+      "contentHash": "sha256:f7c7209dfa31109c1a3b881e6bbbfa92d2c3d3697dc3b34575c63d7a87b0ea2b",
+      "verifyVia": "web: after picking an older run in the dropdown, the header carries neither the Analyze button nor the Normal / Git Diff toggle"
+    },
+    {
+      "id": "dashboard-analyze-hidden-outside-a-git-repository",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "title": "Analyze and the diff toggle are hidden outside a git repository",
+      "claim": "The Analyze button and the Normal / Git Diff toggle are hidden when the directory is not a git repository.",
+      "contentHash": "sha256:f71a766b9d9dcd5481f5700ef01b8af9e82b2b9b963cb621a796663f75adbdf9",
+      "verifyVia": "web: on a directory with no git repository the header carries neither the Analyze button nor the Normal / Git Diff toggle"
+    },
+    {
+      "id": "dashboard-analyze-hidden-in-the-spec-guard-section",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "title": "Analyze and the diff toggle are hidden in the Spec Guard section",
+      "claim": "The Analyze button and the Normal / Git Diff toggle are hidden when you are in the Spec Guard section rather than Code Analysis.",
+      "contentHash": "sha256:d0eb1ce7e94e0b89e36121d1dcec857a68f70ed312d94c4213ba05fe8997fed5",
+      "verifyVia": "web: switching the section dropdown to Spec Guard removes the Analyze button and the Normal / Git Diff toggle from the header"
+    },
+    {
+      "id": "dashboard-analyze-stash-flags-preanswer-the-stash-prompt",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "title": "`--stash` / `--no-stash` pre-answer the stash prompt",
+      "claim": "`truecourse analyze --stash` / `--no-stash` pre-answer the stash prompt.",
+      "contentHash": "sha256:e72e2f9a418421452322b18839e2191033076bc7df466020cf08e522a918f04f",
+      "verifyVia": "cli: on a dirty tree `truecourse analyze --no-stash` completes without printing the stash question, and `--stash` does the same while analyzing the committed state"
+    },
+    {
+      "id": "dashboard-analyze-llm-flags-preanswer-the-llm-prompt",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "title": "`--llm` / `--no-llm` pre-answer the LLM prompt",
+      "claim": "`truecourse analyze --llm` / `--no-llm` pre-answer the LLM prompt.",
+      "contentHash": "sha256:a03e631b8e490db6346bb270643bdb2814f9e20c8f7aaa9ec3e06a20e4c9b923",
+      "verifyVia": "cli: `truecourse analyze --no-llm` completes without printing the cost-estimate question and makes no model call; `--llm` runs the LLM rules without asking"
+    },
+    {
+      "id": "dashboard-violations-home-splits-analytics-and-list",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "violations",
+      "title": "Home is split into analytics and the violations list",
+      "claim": "The Home tab is split in two: analytics on the left, the violations list on the right.",
+      "contentHash": "sha256:0445ec270649915d4746a251cba408773f885393eaa327cf997b7676f853b01e",
+      "verifyVia": "web: the Home tab renders an analytics column on the left and the violations list on the right"
+    },
+    {
+      "id": "dashboard-violations-divider-resizes-the-halves",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "violations",
+      "title": "the divider resizes the two halves",
+      "claim": "Drag the divider between them to give either side more room.",
+      "contentHash": "sha256:3bcccb285dc4df367a983b1a7360abf80528b7410f8fd4599251f309db8fe43e",
+      "verifyVia": "web: dragging the divider left or right changes the widths of the analytics and violations columns"
+    },
+    {
+      "id": "dashboard-violations-list-shows-active-findings-of-the-viewed-analysis",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "violations",
+      "title": "the list shows the active findings of the analysis you are viewing",
+      "claim": "The list shows the active findings of the analysis you are viewing.",
+      "contentHash": "sha256:1fe9ea72d6e5ff22229615205b93dee0499752415cb1a0f18973928d718affaf",
+      "verifyVia": "web: the listed findings are those of the currently selected analysis, and switching to another analysis changes the set"
+    },
+    {
+      "id": "dashboard-violations-list-sorted-by-severity-then-newest",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "violations",
+      "title": "the list is sorted by severity then newest first",
+      "claim": "The list is sorted by severity and then by newest first.",
+      "contentHash": "sha256:ba3b3ad0a40446cef89f5c12740bd5e4f4da104b4bcb6d7cbb6cc5b10efdda04",
+      "verifyVia": "web: the rendered order runs Critical to Low, and within one severity the newer finding precedes the older"
+    },
+    {
+      "id": "dashboard-violations-four-filters-combine",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "the four filter controls combine",
+      "claim": "Four controls sit above the list, and they combine.",
+      "contentHash": "sha256:94ded95d7d4362ab2b0b24b311b423dcce968ace2a410991b01656fa520572d8",
+      "verifyVia": "web: with a search term and a severity both set, the list shows only findings satisfying both"
+    },
+    {
+      "id": "dashboard-violations-search-matches-title-description-and-target",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "Search matches title, description and target name",
+      "claim": "Search matches the finding's title and description, and the name of the service, module or function it targets.",
+      "contentHash": "sha256:abf654ab666547cbfebf9e898e3d18eec064e67d7426173d09b82afdb00c2775",
+      "verifyVia": "web: a term appearing only in a finding's description keeps it in the list, and so does a term that is only the name of the service, module or function it targets"
+    },
+    {
+      "id": "dashboard-violations-severity-dropdown-offers-four-levels",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "Severity is a dropdown of the four levels",
+      "claim": "Severity is a dropdown of Critical, High, Medium and Low.",
+      "contentHash": "sha256:3aa1560febbbfb850bcacc3e6c0dbaa86a6e4183876aab0618e70a8718f74603",
+      "verifyVia": "web: the severity dropdown offers exactly Critical, High, Medium and Low, and choosing one narrows the list to that severity"
+    },
+    {
+      "id": "dashboard-violations-severity-options-carry-live-counts",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "each severity carries a live count",
+      "claim": "Each severity in the dropdown carries a live count.",
+      "contentHash": "sha256:62ea7f791964cae65182714d8e83e8cfc02c675f8726bfd3a4389de2a8e7e95b",
+      "verifyVia": "web: each severity entry shows a number equal to the findings at that severity in the current view, and the number moves when another filter changes"
+    },
+    {
+      "id": "dashboard-violations-detection-switch-is-three-way",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "Detection is a three-way All / Det / LLM switch",
+      "claim": "Detection is a three-way switch: All, Det (deterministic rules) or LLM (rules that called the model).",
+      "contentHash": "sha256:a86f639a91e8a2ed6bc878f17d6d601c00f6bca7cefd5bbf5549ebbd17ddfa99",
+      "verifyVia": "web: setting Det leaves only deterministic-rule findings and setting LLM leaves only model-detected ones, while All shows both"
+    },
+    {
+      "id": "dashboard-violations-category-tabs-cover-nine-categories",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "category tabs run across the second row",
+      "claim": "Category tabs run across the second row: All, Security, Bugs, Architecture, Performance, Reliability, Code Quality, Database and Style.",
+      "contentHash": "sha256:afab789af8debba1dfe85d4410de06059861ff709c51bc50068b33549fd12c9b",
+      "verifyVia": "web: the second filter row carries those nine tabs and choosing one narrows the list to that category"
+    },
+    {
+      "id": "dashboard-violations-category-tabs-carry-counts",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "each category tab carries a count",
+      "claim": "Each category tab carries a count.",
+      "contentHash": "sha256:234abaf9cff1ba4d809e3b5b9dd2406a463b9c3033e7a1794e422ba7f8609dda",
+      "verifyVia": "web: every category tab shows a number equal to the findings it would leave in the list"
+    },
+    {
+      "id": "dashboard-violations-counts-respond-to-the-other-filters",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "the counts respond to the other filters",
+      "claim": "Counts respond to the other filters, so the category counts reflect your current search and severity choice rather than the whole analysis.",
+      "contentHash": "sha256:4549e01702c2e410bc397c0321e400e6963a82a771ab2cf7d01bed162947c178",
+      "verifyVia": "web: setting a search term or a severity changes the numbers on the category tabs"
+    },
+    {
+      "id": "dashboard-violations-top-offender-row-scopes-the-list",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "clicking a Top Offenders row scopes the list",
+      "claim": "Clicking a row in Top Offenders scopes the list to that service or module.",
+      "contentHash": "sha256:69ee69639c9a807569fca2c0644d1c53c44ab4bd8f3789905a887acaf91f1ff1",
+      "verifyVia": "web: after clicking an offender row the list shows only findings targeting that service or module"
+    },
+    {
+      "id": "dashboard-violations-code-hotspot-row-scopes-the-list",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "clicking a Code Hotspots row scopes the list",
+      "claim": "Clicking a row in Code Hotspots scopes the list to that file.",
+      "contentHash": "sha256:7bc05b5382c66bf4c1f480e7ff1ccbb82025a6636f37d038e7fdbbf7c4168455",
+      "verifyVia": "web: after clicking a hotspot row the list shows only findings in that file"
+    },
+    {
+      "id": "dashboard-violations-active-filters-show-as-chips",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "active filters show as a Filtered by row of chips",
+      "claim": "Whatever is active shows up as a Filtered by row of chips above the list.",
+      "contentHash": "sha256:9588937d98c1a93221363d24a6b683b86116ec595234e57236dd6337f50be266",
+      "verifyVia": "web: with a search term and a category set, a Filtered by row above the list carries a chip for each"
+    },
+    {
+      "id": "dashboard-violations-chip-x-clears-one-filter",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "a chip's X clears just that filter",
+      "claim": "Each chip has an X that clears just that filter.",
+      "contentHash": "sha256:f2550102c8a359bc07d5faa21a7d67b4413e6f3669445482793ba71cb262bff9",
+      "verifyVia": "web: pressing one chip's X removes that chip and widens the list, while the other chips and their narrowing stay"
+    },
+    {
+      "id": "dashboard-violations-list-scrolls-continuously",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "title": "the filtered list scrolls in one continuous view",
+      "claim": "The whole filtered list scrolls in one continuous view.",
+      "contentHash": "sha256:09584704eb161e5ba82517726f25af8fd5ab1a22f8ff0beb1f23b5d6ec4c969c",
+      "verifyVia": "web: with more findings than fit the viewport, scrolling reaches the last finding with no pagination control anywhere on the list"
+    },
+    {
+      "id": "dashboard-violations-card-carries-target-and-severity-badges",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "a card carries an attachment badge and a severity badge",
+      "claim": "Each card carries a badge for what the finding is attached to (`code`, `service`, `module`, `function` or `database`) and a badge for its severity.",
+      "contentHash": "sha256:c463aac179709d3df5d374d6e9c7cf5b1d2c5108f73cdabf785e21784a8df605",
+      "verifyVia": "web: every card shows one of those five attachment badges plus a badge naming its severity"
+    },
+    {
+      "id": "dashboard-violations-card-shows-title-and-description",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "a card shows the title and description",
+      "claim": "Each card carries the title and description.",
+      "contentHash": "sha256:722e2092c8463fb3e27c3503a209faa3c7298907795aaca01b2d41d6260e8a16",
+      "verifyVia": "web: every card renders the finding's title and its description text"
+    },
+    {
+      "id": "dashboard-violations-card-renders-backticked-identifiers-as-code",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "backticked identifiers render as code",
+      "claim": "Backticked identifiers in a card's title and description are rendered as code.",
+      "contentHash": "sha256:cd816bef85001d9d64b68a1e4636c3a6fc76a549a1cd25477f765883b8a5068b",
+      "verifyVia": "web: a finding whose description contains a backticked identifier shows it as a code span, not as literal backticks"
+    },
+    {
+      "id": "dashboard-violations-code-finding-shows-file-and-line",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "a code finding shows the file path and line",
+      "claim": "For code findings, the card carries the file path and line.",
+      "contentHash": "sha256:43245909eda256d95fe8eda334178c60f8e3740105d67381a3a5c7ef39cd31c9",
+      "verifyVia": "web: a code finding's card shows a file path and a line number matching the stored finding"
+    },
+    {
+      "id": "dashboard-violations-architecture-finding-shows-its-target",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "an architecture finding shows its `service / module / function` target",
+      "claim": "For architecture findings, the card carries the target as `service / module / function`.",
+      "contentHash": "sha256:fe6ea5e6ab37f39dd67f008edfc7fcc7f3c77889232b69e5b5782283759d2916",
+      "verifyVia": "web: an architecture finding's card renders its target in the service / module / function form"
+    },
+    {
+      "id": "dashboard-violations-fix-prompt-expands-the-instruction",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "Fix Prompt expands the ready-to-paste instruction",
+      "claim": "Fix Prompt expands the ready-to-paste instruction for fixing the finding.",
+      "contentHash": "sha256:cf1f803b95f59555cb647d9488baef0b6d24f5b45e41a03b928fdae4db57e868",
+      "verifyVia": "web: pressing Fix Prompt on a card reveals the fix instruction text inside that card"
+    },
+    {
+      "id": "dashboard-violations-copy-fix-copies-the-prompt",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "Copy Fix copies the fix prompt to the clipboard",
+      "claim": "Copy Fix copies the fix prompt text to your clipboard.",
+      "contentHash": "sha256:07249d20aaa00477ed0a68212925a18cf4eb3d7bb8d995bdfbf065eb52df2780",
+      "verifyVia": "web: after pressing Copy Fix the clipboard holds the same text the expanded Fix Prompt shows"
+    },
+    {
+      "id": "dashboard-violations-open-opens-the-file-at-the-line",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "Open opens the file in the code viewer at the line",
+      "claim": "Code findings get Open, which opens the file in the code viewer scrolled to the line.",
+      "contentHash": "sha256:4e7544b1d148124d571cc94f9f1b8dfc7ed4f61d2c02822e743e72cfb56a9c54",
+      "verifyVia": "web: pressing Open on a code finding switches to the code viewer with that file open and the finding's line in view"
+    },
+    {
+      "id": "dashboard-violations-locate-jumps-to-the-graph",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "title": "Locate zooms the graph onto the target",
+      "claim": "Architecture findings get Locate, which switches to the Graphs tab and zooms the graph onto the target.",
+      "contentHash": "sha256:bf428514d6d8aa6c33a639143a8de6ad0861d0feae0ad3fe88b9ad9d0c2ac55e",
+      "verifyVia": "web: pressing Locate on an architecture finding lands on the Graphs tab with that target node selected and centered"
+    },
+    {
+      "id": "dashboard-violations-card-menu-offers-disable-rule",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "the card menu offers Disable rule for this repo",
+      "claim": "The ⋮ menu on a card offers Disable rule for this repo.",
+      "contentHash": "sha256:319cfcd79c181ecbd1ad84c76069e854553322ac2faa607c46482219c0e196e7",
+      "verifyVia": "web: opening the ⋮ menu on a violation card reveals a Disable rule for this repo action"
+    },
+    {
+      "id": "dashboard-violations-disable-menu-shows-the-rule-key",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "the disable action shows the rule key it will disable",
+      "claim": "The Disable rule for this repo action shows the rule key it will disable.",
+      "contentHash": "sha256:b197db5dd23850494d213874cb45e7098e84690d0a5017ebed07761e93174b76",
+      "verifyVia": "web: the menu entry names a rule key, and that key is the one added to `disabledRules` when it is chosen"
+    },
+    {
+      "id": "dashboard-violations-disabling-hides-the-rules-violations",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "disabling a rule immediately hides its violations from the list",
+      "claim": "Disabling a rule immediately hides every violation from that rule from the list.",
+      "contentHash": "sha256:89af332f1c32810d04f17cbd76f6b77e91fbbe1449666d297c7d166149599a71",
+      "verifyVia": "web: right after choosing the action, no finding from that rule key remains in the violations list"
+    },
+    {
+      "id": "dashboard-violations-disabling-removes-them-from-analytics",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "disabling a rule removes its violations from the analytics numbers",
+      "claim": "Disabling a rule immediately hides every violation from that rule from the analytics numbers.",
+      "contentHash": "sha256:6de69efe301075c0d3a157218bc6347fcabd84bf3a1582aac25c2aba6a82bc28",
+      "verifyVia": "web: the analytics counts drop by the number of findings that rule contributed"
+    },
+    {
+      "id": "dashboard-violations-disabling-writes-to-disabledrules",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "disabling a rule writes its key to `disabledRules`",
+      "claim": "Disabling a rule adds the rule key to `disabledRules` in `<repo>/.truecourse/config.json`.",
+      "contentHash": "sha256:c6fff147af5ca879107605194efbd65908562ec8cfd88ac525a96da897a913eb",
+      "verifyVia": "web then disk: after the action, `<repo>/.truecourse/config.json` lists that rule key under `disabledRules`"
+    },
+    {
+      "id": "dashboard-violations-disabledrules-is-shared-with-the-cli",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "`disabledRules` is shared with the CLI",
+      "claim": "The `disabledRules` list in `<repo>/.truecourse/config.json` is shared with the CLI.",
+      "contentHash": "sha256:3f6335b4be87f681f38f18a9a6f249e21d785cdaffed724196f27a7bd65578b0",
+      "verifyVia": "web then cli: after disabling a rule from a card, `truecourse rules list` reports that rule as off"
+    },
+    {
+      "id": "dashboard-violations-disabled-rule-skipped-on-future-analyses",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "a disabled rule is skipped on future analyses",
+      "claim": "Disabling a rule skips it on future analyses.",
+      "contentHash": "sha256:e66f89eed018e16576cea2feecec8b2a767ea0fcac6df68542ed290e0d095cfd",
+      "verifyVia": "web: a later run over code that still violates the rule records no finding from it"
+    },
+    {
+      "id": "dashboard-violations-disabled-rule-costs-nothing-to-run",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "a disabled rule costs nothing to run",
+      "claim": "A disabled rule costs nothing to run.",
+      "contentHash": "sha256:8fa76e8288ef23b148f68118fa7a96e30567f439c015c98b544fcee987053c89",
+      "verifyVia": "web: with an LLM rule disabled, the next run's usage totals carry no call for that rule"
+    },
+    {
+      "id": "dashboard-violations-violations-stay-in-the-stored-analysis",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "silenced violations stay in the stored analysis",
+      "claim": "The violations stay in the stored analysis when a rule is disabled.",
+      "contentHash": "sha256:a68db6c8d272a994b448dda5c14b1e140f4c3fff5ebad6712ffb20b267386c76",
+      "verifyVia": "web then disk: the stored analysis file still contains the hidden findings after the rule is disabled"
+    },
+    {
+      "id": "dashboard-violations-re-enabling-restores-them-without-rerunning",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "re-enabling a rule brings its violations back without re-running",
+      "claim": "Re-enabling the rule brings the violations back without re-running anything.",
+      "contentHash": "sha256:b3bca1ad90bfe5f9993f041a61cf4025f56a2688767ea30af357f82aa61c9e72",
+      "verifyVia": "web: turning the rule back on restores its findings to the list with no analysis run in between"
+    },
+    {
+      "id": "dashboard-violations-resolved-diff-findings-cannot-be-silenced",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "title": "resolved findings in diff mode do not offer the disable action",
+      "claim": "Resolved findings in diff mode do not offer the Disable rule for this repo action.",
+      "contentHash": "sha256:d91cc3cdcee8ca83d90fc34a948b7c3b8794057ff79a5d220805532b92343c9a",
+      "verifyVia": "web: in Git Diff mode a struck-through resolved finding's card has no disable-rule action"
+    },
+    {
+      "id": "dashboard-violations-shield-opens-the-rules-panel",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the shield button opens the Rules panel",
+      "claim": "The shield button at the right of the filter row opens the Rules panel.",
+      "contentHash": "sha256:e53460221573121cfebbc0ce5a6280757fc6d9da9119f0fc897c419bbc6f40e1",
+      "verifyVia": "web: pressing the shield at the right of the filter row opens the Rules panel"
+    },
+    {
+      "id": "dashboard-violations-rules-panel-lists-every-rule",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the Rules panel lists every rule the repository is analyzed against",
+      "claim": "The Rules panel lists every rule this repository is analyzed against.",
+      "contentHash": "sha256:a4890ef825af29a1e72a6f71a989768e4513913aee04c13e6f760398bfa10be2",
+      "verifyVia": "web: the panel's unfiltered count matches the number of rules `truecourse rules list` reports for the repository"
+    },
+    {
+      "id": "dashboard-violations-rules-panel-has-its-own-filters",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the Rules panel has its own search, severity and Det / LLM controls",
+      "claim": "The Rules panel has its own search, severity dropdown and Det / LLM switch.",
+      "contentHash": "sha256:9cc62a82d07da864d528b1db83649c6fac60beeb4032ecbd01a9c17d1da15d8e",
+      "verifyVia": "web: each of the three controls inside the panel narrows the rule list independently of the violations-list filters"
+    },
+    {
+      "id": "dashboard-violations-rules-panel-all-on-off-switch",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the Rules panel has an All / On / Off switch",
+      "claim": "The Rules panel has an All / On / Off switch.",
+      "contentHash": "sha256:4ea2feb68c07898d423541cdfe47163a7b91b4d1a7127e6b6dbcd9b14b0cee33",
+      "verifyVia": "web: setting Off leaves only disabled rules and setting On leaves only enabled ones"
+    },
+    {
+      "id": "dashboard-violations-rules-panel-counts-disabled-rules",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the On / Off switch carries the disabled-rule count",
+      "claim": "The All / On / Off switch carries a count of how many rules you currently have disabled.",
+      "contentHash": "sha256:94a2b7e254a9754289df648720fbf1932df660a17b979c36fc01ca017779aaae",
+      "verifyVia": "web: the count equals the number of keys in `disabledRules`, and it rises by one when another rule is switched off"
+    },
+    {
+      "id": "dashboard-violations-rules-panel-category-tabs-match",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the panel's category tabs match the violations list",
+      "claim": "The category tabs in the Rules panel match the ones on the violations list.",
+      "contentHash": "sha256:cf6ae7a7d469c3bd197354c289f9e185c2c8c8a35c48cabd0a124d4091a2a9a7",
+      "verifyVia": "web: the panel's category tabs are the same set the violations list carries"
+    },
+    {
+      "id": "dashboard-violations-rule-row-shows-its-metadata",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "a rule row shows name, description, severity, category and detection kind",
+      "claim": "Each rule shows its name, description, severity, category, and whether it is deterministic or LLM-powered.",
+      "contentHash": "sha256:7a90d9a37b155bd21addbde8c52160d22b96e9707643f3e7034af952bdeccee0",
+      "verifyVia": "web: a rule row carries all five, and its deterministic-or-LLM marker agrees with the Det / LLM switch that keeps it in the list"
+    },
+    {
+      "id": "dashboard-violations-rule-row-shows-a-badge-per-language",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "a rule row shows a badge per language",
+      "claim": "Each rule shows a badge per language (JS, PY, C#).",
+      "contentHash": "sha256:5b36cafd6336255a9ae1516d25dd81aafb26750f9f3095e06201b2952c5af807",
+      "verifyVia": "web: a rule row carries a JS, a PY and a C# badge"
+    },
+    {
+      "id": "dashboard-violations-language-badge-hover-explains-support",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "a language badge's hover text says whether the rule is supported and why",
+      "claim": "A language badge's hover text says whether the rule is supported, partial, not applicable or unsupported for that language, and why.",
+      "contentHash": "sha256:3bbcbff66f3b9a22f835a423317b5ba7a5600d4e306d74b60ccfb361fd4656bc",
+      "verifyVia": "web: hovering a language badge reveals one of those four support words plus a reason"
+    },
+    {
+      "id": "dashboard-violations-rule-switch-toggles-for-this-repo",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the switch on a rule turns it on or off for this repository",
+      "claim": "The switch on each rule turns it on or off for this repository.",
+      "contentHash": "sha256:38084e5424b70d5194e2314f43b81b793bd3ecec83a6f62a8e76b59c582ec8e2",
+      "verifyVia": "web: flipping a rule's switch changes its state in the panel and only for the repository being viewed"
+    },
+    {
+      "id": "dashboard-violations-rule-switch-writes-to-disabledrules",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the rule switch writes to the same `disabledRules` list",
+      "claim": "The switch on a rule writes to the same `disabledRules` list as the card menu.",
+      "contentHash": "sha256:b47aa600660a73abb9a2b72fd8a9314e8fb493bd5cca64c8930f0db39611f7ae",
+      "verifyVia": "web then disk: switching a rule off adds its key to `disabledRules` in `<repo>/.truecourse/config.json`"
+    },
+    {
+      "id": "dashboard-violations-rule-switch-refreshes-list-and-analytics",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the rule switch refreshes the list and analytics straight away",
+      "claim": "When a rule's switch is used, the violations list and analytics refresh straight away.",
+      "contentHash": "sha256:033609b927ed242296f29c0e99184af489647ac138567aedd18fd3f260f24110",
+      "verifyVia": "web: without reloading, that rule's findings leave the list and the analytics counts drop accordingly"
+    },
+    {
+      "id": "dashboard-violations-cli-offers-the-same-rule-toggles",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "title": "the same rule toggles exist on the command line",
+      "claim": "The same toggles exist on the command line: `truecourse rules list`, `truecourse rules disable <ruleKey>`, `truecourse rules enable <ruleKey>`.",
+      "contentHash": "sha256:0c135c6817468f777eda507f8fdac070f0612d49972be5a9b124d62b375d7fa2",
+      "verifyVia": "cli: `truecourse rules disable <ruleKey>` turns the rule off and `truecourse rules list` reports it off; `truecourse rules enable <ruleKey>` turns it back on"
+    },
+    {
+      "id": "dashboard-analytics-left-half-summarizes-the-viewed-analysis",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "analytics",
+      "title": "the left half of Home summarizes the analysis you are viewing",
+      "claim": "The left half of the Home tab summarizes the analysis you are viewing.",
+      "contentHash": "sha256:e64d2f4dcbc69f587b772cccdbf8f0e6d4303b30cee0a0bf40e020badd1c338a",
+      "verifyVia": "web: the analytics column's totals match the findings of the currently selected analysis"
+    },
+    {
+      "id": "dashboard-analytics-clicking-a-chart-narrows-the-list",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "analytics",
+      "title": "clicking into a chart narrows the violations list",
+      "claim": "Every widget below the summary row is also a filter: clicking into a chart narrows the violations list beside it.",
+      "contentHash": "sha256:2d656ff9da84cfd6eb7c23c97d326a4cf98cbfdfd7ecd554e0088aa642b2d33f",
+      "verifyVia": "web: clicking a slice, bar or row in any widget below the summary row leaves only the matching findings in the list"
+    },
+    {
+      "id": "dashboard-analytics-clicking-again-clears-the-filter",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "analytics",
+      "title": "clicking the same thing again clears the filter",
+      "claim": "Clicking the same thing again clears the filter it applied.",
+      "contentHash": "sha256:63356fc885f079f7bc8701c8f569a15bb3ed18cef5271c5fb292c57e4051fe01",
+      "verifyVia": "web: clicking an already-selected slice, bar or row restores the unfiltered list"
+    },
+    {
+      "id": "dashboard-analytics-numbers-exclude-disabled-rules",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "analytics",
+      "title": "the analytics numbers exclude disabled rules",
+      "claim": "All of these numbers exclude rules you have disabled.",
+      "contentHash": "sha256:01af48f036df9adebf96acfcd84c295bfd4341b162b8790647badb8b4f94aecd",
+      "verifyVia": "web: disabling a rule drops the analytics totals by the findings that rule contributed"
+    },
+    {
+      "id": "dashboard-analytics-summary-row-has-five-chips",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "title": "the summary row has five chips",
+      "claim": "Five chips sit across the top of the analytics column.",
+      "contentHash": "sha256:0cd8c9e0c6804113a8dd896ee20229d8dede7e29bb4158f4dc1ba21c6896bc44",
+      "verifyVia": "web: the summary row renders exactly five chips — resolve, resolved, active, stale and rate"
+    },
+    {
+      "id": "dashboard-analytics-summary-chips-have-hover-explanations",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "title": "each summary chip has a hover explanation",
+      "claim": "Each of the five chips has a hover explanation.",
+      "contentHash": "sha256:11898a12bd0103a12c801bd5db7c5a4741a8beea93a5cc3a803921aa6c0c6fd3",
+      "verifyVia": "web: hovering a summary chip reveals explanatory text for that number"
+    },
+    {
+      "id": "dashboard-analytics-resolve-chip-is-average-time-to-resolution",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "title": "the resolve chip is the average time to resolution",
+      "claim": "The resolve chip is the average time from a violation first being detected to it being resolved.",
+      "contentHash": "sha256:72a991efd6dd26d635dc50e4a45d425916fe354226ecd4a1feee3d78ba88d006",
+      "verifyVia": "web: the chip renders a duration, and its hover text names it as the average detection-to-resolution time"
+    },
+    {
+      "id": "dashboard-analytics-resolved-chip-counts-all-fixed-violations",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "title": "the resolved chip counts violations fixed across all analyses",
+      "claim": "The resolved chip is the total violations fixed across all analyses.",
+      "contentHash": "sha256:daa25ff9f350738a4daac716a2d81ef22f8fa32bd8f7cbf69a28ec3c9a1d93d7",
+      "verifyVia": "web: after a violation disappears in a later analysis, the resolved chip's number is one higher"
+    },
+    {
+      "id": "dashboard-analytics-active-chip-counts-open-violations",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "title": "the active chip counts violations open right now",
+      "claim": "The active chip is the violations open right now.",
+      "contentHash": "sha256:5cb7bd9801eafdcc971cef031533e56f95a8b2b4224669b063bbbd4442008393",
+      "verifyVia": "web: the chip's number equals the count of active findings the violations list holds unfiltered"
+    },
+    {
+      "id": "dashboard-analytics-stale-chip-counts-violations-open-over-7-days",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "title": "the stale chip counts violations open more than 7 days",
+      "claim": "The stale chip is the active violations that have been open for more than 7 days.",
+      "contentHash": "sha256:88fbd1372b8e72661e5b5d49b2318a0f1a2492dc9f7e297793400b9aa58a9936",
+      "verifyVia": "web: only findings first detected more than seven days ago are counted in the stale chip"
+    },
+    {
+      "id": "dashboard-analytics-rate-chip-is-the-resolved-share",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "title": "the rate chip is the resolved share of all detected violations",
+      "claim": "The rate chip is the share of all detected violations that have been resolved.",
+      "contentHash": "sha256:86c52d3c9238234d9b0c071c6b2fa6116dff1fe3e5ec82d1e536c48816b2e730",
+      "verifyVia": "web: the chip renders a percentage equal to resolved over all detected violations"
+    },
+    {
+      "id": "dashboard-analytics-trend-covers-the-20-most-recent-analyses",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "violation-trend",
+      "title": "the trend chart covers the 20 most recent analyses",
+      "claim": "Violation Trend is an area chart over your 20 most recent analyses.",
+      "contentHash": "sha256:cf799b7e02e6b5eae3e6ada0e0c73bc553a39d3a63e5feced5e552be1b03be73",
+      "verifyVia": "web: with more than twenty analyses on record the chart plots exactly twenty points, the most recent ones"
+    },
+    {
+      "id": "dashboard-analytics-trend-plots-active-new-and-resolved",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "violation-trend",
+      "title": "the trend chart plots total active, new and resolved",
+      "claim": "The trend chart has three series: total active, new, and resolved.",
+      "contentHash": "sha256:6345ce341b5bad5cc120327028385bd2e50bc09555d1d356272943b08d142aac",
+      "verifyVia": "web: the chart's legend and areas cover total active, new and resolved"
+    },
+    {
+      "id": "dashboard-analytics-trend-header-shows-the-change-vs-previous",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "violation-trend",
+      "title": "the trend header shows the change against the previous analysis",
+      "claim": "The trend header shows the change in active violations against the previous analysis.",
+      "contentHash": "sha256:935396d133de391a404ba4cfb878a53114f520fed931c163965881d95b0be6c8",
+      "verifyVia": "web: the header's delta equals this analysis's active count minus the previous analysis's"
+    },
+    {
+      "id": "dashboard-analytics-trend-change-is-red-up-green-down",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "violation-trend",
+      "title": "the trend change is red when up and green when down",
+      "claim": "The change in active violations is shown up in red or down in green.",
+      "contentHash": "sha256:6bd580d3c9c56aae11b31f57f7fceb19a76a971aa1c227a3e33c67d1cdbaee4b",
+      "verifyVia": "web: an increase renders the delta in the red treatment and a decrease in the green one"
+    },
+    {
+      "id": "dashboard-analytics-single-analysis-shows-a-number-instead",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "violation-trend",
+      "title": "with one analysis the trend card shows a single number",
+      "claim": "With only one analysis on record there is no trend to draw, so the card shows the active count as a single number instead.",
+      "contentHash": "sha256:cc1e630499d1491e2b9d2d52950b837c5419d9a88d072407a30d48c623c3159b",
+      "verifyVia": "web: on a repository with exactly one analysis the trend card renders the active count as a number rather than a chart"
+    },
+    {
+      "id": "dashboard-analytics-past-run-point-is-ringed",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "violation-trend",
+      "title": "the viewed past analysis is ringed on the trend line",
+      "claim": "When you are viewing a past analysis, its point on the line is ringed.",
+      "contentHash": "sha256:d30a2305e34a5ea8f0ce6931f1686e3e4485ada80a08dd3f05ec069855498930",
+      "verifyVia": "web: after selecting an older run, the point for that run carries a ring the other points do not"
+    },
+    {
+      "id": "dashboard-analytics-category-donut-shows-totals",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "by-category",
+      "title": "By Category is a donut with the total in the middle",
+      "claim": "By Category is a donut of findings per category with the total in the middle.",
+      "contentHash": "sha256:cd679599dfc9af70b15cb5f44b742d5a811faa1551ed3b0624a48d0fecba23b6",
+      "verifyVia": "web: the donut has a slice per category present and the number in its center equals the sum of those slices"
+    },
+    {
+      "id": "dashboard-analytics-donut-slice-filters-the-list",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "by-category",
+      "title": "clicking a donut slice filters the list to that category",
+      "claim": "Click a slice to filter the list to that category.",
+      "contentHash": "sha256:b2a177e3aa0667ad9770676a0b80a017b37adbaf3d702e44ecb7b9379a498d7e",
+      "verifyVia": "web: after clicking a slice the violations list holds only findings of that category"
+    },
+    {
+      "id": "dashboard-analytics-selected-slice-pops-out",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "by-category",
+      "title": "the selected slice pops out and the others fade",
+      "claim": "The clicked slice pops out and the others fade.",
+      "contentHash": "sha256:82560160610dde6766aedba6b12dab23716577ffe1ca85af32633c3461e8522e",
+      "verifyVia": "web: the selected slice is drawn offset from the donut while the remaining slices are dimmed"
+    },
+    {
+      "id": "dashboard-analytics-severity-chart-has-a-bar-per-severity",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "by-severity",
+      "title": "By Severity draws a bar per severity present",
+      "claim": "By Severity is a bar per severity present in the analysis.",
+      "contentHash": "sha256:e5065ba1454ccc9c7a197fab1b42601783d5735030bee26add18b1f3d13b1e78",
+      "verifyVia": "web: the chart has one bar for each severity that occurs in the analysis and none for severities that do not"
+    },
+    {
+      "id": "dashboard-analytics-severity-bar-filters-the-list",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "by-severity",
+      "title": "clicking a bar filters the list to that severity",
+      "claim": "Click a bar to filter the list to that severity.",
+      "contentHash": "sha256:a2322e1ca242dc35daf2e14a825ec25055eef0165a98e0f0cae20b929ac28db7",
+      "verifyVia": "web: after clicking a bar the violations list holds only findings at that severity"
+    },
+    {
+      "id": "dashboard-analytics-top-offenders-ranks-up-to-ten",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "title": "Top Offenders ranks up to ten services and modules",
+      "claim": "Top Offenders lists up to ten services and modules ranked by how many violations target them.",
+      "contentHash": "sha256:075bc7fc8635b620446315547562416e0cc3a70df9476f00e3a39e6a949e8af2",
+      "verifyVia": "web: at most ten rows are listed and their counts descend"
+    },
+    {
+      "id": "dashboard-analytics-top-offenders-shows-critical-and-high-counts",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "title": "Top Offenders shows critical and high counts alongside",
+      "claim": "Each Top Offenders row carries critical and high counts alongside.",
+      "contentHash": "sha256:9e40f832eae4a7cf4a951fa7563c19ba1009658ac69619a52d1f23c64cc6b302",
+      "verifyVia": "web: each offender row shows its critical and high counts next to the total"
+    },
+    {
+      "id": "dashboard-analytics-top-offenders-header-re-sorts",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "title": "the Top Offenders header re-sorts the list",
+      "claim": "Click Total, Critical or High in the Top Offenders header to re-sort.",
+      "contentHash": "sha256:01573f5c216f6c386003a231c4a55f8db21a0d371a52a2bba8b8e7835b39a580",
+      "verifyVia": "web: clicking Critical reorders the rows by their critical counts, and Total restores the total ordering"
+    },
+    {
+      "id": "dashboard-analytics-offender-row-scopes-the-list",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "title": "clicking an offender row scopes the violations list",
+      "claim": "Clicking a Top Offenders row scopes the violations list to that service or module.",
+      "contentHash": "sha256:cd8d00f5ca3fb9df34e933fba68197f88e4ccd7c11dd35ac489fdefba344e776",
+      "verifyVia": "web: after clicking a row the list holds only findings targeting that service or module"
+    },
+    {
+      "id": "dashboard-analytics-offenders-count-only-attributed-findings",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "title": "only findings attributed to a service or module are counted",
+      "claim": "Only findings attributed to a service or module are counted in Top Offenders.",
+      "contentHash": "sha256:6875526b7a06541ca8a91243f800a389605e2ebb2925c675a7e091a37baacb05",
+      "verifyVia": "web: a finding with no service or module attribution contributes to no offender row's count"
+    },
+    {
+      "id": "dashboard-analytics-architecture-findings-count-toward-their-module",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "title": "architecture findings raised on code count toward the mapped module",
+      "claim": "Architecture findings raised on code are the exception: when the file maps to a detected module, they count toward it.",
+      "contentHash": "sha256:d6a8e177ee9dd33c11954b0f8c62e6084ba2e0a07d5038cf916bb7024490237c",
+      "verifyVia": "web: an architecture finding on a file inside a detected module raises that module's offender count"
+    },
+    {
+      "id": "dashboard-analytics-hotspots-lists-ten-files-by-code-violations",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "code-hotspots",
+      "title": "Code Hotspots lists the ten files with the most code violations",
+      "claim": "Code Hotspots is the ten files with the most code violations.",
+      "contentHash": "sha256:fc421bd01bf9d0979f10607aec1ca5ce4e359803303fd52bad0bea2eab4549a9",
+      "verifyVia": "web: at most ten file rows are listed and their code-violation counts descend"
+    },
+    {
+      "id": "dashboard-analytics-hotspot-shows-its-worst-severity",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "code-hotspots",
+      "title": "each hotspot shows its worst severity",
+      "claim": "Each Code Hotspots row carries its worst severity.",
+      "contentHash": "sha256:e27379d23a093b399b8fbb2e8f9d40815338bda4837883b0e8fe4259f98b32de",
+      "verifyVia": "web: a row's severity marker matches the highest severity among that file's findings"
+    },
+    {
+      "id": "dashboard-analytics-hotspot-row-filters-the-list",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "code-hotspots",
+      "title": "clicking a hotspot row filters the list to that file",
+      "claim": "Clicking a Code Hotspots row filters the violations list to that file.",
+      "contentHash": "sha256:80b09a97ceea2bdc5e6380af9566f15d6d99ce1b16656ec5a4c13301fd796168",
+      "verifyVia": "web: after clicking a row the list holds only findings in that file"
+    },
+    {
+      "id": "dashboard-analytics-widgets-recomputed-for-the-selected-run",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "following-the-run-you-selected",
+      "title": "the widgets are recomputed as of the selected run",
+      "claim": "Pick an older run and the trend, breakdowns, offenders and hotspots are all recomputed as of that run.",
+      "contentHash": "sha256:a2ae480d1b986a5875c1b9041909830bdcde9e9a45a971507b37991f1475a7da",
+      "verifyVia": "web: after selecting an older run from the header dropdown, the trend, donut, severity bars, offenders and hotspots all describe that run's findings"
+    },
+    {
+      "id": "dashboard-analytics-diff-mode-replaces-the-column",
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "following-the-run-you-selected",
+      "title": "diff mode replaces the analytics column",
+      "claim": "In Git Diff mode this column is replaced by a diff-scoped summary instead.",
+      "contentHash": "sha256:1a8de0fb33dbdd9b85aa6d871546d8e0d0bc7d8acd66ee65a9e64212cd383df0",
+      "verifyVia": "web: switching to Git Diff replaces the analytics widgets with the diff summary"
+    },
+    {
+      "id": "dashboard-graph-draws-the-detected-architecture",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "architecture-graph",
+      "title": "the Graphs tab draws the architecture the analysis detected",
+      "claim": "The Graphs tab draws the architecture the analysis detected: services and the layers inside them, the modules and functions under those, and the databases they talk to.",
+      "contentHash": "sha256:535a2e6fa8fe62277554d3e4b5dd14bc1a918c5dfb13556bfc8fa3ae2d8f98cf",
+      "verifyVia": "web: the canvas renders nodes for the analysis's detected services, layers, modules, functions and databases"
+    },
+    {
+      "id": "dashboard-graph-draws-the-dependencies-between-them",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "architecture-graph",
+      "title": "the graph draws the dependencies between the nodes",
+      "claim": "The Graphs tab draws the dependencies between the detected services, modules, functions and databases.",
+      "contentHash": "sha256:d2a7e803a9f874adca99b8d86a856d0a9af27090436d7b998291837607d2686c",
+      "verifyVia": "web: edges connect the nodes that the analysis recorded a dependency between"
+    },
+    {
+      "id": "dashboard-graph-depth-toggle-offers-three-depths",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "title": "the toggle at the top switches between three depths",
+      "claim": "The toggle at the top switches between three depths: Services, Modules and Functions.",
+      "contentHash": "sha256:0cadc084acfc90f7abbeaa4a67b872f38fe38573d4cf61d55e05e542a2704016",
+      "verifyVia": "web: the depth toggle offers exactly those three entries and choosing one redraws the canvas at that depth"
+    },
+    {
+      "id": "dashboard-graph-services-depth-shows-the-whole-system",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "title": "Services depth shows the whole system at once",
+      "claim": "Services shows the whole system at once.",
+      "contentHash": "sha256:c0b665a84365cc6215f102824a165457e3a4756ad7f754ce657ec7352f4d8179",
+      "verifyVia": "web: at Services depth every detected service is on the canvas together"
+    },
+    {
+      "id": "dashboard-graph-modules-depth-shows-one-service",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "title": "Modules depth shows the modules of one service",
+      "claim": "Modules shows the modules of one service.",
+      "contentHash": "sha256:c2acab42ff1445fe272a9804fe79d9db857780018d17f7fc36a41ea589722b8a",
+      "verifyVia": "web: at Modules depth only the modules of the scoped service are drawn"
+    },
+    {
+      "id": "dashboard-graph-functions-depth-shows-one-module",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "title": "Functions depth shows the functions of one module",
+      "claim": "Functions shows the functions of one module.",
+      "contentHash": "sha256:e6eb981b8bf9c0201833f4717e3e3a4406950dd9061582eeefcf7faaaf025f72",
+      "verifyVia": "web: at Functions depth only the functions of the scoped module are drawn"
+    },
+    {
+      "id": "dashboard-graph-scoped-depth-prompts-for-a-pick",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "title": "a card in the middle of the canvas tells you what to pick",
+      "claim": "At Modules and Functions depth, a card in the middle of the canvas tells you what to pick.",
+      "contentHash": "sha256:112ba50f8813a3091628048a12ae7fc9306a2d3500066653bdc3ce9a4508488f",
+      "verifyVia": "web: switching to Modules with nothing scoped renders a card naming what has to be chosen instead of a graph"
+    },
+    {
+      "id": "dashboard-graph-scope-selector-sits-by-the-depth-toggle",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "title": "a scope selector appears next to the depth toggle",
+      "claim": "At Modules and Functions depth, a selector appears next to the depth toggle.",
+      "contentHash": "sha256:a580dd2b7ff32b197c6f074039b4369586feeab91cfc1c8cd0123f6f7f3cbca5",
+      "verifyVia": "web: switching to Modules adds a selector beside the depth toggle whose choice changes the scoped service"
+    },
+    {
+      "id": "dashboard-graph-single-candidate-is-selected-for-you",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "title": "a single candidate is selected for you",
+      "claim": "When there is only one candidate (one service, or one module in the scoped service) it is selected for you.",
+      "contentHash": "sha256:670b9972ffacbd01deec8ffb106a9e6709ae6be378e3d1e69dd84af2b584b2ac",
+      "verifyVia": "web: on a repository with one detected service, switching to Modules draws that service's modules without asking"
+    },
+    {
+      "id": "dashboard-graph-top-level-nodes-can-be-dragged",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "top-level nodes can be dragged to move them",
+      "claim": "Drag any top-level node to move it.",
+      "contentHash": "sha256:9e868a6d6dbceabdbd484d864ef6ec06a134b455aebca0e299af0f6793efea6b",
+      "verifyVia": "web: dragging a top-level node leaves it at the new position on the canvas"
+    },
+    {
+      "id": "dashboard-graph-positions-saved-per-branch-and-depth",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "positions are saved per branch and per depth",
+      "claim": "Positions are saved per branch and per depth.",
+      "contentHash": "sha256:06e2cded7fba2e8c6a75742c6526585084735f9130a20a7607facca354e8770a",
+      "verifyVia": "web: an arrangement made at Services depth on one branch is not applied at Modules depth or after checking out another branch"
+    },
+    {
+      "id": "dashboard-graph-positions-survive-reload-and-new-analysis",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "the arrangement survives a reload and a new analysis",
+      "claim": "The arrangement you make is still there after a reload or a new analysis.",
+      "contentHash": "sha256:0c21a2cb1ba190d517dffb248fc1676b323f21dd36b7b1f4d9f55092fcf35c68",
+      "verifyVia": "web: after moving nodes, reloading the page and running another analysis both leave the nodes where they were put"
+    },
+    {
+      "id": "dashboard-graph-auto-layout-discards-saved-positions",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "Auto layout throws the saved positions away",
+      "claim": "Auto layout (the grid icon in the bottom-left controls) throws the saved positions away and reverts to the computed layout.",
+      "contentHash": "sha256:0c3c867327239240b70f68b712699008cce90cca8397c16be48379bdae956cd9",
+      "verifyVia": "web: after pressing Auto layout the nodes return to the computed layout and a reload no longer restores the dragged positions"
+    },
+    {
+      "id": "dashboard-graph-container-nodes-collapse-and-expand",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "container nodes collapse and expand at Modules and Functions depth",
+      "claim": "At Modules and Functions depth, container nodes collapse and expand.",
+      "contentHash": "sha256:194ebd2117a0313a5da51efdbb9b8f95896fee40193073b4cdb3e278faa8f3b3",
+      "verifyVia": "web: collapsing a container node hides its children and expanding it brings them back"
+    },
+    {
+      "id": "dashboard-graph-collapse-all-expand-all-button",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "the button next to the scope selector collapses or expands everything",
+      "claim": "The button next to the scope selector collapses everything or expands everything.",
+      "contentHash": "sha256:50b5f4cc686cf647af823dd22b4b47fbddc0767b959b3f5e28df4fd34e58d028",
+      "verifyVia": "web: pressing it collapses every container node at once, and pressing it again expands them all"
+    },
+    {
+      "id": "dashboard-graph-collapse-state-is-saved",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "collapse state is saved like positions",
+      "claim": "Collapse state is saved the same way as positions.",
+      "contentHash": "sha256:c95654f23e9c48e88a8c29b931a6d5bbc3928c209fdee74d88714ed9b896a32f",
+      "verifyVia": "web: a collapsed container is still collapsed after a reload, per branch and per depth"
+    },
+    {
+      "id": "dashboard-graph-view-state-lives-in-ui-state-json",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "positions and collapse state live in `ui-state.json`",
+      "claim": "Both positions and collapse state live in `<repo>/.truecourse/ui-state.json`.",
+      "contentHash": "sha256:6553fb5263e0f453e9ea557ade75c43524f7c170fe6f094c6fd5124e285ed059",
+      "verifyVia": "web then disk: after moving and collapsing nodes, `<repo>/.truecourse/ui-state.json` carries the new positions and collapse state"
+    },
+    {
+      "id": "dashboard-graph-ui-state-json-is-gitignored",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "title": "`ui-state.json` is gitignored",
+      "claim": "`<repo>/.truecourse/ui-state.json` is gitignored: it is your local view, not something the team shares.",
+      "contentHash": "sha256:420ae77cdbc5e4d69effc3004f81a51513b5d1cf63d0b1d1f82625b87c8371c0",
+      "verifyVia": "git: `git check-ignore .truecourse/ui-state.json` reports it ignored, and `git status` never lists it after a rearrangement"
+    },
+    {
+      "id": "dashboard-graph-edges-on-hover-only",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "Edges on hover only hides edges until a node is hovered",
+      "claim": "Edges on hover only hides dependency edges until you hover a node.",
+      "contentHash": "sha256:898bdcbdfbe0fba2033f1670f2f1b09d717773a468187999aa3d74da390df3be",
+      "verifyVia": "web: with the control on, no dependency edges are drawn until a node is hovered, when that node's edges appear"
+    },
+    {
+      "id": "dashboard-graph-curved-or-l-shaped-edges",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "edges can be curved or L-shaped",
+      "claim": "The canvas offers curved or L-shaped edges.",
+      "contentHash": "sha256:62743ece545e30c80d6d54e336e0412afd5fdfade2065dccf1328fee20d1afdd",
+      "verifyVia": "web: flipping the control redraws the dependency edges between the curved and the L-shaped form"
+    },
+    {
+      "id": "dashboard-graph-animations-on-or-off",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "animations can be turned on or off",
+      "claim": "The canvas offers animations on or off.",
+      "contentHash": "sha256:a68a5307f2b1a38ee60fe25fcd46ca24a573217016df4b0d82a043e69e4eed5f",
+      "verifyVia": "web: with animations off the graph's animated edge motion stops"
+    },
+    {
+      "id": "dashboard-graph-canvas-toggles-remembered-in-the-browser",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "the three canvas toggles are remembered in the browser",
+      "claim": "The three canvas toggles are remembered in your browser rather than in the repo.",
+      "contentHash": "sha256:d26e7d9aa51ed1db5ce4183f946f8ef604173beb0265315308981332fc0a822f",
+      "verifyVia": "web then disk: after changing them and reloading, the settings survive, and no repo file under `.truecourse/` records them"
+    },
+    {
+      "id": "dashboard-graph-bottom-left-zoom-fit-and-auto-layout",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "the bottom-left controls zoom, fit and auto-layout",
+      "claim": "Bottom-left carries zoom in, zoom out, fit view, and auto layout.",
+      "contentHash": "sha256:ee12abf8ae20a5bb7bcd4ba0d5c90e450fee44d74d5bf11b550f72b5f2a33184",
+      "verifyVia": "web: the bottom-left cluster offers those four controls and each changes the canvas accordingly"
+    },
+    {
+      "id": "dashboard-graph-move-mode-vs-select-mode",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "a toggle switches between move mode and select mode",
+      "claim": "Bottom-left carries a toggle between move mode (drag the canvas) and select mode (drag nodes).",
+      "contentHash": "sha256:eabaa08d4ded5f4f82facbdc856cdb559b360adf20cae0f2b7c32fa3e147b7e8",
+      "verifyVia": "web: in move mode dragging pans the canvas; in select mode the same drag moves a node"
+    },
+    {
+      "id": "dashboard-graph-has-a-minimap",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "the canvas has a minimap",
+      "claim": "There is a minimap on the canvas.",
+      "contentHash": "sha256:fbae270b7dd03166151ada4155e8f2c24e12fb7d49b999b4920b828d411a3fee",
+      "verifyVia": "web: a minimap of the graph is rendered on the canvas"
+    },
+    {
+      "id": "dashboard-graph-live-offline-pill-shows-connection",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "a Live / Offline pill shows the event-stream connection",
+      "claim": "A Live / Offline pill in the top-right corner shows whether the page is connected to the dashboard's event stream.",
+      "contentHash": "sha256:65c09e81cb7e468cdab941734040d3c37ad5253ae93b02dbb78f16fcc247b71c",
+      "verifyVia": "web: the pill reads Live while the page is connected and flips to Offline when the event stream is cut"
+    },
+    {
+      "id": "dashboard-graph-offline-stalls-progress-updates",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "title": "Offline means progress updates do not arrive until it reconnects",
+      "claim": "Offline means progress updates will not arrive until the page reconnects.",
+      "contentHash": "sha256:2e98c94219a2997e303191308cf08ffea1b4ccb3abfabe7c897dade2ade68e1c",
+      "verifyVia": "web: while the pill reads Offline a running analysis produces no progress updates on the page, and they resume once it reads Live again"
+    },
+    {
+      "id": "dashboard-graph-hover-dims-untouched-edges",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "clicking-around",
+      "title": "hovering a node at Services depth dims the edges it does not touch",
+      "claim": "Hovering a node at Services depth dims every edge that does not touch it.",
+      "contentHash": "sha256:f6af2f482dcb1f649faec94fbfc8c890a33f75c5f17b3f4db23b9963715fd419",
+      "verifyVia": "web: while a service node is hovered only its own edges stay at full strength"
+    },
+    {
+      "id": "dashboard-graph-clicking-a-node-zooms-to-it",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "clicking-around",
+      "title": "clicking a node zooms to it",
+      "claim": "Clicking a service, module, function or database node zooms to it.",
+      "contentHash": "sha256:5fe7e3d047d40e50d62af7d0c819301b50245b6e29b7acefa0af16527f396710",
+      "verifyVia": "web: clicking any of those node kinds recenters and zooms the canvas onto it"
+    },
+    {
+      "id": "dashboard-graph-clicking-a-service-group-zooms-with-children",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "clicking-around",
+      "title": "clicking a service group zooms to it and its children",
+      "claim": "Clicking a service group zooms to it and its children.",
+      "contentHash": "sha256:0d41165f210bd0ac434a8b9511c2c007af41dd431fba4daa643e32c4e48c146e",
+      "verifyVia": "web: clicking a service group frames the group together with the nodes inside it"
+    },
+    {
+      "id": "dashboard-graph-clicking-empty-canvas-clears-and-fits",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "clicking-around",
+      "title": "clicking empty canvas clears the selection and fits the graph",
+      "claim": "Clicking empty canvas clears the selection and fits the whole graph again.",
+      "contentHash": "sha256:418d034f15105bba8d2a8e414c5d55d0757cf47d1d2984d680811aeeec51408d",
+      "verifyVia": "web: after clicking empty canvas no node is selected and the whole graph is back in view"
+    },
+    {
+      "id": "dashboard-graph-clicking-a-database-opens-its-schema",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "clicking-around",
+      "title": "clicking a database node opens its schema",
+      "claim": "Clicking a database node switches to the Databases tab and opens that database's schema.",
+      "contentHash": "sha256:9576166973e1b0e1eea54724b724605ec505925a75008cb6215d901a04e30cc6",
+      "verifyVia": "web: clicking a database node lands on the Databases tab with that database's schema open"
+    },
+    {
+      "id": "dashboard-graph-locate-selects-and-centers-the-target",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "title": "Locate selects and centers the violation's target",
+      "claim": "Locate on an architecture violation card jumps to the graph, selects the target and centers it.",
+      "contentHash": "sha256:3bac0240ca8b827e1ad51b59b2e180dc256258c88547bcf2fa0d0e995a2a2e79",
+      "verifyVia": "web: pressing Locate lands on the Graphs tab with the finding's target node selected and centered"
+    },
+    {
+      "id": "dashboard-graph-locate-switches-depth-for-modules-and-functions",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "title": "Locate switches depth for module and function targets",
+      "claim": "Locate switches depth if the target is a module or a function.",
+      "contentHash": "sha256:01bb27b7ab24d3f7d06e997c104c2e8ef61b8b26f189ab610ecd22b7360cc529",
+      "verifyVia": "web: pressing Locate on a finding whose target is a module lands at Modules depth scoped to that module's service"
+    },
+    {
+      "id": "dashboard-graph-file-crosshair-dims-and-zooms",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "title": "the Files crosshair dims unrelated nodes and zooms to the rest",
+      "claim": "The crosshair on a row in the Files tab dims every node that does not belong to that path and zooms to what is left.",
+      "contentHash": "sha256:28687b800990dfc52d30ec63bee012b934e0dff1a33141f1cc6254ffa6f58616",
+      "verifyVia": "web: after using the crosshair on a file row, the graph dims the nodes outside that path and frames the remaining ones"
+    },
+    {
+      "id": "dashboard-graph-path-focus-can-be-cleared",
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "title": "the path focus is cleared from the tree or its filter bar",
+      "claim": "Clear the path focus from the tree, or from the filter bar at the top of the tree.",
+      "contentHash": "sha256:14b66bf645bb4a5b6dccc77faa9e26a2b1dabc66447c830a107fc251704f6784",
+      "verifyVia": "web: clearing it from either place undims the graph and returns the full node set"
+    },
+    {
+      "id": "dashboard-panes-three-tabs-read-the-working-copy",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "title": "three tabs read your working copy directly",
+      "claim": "Files, Flows and Databases read your working copy directly, so they are available when the repository is on this machine.",
+      "contentHash": "sha256:f500a734b01d296382ea879d2e46c84e290c2ed7d56f58f0aca728d61ac3068b",
+      "verifyVia": "web: the three tabs render content from the repository present on the machine the server runs on"
+    },
+    {
+      "id": "dashboard-panes-shared-tab-strip",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "title": "Files, Flows and Databases share a tab strip",
+      "claim": "Files, Flows and Databases share a tab strip above the main pane.",
+      "contentHash": "sha256:4657b82e7ca089a22164229675bd9cb44e65b79dbf5407b27d3566e1130e1dbe",
+      "verifyVia": "web: items opened in each of the three views appear in one shared strip above the main pane"
+    },
+    {
+      "id": "dashboard-panes-single-click-previews",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "title": "a single click previews an item",
+      "claim": "A single click previews an item.",
+      "contentHash": "sha256:f85f474f95afc5388a37837138fedd4758566688bfdab65988a963dbc758ab6f",
+      "verifyVia": "web: single-clicking an item opens it in the strip with an italic tab title"
+    },
+    {
+      "id": "dashboard-panes-preview-is-replaced-by-the-next-one",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "title": "the next preview replaces the previous one",
+      "claim": "A previewed item's tab title is italic and the next preview replaces it.",
+      "contentHash": "sha256:841c9505f7030d8ff9ccb5600dec39e6be7f962c53079da3fd15811925fe9ac5",
+      "verifyVia": "web: single-clicking a second item replaces the first preview tab rather than adding a second one"
+    },
+    {
+      "id": "dashboard-panes-double-click-pins",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "title": "a double click pins an item",
+      "claim": "A double click pins an item so it stays.",
+      "contentHash": "sha256:d551d71b78894343963454a6c102e0036535c3c5ec86c999bf0973a42fd90dcd",
+      "verifyVia": "web: after double-clicking an item, previewing another item leaves the pinned tab open"
+    },
+    {
+      "id": "dashboard-panes-databases-open-pinned",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "title": "databases always open pinned",
+      "claim": "Databases always open pinned.",
+      "contentHash": "sha256:823cb1151d53302c797c8f2ef079e543f48211bd49ff61d7eadabd9c86574f2d",
+      "verifyVia": "web: a database opened with a single click gets a pinned tab that the next preview does not replace"
+    },
+    {
+      "id": "dashboard-panes-switching-back-reopens-the-last-item",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "title": "switching away and back reopens what you were looking at",
+      "claim": "Switching away and back reopens what you were last looking at.",
+      "contentHash": "sha256:cccad1cb85c21f1a54c9a77022adc38b1fe0cc11b5b4a7b4a49af8b7f019c85a",
+      "verifyVia": "web: leaving Files for another tab and returning reopens the file that was open"
+    },
+    {
+      "id": "dashboard-files-tree-lists-git-tracked-files",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "the tree lists every file git tracks",
+      "claim": "The tree lists every file git tracks in the repository.",
+      "contentHash": "sha256:08f71f5785c17deb7d4d9c288e3a7212397f3b9bdec8c42f4720269ba9a8d0e3",
+      "verifyVia": "web: the tree's files are the ones `git ls-files` reports, and an untracked file is absent from it"
+    },
+    {
+      "id": "dashboard-files-top-level-folders-start-expanded",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "top-level folders are expanded to start",
+      "claim": "Top-level folders are expanded to start.",
+      "contentHash": "sha256:9e246edf670f107a7b9be674b31652b76bd6ad4f49895443e6429f429e31dba0",
+      "verifyVia": "web: on first opening the Files tab the top-level folders show their children without being clicked"
+    },
+    {
+      "id": "dashboard-files-names-colored-by-worst-severity",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "each name is colored by the worst severity found in it",
+      "claim": "Each name is colored by the worst severity found in it.",
+      "contentHash": "sha256:d6ed5c1c146c214c394c2893753aa2e8cde7971c359f24cc97dacd61bcdfa228",
+      "verifyVia": "web: a file holding a critical finding carries the critical color while a clean file carries none"
+    },
+    {
+      "id": "dashboard-files-folders-roll-up-counts-and-severity",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "folders roll up the counts and severity beneath them",
+      "claim": "Folders roll up the counts and severity of everything beneath them.",
+      "contentHash": "sha256:a2b0dcf05da38d34b0cd9a88f1bcff0efeb9ad212b1f191b904a88a35ed0989e",
+      "verifyVia": "web: a collapsed folder's count equals the findings in its subtree and its color is that subtree's worst severity"
+    },
+    {
+      "id": "dashboard-files-folder-click-expands-or-collapses",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "clicking a folder expands or collapses it",
+      "claim": "Click a folder to expand or collapse it.",
+      "contentHash": "sha256:77f76c46097d029b3a2530d095aa7d7cf0b24fd24f27f402525efefd0f11772d",
+      "verifyVia": "web: clicking a folder row shows its children, and clicking it again hides them"
+    },
+    {
+      "id": "dashboard-files-crosshair-dims-unrelated-graph-nodes",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "the crosshair dims unrelated nodes in the graph",
+      "claim": "The crosshair on any row focuses that path: it dims unrelated nodes in the architecture graph.",
+      "contentHash": "sha256:7b155be288a408eefdd46f8282d23a070e790e2ed6a2334798d9d237448bf932",
+      "verifyVia": "web: after using the crosshair on a row, the Graphs tab dims every node outside that path"
+    },
+    {
+      "id": "dashboard-files-crosshair-narrows-the-violations-list",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "the crosshair narrows the violations list to that path",
+      "claim": "The crosshair on any row narrows the violations list to that path.",
+      "contentHash": "sha256:62141f5af7f2b163cf29df89966bd08e827257c784a518b1bb7cbbb48b27e9ca",
+      "verifyVia": "web: after using the crosshair on a row, the violations list holds only findings under that path"
+    },
+    {
+      "id": "dashboard-files-filter-bar-shows-and-clears-the-focus",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "title": "a Filter bar shows what is focused and clears it",
+      "claim": "A Filter bar at the top of the tree shows what is focused and clears it.",
+      "contentHash": "sha256:58c805ceca7a39efab6f873463414ed28250a006f14b81cb9d7fe11e276e89d3",
+      "verifyVia": "web: with a path focused the bar names that path, and using it removes the focus from the tree, graph and list"
+    },
+    {
+      "id": "dashboard-files-viewer-shows-highlighting-breadcrumb-and-issue-count",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files/the-code-viewer",
+      "title": "the code viewer shows highlighting, a breadcrumb and an issue count",
+      "claim": "Opening a file shows it with syntax highlighting, the path as a breadcrumb, and a count of the issues in it.",
+      "contentHash": "sha256:c130926afbb6d43251add55b8a5834cb75acb807bbbad8c08a2194890fa9ae45",
+      "verifyVia": "web: the opened file is syntax-highlighted, its path is rendered as a breadcrumb, and the issue count matches the findings recorded in that file"
+    },
+    {
+      "id": "dashboard-files-gutter-bar-spans-the-finding-lines",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files/the-code-viewer",
+      "title": "a colored gutter bar spans the lines a finding covers",
+      "claim": "A colored bar in the gutter spans the lines the finding covers.",
+      "contentHash": "sha256:4551a03ea65641204b74f0801c22cd93445ebd5a4d50656f0dfa816e0a34a845",
+      "verifyVia": "web: the gutter bar starts and ends on the finding's recorded line range and is colored by its severity"
+    },
+    {
+      "id": "dashboard-files-finding-row-under-the-line",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files/the-code-viewer",
+      "title": "a row underneath the line shows the finding",
+      "claim": "A row underneath the line shows the severity, the title and the description of the finding.",
+      "contentHash": "sha256:681c39753b79c1641134824c84f5f45e95e11ebf71c78e970ff72cd5cea3f8ea",
+      "verifyVia": "web: directly below the finding's line the viewer renders its severity, title and description"
+    },
+    {
+      "id": "dashboard-files-finding-row-expands-the-fix-prompt",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files/the-code-viewer",
+      "title": "clicking the finding row expands its fix prompt",
+      "claim": "Clicking that row expands the finding's fix prompt.",
+      "contentHash": "sha256:43440621418182121f715bff7c2414e49aff1a66369c5d1ad3d4a79d5514000c",
+      "verifyVia": "web: clicking the in-file finding row reveals the same fix prompt text the violation card carries"
+    },
+    {
+      "id": "dashboard-files-normal-mode-shows-committed-content",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files/the-code-viewer",
+      "title": "Normal mode shows the committed content of the file",
+      "claim": "In Normal mode the viewer shows the committed content of the file.",
+      "contentHash": "sha256:621c044ac50ea8df8753d4fa9188108dc72eb09a28db9ce534a20eeffc055ddc",
+      "verifyVia": "web: with an uncommitted edit on disk, the viewer in Normal mode shows the committed text, not the edit"
+    },
+    {
+      "id": "dashboard-files-diff-mode-shows-on-disk-content",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files/the-code-viewer",
+      "title": "Git Diff mode shows what is on disk",
+      "claim": "In Git Diff mode the viewer shows what is on disk, including uncommitted edits.",
+      "contentHash": "sha256:cf5b74f98cca17393f137f91a6d2e2a429d8a69aee5a8f9e810764abbc11730e",
+      "verifyVia": "web: with an uncommitted edit on disk, the viewer in Git Diff mode shows that edited text"
+    },
+    {
+      "id": "dashboard-flows-are-the-detected-execution-paths",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "flows are the execution paths the analysis detected",
+      "claim": "Flows are the execution paths the analysis detected.",
+      "contentHash": "sha256:09c2edb0bd69b101f215e5e4254adcfb028089c43d918762ec87cef18e0d5aca",
+      "verifyVia": "web: the flows listed are the ones recorded by the analysis being viewed"
+    },
+    {
+      "id": "dashboard-flows-sidebar-groups-by-entry-service",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "the sidebar groups flows by entry service",
+      "claim": "The sidebar groups flows by entry service.",
+      "contentHash": "sha256:a695ffdeb2e5f7f639f880be7204484fc7114ea537e38a8293745f01f57c9ae4",
+      "verifyVia": "web: the flow list is grouped under headings naming each flow's entry service"
+    },
+    {
+      "id": "dashboard-flows-sidebar-shows-trigger-steps-and-severity",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "each flow shows a trigger icon, its step count and a severity-colored name",
+      "claim": "The sidebar gives each flow a trigger icon (HTTP, event, cron or startup), its step count, and a name colored by the worst severity anywhere on the flow.",
+      "contentHash": "sha256:3b0478067e6da9e78d42ce79e9adb23954734576187359b33e95418806dc81df",
+      "verifyVia": "web: a flow row carries one of the four trigger icons, a step count equal to its steps, and a name in its worst step's severity color"
+    },
+    {
+      "id": "dashboard-flows-sidebar-has-a-search-box",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "a search box sits over the flow list",
+      "claim": "There is a search box over the flow list.",
+      "contentHash": "sha256:e150e5ae731ea4ab280360ea347aaab7e1fa3fda7a0d33279a2b66b03fade377",
+      "verifyVia": "web: typing into it leaves only the flows whose names match"
+    },
+    {
+      "id": "dashboard-flows-open-as-a-sequence-diagram",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "opening a flow draws it as a sequence diagram",
+      "claim": "Opening a flow draws it as a sequence diagram: one column per participating service and module, one row per step, arrows in the direction of the call, with the target method on each step.",
+      "contentHash": "sha256:1e76b81c2c40e20e12b049ce298d4877b423f5356aeebe102d618aa6dd335d09",
+      "verifyVia": "web: the opened flow renders a column per participating service and module, a row per recorded step, and each arrow points at the called side and names the target method"
+    },
+    {
+      "id": "dashboard-flows-database-steps-colored-by-datastore",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "database reads and writes are colored by the datastore",
+      "claim": "Database reads and writes are colored by the datastore.",
+      "contentHash": "sha256:c37f276361e849f6fad7cc959e8c938852b86f7d547ad42e25661ab28d9c01cc",
+      "verifyVia": "web: steps touching different datastores are drawn in different colors, one per datastore"
+    },
+    {
+      "id": "dashboard-flows-steps-carry-their-violations",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "steps carry the violations that target them",
+      "claim": "Steps carry the violations that target them.",
+      "contentHash": "sha256:ac77e1fb40396b0cbb39ea4cf9d924739a2e2229618d0f098f27defa5c975869",
+      "verifyVia": "web: a step whose target has a finding shows that finding on the step"
+    },
+    {
+      "id": "dashboard-flows-player-steps-forward-and-back",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "the player steps forward and back through the flow",
+      "claim": "The player at the bottom steps forward and back.",
+      "contentHash": "sha256:2a85e40eb777562629d721e7253284c45dd90b5fbe92fe8aebe04c1075b11b83",
+      "verifyVia": "web: the forward control advances the highlighted step by one and the back control returns to the previous one"
+    },
+    {
+      "id": "dashboard-flows-player-plays-the-flow-through",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "the player plays the flow through",
+      "claim": "The player plays the flow through, lighting each step as it goes.",
+      "contentHash": "sha256:40a7c5196fe610ba9bf01a51f5c2e439ce2396454662fac6973074114db78b7e",
+      "verifyVia": "web: pressing play walks the highlight from the first step to the last without further input"
+    },
+    {
+      "id": "dashboard-flows-enrich-appears-for-undescribed-flows-on-latest",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "Enrich appears for an undescribed flow on the latest analysis",
+      "claim": "Enrich appears when a flow has no description and you are on the latest analysis.",
+      "contentHash": "sha256:fb3dcb2347e4458b3b189fae1aaaeae7e3037beac1ec1299edb754b55342f5d0",
+      "verifyVia": "web: a described flow offers no Enrich action, an undescribed one on the latest analysis does"
+    },
+    {
+      "id": "dashboard-flows-enrich-asks-the-llm-for-descriptions",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "Enrich asks the LLM to write descriptions",
+      "claim": "Enrich asks the LLM to write descriptions for the flow and its steps.",
+      "contentHash": "sha256:e45ebdd8efee5142fc874366a0db2ea9ed314d22548e3c49876afd85ad30fe93",
+      "verifyVia": "web: pressing Enrich makes a model call and the flow and its steps come back with descriptions"
+    },
+    {
+      "id": "dashboard-flows-enrich-saves-descriptions-into-the-analysis",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "Enrich saves the descriptions back into the analysis",
+      "claim": "Enrich saves the descriptions back into the analysis.",
+      "contentHash": "sha256:652172910438d996534eff2d8f8125e00d3a1cbd485c883a7725328951d34bd4",
+      "verifyVia": "web then disk: after enriching, the stored analysis carries the flow and step descriptions and they survive a page reload"
+    },
+    {
+      "id": "dashboard-flows-enrich-not-offered-on-past-runs-or-diff",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "title": "Enrich is not offered on past analyses or in diff mode",
+      "claim": "Enrich is not offered for past analyses or in diff mode.",
+      "contentHash": "sha256:26c07ac47f9def47ec3a6ce1bda85045d72ba640bbb6701c11270b82b0179110",
+      "verifyVia": "web: with an older run selected, and again in Git Diff mode, an undescribed flow shows no Enrich action"
+    },
+    {
+      "id": "dashboard-databases-sidebar-lists-detected-datastores",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "the sidebar lists the datastores the analysis found",
+      "claim": "The sidebar lists the datastores the analysis found.",
+      "contentHash": "sha256:948c93a8802c35746b36af81ba7b61817e789ac66db8dfea4046c40e5dc70716",
+      "verifyVia": "web: the listed datastores are the ones recorded by the analysis being viewed"
+    },
+    {
+      "id": "dashboard-databases-sidebar-shows-type-tables-and-services",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "each datastore shows its type, table count and connected services",
+      "claim": "Each datastore is listed with its type, its table count, and how many services connect to it.",
+      "contentHash": "sha256:2198025989c1f92e533d7695b2c8828991c538aad29074a5457aac62010c1881",
+      "verifyVia": "web: a datastore row carries its type, a table count equal to its detected tables, and the number of services connected to it"
+    },
+    {
+      "id": "dashboard-databases-caches-show-no-table-count",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "caches show no table count",
+      "claim": "Caches such as Redis show no table count.",
+      "contentHash": "sha256:4d65d8c95523145d790fe979ae1908c1af90d4d77e0160c228e4f601d922f897",
+      "verifyVia": "web: a detected Redis datastore's row carries no table count"
+    },
+    {
+      "id": "dashboard-databases-schema-shown-two-ways",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "opening a datastore shows its schema two ways",
+      "claim": "Opening a datastore shows the schema two ways: an ER diagram and a table list.",
+      "contentHash": "sha256:3a3597910d98a33f9867fb0478ad72bcf169784fdb5ec2ce24e1f03fa1a9004a",
+      "verifyVia": "web: the opened datastore offers both an ER diagram view and a table list view"
+    },
+    {
+      "id": "dashboard-databases-er-diagram-is-the-default",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "the ER diagram is the default view",
+      "claim": "The ER diagram is the default view when a datastore is opened.",
+      "contentHash": "sha256:b2aae9cce2eb48b57e7a23d3907f38e4ead1371997d9034dfb82348be7777cb3",
+      "verifyVia": "web: opening a datastore lands on the ER diagram without choosing a view"
+    },
+    {
+      "id": "dashboard-databases-er-diagram-marks-keys-nullables-and-relations",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "the ER diagram marks keys, nullable columns and relations",
+      "claim": "The ER diagram draws a node per table with its columns, a key icon on primary keys, a link icon on foreign keys, `?` on nullable columns, and crow's-foot relations between tables.",
+      "contentHash": "sha256:1ba907686f75258b3be1e8624cec02b258cc9159df7b5de88d691a2b659faa5a",
+      "verifyVia": "web: a table node lists its columns with a key icon on the primary key, a link icon on a foreign key, `?` on a nullable column, and a crow's-foot edge to the related table"
+    },
+    {
+      "id": "dashboard-databases-violating-tables-are-outlined-with-a-count",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "tables with violations are outlined and carry a warning count",
+      "claim": "Tables that have violations against them are outlined and carry a warning count.",
+      "contentHash": "sha256:d57893db9f36794582cf00e3b8df08557d53943c0d71917c6371f9644825c77d",
+      "verifyVia": "web: a table with findings against it is outlined and shows a count equal to those findings"
+    },
+    {
+      "id": "dashboard-databases-hovering-the-warning-reads-the-findings",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "hovering the warning count reads the findings",
+      "claim": "Hover the warning count to read the findings.",
+      "contentHash": "sha256:6b6ed378e835875b911d23254131d415b156168b927851148cce204a55f56c84",
+      "verifyVia": "web: hovering the count on an outlined table reveals the findings raised against it"
+    },
+    {
+      "id": "dashboard-databases-table-list-expands-columns-and-relations",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "the table list expands to columns and relations",
+      "claim": "Table list shows every table expandable to its columns and the relations it takes part in.",
+      "contentHash": "sha256:6651481f61896cf6bf39597e6ba04ef73c0134cd4993d9c1f89da93fd195881d",
+      "verifyVia": "web: expanding a table in the list reveals its columns and the relations it participates in"
+    },
+    {
+      "id": "dashboard-databases-graph-node-opens-the-same-view",
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "title": "a database node in the graph opens the same view",
+      "claim": "Clicking a database node in the architecture graph opens the same view.",
+      "contentHash": "sha256:832a2066988a69efb8823957d83d879271166d11f2d1d9c062e92687614079a2",
+      "verifyVia": "web: clicking a database node on the Graphs tab lands on that datastore's schema view"
+    },
+    {
+      "id": "dashboard-analyses-table-lists-20-most-recent",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "the Analyses tab tables your 20 most recent analyses",
+      "claim": "The Analyses tab is a table of your 20 most recent analyses.",
+      "contentHash": "sha256:71c730ee4b44b3d20fbe4104d8c234149470b684581a1dcd1cd402edebb024ba",
+      "verifyVia": "web: with more than twenty analyses stored the table holds exactly twenty rows, the most recent ones"
+    },
+    {
+      "id": "dashboard-analyses-table-is-newest-first",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "the Analyses table is newest first",
+      "claim": "The Analyses table is ordered newest first.",
+      "contentHash": "sha256:18de0274f1f90a0257da7668f864f08934b04e121c92127c4530a1d74120663e",
+      "verifyVia": "web: the first row's timestamp is the latest and timestamps descend down the table"
+    },
+    {
+      "id": "dashboard-analyses-diff-runs-are-not-listed",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "diff runs are not listed in the Analyses table",
+      "claim": "Diff runs are not listed in the Analyses table.",
+      "contentHash": "sha256:b29dca268ded561a0194ca868fa1e8ebf21eafec899549f7c72b27afcff9c300",
+      "verifyVia": "web: after running a diff check the table's row count is unchanged"
+    },
+    {
+      "id": "dashboard-analyses-row-shows-run-metadata",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "each row shows the run's metadata",
+      "claim": "Each row shows the date and time, the branch with the short commit hash, the LLM provider the run used, how many services it found, the violation counts by severity with a proportional bar, how long it took, and how many tokens it spent.",
+      "contentHash": "sha256:8ff36af377fb17a8acf8ba8eb4fe43e97f5ec8218175476b2c4165fa94dd1cc8",
+      "verifyVia": "web: a row carries all of those, and its branch, short hash and severity counts match the stored run"
+    },
+    {
+      "id": "dashboard-analyses-newest-completed-run-marked-latest",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "the newest completed run is marked latest",
+      "claim": "The newest completed run is marked latest.",
+      "contentHash": "sha256:5bca15e288e30fa7b9e4ae0e70c2e24a17185a0754e8dca2355ce29458d8f2da",
+      "verifyVia": "web: exactly one row carries the latest marker and it is the newest completed run"
+    },
+    {
+      "id": "dashboard-analyses-coins-icon-appears-when-tokens-were-spent",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "the coins icon appears when the run spent tokens",
+      "claim": "The coins icon appears when the run spent tokens.",
+      "contentHash": "sha256:b4debc2cd8e2f022ebfab72f22a50419e9fce19926b6edc4c6f819e4d6e908ff",
+      "verifyVia": "web: a run made without LLM rules has no coins icon on its row while an LLM run does"
+    },
+    {
+      "id": "dashboard-analyses-usage-breakdown-per-call-type",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "the coins icon opens a usage breakdown per call type",
+      "claim": "The coins icon opens a usage breakdown: one line per call type (service, database, module, code, enrichment, flow) with input, output, cache-read and cache-write tokens, the total, the duration, plus a totals row.",
+      "contentHash": "sha256:0335802a1cbbe922c86b660065f3a7e15f4a459a7acac15de2e418d31689396e",
+      "verifyVia": "web: the breakdown has a line per call type used with those token columns and a totals row summing them"
+    },
+    {
+      "id": "dashboard-analyses-usage-shows-cost-when-reported",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "the usage breakdown shows cost when the provider reports one",
+      "claim": "The usage breakdown shows the cost when the provider reports one.",
+      "contentHash": "sha256:0635e6de4784c390821b6895eba30841b3fc48ebc0597fc590a9f618f0a31472",
+      "verifyVia": "web: a run on a provider that reports cost shows a cost column; one that does not report cost leaves it out"
+    },
+    {
+      "id": "dashboard-analyses-trash-deletes-after-confirmation",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "the trash icon deletes an analysis after a confirmation",
+      "claim": "The trash icon deletes that analysis after a confirmation.",
+      "contentHash": "sha256:1f93f4d6c3ec844566c4c15c680ee4b822b25533a3639a3727046645175ebce8",
+      "verifyVia": "web: the trash icon opens a confirmation, and only after confirming does the row leave the table"
+    },
+    {
+      "id": "dashboard-analyses-deleting-the-newest-rebuilds-the-baseline",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "title": "deleting the newest run rebuilds the current-state baseline",
+      "claim": "If you delete the newest analysis, the current-state baseline is rebuilt from whatever is left.",
+      "contentHash": "sha256:19a1d384929f4ffc139725920f623be851473611f9d29591a306a33eb2adb218",
+      "verifyVia": "web: after deleting the latest run, the dashboard's current state matches the next-newest run"
+    },
+    {
+      "id": "dashboard-analyses-row-or-dropdown-loads-an-older-run",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "viewing-a-past-run",
+      "title": "a row click or the header dropdown loads an older analysis",
+      "claim": "Click a row, or use the dropdown in the header, to load an older analysis.",
+      "contentHash": "sha256:020b4f609ea89d697d1c8620e9ca765262d6fd913c79695442dfbf34c2a7a977",
+      "verifyVia": "web: either affordance switches the page onto the chosen older run"
+    },
+    {
+      "id": "dashboard-analyses-every-view-switches-to-that-run",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "viewing-a-past-run",
+      "title": "every view switches to the selected point in time",
+      "claim": "The violations list, the analytics, the graph, the flows and the databases all switch to that point in time.",
+      "contentHash": "sha256:549a85bc8fef47531f1eeb1295b8fc62c02758b1f512e06fe563f8b96a42f594",
+      "verifyVia": "web: with an older run selected, each of those five surfaces shows that run's data rather than the latest run's"
+    },
+    {
+      "id": "dashboard-analyses-amber-banner-names-the-run",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "viewing-a-past-run",
+      "title": "an amber banner says which run you are on",
+      "claim": "An amber banner across the top says which run you are on.",
+      "contentHash": "sha256:039d7c6af9f09641eca09c4a6a69834051ee20cc22e9792f5cf5b98461800539",
+      "verifyVia": "web: while on a past run an amber banner names that run"
+    },
+    {
+      "id": "dashboard-analyses-return-to-latest-leaves-the-past-run",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "viewing-a-past-run",
+      "title": "Return to latest leaves the past run",
+      "claim": "The banner carries Return to latest to leave the past run.",
+      "contentHash": "sha256:1c3b5ef46f5fe7d6882a4ab88d4b286e9b5c031563382ea61c7a59e10a7e65d1",
+      "verifyVia": "web: pressing Return to latest removes the banner and puts every view back on the newest analysis"
+    },
+    {
+      "id": "dashboard-analyses-past-run-hides-analyze-and-diff-toggle",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "viewing-a-past-run",
+      "title": "Analyze and the diff toggle are hidden on a past run",
+      "claim": "While you are on a past run, Analyze and the diff toggle are hidden.",
+      "contentHash": "sha256:0abb9b048394cb2253877c8d789769162685a21f5bed1b08853203398df69814",
+      "verifyVia": "web: with an older run selected the header carries neither the Analyze button nor the Normal / Git Diff toggle"
+    },
+    {
+      "id": "dashboard-diff-toggle-chooses-normal-or-git-diff",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the Normal / Git Diff toggle chooses what you are looking at",
+      "claim": "The Normal / Git Diff toggle in the header chooses what you are looking at.",
+      "contentHash": "sha256:0ad8675bd479e157e1f7913a2e869ebaec5817830a82f29ff1aaf42e5bd163f2",
+      "verifyVia": "web: flipping the toggle moves the page between the committed-state view and the working-tree diff view"
+    },
+    {
+      "id": "dashboard-diff-normal-is-the-committed-state",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "Normal is the committed state",
+      "claim": "Normal is the committed state.",
+      "contentHash": "sha256:71cf15cba04b027b489ca255cdae7f8caf4fafadc4bea9911da40ba85c0f8092",
+      "verifyVia": "web: in Normal mode a violation that exists only in an uncommitted edit is absent from the list"
+    },
+    {
+      "id": "dashboard-diff-analysis-stashes-analyzes-and-restores",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "an analysis stashes, analyzes the committed code and restores your changes",
+      "claim": "An analysis stashes pending changes, analyzes the committed code, and restores your changes, so the baseline is always what is committed.",
+      "contentHash": "sha256:dafc3bd6da0a8753bc03063f0e937d102a00372a4f9201c9026f3f559a88b3d6",
+      "verifyVia": "web then git: after a run over a dirty tree, the findings describe the committed code and `git status` reports the same pending changes as before the run"
+    },
+    {
+      "id": "dashboard-diff-compares-worktree-against-the-baseline",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "Git Diff compares the working tree against the committed baseline",
+      "claim": "Git Diff compares your working tree against that committed baseline and shows which violations your pending changes introduce or resolve.",
+      "contentHash": "sha256:8a57bf7bf3f9febe0be9c74d9517a85b6daf6428971a338a5d150adfd30fd57f",
+      "verifyVia": "web: an uncommitted edit that adds a violation appears as new and one that removes a violation appears as resolved"
+    },
+    {
+      "id": "dashboard-diff-analyze-runs-a-diff-check",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "in diff mode Analyze runs a diff check",
+      "claim": "In Git Diff mode the Analyze button runs a diff check instead of a full analysis.",
+      "contentHash": "sha256:0a74053663054d4af0b3f97da52786bdf353e3189e99bd2d179b3ae1de99c78f",
+      "verifyVia": "web: pressing Analyze in Git Diff mode produces diff results and adds no row to the Analyses table"
+    },
+    {
+      "id": "dashboard-diff-without-a-baseline-tells-you-to-run-one",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "without a baseline the dashboard tells you to run a full analysis",
+      "claim": "Without a baseline the dashboard tells you to switch back to Normal and run a full analysis first.",
+      "contentHash": "sha256:937029eb00ef6ce86b23d431ec7259d462099ebcdde43e103b5dd96fef28078e",
+      "verifyVia": "web: in Git Diff mode on a repository with no analysis yet, the page says to switch back to Normal and run one"
+    },
+    {
+      "id": "dashboard-diff-banner-announces-working-tree-state",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "a banner announces the working tree state",
+      "claim": "While you are in diff mode, a banner reads Showing working tree state (uncommitted changes).",
+      "contentHash": "sha256:facfe113ca6b082f2a0811582a2c020f7366e0e85cd31eef1114a0a672da5eb3",
+      "verifyVia": "web: entering Git Diff mode renders that banner across the top"
+    },
+    {
+      "id": "dashboard-diff-analytics-replaced-by-four-chips",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the analytics column is replaced by four diff chips",
+      "claim": "While you are in diff mode, the analytics column is replaced by four chips (new, unchanged, resolved, files).",
+      "contentHash": "sha256:6740489e356afcdc95aa5f26049cac21cbfcc4f6671c8430cfaabbb3ae633ead",
+      "verifyVia": "web: in Git Diff mode the analytics widgets are gone and four chips labelled new, unchanged, resolved and files stand in their place"
+    },
+    {
+      "id": "dashboard-diff-severity-chart-of-new-findings",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the diff column carries a severity chart of the new findings",
+      "claim": "While you are in diff mode, the column carries a severity chart of the new findings.",
+      "contentHash": "sha256:9043d837a301489cd85e9b831a1ffcdafe7fa09df20cc2786fceeaef3e1b600c",
+      "verifyVia": "web: the chart's bars count only the findings the diff marks new"
+    },
+    {
+      "id": "dashboard-diff-changed-files-marked-a-m-d",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "changed files are listed marked A, M or D",
+      "claim": "While you are in diff mode, the column carries the list of changed files marked A, M or D.",
+      "contentHash": "sha256:0f6398fa0c50355c2b0eff04de6934cd23fd61918275ae5af9a81a712f3e3a74",
+      "verifyVia": "web: an added file is marked A, a modified one M and a deleted one D, matching `git status`"
+    },
+    {
+      "id": "dashboard-diff-clicking-a-changed-file-opens-it",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "clicking a changed file opens it",
+      "claim": "Clicking a changed file opens it.",
+      "contentHash": "sha256:50513eea4720009fb7f0d8950717f3845842a11019e630450f086ec588c854f3",
+      "verifyVia": "web: clicking an added or modified file in the diff list opens it in the code viewer"
+    },
+    {
+      "id": "dashboard-diff-deleted-files-are-not-clickable",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "deleted files are not clickable",
+      "claim": "Deleted files in the changed-files list are not clickable.",
+      "contentHash": "sha256:e5e490ab3f439d50130e735a1979480f08b292db7a9fda7a56e1c773afcc0727",
+      "verifyVia": "web: clicking a file marked D opens nothing"
+    },
+    {
+      "id": "dashboard-diff-list-shows-new-then-resolved",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the diff list shows new findings first, then resolved ones",
+      "claim": "The violations list shows new findings first, then resolved ones.",
+      "contentHash": "sha256:a83c13d973e21af632e1c8be90386ebdf6927c18d369d9d10d65f81ba1b9876e",
+      "verifyVia": "web: in Git Diff mode every new finding precedes every resolved finding in the list"
+    },
+    {
+      "id": "dashboard-diff-resolved-findings-struck-through-and-dimmed",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "resolved findings are struck through and dimmed",
+      "claim": "Resolved findings are struck through and dimmed.",
+      "contentHash": "sha256:155a0cb9b4fc67c8abfdfbbe369365a23ee043580a0df9c63973b8d9f7ab5f9d",
+      "verifyVia": "web: a resolved finding's card is rendered struck through and dimmed relative to a new one"
+    },
+    {
+      "id": "dashboard-diff-filters-still-apply",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the list filters still apply in diff mode",
+      "claim": "The search, severity, category and detection filters all still apply in diff mode.",
+      "contentHash": "sha256:02e4cfe1165992ba12e232e04ece0355f7b229c0e11fd1331acf6ed7979aec65",
+      "verifyVia": "web: each of the four filters narrows the diff-mode list the same way it narrows the normal list"
+    },
+    {
+      "id": "dashboard-diff-graph-dims-untouched-nodes",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the graph dims everything your changes did not touch",
+      "claim": "The graph dims everything your changes did not touch.",
+      "contentHash": "sha256:c19d6381275ffd2fa92a2478725123835bbc85dcc4ac9cc04a8bed9aa03ecf18",
+      "verifyVia": "web: in Git Diff mode only nodes covered by the pending changes stay at full strength"
+    },
+    {
+      "id": "dashboard-diff-graph-badges-gained-and-lost-violations",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the graph badges affected nodes with violations gained or lost",
+      "claim": "The graph badges the affected services, modules and functions with how many violations they gained or lost.",
+      "contentHash": "sha256:13a2e212737e2be5806cb87675039cd9b6437c39ac5ff9d35974a1e435f69d7f",
+      "verifyVia": "web: an affected node carries a badge whose number matches the violations the diff attributes to it as gained or lost"
+    },
+    {
+      "id": "dashboard-diff-files-tab-lists-untracked-files",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the Files tab also lists untracked files in diff mode",
+      "claim": "In diff mode the Files tab also lists untracked files.",
+      "contentHash": "sha256:99802893845dc0c38921f1f8283753234fecf40a8fee5d581b822d233bc42442",
+      "verifyVia": "web: a file that git does not track appears in the tree in Git Diff mode and not in Normal mode"
+    },
+    {
+      "id": "dashboard-diff-code-viewer-shows-uncommitted-content",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the code viewer shows your uncommitted content in diff mode",
+      "claim": "In diff mode the code viewer shows your uncommitted content.",
+      "contentHash": "sha256:766b7487135e365a46fc0fd1cd685eaacc84137484f2439029ca1f62e9549f76",
+      "verifyVia": "web: a file with an uncommitted edit opens showing the edited text in Git Diff mode"
+    },
+    {
+      "id": "dashboard-diff-last-result-is-kept",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "the last diff result is kept",
+      "claim": "The result of the last diff check is kept, so switching back into Git Diff shows it again without re-running.",
+      "contentHash": "sha256:ce001cafcc8c363ca593d6ec771da5a30eba303d30765c5a29d86eb850e0a114",
+      "verifyVia": "web: after leaving Git Diff and returning, the previous diff's findings are shown with no run in between"
+    },
+    {
+      "id": "dashboard-diff-stale-baseline-warns-to-re-run",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "a changed baseline warns you to re-run the diff",
+      "claim": "If the baseline analysis has changed since that diff was computed, a warning tells you to re-run.",
+      "contentHash": "sha256:11c5d93eddce7d209124efb01f2e51b9c0b4454c7c51b2c39d40a487d119f2a5",
+      "verifyVia": "web: after a new full analysis, re-entering Git Diff shows a warning to re-run the diff check"
+    },
+    {
+      "id": "dashboard-diff-matches-analyze-diff",
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "title": "diff mode is the dashboard's view of `truecourse analyze --diff`",
+      "claim": "Diff mode is the dashboard's view of the same comparison `truecourse analyze --diff` performs.",
+      "contentHash": "sha256:15e71ddc788012319681029042dcd4e09fa1372e80e85b2ee0d7d3ed8d46744a",
+      "verifyVia": "web then cli: the new and resolved findings shown in Git Diff mode match those `truecourse analyze --diff` reports for the same working tree"
     }
   ],
   "untestable": [
@@ -3060,6 +5769,306 @@
       "anchor": "dashboard/next-steps",
       "text": "CLI reference — Every dashboard action has a CLI equivalent.",
       "reason": "Navigation card pointing at a page outside this area."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "text": "Start the dashboard, pick a repository, and find your way around the Code Analysis views. (page description)",
+      "reason": "Page metadata describing what the page covers; the behaviors are claimed from the page body."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "text": "```bash\ncd <your-repo>\ntruecourse dashboard\n```",
+      "reason": "The lead's bare command block restates the sentence above it (`truecourse dashboard` starts a server, opens the browser and lands on the repository); claimed there, so one statement is not claimed twice in one doc."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "overview",
+      "text": "The server runs on your machine",
+      "reason": "Same-doc restatement of the concrete statement in Starting and stopping that the server listens on `http://localhost:3001`; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "text": "truecourse dashboard                  # Start + open the dashboard",
+      "reason": "Same-doc restatement of the lead sentence that `truecourse dashboard` starts a local web server, opens your browser and lands you on the repository; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "text": "`--reconfigure` re-asks later.",
+      "reason": "Same-doc restatement of the `--reconfigure` command row (\"Re-prompt for console vs background service mode\"); claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "text": "To add one:",
+      "reason": "List introduction with no behavior of its own; the three ways to add a repository are claimed from its bullets."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "sections",
+      "text": "See [Spec Guard](/guard/overview).",
+      "reason": "Navigation pointer to another docs page; the product does nothing here."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "sections",
+      "text": "These pages document Code Analysis.",
+      "reason": "A statement about the documentation's own scope, not about product behavior."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "before-the-first-analysis",
+      "text": "A freshly added repository has no analysis data yet.",
+      "reason": "Premise framing the section (the state a scenario would arrange), not an observable behavior; the observable empty states are claimed from the sentences that follow."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "repositories-without-git",
+      "text": "TrueCourse needs git for commit-anchored baselines, diff and history.",
+      "reason": "Rationale for the behavior below; the observable consequence (banner, hidden actions) is claimed from the next sentence."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "next-steps",
+      "text": "Running an analysis — The Analyze button, the stash prompt, and the LLM cost gate.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "next-steps",
+      "text": "Violations — Filter findings, copy fix prompts, and silence noisy rules.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "running-an-analysis",
+      "text": "Trigger an analysis from the dashboard: the stash prompt, the LLM cost gate, live progress, and cancelling. (page description)",
+      "reason": "Page metadata describing what the page covers; the behaviors are claimed from the page body."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "text": "You do not need to reload.",
+      "reason": "Same-sentence-pair restatement of \"the violations list, analytics, graph, flows and run history all refresh in place\"; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "which-llm-the-dashboard-uses",
+      "text": "No restart is needed.",
+      "reason": "Restates the preceding sentence that a transport change takes effect on the next run; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "text": "Everything the button does has a CLI equivalent: `truecourse analyze`",
+      "reason": "Same-doc restatement of the lead sentence that the Analyze button runs the same analysis `truecourse analyze` runs; claimed there. The two flag pairs in the rest of the tip are claimed separately."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "text": "See the [CLI reference](/reference/cli).",
+      "reason": "Navigation pointer to another docs page; the product does nothing here."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "next-steps",
+      "text": "Run history and diff mode — Past runs, token usage, and comparing your working tree.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "next-steps",
+      "text": "Violations — What the run produced, and how to work through it.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "violations",
+      "text": "Filter the findings list, copy fix prompts, jump to the code, and silence noisy rules. (page description)",
+      "reason": "Page metadata describing what the page covers; the behaviors are claimed from the page body."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "filters",
+      "text": "There are no pages to click through.",
+      "reason": "Restates the preceding sentence that the whole filtered list scrolls in one continuous view; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "text": "Each card carries:",
+      "reason": "List introduction with no behavior of its own; the card's contents are claimed from its bullets."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "text": "The action on the top right depends on the finding.",
+      "reason": "Umbrella restated by the two sentences that follow it (Open for code findings, Locate for architecture findings); claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "text": "Choosing it:",
+      "reason": "List introduction with no behavior of its own; the three effects are claimed from its bullets."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "text": "intended to be committed",
+      "reason": "A convention for the user's own git workflow, not behavior the product performs or an observable the dashboard produces."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "text": "Nothing is deleted.",
+      "reason": "Restates the next sentence, that the violations stay in the stored analysis; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "text": "See [Rules](/analyze/rules).",
+      "reason": "Navigation pointer to another docs page; the product does nothing here."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "next-steps",
+      "text": "Analytics — Trends, breakdowns, offenders and hotspots, all wired into these filters.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "next-steps",
+      "text": "Files and code — Read a finding in context, with markers in the gutter.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "analytics",
+      "text": "Trend, severity and category breakdowns, top offenders and code hotspots, each one a filter on the violations list. (page description)",
+      "reason": "Page metadata describing what the page covers; the behaviors are claimed from the page body."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "text": "Most code findings carry no such attribution, so they sit outside the offender sets; use Code Hotspots for those.",
+      "reason": "An explanatory generalization about how typical findings happen to be attributed plus reader guidance; the rule the product enforces (only attributed findings count) is claimed from the previous sentence."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "following-the-run-you-selected",
+      "text": "Everything on this side follows the analysis chosen in the header's past-run dropdown.",
+      "reason": "Umbrella restated by the next sentence, which names the widgets recomputed as of the selected run; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "next-steps",
+      "text": "Violations — The list these widgets filter.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "next-steps",
+      "text": "Run history and diff mode — Choose which analysis the numbers describe.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "architecture-graph",
+      "text": "Explore services, modules and functions; arrange the layout and keep it; jump straight to a violation's target. (page description)",
+      "reason": "Page metadata describing what the page covers; the behaviors are claimed from the page body."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "text": "Modules and Functions are scoped on purpose: rendering every module or every function of a large repo at once is hidden for performance.",
+      "reason": "Design rationale for the scoping; the observable behavior (Modules shows one service, Functions shows one module, and a pick is required) is claimed from the depth bullets and the sentences that follow."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "text": "Top of the canvas:",
+      "reason": "List introduction with no behavior of its own; the three controls are claimed from its bullets."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "next-steps",
+      "text": "Files, flows and databases — The other three views over the same analysis.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "next-steps",
+      "text": "Violations — Where Locate comes from.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "text": "Read findings in the code, replay an execution flow as a sequence diagram, and inspect a detected schema. (page description)",
+      "reason": "Page metadata describing what the page covers; the behaviors are claimed from the page body."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "text": "Click a file to preview it, double-click to pin it.",
+      "reason": "Same-doc restatement of the lead's preview-and-pin sentence; claimed there."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "text": "so it is a one-time cost per flow",
+      "reason": "A consequence of the two behaviors claimed here (Enrich writes descriptions into the analysis, and only appears when a flow has no description); the observable — Enrich no longer offered afterwards — is claimed from that appearance rule."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "next-steps",
+      "text": "Architecture graph — The system-level view these three drill into.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "next-steps",
+      "text": "Excluding files — Keep generated and vendored code out of the analysis in the first place.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "run-history-and-diff-mode",
+      "text": "Browse past analyses and their token usage, and compare your working tree against the committed baseline. (page description)",
+      "reason": "Page metadata describing what the page covers; the behaviors are claimed from the page body."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "text": "Two actions per row:",
+      "reason": "List introduction with no behavior of its own; the coins and trash actions are claimed from its bullets."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "text": "While you are in diff mode:",
+      "reason": "List introduction with no behavior of its own; each diff-mode behavior is claimed from its bullets."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "text": "See [Baselines and diff](/analyze/baseline-and-diff) for the CLI side and for how the committed baseline travels between machines.",
+      "reason": "Navigation pointer to another docs page; the product does nothing here."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "next-steps",
+      "text": "Running an analysis — What the Analyze button does in each mode.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "next-steps",
+      "text": "Storage — Where runs, baselines and diffs are stored on disk.",
+      "reason": "Next-steps card: a pure navigation pointer to another docs page."
     }
   ]
 }

@@ -1,0 +1,59 @@
+---
+title: "Files, flows and databases"
+description: "Read findings in the code, replay an execution flow as a sequence diagram, and inspect a detected schema."
+---
+
+Three tabs read your working copy directly, so they are available when the repository is on this machine.
+
+Files, Flows and Databases share a tab strip above the main pane. A single click **previews** an item (its tab title is italic and the next preview replaces it); a double click **pins** it so it stays. Databases always open pinned. Switching away and back reopens what you were last looking at.
+
+## Files
+
+The tree lists every file git tracks in the repository. Top-level folders are expanded to start.
+
+Each name is colored by the worst severity found in it, and folders roll up the counts and severity of everything beneath them, so you can see where the problems are without expanding.
+
+* Click a folder to expand or collapse it.
+* Click a file to preview it, double-click to pin it.
+* The crosshair on any row focuses that path: it dims unrelated nodes in the [architecture graph](/dashboard/architecture-graph) and narrows the violations list to that path. A **Filter** bar at the top of the tree shows what is focused and clears it.
+
+### The code viewer
+
+Opening a file shows it with syntax highlighting, the path as a breadcrumb, and a count of the issues in it.
+
+Findings are marked twice: a colored bar in the gutter spans the lines the finding covers, and a row underneath the line shows the severity, the title and the description. Clicking that row expands the finding's fix prompt.
+
+In Normal mode the viewer shows the committed content of the file. In [Git Diff mode](/dashboard/history-and-diff#git-diff-mode) it shows what is on disk, including uncommitted edits.
+
+## Flows
+
+Flows are the execution paths the analysis detected. The sidebar groups them by entry service and gives each one a trigger icon (HTTP, event, cron or startup), its step count, and a name colored by the worst severity anywhere on the flow. There is a search box over the list.
+
+Opening a flow draws it as a sequence diagram: one column per participating service and module, one row per step, arrows in the direction of the call, with the target method on each step. Database reads and writes are colored by the datastore. Steps carry the violations that target them.
+
+The player at the bottom steps forward and back, or plays the flow through, lighting each step as it goes.
+
+**Enrich** appears when a flow has no description and you are on the latest analysis. It asks the LLM to write descriptions for the flow and its steps, and saves them back into the analysis, so it is a one-time cost per flow. It is not offered for past analyses or in diff mode, where there is nothing to save into.
+
+## Databases
+
+The sidebar lists the datastores the analysis found, each with its type, its table count, and how many services connect to it. Caches such as Redis show no table count.
+
+Opening one shows the schema two ways:
+
+* **ER diagram** (the default): a node per table with its columns, a key icon on primary keys, a link icon on foreign keys, `?` on nullable columns, and crow's-foot relations between tables. Tables that have violations against them are outlined and carry a warning count; hover it to read the findings.
+* **Table list**: every table expandable to its columns and the relations it takes part in.
+
+Clicking a database node in the [architecture graph](/dashboard/architecture-graph) opens the same view.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture graph" icon="diagram-project" href="/dashboard/architecture-graph">
+    The system-level view these three drill into.
+  </Card>
+
+  <Card title="Excluding files" icon="file-slash" href="/analyze/excluding-files">
+    Keep generated and vendored code out of the analysis in the first place.
+  </Card>
+</CardGroup>

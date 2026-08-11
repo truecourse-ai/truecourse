@@ -1,0 +1,56 @@
+---
+title: "Run history and diff mode"
+description: "Browse past analyses and their token usage, and compare your working tree against the committed baseline."
+---
+
+## The Analyses tab
+
+A table of your 20 most recent analyses, newest first. Diff runs are not listed here.
+
+Each row shows the date and time, the branch with the short commit hash, the LLM provider the run used, how many services it found, the violation counts by severity with a proportional bar, how long it took, and how many tokens it spent. The newest completed run is marked **latest**.
+
+Two actions per row:
+
+* **The coins icon** appears when the run spent tokens. It opens a usage breakdown: one line per call type (service, database, module, code, enrichment, flow) with input, output, cache-read and cache-write tokens, the total, the duration, and the cost when the provider reports one, plus a totals row.
+* **The trash icon** deletes that analysis after a confirmation. If you delete the newest one, the current-state baseline is rebuilt from whatever is left.
+
+## Viewing a past run
+
+Click a row, or use the dropdown in the header, to load an older analysis into every view: the violations list, the analytics, the graph, the flows and the databases all switch to that point in time.
+
+An amber banner across the top says which run you are on, with **Return to latest** to leave it. While you are on a past run, **Analyze** and the diff toggle are hidden.
+
+## Git Diff mode
+
+The **Normal / Git Diff** toggle in the header chooses what you are looking at.
+
+* **Normal** is the committed state. An analysis stashes pending changes, analyzes the committed code, and restores your changes, so the baseline is always what is committed.
+* **Git Diff** compares your working tree against that committed baseline and shows which violations your pending changes introduce or resolve.
+
+In Git Diff mode the **Analyze** button runs a diff check instead of a full analysis. You need a full analysis first; without a baseline the dashboard tells you to switch back to Normal and run one.
+
+While you are in diff mode:
+
+* A banner reads *Showing working tree state (uncommitted changes)*.
+* The analytics column is replaced by four chips (**new**, **unchanged**, **resolved**, **files**), a severity chart of the new findings, and the list of changed files marked **A**, **M** or **D**. Clicking a file opens it; deleted files are not clickable.
+* The violations list shows new findings first, then resolved ones struck through and dimmed. The search, severity, category and detection filters all still apply.
+* The graph dims everything your changes did not touch, and badges the affected services, modules and functions with how many violations they gained or lost.
+* The **Files** tab also lists untracked files, and the code viewer shows your uncommitted content.
+
+The result of the last diff check is kept, so switching back into Git Diff shows it again without re-running. If the baseline analysis has changed since that diff was computed, a warning tells you to re-run.
+
+<Note>
+  Diff mode is the dashboard's view of the same comparison `truecourse analyze --diff` performs. See [Baselines and diff](/analyze/baseline-and-diff) for the CLI side and for how the committed baseline travels between machines.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Running an analysis" icon="play" href="/dashboard/running-analyses">
+    What the Analyze button does in each mode.
+  </Card>
+
+  <Card title="Storage" icon="database" href="/configuration/storage">
+    Where runs, baselines and diffs are stored on disk.
+  </Card>
+</CardGroup>
