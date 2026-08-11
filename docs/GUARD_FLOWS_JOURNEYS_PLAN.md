@@ -5,8 +5,8 @@ are committed on PR #834 (draft; docs + implementation reviewed together). After
 2026-07-26/27 live review rounds the dashboard follows THE GOVERNING MODEL (see the
 REVISED block in the Dashboard section): five tabs Coverage/Flows/Tests/Journeys/Runs,
 single status-vocabulary module (anti-drift-tested), unified GuardTestView (entity + run
-instance; View|YAML switch; milestone-grouped collapsible steps with step-inline
-expected/actual; labeled footer), Not-in-specs chips on kept orphans (ghost orphans
+instance; View|YAML switch; failure-first verdict, milestone-grouped step navigator,
+shared selected-step inspector, visual evidence and flow-interface rail; labeled footer), Not-in-specs chips on kept orphans (ghost orphans
 pruned, item 52), the empty-settle invariant + heal (item 53), and the permanent
 cross-cutting rules: universal URL+preview+scroll navigation, no nested scroll containers
 (clamp + inline expand; wide blocks h-scroll internally), status word in lists / reason
@@ -110,15 +110,15 @@ ceiling built into it:
   **then** list shows it) is never exercised, and that composition is where real systems break.
 - **The entry surface is conflated with the claim.** Extraction classifies each claim with a
   driver (cli/api/web/…), baking HOW into WHAT. A web app's spec claim "users can create a
-  task" is testable through the API *and* through the browser — two different user contracts —
+  task" is testable through the API _and_ through the browser — two different user contracts —
   but today it becomes exactly one scenario on one driver.
 
 The redesign splits the two questions the current pipeline answers at once:
 
-- A **flow** answers *what to test*: a user-goal path through the product, synthesized from
+- A **flow** answers _what to test_: a user-goal path through the product, synthesized from
   the spec corpus ONLY — never from code — so it states what the product SHOULD do,
   unbiased by what the implementation happens to offer.
-- A **journey** answers *how to test*: a concrete interaction path over the app's real
+- A **journey** answers _how to test_: a concrete interaction path over the app's real
   surfaces (endpoints, screens, commands), extracted deterministically from the code's
   abstract tree — the analyzer's artifact graph, never raw source — exactly the concept the
   analyze module's User Flows feature (`detectFlows`/`traceFlows`) already implements for
@@ -166,17 +166,17 @@ spec sections ⇄ flow → scenario ← journey
 
 ## What stays, what changes
 
-| Layer | Fate |
-| --- | --- |
-| Spec side — scan, corpus, areas, decisions, conflicts | **Unchanged.** Flow synthesis reads the corpus; writes nothing to it. |
-| Claim extraction (`guard.extract`, whole-doc, cached per doc) | **Kept as the flow-synthesis input.** Claims stop being the generation unit; they become the milestone vocabulary flows are built from. The per-claim driver verdict becomes a *surface hint*. |
-| Section index / anchors / fingerprints / remap-stale-orphan | **Unchanged.** Flows bind sections through it; OpenAPI operation sections (item 37) participate identically. |
-| Scenario envelope | **Changes — `guard: 2`.** `binds` becomes plural + gains flow/journey references. This is a format-version event, explicitly allowed by the driver contract (the envelope freeze was per-driver, not per-version). |
-| Drivers, runner, sandboxes, capabilities, evidence, birth, credentials/seed/schema-conformance (items 38–45) | **Unchanged.** Everything below authoring is driver-level plumbing the redesign sits on top of. |
-| Driver registry (`packages/shared/src/guard/drivers.ts`) | **Reinterpreted, not changed**: a registry row now also names a JOURNEY TYPE. `desktop` and `mobile` are added as recorded (non-runnable) rows. |
-| Manifest | **Rebuilt as flow-keyed (v2).** Per-section coverage derives at read time. |
-| decisions.json (`dismissedClaims`) | **Kept.** Claims still exist (as milestones), so claim-level dismissal keeps working; a `dismissedFlows` list is added. |
-| Coverage/gap model | **Extended**: gaps can now also be `blocked-on: journey` (no surface realizes a milestone) and per-surface `awaiting-driver` (journey exists, driver not runnable). |
+| Layer                                                                                                        | Fate                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Spec side — scan, corpus, areas, decisions, conflicts                                                        | **Unchanged.** Flow synthesis reads the corpus; writes nothing to it.                                                                                                                                              |
+| Claim extraction (`guard.extract`, whole-doc, cached per doc)                                                | **Kept as the flow-synthesis input.** Claims stop being the generation unit; they become the milestone vocabulary flows are built from. The per-claim driver verdict becomes a _surface hint_.                     |
+| Section index / anchors / fingerprints / remap-stale-orphan                                                  | **Unchanged.** Flows bind sections through it; OpenAPI operation sections (item 37) participate identically.                                                                                                       |
+| Scenario envelope                                                                                            | **Changes — `guard: 2`.** `binds` becomes plural + gains flow/journey references. This is a format-version event, explicitly allowed by the driver contract (the envelope freeze was per-driver, not per-version). |
+| Drivers, runner, sandboxes, capabilities, evidence, birth, credentials/seed/schema-conformance (items 38–45) | **Unchanged.** Everything below authoring is driver-level plumbing the redesign sits on top of.                                                                                                                    |
+| Driver registry (`packages/shared/src/guard/drivers.ts`)                                                     | **Reinterpreted, not changed**: a registry row now also names a JOURNEY TYPE. `desktop` and `mobile` are added as recorded (non-runnable) rows.                                                                    |
+| Manifest                                                                                                     | **Rebuilt as flow-keyed (v2).** Per-section coverage derives at read time.                                                                                                                                         |
+| decisions.json (`dismissedClaims`)                                                                           | **Kept.** Claims still exist (as milestones), so claim-level dismissal keeps working; a `dismissedFlows` list is added.                                                                                            |
+| Coverage/gap model                                                                                           | **Extended**: gaps can now also be `blocked-on: journey` (no surface realizes a milestone) and per-surface `awaiting-driver` (journey exists, driver not runnable).                                                |
 
 ## Flows (WHAT to test)
 
@@ -220,21 +220,35 @@ same clone-inheritance rationale as `manifest.json`). The spec store stays untou
 {
   "version": 1,
   "generatedAt": "…",
-  "flows": [{
-    "id": "onboarding-first-project",
-    "title": "A new user onboards and creates their first project",
-    "goal": "…",
-    "fingerprint": "sha256:…",
-    "milestones": [{ "doc": "docs/auth.md", "anchor": "signup", "claimTitle": "…", "order": 1 }],
-    "bindings": [{ "doc": "docs/auth.md", "anchor": "signup", "fingerprint": "sha256:…" }],
-    "composedOf": [],
-    "synthesisInputsHash": "…"
-  }],
-  "noFlowClaims": [{ "doc": "…", "anchor": "…", "claimTitle": "…", "reason": "…" }]
+  "flows": [
+    {
+      "id": "onboarding-first-project",
+      "title": "A new user onboards and creates their first project",
+      "goal": "…",
+      "fingerprint": "sha256:…",
+      "milestones": [
+        {
+          "doc": "docs/auth.md",
+          "anchor": "signup",
+          "claimTitle": "…",
+          "order": 1
+        }
+      ],
+      "bindings": [
+        { "doc": "docs/auth.md", "anchor": "signup", "fingerprint": "sha256:…" }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "…"
+    }
+  ],
+  "noFlowClaims": [
+    { "doc": "…", "anchor": "…", "claimTitle": "…", "reason": "…" }
+  ]
 }
 ```
 
 **Identity & staleness — the section trichotomy, lifted one level.**
+
 - `id` = slugified title, `-N` disambiguated (stable handle for scenarios, dismissals, URLs).
 - `fingerprint` = sha256 over the normalized milestone list (claim titles + anchors, ordered).
 - Re-synthesis triggers per area when its claim inventory hash moves (extract output is
@@ -253,16 +267,17 @@ same clone-inheritance rationale as `manifest.json`). The spec store stays untou
 **Code-blindness pays off as a signal — but the gap must say WHICH failure it is.** A flow
 milestone that cannot be realized settles as a structured gap with two distinct kinds,
 because they have opposite remedies:
+
 - `no-journey` — the surface's catalog has NO entry that could plausibly serve the
   milestone. On surfaces where extraction is known-weak (wrapper API clients, exotic
   frameworks) this usually means "the mapper can't see your code", an EXTRACTION gap — it
   must never read as "your product lacks the feature".
 - `unrealizable` — the catalog is healthy, matching examined it, and no journey path
   serves the milestone: the real "spec claims this; no code surface offers it" signal.
-v1 deliberately keeps BOTH as gaps, not findings: the matcher is new and unproven, and
-bogus findings are the worst failure mode
-(sqlfluff battle-test, issue #762). Escalation to a first-class finding kind once the
-matcher's precision is measured is an explicit open item.
+  v1 deliberately keeps BOTH as gaps, not findings: the matcher is new and unproven, and
+  bogus findings are the worst failure mode
+  (sqlfluff battle-test, issue #762). Escalation to a first-class finding kind once the
+  matcher's precision is measured is an explicit open item.
 
 ## Journeys (HOW to test)
 
@@ -289,15 +304,16 @@ author, and the sequence diagram handle "a step" without caring which surface pr
 The envelope is a closed cross-surface kind set (discriminated union; new kinds are a
 schema event, never per-surface field sprawl):
 
-| kind | meaning | payload |
-| --- | --- | --- |
-| `invoke` | run a command (cli/tui) | `command[]`, `flags[]` |
-| `request` | HTTP call (api) | `method`, `path` |
-| `navigate` | go to a screen (web/desktop/mobile) | `route` |
-| `input` | fill/type | `target` |
-| `activate` | click / tap / submit | `target` |
+| kind       | meaning                             | payload                |
+| ---------- | ----------------------------------- | ---------------------- |
+| `invoke`   | run a command (cli/tui)             | `command[]`, `flags[]` |
+| `request`  | HTTP call (api)                     | `method`, `path`       |
+| `navigate` | go to a screen (web/desktop/mobile) | `route`                |
+| `input`    | fill/type                           | `target`               |
+| `activate` | click / tap / submit                | `target`               |
 
 Two adapter seams keep it honest:
+
 1. **Extraction adapters** (`JourneyExtractor`, one per surface): a single mapper pipeline
    — `discoverEntries() → expandSteps(entry) → fingerprint` — where only the two callbacks
    are surface-specific. api: routes/OpenAPI entries + the `traceFlows` chain. cli v1:
@@ -366,9 +382,9 @@ rest** — the same surface sequencing guard's drivers followed; phases F1/F6/F7
      in `httpCalls` with enclosing-function attribution. The mapper joins page → interaction
      → handler → httpCall → (via the route-handler lookup `flow.service.ts:133`) the api
      journey behind it.
-  A web journey is then a page-rooted path: screen → interactions (fill/click) →
-  navigations → API effects — precisely the "go to this screen, fill out information, click,
-  go to other screen" shape, derived from the tree.
+     A web journey is then a page-rooted path: screen → interactions (fill/click) →
+     navigations → API effects — precisely the "go to this screen, fill out information, click,
+     go to other screen" shape, derived from the tree.
 - **tui / library / desktop / mobile** — registered types with NO extractor in v1. A repo
   whose only surface is one of these simply yields no journeys, and its flows settle as
   `blocked-on: journey` — honest, visible, self-unlocking when an extractor ships (the
@@ -385,11 +401,12 @@ this as per-surface columns on one flow, never as duplicate rows.
 the same philosophy as the section index ("computed at generate/run time from doc content; no
 new fields in corpus.json"). Committing them would churn on every code change and conflict on
 every feature branch. Two artifacts exist on disk:
+
 - `.truecourse/guard/journeys.json` — **gitignored** snapshot of the last mapping (dashboard
   reads it; `result.json` convention; safe to delete).
 - The journey fingerprints EMBEDDED in scenario YAMLs and the manifest — the committed,
   clone-portable part (see staleness below).
-Update `GITIGNORE_CONTENTS` in `packages/core/src/config/paths.ts` accordingly.
+  Update `GITIGNORE_CONTENTS` in `packages/core/src/config/paths.ts` accordingly.
 
 **Packaging.** New `packages/journey-mapper/` — deterministic, zero LLM dependencies,
 consumes `@truecourse/analyzer` outputs, produces `Journey[]`. It does NOT depend on a prior
@@ -447,15 +464,15 @@ pipeline. Stages, in order (all cached, all estimated):
 judgement stages on the Sonnet tier, authoring on Opus, everything deterministic has no
 model — each per-stage overridable exactly like today's stages:
 
-| Stage | Tier | Why |
-| --- | --- | --- |
-| `guard.extract` | Sonnet (unchanged) | whole-doc comprehension judgement |
-| journey mapping | — | deterministic tree derivation, zero LLM |
-| `guard.flows` (incl. the epic pass) | Sonnet | composition over already-extracted claims — optimize the prompt until Sonnet handles it, never fix prompt weakness with a bigger model |
-| `guard.match` | Sonnet | structured selection over digests; Haiku under-reasons nuanced judgement (the same weakness that moved `spec.areaTag` off it) |
-| `guard.generate` / `guard.retry` | Opus (unchanged) | scenario authoring is the hard tier |
-| `guard.fidelity` | Sonnet (unchanged) | adversarial comprehension |
-| recipe discovery | unchanged | existing stage untouched |
+| Stage                               | Tier               | Why                                                                                                                                    |
+| ----------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `guard.extract`                     | Sonnet (unchanged) | whole-doc comprehension judgement                                                                                                      |
+| journey mapping                     | —                  | deterministic tree derivation, zero LLM                                                                                                |
+| `guard.flows` (incl. the epic pass) | Sonnet             | composition over already-extracted claims — optimize the prompt until Sonnet handles it, never fix prompt weakness with a bigger model |
+| `guard.match`                       | Sonnet             | structured selection over digests; Haiku under-reasons nuanced judgement (the same weakness that moved `spec.areaTag` off it)          |
+| `guard.generate` / `guard.retry`    | Opus (unchanged)   | scenario authoring is the hard tier                                                                                                    |
+| `guard.fidelity`                    | Sonnet (unchanged) | adversarial comprehension                                                                                                              |
+| recipe discovery                    | unchanged          | existing stage untouched                                                                                                               |
 
 **Scenario envelope v2** (`guard: 2`, `GUARD_FORMAT_VERSION` bump — a clean cut, no v1
 compatibility; see Cutover):
@@ -468,20 +485,20 @@ flow:
   id: onboarding-first-project
   fingerprint: sha256:…
 journey:
-  path: [api/signup, api/create-project]     # the realization plan's journey refs
+  path: [api/signup, api/create-project] # the realization plan's journey refs
   fingerprints: [sha256:…, sha256:…]
-binds:                                        # denormalized from the flow at write time
+binds: # denormalized from the flow at write time
   - { doc: docs/auth.md, section: signup, fingerprint: sha256:… }
   - { doc: docs/projects.md, section: create, fingerprint: sha256:… }
 driver: api
-setup: …                                      # unchanged per-driver vocabulary
-steps:                                        # unchanged per-driver verbs, plus:
-  - request: …                                #   each step MAY carry `milestone: <order>` —
-    milestone: 1                              #   the flow milestone it realizes. Authoring
-  - request: …                                #   emits it; the engine validates every
-    milestone: 2                              #   milestone is realized by ≥1 step. Steps
-    expect: …                                 #   with no milestone are plumbing (login,
-normalize: [timestamps, abs-paths, versions]  #   seeding) and paint neutral.
+setup: … # unchanged per-driver vocabulary
+steps: # unchanged per-driver verbs, plus:
+  - request: … #   each step MAY carry `milestone: <order>` —
+    milestone: 1 #   the flow milestone it realizes. Authoring
+  - request: … #   emits it; the engine validates every
+    milestone: 2 #   milestone is realized by ≥1 step. Steps
+    expect: … #   with no milestone are plumbing (login,
+normalize: [timestamps, abs-paths, versions] #   seeding) and paint neutral.
 ```
 
 The `milestone` annotation is what makes a run renderable as a flow instance (see
@@ -492,11 +509,11 @@ onto flow milestones read-time — no new run-store fields.
 fingerprint is a content hash answering "did THIS input change since authoring?" — with a
 different consequence per input:
 
-| Fingerprint | Hashes | Changed means | Consequence |
-| --- | --- | --- | --- |
-| `binds[].fingerprint` | the spec SECTION's normalized text (existing mechanism) | the claim itself changed | scenario `stale` — spec-side drift, surfaced in runs |
-| `flow.fingerprint` | the flow's milestone composition | synthesis reorganized what this flow tests | re-author the flow's scenarios at next generate |
-| `journey.fingerprints[]` | the grounding journeys' step lists | the code surface moved | drift DOT only — scenario still runs; re-ground suggested |
+| Fingerprint              | Hashes                                                  | Changed means                              | Consequence                                               |
+| ------------------------ | ------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------- |
+| `binds[].fingerprint`    | the spec SECTION's normalized text (existing mechanism) | the claim itself changed                   | scenario `stale` — spec-side drift, surfaced in runs      |
+| `flow.fingerprint`       | the flow's milestone composition                        | synthesis reorganized what this flow tests | re-author the flow's scenarios at next generate           |
+| `journey.fingerprints[]` | the grounding journeys' step lists                      | the code surface moved                     | drift DOT only — scenario still runs; re-ground suggested |
 
 Severity is deliberately graded: spec drift changes what the test MEANS (loudest — a run
 outcome); flow drift changes what the test COVERS (re-author); code-surface drift changes
@@ -540,14 +557,15 @@ per-surface gaps. `GuardSectionCoverage` carries `flows: [{flowId, title, status
 surfaces: [{surface, scenarioId?, status}]}]` instead of `scenarios`.
 
 **Dashboard (the user-directed inversion):**
+
 - **Coverage tab** — unchanged doc/status-band left+main panes; `GuardSectionDetail` becomes
   a FLOW list (title, per-surface status chips, milestone count). Clicking a flow opens the
   flow detail: goal, milestones each linking back to its section, per-surface scenario rows
   with outcome/evidence — scenarios are two clicks from a section, never one.
-**REVISED 2026-07-26 (two live review rounds on the dogfood store; the bullets below are
-kept for layout/history — where they conflict, THIS block wins):**
-- **THE GOVERNING MODEL (user):** *a flow either has a test or it doesn't; has one → show
-  the test and its status; doesn't → say why, in one plain sentence.* Flow detail renders
+  **REVISED 2026-07-26 (two live review rounds on the dogfood store; the bullets below are
+  kept for layout/history — where they conflict, THIS block wins):**
+- **THE GOVERNING MODEL (user):** _a flow either has a test or it doesn't; has one → show
+  the test and its status; doesn't → say why, in one plain sentence._ Flow detail renders
   ONE row per surface: the TEST (clickable, status word) or the why-no-test sentence
   ("needs credentials", "no code path does this", "awaiting web driver", "nothing
   testable", "couldn't create the test — will retry next generate"). The Findings block,
@@ -611,7 +629,32 @@ kept for layout/history — where they conflict, THIS block wins):**
   panel copy. They are hand-laid-out (a fifth tab shifts every x-coordinate), so
   they were left alone rather than half-updated; treat this block as the spec.
 
+**REVISED 2026-08-11 (test investigation view) — STATUS: BUILT + POLISHED:**
+
+- A test opens as a failure-first investigation workspace. The compact verdict names
+  the failed step and calls out when the result belongs to a previous test revision.
+  The authored timeline remains grouped by claim; selecting any row retargets one
+  expected/actual/output inspector. The failure is selected by default.
+- The workspace responds to the detail container rather than the browser viewport. On
+  wide panes the timeline receives roughly 40% and the inspector roughly 60%; on
+  constrained panes the selected-step evidence comes before the full timeline so the
+  reason for failure is never stranded at the bottom of a long step list.
+- Visual evidence sits with the selected-step inspector. One capture is featured at
+  reading size, previous/next controls and a horizontal filmstrip keep the run in step
+  order, and a thumbnail selects without unexpectedly opening a modal. The featured
+  image opens the full-size carousel; session replay is a secondary disclosure.
+- Interfaces stay flow-level because the current scenario contract records one ordered
+  `interface.path`, not a per-step mapping. The path now follows the workspace as a
+  compact ordered list with direct jumps into Interfaces; diagrams no longer consume
+  the investigation rail. The full transcript is likewise a collapsed supporting
+  artifact after the interface path.
+- Historical truth is explicit: a run can report a failing step that no longer exists
+  in the current YAML. That recorded failure is shown before a clearly labelled current
+  definition, selected by default, with preserved expected/actual/output and screenshot;
+  the UI does not pair the old failure with an unrelated current step.
+
 **REVISED 2026-07-27 (round 6 — the overview panes and the list row):**
+
 - **The Overview pseudo-tab is OPT-IN.** It survives only where the no-selection pane is a
   destination of its own — Flows (the filter dashboard), Tests, Runs. Coverage and Journeys
   carry NO strip entry for it: nothing selected there is simply the pane at rest ("select a
@@ -630,7 +673,7 @@ kept for layout/history — where they conflict, THIS block wins):**
   by the stage that produced it (birth vs the last run), ONE last-run line (when · commit ·
   duration), and the one sentence the rows can't say — why guard commits failing tests.
 - **ONE row component for both test lists** (`GuardTestListRow`): `[surface] test · status
-  word` over a WRAPPED title, casing from the vocabulary module. The Tests tab and a run's
+word` over a WRAPPED title, casing from the vocabulary module. The Tests tab and a run's
   result list render the same markup for the same test and status (asserted by markup
   equality); only the feeding result differs — a run result derives its surface from the test
   id (`<flow>.<surface>.<n>`) and its word from the outcome. Run rows carry no duration, no
@@ -675,21 +718,21 @@ kept for layout/history — where they conflict, THIS block wins):**
      candidate spec gap, the future infer signal).
   3. **Journey detail** (main) — the sequence diagram (`FlowDiagramPanel` adapter), typed
      step list, and the flows/scenarios that reference it (click-through to the Flows tab).
-  **Usage counts MATCHED flows, not just realized ones (user decision 2026-07-25).** The
-  reverse index is the UNION of two records: each manifest flow's per-surface `journeys`
-  (the realization PLAN — written for authored AND blocked surfaces alike) and the
-  committed scenarios' own `journey.path` (the fallback for pre-field manifests and for
-  hand-written scenarios). A flow that matched a journey and was then refused at authoring
-  reads "Used by flows: `<title>` — blocked (`<plain need>`)"; the "no flow uses this
-  journey — the spec never mentions this code path" line is reserved for journeys with ZERO
-  references of any kind. Measured motivation: `manage-telemetry-settings` matched the
-  `cli/telemetry*` journeys, authoring refused on per-step env, and the scenario-only index
-  then claimed the spec never mentioned telemetry.
-  This tab is the debugging surface for the two failure modes the design introduces: a
-  `blocked-on: journey` gap ("spec claims this — HERE is every surface we found, none
-  offers it") and the journey-drift dot (compare a scenario's embedded fingerprints against
-  the live catalog). Empty state: journeys derive from the working tree — one Map click,
-  seconds, free. Reads `guard/journeys.json`; Map rewrites it.
+     **Usage counts MATCHED flows, not just realized ones (user decision 2026-07-25).** The
+     reverse index is the UNION of two records: each manifest flow's per-surface `journeys`
+     (the realization PLAN — written for authored AND blocked surfaces alike) and the
+     committed scenarios' own `journey.path` (the fallback for pre-field manifests and for
+     hand-written scenarios). A flow that matched a journey and was then refused at authoring
+     reads "Used by flows: `<title>` — blocked (`<plain need>`)"; the "no flow uses this
+     journey — the spec never mentions this code path" line is reserved for journeys with ZERO
+     references of any kind. Measured motivation: `manage-telemetry-settings` matched the
+     `cli/telemetry*` journeys, authoring refused on per-step env, and the scenario-only index
+     then claimed the spec never mentioned telemetry.
+     This tab is the debugging surface for the two failure modes the design introduces: a
+     `blocked-on: journey` gap ("spec claims this — HERE is every surface we found, none
+     offers it") and the journey-drift dot (compare a scenario's embedded fingerprints against
+     the live catalog). Empty state: journeys derive from the working tree — one Map click,
+     seconds, free. Reads `guard/journeys.json`; Map rewrites it.
 - **Visualization model (user direction 2026-07-24) — two shapes, three surfaces:**
   1. **Journey = sequence diagram.** Analyze's User Flows visualization IS the journey
      concept (entry-rooted, code-derived), so `FlowDiagramPanel`'s participant/step React
@@ -737,14 +780,17 @@ React board + Express API, so it has TWO surfaces (web, api).
 become `paths/post-tasks` etc. sections per item 37):
 
 ```markdown
-## Creating tasks                          ← anchor tasks/creating-tasks
+## Creating tasks ← anchor tasks/creating-tasks
+
 POST /tasks creates a task; 201 returns the task (id, title, done:false).
 A missing title is a 400.
 
-## Listing tasks                           ← anchor tasks/listing-tasks
+## Listing tasks ← anchor tasks/listing-tasks
+
 GET /tasks returns tasks newest-first.
 
-## Completing tasks                        ← anchor tasks/completing-tasks
+## Completing tasks ← anchor tasks/completing-tasks
+
 PATCH /tasks/:id with { done: true } marks a task done. Done tasks show
 under the "done" filter, struck through on the board.
 ```
@@ -758,19 +804,47 @@ under the "done" filter, struck through on the board.
   "title": "A user creates a task, sees it listed, completes it, and sees it done",
   "fingerprint": "sha256:41ac…",
   "milestones": [
-    { "order": 1, "doc": "docs/specs/tasks.md", "anchor": "tasks/creating-tasks",
-      "claimTitle": "Creating a task returns it with an id" },
-    { "order": 2, "doc": "docs/specs/tasks.md", "anchor": "tasks/listing-tasks",
-      "claimTitle": "The list shows tasks newest-first" },
-    { "order": 3, "doc": "docs/specs/tasks.md", "anchor": "tasks/completing-tasks",
-      "claimTitle": "A task can be marked done" },
-    { "order": 4, "doc": "docs/specs/tasks.md", "anchor": "tasks/completing-tasks",
-      "claimTitle": "Done tasks appear under the done filter" }
+    {
+      "order": 1,
+      "doc": "docs/specs/tasks.md",
+      "anchor": "tasks/creating-tasks",
+      "claimTitle": "Creating a task returns it with an id"
+    },
+    {
+      "order": 2,
+      "doc": "docs/specs/tasks.md",
+      "anchor": "tasks/listing-tasks",
+      "claimTitle": "The list shows tasks newest-first"
+    },
+    {
+      "order": 3,
+      "doc": "docs/specs/tasks.md",
+      "anchor": "tasks/completing-tasks",
+      "claimTitle": "A task can be marked done"
+    },
+    {
+      "order": 4,
+      "doc": "docs/specs/tasks.md",
+      "anchor": "tasks/completing-tasks",
+      "claimTitle": "Done tasks appear under the done filter"
+    }
   ],
   "bindings": [
-    { "doc": "docs/specs/tasks.md", "anchor": "tasks/creating-tasks",  "fingerprint": "sha256:…" },
-    { "doc": "docs/specs/tasks.md", "anchor": "tasks/listing-tasks",   "fingerprint": "sha256:…" },
-    { "doc": "docs/specs/tasks.md", "anchor": "tasks/completing-tasks","fingerprint": "sha256:…" }
+    {
+      "doc": "docs/specs/tasks.md",
+      "anchor": "tasks/creating-tasks",
+      "fingerprint": "sha256:…"
+    },
+    {
+      "doc": "docs/specs/tasks.md",
+      "anchor": "tasks/listing-tasks",
+      "fingerprint": "sha256:…"
+    },
+    {
+      "doc": "docs/specs/tasks.md",
+      "anchor": "tasks/completing-tasks",
+      "fingerprint": "sha256:…"
+    }
   ],
   "composedOf": []
 }
@@ -809,12 +883,25 @@ journey:
   path: [api/create-task, api/list-tasks, api/complete-task]
   fingerprints: ["sha256:9b…", "sha256:c2…", "sha256:77…"]
 binds:
-  - { doc: docs/specs/tasks.md, section: tasks/creating-tasks,   fingerprint: "sha256:…" }
-  - { doc: docs/specs/tasks.md, section: tasks/listing-tasks,    fingerprint: "sha256:…" }
-  - { doc: docs/specs/tasks.md, section: tasks/completing-tasks, fingerprint: "sha256:…" }
+  - {
+      doc: docs/specs/tasks.md,
+      section: tasks/creating-tasks,
+      fingerprint: "sha256:…",
+    }
+  - {
+      doc: docs/specs/tasks.md,
+      section: tasks/listing-tasks,
+      fingerprint: "sha256:…",
+    }
+  - {
+      doc: docs/specs/tasks.md,
+      section: tasks/completing-tasks,
+      fingerprint: "sha256:…",
+    }
 driver: api
 steps:
-  - request: { method: POST, path: /tasks, body: { title: "Buy milk {{unique}}" } }
+  - request:
+      { method: POST, path: /tasks, body: { title: "Buy milk {{unique}}" } }
     capture: { taskId: body.id }
     expect: { status: 201, schema: true }
     milestone: 1
@@ -960,14 +1047,14 @@ dogfood tradition) before each further surface joins.
   (FlowDiagramPanel adapter), the flow milestone graph with both paint modes (generate
   state in Flows, run-instance pass/fail/not-reached in Runs), OpenAPI band fix.
 - **F6 — api surface.** Api journeys (routeRegistrations/routerMounts + OpenAPI operations
-  + traceFlows chains) join matching and authoring — the api DRIVER is already runnable
-  (Phase 6 PoC + items 38–45), so this phase is mapper + matching work only. First
-  multi-surface repos (cli+api) light the per-surface rollups; the api shared-server boot
-  amortization lands here (epic scenarios are boot-heavy). Acceptance:
-  `guard-fixture-api` realizes the taskbird-class flow through api journeys end-to-end.
-  STATUS: BUILT 2026-07-27 (see the status header for the as-built decisions — the
-  traceFlows-chain step folding and boot amortization deliberately deferred; mapper
-  acceptance proven on `guard-fixture-api`'s OpenAPI-only shape).
+  - traceFlows chains) join matching and authoring — the api DRIVER is already runnable
+    (Phase 6 PoC + items 38–45), so this phase is mapper + matching work only. First
+    multi-surface repos (cli+api) light the per-surface rollups; the api shared-server boot
+    amortization lands here (epic scenarios are boot-heavy). Acceptance:
+    `guard-fixture-api` realizes the taskbird-class flow through api journeys end-to-end.
+    STATUS: BUILT 2026-07-27 (see the status header for the as-built decisions — the
+    traceFlows-chain step folding and boot amortization deliberately deferred; mapper
+    acceptance proven on `guard-fixture-api`'s OpenAPI-only shape).
 - **F7 — web surface.** The `uiRoutes`/`uiInteractions` extractors, web journey
   composition, and the Playwright web driver (the original plan's web tier) land
   TOGETHER — journeys give the web driver its grounding, the web driver makes web journeys

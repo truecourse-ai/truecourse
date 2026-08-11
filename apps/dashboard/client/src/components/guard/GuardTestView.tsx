@@ -10,16 +10,12 @@
  *   2 verdict          ONE card: result + duration + where it broke, and the claim
  *   3 setup            the world the steps start in — the `setup:` block the runner
  *                      materializes before step 1 (only when the file declares one)
- *   4 steps            the structured step list, grouped by the claim each group
- *                      realizes — and each such header LINKS to the section that
- *                      states it, which is why the flow detail no longer carries a
- *                      milestone list of its own above the test. Every step says
- *                      what it drives (`cli`, `git`, `file`, `api`) and carries its
- *                      own expected/actual/output INLINE
- *   5 evidence         ONE transcript block — plus the run's own screenshots and
- *                      session video when a browser took any (see
- *                      {@link GuardEvidenceVisuals}); nothing extra when it did not
- *   6 interface          the code path it drives
+ *   4 investigation    the claim-grouped step timeline beside ONE selected-step
+ *                      inspector. Failure owns selection on load, so where it broke
+ *                      and why are visible together without scrolling to the end.
+ *                      Screenshots + replay and the flow's interface path share the
+ *                      inspector rail (see {@link GuardEvidenceVisuals}).
+ *   5 transcript       the run's long-form supporting record, after the investigation
  *   footer             labelled rows: Test · File · Flow · Spec
  *
  * {@link GuardScenarioBody} is that body — the flow detail embeds it under the
@@ -46,9 +42,9 @@
  * artifact-backed entity offers exactly that pair, through the same component —
  * see {@link ArtifactModeSwitch}.
  *
- * EVERY row collapses, and ONE is open: the failing one. That is the row the reader
- * came for, and it is the only one whose bulk earns the page by default; the rest
- * are one click from exactly the same three fields.
+ * EVERY row selects the SAME inspector, and ONE is selected: the failing one when
+ * there is a failure, otherwise the first. Rows stay compact enough to scan as a
+ * flow; expected/actual/output never push neighboring steps apart.
  *
  * Everything is fetched with the tab — the reader came to read (chrome-diet, no
  * toggles). The file's own text is never rendered: the steps above ARE its
@@ -62,8 +58,18 @@
  * and every truncating span is width-bound rather than free to grow.
  */
 
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowUpRight, Braces, ChevronDown, ChevronRight, Copy } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowUpRight,
+  Braces,
+  Camera,
+  Check,
+  ChevronDown,
+  CirclePlay,
+  Copy,
+  Minus,
+  X,
+} from "lucide-react";
 import type {
   GuardEvidenceVisual,
   GuardFailureDetail,
@@ -73,25 +79,29 @@ import type {
   GuardStepApiCheck,
   GuardStepWebActual,
   GuardTriage,
-} from '@truecourse/shared';
-import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
-import { HoverPopover } from '@/components/ui/hover-popover';
-import * as api from '@/lib/api';
-import { formatGuardDuration } from '@/lib/guard-drifts';
-import type { GuardTestStatusView } from '@/lib/guard-flow-status';
-import { GuardEvidenceVisuals } from './GuardEvidenceVisuals';
-import { GuardInterfaceDiagram } from './GuardInterfaceDiagram';
-import { GuardLongText } from './GuardLongText';
-import { GuardTestSetup } from './GuardTestSetup';
-import { GuardTriageChip } from './GuardTriageChip';
-import { GuardFlowStatusChip } from './GuardStatusBadge';
-import { PRE } from './detail-styles';
+} from "@truecourse/shared";
+import {
+  ArtifactModeSwitch,
+  ArtifactRaw,
+  useArtifactMode,
+} from "@/components/ui/artifact-view";
+import { HoverPopover } from "@/components/ui/hover-popover";
+import * as api from "@/lib/api";
+import { formatGuardDuration } from "@/lib/guard-drifts";
+import type { GuardTestStatusView } from "@/lib/guard-flow-status";
+import { GuardEvidenceVisuals } from "./GuardEvidenceVisuals";
+import { GuardLongText } from "./GuardLongText";
+import { GuardTestSetup } from "./GuardTestSetup";
+import { GuardTriageChip } from "./GuardTriageChip";
+import { GuardFlowStatusChip } from "./GuardStatusBadge";
+import { PRE } from "./detail-styles";
 
-const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
+const LABEL =
+  "mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground";
 const FOOT_BTN =
-  'inline-flex min-w-0 max-w-full items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground';
+  "inline-flex min-w-0 max-w-full items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground";
 /** A truncating label inside a footer button — it must shrink, or it stretches the row. */
-const FOOT_TEXT = 'min-w-0 truncate';
+const FOOT_TEXT = "min-w-0 truncate";
 
 /** One labelled footer row — "Test — <id>", "File — <path>". */
 function FootRow({ label, children }: { label: string; children: ReactNode }) {
@@ -104,7 +114,9 @@ function FootRow({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** Where a transcript lives: under a run, or at the birth path the generate wrote. */
-export type GuardEvidenceRef = { kind: 'run'; runId: string } | { kind: 'birth'; path: string };
+export type GuardEvidenceRef =
+  | { kind: "run"; runId: string }
+  | { kind: "birth"; path: string };
 
 /** The one view model both feeds produce. */
 export interface GuardTestViewModel {
@@ -160,19 +172,30 @@ export interface GuardTestViewModel {
    * inside its own flow the milestone list above already links every section the
    * test walks, and a flow with no inventory row behind it has nothing to point at.
    */
-  binds?: { doc: string; section: string; headingText?: string; fingerprint?: string };
+  binds?: {
+    doc: string;
+    section: string;
+    headingText?: string;
+    fingerprint?: string;
+  };
   interfacePath: readonly string[];
   evidence: GuardEvidenceRef | null;
 }
 
 /** Per-step paint from the viewed result: pass up to the failure, fail at it, not-reached after. */
-function stepGlyph(n: number, failedStep: number | undefined, passed: boolean): { glyph: string; label: string } {
+function stepGlyph(
+  n: number,
+  failedStep: number | undefined,
+  passed: boolean,
+): { glyph: string; label: string } {
   if (failedStep != null) {
-    if (n < failedStep) return { glyph: '✓', label: 'passed' };
-    if (n === failedStep) return { glyph: '✗', label: 'failed' };
-    return { glyph: '·', label: 'not reached' };
+    if (n < failedStep) return { glyph: "✓", label: "passed" };
+    if (n === failedStep) return { glyph: "✗", label: "failed" };
+    return { glyph: "·", label: "not reached" };
   }
-  return passed ? { glyph: '✓', label: 'passed' } : { glyph: '·', label: 'not run' };
+  return passed
+    ? { glyph: "✓", label: "passed" }
+    : { glyph: "·", label: "not run" };
 }
 
 /**
@@ -180,7 +203,15 @@ function stepGlyph(n: number, failedStep: number | undefined, passed: boolean): 
  * verdict mark lives INSIDE the fixed-width label column so every value box
  * starts at the same left edge whether or not its row carries a mark.
  */
-function DiffRow({ label, mark, children }: { label: string; mark?: ReactNode; children: ReactNode }) {
+function DiffRow({
+  label,
+  mark,
+  children,
+}: {
+  label: string;
+  mark?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-w-0 items-start gap-2">
       <span className="flex w-14 shrink-0 items-baseline justify-between gap-1 pt-1.5 text-[10px] text-muted-foreground">
@@ -194,11 +225,15 @@ function DiffRow({ label, mark, children }: { label: string; mark?: ReactNode; c
 
 /** A field with nothing behind it — said in words, never left as a blank. */
 function NoValue({ children }: { children: ReactNode }) {
-  return <p className="pt-1 text-[11px] italic leading-snug text-muted-foreground">{children}</p>;
+  return (
+    <p className="pt-1 text-[11px] italic leading-snug text-muted-foreground">
+      {children}
+    </p>
+  );
 }
 
 /** The one thing an unrecorded field can honestly say. */
-const NOT_RECORDED = 'not recorded in this run';
+const NOT_RECORDED = "not recorded in this run";
 
 /**
  * EVERY member of a step's expectation beside the answer THAT member got — the
@@ -207,7 +242,11 @@ const NOT_RECORDED = 'not recorded in this run';
  * does a request step asserting a status and a json path. Showing one of them
  * beside all the assertions reads as a failure on a step that passed.
  */
-function CheckRows({ checks }: { checks: readonly { expected: string; actual: string; ok: boolean }[] }) {
+function CheckRows({
+  checks,
+}: {
+  checks: readonly { expected: string; actual: string; ok: boolean }[];
+}) {
   return (
     <>
       {checks.map((check, i) => (
@@ -216,12 +255,14 @@ function CheckRows({ checks }: { checks: readonly { expected: string; actual: st
             label="expected"
             mark={
               <span
-                aria-label={check.ok ? 'met' : 'not met'}
+                aria-label={check.ok ? "met" : "not met"}
                 className={`text-[11px] ${
-                  check.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                  check.ok
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
                 }`}
               >
-                {check.ok ? '✓' : '✗'}
+                {check.ok ? "✓" : "✗"}
               </span>
             }
           >
@@ -262,40 +303,48 @@ function WebStepPanel({
         <>
           <DiffRow label="expected">
             {expected ? (
-              <GuardLongText text={expected} label="expected value" />
+              <GuardLongText text={expected} label="expected value" head={8} />
             ) : (
               <NoValue>this step asserts nothing</NoValue>
             )}
           </DiffRow>
           <DiffRow label="actual">
             {actual ? (
-              <GuardLongText text={actual} label="actual value" />
+              <GuardLongText text={actual} label="actual value" head={8} />
             ) : (
               <NoValue>
-                {expected ? 'the step did not get past its action, so nothing was asserted' : 'nothing was asserted'}
+                {expected
+                  ? "the step did not get past its action, so nothing was asserted"
+                  : "nothing was asserted"}
               </NoValue>
             )}
           </DiffRow>
         </>
       )}
       <DiffRow label="at">
-        <GuardLongText text={web.url} label="page address" />
+        <GuardLongText text={web.url} label="page address" head={8} />
       </DiffRow>
       <DiffRow label="page text">
         {web.text ? (
-          <GuardLongText text={web.text} label="page text" />
+          <GuardLongText text={web.text} label="page text" head={8} />
         ) : (
           <NoValue>the page showed no text</NoValue>
         )}
       </DiffRow>
       {web.console && web.console.length > 0 && (
         <DiffRow label="console">
-          <GuardLongText text={web.console.join('\n')} label="page console" />
+          <GuardLongText
+            text={web.console.join("\n")}
+            label="page console"
+            head={8}
+          />
         </DiffRow>
       )}
       {web.screenshot && (
         <DiffRow label="screen">
-          <p className="pt-1 font-mono text-[11px] leading-snug text-muted-foreground">{web.screenshot}</p>
+          <p className="pt-1 font-mono text-[11px] leading-snug text-muted-foreground">
+            {web.screenshot}
+          </p>
         </DiffRow>
       )}
     </div>
@@ -320,15 +369,7 @@ function WebStepPanel({
  * Every value is a long-data block — clamped vertically, scrolled horizontally,
  * never wrapped (a wrapped command line or JSON body lies about its shape).
  */
-function StepPanel({
-  expected,
-  actual,
-  stdout,
-  stderr,
-  recorded,
-  web,
-  checks,
-}: {
+interface StepPanelProps {
   /** What the step asserts, as authored — empty when it asserts nothing. */
   expected: string;
   /** What it returned: `exit 0`, `status 200`, the mismatch. Absent when it returns nothing. */
@@ -341,8 +382,25 @@ function StepPanel({
   web?: GuardStepWebActual;
   /** Each assertion beside its own answer, on a request step the viewed run took. */
   checks?: readonly GuardStepApiCheck[];
-}) {
-  if (web) return <WebStepPanel expected={expected} {...(actual ? { actual } : {})} web={web} />;
+}
+
+function StepPanel({
+  expected,
+  actual,
+  stdout,
+  stderr,
+  recorded,
+  web,
+  checks,
+}: StepPanelProps) {
+  if (web)
+    return (
+      <WebStepPanel
+        expected={expected}
+        {...(actual ? { actual } : {})}
+        web={web}
+      />
+    );
   return (
     <div className="mt-2 space-y-1">
       {checks && checks.length > 0 ? (
@@ -354,16 +412,18 @@ function StepPanel({
         <>
           <DiffRow label="expected">
             {expected ? (
-              <GuardLongText text={expected} label="expected value" />
+              <GuardLongText text={expected} label="expected value" head={8} />
             ) : (
               <NoValue>this step asserts nothing</NoValue>
             )}
           </DiffRow>
           <DiffRow label="actual">
             {actual ? (
-              <GuardLongText text={actual} label="actual value" />
+              <GuardLongText text={actual} label="actual value" head={8} />
             ) : (
-              <NoValue>{recorded ? 'the step returns no exit code' : NOT_RECORDED}</NoValue>
+              <NoValue>
+                {recorded ? "the step returns no exit code" : NOT_RECORDED}
+              </NoValue>
             )}
           </DiffRow>
         </>
@@ -371,24 +431,57 @@ function StepPanel({
       <DiffRow label="output">
         {stdout || stderr ? (
           <div className="space-y-1">
-            {stdout && <GuardLongText text={stdout} label="step output" />}
-            {stderr && <GuardLongText text={stderr} label="step error output" />}
+            {stdout && (
+              <GuardLongText text={stdout} label="step output" head={8} />
+            )}
+            {stderr && (
+              <GuardLongText text={stderr} label="step error output" head={8} />
+            )}
           </div>
         ) : (
-          <NoValue>{recorded ? 'the step printed nothing' : NOT_RECORDED}</NoValue>
+          <NoValue>
+            {recorded ? "the step printed nothing" : NOT_RECORDED}
+          </NoValue>
         )}
       </DiffRow>
     </div>
   );
 }
 
+/** The detail shown for one authored step in the inspector. */
+function stepPanelProps(
+  step: GuardScenarioStepView,
+  failedStep: number | undefined,
+  failure?: GuardFailureDetail,
+): StepPanelProps {
+  const diff = step.n === failedStep && failure ? failure : null;
+  const recorded = step.actual ?? null;
+  const checks = recorded?.checks ?? [];
+  const showChecks =
+    checks.length > 0 && (!diff || checks.some((check) => !check.ok));
+  return {
+    expected: step.expectation || diff?.expected || "",
+    ...((diff?.actual ?? recorded?.actual)
+      ? { actual: diff?.actual ?? recorded?.actual }
+      : {}),
+    ...(recorded?.web ? { web: recorded.web } : {}),
+    ...(showChecks ? { checks } : {}),
+    ...(diff && (diff.stdout || diff.stderr)
+      ? {
+          ...(diff.stdout ? { stdout: diff.stdout } : {}),
+          ...(diff.stderr ? { stderr: diff.stderr } : {}),
+        }
+      : {
+          ...(recorded?.stdout ? { stdout: recorded.stdout } : {}),
+          ...(recorded?.stderr ? { stderr: recorded.stderr } : {}),
+        }),
+    recorded: recorded != null || diff != null,
+  };
+}
+
 /**
- * ONE step: glyph · number · command, and — on click — the SAME panel every other
- * step carries: what it expected, what it actually returned, what it printed.
- *
- * Every row opens, because every row has the same thing to say. The one that FAILED
- * is open BY DEFAULT (that is the row the reader came for) and closable when they
- * are done with it; the rest start closed, one click from the same three fields.
+ * ONE compact step: status · number · driver · command. Clicking it retargets the
+ * shared inspector beside the timeline to what it expected, returned and printed.
  *
  * No row carries an "expects …" summary line any more: the labelled `expected` field
  * says the same thing, and a fact told twice reads as two facts.
@@ -397,94 +490,261 @@ function StepRow({
   step,
   failedStep,
   passed,
-  failure,
+  selected,
+  onSelect,
+  rowRef,
 }: {
   step: GuardScenarioStepView;
   failedStep: number | undefined;
   passed: boolean;
-  /** The viewed result's failure — rendered inline on the step it names. */
-  failure?: GuardFailureDetail;
+  selected: boolean;
+  onSelect: () => void;
+  rowRef?: (node: HTMLLIElement | null) => void;
 }) {
   const { glyph, label } = stepGlyph(step.n, failedStep, passed);
-  const failed = glyph === '✗';
-  const diff = failed && failure ? failure : null;
-  // The failing row leads with the MISMATCH (the assertion that actually missed and
-  // what came back instead); every other row reads its record. An infra failure
-  // carries no excerpts, so the record's output stands in for it.
-  const recorded = step.actual ?? null;
-  // A request step's record carries one pair per assertion. They REPLACE the single
-  // expected/actual only when they can tell the whole story: on a step that failed
-  // somewhere else (a capture that resolved to nothing), a wall of green ticks would
-  // hide the failure, so the diff keeps the row.
-  const checks = recorded?.checks ?? [];
-  const showChecks = checks.length > 0 && (!diff || checks.some((c) => !c.ok));
-  const panel = {
-    expected: step.expectation || diff?.expected || '',
-    actual: diff?.actual ?? recorded?.actual,
-    // A web step's record carries its own expected/actual pairs and its own words
-    // for what it "printed"; the cli fields below say nothing true about it.
-    ...(recorded?.web ? { web: recorded.web } : {}),
-    ...(showChecks ? { checks } : {}),
-    ...(diff && (diff.stdout || diff.stderr)
-      ? { stdout: diff.stdout, stderr: diff.stderr }
-      : { stdout: recorded?.stdout, stderr: recorded?.stderr }),
-    recorded: recorded != null || diff != null,
-  };
-  const [open, setOpen] = useState(failed);
-  const Chevron = open ? ChevronDown : ChevronRight;
-
-  const head = (
-    <>
-      <span
-        className={`w-4 shrink-0 text-center text-[11px] ${
-          failed ? 'text-red-600 dark:text-red-400' : glyph === '✓' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'
-        }`}
-      >
-        {glyph}
-      </span>
-      <span className="w-4 shrink-0 text-[11px] text-muted-foreground">{step.n}</span>
-      {/* WHAT the step drives, as a small leading chip. Never coloured: a kind is
-          not a verdict, and the glyph on the left is the only thing on this row
-          that says how the step fared. */}
-      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-        {step.kind}
-      </span>
-      <span className="min-w-0 flex-1 break-words font-mono text-[12px] text-foreground">{step.command}</span>
-      {step.repeat != null && step.repeat > 1 && (
-        <span className="mt-0.5 shrink-0 text-[10px] text-muted-foreground">×{step.repeat}</span>
-      )}
-    </>
-  );
-
-  const env = step.env && step.env.length > 0 && (
-    <div className="break-words font-mono text-[11px] text-muted-foreground">with {step.env.join(' ')}</div>
-  );
+  const failed = glyph === "✗";
+  const Mark = failed ? X : glyph === "✓" ? Check : Minus;
 
   return (
     <li
+      ref={rowRef}
       aria-label={`Step ${step.n}: ${step.command} — ${label}`}
-      className={`border-b border-border/60 last:border-b-0 ${failed ? 'border-l-2 border-l-red-500/60' : ''}`}
+      className={`border-b border-border/60 last:border-b-0 ${
+        selected
+          ? "bg-primary/[0.055] ring-1 ring-inset ring-primary/20"
+          : failed
+            ? "bg-red-500/[0.035]"
+            : ""
+      }`}
     >
-      {/* The whole line is the target — a step is one thing to click, not a
-          chevron a reader has to aim at. */}
       <button
         type="button"
-        aria-expanded={open}
-        aria-label={`${open ? 'Collapse' : 'Expand'} step ${step.n}`}
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left hover:bg-muted/40"
+        aria-pressed={selected}
+        aria-label={`Inspect step ${step.n}`}
+        onClick={onSelect}
+        className="flex w-full min-w-0 items-start gap-2 px-3 py-2.5 text-left outline-none hover:bg-muted/35 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
       >
-        <Chevron className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
-        {head}
+        <Mark
+          aria-hidden
+          className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${
+            failed
+              ? "text-red-600 dark:text-red-400"
+              : glyph === "✓"
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-muted-foreground"
+          }`}
+        />
+        <span className="w-5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          {step.n}
+        </span>
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {step.kind}
+        </span>
+        <span className="min-w-0 flex-1 break-words font-mono text-[12px] leading-relaxed text-foreground">
+          {step.command}
+        </span>
+        {step.repeat != null && step.repeat > 1 && (
+          <span className="mt-0.5 shrink-0 text-[10px] text-muted-foreground">
+            ×{step.repeat}
+          </span>
+        )}
       </button>
-      {/* Indented to the command column, so the detail reads as that step's. */}
-      {open && (
-        <div className="pb-2 pl-20 pr-3">
-          {env}
-          <StepPanel {...panel} />
-        </div>
-      )}
     </li>
+  );
+}
+
+/** One step's full authored + recorded reading, kept beside the timeline. */
+function StepInspector({
+  step,
+  failedStep,
+  passed,
+  failure,
+  claim,
+}: {
+  step: GuardScenarioStepView | null;
+  failedStep: number | undefined;
+  passed: boolean;
+  failure?: GuardFailureDetail;
+  claim?: string;
+}) {
+  if (!step) {
+    return (
+      <div className="rounded border border-border bg-card p-4 text-[12px] text-muted-foreground">
+        Loading step details…
+      </div>
+    );
+  }
+  const { glyph, label } = stepGlyph(step.n, failedStep, passed);
+  const failed = glyph === "✗";
+  const Mark = failed ? X : glyph === "✓" ? Check : Minus;
+  return (
+    <section
+      aria-label="Selected step details"
+      aria-live="polite"
+      className="min-w-0 rounded border border-border bg-card"
+    >
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Mark
+            aria-hidden
+            className={`h-4 w-4 shrink-0 ${
+              failed
+                ? "text-red-600 dark:text-red-400"
+                : glyph === "✓"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-muted-foreground"
+            }`}
+          />
+          <h3 className="text-[13px] font-semibold text-foreground">
+            Step {step.n}
+          </h3>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            {step.kind}
+          </span>
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            step {label}
+          </span>
+        </div>
+        <p className="mt-2 break-words font-mono text-[12px] leading-relaxed text-foreground">
+          {step.command}
+        </p>
+        {claim && (
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            {claim}
+          </p>
+        )}
+      </div>
+      <div className="min-w-0 px-4 py-3">
+        {failed && (
+          <div className="mb-3 rounded border border-red-500/40 bg-red-500/[0.035] px-3 py-2 text-[11px] leading-relaxed text-foreground">
+            Execution stopped here. The steps after this one were not reached.
+          </div>
+        )}
+        <div className="space-y-1 text-[11px] text-muted-foreground">
+          {step.env && step.env.length > 0 && (
+            <div className="break-words font-mono">
+              with {step.env.join(" ")}
+            </div>
+          )}
+          {step.cwd && (
+            <div className="break-words font-mono">in {step.cwd}</div>
+          )}
+          {step.actual?.durationMs != null && (
+            <div>{formatGuardDuration(step.actual.durationMs)}</div>
+          )}
+        </div>
+        <StepPanel {...stepPanelProps(step, failedStep, failure)} />
+        {step.note && (
+          <p className="mt-3 border-t border-border pt-3 text-[11px] leading-relaxed text-muted-foreground">
+            {step.note}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A run can outlive the exact scenario revision it executed. When its failure
+ * names a step that no longer exists in the current YAML, the failure is still
+ * first-class evidence: render its recorded diff without pretending the current
+ * authored row is the one that ran.
+ */
+function RecordedFailureInspector({
+  failure,
+}: {
+  failure: GuardFailureDetail;
+}) {
+  return (
+    <section
+      aria-label="Selected step details"
+      aria-live="polite"
+      className="min-w-0 rounded border border-red-500/40 bg-card"
+    >
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <X
+            aria-hidden
+            className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400"
+          />
+          <h3 className="text-[13px] font-semibold text-foreground">
+            Step {failure.step}
+          </h3>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            recorded run
+          </span>
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            step failed
+          </span>
+        </div>
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+          This run used an earlier test revision. Step {failure.step} is not in
+          the current YAML, but its failure and captured evidence are preserved
+          below.
+        </p>
+      </div>
+      <div className="min-w-0 px-4 py-3">
+        <div className="mb-3 rounded border border-red-500/40 bg-red-500/[0.035] px-3 py-2 text-[11px] leading-relaxed text-foreground">
+          Execution stopped here. The recorded action did not complete.
+        </div>
+        <StepPanel
+          expected={failure.expected}
+          actual={failure.actual}
+          {...(failure.stdout ? { stdout: failure.stdout } : {})}
+          {...(failure.stderr ? { stderr: failure.stderr } : {})}
+          recorded
+        />
+      </div>
+    </section>
+  );
+}
+
+function RecordedFailureRow({
+  failure,
+  selected,
+  onSelect,
+  rowRef,
+}: {
+  failure: GuardFailureDetail;
+  selected: boolean;
+  onSelect: () => void;
+  rowRef: (node: HTMLLIElement | null) => void;
+}) {
+  return (
+    <div className="border-t border-border first:border-t-0">
+      <div className="bg-red-500/[0.035] px-3 py-2 text-[11px] font-medium text-foreground">
+        Recorded run · earlier test revision
+      </div>
+      <ol>
+        <li
+          ref={rowRef}
+          aria-label={`Step ${failure.step}: recorded run failure — failed`}
+          className={`bg-red-500/[0.035] ${selected ? "ring-1 ring-inset ring-red-500/35" : ""}`}
+        >
+          <button
+            type="button"
+            aria-pressed={selected}
+            aria-label={`Inspect step ${failure.step}`}
+            onClick={onSelect}
+            className="flex w-full min-w-0 items-start gap-2 px-3 py-2.5 text-left outline-none hover:bg-muted/35 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          >
+            <X
+              aria-hidden
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400"
+            />
+            <span className="w-5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+              {failure.step}
+            </span>
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              recorded
+            </span>
+            <span className="min-w-0 flex-1 break-words font-mono text-[12px] leading-relaxed text-foreground">
+              {failure.expected}
+            </span>
+          </button>
+        </li>
+      </ol>
+    </div>
   );
 }
 
@@ -499,7 +759,7 @@ type StepGroup = {
   milestone: number | null;
   claims: readonly string[];
   /** Set on an UNTAGGED group only — what its POSITION makes it (see the rule below). */
-  heading?: 'Prepare' | 'Checks';
+  heading?: "Prepare" | "Checks";
   steps: GuardScenarioStepView[];
 };
 
@@ -516,7 +776,7 @@ function isClaimGroup(group: StepGroup): boolean {
 function stepGroupKey(step: GuardScenarioStepView): string {
   if (step.milestone != null) return `m:${step.milestone}`;
   const claims = step.claims ?? [];
-  return claims.length > 0 ? `c:${claims.join('␟')}` : 'untagged';
+  return claims.length > 0 ? `c:${claims.join("␟")}` : "untagged";
 }
 
 /**
@@ -534,20 +794,133 @@ function stepGroupKey(step: GuardScenarioStepView): string {
  * section is the state that was already there before step 1. Two different things,
  * so two different words.
  */
-export function groupStepsByMilestone(steps: readonly GuardScenarioStepView[]): StepGroup[] {
+export function groupStepsByMilestone(
+  steps: readonly GuardScenarioStepView[],
+): StepGroup[] {
   const groups: StepGroup[] = [];
   let lastKey: string | null = null;
   for (const step of steps) {
     const key = stepGroupKey(step);
     const last = groups[groups.length - 1];
     if (last && lastKey === key) last.steps.push(step);
-    else groups.push({ milestone: step.milestone ?? null, claims: step.claims ?? [], steps: [step] });
+    else
+      groups.push({
+        milestone: step.milestone ?? null,
+        claims: step.claims ?? [],
+        steps: [step],
+      });
     lastKey = key;
   }
   return groups.map((group, i) =>
     isClaimGroup(group)
       ? group
-      : { ...group, heading: groups.slice(i + 1).some(isClaimGroup) ? ('Prepare' as const) : ('Checks' as const) },
+      : {
+          ...group,
+          heading: groups.slice(i + 1).some(isClaimGroup)
+            ? ("Prepare" as const)
+            : ("Checks" as const),
+        },
+  );
+}
+
+/** The claim or preparation phase a selected step belongs to. */
+function stepClaim(
+  step: GuardScenarioStepView | null,
+  test: GuardTestViewModel,
+  milestones: ReadonlyMap<
+    number,
+    NonNullable<GuardTestViewModel["milestones"]>[number]
+  >,
+): string | undefined {
+  if (!step) return undefined;
+  if (step.milestone != null) {
+    const milestone = milestones.get(step.milestone);
+    return milestone
+      ? `Milestone ${step.milestone} — ${milestone.claimTitle}`
+      : `Milestone ${step.milestone}`;
+  }
+  if (step.claims && step.claims.length > 0) {
+    return step.claims.map((id) => test.claimTitles?.[id] ?? id).join(" · ");
+  }
+  return undefined;
+}
+
+function InterfacePathSection({
+  path,
+  interfaces,
+  onOpenInterface,
+}: {
+  path: readonly string[];
+  interfaces: GuardInterfaceRow[] | null;
+  onOpenInterface?: (interfaceId: string) => void;
+}) {
+  const byId = new Map((interfaces ?? []).map((row) => [row.id, row]));
+  return (
+    <section aria-label="Interfaces used by this flow" className="min-w-0">
+      <div className="mb-2 flex items-center gap-2">
+        <Braces className="h-3.5 w-3.5 text-muted-foreground" />
+        <h3 className="text-[12px] font-semibold text-foreground">
+          Interfaces used by this flow
+        </h3>
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {path.length}
+        </span>
+      </div>
+      {path.length === 0 ? (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          This test records no interface path. It may be hand-written or predate
+          interface mapping.
+        </p>
+      ) : (
+        <ol className="grid overflow-hidden rounded border border-border bg-card/40 sm:grid-cols-2 xl:grid-cols-3">
+          {path.map((id, index) => {
+            const iface = byId.get(id);
+            const content = (
+              <>
+                <span className="w-5 shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+                  {id}
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {iface?.type ?? "unmapped"}
+                </span>
+                {iface && onOpenInterface && (
+                  <ArrowUpRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                )}
+              </>
+            );
+            return (
+              <li
+                key={`${id}-${index}`}
+                className="min-w-0 border-b border-border last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 xl:[&:nth-child(2n)]:border-r xl:[&:nth-child(3n)]:border-r-0"
+              >
+                {iface && onOpenInterface ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenInterface(id)}
+                    aria-label={`Open interface ${id}`}
+                    className="flex w-full min-w-0 items-center gap-2 px-3 py-2.5 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div
+                    className="flex min-w-0 items-center gap-2 px-3 py-2.5"
+                    title={
+                      iface ? undefined : "Not in the current interface catalog"
+                    }
+                  >
+                    {content}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 
@@ -557,8 +930,8 @@ export function groupStepsByMilestone(steps: readonly GuardScenarioStepView[]): 
  * and milestone list. {@link GuardTestView} is the same body with a header of its
  * own, for the run instance that has no flow header above it.
  *
- * The parent supplies the scrolling container and its `space-y-5 px-6 py-4` — one
- * spacing rhythm for the whole detail, whichever parent it is.
+ * The parent supplies the scrolling container; this body owns its internal
+ * investigation grid and responsive stacking in both hosts.
  */
 export function GuardScenarioBody({
   repoId,
@@ -567,6 +940,8 @@ export function GuardScenarioBody({
   raw = false,
   action,
   notes,
+  showGoal = true,
+  showGoalLabel = true,
   onOpenFlow,
   onOpenInterface,
   onOpenSpec,
@@ -581,6 +956,10 @@ export function GuardScenarioBody({
   action?: ReactNode;
   /** Extra verdict-card notes (stale/orphaned bindings, "no result yet"). */
   notes?: ReactNode;
+  /** The merged flow header already states the goal; standalone run instances do not. */
+  showGoal?: boolean;
+  /** Multi-surface flows need each test goal, but not a repeated section label. */
+  showGoalLabel?: boolean;
   onOpenFlow?: (flowId: string) => void;
   onOpenInterface?: (interfaceId: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
@@ -595,6 +974,13 @@ export function GuardScenarioBody({
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   /** The bundle's screenshots + session video; empty for every run that took none. */
   const [visuals, setVisuals] = useState<GuardEvidenceVisual[]>([]);
+  const [visualsBusy, setVisualsBusy] = useState(false);
+  const [selectedStepNumber, setSelectedStepNumber] = useState<number | null>(
+    null,
+  );
+  const stepRows = useRef(new Map<number, HTMLLIElement>());
+  const visualsSection = useRef<HTMLDivElement | null>(null);
+  const interfacesSection = useRef<HTMLDivElement | null>(null);
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -608,8 +994,8 @@ export function GuardScenarioBody({
   // WHERE this test ran, as the two primitives the read needs. Kept primitive on
   // purpose: the model object is rebuilt on every parent render, so depending on it
   // here would re-fetch the file for nothing.
-  const evRunId = ev?.kind === 'run' ? ev.runId : null;
-  const evPath = ev?.kind === 'birth' ? ev.path : null;
+  const evRunId = ev?.kind === "run" ? ev.runId : null;
+  const evPath = ev?.kind === "birth" ? ev.path : null;
 
   useEffect(() => {
     setSource(null);
@@ -628,12 +1014,15 @@ export function GuardScenarioBody({
                 steps: src.steps ?? [],
                 ...(src.setup ? { setup: src.setup } : {}),
               }
-            : { content: 'Steps not found on disk.', steps: [] },
+            : { content: "Steps not found on disk.", steps: [] },
         );
       })
       .catch((e: unknown) => {
         if (mounted.current)
-          setSource({ content: e instanceof Error ? e.message : 'Steps unavailable.', steps: [] });
+          setSource({
+            content: e instanceof Error ? e.message : "Steps unavailable.",
+            steps: [],
+          });
       });
   }, [repoId, test.id, evRunId, evPath]);
 
@@ -650,7 +1039,7 @@ export function GuardScenarioBody({
     setEvidence(null);
     setEvidenceBusy(true);
     const load =
-      ev.kind === 'birth'
+      ev.kind === "birth"
         ? api.getGuardFindingEvidence(repoId, ev.path)
         : api.getGuardEvidence(repoId, ev.runId, test.id);
     load
@@ -658,7 +1047,10 @@ export function GuardScenarioBody({
         if (mounted.current) setEvidence(text);
       })
       .catch((e: unknown) => {
-        if (mounted.current) setEvidence(e instanceof Error ? e.message : 'Transcript unavailable.');
+        if (mounted.current)
+          setEvidence(
+            e instanceof Error ? e.message : "Transcript unavailable.",
+          );
       })
       .finally(() => {
         if (mounted.current) setEvidenceBusy(false);
@@ -670,8 +1062,13 @@ export function GuardScenarioBody({
   // cannot answer for them, leave the section exactly as it was: the transcript
   // alone. Never blocks the transcript, and never reports a failure of its own.
   useEffect(() => {
-    if (!evRunId && !evPath) return;
+    if (!evRunId && !evPath) {
+      setVisuals([]);
+      setVisualsBusy(false);
+      return;
+    }
     setVisuals([]);
+    setVisualsBusy(true);
     const from: api.GuardEvidenceWhere = evPath
       ? { evidencePath: evPath }
       : { runId: evRunId!, scenarioId: test.id };
@@ -682,309 +1079,507 @@ export function GuardScenarioBody({
       })
       .catch(() => {
         if (mounted.current) setVisuals([]);
+      })
+      .finally(() => {
+        if (mounted.current) setVisualsBusy(false);
       });
   }, [repoId, test.id, evRunId, evPath]);
 
-  const failed = test.status.plain === 'failed';
-  const passed = test.status.plain === 'succeeded' && !failed;
+  const failed = test.status.plain === "failed";
+  const passed = test.status.plain === "succeeded" && !failed;
   // "failed (birth)" is the plan's own wording for a test committed red: it ran
   // once, at authoring time, and disagreed with the code.
-  const verdictWord = failed ? (test.status.birth ? 'failed (birth)' : 'failed') : passed ? 'passed' : test.status.word.toLowerCase();
-  const byId = new Map((interfaces ?? []).map((j) => [j.id, j]));
+  const verdictWord = failed
+    ? test.status.birth
+      ? "failed (birth)"
+      : "failed"
+    : passed
+      ? "passed"
+      : test.status.word.toLowerCase();
   const milestones = new Map((test.milestones ?? []).map((m) => [m.order, m]));
   // WHICH step is the open one is a fact about the VIEWED RESULT, so the step list
   // is keyed on it: reading another test — or this same test as another run's
   // record — re-opens that result's failing step instead of inheriting the toggle
   // the last one was left in.
-  const resultKey = `${test.id}:${test.failure?.step ?? 'none'}`;
+  const resultKey = `${test.id}:${test.failure?.step ?? "none"}`;
+  const stepSignature = source?.steps.map((step) => step.n).join(",") ?? "";
+  useEffect(() => {
+    const first = source?.steps[0]?.n ?? null;
+    const failure = test.failure?.step;
+    setSelectedStepNumber(failure ?? first);
+  }, [resultKey, stepSignature]);
 
-  if (raw) return <ArtifactRaw content={source?.content ?? null} label="test source" />;
+  const steps = source?.steps ?? [];
+  const selectedStep =
+    steps.find((step) => step.n === selectedStepNumber) ?? null;
+  const recordedFailureMissingFromSource =
+    test.failure != null &&
+    source != null &&
+    !steps.some((step) => step.n === test.failure!.step);
+  const selectedRecordedFailure =
+    recordedFailureMissingFromSource &&
+    selectedStepNumber === test.failure?.step
+      ? test.failure
+      : null;
+  const screenshotCount = visuals.filter(
+    (visual) => visual.kind === "screenshot",
+  ).length;
+  const hasVideo = visuals.some((visual) => visual.kind === "video");
+  const completedSteps = test.failure
+    ? steps.filter((step) => step.n < test.failure!.step).length
+    : passed
+      ? steps.length
+      : 0;
+  const notReachedSteps = test.failure
+    ? steps.filter((step) => step.n > test.failure!.step).length
+    : 0;
+  const inspectStep = (step: number, reveal = false) => {
+    setSelectedStepNumber(step);
+    if (reveal)
+      requestAnimationFrame(() =>
+        stepRows.current.get(step)?.scrollIntoView({ block: "center" }),
+      );
+  };
+  const reveal = (target: { current: HTMLElement | null }) =>
+    target.current?.scrollIntoView({ block: "start" });
+
+  if (raw)
+    return (
+      <ArtifactRaw content={source?.content ?? null} label="test source" />
+    );
 
   return (
-    <>
-        {/* 1. What it checks — one line. */}
-        <div>
-          <div className={LABEL}>What it checks</div>
-          <p className="text-[13px] leading-relaxed text-foreground">{test.goal ?? test.title}</p>
-        </div>
-
-        {/* 2. The verdict — ONE card. Everything about the result is inside it. */}
-        <div>
-          <div className={LABEL}>Verdict</div>
-          <div
-            className={`rounded border p-3 ${failed ? 'border-red-500/60' : 'border-border'}`}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <GuardFlowStatusChip status={test.status.plain} word={verdictWord} className="text-[11px]" />
-              {/* WHOSE fault the failure is, beside the fact that it failed. The
-                  status says the test is red; this says whether that is drift in
-                  the repo or a defect of ours. */}
-              {test.triage && <GuardTriageChip triage={test.triage} />}
-              {test.durationMs != null && (
-                <span className="text-[11px] text-muted-foreground">{formatGuardDuration(test.durationMs)}</span>
-              )}
-              {failed && test.status.birth && (
-                <HoverPopover portal
-                  width="wide"
-                  content="This test failed the first time it ran, when it was written. It is committed anyway — the doc and the code disagree, and the next run that turns it green closes that gap."
-                >
-                  <span className="text-[11px] text-muted-foreground underline decoration-dotted">
-                    what does birth mean?
-                  </span>
-                </HoverPopover>
-              )}
-            </div>
-
-            {test.failure && (
-              <div className="mt-2">
-                <div className="text-[11px] text-muted-foreground">
-                  Failed at step <span className="text-foreground">{test.failure.step}</span>
-                  {test.failedMilestone != null && (
-                    <span className="text-foreground"> · milestone {test.failedMilestone}</span>
-                  )}
-                </div>
-                {test.failedMilestoneClaim && (
-                  <div className="mt-0.5 text-[12px] leading-snug text-foreground">{test.failedMilestoneClaim}</div>
-                )}
-                {/* The unblock the verdict recommends — the one line a reader acts
-                    on. The reasoning behind it stays in the chip's hover. */}
-                {test.triage && (
-                  <div className="mt-1 text-[12px] leading-snug text-muted-foreground">
-                    <span className="text-foreground">Do: </span>
-                    {test.triage.recommendation}
-                  </div>
-                )}
-              </div>
+    <div className="mx-auto w-full max-w-[100rem] space-y-5">
+      <section aria-label="Test verdict" className="min-w-0">
+        {showGoal && (
+          <div className="mb-4">
+            {showGoalLabel && <div className={LABEL}>What it checks</div>}
+            <p className="max-w-[75ch] text-[13px] leading-relaxed text-foreground">
+              {test.goal ?? test.title}
+            </p>
+          </div>
+        )}
+        <div className={LABEL}>Verdict</div>
+        <div
+          className={`rounded border bg-card p-4 ${failed ? "border-red-500/50" : "border-border"}`}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <GuardFlowStatusChip
+              status={test.status.plain}
+              word={verdictWord}
+              className="text-[11px]"
+            />
+            {test.triage && <GuardTriageChip triage={test.triage} />}
+            {test.durationMs != null && (
+              <span className="text-[11px] text-muted-foreground">
+                {formatGuardDuration(test.durationMs)}
+              </span>
             )}
-
-            {test.interfaceDrifted && (
-              <HoverPopover portal
-                align="start"
+            {steps.length > 0 && (
+              <span className="text-[11px] text-muted-foreground">
+                {recordedFailureMissingFromSource ? (
+                  <>
+                    {steps.length} current steps · recorded failure at{" "}
+                    {test.failure!.step}
+                  </>
+                ) : (
+                  <>
+                    {completedSteps} passed
+                    {test.failure ? " · 1 failed" : ""}
+                    {notReachedSteps > 0
+                      ? ` · ${notReachedSteps} not reached`
+                      : ""}
+                  </>
+                )}
+              </span>
+            )}
+            {failed && test.status.birth && (
+              <HoverPopover
+                portal
                 width="wide"
-                content="The live interface catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
+                content="This test failed the first time it ran, when it was written. It is committed anyway — the doc and the code disagree, and the next run that turns it green closes that gap."
               >
-                {/* Never a verdict, so never a verdict colour: an unknown reads
-                    grey, like every other state nothing has ruled on. */}
-                <div className="mt-2 flex items-center gap-2 text-[12px] text-muted-foreground">
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />
-                  Interface drift — the mapped surface moved since this test was written
-                </div>
+                <span className="text-[11px] text-muted-foreground underline decoration-dotted">
+                  what does birth mean?
+                </span>
               </HoverPopover>
             )}
-
-            {notes}
-            {action}
           </div>
-        </div>
 
-        {/* 3. The world the steps start in — rendered only for a test that declares
-               one, so a scenario with no `setup:` block shows no heading at all. */}
-        {source?.setup && (
-          <div>
-            <div className={LABEL}>Setup</div>
-            <GuardTestSetup setup={source.setup} />
-          </div>
-        )}
-
-        {/* 4. The steps, as steps — grouped under the claim each one realizes, with
-               the failure read inside the step it happened in. */}
-        <div>
-          <div className={LABEL}>Steps</div>
-          {/* One stable container, whatever its state: loading, the step list, or —
-              for a file that doesn't parse as a known driver — its own text. A
-              failure never depends on that parse: when there are no steps to hang
-              it on, it reads as its own block rather than disappearing. */}
-          <div aria-label="test steps">
-            {source != null && source.steps.length > 0 ? (
-              <div key={resultKey} className="rounded border border-border">
-                {groupStepsByMilestone(source.steps).map((group, i) => {
-                  const milestone = group.milestone != null ? milestones.get(group.milestone) : undefined;
-                  return (
-                  <div
-                    key={`${group.milestone ?? (group.claims.join(' ') || 'untagged')}-${i}`}
-                    className="border-b border-border last:border-b-0"
-                  >
-                    <div className="flex min-w-0 items-start gap-2 bg-muted/40 px-3 py-1.5 text-[11px] leading-snug">
-                      <span className="min-w-0 flex-1">
-                      {group.milestone != null ? (
-                        <>
-                          <span className="font-medium text-foreground">Milestone {group.milestone}</span>
-                          {milestone?.claimTitle && (
-                            <span className="text-muted-foreground"> — {milestone.claimTitle}</span>
-                          )}
-                        </>
-                      ) : group.claims.length > 0 ? (
-                        // Named by IDENTITY, not position: the header is the claim
-                        // itself. An id the corpus doesn't name renders as the id —
-                        // these steps prove a promise, and saying so is the point.
-                        <span className="font-medium text-foreground">
-                          {group.claims.map((id) => test.claimTitles?.[id] ?? id).join(' · ')}
-                        </span>
-                      ) : (
-                        // The two headers that name no claim, told apart by where the
-                        // group sits (see `groupStepsByMilestone`). Each says what it
-                        // IS on hover rather than leaving a reader to wonder which
-                        // promise these steps serve.
-                        <HoverPopover
-                          portal
-                          width="narrow"
-                          content={
-                            group.heading === 'Checks'
-                              ? 'Runs after the last claim these steps could prepare — not tied to a spec promise.'
-                              : 'Arranges a condition the claim steps below it prove — not itself tied to a spec promise.'
-                          }
-                        >
-                          <span className="font-medium text-foreground underline decoration-dotted underline-offset-2">
-                            {group.heading ?? 'Prepare'}
-                          </span>
-                        </HoverPopover>
-                      )}
-                      </span>
-                      {/* The section that STATES this claim — the one link the
-                          retired milestone list carried, now on the header of the
-                          steps that prove it. A group the corpus does not place
-                          (an identity-tagged one, a hand-written test) has no
-                          section to point at and shows none. */}
-                      {milestone?.doc && milestone.anchor && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenSpec(milestone.doc!, milestone.anchor!)}
-                          title={`${milestone.doc} § ${milestone.anchor}`}
-                          className="inline-flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                        >
-                          <span className="min-w-0 truncate">§ {milestone.headingText ?? milestone.anchor}</span>
-                          <ArrowUpRight className="h-3 w-3 shrink-0" />
-                        </button>
-                      )}
-                    </div>
-                    <ol>
-                      {group.steps.map((step) => (
-                        <StepRow
-                          key={step.n}
-                          step={step}
-                          failedStep={test.failure?.step}
-                          passed={passed}
-                          {...(test.failure ? { failure: test.failure } : {})}
-                        />
-                      ))}
-                    </ol>
-                  </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <>
-                {test.failure && (
-                  <div className="rounded border border-red-500/60 px-3 py-2">
-                    <div className="text-[11px] text-muted-foreground">
-                      Step <span className="text-foreground">{test.failure.step}</span> —{' '}
-                      <span className="text-red-600 dark:text-red-400">failed</span>
-                    </div>
-                    {/* No step list to hang it on — the same panel, standing alone. */}
-                    <StepPanel
-                      expected={test.failure.expected}
-                      actual={test.failure.actual}
-                      {...(test.failure.stdout ? { stdout: test.failure.stdout } : {})}
-                      {...(test.failure.stderr ? { stderr: test.failure.stderr } : {})}
-                      recorded
-                    />
-                  </div>
+          {test.failure && (
+            <div className="mt-3 flex min-w-0 flex-wrap items-start gap-x-4 gap-y-2 border-t border-border pt-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold text-foreground">
+                  {recordedFailureMissingFromSource
+                    ? "Recorded failure at"
+                    : "Failed at"}{" "}
+                  step {test.failure.step}
+                  {test.failedMilestone != null
+                    ? ` · milestone ${test.failedMilestone}`
+                    : ""}
+                </p>
+                {recordedFailureMissingFromSource && (
+                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                    This result came from a previous test revision. The current
+                    definition has {steps.length} steps.
+                  </p>
                 )}
-                <pre className={PRE}>{source == null ? 'Loading steps…' : source.content}</pre>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* 5. Evidence — ONE transcript, never repeated as separate sections, and
-               the run's own pictures under it when a browser took any. */}
-        {where && (
-          <div>
-            <div className={LABEL}>Evidence</div>
-            <GuardLongText text={evidenceBusy ? 'Loading transcript…' : evidence ?? ''} label="evidence transcript" />
-            <GuardEvidenceVisuals repoId={repoId} where={where} visuals={visuals} />
-          </div>
-        )}
-
-        {/* 6. The interface it drives — context, not verdict, so it comes last. */}
-        <div>
-          <div className={LABEL}>Interface</div>
-          {test.interfacePath.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
-              This test records no interface path (hand-written, or written before mapping).
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {test.interfacePath.map((id) => {
-                const iface = byId.get(id);
-                return (
-                  <div key={id}>
-                    <button
-                      type="button"
-                      onClick={() => onOpenInterface?.(id)}
-                      disabled={!onOpenInterface}
-                      className="mb-1 inline-flex items-center gap-1 font-mono text-[11px] text-primary hover:underline disabled:no-underline"
-                    >
-                      <Braces className="h-3 w-3" />
-                      {id}
-                    </button>
-                    {iface ? (
-                      <GuardInterfaceDiagram iface={iface} label={iface.id} />
-                    ) : (
-                      <p className="text-[12px] text-muted-foreground">
-                        Not in the current catalog — run Map on the Interfaces tab to re-derive it.
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
+                {test.failedMilestoneClaim && (
+                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                    {test.failedMilestoneClaim}
+                  </p>
+                )}
+                {test.triage && (
+                  <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                    <span className="text-foreground">Next: </span>
+                    {test.triage.recommendation}
+                  </p>
+                )}
+              </div>
             </div>
           )}
-        </div>
 
-        {/* The technical footer: what this is and where it lives, as labelled rows
-            — never a pile of bare strings. The file path is how a developer opens
-            the real file; the page itself never shows its text. */}
-        <dl className="space-y-1 border-t border-border pt-3 text-[11px]">
-          <FootRow label="Test">
-            <span className="truncate font-mono text-muted-foreground">{test.id}</span>
+          {(screenshotCount > 0 ||
+            hasVideo ||
+            test.interfacePath.length > 0) && (
+            <div className="mt-2.5 flex flex-wrap gap-2 border-t border-border pt-2.5">
+              {screenshotCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => reveal(visualsSection)}
+                  className="inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  {screenshotCount} screenshot{screenshotCount === 1 ? "" : "s"}
+                </button>
+              )}
+              {hasVideo && (
+                <button
+                  type="button"
+                  onClick={() => reveal(visualsSection)}
+                  className="inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <CirclePlay className="h-3.5 w-3.5" />
+                  Session replay
+                </button>
+              )}
+              {test.interfacePath.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => reveal(interfacesSection)}
+                  className="inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Braces className="h-3.5 w-3.5" />
+                  {test.interfacePath.length} interface
+                  {test.interfacePath.length === 1 ? "" : "s"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {test.interfaceDrifted && (
+            <HoverPopover
+              portal
+              align="start"
+              width="wide"
+              content="The live interface catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
+            >
+              <div className="mt-2.5 flex items-center gap-2 text-[12px] text-muted-foreground">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />
+                Interface drift — the mapped surface moved since this test was
+                written
+              </div>
+            </HoverPopover>
+          )}
+          {notes}
+          {action}
+        </div>
+      </section>
+
+      {source?.setup && (
+        <section>
+          <div className={LABEL}>Setup</div>
+          <GuardTestSetup setup={source.setup} />
+        </section>
+      )}
+
+      <section
+        aria-label="Test investigation"
+        className="guard-investigation min-w-0"
+      >
+        <div className="guard-investigation-layout">
+          <div className="guard-investigation-timeline min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              <h3 className="text-[12px] font-semibold text-foreground">
+                Steps
+              </h3>
+              {steps.length > 0 && (
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {steps.length}
+                </span>
+              )}
+            </div>
+            <div aria-label="test steps">
+              {source != null && source.steps.length > 0 ? (
+                <div
+                  key={resultKey}
+                  className="overflow-hidden rounded border border-border"
+                >
+                  {recordedFailureMissingFromSource && test.failure && (
+                    <RecordedFailureRow
+                      failure={test.failure}
+                      selected={selectedStepNumber === test.failure.step}
+                      onSelect={() => inspectStep(test.failure!.step)}
+                      rowRef={(node) => {
+                        if (node)
+                          stepRows.current.set(test.failure!.step, node);
+                        else stepRows.current.delete(test.failure!.step);
+                      }}
+                    />
+                  )}
+                  {recordedFailureMissingFromSource && (
+                    <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3 py-2 text-[11px]">
+                      <span className="font-medium text-foreground">
+                        Current test definition
+                      </span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {steps.length} steps
+                      </span>
+                    </div>
+                  )}
+                  {groupStepsByMilestone(source.steps).map((group, i) => {
+                    const milestone =
+                      group.milestone != null
+                        ? milestones.get(group.milestone)
+                        : undefined;
+                    return (
+                      <div
+                        key={`${group.milestone ?? (group.claims.join(" ") || "untagged")}-${i}`}
+                        className="border-b border-border last:border-b-0"
+                      >
+                        <div className="flex min-w-0 items-start gap-2 bg-muted/40 px-3 py-2 text-[11px] leading-snug">
+                          <span className="min-w-0 flex-1">
+                            {group.milestone != null ? (
+                              <>
+                                <span className="font-medium text-foreground">
+                                  Milestone {group.milestone}
+                                </span>
+                                {milestone?.claimTitle && (
+                                  <span className="text-muted-foreground">
+                                    {" "}
+                                    — {milestone.claimTitle}
+                                  </span>
+                                )}
+                              </>
+                            ) : group.claims.length > 0 ? (
+                              <span className="font-medium text-foreground">
+                                {group.claims
+                                  .map((id) => test.claimTitles?.[id] ?? id)
+                                  .join(" · ")}
+                              </span>
+                            ) : (
+                              <HoverPopover
+                                portal
+                                width="narrow"
+                                content={
+                                  group.heading === "Checks"
+                                    ? "Runs after the last claim these steps could prepare — not tied to a spec promise."
+                                    : "Arranges a condition the claim steps below it prove — not itself tied to a spec promise."
+                                }
+                              >
+                                <span className="font-medium text-foreground underline decoration-dotted underline-offset-2">
+                                  {group.heading ?? "Prepare"}
+                                </span>
+                              </HoverPopover>
+                            )}
+                          </span>
+                          {milestone?.doc && milestone.anchor && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenSpec(milestone.doc!, milestone.anchor!)
+                              }
+                              title={`${milestone.doc} § ${milestone.anchor}`}
+                              className="inline-flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                            >
+                              <span className="min-w-0 truncate">
+                                § {milestone.headingText ?? milestone.anchor}
+                              </span>
+                              <ArrowUpRight className="h-3 w-3 shrink-0" />
+                            </button>
+                          )}
+                        </div>
+                        <ol>
+                          {group.steps.map((step) => (
+                            <StepRow
+                              key={step.n}
+                              step={step}
+                              failedStep={test.failure?.step}
+                              passed={passed}
+                              selected={step.n === selectedStepNumber}
+                              onSelect={() => inspectStep(step.n)}
+                              rowRef={(node) => {
+                                if (node) stepRows.current.set(step.n, node);
+                                else stepRows.current.delete(step.n);
+                              }}
+                            />
+                          ))}
+                        </ol>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : test.failure && source != null ? (
+                <div className="overflow-hidden rounded border border-red-500/40">
+                  <RecordedFailureRow
+                    failure={test.failure}
+                    selected={selectedStepNumber === test.failure.step}
+                    onSelect={() => inspectStep(test.failure!.step)}
+                    rowRef={(node) => {
+                      if (node) stepRows.current.set(test.failure!.step, node);
+                      else stepRows.current.delete(test.failure!.step);
+                    }}
+                  />
+                </div>
+              ) : (
+                <pre className={PRE}>
+                  {source == null ? "Loading steps…" : source.content}
+                </pre>
+              )}
+            </div>
+          </div>
+
+          <aside className="guard-investigation-inspector min-w-0 space-y-5">
+            {selectedRecordedFailure ? (
+              <RecordedFailureInspector failure={selectedRecordedFailure} />
+            ) : (
+              <StepInspector
+                step={selectedStep}
+                failedStep={test.failure?.step}
+                passed={passed}
+                claim={stepClaim(selectedStep, test, milestones)}
+                {...(test.failure ? { failure: test.failure } : {})}
+              />
+            )}
+
+            <div ref={visualsSection}>
+              <div className="mb-2 flex items-center gap-2">
+                <Camera className="h-3.5 w-3.5 text-muted-foreground" />
+                <h3 className="text-[12px] font-semibold text-foreground">
+                  Visual evidence
+                </h3>
+                {screenshotCount > 0 && (
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {screenshotCount}
+                  </span>
+                )}
+              </div>
+              {visualsBusy ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Loading screenshots…
+                </p>
+              ) : where && visuals.length > 0 ? (
+                <GuardEvidenceVisuals
+                  repoId={repoId}
+                  where={where}
+                  visuals={visuals}
+                  {...(selectedStepNumber != null
+                    ? { selectedStep: selectedStepNumber }
+                    : {})}
+                  {...(test.failure ? { failedStep: test.failure.step } : {})}
+                  onSelectStep={(step) => inspectStep(step, true)}
+                />
+              ) : (
+                <p className="rounded border border-dashed border-border px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
+                  No screenshots or session replay were recorded for this test.
+                </p>
+              )}
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <div ref={interfacesSection}>
+        <InterfacePathSection
+          path={test.interfacePath}
+          interfaces={interfaces}
+          {...(onOpenInterface ? { onOpenInterface } : {})}
+        />
+      </div>
+
+      {where && (
+        <details
+          className="group overflow-hidden rounded border border-border"
+          aria-label="Run transcript"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 outline-none hover:bg-muted/35 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+            <span className="text-[12px] font-semibold text-foreground">
+              Transcript
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              supporting run evidence
+            </span>
+            <ChevronDown className="ml-auto h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="border-t border-border p-3">
+            <GuardLongText
+              text={evidenceBusy ? "Loading transcript…" : (evidence ?? "")}
+              label="evidence transcript"
+            />
+          </div>
+        </details>
+      )}
+
+      <dl className="space-y-1 border-t border-border pt-3 text-[11px]">
+        <FootRow label="Test">
+          <span className="truncate font-mono text-muted-foreground">
+            {test.id}
+          </span>
+        </FootRow>
+        {source?.file && (
+          <FootRow label="File">
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard?.writeText(source.file!)}
+              title="Copy the path"
+              className={`${FOOT_BTN} font-mono`}
+            >
+              <span className={FOOT_TEXT}>{source.file}</span>
+              <Copy className="h-3 w-3 shrink-0" />
+            </button>
           </FootRow>
-          {source?.file && (
-            <FootRow label="File">
-              <button
-                type="button"
-                onClick={() => void navigator.clipboard?.writeText(source.file!)}
-                title="Copy the path"
-                className={`${FOOT_BTN} font-mono`}
-              >
-                <span className={FOOT_TEXT}>{source.file}</span>
-                <Copy className="h-3 w-3 shrink-0" />
-              </button>
-            </FootRow>
-          )}
-          {test.flow && onOpenFlow && (
-            <FootRow label="Flow">
-              <button type="button" onClick={() => onOpenFlow(test.flow!.id)} className={FOOT_BTN}>
-                <span className={FOOT_TEXT}>{test.flow.title}</span>
-                <ArrowUpRight className="h-3 w-3 shrink-0" />
-              </button>
-            </FootRow>
-          )}
-          {test.binds && (
-            <FootRow label="Spec">
-              <button
-                type="button"
-                onClick={() => onOpenSpec(test.binds!.doc, test.binds!.section)}
-                className={FOOT_BTN}
-              >
-                <span className={FOOT_TEXT}>{test.binds.headingText ?? test.binds.doc}</span>
-                <span className={`${FOOT_TEXT} text-muted-foreground`}>§ {test.binds.section}</span>
-                <ArrowUpRight className="h-3 w-3 shrink-0" />
-              </button>
-            </FootRow>
-          )}
-        </dl>
-    </>
+        )}
+        {test.flow && onOpenFlow && (
+          <FootRow label="Flow">
+            <button
+              type="button"
+              onClick={() => onOpenFlow(test.flow!.id)}
+              className={FOOT_BTN}
+            >
+              <span className={FOOT_TEXT}>{test.flow.title}</span>
+              <ArrowUpRight className="h-3 w-3 shrink-0" />
+            </button>
+          </FootRow>
+        )}
+        {test.binds && (
+          <FootRow label="Spec">
+            <button
+              type="button"
+              onClick={() => onOpenSpec(test.binds!.doc, test.binds!.section)}
+              className={FOOT_BTN}
+            >
+              <span className={FOOT_TEXT}>
+                {test.binds.headingText ?? test.binds.doc}
+              </span>
+              <span className={`${FOOT_TEXT} text-muted-foreground`}>
+                § {test.binds.section}
+              </span>
+              <ArrowUpRight className="h-3 w-3 shrink-0" />
+            </button>
+          </FootRow>
+        )}
+      </dl>
+    </div>
   );
 }
 
@@ -1017,17 +1612,29 @@ export function GuardTestView({
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   // The two readings of ONE file: this page, or the YAML it was read from.
-  const { mode, setMode, raw } = useArtifactMode('YAML');
+  const { mode, setMode, raw } = useArtifactMode("YAML");
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
       <div className="min-w-0 border-b border-border bg-card px-6 py-4">
-        <h2 className="break-words text-sm font-semibold text-foreground">{test.title}</h2>
+        <h2 className="break-words text-sm font-semibold text-foreground">
+          {test.title}
+        </h2>
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
           {/* The status word sits FIRST, the way it does on every guard row and
               header. No surface chip: one surface, no information. */}
-          <GuardFlowStatusChip status={test.status.plain} word={test.status.word} />
-          <span className="text-[11px] text-muted-foreground">{test.provenance}</span>
-          <ArtifactModeSwitch format="YAML" mode={mode} onSelect={setMode} className="ml-auto" />
+          <GuardFlowStatusChip
+            status={test.status.plain}
+            word={test.status.word}
+          />
+          <span className="text-[11px] text-muted-foreground">
+            {test.provenance}
+          </span>
+          <ArtifactModeSwitch
+            format="YAML"
+            mode={mode}
+            onSelect={setMode}
+            className="ml-auto"
+          />
         </div>
         {headerAction}
       </div>

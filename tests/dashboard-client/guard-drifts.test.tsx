@@ -424,8 +424,8 @@ describe('GuardDriftsView — detail', () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
-    expect(screen.getByText('exit code 0')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
+    expect(screen.getByLabelText('actual value')).toHaveTextContent('exit code 0');
     // The binding doc + section are shown in the detail.
     expect(screen.getByText('§ authentication/login/rate-limiting')).toBeInTheDocument();
   });
@@ -443,7 +443,7 @@ describe('GuardDriftsView — detail', () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    await screen.findByText('exit code 1');
+    await screen.findByLabelText('expected value');
     // The detail pane renders no own X (its old "Close scenario" affordance)…
     expect(screen.queryByLabelText('Close scenario')).not.toBeInTheDocument();
     // …only the tab strip's per-tab close (Close s-fail) remains.
@@ -465,7 +465,7 @@ describe('GuardDriftsView — detail', () => {
     stubFetch({ latest: withOutput });
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
     expect(screen.getByLabelText('step output')).toHaveTextContent('drift-stdout-line');
     expect(screen.getByLabelText('step error output')).toHaveTextContent('usage: login --token <t>');
     // The retired section and its stream sub-headings render nowhere.
@@ -478,7 +478,7 @@ describe('GuardDriftsView — detail', () => {
     const user = userEvent.setup();
     renderView(); // default s-fail failure has no stdout/stderr
     await user.click(await screen.findByText('login rate limits'));
-    await screen.findByText('exit code 1');
+    await screen.findByLabelText('expected value');
     expect(screen.queryByText('Program output')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('step output')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('step error output')).not.toBeInTheDocument();
@@ -685,7 +685,7 @@ describe('GuardDriftsView — bug 2: preview / pin tab model', () => {
     await user.click(await screen.findByText('login rate limits'));
     expect(tabLabel('s-fail')).toHaveClass('italic');
     expect(gdrift()).toBe('s-fail');
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
 
     // A second single-click takes the transient slot — one tab only.
     await user.click(screen.getByText('infra broke'));
@@ -718,7 +718,7 @@ describe('GuardDriftsView — bug 2: preview / pin tab model', () => {
 
   it('a ?gdrift deep link opens the scenario as a pinned tab', async () => {
     renderView('/repos/r?section=guard&tab=guarddrifts&gdrift=s-fail');
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
     expect(tabLabel('s-fail')).toHaveClass('font-medium');
   });
 });
@@ -777,7 +777,7 @@ describe('GuardDriftsView — THE run is read in the aside', () => {
     renderView();
     await user.click(await screen.findByText('login rate limits'));
     // The result owns the pane; the run keeps its column.
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
     expect(within(runAside()).getByText('main @ abcdef12')).toBeInTheDocument();
     expect(within(runAside()).getByText('Recent runs')).toBeInTheDocument();
   });
@@ -822,7 +822,7 @@ describe('GuardDriftsView — run-switch tab re-resolution', () => {
     renderView();
     // Pin s-fail — it FAILED in the latest run (expected/actual shown).
     await user.dblClick(await screen.findByText('login rate limits'));
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
 
     // Load the older run: same tab, but s-fail PASSED there → last-result, no failure.
     await user.click(screen.getByText(/2026-07-06T00-00-00Z/));
