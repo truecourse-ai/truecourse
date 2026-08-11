@@ -25,7 +25,11 @@ import { OutputExcerptsSchema } from './excerpts.js'
  */
 export const GuardStepWebCheckSchema = z
   .object({
-    subject: z.enum(['url', 'text', 'visible']),
+    // `state`, `attribute` and `class` joined the three original subjects when the
+    // observation channels landed (2026-08-11). Additive: a bundle written before
+    // them carries none, and one written with them reads in any reader that only
+    // renders `expected` / `actual` / `ok` — which is every renderer there is.
+    subject: z.enum(['url', 'text', 'visible', 'state', 'attribute', 'class']),
     /** The assertion in full — `the page text contains "Filtered by"`. */
     expected: z.string(),
     /** What the page had for THAT assertion. */
@@ -129,6 +133,12 @@ const InvocationStepSchema = z
     /** api: the response status; `null` when no response arrived. */
     status: z.number().nullable().optional(),
     timedOut: z.boolean().optional(),
+    /**
+     * cli: the marker this step was RUN UNTIL, present when the runner stopped the
+     * child at it. The exit code is then the runner's signal, not the command's, so
+     * this is what the actual line reports instead.
+     */
+    endedAtMarker: z.string().optional(),
     spawnError: z.string().optional(),
     requestError: z.string().optional(),
     durationMs: z.number().nonnegative().optional(),
@@ -182,6 +192,9 @@ function actualLine(step: InvocationStep): string | undefined {
   if (step.spawnError) return `failed to spawn: ${step.spawnError}`
   if (step.requestError) return `no response: ${step.requestError}`
   if (step.timedOut) return 'timed out'
+  // A step the runner stopped at its marker never had an exit code of its own —
+  // `exit (killed)` would report our own SIGKILL as the command's outcome.
+  if (step.endedAtMarker) return `stopped at “${step.endedAtMarker}”`
   // A web step returns no code and no status — what it "returned" is where the
   // browser ended up, which is the one line a reader wants beside the screenshot.
   if (step.kind === 'web') return step.url ? `at ${step.url}` : undefined

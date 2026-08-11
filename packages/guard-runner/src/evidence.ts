@@ -62,7 +62,7 @@ export function isFileStepKind(kind: EvidenceStep['kind']): boolean {
  * shape this is: the evidence carries it verbatim.
  */
 export interface EvidenceWebCheck {
-  subject: 'url' | 'text' | 'visible'
+  subject: 'url' | 'text' | 'visible' | 'state' | 'attribute' | 'class'
   expected: string
   actual: string
   ok: boolean
@@ -183,6 +183,12 @@ export interface EvidenceStep {
   iterationsRun: number
   exitCode: number | null
   timedOut: boolean
+  /**
+   * The ready line this step was run UNTIL, present when the runner stopped the
+   * child at it. Both the transcript and the dashboard's actual line read it, so
+   * neither reports our own SIGKILL as the command's outcome.
+   */
+  endedAtMarker?: string
   spawnError?: string
   rawStdout: string
   rawStderr: string
@@ -269,6 +275,7 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       iterationsRun: s.iterationsRun,
       exitCode: s.exitCode,
       timedOut: s.timedOut,
+      endedAtMarker: s.endedAtMarker,
       spawnError: s.spawnError,
       captured: s.captured,
       // What THIS step printed, not just the focus step's files below — the record
@@ -400,7 +407,14 @@ function renderTranscript(params: WriteEvidenceParams): string {
       lines.push('')
       continue
     }
-    lines.push(`   exit:    ${s.exitCode ?? '(killed)'}${s.timedOut ? ' [timed out]' : ''}`)
+    // A held command ends because the runner stopped it at its ready line. Saying
+    // "(killed)" for that would read as an infrastructure failure on a green step.
+    if (s.endedAtMarker !== undefined) lines.push(`   until:   stopped at ${JSON.stringify(s.endedAtMarker)}`)
+    lines.push(
+      `   exit:    ${
+        s.endedAtMarker !== undefined ? '(stopped at its marker)' : (s.exitCode ?? '(killed)')
+      }${s.timedOut ? ' [timed out]' : ''}`,
+    )
     if (s.spawnError) lines.push(`   spawn:   ${s.spawnError}`)
     // The values this step handed forward — the api transcript's `capture:` line.
     if (s.captured && Object.keys(s.captured).length > 0) {

@@ -32,11 +32,16 @@ export interface ExpectMismatch {
     | 'stub'
     | 'prompt'
     | 'capture'
-    // The WEB driver's three: an element the step addressed that the page never
-    // showed (or showed more than once), the page's visible text, and the address.
+    // The WEB driver's: an element the step addressed that the page never showed
+    // (or showed more than once), the page's visible text, the address — and the
+    // three channels for what a page keeps OUTSIDE its text: an element's ARIA
+    // state, one attribute, and a class token.
     | 'target'
     | 'text'
     | 'url'
+    | 'state'
+    | 'attribute'
+    | 'class'
     // The API driver's, for a `request` step taken in the sandbox: the response's
     // status line, one of its headers, its body as text, its conformance to a
     // declared schema, and the value at one json path.

@@ -4285,6 +4285,20 @@ LAST (7 milestones ride on it red-by-timeout), and
 `--reconfigure`/`stop`/`uninstall` steps past the mid-flow `logs` step.
 **Owner:** Guard Run (a lifecycle/background verb for the sandbox union, or
 sandbox-owned dashboard lifecycle like the api driver's).
+**STATUS: CAPABILITY BUILT 2026-08-11** (plan item 91.4) — a `run` step may declare
+`until: { marker: … }`: the runner watches what the command writes, terminates the
+child the moment that line appears, and evaluates the step's `expect` against the
+output so far. A console-mode step therefore passes on its real output and the
+scenario CONTINUES past it, so neither the last-step placement nor the
+red-by-timeout milestones are forced any more; `dashboard logs` mid-flow is
+reachable the same way. A marker that never appears is a FAIL naming it, not an
+infrastructure timeout, and `expect.exit` beside `until` is refused at load (the
+runner ends the child, so there is no exit code of the command's own). Not covered
+by this: the FIXED PORT 3001 the sandbox's dashboard binds (the G87 sibling noted in
+the run classification below) — that is still a recipe/runner allocation question,
+and the false green it produced is a separate item. The reference corpus has not
+been re-authored against the new field; the scenario edits are the corpus's own
+call.
 
 ### G88. The web vocabulary cannot OBSERVE style, motion, input state, or SVG geometry
 **What:** seventeen claim-level gaps recorded in `guard/result.json` (reason
@@ -4299,6 +4313,46 @@ accessible names, the pane a plain div), and no transform on a captured value
 (Code Hotspots renders a basename while the store holds the full path).
 **Owner:** Web Driver (each channel is its own decision; the roles-and-labels
 policy stays the default).
+**STATUS: THREE CHANNELS BUILT 2026-08-11** (plan item 91.1–91.3, 91.5), the rest
+still open:
+- **attribute / class** — `expect.attribute { of?, name, value? | present? }` and
+  `expect.class { of?, has? | absent? }`, reading the DOCUMENT ELEMENT when `of`
+  names no element. Dark mode is now assertable exactly as the product implements
+  it (the `dark` class on `<html>`, `data-theme` beside it), both the flip and its
+  survival across a reload. `class` matches whole TOKENS, so `has: dark` never
+  passes for `darkroom`. The `theme` STORAGE key is still unreadable — no storage
+  channel was added.
+- **ARIA state** — `expect.state { role, name, checked? | pressed? | selected? |
+  expanded? | disabled? }`. This is the disabled-state observation this entry lists,
+  plus tab strips and toggle switches. The three-way detection switch is now
+  ASSERTABLE-AND-RED rather than unstatable: the step fails with "…exposes no
+  aria-pressed state", which is the honest finding (nothing exposes its position to
+  a screen reader either), and is a product fix waiting to happen rather than a
+  vocabulary gap.
+- **browser history** — `history: back | forward` is a web verb now, on the same
+  footing as navigate/click/fill, and works for a single-page traversal that loads
+  no document. The overview flow's Back/Forward claim no longer has to ride as
+  "the old address still renders".
+- **several `visible` targets** — one expectation may name a LIST of role+name
+  targets (the graph canvas's three icon buttons after a reload: one claim, one
+  step, one check each, and a miss names which target).
+Still open, untouched: drag (the violations divider), scroll, clipboard read,
+motion, hover, SVG-geometry locators, and the transform on a captured value.
+**APP-SIDE MOVEMENT, same day (2026-08-11), superseding two sentences above:**
+the "ASSERTABLE-AND-RED" reading of the detection switch is already outdated —
+the client now exposes `aria-pressed` on every position of the detection
+switch, the category tabs and the rules panel's three switches (inside named
+groups: `Detection type filter`, `Violation category filter`, `Rule detection
+type filter`, `Rule status filter`, `Rule category filter`), so `expect.state`
+reads a real answer there, green. The React-Flow-nodes-without-names clause in
+the What paragraph is likewise history — see the red-board entry for
+`explore-the-architecture-graph` (every node carries `ariaLabel` since
+`3bac254f`). Two more surfaces gained identities the vocabulary can now use:
+the violations divider is a `separator` named `Analytics panel width`
+advertising `aria-valuenow` (readable via the new attribute channel, though
+RESIZING it still needs the missing drag/keyboard verbs), and the rail badges
+name their counts as `status` elements (`Home, 12 violations`,
+`Home, 3 new, 2 resolved`) without touching the buttons' own names.
 
 ### G89. Dependency registration kinds cannot express a HOST CAPABILITY
 **What:** the new `host-service-session` dependency (the background-service
@@ -4312,7 +4366,9 @@ The authoring note, verbatim: REGISTRATION-KIND CAVEAT: the catalog's registrati
 entry for the other button ("Don't stash — analyze the working tree as-is"),
 which `run-an-analysis-from-the-dashboard` walks to prove the as-is claim; the
 step exists, honestly unlisted in the interface path rather than misdescribed.
-**Owner:** Interface mapping (next interfaces wave authors the sibling task).
+**Owner:** Interface mapping. **STATUS: CLOSED 2026-08-11** —
+`web/analyze-working-tree-without-stashing` now carries the sibling task and the
+existing scenario names it in both its path and manifest mapping.
 
 #### Product/doc findings of the scenario wave (the feed; not schema gaps)
 
@@ -4446,3 +4502,36 @@ same interaction for its own doc's claim.
 **Owner:** Web Driver (a text-capture channel — regex over rendered text, the
 web sibling of the cli stdout capture), or dashboard-server (a ranked
 hotspots endpoint the capture vocabulary can address).
+
+### Analyze-tab web corpus expansion (2026-08-11)
+
+The Code Analysis-only follow-up added 15 stateful web interfaces and seven
+mixed-driver flows. In addition to the stash/clean-tree/LLM paths, executable
+journeys now cover adding a repository by path, a non-git repository, repository
+rule configuration, and the Rules panel. Existing walks gained the interactions
+they already needed or can now observe honestly: Functions depth, folder
+collapse/expand, flow search/forward/back/play, shared tabs, schema expansion,
+Top Offenders sorting, hotspot severity, graph connection state, and the detailed
+Normal/Git Diff comparison. G90 closes as described above.
+
+The store now contains 114 interfaces (55 web), 51 settled flows, and 51
+scenarios. The dashboard documentation has 301 extracted claims: 222 occur once
+as executable milestones and the remaining 79 occur once in `noFlowClaims` with
+claim-specific reasons. There are no unaccounted or duplicate dashboard claims.
+
+The no-flow inventory makes the remaining transformation boundary concrete:
+native `window.confirm`/directory dialogs (G84), socket-deferred cancellation and
+failure (G85), Escape and other keyboard-only paths (G86), long multi-run caps
+(G87), drag/hover/style/SVG geometry and disabled-state observations (G88), web
+value capture for cross-driver equality (G91), and state-distinct actions that
+still fingerprint identically (G83). The corpus does not invent steps or weaken
+assertions to hide those limitations.
+
+**Boundary update, 2026-08-11 (engine side).** Five of those limitations are gone
+as CAPABILITIES — the held-command step (G87) and four web channels: ARIA state,
+attribute/class on the document element, several `visible` targets, and a browser
+history verb (the observable half of G88). See the STATUS blocks on G87 and G88
+above and plan item 91 for the field names and their semantics. Nothing in
+`reference/store/` was re-authored for them: the inventory above still describes
+the corpus as committed, and closing the claims those channels unblock is the
+corpus's own next pass.

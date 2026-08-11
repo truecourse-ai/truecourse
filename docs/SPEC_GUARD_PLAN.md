@@ -5160,3 +5160,77 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     accounted for exactly once: 222 by executable milestones and 79 by explicit no-flow
     reasons tied to driver/state limitations. G90 is closed; remaining limitations are
     tracked under G83–G88 and G91 rather than represented as false executable coverage.
+
+91. **Driver vocabulary — the five gaps the reference corpus kept filing (2026-08-11).**
+    STATUS: BUILT. The dashboard reference corpus filed the same limitations in step
+    notes and in the `transform-gaps.md` ledger run after run (G87, and three of the
+    channels G88 enumerates): claims that were perfectly observable were authored
+    DELIBERATELY PARTIAL, or rode as no-flow gaps, because the vocabulary had no way to
+    say them. Five capabilities, all additive and all optional — `GUARD_FORMAT_VERSION`
+    stays 3, every committed scenario parses and behaves exactly as before, and no
+    fingerprint moves (see the last paragraph).
+
+    1. **`expect.state` — an ARIA state on a role+name target** (web). The `visible`
+       matcher's shape with the assertion added: `{ role, name, exact?, checked? |
+       pressed? | selected? | expanded? | disabled? }`, several at once allowed and
+       each recorded as its own check, in the fixed order the state list declares.
+       The value read is the `aria-*` attribute where present, else the element's own
+       state (a checkbox's checkedness, an `<option>`'s selectedness, `:disabled`).
+       The deliberate outcome for a control whose position is drawn in COLOUR alone —
+       the dashboard's three-way detection switch — is a FAIL reading "…exposes no
+       aria-pressed state": the state is unobservable to this step and to a screen
+       reader alike, and that is the finding, not a reason to weaken the assertion.
+    2. **`expect.attribute` and `expect.class`** (web). `attribute: { of?, name,
+       value? | present? }` and `class: { of?, has? | absent? }`, both reading the
+       DOCUMENT ELEMENT when `of` names no element — which is where a page keeps what
+       it does not print (dark mode is a `dark` class on `<html>` plus a `theme`
+       storage key, and the theme button's own name never changes). `class` is its own
+       member rather than an attribute matcher because a class attribute is a TOKEN
+       LIST: `contains "dark"` also passes for `darkroom`, and a scenario should never
+       have to spell token boundaries in a regex.
+    3. **`expect.visible` takes a LIST** (web). One expectation, several role+name
+       targets, one check each, and a miss names WHICH target was missing. The
+       motivating claim — the graph canvas's three icon buttons surviving a reload —
+       is one claim, and their accessible names are `aria-label`s that never reach the
+       page's text, so neither a text matcher nor three separate steps could state it.
+       The single-object form is unchanged.
+    4. **`until: { marker }` on a `run` step** (cli). Run until that line appears in
+       what the command writes, then terminate the child and settle the step on the
+       output so far. This is G87: `truecourse dashboard` (console mode) and
+       `dashboard logs` hold the terminal by design, so before this the ONLY outcome
+       available to them was the whole budget spent and a SIGKILL, reported as an
+       infrastructure error that stops the scenario — which is why
+       `open-the-dashboard-and-find-your-way-around` had to put its console step LAST
+       with seven milestones riding on it red-by-timeout. A marker that never appears
+       is a FAIL naming it (the same reading an unasked prompt earns), never a
+       timeout; `expect.exit` beside `until` is refused at load, because a step the
+       runner stops has no exit code of its own. Works on pipes and on a pty, and both
+       marker features (this and the prompt-keyed answers) now read the child's output
+       through one module, `guard-runner/src/marker.ts`.
+    5. **`history: back | forward`** (web). The browser's own two buttons, a verb on
+       the same footing as navigate/click/fill — the web verb set is closed at five
+       now. The traversal's return value is deliberately ignored: a same-document
+       (single-page) Back completes without a navigation response, which is exactly the
+       case the verb exists for, and what the move DID is the expectation's business.
+       The claim "browser Back and Forward move through the views" was previously
+       authored as re-opening the earlier address, which proves that a link works.
+
+    **Fingerprint discipline.** `until` is added to a new `GuardRunStepObjectSchema`
+    (the runner's `run` step) and NOT to `GuardStepObjectSchema`, which
+    `guard-generator` extends for the scenario schema it embeds in the authoring
+    prompt — the `patch` precedent applied to a field. Verified after the change:
+    `GENERATE_PROMPT_FINGERPRINT` is still `1ee6cde76c89e1d9` and
+    `GENERATE_API_PROMPT_FINGERPRINT` still `244fc34ecb318a03`, so no author cache
+    entry is invalidated and no flow is re-authored. Flow fingerprints (milestone
+    composition) and interface fingerprints (an interface's own steps) never folded
+    scenario step content, so neither moves either.
+
+    **As built.** Schemas + rendering: `packages/shared/src/guard/web-steps.ts`,
+    `cli-steps.ts`, `step-actuals.ts` (the web check subject enum gains `state` |
+    `attribute` | `class`; a step record gains `endedAtMarker`, which the actual line
+    renders as "stopped at …" instead of "exit (killed)"). Runner:
+    `guard-runner/src/web/{executor,tokens}.ts`, `drivers/cli-driver.ts`,
+    `{executor,pty,marker,child-kill,evidence,expect}.ts`. Tests:
+    `tests/shared/guard-web-steps.test.ts`, `tests/shared/guard-until-step.test.ts`,
+    `tests/guard-runner/web-driver.test.ts` (eight new cases against the fixture's new
+    `/controls` page), `tests/guard-runner/run-until-marker.test.ts`.

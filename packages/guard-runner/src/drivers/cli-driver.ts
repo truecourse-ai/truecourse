@@ -197,6 +197,9 @@ async function runProcessStep(
   // developer.
   const baseEnv = overlayStepEnv(sandbox.env, stepEnvOverlay)
   const stepEnv = isGitStep(step) ? gitChildEnv(baseEnv, step.identity ?? opts.gitIdentity) : baseEnv
+  // The ready line a HELD command is run until, with its tokens resolved like every
+  // other authored string (a marker can name a `${unique}` id the run minted).
+  const until = isRunStep(step) && step.until ? tok(step.until.marker) : undefined
   const invocation = {
     ...(isGitStep(step) ? { kind: 'git' as const } : {}),
     argv,
@@ -219,6 +222,7 @@ async function runProcessStep(
       env: stepEnv,
       stdin,
       ...(isRunStep(step) && step.tty ? { tty: true } : {}),
+      ...(until !== undefined ? { until } : {}),
       timeoutMs: stepTimeoutMs,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     })
@@ -231,6 +235,30 @@ async function runProcessStep(
     const record = (): EvidenceStep[] => [
       toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, ctx.normText),
     ]
+
+    // The ready line a held command was run UNTIL never appeared. Checked before
+    // the infrastructure branch on purpose: such a step reaches its budget by
+    // construction (the command never returns), so reporting the overrun would
+    // bury the real finding — the documented line was never printed. Same reading,
+    // and the same `fail`, as a prompt-keyed question that was never asked.
+    if (capture.unseenMarker !== undefined) {
+      return {
+        status: 'fail',
+        records: record(),
+        mismatch: {
+          subject: 'output',
+          expected: `the command to print “${capture.unseenMarker}”`,
+          actual: `it never did — the step ran ${
+            capture.timedOut ? `to its ${stepTimeoutMs}ms budget` : 'to the end of the command'
+          } without that line`,
+          detail: [
+            `the step runs until “${capture.unseenMarker}” appears, and it never appeared:`,
+            'that text is not in what the command wrote.',
+          ],
+        },
+        excerpts: outputExcerpts(capture),
+      }
+    }
 
     // Infrastructure problem — never a scenario fail.
     if (capture.spawnError || capture.timedOut || capture.orphanedStdio) {
@@ -556,6 +584,8 @@ function toRecord(
     ...(captured && Object.keys(captured).length > 0 ? { captured } : {}),
     exitCode: capture.exitCode,
     timedOut: capture.timedOut,
+    // Why this step has no exit code: the runner stopped it at its ready line.
+    ...(capture.endedAtMarker !== undefined ? { endedAtMarker: capture.endedAtMarker } : {}),
     spawnError: capture.spawnError,
     rawStdout: capture.stdout,
     rawStderr: capture.stderr,

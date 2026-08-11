@@ -17,7 +17,6 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -31,7 +30,16 @@ import {
   scenarioUnique,
   type ResolvedWebSurface,
 } from '@truecourse/guard-runner'
-import { FIXTURE_BIN, makeTempRepo, rmrf, scenario, specBinds, writeSpecDoc } from './helpers.js'
+import {
+  FIXTURE_BIN,
+  isAlive,
+  makeTempRepo,
+  playwrightBrowserPids,
+  rmrf,
+  scenario,
+  specBinds,
+  writeSpecDoc,
+} from './helpers.js'
 
 /** The fixture web app: two pages AND a JSON surface over the same `notes.txt`. */
 const FIXTURE_WEB_SERVER = fileURLToPath(
@@ -39,25 +47,6 @@ const FIXTURE_WEB_SERVER = fileURLToPath(
 )
 
 const TEST_TIMEOUT_MS = 60_000
-
-/** The chromium processes Playwright has running right now, by pid (see web-driver). */
-function playwrightBrowserPids(): number[] {
-  return execFileSync('ps', ['-Ao', 'pid=,args='])
-    .toString()
-    .split('\n')
-    .filter((line) => line.includes('/ms-playwright/') && line.includes('--user-data-dir='))
-    .map((line) => Number(line.trim().split(/\s+/)[0]))
-    .filter((pid) => Number.isInteger(pid))
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
 
 /** A repo whose recipe runs `relkit` and serves the fixture web app. */
 function makeWebRepo(env?: Record<string, string>): string {

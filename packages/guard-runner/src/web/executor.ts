@@ -19,14 +19,21 @@
 import path from 'node:path'
 import type { Locator, Page } from 'playwright-core'
 import {
+  describeWebAttribute,
+  describeWebClass,
   describeWebCommand,
   describeWebExpect,
   describeWebLocator,
+  describeWebSubject,
   isWebClickStep,
   isWebFillStep,
+  isWebHistoryStep,
   isWebNavigateStep,
+  webStateAssertions,
+  webVisibleTargets,
   type GuardWebExpect,
   type GuardWebLocator,
+  type GuardWebState,
   type GuardWebStep,
 } from '@truecourse/shared'
 import { describeTextMatcher, matchTextMatcher, truncate, type ExpectMismatch } from '../expect.js'
@@ -63,7 +70,7 @@ export function webScreenshotFile(stepIndex: number): string {
  * whether it held or not.
  */
 export interface WebCheck {
-  subject: 'url' | 'text' | 'visible'
+  subject: 'url' | 'text' | 'visible' | 'state' | 'attribute' | 'class'
   /** The assertion in full, in the words a mismatch uses. */
   expected: string
   /** What the page had FOR THIS MEMBER — never another member's value. */
@@ -211,6 +218,139 @@ async function awaitTarget(
   }
 }
 
+/**
+ * ONE element, resolved at a GLANCE (no waiting of its own): the members that read
+ * an element's state, attribute or class are evaluated inside the expectation's own
+ * poll loop, so waiting here would be a second, nested wait racing the first.
+ */
+async function resolveOne(
+  page: Page,
+  target: GuardWebLocator,
+  what: string,
+): Promise<{ locator: Locator } | { mismatch: ExpectMismatch }> {
+  const locator = webLocator(page, target)
+  const found = await locator.count().catch(() => 0)
+  if (found === 1) return { locator }
+  return { mismatch: await targetMismatch(page, target, found, what) }
+}
+
+/**
+ * What ONE state assertion read: the state's value as the page exposes it, or
+ * `null` when the page exposes NOTHING for it — which is a real answer, and the one
+ * a control whose position is drawn in colour alone gives.
+ */
+interface StateReading {
+  value: boolean | null
+  /** The page's own answer, in the words the check records. */
+  actual: string
+}
+
+/** `aria-*` state values are a three-valued vocabulary; only two are booleans. */
+function ariaBoolean(raw: string | null): boolean | null {
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return null
+}
+
+/**
+ * Every ARIA state of one element, read in ONE round trip. The `aria-*` attribute
+ * wins where it is present (it is what a screen reader is told); the element's own
+ * state answers for the native controls that carry no ARIA — a checkbox, an
+ * `<option>`, a `disabled` button — because those ARE exposed to a user.
+ */
+async function readElementStates(
+  locator: Locator,
+  target: GuardWebLocator,
+): Promise<Record<GuardWebState, StateReading>> {
+  // The callback runs in the PAGE, which this package has no DOM types for (and
+  // deliberately does not pull in: the runner is a node program). The structural
+  // shape below is erased at compile time, so what is serialized to the browser is
+  // exactly the plain function it reads as.
+  const raw = await locator.evaluate((node) => {
+    const el = node as unknown as {
+      tagName: string
+      type?: string
+      checked?: boolean
+      selected?: boolean
+      getAttribute(name: string): string | null
+      matches(selector: string): boolean
+    }
+    const tag = el.tagName.toLowerCase()
+    return {
+      checked: el.getAttribute('aria-checked'),
+      pressed: el.getAttribute('aria-pressed'),
+      selected: el.getAttribute('aria-selected'),
+      expanded: el.getAttribute('aria-expanded'),
+      disabled: el.getAttribute('aria-disabled'),
+      nativeChecked:
+        tag === 'input' && (el.type === 'checkbox' || el.type === 'radio') ? Boolean(el.checked) : null,
+      nativeSelected: tag === 'option' ? Boolean(el.selected) : null,
+      nativeDisabled: el.matches(':disabled'),
+    }
+  })
+  const who = describeWebLocator(target)
+  /** One state: the ARIA attribute, then the element's own state, then nothing. */
+  const read = (state: GuardWebState, attr: string | null, native: boolean | null): StateReading => {
+    if (attr !== null) {
+      const value = ariaBoolean(attr)
+      return {
+        value,
+        actual:
+          value === null
+            ? `${who} has aria-${state}="${attr}", which is neither true nor false`
+            : `${who} is ${value ? '' : 'not '}${state}`,
+      }
+    }
+    if (native !== null) return { value: native, actual: `${who} is ${native ? '' : 'not '}${state}` }
+    return {
+      value: null,
+      // The finding a colour-only control earns: nothing about its position is
+      // exposed to anyone — not to this step, and not to a screen reader.
+      actual: `${who} exposes no aria-${state} state`,
+    }
+  }
+  return {
+    checked: read('checked', raw.checked, raw.nativeChecked),
+    pressed: read('pressed', raw.pressed, null),
+    selected: read('selected', raw.selected, raw.nativeSelected),
+    expanded: read('expanded', raw.expanded, null),
+    disabled: read('disabled', raw.disabled, raw.nativeDisabled),
+  }
+}
+
+/**
+ * The subject an `attribute` / `class` member reads: one element, or the DOCUMENT
+ * ELEMENT when the expectation names none. Returns the attribute's raw value
+ * (`null` when the attribute is absent) or the miss that stopped it.
+ */
+async function readAttribute(
+  page: Page,
+  of: GuardWebLocator | undefined,
+  name: string,
+): Promise<{ value: string | null } | { mismatch: ExpectMismatch }> {
+  if (!of) {
+    // `document.documentElement` — the one element with no role and no name, and
+    // the one a page keeps its theme, its locale and its feature flags on.
+    const value = await page
+      .evaluate((attr: string) => {
+        const doc = (globalThis as unknown as {
+          document: { documentElement: { getAttribute(n: string): string | null } }
+        }).document
+        return doc.documentElement.getAttribute(attr)
+      }, name)
+      .catch(() => null)
+    return { value }
+  }
+  const resolved = await resolveOne(page, of, `the ${name} of`)
+  if ('mismatch' in resolved) return resolved
+  return { value: await resolved.locator.getAttribute(name).catch(() => null) }
+}
+
+/** A class attribute read as what it is: a list of tokens. */
+function classTokens(value: string | null): string[] {
+  return (value ?? '').split(/\s+/).filter((token) => token.length > 0)
+}
+
 /** What one pass over a web expectation saw: every member, and the first miss. */
 interface WebObservation {
   checks: WebCheck[]
@@ -219,8 +359,10 @@ interface WebObservation {
 }
 
 /**
- * Evaluate a web expectation ONCE, in a fixed order (address, then text, then
- * presence). EVERY declared member is evaluated — a member that holds must never
+ * Evaluate a web expectation ONCE, in a fixed order: address, text, presence (each
+ * target in turn), ARIA state, attribute, class — the order they were added, so a
+ * step that asserted two things before the observation channels existed still fails
+ * on the same one. EVERY declared member is evaluated — a member that holds must never
  * end the pass, or a step asserting an address and a page's words would go green on
  * the address alone — and the FIRST miss is the step's failure, which is the cli
  * `evaluateExpect` contract: one deterministic failure per step, whichever driver
@@ -277,8 +419,9 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
       )
     }
   }
-  if (expect.visible) {
-    const target = expect.visible
+  // EVERY presence target, one check each — a list is several assertions, not one,
+  // so a toolbar that lost a single button says WHICH one.
+  for (const target of webVisibleTargets(expect.visible)) {
     const expected = `${describeWebLocator(target)} is visible`
     const locator = webLocator(page, target)
     const found = await locator.count().catch(() => 0)
@@ -296,6 +439,123 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
           actual: found === 1 ? `${describeWebLocator(target)} is on the page but not visible` : miss.actual,
         },
         miss,
+      )
+    }
+  }
+  if (expect.state) {
+    const target = expect.state
+    const assertions = webStateAssertions(target)
+    const resolved = await resolveOne(page, target, 'the state of')
+    if ('mismatch' in resolved) {
+      // The element itself is missing: every state it was going to be asked about
+      // gets the same honest answer, and the target miss is the failure.
+      for (const { state, expected } of assertions) {
+        record(
+          {
+            subject: 'state',
+            expected: `${describeWebLocator(target)} is ${expected ? '' : 'not '}${state}`,
+            actual: resolved.mismatch.actual,
+          },
+          resolved.mismatch,
+        )
+      }
+    } else {
+      const readings = await readElementStates(resolved.locator, target).catch(() => null)
+      for (const { state, expected } of assertions) {
+        const wanted = `${describeWebLocator(target)} is ${expected ? '' : 'not '}${state}`
+        const reading = readings?.[state]
+        const ok = reading !== undefined && reading.value === expected
+        const actual = reading?.actual ?? `${describeWebLocator(target)} could not be read`
+        record(
+          { subject: 'state', expected: wanted, actual },
+          ok
+            ? null
+            : {
+                subject: 'state',
+                expected: wanted,
+                actual,
+                detail: [
+                  `expected ${wanted} at ${pageAddress(page)}`,
+                  actual,
+                  ...(reading?.value === null
+                    ? [
+                        'a state nothing exposes cannot be observed by this step, by a screen reader, ' +
+                          'or by anything but a sighted reader of the pixels.',
+                      ]
+                    : []),
+                  '--- visible page text ---',
+                  await readVisibleText(page),
+                ],
+              },
+        )
+      }
+    }
+  }
+  if (expect.attribute) {
+    const attribute = expect.attribute
+    const expected = describeWebAttribute(attribute)
+    const read = await readAttribute(page, attribute.of, attribute.name)
+    if ('mismatch' in read) {
+      record({ subject: 'attribute', expected, actual: read.mismatch.actual }, read.mismatch)
+    } else {
+      const subject = describeWebSubject(attribute.of)
+      const actual =
+        read.value === null
+          ? `${subject} has no ${attribute.name} attribute`
+          : `${subject}’s ${attribute.name} was ${JSON.stringify(read.value)}`
+      let miss: ExpectMismatch | null = null
+      if (attribute.present !== undefined && (read.value !== null) !== attribute.present) {
+        miss = { subject: 'attribute', expected, actual, detail: [`expected ${expected}`, actual] }
+      }
+      if (!miss && attribute.value) {
+        // A matcher on an ABSENT attribute compares against the empty string, which
+        // would let `contains ""` pass on an element that carries nothing. Say what
+        // is actually the case instead.
+        miss =
+          read.value === null
+            ? { subject: 'attribute', expected, actual, detail: [`expected ${expected}`, actual] }
+            : matchTextMatcher(
+                'attribute',
+                `${subject}’s ${attribute.name}`,
+                attribute.value,
+                read.value,
+              )
+      }
+      record({ subject: 'attribute', expected, actual }, miss)
+    }
+  }
+  if (expect.class) {
+    const cls = expect.class
+    const expected = describeWebClass(cls)
+    const read = await readAttribute(page, cls.of, 'class')
+    if ('mismatch' in read) {
+      record({ subject: 'class', expected, actual: read.mismatch.actual }, read.mismatch)
+    } else {
+      const subject = describeWebSubject(cls.of)
+      const tokens = classTokens(read.value)
+      const actual =
+        tokens.length === 0
+          ? `${subject} has no classes`
+          : `${subject}’s classes are ${tokens.map((t) => `“${t}”`).join(', ')}`
+      const wrong =
+        (cls.has !== undefined && !tokens.includes(cls.has)) ||
+        (cls.absent !== undefined && tokens.includes(cls.absent))
+      record(
+        { subject: 'class', expected, actual },
+        wrong
+          ? {
+              subject: 'class',
+              expected,
+              actual,
+              detail: [
+                `expected ${expected} at ${pageAddress(page)}`,
+                actual,
+                // The trap this member exists to close: `contains "dark"` on the raw
+                // class attribute also passes for `darkroom`.
+                'a class assertion matches whole TOKENS, the way `classList.contains` does.',
+              ],
+            }
+          : null,
       )
     }
   }
@@ -361,6 +621,14 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
       const target = await awaitTarget(page, step.fill, 'to fill', deadline, opts.signal)
       if ('mismatch' in target) mismatch = target.mismatch
       else await target.locator.fill(step.value, { timeout: Math.max(1, deadline - Date.now()) })
+    } else if (isWebHistoryStep(step)) {
+      // The RETURN VALUE is deliberately ignored. A same-document traversal — every
+      // Back in a single-page app — completes without a navigation response, and
+      // treating that `null` as a failure would refuse the very case this verb was
+      // added for. What the move DID is the expectation's business.
+      const options = { waitUntil: 'domcontentloaded' as const, timeout: timeoutMs }
+      if (step.history === 'back') await page.goBack(options)
+      else await page.goForward(options)
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)

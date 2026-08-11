@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -75,6 +76,53 @@ export function makeTempRepo(): string {
 
 export function rmrf(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true })
+}
+
+// --- Orphan checks: the browsers THIS test process started -------------------
+
+/**
+ * The chromium processes Playwright has running right now that DESCEND FROM THIS
+ * PROCESS, by pid. Read from the OS, not from our own bookkeeping — the point of an
+ * orphan check is to distrust the bookkeeping.
+ *
+ * A browser Playwright launched is the only thing on the machine whose argv carries
+ * both the ms-playwright cache path and a `--user-data-dir`; the ANCESTRY filter is
+ * what makes the answer this file's rather than the machine's. Vitest runs test
+ * files in parallel workers, so a sibling suite's browser is live at the same time
+ * and looks identical in `ps` — an unfiltered scan reports it as an orphan of
+ * whichever file happened to look.
+ */
+export function playwrightBrowserPids(): number[] {
+  const parents = new Map<number, number>()
+  const browsers: number[] = []
+  for (const line of execFileSync('ps', ['-Ao', 'pid=,ppid=,args=']).toString().split('\n')) {
+    const row = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+    if (!row) continue
+    const pid = Number(row[1])
+    parents.set(pid, Number(row[2]))
+    if (row[3].includes('/ms-playwright/') && row[3].includes('--user-data-dir=')) browsers.push(pid)
+  }
+  const ours = (pid: number): boolean => {
+    // Walk to init; the bound is only there so a malformed table cannot loop.
+    for (let at = pid, hops = 0; at > 1 && hops < 64; hops++) {
+      const parent = parents.get(at)
+      if (parent === undefined) return false
+      if (parent === process.pid) return true
+      at = parent
+    }
+    return false
+  }
+  return browsers.filter(ours)
+}
+
+/** True while the process is alive (signal 0 probes without delivering anything). */
+export function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Write a recipe.json whose entry invokes the fixture CLI, plus the shared spec doc. */

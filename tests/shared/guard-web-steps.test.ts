@@ -22,9 +22,12 @@ import {
   isWebClickStep,
   isWebExpectStep,
   isWebFillStep,
+  isWebHistoryStep,
   isWebNavigateStep,
   isWebStep,
   stepCaptureNames,
+  webStateAssertions,
+  webVisibleTargets,
   type GuardSandboxStep,
   type GuardWebStep,
 } from '@truecourse/shared'
@@ -87,6 +90,152 @@ describe('web step schema', () => {
 
   it('an assert-only step must actually assert', () => {
     expect(() => GuardWebStepSchema.parse({ driver: 'web' })).toThrow()
+  })
+})
+
+describe('the accessible-state matcher', () => {
+  it('asserts an ARIA state on a role + name target', () => {
+    const parsed = GuardWebExpectSchema.parse({
+      state: { role: 'tab', name: 'Home', selected: true },
+    })
+    expect(parsed.state?.role).toBe('tab')
+    expect(webStateAssertions(parsed.state!)).toEqual([{ state: 'selected', expected: true }])
+  })
+
+  it('carries several states of one element, in a fixed order', () => {
+    const parsed = GuardWebExpectSchema.parse({
+      state: { role: 'button', name: 'Filters', expanded: false, disabled: false, pressed: true },
+    })
+    expect(webStateAssertions(parsed.state!)).toEqual([
+      { state: 'pressed', expected: true },
+      { state: 'expanded', expected: false },
+      { state: 'disabled', expected: false },
+    ])
+  })
+
+  it('needs at least one state, and knows only the five', () => {
+    expect(() => GuardWebExpectSchema.parse({ state: { role: 'tab', name: 'Home' } })).toThrow()
+    expect(() =>
+      GuardWebExpectSchema.parse({ state: { role: 'tab', name: 'Home', highlighted: true } }),
+    ).toThrow()
+    expect(() =>
+      GuardWebExpectSchema.parse({ state: { role: 'tab', name: 'Home', selected: 'yes' } }),
+    ).toThrow()
+  })
+
+  it('reads the way a failure quotes it', () => {
+    expect(describeWebExpect({ state: { role: 'switch', name: 'LLM rules', checked: true } })).toBe(
+      'switch “LLM rules” is checked',
+    )
+    expect(describeWebExpect({ state: { role: 'tab', name: 'Home', selected: false } })).toBe(
+      'tab “Home” is not selected',
+    )
+  })
+})
+
+describe('the attribute and class matchers', () => {
+  it('reads an attribute of the DOCUMENT ELEMENT when no element is named', () => {
+    const parsed = GuardWebExpectSchema.parse({
+      attribute: { name: 'data-theme', value: { equals: 'dark' } },
+    })
+    expect(parsed.attribute?.of).toBeUndefined()
+    expect(describeWebExpect(parsed)).toBe('the document element’s data-theme is “dark”')
+  })
+
+  it('scopes to a role + name element with `of`', () => {
+    const parsed = GuardWebExpectSchema.parse({
+      attribute: { of: { role: 'button', name: 'Filters' }, name: 'data-state', value: { equals: 'open' } },
+    })
+    expect(parsed.attribute?.of?.name).toBe('Filters')
+    expect(describeWebExpect(parsed)).toBe('button “Filters”’s data-state is “open”')
+  })
+
+  it('asserts an attribute is present or absent, whatever its value', () => {
+    expect(GuardWebExpectSchema.parse({ attribute: { name: 'hidden', present: false } }).attribute?.present).toBe(
+      false,
+    )
+    expect(describeWebExpect({ attribute: { name: 'hidden', present: false } })).toBe(
+      'the document element has no hidden attribute',
+    )
+  })
+
+  it('an attribute assertion must assert something', () => {
+    expect(() => GuardWebExpectSchema.parse({ attribute: { name: 'class' } })).toThrow()
+    expect(() => GuardWebExpectSchema.parse({ attribute: { value: { equals: 'x' } } })).toThrow()
+  })
+
+  it('a class assertion names a TOKEN — the whole point of not using `contains` on class', () => {
+    const parsed = GuardWebExpectSchema.parse({ class: { has: 'dark' } })
+    expect(parsed.class?.has).toBe('dark')
+    expect(describeWebExpect(parsed)).toBe('the document element has class “dark”')
+    expect(describeWebExpect({ class: { of: { role: 'tab', name: 'Home' }, absent: 'dark' } })).toBe(
+      'tab “Home” does not have class “dark”',
+    )
+    expect(() => GuardWebExpectSchema.parse({ class: { of: { role: 'tab', name: 'Home' } } })).toThrow()
+  })
+
+  it('an uncompilable regex in an attribute value is caught before a browser is paid for', () => {
+    const bad = firstInvalidMatchPattern([
+      { driver: 'web', expect: { attribute: { name: 'class', value: { matches: 'a[0-9' } } } },
+    ] as GuardSandboxStep[])
+    expect(bad?.step).toBe(1)
+    expect(bad?.where).toBe('expect.attribute.value')
+  })
+})
+
+describe('several `visible` targets in one expectation', () => {
+  it('takes a LIST as well as a single locator', () => {
+    const one = GuardWebExpectSchema.parse({ visible: { role: 'button', name: 'Fit view' } })
+    expect(webVisibleTargets(one.visible)).toEqual([{ role: 'button', name: 'Fit view' }])
+
+    const many = GuardWebExpectSchema.parse({
+      visible: [
+        { role: 'button', name: 'Fit view' },
+        { role: 'button', name: 'Zoom in' },
+        { role: 'button', name: 'Zoom out' },
+      ],
+    })
+    expect(webVisibleTargets(many.visible).map((t) => t.name)).toEqual(['Fit view', 'Zoom in', 'Zoom out'])
+    expect(webVisibleTargets(undefined)).toEqual([])
+  })
+
+  it('an empty list asserts nothing and is refused', () => {
+    expect(() => GuardWebExpectSchema.parse({ visible: [] })).toThrow()
+  })
+
+  it('renders every target', () => {
+    expect(
+      describeWebExpect({
+        visible: [
+          { role: 'button', name: 'Zoom in' },
+          { role: 'button', name: 'Zoom out' },
+        ],
+      }),
+    ).toBe('button “Zoom in” is visible · button “Zoom out” is visible')
+  })
+})
+
+describe('the history verb', () => {
+  it('parses back and forward, and only those', () => {
+    const back = GuardWebStepSchema.parse({ driver: 'web', history: 'back' })
+    const forward = GuardWebStepSchema.parse({ driver: 'web', history: 'forward', expect: { url: { equals: '/' } } })
+    expect([isWebHistoryStep(back), isWebHistoryStep(forward)]).toEqual([true, true])
+    expect(isWebExpectStep(back)).toBe(false)
+    expect(() => GuardWebStepSchema.parse({ driver: 'web', history: 'reload' })).toThrow()
+  })
+
+  it('reads as a user describes it, and rides a mixed step list', () => {
+    expect(describeWebCommand({ driver: 'web', history: 'back' } as GuardWebStep)).toBe('go back')
+    expect(describeWebCommand({ driver: 'web', history: 'forward' } as GuardWebStep)).toBe('go forward')
+    const views = describeGuardScenarioSteps(
+      mixedScenario([
+        { driver: 'web', navigate: '/notes' },
+        { driver: 'web', history: 'back', expect: { url: { equals: '/' } } },
+      ]),
+    )
+    expect(views.map((v) => v.kind)).toEqual(['web', 'web'])
+    expect(views[1].command).toBe('go back')
+    expect(views[1].expectation).toBe('address is “/”')
   })
 })
 

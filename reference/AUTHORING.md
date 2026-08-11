@@ -193,6 +193,26 @@ Scenario rules (format v3):
   hidden text is invisible to it. Matchers are case-sensitive — author
   the case the page shows. A miss that would pass ignoring case names
   itself in the failure ("differs only in letter case").
+- State a page keeps OUTSIDE its text has its own expect members (added
+  2026-08-11, plan item 91) — use them instead of asserting a label that
+  never changes: `state` (an ARIA state — `checked` | `pressed` |
+  `selected` | `expanded` | `disabled` — on a role+name target, for tab
+  strips, switches and disabled controls), `attribute` and `class` (on
+  the document element by default, which is where a theme lives; `class`
+  matches whole TOKENS, so `has: dark` never passes for `darkroom`).
+  A control that exposes NO state fails saying so — that failure is the
+  finding, and it is not to be papered over with a text assertion.
+- `visible` takes a LIST as well as a single locator: several icon
+  buttons that survive one action are ONE claim, and their accessible
+  names (`aria-label`s) never appear in the page text.
+- Browser Back and Forward are a verb: `- driver: web` + `history: back`
+  (or `forward`). Re-navigating to the old address proves a link, not
+  the history — do not author the one for the other.
+- A command that never returns (a console-mode server, a log follower)
+  is a `run` step with `until: { marker: … }`: the runner stops it the
+  moment that line appears and evaluates the expect against the output so
+  far. Such a step asserts output, never `exit` (the schema refuses it),
+  and it no longer has to be the flow's last step.
 - Milestone-tag each proving step with the claim ids it proves (a step
   may prove several).
 - Every step either proves a claim or prepares for a later claim step.

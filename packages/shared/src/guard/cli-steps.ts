@@ -221,7 +221,71 @@ export function promptKeysNeedATerminal(
   }
 }
 
-/** The `run` step's FIELDS, before {@link promptKeysNeedATerminal} is applied. */
+/**
+ * THE HELD-COMMAND TERMINATOR: run until this line appears, then stop the child.
+ *
+ * A documented command that does not return is unreachable otherwise. `truecourse
+ * dashboard` in console mode holds the terminal by design; a log follower follows;
+ * a dev server serves. A step can only await EXIT, so each of them spends its whole
+ * budget and is SIGKILLed, and the runner reports that — correctly, for a step that
+ * declared nothing — as an infrastructure error that stops the scenario. The claim
+ * ("it starts and says where it is listening") is perfectly observable; only the
+ * command's ending was ever the problem.
+ *
+ * So the step names the line it is waiting for. The runner watches what the command
+ * writes, and the moment the marker appears it terminates the child and settles the
+ * step on the output produced SO FAR — the expectation is evaluated against exactly
+ * that, and a pass is a pass. Nothing here is a timer: the marker is observable
+ * state, the same discipline the web driver's waiting follows.
+ *
+ * The marker is matched against what the PROGRAM wrote, with the terminal's own
+ * doing removed (ANSI escapes stripped, `\r\n` folded to `\n`) — the same text an
+ * `expect.output` matcher sees, and the same rule {@link GuardTtyAnswerSchema}'s
+ * marker follows. Keep it short: one distinctive fragment of the line.
+ *
+ * A marker that NEVER appears is the step FAILING with the marker as its
+ * expectation — the same verdict an unasked prompt earns, and for the same reason:
+ * the line the docs promise was not printed, which is a finding about the program,
+ * not about the machine.
+ */
+export const GuardStepUntilSchema = z
+  .object({
+    /** The line's stable substring — what ends the step when it appears. */
+    marker: z.string().min(1),
+  })
+  .strict()
+export type GuardStepUntil = z.infer<typeof GuardStepUntilSchema>
+
+/**
+ * The rule the step object cannot state field-by-field: a step the runner stops on
+ * purpose has NO exit code of its own — the code it reports is the signal that
+ * stopped it — so asserting one could only ever be a lie. Assert the output.
+ */
+export function markerTerminationHasNoExit(
+  step: { until?: GuardStepUntil; expect?: GuardExpect },
+  ctx: z.RefinementCtx,
+): void {
+  if (step.until !== undefined && step.expect?.exit !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'a step that runs `until` a marker is terminated by the runner, so it has no exit code of its own — ' +
+        'assert what it printed (`expect.output` / `expect.stdout`) instead',
+      path: ['expect', 'exit'],
+    })
+  }
+}
+
+/**
+ * The `run` step's FIELDS, before {@link promptKeysNeedATerminal} is applied.
+ *
+ * THE AUTHORING BASE, deliberately: `@truecourse/guard-generator` extends exactly
+ * this object for the scenario schema it embeds in the authoring prompt, so every
+ * field here is prompt bytes and any change to it rolls `GENERATE_PROMPT_FINGERPRINT`
+ * and re-authors every cli flow in the corpus. Runner-only vocabulary is added to
+ * {@link GuardRunStepObjectSchema} below instead — the `patch` precedent, applied to
+ * a field rather than a step kind.
+ */
 export const GuardStepObjectSchema = z
   .object({
     /** Argv appended to the recipe entrypoint. May be empty (run the bare entry). */
@@ -265,8 +329,24 @@ export const GuardStepObjectSchema = z
   })
   .strict()
 
+/**
+ * The `run` step as the RUNNER accepts it: the authoring base plus the vocabulary a
+ * model never writes. `until` is hand-authored — it says how a command that never
+ * returns is ended, which is knowledge about a specific documented command, not
+ * something an authoring pass can infer — and keeping it out of
+ * {@link GuardStepObjectSchema} is what keeps the authoring prompt (and every
+ * author cache key built from it) byte-identical.
+ */
+export const GuardRunStepObjectSchema = GuardStepObjectSchema.extend({
+  /** Run until this line appears, then stop the child. See {@link GuardStepUntilSchema}. */
+  until: GuardStepUntilSchema.optional(),
+})
+
 /** ONE `run` step — the program under test, invoked with argv and scripted input. */
-export const GuardStepSchema = GuardStepObjectSchema.superRefine(promptKeysNeedATerminal)
+export const GuardStepSchema = GuardRunStepObjectSchema.superRefine((step, ctx) => {
+  promptKeysNeedATerminal(step, ctx)
+  markerTerminationHasNoExit(step, ctx)
+})
 
 /**
  * Invoke `git` in the sandbox — the ONE program besides the entrypoint a scenario
@@ -621,7 +701,12 @@ export function describePatchOperations(ops: GuardPatchOperations): string {
 
 /** What a cli step DOES, in the words a reader needs — one line per step kind. */
 export function describeCliCommand(step: GuardCliStep): string {
-  if (isRunStep(step)) return runArgvWords(step.run).join(' ')
+  if (isRunStep(step)) {
+    const argv = runArgvWords(step.run).join(' ')
+    // A held command's ending is part of what the step DOES: a reader scanning the
+    // list must see that this row stops itself rather than waiting for an exit.
+    return step.until ? `${argv} (until “${step.until.marker}”)` : argv
+  }
   if (isGitStep(step)) return `git ${step.git.join(' ')}`
   if (isWriteStep(step)) return `write ${Object.keys(step.write).join(', ')}`
   if (isPatchStep(step)) {
