@@ -4171,3 +4171,278 @@ between them.
 | Interface mapping | G72 (produce the relation) |
 | dashboard view work | G72 (render the relation) |
 | Guard Generate | G81 |
+
+### G82. Interface diagnostics still have no store home (CLI half of G78)
+**What:** An interface carries no diagnostics field, by design (`InterfaceContractSchema`: “no doc-versus-code diagnostics — discrepancies the mapper finds are run reporting, never stored interface data”), while plan §7.5's amendment says diagnostics live per-journey as `{kind, subject, detail, right?}`. The twelve findings of this pass therefore have no home in the artifact and ride in this fragment's `diagnostics[]`. Same shape as the already-recorded G78 (web mapper diagnostics have no store home), now confirmed for the CLI half too.
+**Owner:** Guard Setup (§7.5 — give diagnostics the per-journey home the plan amendment describes)
+
+### G83. A state id matches by equality only — one interface cannot serve several starting worlds
+**What:** A state id matches by EQUALITY only, and an interface names exactly one `startingState`, so a task invocable from several worlds cannot say so. Concrete losses in this area: the header's “Analyze” click is one interface but three tasks (first analysis from `repo-no-analysis-open`, re-analysis from `repo-report-open`, diff check from `diff-mode-on`); returning to the Home tab is one interface reachable from all six tab states; clearing a filter chip is one interface per filter but reachable from any combination of the others. A second entry for the alternatives is impossible — `interfaceFingerprint` folds only type + entry + steps, so two tasks that differ only in the world they assume are the same identity.
+**Owner:** Guard Setup (interface schema — starting-state sets or per-world tasks with distinct identity)
+
+### G84. No step for a native browser dialog (`window.confirm`)
+**What:** There is no step for a NATIVE browser dialog. `web/delete-a-past-analysis` activates `button "Delete analysis"`, but the deletion only happens after a `window.confirm` that no `activate`/`input` target can name (it is not in the page's accessibility tree). The same applies to the repository-delete confirm on the home page.
+**Owner:** Web Driver
+
+### G85. No way to record a step outcome deferred to a socket push
+**What:** A web interface cannot say that a step's outcome is DEFERRED to a server push. `web/run-an-analysis-from-the-header` ends at `analysis-running`, but whether the next thing on screen is the progress card, the stash dialog or the LLM dialog is decided by socket events (`analysis:stash-confirm-request`, `analysis:llm-estimate`), and nothing in the schema carries that fan-out — the three successor states are authored as separate interfaces with no way to say what selects between them.
+**Owner:** Web Driver (with Guard Setup for the schema half)
+
+### G86. No keyboard verb in the step vocabulary — the documented `Escape` cancellation is unauthorable
+**What:** The step vocabulary has no verb for a keyboard-only interaction, so the documented `Escape` cancellation of both dialogs (running-analyses.mdx: “Closing the dialog (the X, the backdrop, or `Escape`) cancels the run”) is unauthorable; only the labelled buttons are.
+**Owner:** Web Driver
+
+#### Appendix to G82 — the twelve diagnostics of the dashboard cli+web interface wave (preserved verbatim; the doc-bug / product-bug feed)
+
+**D1. cli/dashboard — the run-mode question**
+- code: The question is gated on `fs.existsSync(~/.truecourse/config.json)` (`runDashboard`, tools/cli/src/commands/dashboard.ts:209-225). That file is ALSO where the LLM first-run wizard saves its answer (`saveTransportSelection` → `writeGlobalConfig`, `getGlobalConfigPath()` = `~/.truecourse/config.json`), and the wizard runs in the program's `preAction` hook — before every command's action, including this one. So on an interactive machine the file always exists by the time `runDashboard` looks: the question never arrives, and `readConfig().runMode` falls through to the `console` default. It can only appear when the file is absent at that moment — `TRUECOURSE_LLM_TRANSPORT` set (wizard skipped, nothing written), a deleted config, or `--reconfigure`.
+- docs: dashboard/overview.mdx:28 — “The first `truecourse dashboard` asks whether to run in this terminal (console) or as a background service; `--reconfigure` re-asks later.”
+- verdict: Code wins for grammar: the prompt fact is authored with the real condition (`no ~/.truecourse/config.json yet (or --reconfigure), no --service/--console, stdin is a TTY`). Not resolved here — this is a product-bug candidate (the documented first-run choice is unreachable on a normal machine), for the user to rule on.
+
+**D2. cli/dashboard-logs — “service mode only”**
+- code: `runDashboardLogs` short-circuits ONLY when the health endpoint answers and no service is running (console mode); in every other case — service running, service stopped, nothing running at all — it tails `~/.truecourse/logs/*.log` and, with no live log file, prints “No log files found. Is the service running?”.
+- docs: reference/cli.mdx:100 and dashboard/overview.mdx:24 — “Tail dashboard logs (service mode only)”.
+- verdict: Code wins: the command is not service-only; it is console-mode-only-excluded. Recorded, not resolved.
+
+**D3. cli/dashboard — `--service` with `--console`**
+- code: tools/cli/src/index.ts:113-116 prints `error: --service and --console are mutually exclusive` on STDERR and exits 1 before any other work.
+- docs: reference/cli.mdx:99 and dashboard/overview.mdx:17-26 list all three flags and never state the exclusion or its error path.
+- verdict: Code wins; the exclusion and its exit-1 path are authored on the grammar and the io facts. Doc gap, unresolved.
+
+**D4. cli/dashboard — console mode while a service runs**
+- code: `runDashboard` refuses with exit 1 (“A dashboard service is already installed and running. Stop and remove it first: `truecourse dashboard uninstall`, then rerun `truecourse dashboard`.”) whenever the resolved mode is not `service` and an installed service is running.
+- docs: No dashboard page mentions this refusal; `--console` is documented only as “Run in this terminal (skips the mode prompt)”.
+- verdict: Code wins; recorded as an authored exit fact. Doc gap, unresolved.
+
+**D5. cli/dashboard — the service→console fallback**
+- code: A throw out of `runServiceMode` is caught: the CLI prints “Service mode failed: …” and “Falling back to console mode.”, runs console mode instead, and persists `runMode: "console"`.
+- docs: Undocumented on every page.
+- verdict: Code wins; authored as output facts. Doc gap, unresolved.
+
+**D6. cli/dashboard-uninstall — what it actually does**
+- code: The command reads `config.runMode` FIRST and returns doing nothing (“Dashboard isn't installed as a service — nothing to uninstall.”) whenever it is not `service` — even if a service really is installed. On the other paths it always writes `runMode: "console"` back to `~/.truecourse/config.json`.
+- docs: dashboard/overview.mdx:25 — “truecourse dashboard uninstall  # Remove the background service”. The config flip is undocumented, and so is the config-driven no-op.
+- verdict: Code wins; the command's own description (“…and revert to console mode”) is the accurate one. Recorded, unresolved — the no-op-on-stale-config path is a product-bug candidate.
+
+**D7. web — the Graphs tab before the first analysis**
+- code: RepoPage's Graphs empty state reads “No graph data” / “Run an analysis to generate the architecture graph.” in the community build and names no button; only the enterprise branch says “No analysis yet”.
+- docs: dashboard/overview.mdx:74 — “Home shows **No analysis yet** and points at the **Analyze** button …; Graphs offers the same prompt”.
+- verdict: Code wins: the two empty states share neither wording nor a call to action. Recorded, unresolved.
+
+**D8. web — the Rules panel entry point**
+- code: The control is a Sheet trigger whose accessible name is “Browse Rules” (both `aria-label` and `title`); a Shield icon is its only visible content.
+- docs: dashboard/violations.mdx — “The shield button at the right of the filter row opens the **Rules** panel”.
+- verdict: Code wins; the existing `web/reenable-rule-from-rules-panel` already targets `button "Browse Rules"`. Same drift the web wave logged on 2026-08-10 (reference/transform-gaps.md); re-confirmed, still unresolved.
+
+**D9. web — the severity dropdown's value set**
+- code: `SeverityDropdown` offers `all, critical, high, medium, low` — an “All severities” reset item the docs omit, and no `info` entry, although violation cards render an `info` severity (and the CLI's `--severity` accepts it).
+- docs: dashboard/violations.mdx — “**Severity** is a dropdown of Critical, High, Medium and Low, each with a live count.”
+- verdict: Code wins. Two findings: the docs omit the reset item, and `info` findings cannot be filtered for in the dashboard at all. Recorded, unresolved.
+
+**D10. web — when Analyze is hidden**
+- code: `onAnalyze` is withheld (so the button does not render) on FOUR conditions: not the Code Analysis section, viewing a past run, the repository is not a git repo, and a repo-load error.
+- docs: dashboard/running-analyses.mdx:37-43 lists three (past analysis, not a git repository, Spec Guard section).
+- verdict: Code wins; the repo-error condition is undocumented. Recorded, unresolved.
+
+**D11. web — “where you are is written into the URL”**
+- code: `?section=`, `?tab=`, `?file=`, `?flow=` and `?view=diff` are all URL-backed, but the selected past run (`selectedAnalysisId`, ViewModeContext) and the open database (`activeDbId`, OpenTabsContext) are plain component state — a link cannot reopen a past-run view or an open schema, and both are lost on reload.
+- docs: dashboard/overview.mdx:76-78 — “Where you are is written into the URL, so a link reopens the same view”, then lists exactly the params that are backed.
+- verdict: Code wins on the params; the general sentence over-promises for the two unlisted selections. Recorded, unresolved.
+
+**D12. web — unlocatable interactive elements (locator policy, plan §10.3)**
+- code: These real interactions have no role and no accessible name, so no role+name step can be authored for them: the file-tree row and its folder chevron (`<div onClick>` / `<span onClick>`, components/files/FileTree.tsx), the pie slice and the severity bar (recharts SVG paths with `onClick`), the open-item tab strip and its close buttons (`<div onClick>` + icon-only `<button>` with no label), the header back link, and the graph's own node bodies (custom React Flow nodes whose ARIA this pass did not establish).
+- docs: The docs promise all of them: violations.mdx (“Click a slice…”, “Click a bar…”), files-flows-databases.mdx (“Click a file to preview it, double-click to pin it”, “Click a folder to expand or collapse it”), architecture-graph.mdx (“Clicking a service, module, function or database node zooms to it”).
+- verdict: Not a doc bug — a product accessibility gap that costs the corpus coverage. The file-open task is authored through the shareable URL instead (`web/open-a-file-in-the-code-viewer`); the chart drill-downs are authored only where a role exists (`columnheader`/`row` in Top Offenders and Code Hotspots); the graph node click is NOT authored. Recorded, unresolved.
+
+#### Authored decisions of the same wave (recorded per AUTHORING §2)
+
+1. No Phase-0 divergence exists in the `cli/dashboard` family: §5 deletes the agent transport, the scenario Story mode and the externals/api coupling, and this family exposes none of them. Its one inherited surface, the first-run transport question, already offers exactly the two transports Phase 0 keeps (`Claude Code | API`, `runWizard`), so its `answerHint` is authored as the code has it, not narrowed.
+2. Slate item 2 (“run the dashboard as a background service”) adds NO web interface: the service is entirely a CLI surface (`cli/dashboard --service`, `cli/dashboard-status`, `cli/dashboard-stop`, `cli/dashboard-logs`, `cli/dashboard-uninstall`), and what the browser then shows is the already-catalogued `web/open-dashboard-home` / `web/open-repo-report`.
+3. The empty state (slate item 3) is NOT authored as a second click on the home page's repo link: that is the SAME invocation as `web/open-repo-report` (same entry, same step), so a second entry would carry an identical fingerprint. It is authored as the direct-URL task `web/open-an-unanalyzed-repository`, which is a real invocation the product itself performs — `truecourse dashboard` opens `<origin>/repos/<slug>` in the browser (`targetUrlFor`).
+4. `web/run-an-analysis-from-the-header` is authored from `repo-no-analysis-open` because a state id matches by equality only: the same “Analyze” click also starts a re-analysis from `repo-report-open` and a diff check from `diff-mode-on`, and neither can be a second entry (identical fingerprint). Same reason no “return to the Home tab” task is authored — it would have to pick one of the six tab states it can be invoked from. See the state-equality gap below.
+5. `apiEffects` lists only operations that exist in this catalog, which is analyze-area scoped. The repository page ALSO issues `GET /api/repos/{id}/spec/staleness` and `GET /api/repos/{id}/guard/staleness` on every mount; both are out-of-area routes with no api entry, so they are deliberately not listed rather than authored as dangling ids.
+6. The LLM estimate dialog's labels are authored as the NON-staged pair (“Run LLM rules” / “Skip — deterministic rules only”): the analyze path's socket payload (`createSocketLlmEstimateHandler`) carries `{totalEstimatedTokens, tiers, uniqueFileCount, uniqueRuleCount}` and no `stages`, so `LlmEstimateModal` cannot render its staged variant (“Proceed” / “Cancel”) for an analysis. Established from source, not assumed from the docs.
+7. For the integrator, not a change made here: the existing `web/open-repo-report` omits `api/get-api-repos-id-violations-summary` from its `apiEffects`, although `useAnalytics` issues `GET /api/repos/{id}/violations/summary` in the same `Promise.all` as the four analytics calls it does list. The new `web/open-an-unanalyzed-repository` lists all five. `apiEffects` is not fingerprinted, so correcting the existing entry would move no identity — but the existing 60 were left untouched by scope.
+8. Every `apiEffects: []` in this fragment is the established “reaches no server”, verified at the call site: the violation-list filters, the fix-prompt expand/copy, the Top Offenders sort and both drill-downs, the graph fit-view, the schema view toggle, opening the Analyses tab and selecting a past run there (the analyses list is already loaded page-level, and on that tab the violations/graph/flows hooks are all disabled), leaving diff mode, and the two socket-answered dialogs (stash, LLM estimate) which emit `analysis:stash-confirm-response` / `analysis:llm-proceed` and issue no HTTP at all.
+
+### J-index (dashboard flows+interfaces wave). Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Setup | G82 (with §7.5), G83, G85 (schema half) |
+| Web Driver | G84, G85, G86 |
+
+### G87. The sandbox step union has no verb for a LONG-RUNNING process
+**What:** `truecourse dashboard` (console mode) holds the terminal and `dashboard
+logs` follows a file; a `run` step can only await exit, so both exhaust their
+`timeoutMs` and land as INFRASTRUCTURE errors that stop the scenario. The api
+driver already owns the needed verbs (`boot`/`signal`/`logs` with matchers) but
+the sandbox union excludes lifecycle verbs by design (scenario.ts: the served
+surface's lifecycle belongs to the sandbox). Cost, concretely:
+`open-the-dashboard-and-find-your-way-around` had to put the console-mode step
+LAST (7 milestones ride on it red-by-timeout), and
+`run-the-dashboard-as-a-background-service` cannot reach its
+`--reconfigure`/`stop`/`uninstall` steps past the mid-flow `logs` step.
+**Owner:** Guard Run (a lifecycle/background verb for the sandbox union, or
+sandbox-owned dashboard lifecycle like the api driver's).
+
+### G88. The web vocabulary cannot OBSERVE style, motion, input state, or SVG geometry
+**What:** seventeen claim-level gaps recorded in `guard/result.json` (reason
+prefix ``claim `…` ``) trace to missing observation channels: no
+attribute/class/inline-style matcher (theme dark-mode, severity colouring,
+trend delta colour, gutter bars, slice pop-out), no browser-history verb
+(Back/Forward), no drag (the violations divider), no scroll, no clipboard read
+(Copy Fix), no motion observation (graph animations), no hover (edges-on-hover,
+edge dimming), no locator for SVG-geometry targets (recharts donut slices and
+severity bars are bare `<path>`es; React Flow nodes are `role=group` without
+accessible names, the pane a plain div), and no transform on a captured value
+(Code Hotspots renders a basename while the store holds the full path).
+**Owner:** Web Driver (each channel is its own decision; the roles-and-labels
+policy stays the default).
+
+### G89. Dependency registration kinds cannot express a HOST CAPABILITY
+**What:** the new `host-service-session` dependency (the background-service
+flow) is really "this machine grants a capability", but the catalog's
+registration kinds are `env | path | config-dir`, so it rides an opt-in env var.
+The authoring note, verbatim: REGISTRATION-KIND CAVEAT: the catalog's registration kinds are `env` | `path` | `config-dir`, and none of them says "this machine grants a capability". `env` is used here as the closest honest mechanism (an explicit opt-in variable the runner can check and the user can withhold), but a `host-capability` kind — a named capability with a probe — is what this dependency actually is. Recorded as a schema gap rather than papered over.
+**Owner:** Guard Setup (a `capability` registration kind).
+
+### G90. Interface catalog gap: the dirty-tree dialog's SECOND answer has no entry
+**What:** the catalog carries `web/stash-pending-changes-before-a-run` but no
+entry for the other button ("Don't stash — analyze the working tree as-is"),
+which `run-an-analysis-from-the-dashboard` walks to prove the as-is claim; the
+step exists, honestly unlisted in the interface path rather than misdescribed.
+**Owner:** Interface mapping (next interfaces wave authors the sibling task).
+
+#### Product/doc findings of the scenario wave (the feed; not schema gaps)
+
+1. The documented first-run console-vs-service question is unreachable on a
+   normal machine (G82 appendix D1). The scenario wave adds the concrete fix
+   candidate: gate on a `runMode` KEY in `~/.truecourse/config.json`, not on the
+   file's existence — the LLM first-run hook creates that file first.
+2. The trend chart's legend resolves labels by data key and the total-active
+   series is keyed differently, so `Total Active` renders as a swatch with no
+   text. Authored to the doc; expected red.
+3. The file tree renders NO rollup count text, while the doc promises "folders
+   roll up the counts"; recorded as an untestable gap and a doc/UI divergence to
+   rule on.
+4. Top Offenders is EMPTY under every deterministic seed: no deterministic rule
+   attributes a finding to a service or module, so the doc's ranking claims are
+   only reachable with LLM-attributed findings (the two claims ride as
+   blocked-on gaps).
+5. "The first open registers the repository" (overview) is unfalsifiable inside
+   a flow that also needs a stored analysis — every arranging route registers
+   too. Candidate for a later edge flow seeded with a config-only store.
+
+### J-index (dashboard scenario wave). Owning workstream
+
+| workstream | items |
+|---|---|
+| Guard Run | G87 |
+| Web Driver | G88 |
+| Guard Setup | G89 |
+| Interface mapping | G90 |
+
+#### Run classification, 2026-08-11 (the red board, marked)
+
+Every current red/false-green of the two dashboard-area runs, classified. The
+authoring defect found (history flow: cap-blind past-run assertion; unanswered
+LLM modal after the diff-mode Analyze) is FIXED and that flow is green; the rest
+are deliberate reds or engine findings, kept red on purpose:
+
+- `read-a-violation-card-and-silence-its-rule` — PRODUCT BUG, FIXED 2026-08-11:
+  after a rule was disabled the Home badge, donut and trend refreshed but the
+  `active` summary chip (and `stale`/`rate`/`resolved`, same sources) kept the
+  stale count. Root cause: `getResolution()`'s LATEST branch read `LATEST.json`
+  directly, bypassing the shared `readActiveViolationsForAnalysisId` resolver
+  where the `disabledRules` filter lives; `resolved` separately counted refs
+  from disabled rules (ResolvedViolationRef carries no ruleKey — now resolved
+  via the snapshot walk's own `added` rows). Fixed in
+  `apps/dashboard/server/src/services/analytics.service.ts`; pinned by a new
+  case in `tests/dashboard-server/dashboard-routes.test.ts` (fails on the
+  unfixed code) and a controlled Playwright run (chip 31→29→31 tracking the
+  badge; the unfixed bundle reproduces chip=31 vs badge=29). Scenario expected
+  green on the next full run.
+- `read-the-analytics-of-a-run` — PRODUCT BUG (predicted at authoring), FIXED
+  2026-08-11: the trend legend rendered `New`/`Resolved` plus an UNLABELLED
+  swatch. Root cause: `ChartLegendContent` resolves labels by `item.dataKey`
+  (the tooltip prefers `item.name`, which is why only the legend broke), and
+  `TrendChart` registered the total-active series under config key `total`
+  while drawing the Area with `dataKey="active"`. Fixed by keying the config
+  as `active` (matching the dataKey, the convention every other chart follows)
+  in `apps/dashboard/client/src/components/analytics/TrendChart.tsx`; pinned by
+  `tests/dashboard-client/trend-chart-legend.test.tsx` (fails unfixed) and a
+  before/after Playwright run. Scenario's step stays red until the run repeats.
+- NEW FINDING (same component, spotted during the fix, NOT yet fixed):
+  `TrendChart.tsx` computes `active: p.total - p.resolved`, but the server's
+  `total` is already active-only (`new + unchanged`), so resolved findings are
+  subtracted TWICE and the Total Active line plots 0 whenever a run resolves as
+  many findings as remain active (visible in the verification screenshots).
+  Needs its own fix + a claim/scenario check on what the doc promises the trend
+  plots.
+- `explore-the-architecture-graph` — a11y half FIXED 2026-08-11: every graph
+  node now carries `ariaLabel` (React Flow's per-node mechanism; its NodeWrapper
+  is the element with role=group) via `nodeAriaLabel()` in
+  `apps/dashboard/client/src/hooks/useGraph.ts`, pinned by
+  `tests/dashboard-client/graph-node-names.test.ts` and a Playwright run
+  (`group "postgres"`/`"api"`/`"worker"` each resolve; screenshots in the
+  session scratchpad). The unblocked click ADJUDICATES the doc contradiction:
+  clicking a database node switches to the Databases tab and opens the schema
+  (RepoPage.handleNodeSelect intercepts type=database and wins over
+  GraphCanvas.onNodeClick's zoom, which still fires underneath) — so the
+  db-specific sentence is TRUE and the doc bug is the generic click-zooms
+  sentence LISTING database among its node types. Doc fix: drop "database" from
+  the zoom list. Known residue: at modules depth a serviceGroup and its layer
+  can share a name (role locator ambiguous there); services depth is unique.
+- `walk-files-flows-and-databases` — RETRACTED as an engine race, FIXED
+  2026-08-11 as three smaller things. The "read-once expects" diagnosis was
+  wrong: `awaitWebExpect` polls the whole expectation every 100ms until the
+  step deadline, and the "559 chars" was `truncate()`'s 400-char DISPLAY cap
+  (the full text held the entire Flows sidebar — steps 16/17 passed on the
+  same string). The real miss was case: the scenario asserted `api`/`worker`
+  while `innerText` returns what CSS renders, and `FlowList` uppercases its
+  group headings. Fixed by (1) the scenario asserting the rendered case
+  `API`/`WORKER`, (2) the driver naming a case-only miss in its mismatch
+  ("differs only in letter case", with the CSS-renders-the-case why on the
+  web text subject), (3) web text mismatches carrying the full channel width
+  (2000) instead of re-truncating to 400, and (4) an AUTHORING.md rule: web
+  `text` is CSS-rendered text. Scenario is green.
+- `open-the-dashboard-and-find-your-way-around` — FALSE GREEN on the console
+  step: the sandbox serves the dashboard on the fixed port 3001, so the
+  scenario's own `truecourse dashboard` run hit "Port 3001 is already in use"
+  and exited 1 AFTER printing every asserted marker. The port is not
+  runner-allocated (G87's sibling); the "console mode holds the terminal"
+  reality was never observed.
+- seven code-analysis scenarios (`commit-a-baseline…`, `decline…`, `diff-uncommitted…`,
+  `install-the-pre-commit-hook…`, `retune…`, `run-llm-rules-on-every-commit`,
+  `work-from-a-fresh-worktree…`) — ENGINE/DOC DRIFT, investigated 2026-08-11:
+  each fails at `git add .truecourse/config.json` (exit 128, "pathspec did not
+  match"). CORRECTION to this entry's first form: analyze NEVER wrote
+  `config.json` — the file has been write-on-settings-mutation-only since it
+  was introduced (`5f16005c`); the docs' "commit config.json" block (`c433a6cf`)
+  was never true against any engine. The intended fix already exists unmerged:
+  `620b06ff` on `sm/api-wave-stage-3` adds an absent-only `ensureProjectConfig`
+  called from `persistFullAnalysis` ("a completed analyze must leave a
+  config.json next to the baseline it just wrote"), with tests. Restoring that
+  write fixes all seven scenarios and the one falsified claim
+  (`baseline-files-exist-and-are-stageable-after-analyze`) with zero doc edits
+  and zero fingerprint churn.
+- `exclude-generated-and-ignored-files-from-analysis` — ENGINE: findings from
+  excluded files (`generated_helper` camelCase, SELECT *) still listed after the
+  `.truecourseignore` arrangement.
+- `survive-a-file-that-exceeds-the-per-file-budget` — ENGINE DRIFT: no
+  "skipped … bulk.js" message; the run completes silently with 1 violation.
+
+### G91. No web CAPTURE channel, and the hotspots ranking has no API
+**What:** cli and api steps capture values (`stepCaptureNames`) but web steps
+cannot read anything off the page into `${captured:…}` — and the Code Hotspots
+table is ranked CLIENT-SIDE from the unordered `violations/summary` `byFile`
+map, so no JSON path can name the top hotspot either. Against a SUPPLIED
+project the hotspot-row click is therefore unrealizable: the row's accessible
+name (its file) is unknowable at authoring time by every channel the vocabulary
+has. Cost: `dashboard-violations-code-hotspot-row-scopes-the-list` rides as a
+blocked-on gap in `guard/result.json`; the seeded analytics flow proves the
+same interaction for its own doc's claim.
+**Owner:** Web Driver (a text-capture channel — regex over rendered text, the
+web sibling of the cli stdout capture), or dashboard-server (a ranked
+hotspots endpoint the capture vocabulary can address).
