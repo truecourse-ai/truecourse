@@ -12,7 +12,10 @@
  *               and no predicate.
  *   FILTER      one idiom: count chips ({@link FilterBar}), single-select with
  *               toggle-off, multi-select where a surface needs it, and the
- *               typeahead shape above a dozen options. Never a `<select>`.
+ *               typeahead shape above a dozen options. Never a `<select>`. A
+ *               surface with two independent questions (the Tests list's status
+ *               AND its drivers) passes an ARRAY of bars — same chips, and a row
+ *               must satisfy every bar that has a selection.
  *   GROUPING    optional, one nesting level deep, sticky headers, a count and an
  *               optional hover explainer per header, collapsible where a surface
  *               asks for it (the corpus sections, a run's passed group). A nested
@@ -83,6 +86,13 @@ export interface EntityListGroup<T> {
   help?: ReactNode;
   /** A muted line under the header — why these rows are here. */
   hint?: ReactNode;
+  /**
+   * An affordance row at the group's TOP, above its rows and nested groups — a
+   * surface-level opener that belongs to the group rather than to any row (the
+   * Interfaces catalog's per-surface Recipe opener). The group's counterpart of
+   * {@link EntityListProps.toolbar}, and never a second narrowing control.
+   */
+  lead?: ReactNode;
   icon?: LucideIcon;
   /** Header tint (a run's severity groups). */
   tone?: string;
@@ -130,7 +140,12 @@ export interface EntityListProps<T> {
   rowInteractive?: (item: T) => boolean;
   sort?: (a: T, b: T) => number;
   search?: EntityListSearch<T>;
-  filter?: EntityListFilter<T>;
+  /**
+   * The narrowing chips. One bar is the common case; a surface asking two
+   * independent questions passes both, and a row must satisfy EVERY bar that has
+   * a selection (AND across bars, OR inside one).
+   */
+  filter?: EntityListFilter<T> | EntityListFilter<T>[];
   /** The row-count line: "12 of 30 flows". Omit for no count line. */
   noun?: { one: string; many: string };
   /** A line above the controls — the PR baseline-fallback note. */
@@ -162,6 +177,12 @@ const ROW = 'flex w-full min-w-0 flex-col items-start gap-1 border-b border-bord
 
 function groupItems<T>(group: EntityListGroup<T>): readonly T[] {
   return group.items ?? [];
+}
+
+/** The filter bars a surface configured, in render order (none, one, or several). */
+function filterBars<T>(filter: EntityListProps<T>['filter']): EntityListFilter<T>[] {
+  if (!filter) return [];
+  return Array.isArray(filter) ? filter : [filter];
 }
 
 function countOf<T>(group: EntityListGroup<T>): number | undefined {
@@ -313,6 +334,7 @@ function Group<T>({
       )}
       {shown && (
         <>
+          {group.lead}
           {group.groups?.map((child) => (
             <Group key={child.key} group={child} depth={depth + 1} rest={rest} />
           ))}
@@ -370,17 +392,21 @@ export function EntityList<T>(props: EntityListProps<T>) {
 
   const all = useMemo(() => (items ? [...items] : []), [items]);
 
+  const bars = useMemo(() => filterBars(filter), [filter]);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const selected = filter?.selected ?? [];
     let rows = all;
-    if (filter && selected.length > 0) {
-      rows = rows.filter((item) => selected.some((key) => filter.match(item, key)));
+    // Every bar that has a selection narrows in turn: a row must answer all of
+    // them (and any of the keys inside one), so two bars read as two questions.
+    for (const bar of bars) {
+      if (bar.selected.length === 0) continue;
+      rows = rows.filter((item) => bar.selected.some((key) => bar.match(item, key)));
     }
     if (q && search?.match) rows = rows.filter((item) => search.match!(item, q));
     if (sort) rows = [...rows].sort(sort);
     return rows;
-  }, [all, filter, search, query, sort]);
+  }, [all, bars, search, query, sort]);
 
   const groups = useMemo<EntityListGroup<T>[]>(() => {
     if (fixedGroups) return fixedGroups;
@@ -428,7 +454,7 @@ export function EntityList<T>(props: EntityListProps<T>) {
     );
   }
 
-  const controls = (search || filter || noun || toolbar) && (
+  const controls = (search || bars.length > 0 || noun || toolbar) && (
     <div className="shrink-0">
       {search && (
         <div className="border-b border-border p-2">
@@ -442,16 +468,17 @@ export function EntityList<T>(props: EntityListProps<T>) {
           />
         </div>
       )}
-      {filter && (
+      {bars.map((bar) => (
         <FilterBar
-          label={filter.label}
-          ariaLabel={filter.ariaLabel}
-          options={filter.options}
-          selected={filter.selected}
-          onChange={filter.onChange}
-          {...(filter.multi ? { multi: true } : {})}
+          key={bar.ariaLabel}
+          label={bar.label}
+          ariaLabel={bar.ariaLabel}
+          options={bar.options}
+          selected={bar.selected}
+          onChange={bar.onChange}
+          {...(bar.multi ? { multi: true } : {})}
         />
-      )}
+      ))}
       {noun && (
         <div className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
           <HoverPopover portal width="narrow" content={onOpen ? PREVIEW_PIN_HINT : null}>

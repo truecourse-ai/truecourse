@@ -67,19 +67,6 @@ export function GuardInterfaceDiagram({
                   <div className={`truncate rounded border border-border bg-card px-2 py-0.5 text-center ${CELL}`}>
                     {m.label}
                   </div>
-                ) : m.reply ? (
-                  // A reply: the interaction change the action produced,
-                  // flowing back to the user — prose on a dashed line.
-                  <div className="flex flex-col items-center">
-                    <span className="w-full truncate text-center text-[10px] italic leading-tight text-muted-foreground" title={m.label}>
-                      {m.label}
-                    </span>
-                    <span className="flex w-full items-center text-muted-foreground/70">
-                      {!forward && <span className="text-[10px] leading-none">◁</span>}
-                      <span className="h-0 flex-1 border-t border-dashed border-muted-foreground/50" />
-                      {forward && <span className="text-[10px] leading-none">▷</span>}
-                    </span>
-                  </div>
                 ) : (
                   <div className="flex flex-col items-center">
                     <span className={`w-full truncate text-center ${CELL}`} title={m.label}>{m.label}</span>

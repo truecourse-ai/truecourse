@@ -85,6 +85,89 @@ describe('parseGuardStepActuals — the api bundle', () => {
   });
 });
 
+describe('parseGuardStepActuals — the web bundle', () => {
+  const webStep = (over: Record<string, unknown> = {}) => ({
+    index: 1,
+    kind: 'web',
+    argv: [],
+    exitCode: null,
+    durationMs: 250,
+    url: '/repos/sample-app',
+    web: {
+      command: 'click button “Security”',
+      expectation: 'page text matches /Filtered by/',
+      url: '/repos/sample-app',
+      screenshot: 'step-1.png',
+      checks: [
+        {
+          subject: 'text',
+          expected: 'the page text contains "Filtered by"',
+          actual: 'the page text was "… Filtered by: CATEGORY"',
+          ok: true,
+        },
+      ],
+      visibleText: '… Filtered by: CATEGORY',
+      ...over,
+    },
+  });
+
+  it('reads a web step in WEB terms — the action, the address, the picture, the page', () => {
+    const actuals = parseGuardStepActuals(bundle([webStep()]));
+    expect(actuals[0].web).toEqual({
+      action: 'click button “Security”',
+      url: '/repos/sample-app',
+      screenshot: 'step-1.png',
+      checks: [
+        {
+          subject: 'text',
+          expected: 'the page text contains "Filtered by"',
+          actual: 'the page text was "… Filtered by: CATEGORY"',
+          ok: true,
+        },
+      ],
+      text: '… Filtered by: CATEGORY',
+    });
+    // A browser step spawns nothing: it has no exit code and no streams, and the
+    // reader must never be told it "printed nothing".
+    expect(actuals[0].stdout).toBeUndefined();
+    expect(actuals[0].stderr).toBeUndefined();
+  });
+
+  it('pairs EVERY member of the expectation with its own answer, met or not', () => {
+    const actuals = parseGuardStepActuals(
+      bundle([
+        webStep({
+          checks: [
+            { subject: 'url', expected: 'the address contains "/repos"', actual: 'the address was "/repos"', ok: true },
+            { subject: 'text', expected: 'the page text matches /Filtered by/', actual: 'the page text was "…"', ok: false },
+          ],
+        }),
+      ]),
+    );
+    expect(actuals[0].web?.checks.map((c) => [c.subject, c.ok])).toEqual([
+      ['url', true],
+      ['text', false],
+    ]);
+  });
+
+  it('reads a web bundle written before checks were recorded, with none', () => {
+    const actuals = parseGuardStepActuals(
+      bundle([
+        {
+          index: 1,
+          kind: 'web',
+          argv: [],
+          durationMs: 5,
+          url: '/notes',
+          web: { command: 'navigate /notes', expectation: '', url: '/notes', visibleText: 'Notes' },
+        },
+      ]),
+    );
+    expect(actuals[0].web?.checks).toEqual([]);
+    expect(actuals[0].actual).toBe('at /notes');
+  });
+});
+
 describe('parseGuardStepActuals — anything that is not a bundle', () => {
   it('reads a bundle written before per-step output was retained', () => {
     // Older transcripts carry the invocation without the excerpts: the actual line

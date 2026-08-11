@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, Network } from 'lucide-react';
+import type { GuardDriverId } from '@truecourse/shared';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { useEdition } from '@/contexts/CapabilityContext';
@@ -373,9 +374,11 @@ function RepoPageInner() {
   const guardCoverageTabs = useGuardCoverageTabs(repoId);
   // Flows-tab data, hoisted here (like contractsTree/verifyState) so the left
   // panel and the main pane read ONE fetch and the guard reload key refreshes both.
+  // Read by the Tests tab AND by the Interfaces tab, which opens the preparation
+  // recipe that rides this payload — one fetch serves both.
   const guardFlows = useGuardFlows(
     repoId,
-    leftTab === 'guardflows' && guardReadsEnabled,
+    (leftTab === 'guardflows' || leftTab === 'interfaces') && guardReadsEnabled,
     guardReloadKey,
     refForTabs,
   );
@@ -414,12 +417,15 @@ function RepoPageInner() {
   const guardInterfaceTabs = useGuardInterfaceTabs(repoId);
   // The interface detail's second nav: which COMMAND of the tree is being read.
   const guardCommandTabs = useGuardCommandTabs(repoId);
-  // The Tests list filter lives HERE, above the panel that owns it, so the
-  // narrowing survives a main-pane navigation (open a flow, come back, the list is
-  // still where it was). The RECIPE toggle lives here for the same reason it must:
-  // the opener is in the panel and the body is in the pane.
+  // The list narrowings live HERE, above the panels that own them, so they survive
+  // a main-pane navigation (open a flow, come back, the list is still where it
+  // was): the Tests list's status and driver chips, and the Interfaces catalog's
+  // surface chips. The per-surface RECIPE toggle lives here for the reason it must
+  // — the opener is in the Interfaces panel and the body is in its pane.
   const [guardFlowFilter, setGuardFlowFilter] = useState<GuardFlowFilter>('all');
-  const [guardRecipeOpen, setGuardRecipeOpen] = useState(false);
+  const [guardFlowDrivers, setGuardFlowDrivers] = useState<string[]>([]);
+  const [guardSurfaces, setGuardSurfaces] = useState<string[]>([]);
+  const [guardRecipeSurface, setGuardRecipeSurface] = useState<GuardDriverId | null>(null);
   // The committed TEST inventory. ONE fact on the merged Tests tab needs it and
   // nothing else does: the spec section a test binds to (the merged detail's Spec
   // row — a hand-written test's only spec pointer).
@@ -1207,24 +1213,19 @@ function RepoPageInner() {
           {leftTab === 'guardflows' && (
             // THE guard inventory: one flat list of flows (each with the test that
             // realizes it), failing first, one status word per row. Single-click
-            // previews a row in the main pane, double-click pins it. The Recipe
-            // affordance under the filter row opens the preparation every one of
-            // them runs against.
+            // previews a row in the main pane, double-click pins it. The chips
+            // narrow it by status and by the drivers its tests exercise.
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardFlowsPanel
                 flows={guardFlows.view?.flows ?? []}
                 loading={guardFlows.loading}
                 error={guardFlows.error}
-                activeId={guardRecipeOpen ? null : guardFlowTabs.activeId}
+                activeId={guardFlowTabs.activeId}
                 filter={guardFlowFilter}
                 onFilter={setGuardFlowFilter}
-                onOpen={(id, pinned) => {
-                  setGuardRecipeOpen(false);
-                  guardFlowTabs.open(id, pinned);
-                }}
-                hasRecipe={guardFlows.view?.recipe != null}
-                recipeOpen={guardRecipeOpen}
-                onToggleRecipe={() => setGuardRecipeOpen((open) => !open)}
+                drivers={guardFlowDrivers}
+                onDrivers={setGuardFlowDrivers}
+                onOpen={guardFlowTabs.open}
                 prRef={refForTabs}
                 flowsCommit={guardFlows.view?.flowsCommit ?? null}
                 dismissedFlowIds={guardDecisions.dismissedFlowIds}
@@ -1233,14 +1234,25 @@ function RepoPageInner() {
           )}
           {leftTab === 'interfaces' && (
             // The code-derived catalog, grouped by surface, each row carrying the
-            // reverse index onto the flows that ground on it.
+            // reverse index onto the flows that ground on it — and each surface
+            // group leading with the preparation THAT surface runs on.
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardInterfacesPanel
                 interfaces={guardInterfaces.view?.interfaces ?? []}
                 loading={guardInterfaces.loading}
                 error={guardInterfaces.error}
-                activeId={guardInterfaceTabs.activeId}
-                onOpen={guardInterfaceTabs.open}
+                activeId={guardRecipeSurface ? null : guardInterfaceTabs.activeId}
+                surfaces={guardSurfaces}
+                onSurfaces={setGuardSurfaces}
+                hasRecipe={guardFlows.view?.recipe != null}
+                recipeSurface={guardRecipeSurface}
+                onToggleRecipe={(surface) =>
+                  setGuardRecipeSurface((open) => (open === surface ? null : surface))
+                }
+                onOpen={(id, pinned) => {
+                  setGuardRecipeSurface(null);
+                  guardInterfaceTabs.open(id, pinned);
+                }}
               />
             </GuardPrScopeGate>
           )}
@@ -1400,9 +1412,6 @@ function RepoPageInner() {
                 loading={guardFlows.loading}
                 error={guardFlows.error}
                 tabs={guardFlowTabs}
-                recipe={guardFlows.view?.recipe ?? null}
-                recipeOpen={guardRecipeOpen}
-                onCloseRecipe={() => setGuardRecipeOpen(false)}
                 interfaces={guardInterfaces.view?.interfaces ?? null}
                 claimTitles={guardClaimTitles}
                 binds={guardTestBindIndex}
@@ -1415,8 +1424,9 @@ function RepoPageInner() {
               />
             </GuardPrScopeGate>
           ) : leftTab === 'interfaces' ? (
-            // Guard Interfaces: the detected-surface banner over the catalog detail —
-            // the sequence diagram and the flows that ground on it.
+            // Guard Interfaces: the catalog detail — the sequence diagram and the
+            // flows that ground on it — or the preparation recipe of whichever
+            // surface the panel opened.
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardInterfacesPane
                 repoId={repoId}
@@ -1427,6 +1437,10 @@ function RepoPageInner() {
                 onMap={() => void guardInterfaces.map()}
                 tabs={guardInterfaceTabs}
                 commandTabs={guardCommandTabs}
+                recipe={guardFlows.view?.recipe ?? null}
+                recipeSurface={guardRecipeSurface}
+                onCloseRecipe={() => setGuardRecipeSurface(null)}
+                prRef={refForTabs}
                 onOpenFlow={openGuardFlow}
               />
             </GuardPrScopeGate>

@@ -536,6 +536,35 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.flows[0].flowId).toBe(FLOW_ID);
     });
 
+    /**
+     * A row says which DRIVERS its tests exercise — the step kinds the scenario
+     * actually uses, not the scenario-level `driver` field (which names the
+     * sandbox world). The Tests list's driver chips narrow on exactly this.
+     */
+    it('carries the drivers a flow’s tests exercise, and a MIXED test reports both', async () => {
+      seed();
+      const res = await request(app).get(url('flows')).expect(200);
+      const byId = new Map<string, any>(res.body.flows.map((f: any) => [f.flowId, f]));
+      // The flow has a cli test AND a web gap: nothing runs on the surface it is
+      // still waiting for, so the row drives cli alone.
+      expect(byId.get(FLOW_ID).drivers).toEqual(['cli']);
+      // A flow with no test ANYWHERE has no steps to read — its declared surface
+      // answers instead, so a blocked flow stays reachable by the filter.
+      expect(byId.get('task-export').drivers).toEqual(['cli']);
+
+      // The same committed test with a WEB step in it: one sandbox scenario,
+      // two drivers, in registry order.
+      write(
+        SCENARIO_FILE,
+        SCENARIO_YAML.replace(
+          '  - run: [list, --done]',
+          ['  - driver: web', '    navigate: /tasks', '    milestone: 4', '  - run: [list, --done]'].join('\n'),
+        ),
+      );
+      const mixed = await request(app).get(url('flows')).expect(200);
+      expect(mixed.body.flows.find((f: any) => f.flowId === FLOW_ID).drivers).toEqual(['cli', 'web']);
+    });
+
     it('is 200 with an empty payload on a fresh repo (the tab renders its CTA)', async () => {
       const res = await request(app).get(url('flows')).expect(200);
       expect(res.body).toEqual({
@@ -829,6 +858,36 @@ describe('Guard flow read surfaces', () => {
       expect(parsed.api.credentials['api-key'].header).toBe('Authorization');
       expect(parsed.api.externals['hit-pay'].baseUrlEnv).toBe('HITPAY_BASE_URL');
       expect(parsed.env).toEqual({ TASKS_HOME: '.tmp/tasks' });
+    });
+
+    /**
+     * The CARD (the flows envelope's `recipe`) carries every surface's
+     * preparation, because the Interfaces catalog opens it per surface: the cli's
+     * install/build/entrypoint, the api block, and the web block.
+     */
+    it('carries the install step and the web block on the card, per surface', async () => {
+      seed();
+      writeJson(
+        RECIPE_FILE,
+        recipeWith({
+          install: 'pnpm install --frozen-lockfile',
+          web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+        }),
+      );
+      const res = await request(app).get(url('flows')).expect(200);
+      expect(res.body.recipe).toMatchObject({
+        install: 'pnpm install --frozen-lockfile',
+        build: 'pnpm build',
+        entry: ['node', 'dist/tasks.js'],
+        web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+      });
+    });
+
+    it('reports no install and no web surface when the recipe declares neither', async () => {
+      seed();
+      writeJson(RECIPE_FILE, recipeWith());
+      const res = await request(app).get(url('flows')).expect(200);
+      expect(res.body.recipe).toMatchObject({ install: null, web: null });
     });
 
     it('404s with no recipe at all, and for one that does not parse', async () => {

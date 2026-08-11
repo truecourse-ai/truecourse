@@ -60,6 +60,7 @@ import {
   guardNoFlowClaimGapKind,
   isAwaitingDriver,
   isManualFlowId,
+  isWebStep,
   manualFlowId,
   manualFlowScenarioId,
   parseBlockedOnCapabilities,
@@ -1202,6 +1203,43 @@ function flowInterfaceIds(flowId: string, join: FlowJoin): string[] {
 }
 
 /**
+ * The drivers ONE scenario exercises — its STEPS' kinds, not its `driver` field.
+ * An api scenario is api throughout; a sandbox scenario is cli for every step the
+ * cli driver owns and web for every step the web driver owns, so a mixed one is
+ * both. The predicates are the runners' own (`isWebStep` decides which executor
+ * takes a step), so this can never disagree with what actually ran.
+ */
+function scenarioDrivers(scenario: GuardScenario): GuardDriverId[] {
+  if (scenario.driver === 'api') return ['api']
+  const drivers: GuardDriverId[] = []
+  if (scenario.steps.some((step) => !isWebStep(step))) drivers.push('cli')
+  if (scenario.steps.some((step) => isWebStep(step))) drivers.push('web')
+  return drivers
+}
+
+/**
+ * The drivers a flow's TESTS exercise, in registry order — read from the committed
+ * scenarios, so a flow with a cli test and a web GAP drives cli only (nothing runs
+ * on the surface it is still waiting for).
+ *
+ * A flow with no test anywhere is the one fallback: it has no steps to read, so its
+ * declared surfaces answer instead — a blocked flow still says which surface it was
+ * for, and stays reachable by the driver filter rather than vanishing from every
+ * chip.
+ */
+function flowDrivers(surfaces: readonly GuardFlowSurface[], join: FlowJoin): GuardDriverId[] {
+  const found = new Set<GuardDriverId>()
+  for (const surface of surfaces) {
+    const scenario = surface.scenarioId ? join.scenarioById.get(surface.scenarioId) : undefined
+    if (scenario) for (const driver of scenarioDrivers(scenario)) found.add(driver)
+  }
+  if (found.size === 0) {
+    for (const surface of surfaces) if (surface.surface) found.add(surface.surface)
+  }
+  return GUARD_DRIVERS.map((d) => d.id as GuardDriverId).filter((id) => found.has(id))
+}
+
+/**
  * True when the manifest kept this flow only for its committed scenarios: it is
  * marked orphaned AND no synthesized flow carries its id. The corpus check is the
  * live half — a flow synthesis produces again is derived from the specs whatever
@@ -1232,6 +1270,7 @@ function flowListItem(
     sectionCount: sections.length,
     docs: [...new Set(sections.map((s) => s.doc))].sort(),
     surfaces,
+    drivers: flowDrivers(surfaces, join),
     // Only DRIFT-class findings say the flow is failing. A withheld generation
     // defect / fidelity rejection is ours, so it rides beside the status as a
     // muted marker and never paints the flow red.
@@ -1989,6 +2028,7 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
     ...(s.app ? { app: s.app } : {}),
   }));
   const card = {
+    install: recipe.install ?? null,
     build: recipe.build,
     entry: recipe.entry ? recipe.entry.slice() : null,
     serve: recipe.api
@@ -1999,6 +2039,19 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
       ? { up: recipe.api.services.up, ...(recipe.api.services.down ? { down: recipe.api.services.down } : {}) }
       : null,
     env: recipe.env ?? null,
+    // The web surface's own preparation, verbatim from the block — the defaults
+    // the runner applies are the RUNNER's, and a card that invented them would
+    // report preparation the file never declared.
+    web: recipe.web
+      ? {
+          ...(recipe.web.build ? { build: recipe.web.build } : {}),
+          serve: [...recipe.web.serve],
+          ...(recipe.web.cwd ? { cwd: recipe.web.cwd } : {}),
+          ...(recipe.web.healthPath ? { healthPath: recipe.web.healthPath } : {}),
+          ...(recipe.web.readyTimeoutMs != null ? { readyTimeoutMs: recipe.web.readyTimeoutMs } : {}),
+          ...(recipe.web.env ? { env: { ...recipe.web.env } } : {}),
+        }
+      : null,
   }
   if (!guardsMaterializeInPlace()) {
     const run = await readGuardRunForView(repoKey, commit)

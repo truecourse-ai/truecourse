@@ -36,7 +36,6 @@ import type {
   GuardFlowListItem,
   GuardFlowsView,
   GuardInterfaceRow,
-  GuardRecipeCard,
   GuardScenarioResult,
   GuardScenarioSetupView,
 } from '@truecourse/shared';
@@ -315,6 +314,48 @@ const STEPS_ALL_RAN = STEPS.map((step) => ({
   ...step,
   actual: { n: step.n, actual: 'exit 0', durationMs: 20 + step.n, stdout: `step ${step.n} output` },
 }));
+/**
+ * The same list with a WEB step in it, as the server merges it after a run that
+ * took it. A browser step returns no exit code and prints no streams: its record is
+ * the action, the address, each assertion beside the page's answer to it, what the
+ * page showed, and the picture.
+ */
+const WEB_STEPS = [
+  STEPS[0],
+  {
+    n: 2,
+    kind: 'web',
+    command: 'click button “Security”',
+    expectation: 'page text contains “Filtered by”',
+    milestone: 1,
+    actual: {
+      n: 2,
+      actual: 'at /repos/sample-app',
+      durationMs: 310,
+      web: {
+        action: 'click button “Security”',
+        url: '/repos/sample-app',
+        screenshot: 'step-2.png',
+        checks: [
+          {
+            subject: 'url',
+            expected: 'the address contains "/repos/sample-app"',
+            actual: 'the address was "/repos/sample-app"',
+            ok: true,
+          },
+          {
+            subject: 'text',
+            expected: 'the page text contains "Filtered by"',
+            actual: 'the page text was "Filtered by: CATEGORY"',
+            ok: true,
+          },
+        ],
+        text: 'Code Analysis\nFiltered by: CATEGORY',
+      },
+    },
+  },
+  STEPS[3],
+];
 /** The claim id a hand-authored test tags a step with, and the sentence behind it. */
 const CLAIM_ID = 'a-task-is-added-and-gets-an-id';
 /** The same file, tagged the way an AUTHORED corpus tags it: by claim IDENTITY. */
@@ -348,35 +389,8 @@ let scenarioRequests: string[] = [];
 let servedVisuals: GuardEvidenceVisual[] = [];
 /** Every `/guard/evidence/visuals` URL asked for — it must address the same bundle. */
 let visualsRequests: string[] = [];
-/** Every `/guard/recipe/raw` URL asked for — the raw mode must be LAZY. */
-let recipeRawRequests: string[] = [];
 /** Every spec section the page jumped to, as `[doc, anchor]`. */
 let openedSpec: [string, string][] = [];
-
-/**
- * The recipe both readings are of. The card is the view model the pane is handed;
- * `RECIPE_RAW` is what the route answers — the stored file with its inline
- * credential ALREADY masked (the masking is the server's, and is pinned there).
- */
-const RECIPE_FILE = '.truecourse/scenarios/recipe.json';
-const RECIPE: GuardRecipeCard = {
-  build: 'pnpm build',
-  entry: ['node', 'dist/tasks.js'],
-  serve: null,
-  env: { TASKS_HOME: '.tmp/tasks' },
-  fingerprint: 'sha256:9f2caabbccdd',
-  stale: false,
-};
-const RECIPE_RAW = JSON.stringify(
-  {
-    build: 'pnpm build',
-    entry: ['node', 'dist/tasks.js'],
-    env: { TASKS_HOME: '.tmp/tasks' },
-    api: { credentials: { 'api-key': { header: 'Authorization', value: '•••••••••••• (inline value, masked)' } } },
-  },
-  null,
-  2,
-);
 
 const decisionsBody = () => json({ version: 1, dismissedClaims, dismissedFlows: [] });
 
@@ -387,7 +401,6 @@ beforeEach(() => {
   servedVisuals = [];
   visualsRequests = [];
   scenarioRequests = [];
-  recipeRawRequests = [];
   openedSpec = [];
   fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
@@ -404,10 +417,6 @@ beforeEach(() => {
         steps: servedSteps,
         ...(servedSetup ? { setup: servedSetup } : {}),
       });
-    }
-    if (u.includes('/guard/recipe/raw')) {
-      recipeRawRequests.push(u);
-      return json({ id: RECIPE_FILE, file: RECIPE_FILE, content: RECIPE_RAW });
     }
     if (u.includes('/guard/evidence/visuals')) {
       visualsRequests.push(u);
@@ -499,21 +508,13 @@ describe('the run-result row — the shared guard row anatomy', () => {
 
 // --- The merged surface: a test is read inside its flow ---------------------
 
-function TestsHarness({
-  claimTitles,
-  recipe = RECIPE,
-}: {
-  claimTitles?: Readonly<Record<string, string>>;
-  /** The recipe the LIST's affordance opens; null hides it entirely. */
-  recipe?: GuardRecipeCard | null;
-}) {
+function TestsHarness({ claimTitles }: { claimTitles?: Readonly<Record<string, string>> }) {
   const tabs = useGuardFlowTabs('r');
   // The real decisions hook — the ruling's write path is under test, not a stub.
   const decisions = useGuardDecisions('r', true);
   const loc = useLocation();
   const [filter, setFilter] = useState<'all'>('all');
-  const [recipeOpen, setRecipeOpen] = useState(false);
-  const view = { flows: FLOW_ROWS, recipe } as unknown as GuardFlowsView;
+  const view = { flows: FLOW_ROWS, recipe: null } as unknown as GuardFlowsView;
   return (
     <div>
       <span data-testid="search">{loc.search}</span>
@@ -522,16 +523,12 @@ function TestsHarness({
           flows={FLOW_ROWS}
           loading={false}
           error={null}
-          activeId={recipeOpen ? null : tabs.activeId}
+          activeId={tabs.activeId}
           filter={filter}
           onFilter={() => {}}
-          onOpen={(id, pinned) => {
-            setRecipeOpen(false);
-            tabs.open(id, pinned);
-          }}
-          hasRecipe={recipe != null}
-          recipeOpen={recipeOpen}
-          onToggleRecipe={() => setRecipeOpen((open) => !open)}
+          drivers={[]}
+          onDrivers={() => {}}
+          onOpen={tabs.open}
         />
       </div>
       <GuardFlowsPane
@@ -539,9 +536,6 @@ function TestsHarness({
         view={view}
         loading={false}
         error={null}
-        recipe={recipe}
-        recipeOpen={recipeOpen}
-        onCloseRecipe={() => setRecipeOpen(false)}
         interfaces={INTERFACES}
         {...(claimTitles ? { claimTitles } : {})}
         binds={BINDS}
@@ -556,7 +550,7 @@ function TestsHarness({
 
 const renderPane = (
   url = '/repos/r?tab=guardflows',
-  props: { claimTitles?: Readonly<Record<string, string>>; recipe?: GuardRecipeCard | null } = {},
+  props: { claimTitles?: Readonly<Record<string, string>> } = {},
 ) =>
   render(
     <MemoryRouter initialEntries={[url]}>
@@ -862,6 +856,52 @@ describe('the test, read inside its flow', () => {
     }
   });
 
+  it('reads a WEB step in web words — each assertion beside ITS answer, the address, the page', async () => {
+    const user = userEvent.setup();
+    servedSteps = WEB_STEPS;
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    await user.click(within(steps).getByRole('button', { name: 'Expand step 2' }));
+    const web = within(steps)
+      .getAllByRole('listitem')
+      .find((r) => (r.getAttribute('aria-label') ?? '').startsWith('Step 2:'))!;
+
+    // EVERY member of the expectation is paired with the page's answer to THAT
+    // member — the address never stands in as the actual of a text assertion.
+    const expectations = within(web).getAllByLabelText('expected value');
+    const answers = within(web).getAllByLabelText('actual value');
+    expect(expectations).toHaveLength(2);
+    expect(answers).toHaveLength(2);
+    expect(expectations[0]).toHaveTextContent('the address contains "/repos/sample-app"');
+    expect(answers[0]).toHaveTextContent('the address was "/repos/sample-app"');
+    expect(expectations[1]).toHaveTextContent('the page text contains "Filtered by"');
+    expect(answers[1]).toHaveTextContent('Filtered by: CATEGORY');
+
+    // The browser's own record: where it ended up, what it showed, the picture.
+    expect(within(web).getByLabelText('page address')).toHaveTextContent('/repos/sample-app');
+    expect(within(web).getByLabelText('page text')).toHaveTextContent('Filtered by: CATEGORY');
+    expect(within(web).getByText('step-2.png')).toBeInTheDocument();
+
+    // …and NOTHING in the cli vocabulary: a browser step neither exits nor prints.
+    expect(within(web).queryByText('the step printed nothing')).toBeNull();
+    expect(within(web).queryByText('the step returns no exit code')).toBeNull();
+    expect(within(web).queryByText('output')).toBeNull();
+  });
+
+  it('a web step the run never reached says so, in web words', async () => {
+    const user = userEvent.setup();
+    servedSteps = WEB_STEPS.map((step) => ({ ...step, actual: undefined }));
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    await user.click(within(steps).getByRole('button', { name: 'Expand step 2' }));
+    const web = within(steps)
+      .getAllByRole('listitem')
+      .find((r) => (r.getAttribute('aria-label') ?? '').startsWith('Step 2:'))!;
+    // The authored assertion is still true of the file; nothing else is known.
+    expect(within(web).getByLabelText('expected value')).toHaveTextContent('page text contains');
+    expect(within(web).getAllByText('not recorded in this run').length).toBeGreaterThan(0);
+  });
+
   it('carries NO Program output section — the excerpt is the step’s, the streams are evidence', async () => {
     renderTest(BIRTH_FAILED_ID);
     await findSteps();
@@ -1064,21 +1104,102 @@ describe('the test, read inside its flow', () => {
       expect(section.contains(shots)).toBe(true);
     });
 
-    it('opens a screenshot full size in a new tab — its own bytes, from the run it ran in', async () => {
+    it('addresses each picture by the run it ran in, from one URL', async () => {
       servedVisuals = WEB_VISUALS;
       renderTest(PASSING_ID);
       await findSteps();
 
       const shots = await screen.findByLabelText('evidence screenshots');
-      const link = within(shots).getAllByRole('link')[0] as HTMLAnchorElement;
-      expect(link.target).toBe('_blank');
-      expect(link.href).toContain('/guard/evidence/visual?');
-      expect(link.href).toContain('file=step-1.png');
+      const src = within(shots).getAllByRole('img')[0].getAttribute('src') ?? '';
+      expect(src).toContain('/guard/evidence/visual?');
+      expect(src).toContain('file=step-1.png');
       // Addressed by the run the page is showing, and the scenario it is of.
-      expect(link.href).toContain(`runId=${encodeURIComponent(RUN_ID)}`);
-      expect(link.href).toContain(`scenarioId=${encodeURIComponent(PASSING_ID)}`);
-      // The thumbnail is the same file — one URL, no separate thumbnail pipeline.
-      expect(within(shots).getAllByRole('img')[0]).toHaveAttribute('src', link.href);
+      expect(src).toContain(`runId=${encodeURIComponent(RUN_ID)}`);
+      expect(src).toContain(`scenarioId=${encodeURIComponent(PASSING_ID)}`);
+      // No new tab: the picture opens IN the app, and the thumbnail is the same
+      // file the full-size reading shows — one URL, no thumbnail pipeline.
+      expect(within(shots).queryAllByRole('link')).toHaveLength(0);
+    });
+
+    /**
+     * The pictures are a SEQUENCE, so reading them is stepping through them: one
+     * click opens the run's screenshots full size and the arrows (and ← / →) walk
+     * them, wrapping at the ends. Escape and a click outside leave. The video is
+     * not in it — a player is already its own full reading.
+     */
+    describe('the screenshot carousel', () => {
+      const open = async (user: ReturnType<typeof userEvent.setup>, label: string) => {
+        servedVisuals = WEB_VISUALS;
+        renderTest(PASSING_ID);
+        await findSteps();
+        const shots = await screen.findByLabelText('evidence screenshots');
+        await user.click(within(shots).getByRole('button', { name: `${label} — open full size` }));
+        return screen.getByRole('dialog', { name: 'Evidence screenshot' });
+      };
+      /** What the open carousel is showing, by the step it names. */
+      const showing = () =>
+        within(screen.getByRole('dialog', { name: 'Evidence screenshot' }))
+          .getByRole('img')
+          .getAttribute('alt');
+
+      it('opens the picture that was clicked, full size and in the app', async () => {
+        const user = userEvent.setup();
+        const lightbox = await open(user, 'Step 2');
+        expect(within(lightbox).getByRole('img')).toHaveAttribute('alt', 'Step 2 screenshot');
+        // Its step names it, and the file it is of is readable beside it.
+        expect(within(lightbox).getByText('Step 2')).toBeInTheDocument();
+        expect(within(lightbox).getByText('step-2.png')).toBeInTheDocument();
+        // The session video stays a plain player, outside the carousel.
+        expect(within(lightbox).queryByLabelText('session video')).toBeNull();
+      });
+
+      it('steps back and next through the run, wrapping at both ends', async () => {
+        const user = userEvent.setup();
+        const lightbox = await open(user, 'Step 2');
+        await user.click(within(lightbox).getByRole('button', { name: 'Next screenshot' }));
+        expect(showing()).toBe('Step 10 screenshot');
+        // Past the last one is the first — a walk, never a dead end.
+        await user.click(within(lightbox).getByRole('button', { name: 'Next screenshot' }));
+        expect(showing()).toBe('Step 1 screenshot');
+        await user.click(within(lightbox).getByRole('button', { name: 'Previous screenshot' }));
+        expect(showing()).toBe('Step 10 screenshot');
+      });
+
+      it('walks with the arrow keys and leaves on Escape', async () => {
+        const user = userEvent.setup();
+        await open(user, 'Step 1');
+        await user.keyboard('{ArrowRight}');
+        expect(showing()).toBe('Step 2 screenshot');
+        await user.keyboard('{ArrowLeft}');
+        expect(showing()).toBe('Step 1 screenshot');
+        await user.keyboard('{Escape}');
+        expect(screen.queryByRole('dialog', { name: 'Evidence screenshot' })).toBeNull();
+      });
+
+      it('closes on the X and on a click outside it', async () => {
+        const user = userEvent.setup();
+        const lightbox = await open(user, 'Step 1');
+        await user.click(within(lightbox).getByRole('button', { name: 'Close screenshot' }));
+        expect(screen.queryByRole('dialog', { name: 'Evidence screenshot' })).toBeNull();
+
+        const shots = screen.getByLabelText('evidence screenshots');
+        await user.click(within(shots).getByRole('button', { name: 'Step 1 — open full size' }));
+        // The overlay itself is the click-outside target; the picture inside is not.
+        await user.click(screen.getByRole('dialog', { name: 'Evidence screenshot' }));
+        expect(screen.queryByRole('dialog', { name: 'Evidence screenshot' })).toBeNull();
+      });
+
+      it('offers no arrows for a single picture — there is nothing to step to', async () => {
+        const user = userEvent.setup();
+        servedVisuals = [{ file: 'step-1.png', kind: 'screenshot', step: 1 }];
+        renderTest(PASSING_ID);
+        await findSteps();
+        const shots = await screen.findByLabelText('evidence screenshots');
+        await user.click(within(shots).getByRole('button', { name: 'Step 1 — open full size' }));
+        const lightbox = screen.getByRole('dialog', { name: 'Evidence screenshot' });
+        expect(within(lightbox).queryByRole('button', { name: 'Next screenshot' })).toBeNull();
+        expect(within(lightbox).queryByRole('button', { name: 'Previous screenshot' })).toBeNull();
+      });
     });
 
     it('closes with the session video, as a plain player after the screenshots', async () => {
@@ -1102,8 +1223,8 @@ describe('the test, read inside its flow', () => {
       await findSteps();
 
       const shots = await screen.findByLabelText('evidence screenshots');
-      expect(within(shots).getAllByRole('link')[0]).toHaveAttribute(
-        'href',
+      expect(within(shots).getAllByRole('img')[0]).toHaveAttribute(
+        'src',
         expect.stringContaining('evidencePath='),
       );
       await waitFor(() => expect(visualsRequests.some((u) => u.includes('evidencePath='))).toBe(true));
@@ -1155,90 +1276,6 @@ describe('the test, read inside its flow', () => {
     // No second control over the list's narrowing, and no Overview destination.
     expect(screen.queryByRole('group', { name: 'Flow filters' })).not.toBeInTheDocument();
     expect(screen.queryByText('Overview')).not.toBeInTheDocument();
-  });
-});
-
-// --- The RECIPE: the preparation behind every test in the list -------------
-//
-// It is not a flow, so it is not a row; it is the ONE affordance the LIST carries
-// beside its rows, opening the same two readings every artifact-backed entity
-// offers. WHERE it sits is `guard-flows.test.tsx`; WHAT it opens is here.
-
-describe('the recipe — the two readings of the preparation', () => {
-  const recipeButton = () => within(screen.getByTestId('panel')).getByRole('button', { name: 'Recipe' });
-  const openRecipe = async (user: ReturnType<typeof userEvent.setup>) => user.click(recipeButton());
-
-  it('opens the structured recipe — and closes again on a second click', async () => {
-    const user = userEvent.setup();
-    renderPane();
-    expect(screen.queryByRole('region', { name: 'Recipe' })).not.toBeInTheDocument();
-
-    await openRecipe(user);
-    const recipe = screen.getByRole('region', { name: 'Recipe' });
-    expect(within(recipe).getByText('pnpm build')).toBeInTheDocument();
-    expect(within(recipe).getByText('node dist/tasks.js')).toBeInTheDocument();
-    expect(within(recipe).getByText('TASKS_HOME=.tmp/tasks')).toBeInTheDocument();
-    expect(recipeButton()).toHaveAttribute('aria-pressed', 'true');
-
-    await openRecipe(user);
-    expect(screen.queryByRole('region', { name: 'Recipe' })).not.toBeInTheDocument();
-    expect(screen.getByText('Select a test')).toBeInTheDocument();
-  });
-
-  it('offers the two readings, and reads the FILE only when asked (lazily)', async () => {
-    const user = userEvent.setup();
-    renderPane();
-    await openRecipe(user);
-    // Nothing was fetched for a reader who never left the structured view.
-    expect(recipeRawRequests).toHaveLength(0);
-
-    const modes = within(screen.getByRole('region', { name: 'Recipe' })).getByRole('group', {
-      name: 'View mode',
-    });
-    expect(within(modes).getAllByRole('button').map((b) => b.textContent)).toEqual(['View', 'JSON']);
-    await user.click(within(modes).getByRole('button', { name: 'JSON' }));
-
-    const raw = await screen.findByLabelText('recipe source');
-    await waitFor(() => expect(raw.textContent).toContain('"build": "pnpm build"'));
-    expect(recipeRawRequests).toHaveLength(1);
-    // A SINGLETON artifact: one recipe per repo, addressed by no id.
-    expect(recipeRawRequests[0]).not.toContain('id=');
-  });
-
-  it('shows the file as the server masked it — the raw mode is no secret door', async () => {
-    const user = userEvent.setup();
-    renderPane();
-    await openRecipe(user);
-    await user.click(
-      within(within(screen.getByRole('region', { name: 'Recipe' })).getByRole('group', { name: 'View mode' }))
-        .getByRole('button', { name: 'JSON' }),
-    );
-    const raw = await screen.findByLabelText('recipe source');
-    await waitFor(() => expect(raw.textContent).toContain('inline value, masked'));
-    // The capability stays readable; the value never arrives to be shown.
-    expect(raw.textContent).toContain('"header": "Authorization"');
-    expect(raw.textContent).not.toMatch(/sk-|secret/);
-  });
-
-  it('picking a flow navigates AWAY from the recipe — one body, one subject', async () => {
-    const user = userEvent.setup();
-    renderPane();
-    await openRecipe(user);
-    expect(screen.getByRole('region', { name: 'Recipe' })).toBeInTheDocument();
-
-    await user.click(within(screen.getByTestId('panel')).getByText(FLOW_TITLES.get(FLOW_ID)!));
-    expect(await findSteps()).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Recipe' })).not.toBeInTheDocument();
-    expect(recipeButton()).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('offers nothing at all when the repo has no recipe yet', () => {
-    render(
-      <MemoryRouter initialEntries={['/repos/r?tab=guardflows']}>
-        <TestsHarness recipe={null} />
-      </MemoryRouter>,
-    );
-    expect(within(screen.getByTestId('panel')).queryByRole('button', { name: 'Recipe' })).toBeNull();
   });
 });
 

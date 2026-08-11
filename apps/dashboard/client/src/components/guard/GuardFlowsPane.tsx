@@ -11,13 +11,13 @@
  * carries the corpus, its counts and its narrowing — so with no flow open this
  * pane is at rest ("pick a flow"), not a second thing to read.
  *
- * The one non-flow subject it renders is the RECIPE, opened from the affordance in
- * the list beside it: one body, one subject, so opening a flow closes it.
+ * It has no non-flow subject at all: the preparation a test runs against is
+ * per-surface, and is read on the Interfaces tab beside the surface it prepares.
  */
 
 import { useMemo } from 'react';
 import { Loader2, FlaskConical } from 'lucide-react';
-import type { GuardFlowsView, GuardInterfaceRow, GuardRecipeCard as GuardRecipeCardData } from '@truecourse/shared';
+import type { GuardFlowsView, GuardInterfaceRow } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
@@ -25,7 +25,6 @@ import { tabFlowId } from '@/hooks/useGuardFlowTabs';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
 import type { GuardTestBinds } from '@/lib/guard-tests';
 import { GuardFlowDetail } from './GuardFlowDetail';
-import { GuardRecipeDetail } from './GuardRecipeDetail';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
 
 function Centered({ children }: { children: React.ReactNode }) {
@@ -38,9 +37,6 @@ export function GuardFlowsPane({
   loading,
   error,
   tabs,
-  recipe = null,
-  recipeOpen = false,
-  onCloseRecipe,
   interfaces = null,
   claimTitles,
   binds,
@@ -56,12 +52,6 @@ export function GuardFlowsPane({
   loading: boolean;
   error: string | null;
   tabs: GuardTabsState;
-  /** The preparation behind every test in the list; null (no `recipe.json`) = none. */
-  recipe?: GuardRecipeCardData | null;
-  /** The recipe is the pane's subject right now, instead of a flow. */
-  recipeOpen?: boolean;
-  /** Drop the recipe — a flow selection takes the body back. */
-  onCloseRecipe?: () => void;
   /** The mapped interface catalog, for the diagrams a test drives; null = unmapped. */
   interfaces?: GuardInterfaceRow[] | null;
   /** Claim id → its sentence, for a step group named by claim identity. */
@@ -104,12 +94,6 @@ export function GuardFlowsPane({
   );
 
   const content = (() => {
-    // The recipe is a second subject for ONE body — it wins while it is open, and
-    // any flow selection closes it on the way in.
-    if (recipeOpen && recipe) {
-      return <GuardRecipeDetail repoId={repoId} recipe={recipe} {...(prRef ? { prRef } : {})} />;
-    }
-
     if (activeFlowId) {
       if (detail) {
         return (
@@ -182,15 +166,7 @@ export function GuardFlowsPane({
     // which only works if every box above them is allowed to shrink.
     <div className="flex h-full min-w-0 flex-col overflow-hidden">
       {/* No Overview chip: with no flow open this pane IS its no-selection state. */}
-      <GuardTabStrip
-        tabs={tabItems}
-        activeId={recipeOpen ? null : activeId}
-        onSelect={(t) => {
-          onCloseRecipe?.();
-          open(t.id, t.pinned);
-        }}
-        onClose={close}
-      />
+      <GuardTabStrip tabs={tabItems} activeId={activeId} onSelect={(t) => open(t.id, t.pinned)} onClose={close} />
       <div className="relative min-h-0 flex-1 overflow-hidden">{content}</div>
     </div>
   );

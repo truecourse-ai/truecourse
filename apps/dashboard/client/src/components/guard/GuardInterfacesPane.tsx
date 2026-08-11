@@ -1,14 +1,7 @@
 /**
  * The Interfaces tab's MAIN PANE — the code half's read surface.
  *
- * Top: the DETECTED-SURFACE banner, one chip per surface TrueCourse actually found
- * in this repo, saying whether scenarios can run on it today (runnable ✓ / awaiting
- * its driver ⚠). It is the one-glance answer to "what does TrueCourse think my app
- * is" — a surface this repo does not have is not user information, so it renders
- * nothing at all. It carries no tally: the catalog list beside it counts its own
- * surface groups, and one number said twice is two numbers to keep in agreement.
- *
- * Below: the selected interface as a SEQUENCE DIAGRAM, then its CONTRACT (the full
+ * The selected interface as a SEQUENCE DIAGRAM, then its CONTRACT (the full
  * grammar of every command in the tree plus each command's input/output as
  * structured facts — see {@link GuardInterfaceContract}), and the
  * flows that use it (click-through into the Tests tab) — every reference a chip
@@ -24,7 +17,12 @@
  */
 
 import { Braces, Loader2, FlaskConical } from 'lucide-react';
-import type { GuardInterfaceRow, GuardInterfacesView } from '@truecourse/shared';
+import type {
+  GuardDriverId,
+  GuardInterfaceRow,
+  GuardInterfacesView,
+  GuardRecipeCard as GuardRecipeCardData,
+} from '@truecourse/shared';
 import { guardDriver, interfaceEntryLabel } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -34,6 +32,7 @@ import { formatGuardTime, shortFingerprint } from '@/lib/guard-drifts';
 import { guardGapNeed, guardPlainStatus, type GuardFlowPlainStatus } from '@/lib/guard-flow-status';
 import { GuardInterfaceContract } from './GuardInterfaceContract';
 import { GuardInterfaceDiagram } from './GuardInterfaceDiagram';
+import { GuardRecipeDetail } from './GuardRecipeDetail';
 import { GuardFlowStatusChip } from './GuardStatusBadge';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
@@ -70,40 +69,6 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
-/**
- * One chip per surface found in this repo — runnable ✓ / awaiting its driver ⚠.
- * Drivers the repo has no code for are dropped entirely, and with nothing detected
- * the banner itself disappears (the unmapped/empty body already says what to do).
- */
-function SurfaceBanner({ view }: { view: GuardInterfacesView }) {
-  const detected = view.surfaces.filter((s) => s.detected);
-  if (detected.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-card px-4 py-2">
-      <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Detected surfaces
-      </span>
-      {detected.map((s) => {
-        const tone = s.runnable
-          ? 'border-emerald-500/60 text-emerald-600 dark:text-emerald-400'
-          : 'border-sky-500/60 text-sky-600 dark:text-sky-400';
-        const state = s.runnable ? 'runnable ✓' : `${s.waitingLabel ?? 'awaiting driver'} ⚠`;
-        return (
-          <HoverPopover portal
-            key={s.surface}
-            width="narrow"
-            content={`${s.label} interfaces are mapped.`}
-          >
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${tone}`}>
-              {s.label} · {state}
-            </span>
-          </HoverPopover>
-        );
-      })}
-    </div>
-  );
-}
-
 export function GuardInterfacesPane({
   repoId,
   view,
@@ -112,6 +77,10 @@ export function GuardInterfacesPane({
   mapping,
   tabs,
   commandTabs,
+  recipe = null,
+  recipeSurface = null,
+  onCloseRecipe,
+  prRef,
   onMap,
   onOpenFlow,
 }: {
@@ -124,6 +93,14 @@ export function GuardInterfacesPane({
   tabs: GuardTabsState;
   /** The contract's command nav — `?gcmd=`, the same tab model as `tabs`. */
   commandTabs: GuardTabsState;
+  /** The preparation every test on these surfaces runs against; null = no recipe. */
+  recipe?: GuardRecipeCardData | null;
+  /** The surface whose recipe is the pane's subject right now, instead of an interface. */
+  recipeSurface?: GuardDriverId | null;
+  /** Drop the recipe — an interface selection takes the body back. */
+  onCloseRecipe?: () => void;
+  /** The PR head ref scoping the raw read (EE); undefined at repo level. */
+  prRef?: string;
   onMap: () => void;
   onOpenFlow: (flowId: string) => void;
 }) {
@@ -170,6 +147,19 @@ export function GuardInterfacesPane({
   }));
 
   const body = (() => {
+    // The recipe is a second subject for ONE body — the surface's preparation. It
+    // wins while it is open, and any interface selection closes it on the way in.
+    if (recipeSurface && recipe) {
+      return (
+        <GuardRecipeDetail
+          repoId={repoId}
+          recipe={recipe}
+          surface={recipeSurface}
+          {...(prRef ? { prRef } : {})}
+        />
+      );
+    }
+
     if (!view.mapped || view.interfaces.length === 0) {
       return (
         <EmptyState
@@ -225,14 +215,16 @@ export function GuardInterfacesPane({
         ) : null}
 
         {/* The task's state contract: the world it assumes and the world it
-            leaves. Rendered before the sequence so the steps read as the path
-            from one to the other. */}
+            leaves, each a NAMED state of its area's registry. Rendered before
+            the sequence so the steps read as the path from one to the other,
+            and rendered mono because these are ids — two tasks chain when they
+            match exactly. */}
         {(active.startingState || active.endState) && (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {active.startingState && (
               <div>
                 <div className={LABEL}>Starting state</div>
-                <p className="rounded border border-border bg-card/40 px-2.5 py-2 text-[12px] leading-snug text-muted-foreground">
+                <p className="rounded border border-border bg-card/40 px-2.5 py-2 font-mono text-[12px] leading-snug text-muted-foreground">
                   {active.startingState}
                 </p>
               </div>
@@ -240,7 +232,7 @@ export function GuardInterfacesPane({
             {active.endState && (
               <div>
                 <div className={LABEL}>End state</div>
-                <p className="rounded border border-border bg-card/40 px-2.5 py-2 text-[12px] leading-snug text-muted-foreground">
+                <p className="rounded border border-border bg-card/40 px-2.5 py-2 font-mono text-[12px] leading-snug text-muted-foreground">
                   {active.endState}
                 </p>
               </div>
@@ -297,13 +289,15 @@ export function GuardInterfacesPane({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <SurfaceBanner view={view} />
       {/* No Overview chip: with no interface open this pane IS its no-selection
-          state — the surface banner over "pick an interface". */}
+          state — "pick an interface", and nothing else to read. */}
       <GuardTabStrip
         tabs={tabItems}
-        activeId={activeId}
-        onSelect={(t) => open(t.id, t.pinned)}
+        activeId={recipeSurface ? null : activeId}
+        onSelect={(t) => {
+          onCloseRecipe?.();
+          open(t.id, t.pinned);
+        }}
         onClose={close}
       />
       <div className="relative min-h-0 flex-1 overflow-hidden">{body}</div>

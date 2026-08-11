@@ -15,18 +15,19 @@
  * reason for it, and the milestone / section counts are all detail copy — a row
  * never carries a sentence or a tally.
  *
- * NO SURFACE CHIPS. Guard runs one surface per flow today, so a chip per surface
- * repeated the same word down the whole list. When a second surface exists it
- * returns as a plain label on the chip line — a name, not a coloured pill.
+ * NO SURFACE CHIPS ON A ROW. A chip per surface repeated the same word down the
+ * whole list; which surfaces a test drives is a NARROWING question, and it is
+ * answered by the driver filter over the list instead.
  *
  * A hand-written test belongs to no synthesized flow: it is a row here like any
  * other, wearing the `manual` marker. The list is total — everything guard runs is
  * in it.
  *
- * The list itself — search, the status filter chips, the row interaction, the
- * scroll-to-selection — is the shared {@link EntityList}; this file is the flow's
- * ROW, the flow's narrowing rules, and the one surface-level affordance that is
- * not a row: the RECIPE, the preparation every test in this list runs against.
+ * The list itself — search, the status and driver filter chips, the row
+ * interaction, the scroll-to-selection — is the shared {@link EntityList}; this
+ * file is the flow's ROW and the flow's narrowing rules. The preparation a test
+ * runs against is NOT here: a recipe is per-surface, so it is read on the
+ * Interfaces tab, beside the surface it prepares.
  *
  * A flow the user RULED OUT stays in the list, muted and marked: hiding it would
  * make the ruling unreachable (only the detail can undo it), and the corpus keeps
@@ -35,9 +36,9 @@
  */
 
 import { useMemo } from 'react';
-import { Hammer, Layers, PenLine } from 'lucide-react';
+import { Layers, PenLine } from 'lucide-react';
 import type { GuardFlowListItem } from '@truecourse/shared';
-import { GUARD_COVERAGE_STATUS_PRECEDENCE } from '@truecourse/shared';
+import { GUARD_COVERAGE_STATUS_PRECEDENCE, GUARD_DRIVERS, guardDriver } from '@truecourse/shared';
 import { EntityList, type FilterOption } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import {
@@ -56,8 +57,15 @@ import {
   GuardToolDefectChip,
 } from './GuardStatusBadge';
 
-export const GUARD_RECIPE_HINT =
-  'How guard prepares this repo before a test runs — the build, the entrypoint, the servers and datastores it starts. Discovered once at setup, reused by every run.';
+/**
+ * The drivers ONE test exercises — the step kinds its scenario actually uses, off
+ * the wire. A mixed test (a sandbox scenario with web steps in it) carries two,
+ * and matches EITHER chip: there is no "mixed" chip, because "mixed" is not a
+ * surface anyone tests on.
+ */
+function flowDrivers(flow: GuardFlowListItem): readonly string[] {
+  return flow.drivers ?? [];
+}
 
 /**
  * Severity-led sort key: the plain status first (the order the filter offers),
@@ -129,10 +137,9 @@ export function GuardFlowsPanel({
   activeId,
   filter,
   onFilter,
+  drivers,
+  onDrivers,
   onOpen,
-  hasRecipe = false,
-  recipeOpen = false,
-  onToggleRecipe,
   prRef,
   flowsCommit,
   dismissedFlowIds,
@@ -146,16 +153,15 @@ export function GuardFlowsPanel({
   /** The active filter, owned above so it survives a main-pane navigation. */
   filter: GuardFlowFilter;
   onFilter: (filter: GuardFlowFilter) => void;
+  /**
+   * The drivers the list is narrowed to (empty = every driver), owned above for
+   * the same reason the status filter is. Multi-select: a mixed test is kept by
+   * either of its drivers, so picking both is a union, never an intersection.
+   */
+  drivers: readonly string[];
+  onDrivers: (next: string[]) => void;
   /** Single-click preview (transient tab), double-click pin — the shared tab model. */
   onOpen: (id: string, pinned: boolean) => void;
-  /**
-   * The repo has a `recipe.json`. False (never discovered) hides the affordance
-   * entirely — an opener onto nothing is not a destination.
-   */
-  hasRecipe?: boolean;
-  /** The main pane is showing the recipe — the button reads pressed. */
-  recipeOpen?: boolean;
-  onToggleRecipe?: () => void;
   /** The PR head ref scoping this view (EE PR view); undefined at repo level. */
   prRef?: string | null;
   /** The commit the corpus was read at (hosted) — the baseline-fallback label. */
@@ -166,6 +172,21 @@ export function GuardFlowsPanel({
   // empty selection IS every flow.
   const options = useMemo<FilterOption[]>(
     () => guardFlowFilterCounts(flows).filter((c) => c.key !== 'all').map(({ key, label, count }) => ({ key, label, count })),
+    [flows],
+  );
+
+  // The same rule for the drivers: counted by the predicate that narrows, and
+  // only for drivers this corpus HAS — a chip for a driver nothing runs on is
+  // engine knowledge, not user information.
+  const driverOptions = useMemo<FilterOption[]>(
+    () =>
+      GUARD_DRIVERS.map((d) => d.id as string)
+        .map((driver) => ({
+          key: driver,
+          label: guardDriver(driver)?.label ?? driver,
+          count: flows.filter((f) => flowDrivers(f).includes(driver)).length,
+        }))
+        .filter((o) => o.count > 0),
     [flows],
   );
 
@@ -192,14 +213,25 @@ export function GuardFlowsPanel({
         ariaLabel: 'Search tests',
         match: (f, q) => `${f.title} ${f.goal} ${f.flowId} ${f.docs.join(' ')}`.toLowerCase().includes(q),
       }}
-      filter={{
-        label: 'Status',
-        ariaLabel: 'Filter by status',
-        options,
-        selected: filter === 'all' ? [] : [filter],
-        onChange: (next) => onFilter((next[0] as GuardFlowFilter) ?? 'all'),
-        match: (flow, key) => guardFlowMatchesFilter(flow, key as GuardFlowFilter),
-      }}
+      filter={[
+        {
+          label: 'Status',
+          ariaLabel: 'Filter by status',
+          options,
+          selected: filter === 'all' ? [] : [filter],
+          onChange: (next) => onFilter((next[0] as GuardFlowFilter) ?? 'all'),
+          match: (flow, key) => guardFlowMatchesFilter(flow, key as GuardFlowFilter),
+        },
+        {
+          label: 'Drivers',
+          ariaLabel: 'Filter by driver',
+          options: driverOptions,
+          selected: drivers,
+          onChange: onDrivers,
+          multi: true,
+          match: (flow, key) => flowDrivers(flow).includes(key),
+        },
+      ]}
       noun={{ one: 'test', many: 'tests' }}
       rowClassName={(flow) => (dismissedFlowIds?.has(flow.flowId) ? 'opacity-60' : undefined)}
       renderRow={(flow) => <FlowRow flow={flow} dismissed={dismissedFlowIds?.has(flow.flowId) === true} />}
@@ -207,30 +239,6 @@ export function GuardFlowsPanel({
       // The MAIN pane carries the single CTA empty state — the panel stays quiet so
       // two identical cards never sit side by side.
       emptyText="No tests yet."
-      // The one thing here that is not a flow: the preparation every flow in the
-      // list runs against. It lives with the list, not in the pane's header —
-      // the pane belongs to whichever flow is open.
-      {...(hasRecipe && onToggleRecipe
-        ? {
-            toolbar: (
-              <HoverPopover portal width="wide" align="start" content={GUARD_RECIPE_HINT}>
-                <button
-                  type="button"
-                  aria-pressed={recipeOpen}
-                  onClick={onToggleRecipe}
-                  className={`flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] transition-colors ${
-                    recipeOpen
-                      ? 'border-primary bg-primary/10 text-foreground'
-                      : 'border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                  }`}
-                >
-                  <Hammer className="h-3 w-3 shrink-0" />
-                  Recipe
-                </button>
-              </HoverPopover>
-            ),
-          }
-        : {})}
       banner={
         baselineFallback ? (
           <div className="shrink-0 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">

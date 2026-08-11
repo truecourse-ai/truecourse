@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { evaluateExpect } from '@truecourse/guard-runner'
+import { describeTextMatcher, evaluateExpect } from '@truecourse/guard-runner'
 
 let cwd: string
 const identity = (t: string): string => t
@@ -107,5 +107,25 @@ describe('evaluateExpect — first-failure order', () => {
       { stdout: 'x', stderr: 'y' },
     )
     expect(m?.subject).toBe('stdout')
+  })
+})
+
+describe('describeTextMatcher — a matcher as a RECORD says it', () => {
+  it('names EVERY member the matcher declares, not just the first', () => {
+    // The record of a step is what it asserted. A description that stopped at the
+    // first member would under-report the assertion beside a green tick — the same
+    // lie as an evaluation that stopped there.
+    expect(
+      describeTextMatcher('the page text', {
+        contains: 'cost',
+        matches: 'total: \\d+',
+        compare: { number: 'total: (\\d+)', atMost: '5' },
+      }),
+    ).toBe('the page text contains "cost" and matches /total: \\d+/ and carries a number matching /total: (\\d+)/ and is at most 5')
+  })
+
+  it('reads as one phrase for the one-member matchers a scenario usually writes', () => {
+    expect(describeTextMatcher('the address', { equals: '/notes' })).toBe('the address equals "/notes"')
+    expect(describeTextMatcher('the page text', { matches: '^ok$' })).toBe('the page text matches /^ok$/')
   })
 })

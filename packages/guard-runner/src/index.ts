@@ -258,7 +258,7 @@ export type { StepCapture, ExecuteStepOptions } from './executor.js'
 export { normalize } from './normalizers.js'
 export type { NormalizerContext } from './normalizers.js'
 
-export { evaluateExpect, matchTextMatcher } from './expect.js'
+export { evaluateExpect, matchTextMatcher, describeTextMatcher } from './expect.js'
 export type { ExpectMismatch, EvaluateExpectParams } from './expect.js'
 
 export { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS } from './build.js'
@@ -287,7 +287,13 @@ export type {
 } from './preflight.js'
 
 export { writeEvidence, stepExcerpt, STEP_OUTPUT_LIMIT, isFileStepKind } from './evidence.js'
-export type { EvidenceStep, EvidenceWebStep, EvidencePatchOp, WriteEvidenceParams } from './evidence.js'
+export type {
+  EvidenceStep,
+  EvidenceWebStep,
+  EvidenceWebCheck,
+  EvidencePatchOp,
+  WriteEvidenceParams,
+} from './evidence.js'
 
 // The WEB driver — the served surface, the browser, and the step executor. A web
 // step runs inside an ordinary sandbox scenario, so there is no `runWebScenario`:
@@ -313,7 +319,7 @@ export {
   DEFAULT_WEB_STEP_TIMEOUT_MS,
   WEB_TEXT_LIMIT,
 } from './web/executor.js'
-export type { WebStepResult, ExecuteWebStepOptions } from './web/executor.js'
+export type { WebStepResult, ExecuteWebStepOptions, WebCheck } from './web/executor.js'
 export { resolveWebStep } from './web/tokens.js'
 
 export { patchJsonText, resolvePatchValue, jsonSyntaxPosition, PatchError } from './patch.js'

@@ -76,8 +76,8 @@ const BANNED: { term: string; pattern: RegExp }[] = [
   // Replaced by "Used by flows".
   { term: 'grounds', pattern: /\bgrounds\b/i },
   // The retired all-caps section header (it became "Tests"). The surface NAMES
-  // (CLI / API / Web) and the Interfaces banner's "Detected surfaces" both stay —
-  // the complaint was the shouted engine header, not the English word.
+  // (CLI / API / Web) stay — the complaint was the shouted engine header, not the
+  // English word.
   { term: 'SURFACES header', pattern: /\bSURFACES\b/ },
   // The technical artifact's name — it renders as "test" everywhere.
   { term: 'scenario(s)', pattern: /\bscenarios?\b/i },
@@ -434,6 +434,8 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         activeId={null}
         filter="all"
         onFilter={() => {}}
+        drivers={[]}
+        onDrivers={() => {}}
         onOpen={() => {}}
       />,
     );
@@ -449,6 +451,8 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         activeId={null}
         filter="all"
         onFilter={() => {}}
+        drivers={[]}
+        onDrivers={() => {}}
         onOpen={() => {}}
       />,
     );
@@ -690,13 +694,15 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         loading={false}
         error={null}
         activeId={null}
+        surfaces={[]}
+        onSurfaces={() => {}}
         onOpen={() => {}}
       />,
     );
     expectCleanVocabulary('GuardInterfacesPanel');
   });
 
-  it('the interface detail pane — the banner, the reverse index and the fingerprint note', () => {
+  it('the interface detail pane — the reverse index and the fingerprint note', () => {
     render(
       <GuardInterfacesPane repoId="r"
         view={{
@@ -843,6 +849,8 @@ describe('guard hover popovers — none of them can clip', () => {
         activeId={null}
         filter="all"
         onFilter={() => {}}
+        drivers={[]}
+        onDrivers={() => {}}
         onOpen={() => {}}
       />,
     );

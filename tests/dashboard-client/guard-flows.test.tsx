@@ -569,6 +569,7 @@ afterEach(() => vi.unstubAllGlobals());
  */
 function FlowsPanelHarness(props: Partial<Parameters<typeof GuardFlowsPanel>[0]> = {}) {
   const [filter, setFilter] = useState<GuardFlowFilter>('all');
+  const [drivers, setDrivers] = useState<string[]>([]);
   return (
     <GuardFlowsPanel
       flows={FLOWS}
@@ -578,6 +579,8 @@ function FlowsPanelHarness(props: Partial<Parameters<typeof GuardFlowsPanel>[0]>
       onOpen={() => {}}
       filter={filter}
       onFilter={setFilter}
+      drivers={drivers}
+      onDrivers={setDrivers}
       {...props}
     />
   );
@@ -631,9 +634,10 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     }
   });
 
-  it('carries NO surface chips — one surface per flow, so they said nothing', () => {
+  it('carries NO surface chips on a ROW — which surfaces a test drives is a filter', () => {
     // They came back on every row as the same word, and a reader learned to skip
-    // them. When a second surface exists they return as a plain label, not a chip.
+    // them. The question they answered is a NARROWING one, and the driver chips
+    // over the list answer it now.
     renderPanel();
     const list = screen.getByRole('list', { name: 'Test inventory' });
     for (const text of ['CLI ✗', 'CLI ✓', 'Web', 'CLI', 'API']) {
@@ -1215,9 +1219,9 @@ describe('GuardFlowDetail — the flow AND its test, on one page', () => {
 // --- The pane: tabs and deep links -----------------------------------------
 
 /**
- * The whole surface as the page wires it: the list, the pane, the shared tab
- * reducer, and the recipe toggle the page owns (opener in the panel, body in the
- * pane).
+ * The whole surface as the page wires it: the list, the pane, and the shared tab
+ * reducer. No recipe here — preparation is per-surface, and it is read on the
+ * Interfaces tab beside the surface it prepares.
  */
 function FlowsHarness({
   flows = FLOWS,
@@ -1228,9 +1232,9 @@ function FlowsHarness({
 }) {
   const tabs = useGuardFlowTabs('r');
   const loc = useLocation();
-  // The list's narrowing is owned above the panel, as the page owns it.
+  // The list's narrowings are owned above the panel, as the page owns them.
   const [filter, setFilter] = useState<GuardFlowFilter>('all');
-  const [recipeOpen, setRecipeOpen] = useState(false);
+  const [drivers, setDrivers] = useState<string[]>([]);
   return (
     <div>
       <span data-testid="search">{loc.search}</span>
@@ -1239,16 +1243,12 @@ function FlowsHarness({
           flows={flows}
           loading={false}
           error={null}
-          activeId={recipeOpen ? null : tabs.activeId}
+          activeId={tabs.activeId}
           filter={filter}
           onFilter={setFilter}
-          onOpen={(id, pinned) => {
-            setRecipeOpen(false);
-            tabs.open(id, pinned);
-          }}
-          hasRecipe={recipe != null}
-          recipeOpen={recipeOpen}
-          onToggleRecipe={() => setRecipeOpen((open) => !open)}
+          drivers={drivers}
+          onDrivers={setDrivers}
+          onOpen={tabs.open}
         />
       </div>
       <GuardFlowsPane
@@ -1257,9 +1257,6 @@ function FlowsHarness({
         loading={false}
         error={null}
         tabs={tabs}
-        recipe={recipe}
-        recipeOpen={recipeOpen}
-        onCloseRecipe={() => setRecipeOpen(false)}
         onOpenSpec={() => {}}
         onOpenInterface={() => {}}
       />
@@ -1326,52 +1323,16 @@ describe('a retired test address selects nothing', () => {
   });
 });
 
-// --- The recipe: an affordance of the LIST, a body in the pane --------------
+// --- The recipe is NOT here -------------------------------------------------
 
-describe('the recipe affordance lives with the list', () => {
-  const recipeButton = () => within(screen.getByTestId('panel')).getByRole('button', { name: /Recipe/ });
-
-  it('sits under the list\u2019s filter row — never in the pane\u2019s header', () => {
+describe('the Tests list carries no recipe', () => {
+  it('offers no preparation affordance at all — that reading moved to Interfaces', () => {
     renderPane();
     const panel = screen.getByTestId('panel');
-    const button = recipeButton();
-    expect(button).toHaveAttribute('aria-pressed', 'false');
-    // It belongs to the panel, and it is BELOW the narrowing controls it is not
-    // part of (search, then the status chips, then the count, then this).
-    expect(panel.contains(button)).toBe(true);
-    const filters = within(panel).getByRole('group', { name: 'Filter by status' });
-    expect(filters.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // House idiom: the hint is a HoverPopover, never a title attribute.
-    expect(button.getAttribute('title')).toBeNull();
-    expect(screen.getAllByRole('tooltip').map((t) => t.textContent).join(' ')).toContain(
-      'How guard prepares this repo',
-    );
-  });
-
-  it('opens the recipe in the pane, and a second click closes it', async () => {
-    const user = userEvent.setup();
-    renderPane();
-    await user.click(recipeButton());
-    expect(recipeButton()).toHaveAttribute('aria-pressed', 'true');
-    expect(await screen.findByRole('region', { name: 'Recipe' })).toBeInTheDocument();
-    await user.click(recipeButton());
+    // Not an opener, not a toolbar row, not a body: a recipe is per-SURFACE, and
+    // the Interfaces catalog's surface groups are where each one is opened.
+    expect(within(panel).queryByRole('button', { name: /recipe/i })).toBeNull();
     expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
-    expect(screen.getByText('Select a test')).toBeInTheDocument();
-  });
-
-  it('picking a flow navigates AWAY from the recipe — one body, one subject', async () => {
-    const user = userEvent.setup();
-    renderPane();
-    await user.click(recipeButton());
-    await screen.findByRole('region', { name: 'Recipe' });
-    await user.click(within(screen.getByTestId('panel')).getByText(FLOW_TITLE));
-    expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
-    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
-  });
-
-  it('offers nothing at all when the repo has no recipe yet', () => {
-    renderPane('/repos/r?tab=guardflows', { recipe: null });
-    expect(within(screen.getByTestId('panel')).queryByRole('button', { name: /Recipe/ })).toBeNull();
   });
 });
 
@@ -1396,6 +1357,8 @@ function DismissHarness() {
           activeId={tabs.activeId}
           filter={filter}
           onFilter={setFilter}
+          drivers={[]}
+          onDrivers={() => {}}
           onOpen={tabs.open}
           dismissedFlowIds={decisions.dismissedFlowIds}
         />
@@ -1607,13 +1570,105 @@ describe('GuardFlowsPanel — the filter chips over the whole corpus', () => {
     renderMixed();
     await user.click(statusChip(GUARD_FLOW_FILTER_LABEL.failed));
     expect(listRows()).toHaveLength(2);
-    await user.click(screen.getByText('clear'));
+    await user.click(within(statusFilter()).getByText('clear'));
     expect(listRows()).toHaveLength(MIXED_FLOWS.length);
     expect(
       within(statusFilter())
         .getAllByRole('button')
         .filter((b) => b.getAttribute('aria-pressed') === 'true'),
     ).toHaveLength(0);
+  });
+});
+
+/**
+ * The DRIVER narrowing — what a test actually drives, off the wire: the step kinds
+ * its scenario uses. A MIXED test (cli steps and web steps in one scenario) is
+ * both, so it answers either chip and there is no third "mixed" word: mixed is not
+ * a surface anybody tests on.
+ */
+const driverFlow = (
+  flowId: string,
+  title: string,
+  drivers: GuardFlowListItem['drivers'],
+): GuardFlowListItem => ({
+  flowId,
+  title,
+  goal: `${title} — the goal`,
+  status: 'pass',
+  bucket: 'guarded',
+  epic: false,
+  composedOf: [],
+  manual: false,
+  milestoneCount: 1,
+  sectionCount: 1,
+  docs: [DOC],
+  surfaces: [],
+  ...(drivers ? { drivers } : {}),
+  findings: 0,
+  toolDefects: 0,
+  errors: 0,
+  interfaceDrifted: false,
+});
+
+const DRIVER_FLOWS: GuardFlowListItem[] = [
+  driverFlow('cli-only', 'A user runs the command', ['cli']),
+  driverFlow('api-only', 'A client calls the endpoint', ['api']),
+  driverFlow('mixed', 'A user clicks through, then checks the CLI', ['cli', 'web']),
+  // A flow no test realizes yet drives nothing — it is in the list, and no chip
+  // may claim it.
+  driverFlow('nothing-yet', 'A user does something nobody has tested', undefined),
+];
+
+describe('GuardFlowsPanel — the driver chips', () => {
+  const renderDrivers = () => render(<FlowsPanelHarness flows={DRIVER_FLOWS} />);
+  const driverFilter = () => screen.getByRole('group', { name: 'Filter by driver' });
+  const driverChip = (label: string) =>
+    within(driverFilter()).getByRole('button', { name: new RegExp(`^${label} \\d+$`) });
+  const rowTitles = () => {
+    const list = screen.queryByRole('list', { name: 'Test inventory' });
+    return list
+      ? within(list)
+          .getAllByRole('listitem')
+          .map((row) => row.querySelector('span')?.textContent ?? '')
+      : [];
+  };
+
+  it('offers a chip per driver the corpus HAS, counted by the same predicate', () => {
+    renderDrivers();
+    // A mixed test is counted under BOTH of its drivers — the counts are of rows
+    // the chip keeps, not a partition of the corpus.
+    expect(
+      within(driverFilter())
+        .getAllByRole('button')
+        .map((c) => c.textContent),
+    ).toEqual(['CLI 2', 'API 1', 'Web 1']);
+  });
+
+  it('narrows to the driver clicked, and a mixed test answers EITHER chip', async () => {
+    const user = userEvent.setup();
+    renderDrivers();
+
+    await user.click(driverChip('Web'));
+    expect(rowTitles()).toEqual(['A user clicks through, then checks the CLI']);
+
+    // Multi-select: the second chip UNIONS, it does not intersect — the mixed
+    // test is not counted twice, and the cli-only one joins it.
+    await user.click(driverChip('CLI'));
+    expect(rowTitles()).toEqual([
+      'A user clicks through, then checks the CLI',
+      'A user runs the command',
+    ]);
+
+    await user.click(within(driverFilter()).getByText('clear'));
+    expect(rowTitles()).toHaveLength(DRIVER_FLOWS.length);
+  });
+
+  it('narrows by status AND driver at once — two questions, two bars', async () => {
+    const user = userEvent.setup();
+    render(<FlowsPanelHarness flows={[...DRIVER_FLOWS, BIRTH_FAILED_FLOW]} />);
+    await user.click(statusChip(GUARD_FLOW_STATUS_WORD.succeeded));
+    await user.click(driverChip('API'));
+    expect(rowTitles()).toEqual(['A client calls the endpoint']);
   });
 });
 

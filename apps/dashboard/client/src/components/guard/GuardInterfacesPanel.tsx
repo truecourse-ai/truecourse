@@ -6,15 +6,25 @@
  * FLOWS use it (the reverse index — realized or matched-but-blocked; zero means
  * code the spec never mentions, the future infer signal).
  *
- * The list — its search, its grouping chrome, its preview/pin rows and the
- * scroll-to-selection a cross-navigation jump needs — is the shared
+ * The one thing here that is not an interface is the RECIPE: each surface group
+ * leads with the opener for the preparation THAT surface runs on (cli's build and
+ * entrypoint, the api block, the web block). Preparation is per-surface, so it is
+ * read where the surface is — never once, in a list of tests, for all of them.
+ *
+ * The list — its search, its surface filter, its grouping chrome, its preview/pin
+ * rows and the scroll-to-selection a cross-navigation jump needs — is the shared
  * {@link EntityList}; this file is the interface ROW and how interfaces group.
  */
 
-import type { GuardInterfaceRow } from '@truecourse/shared';
-import { guardDriver, interfaceEntryLabel } from '@truecourse/shared';
-import { EntityList, type EntityListGroup } from '@/components/ui/entity-list';
+import { useCallback, useMemo } from 'react';
+import { Hammer } from 'lucide-react';
+import type { GuardDriverId, GuardInterfaceRow } from '@truecourse/shared';
+import { GUARD_DRIVERS, guardDriver, interfaceEntryLabel } from '@truecourse/shared';
+import { EntityList, type EntityListGroup, type FilterOption } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
+
+export const GUARD_RECIPE_HINT =
+  'How guard prepares this repo before a test runs on this surface — the build, the entrypoint, the servers and datastores it starts. Discovered once at setup, reused by every run.';
 
 /**
  * The flow-count hint. A count of zero means NO flow references the interface at
@@ -46,6 +56,11 @@ function bucket(
   return buckets;
 }
 
+/** The surface's own word — "CLI", "Web" — from the driver registry. */
+function surfaceLabel(surface: string): string {
+  return guardDriver(surface)?.label ?? surface;
+}
+
 /**
  * The surface outside, the FAMILY inside — both in first-seen order, so the panel
  * reads in the catalog's own order. Family is scoped to the surface, as the catalog
@@ -57,12 +72,16 @@ function bucket(
  * sticky header, the family is `subordinate` — quieter and indented — and its rows
  * indent to it, so surface > family > interface reads at a glance.
  */
-function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterfaceRow>[] {
+function bySurface(
+  interfaces: GuardInterfaceRow[],
+  lead: (surface: string) => React.ReactNode,
+): EntityListGroup<GuardInterfaceRow>[] {
   return [...bucket(interfaces, (j) => j.type).entries()].map(([surface, rows]) => {
     const group: EntityListGroup<GuardInterfaceRow> = {
       key: surface,
-      label: guardDriver(surface)?.label ?? surface,
+      label: surfaceLabel(surface),
       count: rows.length,
+      lead: lead(surface),
     };
     const families = bucket(rows, (j) => j.group);
     if (families.size === 0) return { ...group, items: rows };
@@ -87,19 +106,84 @@ export function GuardInterfacesPanel({
   loading,
   error,
   activeId,
+  surfaces,
+  onSurfaces,
+  hasRecipe = false,
+  recipeSurface = null,
+  onToggleRecipe,
   onOpen,
 }: {
   interfaces: GuardInterfaceRow[];
   loading: boolean;
   error: string | null;
   activeId: string | null;
+  /** The surfaces the list is narrowed to; empty = every surface. */
+  surfaces: readonly string[];
+  onSurfaces: (next: string[]) => void;
+  /**
+   * The repo has a `recipe.json`. False (never discovered) hides the per-surface
+   * openers entirely — an opener onto nothing is not a destination.
+   */
+  hasRecipe?: boolean;
+  /** The surface whose recipe the main pane is showing — that opener reads pressed. */
+  recipeSurface?: string | null;
+  onToggleRecipe?: (surface: GuardDriverId) => void;
   onOpen: (id: string, pinned: boolean) => void;
 }) {
+  // The catalog counted once, by the same predicate that narrows it — a chip can
+  // never promise rows the list won't show. Only surfaces this catalog HAS get a
+  // chip: a driver with no code behind it is engine knowledge, not user information.
+  const options = useMemo<FilterOption[]>(
+    () =>
+      GUARD_DRIVERS.map((d) => d.id as string)
+        .map((surface) => ({
+          key: surface,
+          label: surfaceLabel(surface),
+          count: interfaces.filter((j) => j.type === surface).length,
+        }))
+        .filter((o) => o.count > 0),
+    [interfaces],
+  );
+
+  // The surface's own recipe opener — the group's lead row. Memoized with the
+  // grouping below it so the list is not re-grouped on every render.
+  const recipeOpener = useCallback(
+    (surface: string): React.ReactNode => {
+      if (!hasRecipe || !onToggleRecipe) return null;
+      const open = recipeSurface === surface;
+      return (
+        <div className="border-b border-border px-2 py-1.5">
+          <HoverPopover portal width="wide" align="start" content={GUARD_RECIPE_HINT}>
+            <button
+              type="button"
+              aria-pressed={open}
+              onClick={() => onToggleRecipe(surface as GuardDriverId)}
+              className={`flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] transition-colors ${
+                open
+                  ? 'border-primary bg-primary/10 text-foreground'
+                  : 'border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+              }`}
+            >
+              <Hammer className="h-3 w-3 shrink-0" />
+              {surfaceLabel(surface)} recipe
+            </button>
+          </HoverPopover>
+        </div>
+      );
+    },
+    [hasRecipe, recipeSurface, onToggleRecipe],
+  );
+
+  const group = useCallback(
+    (rows: GuardInterfaceRow[]) => bySurface(rows, recipeOpener),
+    [recipeOpener],
+  );
+
   return (
     <EntityList<GuardInterfaceRow>
       label="Interface catalog"
       items={interfaces}
-      group={bySurface}
+      group={group}
       itemId={(j) => j.id}
       // An entry in a family sits under its family header; one in no family stays
       // at the surface's own edge.
@@ -112,7 +196,15 @@ export function GuardInterfacesPanel({
         ariaLabel: 'Search interfaces',
         match: (j, q) => `${j.id} ${j.title} ${interfaceEntryLabel(j.entry)}`.toLowerCase().includes(q),
       }}
-      noMatch="No interfaces match this search."
+      filter={{
+        label: 'Surface',
+        ariaLabel: 'Filter by surface',
+        options,
+        selected: surfaces,
+        onChange: onSurfaces,
+        match: (j, key) => j.type === key,
+      }}
+      noMatch="No interfaces match these filters."
       // The MAIN pane carries the single Map CTA — the panel stays quiet.
       emptyText="No interfaces mapped yet."
       renderRow={(iface) => (

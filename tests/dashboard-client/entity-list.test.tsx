@@ -5,7 +5,8 @@
  *   SEARCH   one input, the surface's predicate, and a controlled mode for a
  *            surface whose rows come from a server query.
  *   FILTER   count chips, single-select with toggle-off, multi-select with a
- *            clear link, and the typeahead shape above a dozen options.
+ *            clear link, the typeahead shape above a dozen options, and SEVERAL
+ *            bars for a surface with more than one question to ask.
  *   GROUPS   headers with counts and hover explainers, one nesting level,
  *            collapsible where a surface asks for it.
  *   ROWS     single-click previews, double-click pins, Enter previews, and a row
@@ -173,6 +174,67 @@ describe('EntityList — the filter idiom', () => {
     await user.type(input, 'tag-12');
     expect(screen.getByRole('button', { name: /tag-12/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /tag-3/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('EntityList — two filter bars', () => {
+  /** A surface asking two independent questions: what KIND, and what COLOUR. */
+  function TwoBars() {
+    const [kinds, setKinds] = useState<string[]>([]);
+    const [colours, setColours] = useState<string[]>([]);
+    return (
+      <EntityList<Item>
+        {...BASE}
+        items={ITEMS}
+        filter={[
+          {
+            label: 'Kind',
+            ariaLabel: 'Filter by kind',
+            options: [
+              { key: 'fruit', label: 'Fruit', count: 2 },
+              { key: 'veg', label: 'Veg', count: 1 },
+            ],
+            selected: kinds,
+            onChange: setKinds,
+            match: (i, key) => i.kind === key,
+          },
+          {
+            label: 'Colour',
+            ariaLabel: 'Filter by colour',
+            options: [
+              { key: 'red', label: 'Red', count: 1 },
+              { key: 'yellow', label: 'Yellow', count: 1 },
+            ],
+            selected: colours,
+            onChange: setColours,
+            multi: true,
+            match: (i, key) => (key === 'red' ? i.title === 'apple' : i.title === 'banana'),
+          },
+        ]}
+      />
+    );
+  }
+
+  it('renders one chip row per bar, and a row must answer BOTH', async () => {
+    const user = userEvent.setup();
+    render(<TwoBars />);
+    const kind = () => screen.getByRole('group', { name: 'Filter by kind' });
+    const colour = () => screen.getByRole('group', { name: 'Filter by colour' });
+
+    await user.click(within(kind()).getByRole('button', { name: 'Fruit 2' }));
+    expect(rowTexts()).toEqual(['apple', 'banana']);
+
+    // The second bar narrows what the first one kept — AND across bars.
+    await user.click(within(colour()).getByRole('button', { name: 'Red 1' }));
+    expect(rowTexts()).toEqual(['apple']);
+
+    // …and OR inside one: the second colour widens back to both fruits.
+    await user.click(within(colour()).getByRole('button', { name: 'Yellow 1' }));
+    expect(rowTexts()).toEqual(['apple', 'banana']);
+
+    // A bar with nothing selected narrows nothing.
+    await user.click(within(colour()).getByText('clear'));
+    expect(rowTexts()).toEqual(['apple', 'banana']);
   });
 });
 

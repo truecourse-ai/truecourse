@@ -62,7 +62,7 @@
  * and every truncating span is width-bound rather than free to grow.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, Braces, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import type {
   GuardEvidenceVisual,
@@ -70,6 +70,7 @@ import type {
   GuardInterfaceRow,
   GuardScenarioSetupView,
   GuardScenarioStepView,
+  GuardStepWebActual,
   GuardTriage,
 } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
@@ -192,10 +193,106 @@ function NoValue({ children }: { children: ReactNode }) {
 const NOT_RECORDED = 'not recorded in this run';
 
 /**
+ * A WEB step's record, in the browser's own vocabulary. A browser step spawns
+ * nothing: it has no exit code and no streams, so "exit 0" and "the step printed
+ * nothing" would both be inventions. What it has is an action, an address, each
+ * assertion beside THE PAGE'S OWN ANSWER TO THAT ASSERTION, what the page showed,
+ * and a picture.
+ *
+ * The pairing is the point. A step can assert an address and the page's words at
+ * once, and showing one answer (the address) beside both assertions reads as a
+ * failure on a step that passed.
+ */
+function WebStepPanel({
+  expected,
+  actual,
+  web,
+}: {
+  /** The authored assertion — the fallback when the step never got to evaluate it. */
+  expected: string;
+  /** The failure line, when the step failed before asserting anything. */
+  actual?: string;
+  web: GuardStepWebActual;
+}) {
+  return (
+    <div className="mt-2 space-y-1">
+      {web.checks.length > 0 ? (
+        web.checks.map((check, i) => (
+          <Fragment key={`${check.subject}-${i}`}>
+            <DiffRow label="expected">
+              <div className="flex min-w-0 items-start gap-1.5">
+                <span
+                  aria-label={check.ok ? 'met' : 'not met'}
+                  className={`pt-1 text-[11px] ${
+                    check.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                  }`}
+                >
+                  {check.ok ? '✓' : '✗'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <GuardLongText text={check.expected} label="expected value" />
+                </div>
+              </div>
+            </DiffRow>
+            <DiffRow label="actual">
+              <GuardLongText text={check.actual} label="actual value" />
+            </DiffRow>
+          </Fragment>
+        ))
+      ) : (
+        <>
+          <DiffRow label="expected">
+            {expected ? (
+              <GuardLongText text={expected} label="expected value" />
+            ) : (
+              <NoValue>this step asserts nothing</NoValue>
+            )}
+          </DiffRow>
+          <DiffRow label="actual">
+            {actual ? (
+              <GuardLongText text={actual} label="actual value" />
+            ) : (
+              <NoValue>
+                {expected ? 'the step did not get past its action, so nothing was asserted' : 'nothing was asserted'}
+              </NoValue>
+            )}
+          </DiffRow>
+        </>
+      )}
+      <DiffRow label="at">
+        <GuardLongText text={web.url} label="page address" />
+      </DiffRow>
+      <DiffRow label="page text">
+        {web.text ? (
+          <GuardLongText text={web.text} label="page text" />
+        ) : (
+          <NoValue>the page showed no text</NoValue>
+        )}
+      </DiffRow>
+      {web.console && web.console.length > 0 && (
+        <DiffRow label="console">
+          <GuardLongText text={web.console.join('\n')} label="page console" />
+        </DiffRow>
+      )}
+      {web.screenshot && (
+        <DiffRow label="screen">
+          <p className="pt-1 font-mono text-[11px] leading-snug text-muted-foreground">{web.screenshot}</p>
+        </DiffRow>
+      )}
+    </div>
+  );
+}
+
+/**
  * WHAT A STEP DID, read inside the step: what it asserted, what it returned, and
  * what it printed while getting there. EVERY step carries it — a passing step's
  * actuals are as much a fact as a failing one's — so a reader learns one panel and
  * reads every row with it.
+ *
+ * The panel speaks the step's OWN surface: a cli or api step returns a code and
+ * prints streams; a web step ends up at an address and shows a page (see
+ * {@link WebStepPanel}). A step with no record of its own reads the same either way
+ * — the authored expectation, and the honest absence of everything else.
  *
  * Nothing here is invented. A step the viewed run never reached (it stopped at an
  * earlier failure) and every step of a test that has never run say so, in place of
@@ -210,6 +307,7 @@ function StepPanel({
   stdout,
   stderr,
   recorded,
+  web,
 }: {
   /** What the step asserts, as authored — empty when it asserts nothing. */
   expected: string;
@@ -219,7 +317,10 @@ function StepPanel({
   stderr?: string;
   /** Whether the viewed run has a record of this step at all — what tells "no output" from "not recorded". */
   recorded: boolean;
+  /** The browser's record, on a web step the viewed run took. */
+  web?: GuardStepWebActual;
 }) {
+  if (web) return <WebStepPanel expected={expected} {...(actual ? { actual } : {})} web={web} />;
   return (
     <div className="mt-2 space-y-1">
       <DiffRow label="expected">
@@ -283,6 +384,9 @@ function StepRow({
   const panel = {
     expected: step.expectation || diff?.expected || '',
     actual: diff?.actual ?? recorded?.actual,
+    // A web step's record carries its own expected/actual pairs and its own words
+    // for what it "printed"; the cli fields below say nothing true about it.
+    ...(recorded?.web ? { web: recorded.web } : {}),
     ...(diff && (diff.stdout || diff.stderr)
       ? { stdout: diff.stdout, stderr: diff.stderr }
       : { stdout: recorded?.stdout, stderr: recorded?.stderr }),

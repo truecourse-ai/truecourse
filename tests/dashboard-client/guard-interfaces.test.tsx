@@ -2,20 +2,26 @@
  * Guard INTERFACES-tab tests — the code half's read surface and its one FREE action.
  * Covers the unmapped empty state and the Map swap (the POST answers with the
  * fresh catalog, so the tab re-renders from the response — no refetch, no socket),
- * the detected-surface banner (only surfaces this repo actually has: runnable ✓ /
- * awaiting ⚠ / interface count), the per-surface catalog with the reverse index onto
- * the flows, the per-surface FAMILIES the catalog groups its entries into, the
- * sequence diagram, and the "Used by flows" click-through into the Flows tab.
+ * the per-surface catalog with the reverse index onto the flows, the SURFACE
+ * FILTER over it, the per-surface FAMILIES the catalog groups its entries into,
+ * the per-surface RECIPE each surface group opens (the preparation THAT surface
+ * runs on, in its two readings), the sequence diagram, and the "Used by flows"
+ * click-through into the Flows tab.
+ *
+ * There is no detected-surface banner: the surface groups of the catalog beside
+ * the pane ARE that information, and saying it twice is two things to keep in
+ * agreement.
  *
  * Fixture: the plan's taskbird cli catalog — three grounded interfaces plus one no
  * flow mentions (the candidate spec gap).
  */
 
+import { useState } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import type { GuardInterfacesView } from '@truecourse/shared';
+import type { GuardDriverId, GuardInterfacesView, GuardRecipeCard } from '@truecourse/shared';
 import { GuardInterfacesPanel } from '@/components/guard/GuardInterfacesPanel';
 import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
@@ -27,7 +33,44 @@ const json = (body: unknown) =>
 const FLOW_ID = 'task-lifecycle';
 const SCENARIO_ID = 'task-lifecycle.cli.1';
 
-/** The wire always carries a row per registry driver — the banner shows only the detected ones. */
+/**
+ * The recipe the surface groups open, in ONE fixture covering all three kinds of
+ * preparation: the cli's install/build/entrypoint + env, the api block's server
+ * and datastores, and the web block.
+ */
+const RECIPE: GuardRecipeCard = {
+  install: 'pnpm install --frozen-lockfile',
+  build: 'pnpm build',
+  entry: ['node', 'dist/tasks.js'],
+  serve: ['node', 'dist/server.js'],
+  services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+  env: { TASKS_HOME: '.tmp/tasks' },
+  web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+  fingerprint: 'sha256:9f2caabbccdd',
+  stale: false,
+};
+
+/**
+ * What the raw route answers — the stored file, WHOLE, whatever surface asked for
+ * it, with its inline credential already masked (the masking is the server's, and
+ * is pinned there).
+ */
+const RECIPE_RAW = JSON.stringify(
+  {
+    install: 'pnpm install --frozen-lockfile',
+    build: 'pnpm build',
+    entry: ['node', 'dist/tasks.js'],
+    web: { serve: ['node', 'dist/web.js'] },
+    api: { credentials: { 'api-key': { header: 'Authorization', value: '•••••••••••• (inline value, masked)' } } },
+  },
+  null,
+  2,
+);
+
+/** Every `/guard/recipe/raw` URL asked for — the raw mode must be LAZY. */
+let recipeRawRequests: string[] = [];
+
+/** The wire always carries a row per registry driver — the catalog groups the ones with code. */
 const SURFACES: GuardInterfacesView['surfaces'] = [
   { surface: 'cli', label: 'CLI', runnable: true, interfaces: 5, detected: true, source: 'tree' },
   { surface: 'api', label: 'API', runnable: true, interfaces: 0, detected: false },
@@ -351,12 +394,25 @@ function stubMapFlow() {
 
 afterEach(() => vi.unstubAllGlobals());
 
-/** The tab exactly as RepoPage wires it: one hook feeding panel + pane. */
-function InterfacesHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (flowId: string) => void }) {
+/**
+ * The tab exactly as RepoPage wires it: one hook feeding panel + pane, the surface
+ * narrowing and the per-surface RECIPE toggle owned above both (the opener is in
+ * the panel, the body is in the pane).
+ */
+function InterfacesHarness({
+  onOpenFlow = () => {},
+  recipe = RECIPE,
+}: {
+  onOpenFlow?: (flowId: string) => void;
+  /** The recipe each surface group's opener shows; null hides the openers. */
+  recipe?: GuardRecipeCard | null;
+}) {
   const interfaces = useGuardInterfaces('r', true);
   const tabs = useGuardInterfaceTabs('r');
   const commandTabs = useGuardCommandTabs('r');
   const loc = useLocation();
+  const [surfaces, setSurfaces] = useState<string[]>([]);
+  const [recipeSurface, setRecipeSurface] = useState<GuardDriverId | null>(null);
   return (
     <div>
       <span data-testid="search">{loc.search}</span>
@@ -365,8 +421,16 @@ function InterfacesHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (flowId: st
           interfaces={interfaces.view?.interfaces ?? []}
           loading={interfaces.loading}
           error={interfaces.error}
-          activeId={tabs.activeId}
-          onOpen={tabs.open}
+          activeId={recipeSurface ? null : tabs.activeId}
+          surfaces={surfaces}
+          onSurfaces={setSurfaces}
+          hasRecipe={recipe != null}
+          recipeSurface={recipeSurface}
+          onToggleRecipe={(surface) => setRecipeSurface((open) => (open === surface ? null : surface))}
+          onOpen={(id, pinned) => {
+            setRecipeSurface(null);
+            tabs.open(id, pinned);
+          }}
         />
       </div>
       <GuardInterfacesPane repoId="r"
@@ -377,20 +441,27 @@ function InterfacesHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (flowId: st
         onMap={() => void interfaces.map()}
         tabs={tabs}
         commandTabs={commandTabs}
+        recipe={recipe}
+        recipeSurface={recipeSurface}
+        onCloseRecipe={() => setRecipeSurface(null)}
         onOpenFlow={onOpenFlow}
       />
     </div>
   );
 }
 
-const renderTab = (url = '/repos/r?tab=interfaces', onOpenFlow?: (flowId: string) => void) =>
+const renderTab = (
+  url = '/repos/r?tab=interfaces',
+  onOpenFlow?: (flowId: string) => void,
+  props: { recipe?: GuardRecipeCard | null } = {},
+) =>
   render(
     <MemoryRouter initialEntries={[url]}>
-      <InterfacesHarness onOpenFlow={onOpenFlow} />
+      <InterfacesHarness onOpenFlow={onOpenFlow} {...props} />
     </MemoryRouter>,
   );
 
-/** The pane alone on a fixed view — for banner states the fetch fixtures don't carry. */
+/** The pane alone on a fixed view — for states the fetch fixtures don't carry. */
 function PaneHarness({ view }: { view: GuardInterfacesView }) {
   const tabs = useGuardInterfaceTabs('r');
   const commandTabs = useGuardCommandTabs('r');
@@ -451,32 +522,23 @@ describe('Interfaces tab — unmapped → Map → mapped', () => {
   });
 });
 
-describe('Interfaces tab — the detected-surface banner', () => {
-  it('keeps a detected surface that is still awaiting its driver, and drops the undetected ones', () => {
+describe('Interfaces tab — the surfaces are the catalog’s, not a banner’s', () => {
+  it('carries no detected-surface banner at all — the surface groups are that reading', () => {
     renderPane(CLI_AND_WEB);
-    // The chip says what the surface IS and whether it can run — and nothing else.
-    // Its interface count lives on the catalog's own surface group beside it.
-    const cli = screen.getByText(/CLI · runnable ✓/);
-    expect(cli.textContent).toBe('CLI · runnable ✓');
-    const web = screen.getByText(/Web · Needs web driver ⚠/);
-    expect(web.textContent).toBe('Web · Needs web driver ⚠');
-    // The wire still carries API / Desktop rows; undetected, they say nothing.
-    expect(screen.queryByText(/API · /)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Needs desktop driver/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Detected surfaces')).not.toBeInTheDocument();
+    expect(screen.queryByText(/CLI · runnable ✓/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Web · Needs web driver ⚠/)).not.toBeInTheDocument();
   });
 
   it('names the surfaces and nothing else — how a catalog was derived is store data', () => {
     renderPane(CLI_AND_WEB, '/repos/r?tab=interfaces&ginterface=web%2Ftasks-board');
     // `tree` / `probes` is a degradation marker the store keeps; no reading of the
-    // page — chip, hover or the open interface's byline — says it.
-    expect(screen.getByText('Web interfaces are mapped.')).toBeInTheDocument();
+    // page — the open interface's byline included — says it.
     expect(screen.queryByText(/\btree\b|\bprobes\b/)).not.toBeInTheDocument();
   });
 
-  it('renders nothing at all when no surface was detected — not an empty banner shell', () => {
+  it('says only what to do when nothing is mapped', () => {
     renderPane(UNMAPPED);
-    expect(screen.queryByText('Detected surfaces')).not.toBeInTheDocument();
-    // The unmapped empty state is the whole tab in that case.
     expect(screen.getByText('No interfaces mapped yet')).toBeInTheDocument();
   });
 });
@@ -487,17 +549,6 @@ describe('Interfaces tab — the mapped catalog', () => {
       'fetch',
       vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(MAPPED) : json({}))),
     );
-  });
-
-  it('banners only the surfaces this repo has, with their state and no tally', async () => {
-    renderTab();
-    const cli = await screen.findByText(/CLI · runnable ✓/);
-    expect(cli.textContent).toBe('CLI · runnable ✓');
-    // Drivers with no code behind them are engine knowledge, not user information.
-    expect(screen.queryByText(/Web · /)).not.toBeInTheDocument();
-    expect(screen.queryByText(/API · /)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Desktop · /)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Needs .* driver/)).not.toBeInTheDocument();
   });
 
   it('groups the catalog by surface and carries the reverse index onto the flows', async () => {
@@ -652,8 +703,10 @@ describe('Interfaces tab — the mapped catalog', () => {
       expect(el.className).not.toMatch(/overflow-(auto|scroll|y-auto|y-scroll)/);
     }
     // …and no inner overflow box under it either (the double-scrollbar report).
+    // Read through the attribute: an SVG child (an affordance row's icon) has an
+    // SVGAnimatedString for `className`, not a string.
     for (const child of Array.from(list.querySelectorAll<HTMLElement>('*'))) {
-      expect(child.className).not.toMatch(/overflow-(auto|scroll|y-auto|y-scroll)/);
+      expect(child.getAttribute('class') ?? '').not.toMatch(/overflow-(auto|scroll|y-auto|y-scroll)/);
     }
   });
 
@@ -689,14 +742,13 @@ describe('Interfaces tab — the mapped catalog', () => {
   // The contract is rendered by the pane, not fetched separately — see the
   // dedicated describe below for the grammar table and the io panel.
 
-  // Nothing selected IS this pane — the banner over "pick an interface" — so the
-  // strip never offers an Overview chip to go "back" to it.
+  // Nothing selected IS this pane — "pick an interface" — so the strip never
+  // offers an Overview chip to go "back" to it.
   it('carries NO Overview entry in its tab strip', async () => {
     const user = userEvent.setup();
     renderTab();
-    // Nothing selected: the surface banner and the pick-a-interface state, no strip.
-    expect(await screen.findByText('Detected surfaces')).toBeInTheDocument();
-    expect(screen.getByText('Select an interface')).toBeInTheDocument();
+    // Nothing selected: the pick-an-interface state, no strip.
+    expect(await screen.findByText('Select an interface')).toBeInTheDocument();
     expect(screen.queryByText('Overview')).toBeNull();
 
     // With an interface open the strip is up — and it holds the interface alone.
@@ -707,7 +759,169 @@ describe('Interfaces tab — the mapped catalog', () => {
     // Closing it returns to the same natural state.
     await user.click(screen.getByLabelText('Close cli/tasks-add'));
     expect(await screen.findByText('Select an interface')).toBeInTheDocument();
-    expect(screen.getByText('Detected surfaces')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The SURFACE FILTER — the one filter idiom over the catalog: a count chip per
+ * surface the catalog has, counted by the very predicate that narrows it. The
+ * surface GROUPS survive the narrowing; filtering to one surface just leaves that
+ * surface's groups standing.
+ */
+describe('Interfaces tab — the surface filter', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(FAMILIES) : json({}))),
+    );
+  });
+
+  const bar = () => screen.getByRole('group', { name: 'Filter by surface' });
+
+  it('offers a chip per surface the catalog HAS, counted by what it keeps', async () => {
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('cli/version');
+    // FAMILIES: four cli entries, one web entry.
+    expect(within(bar()).getByRole('button', { name: 'CLI 4' })).toBeInTheDocument();
+    expect(within(bar()).getByRole('button', { name: 'Web 1' })).toBeInTheDocument();
+    // Drivers with no code behind them are engine knowledge, not user information.
+    expect(within(bar()).queryByRole('button', { name: /^API/ })).toBeNull();
+    expect(within(bar()).queryByRole('button', { name: /^Desktop/ })).toBeNull();
+  });
+
+  it('narrows to the surface clicked — its groups stay, the others go', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('cli/version');
+
+    await user.click(within(bar()).getByRole('button', { name: 'Web 1' }));
+    // Just the web surface, with its own family header under it.
+    expect(catalogOutline()).toEqual(['# Web', '# rules', 'web/rules-page']);
+    expect(within(bar()).getByRole('button', { name: 'Web 1' })).toHaveAttribute('aria-pressed', 'true');
+
+    // The chip's count never promised more than the list shows.
+    await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
+    expect(catalogOutline().filter((line) => !line.startsWith('#'))).toHaveLength(4);
+
+    // Toggle-off restores the whole catalog.
+    await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
+    expect(catalogOutline()).toContain('# Web');
+    expect(catalogOutline()).toContain('# CLI');
+  });
+});
+
+/**
+ * THE RECIPE, where preparation belongs: on the SURFACE it prepares. Each surface
+ * group leads with its own opener, and the pane shows that surface's blocks —
+ * never another surface's. The raw reading stays the whole file.
+ */
+describe('Interfaces tab — the per-surface recipe', () => {
+  beforeEach(() => {
+    recipeRawRequests = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => {
+        const u = String(url);
+        if (u.includes('/guard/recipe/raw')) {
+          recipeRawRequests.push(u);
+          return json({ file: '.truecourse/scenarios/recipe.json', content: RECIPE_RAW });
+        }
+        return u.includes('/guard/interfaces') ? json(CLI_AND_WEB) : json({});
+      }),
+    );
+  });
+
+  const opener = (label: string) =>
+    within(screen.getByTestId('panel')).getByRole('button', { name: `${label} recipe` });
+
+  it('gives every surface group its own opener, and opens that surface’s preparation', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+
+    await user.click(opener('CLI'));
+    const recipe = await screen.findByRole('region', { name: 'Recipe' });
+    expect(opener('CLI')).toHaveAttribute('aria-pressed', 'true');
+    // The cli surface's own preparation: install, build, entrypoint, env.
+    expect(within(recipe).getByText('pnpm install --frozen-lockfile')).toBeInTheDocument();
+    expect(within(recipe).getByText('pnpm build')).toBeInTheDocument();
+    expect(within(recipe).getByText('node dist/tasks.js')).toBeInTheDocument();
+    expect(within(recipe).getByText('TASKS_HOME=.tmp/tasks')).toBeInTheDocument();
+    // Somebody else's blocks are not this surface's preparation.
+    expect(within(recipe).queryByText(/dist\/server\.js/)).toBeNull();
+    expect(within(recipe).queryByText(/dist\/web\.js/)).toBeNull();
+  });
+
+  it('scopes the WEB opener to the web block, and a second click closes it', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('web/tasks-board');
+
+    await user.click(opener('Web'));
+    const recipe = await screen.findByRole('region', { name: 'Recipe' });
+    expect(within(recipe).getByText('serve: node dist/web.js')).toBeInTheDocument();
+    expect(within(recipe).getByText('build: pnpm build:web')).toBeInTheDocument();
+    expect(within(recipe).getByText('ready when: /health')).toBeInTheDocument();
+    expect(within(recipe).queryByText('node dist/tasks.js')).toBeNull();
+
+    await user.click(opener('Web'));
+    expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
+  });
+
+  it('picking an interface navigates AWAY from the recipe — one body, one subject', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    await user.click(opener('CLI'));
+    await screen.findByRole('region', { name: 'Recipe' });
+
+    await user.click(within(screen.getByTestId('panel')).getByText('cli/tasks-add'));
+    expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
+    expect(opener('CLI')).toHaveAttribute('aria-pressed', 'false');
+    expect(await screen.findByRole('group', { name: 'Interface cli/tasks-add' })).toBeInTheDocument();
+  });
+
+  it('reads the stored file verbatim in raw mode — the WHOLE file, lazily', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('web/tasks-board');
+    await user.click(opener('Web'));
+    // Nothing fetched for a reading nobody asked for.
+    expect(recipeRawRequests).toHaveLength(0);
+
+    const modes = within(await screen.findByRole('region', { name: 'Recipe' })).getByRole('group', {
+      name: 'View mode',
+    });
+    await user.click(within(modes).getByRole('button', { name: 'JSON' }));
+    const raw = await screen.findByLabelText('recipe source');
+    // The scope is the CARD's; the file is never half-shown.
+    expect(raw.textContent).toContain('dist/tasks.js');
+    expect(raw.textContent).toContain('dist/web.js');
+    expect(recipeRawRequests).toHaveLength(1);
+    // A SINGLETON artifact: one recipe per repo, addressed by no id.
+    expect(recipeRawRequests[0]).not.toContain('id=');
+  });
+
+  it('shows the file as the server masked it — the raw mode is no secret door', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    await user.click(opener('CLI'));
+    await user.click(
+      within(within(await screen.findByRole('region', { name: 'Recipe' })).getByRole('group', { name: 'View mode' }))
+        .getByRole('button', { name: 'JSON' }),
+    );
+    const raw = await screen.findByLabelText('recipe source');
+    await waitFor(() => expect(raw.textContent).toContain('inline value, masked'));
+    // The capability stays readable; the value never arrives to be shown.
+    expect(raw.textContent).toContain('"header": "Authorization"');
+    expect(raw.textContent).not.toMatch(/sk-|secret/);
+  });
+
+  it('offers nothing at all when the repo has no recipe yet', async () => {
+    renderTab('/repos/r?tab=interfaces', undefined, { recipe: null });
+    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    expect(within(screen.getByTestId('panel')).queryByRole('button', { name: /recipe/i })).toBeNull();
   });
 });
 
@@ -1206,5 +1420,60 @@ describe('Interfaces tab — the question sequence', () => {
     expect(await screen.findByText('Input and output')).toBeInTheDocument();
     expect(screen.queryByText('Question sequence')).not.toBeInTheDocument();
     expect(screen.queryByText('sequence unknown')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * THE STATE CONTRACT of a web task, after the named-states rework (2026-08-11).
+ * Both fields are now IDS into the area's registry, and the per-step prose is
+ * gone — so the pane names two states and the diagram is one message per step,
+ * with no interaction-change sentences threaded between them.
+ */
+describe('a web task’s state contract', () => {
+  const WEB: GuardInterfacesView['interfaces'][number] = {
+    id: 'web/silence-rule-from-violation-card',
+    type: 'web',
+    title: 'Silence a noisy rule from a violation card',
+    group: 'repos',
+    entry: { method: 'GET', path: '/repos/{repoId}' },
+    steps: [
+      { kind: 'activate', target: 'button "More actions"' },
+      { kind: 'activate', target: 'menuitem "Disable rule for this repo"' },
+    ],
+    startingState: 'repo-report-open',
+    endState: 'rule-silenced',
+    fingerprint: 'sha256:web',
+    flows: [],
+    scenarioIds: [],
+  };
+
+  const openWebTask = () =>
+    renderPane(
+      { ...MAPPED, interfaces: [WEB] },
+      '/repos/r?tab=interfaces&ginterface=web%2Fsilence-rule-from-violation-card',
+    );
+
+  it('names the two states it assumes and leaves, as ids', async () => {
+    openWebTask();
+    expect(await screen.findByText('Starting state')).toBeInTheDocument();
+    const start = screen.getByText('repo-report-open');
+    const end = screen.getByText('rule-silenced');
+    expect(screen.getByText('End state')).toBeInTheDocument();
+    // Mono, because they are ids: two tasks chain when these match exactly.
+    expect(start.className).toMatch(/font-mono/);
+    expect(end.className).toMatch(/font-mono/);
+  });
+
+  it('draws one message per step — no state prose between them', async () => {
+    openWebTask();
+    const diagram = await screen.findByRole('group', {
+      name: 'Interface web/silence-rule-from-violation-card',
+    });
+    expect(within(diagram).getAllByTitle(/^activate /).map((el) => el.textContent)).toEqual([
+      'activate button "More actions"',
+      'activate menuitem "Disable rule for this repo"',
+    ]);
+    // Two steps, two messages: nothing is drawn flowing back from the surface.
+    expect(diagram.querySelectorAll('[title]')).toHaveLength(2);
   });
 });

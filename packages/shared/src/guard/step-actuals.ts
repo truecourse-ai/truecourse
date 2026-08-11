@@ -17,6 +17,47 @@
 import { z } from 'zod'
 import { OutputExcerptsSchema } from './excerpts.js'
 
+/**
+ * ONE member of a web step's expectation beside the page's own answer to it. A web
+ * step can assert an address, the page's words and a control's presence at once, and
+ * each has its own answer: rendering one of them (the address) as "the actual" of all
+ * three reads as a failure on a step that passed.
+ */
+export const GuardStepWebCheckSchema = z
+  .object({
+    subject: z.enum(['url', 'text', 'visible']),
+    /** The assertion in full — `the page text contains "Filtered by"`. */
+    expected: z.string(),
+    /** What the page had for THAT assertion. */
+    actual: z.string(),
+    ok: z.boolean(),
+  })
+  .strict()
+export type GuardStepWebCheck = z.infer<typeof GuardStepWebCheckSchema>
+
+/**
+ * What a WEB step did, in its own vocabulary. A browser step spawns nothing, so it
+ * has no exit code and no streams: it has an action, an address, what it asserted
+ * and what answered each assertion, the page's own words, and a picture.
+ */
+export const GuardStepWebActualSchema = z
+  .object({
+    /** What the browser did — `navigate /notes`, `click button “Save”`. */
+    action: z.string(),
+    /** The address after the step, as `pathname + search`. */
+    url: z.string(),
+    /** The step's screenshot in the run's evidence bundle, by filename. */
+    screenshot: z.string().optional(),
+    /** Each member of the expectation with the page's answer to it, in step order. */
+    checks: z.array(GuardStepWebCheckSchema).default([]),
+    /** What the page showed — the browser's answer to "what did it print". */
+    text: z.string().optional(),
+    /** Console lines and page errors seen during the step. */
+    console: z.array(z.string()).optional(),
+  })
+  .strict()
+export type GuardStepWebActual = z.infer<typeof GuardStepWebActualSchema>
+
 export const GuardStepActualSchema = z
   .object({
     /** 1-based step index — the same position `GuardScenarioStepView.n` names. */
@@ -30,9 +71,16 @@ export const GuardStepActualSchema = z
     /** Wall clock of the step's last executed iteration. */
     durationMs: z.number().nonnegative(),
     /**
+     * The browser's record, on a web step — see {@link GuardStepWebActualSchema}. Its
+     * presence is what tells a reader (and a renderer) that this step's record speaks
+     * pages and addresses rather than exit codes and streams.
+     */
+    web: GuardStepWebActualSchema.optional(),
+    /**
      * What the step printed, head-truncated at write time; each stream omitted when it
      * was empty. An api request's response body rides as `stdout`, the same mapping the
-     * api driver's failure excerpts use.
+     * api driver's failure excerpts use. A web step has neither — its `web.text` is
+     * what it "printed".
      */
     ...OutputExcerptsSchema.shape,
   })
@@ -63,6 +111,22 @@ const InvocationStepSchema = z
     body: z.string().optional(),
     /** web: the address the step ended at, `pathname + search`. */
     url: z.string().optional(),
+    /**
+     * web: the browser's own record — the action, the address, each expectation
+     * beside its answer, the page text, the screenshot. Read permissively (a bundle
+     * written before checks were recorded still reads, with none).
+     */
+    web: z
+      .object({
+        command: z.string().optional(),
+        url: z.string().optional(),
+        screenshot: z.string().optional(),
+        checks: z.array(GuardStepWebCheckSchema).optional(),
+        visibleText: z.string().optional(),
+        console: z.array(z.string()).optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough()
 
@@ -85,6 +149,27 @@ function actualLine(step: InvocationStep): string | undefined {
   if ('exitCode' in step) return step.exitCode == null ? 'exit (killed)' : `exit ${step.exitCode}`
   if ('status' in step) return step.status == null ? undefined : `status ${step.status}`
   return undefined
+}
+
+/**
+ * The BROWSER's half of a record, when the step had one. A web step's record is not
+ * an exit code with a page attached: it is the action, the address, each expectation
+ * beside what answered it, and what the page showed — which is why it travels as its
+ * own field rather than as `stdout` under a cli name.
+ */
+function webActual(step: InvocationStep): { web?: GuardStepWebActual } {
+  if (step.kind !== 'web' || !step.web) return {}
+  const web = step.web
+  return {
+    web: {
+      action: web.command ?? '',
+      url: web.url ?? step.url ?? '',
+      ...(web.screenshot ? { screenshot: web.screenshot } : {}),
+      checks: web.checks ?? [],
+      ...(web.visibleText ? { text: web.visibleText } : {}),
+      ...(web.console && web.console.length > 0 ? { console: web.console } : {}),
+    },
+  }
 }
 
 /**
@@ -111,6 +196,7 @@ export function parseGuardStepActuals(source: string | unknown): GuardStepActual
       n: step.index,
       ...(line !== undefined ? { actual: line } : {}),
       durationMs: step.durationMs ?? 0,
+      ...webActual(step),
       ...(stdout ? { stdout } : {}),
       ...(step.stderr ? { stderr: step.stderr } : {}),
     }

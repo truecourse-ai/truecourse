@@ -16,8 +16,13 @@
 import type { GuardSandboxStep, GuardWebStep } from '@truecourse/shared'
 import { describeWebCommand, describeWebExpect, isWebStep } from '@truecourse/shared'
 import type { ResolvedWebSurface } from '../recipe.js'
-import { STEP_OUTPUT_LIMIT, stepExcerpt, type EvidenceStep } from '../evidence.js'
-import { DEFAULT_WEB_STEP_TIMEOUT_MS, executeWebStep, type WebStepResult } from '../web/executor.js'
+import { stepExcerpt, type EvidenceStep } from '../evidence.js'
+import {
+  DEFAULT_WEB_STEP_TIMEOUT_MS,
+  executeWebStep,
+  WEB_TEXT_LIMIT,
+  type WebStepResult,
+} from '../web/executor.js'
 import { openWebSession, type WebSession } from '../web/session.js'
 import { resolveWebStep } from '../web/tokens.js'
 import type { StepDriver, StepOutcome, StepRunContext } from './types.js'
@@ -65,6 +70,7 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
             url: '(the browser never opened)',
             visibleText: '',
             durationMs: 0,
+            checks: [],
           }),
         ],
         expected: STEP_TO_RUN,
@@ -124,14 +130,20 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
 
 /**
  * The transcript record of a web step. It spawns nothing, so it has no exit code and
- * no streams; what it has is an action, an address, a screenshot and what the page
- * showed. Written for a passing step and a failing one alike — the question a reader
- * asks about a browser step is always "what did it look like".
+ * no streams; what it has is an action, an address, a screenshot, each assertion
+ * beside the page's own answer to it, and what the page showed. Written for a passing
+ * step and a failing one alike — the question a reader asks about a browser step is
+ * always "what did it look like".
+ *
+ * The page text is recorded at the width it was ASSERTED against ({@link
+ * WEB_TEXT_LIMIT}), not at the stream cap: a record trimmed shorter than the
+ * expectation's own window shows a page missing the very words the step asserted,
+ * next to a green tick, and cannot be checked by the reader.
  */
 function webStepRecord(
   index: number,
   step: GuardWebStep,
-  result: Pick<WebStepResult, 'url' | 'visibleText' | 'durationMs'> & { screenshot?: string },
+  result: Pick<WebStepResult, 'url' | 'visibleText' | 'durationMs' | 'checks'> & { screenshot?: string },
   consoleLines: readonly string[] = [],
 ): EvidenceStep {
   return {
@@ -141,9 +153,10 @@ function webStepRecord(
     web: {
       command: describeWebCommand(step),
       expectation: describeWebExpect(step.expect),
+      ...(result.checks.length > 0 ? { checks: result.checks } : {}),
       url: result.url,
       ...(result.screenshot ? { screenshot: result.screenshot } : {}),
-      visibleText: result.visibleText.slice(0, STEP_OUTPUT_LIMIT),
+      visibleText: result.visibleText.slice(0, WEB_TEXT_LIMIT),
       ...(consoleLines.length > 0 ? { console: consoleLines } : {}),
     },
     repeat: 1,

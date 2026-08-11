@@ -1,11 +1,16 @@
 /**
- * The RECIPE as a destination — the one preparation fact behind every test on the
- * Tests tab, opened from that tab's header.
+ * The RECIPE as a destination — the preparation a SURFACE runs on, opened from
+ * that surface's group in the Interfaces catalog.
  *
  * It is artifact-backed like every other guard entity, so it wears the same two
- * readings and no third: the structured card ({@link GuardRecipeCard} — build,
- * entry, servers, datastores, env, fingerprint and staleness), or the stored
- * `scenarios/recipe.json` verbatim.
+ * readings and no third: the structured card ({@link GuardRecipeCard} — install,
+ * build, entry, servers, datastores, the web surface, env, fingerprint and
+ * staleness), or the stored `scenarios/recipe.json` verbatim.
+ *
+ * The CARD is what the surface scopes: cli reads its install/build/entrypoint, api
+ * its servers and datastores, web its web block. The RAW reading is never scoped —
+ * a file read verbatim is the whole file, and a "verbatim" that hid half of it
+ * would be the one reading a reader cannot trust.
  *
  * Verbatim, with one exception the server owns: an inline credential value is
  * MASKED before it leaves the driver, exactly as `truecourse guard recipe` masks
@@ -14,7 +19,7 @@
  * card would not.
  */
 
-import type { GuardRecipeCard as GuardRecipeCardData } from '@truecourse/shared';
+import type { GuardDriverId, GuardRecipeCard as GuardRecipeCardData } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
 import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
 import { GuardRecipeCard } from './GuardRecipeCard';
@@ -25,10 +30,13 @@ export const GUARD_RECIPE_FILE = '.truecourse/scenarios/recipe.json';
 export function GuardRecipeDetail({
   repoId,
   recipe,
+  surface,
   prRef,
 }: {
   repoId: string;
   recipe: GuardRecipeCardData;
+  /** The surface whose preparation is being read; omit for the whole recipe. */
+  surface?: GuardDriverId;
   /** The PR head ref scoping the read (EE); undefined at repo level. */
   prRef?: string;
 }) {
@@ -54,7 +62,7 @@ export function GuardRecipeDetail({
         </>
       ) : (
         <div className="mt-3">
-          <GuardRecipeCard recipe={recipe} />
+          <GuardRecipeCard recipe={recipe} {...(surface ? { surface } : {})} />
         </div>
       )}
     </div>

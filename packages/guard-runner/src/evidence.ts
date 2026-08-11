@@ -57,20 +57,39 @@ export function isFileStepKind(kind: EvidenceStep['kind']): boolean {
 }
 
 /**
+ * ONE member of a web step's expectation beside the page's own answer to it — the
+ * pair a reader checks a green step with. See `WebCheck` in the web executor, whose
+ * shape this is: the evidence carries it verbatim.
+ */
+export interface EvidenceWebCheck {
+  subject: 'url' | 'text' | 'visible'
+  expected: string
+  actual: string
+  ok: boolean
+}
+
+/**
  * What ONE web step did, for the transcript — a browser step's evidence is visual,
- * so the record is what it did, where it ended up, what the page said, and the name
- * of the screenshot that shows it.
+ * so the record is what it did, where it ended up, what it asserted and what
+ * answered each assertion, what the page said, and the name of the screenshot that
+ * shows it.
  */
 export interface EvidenceWebStep {
   /** What the step did — `navigate /notes`, `click button “Save”`. */
   command: string
   /** What it asserted, one line; empty when it asserted nothing. */
   expectation: string
+  /**
+   * Each member of that expectation with what the page answered IT. Empty when the
+   * step asserted nothing, and when its action failed before anything was asserted
+   * — `expectation` then still says what it was going to check.
+   */
+  checks?: readonly EvidenceWebCheck[]
   /** The address after the step, as `pathname + search`. */
   url: string
   /** The screenshot's filename in this evidence dir, absent when none could be taken. */
   screenshot?: string
-  /** What the page showed, head-truncated. */
+  /** What the page showed — the same window the expectation was evaluated against. */
   visibleText: string
   /** Console lines and page errors seen during the step. */
   console?: readonly string[]
@@ -242,13 +261,26 @@ function renderTranscript(params: WriteEvidenceParams): string {
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
     // A web step has no argv and no streams: it has an action, an address, a
-    // screenshot, and what the page showed. That is its whole record.
+    // screenshot, what it asserted next to what answered each assertion, and what
+    // the page showed. That is its whole record.
     if (s.web) {
       lines.push(`   web:      ${s.web.command}`)
-      if (s.web.expectation) lines.push(`   expect:   ${s.web.expectation}`)
       lines.push(`   at:       ${s.web.url}`)
       if (s.web.screenshot) lines.push(`   screen:   ${s.web.screenshot}`)
       for (const line of s.web.console ?? []) lines.push(`   console:  ${line}`)
+      const checks = s.web.checks ?? []
+      for (const check of checks) {
+        // EVERY assertion beside ITS OWN answer. One `at:` line standing in as the
+        // actual of a text assertion is what made a green step read as a red one.
+        lines.push(`   ${check.ok ? '✓' : '✗'} expected: ${check.expected}`)
+        lines.push(`     actual:   ${check.actual}`)
+      }
+      // An expectation the step never reached (its action failed first) has no
+      // answers — say what it was going to check, and that nothing checked it.
+      if (checks.length === 0 && s.web.expectation) {
+        lines.push(`   · expected: ${s.web.expectation}`)
+        lines.push(`     actual:   not evaluated — the step did not get past its action`)
+      }
       lines.push(`   page text:`)
       lines.push(indent(s.web.visibleText))
       lines.push('')

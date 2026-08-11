@@ -267,6 +267,115 @@ describe('the web driver', () => {
   )
 
   it(
+    'evaluates EVERY member of a web expectation — a text miss fails a step whose address matches',
+    async () => {
+      // The address holds and the page text does not. A step that stopped at the
+      // first member that passed would report green on a page that never showed
+      // what the claim promises.
+      const result = await run(repo, [
+        {
+          driver: 'web',
+          navigate: '/notes',
+          expect: { url: { equals: '/notes' }, text: { contains: 'Totally Different Product' } },
+          timeoutMs: 1_500,
+        },
+      ])
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('the page text contains')
+      expect(result.failure?.actual).toContain('no notes yet')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'evaluates the presence member too — an address and a text that hold do not carry a missing control',
+    async () => {
+      const result = await run(repo, [
+        {
+          driver: 'web',
+          navigate: '/notes',
+          expect: {
+            url: { equals: '/notes' },
+            text: { contains: 'no notes yet' },
+            visible: { role: 'button', name: 'Publish' },
+          },
+          timeoutMs: 1_500,
+        },
+      ])
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('button “Publish”')
+      expect(result.failure?.actual).toContain('no button named “Publish” is on the page')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a PASSING web step records each expectation beside the page’s own answer to THAT expectation',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/notes',
+            expect: {
+              url: { equals: '/notes' },
+              text: { contains: 'no notes yet' },
+              visible: { role: 'link', name: 'Home' },
+            },
+          },
+        ],
+        'web.pairing.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.pairing.cli.1')
+      // Every member is paired with what the page actually had FOR IT: the address
+      // answers the address assertion, the page's words answer the text assertion,
+      // and the control answers the presence assertion. A single `at: /notes` line
+      // standing in as the "actual" of a text assertion is the mispairing this
+      // guards against.
+      expect(text).toContain('✓ expected: the address equals "/notes"')
+      expect(text).toContain('   actual:   the address was "/notes"')
+      expect(text).toContain('✓ expected: the page text contains "no notes yet"')
+      expect(text).toMatch(/actual: {3}the page text was "[^"]*no notes yet/)
+      expect(text).toContain('✓ expected: link “Home” is visible')
+      expect(text).toContain('   actual:   link “Home” is visible')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'the page text a step RECORDS is the page text its expectation was evaluated against',
+    async () => {
+      // A record trimmed shorter than the asserted window cannot be checked by the
+      // reader: the transcript would show a page missing the very words the step
+      // asserted, next to a green tick. The marker sits past the stream excerpt cap
+      // (1,200) and inside the asserted window (2,000).
+      const long = 'x'.repeat(1_500) + ' TAIL-MARKER'
+      const result = await run(
+        repo,
+        [
+          { run: ['note', 'notes.txt', long], expect: { exit: 0 } },
+          {
+            driver: 'web',
+            navigate: '/notes',
+            expect: { text: { contains: 'TAIL-MARKER' } },
+          },
+        ],
+        'web.record-window.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+      // Read the WEB step's own record — the cli step's argv quotes the marker too.
+      const bundle = JSON.parse(
+        fs.readFileSync(path.join(evidenceDir(repo, 'web.record-window.cli.1'), 'invocation.json'), 'utf-8'),
+      ) as { steps: { index: number; web?: { visibleText: string } }[] }
+      const web = bundle.steps.find((s) => s.index === 2)?.web
+      expect(web?.visibleText).toContain('TAIL-MARKER')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
     'waits for observable state rather than sleeping — the late text arrives and passes',
     async () => {
       // The paragraph says "still working" until the page rewrites it. A step that

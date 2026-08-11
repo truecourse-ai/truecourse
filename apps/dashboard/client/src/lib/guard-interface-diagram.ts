@@ -22,12 +22,6 @@ export interface InterfaceMessage {
   /** The message text (mono) — the surface-visible payload of the step. */
   label: string;
   kind: InterfaceStep['kind'];
-  /**
-   * A REPLY: the step's `output` — the interaction change the action produced
-   * (a dropdown opened, the cards gone), flowing surface → user. Prose about
-   * state, rendered dashed and unmono to keep it apart from the actions.
-   */
-  reply?: boolean;
 }
 
 export interface InterfaceDiagramModel {
@@ -68,15 +62,12 @@ export function interfaceStepLabel(step: InterfaceStep): string {
 
 /**
  * The diagram model of an interface: the actor plus every participant its steps
- * touch (first-seen order), and one message per step. `input` steps are
+ * touch (first-seen order), and ONE message per step. `input` steps are
  * self-messages on their surface (a value typed into a field never crosses a
  * boundary).
  *
- * A step that states its `output` (the state handoff) is followed by a REPLY
- * message flowing back to the actor — the interaction change the action
- * produced. The step's `input` is not drawn: the chain invariant makes it the
- * previous reply (or the interface's starting state, which the pane already
- * shows above the diagram), so drawing it would say everything twice.
+ * No state is drawn between the steps: within a task the chain IS step order
+ * (2026-08-11), and the task's own two states are named above the diagram.
  */
 export function interfaceDiagramModel(
   iface: Pick<Interface, 'steps'> & Partial<Pick<Interface, 'type'>>,
@@ -89,17 +80,14 @@ export function interfaceDiagramModel(
     return participants.length - 1;
   };
 
-  const messages = iface.steps.flatMap((step) => {
+  const messages = iface.steps.map((step) => {
     const to = indexOf(targetOf(step));
-    const action = {
+    return {
       from: step.kind === 'input' ? to : 0,
       to,
       label: interfaceStepLabel(step),
       kind: step.kind,
     };
-    return step.output
-      ? [action, { from: to, to: 0, label: step.output, kind: step.kind, reply: true }]
-      : [action];
   });
 
   return { participants, messages };

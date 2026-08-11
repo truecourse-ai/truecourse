@@ -94,8 +94,36 @@ export function evaluateExpect(params: EvaluateExpectParams): ExpectMismatch | n
   return null
 }
 
-function truncate(value: string, max = 400): string {
+export function truncate(value: string, max = 400): string {
   return value.length > max ? `${value.slice(0, max)}… (${value.length} chars)` : value
+}
+
+/**
+ * ONE text matcher as a whole assertion, in the words a mismatch uses — `the page
+ * text contains "x" and matches /y/`.
+ *
+ * Where {@link matchTextMatcher} names the ONE member that missed, this names EVERY
+ * member the matcher declares, because it is what a RECORD says the step asserted.
+ * A record naming half an assertion is the same lie as a check skipping half of it.
+ */
+export function describeTextMatcher(label: string, matcher: GuardStreamMatcher): string {
+  const parts: string[] = []
+  if (matcher.equals !== undefined) parts.push(`equals ${JSON.stringify(truncate(matcher.equals))}`)
+  if (matcher.contains !== undefined) parts.push(`contains ${JSON.stringify(matcher.contains)}`)
+  if (matcher.matches !== undefined) parts.push(`matches /${matcher.matches}/`)
+  if (matcher.compare) parts.push(describeComparison(matcher.compare))
+  return `${label} ${parts.join(' and ')}`
+}
+
+/** The comparison half of a matcher, in the same words its mismatch uses. */
+function describeComparison(compare: GuardComparison): string {
+  const parts: string[] = []
+  if (compare.number !== undefined) parts.push(`carries a number matching /${compare.number}/`)
+  for (const { key, phrase } of COMPARATORS) {
+    const operand = compare[key]
+    if (operand !== undefined) parts.push(`is ${phrase} ${String(operand)}`)
+  }
+  return parts.join(' and ')
 }
 
 /**

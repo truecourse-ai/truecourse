@@ -579,6 +579,8 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
         activeId={null}
         filter="all"
         onFilter={() => {}}
+        drivers={[]}
+        onDrivers={() => {}}
         onOpen={() => {}}
       />,
     );

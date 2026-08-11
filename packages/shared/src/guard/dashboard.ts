@@ -671,6 +671,11 @@ export interface GuardScenarioListItem {
  * it is `null` when there is no run to compare against.
  */
 export interface GuardRecipeCard {
+  /**
+   * Shell command run once before the build to fetch dependencies; null when the
+   * recipe declares none. Part of the cli surface's preparation, like `build`.
+   */
+  install?: string | null
   /** Shell command run once to produce the entrypoint/server. */
   build: string
   /** Entrypoint argv (cli driver); null on an api-only recipe. */
@@ -696,6 +701,25 @@ export interface GuardRecipeCard {
   services: { up: string; down?: string } | null
   /** Recipe-level env the sandbox inherits; null when none is declared. */
   env: Record<string, string> | null
+  /**
+   * The WEB surface's preparation layer (`web`): how the browsed surface is built,
+   * started and observed ready. Null when the recipe declares no web block — a
+   * repo with no web steps. Absent on a card written before the field existed.
+   */
+  web?: {
+    /** Web-only build, run after the top-level one and only for a run with web steps. */
+    build?: string
+    /** Argv that starts the web surface. */
+    serve: string[]
+    /** Where the process runs — `sandbox` (the default) or `repo`. */
+    cwd?: 'sandbox' | 'repo'
+    /** Path polled until it answers 2xx before the first web step. */
+    healthPath?: string
+    /** Budget for the surface to become ready, in ms. */
+    readyTimeoutMs?: number
+    /** Extra env for the web surface process, on top of the recipe-level `env`. */
+    env?: Record<string, string>
+  } | null
   /** `sha256:…` over the current discovery-input files (package.json, lockfile, …). */
   fingerprint: string
   /**
@@ -755,6 +779,17 @@ export const GuardFlowListItemSchema = z
     /** Repo-relative docs the flow binds — the area/doc filter key. */
     docs: z.array(z.string()),
     surfaces: z.array(GuardFlowSurfaceSchema),
+    /**
+     * The drivers this flow's TESTS actually exercise — the union of the step
+     * kinds their scenarios use, not the scenario-level `driver` field. A cli
+     * scenario carrying web steps reports BOTH (`['cli','web']`), which is the
+     * whole point: the scenario-level driver names the sandbox world, and a
+     * reader filtering for "web" means the steps. A flow with no test yet falls
+     * back to its surfaces' declared drivers, so a blocked flow still answers
+     * "which surface was this for". Optional so a payload written before the
+     * field still parses (the `orphaned` precedent).
+     */
+    drivers: z.array(GuardDriverIdSchema).optional(),
     /**
      * DRIFT-class findings the last generate attributed to this flow — the ones
      * that mean the flow is failing: a committed red test the repo and the doc
@@ -1036,9 +1071,10 @@ export const GuardInterfaceRowSchema = z
     group: z.string().optional(),
     entry: InterfaceEntrySchema,
     steps: z.array(InterfaceStepSchema),
-    /** The state the task starts from — passed through from the catalog verbatim. */
+    /** The state the task starts from, as its area's state ID — passed through
+     *  from the catalog verbatim (the registry that describes it lives there). */
     startingState: z.string().optional(),
-    /** The observable state the task leaves behind — passed through verbatim. */
+    /** The observable state the task leaves behind, as a state id — verbatim. */
     endState: z.string().optional(),
     fingerprint: z.string(),
     /**

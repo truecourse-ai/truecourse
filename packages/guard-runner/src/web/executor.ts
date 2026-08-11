@@ -29,7 +29,7 @@ import {
   type GuardWebLocator,
   type GuardWebStep,
 } from '@truecourse/shared'
-import { matchTextMatcher, type ExpectMismatch } from '../expect.js'
+import { describeTextMatcher, matchTextMatcher, truncate, type ExpectMismatch } from '../expect.js'
 
 /**
  * Default budget for one web step's observable state to arrive. Shorter than the
@@ -53,6 +53,24 @@ export function webScreenshotFile(stepIndex: number): string {
   return `step-${stepIndex}.png`
 }
 
+/**
+ * ONE member of a web expectation, with the page's OWN ANSWER to that member.
+ *
+ * The record of a web step is made of these, and that is the point: a step asserting
+ * an address and a page's words has two answers, and reporting one of them beside
+ * both assertions (the address standing in as the "actual" of a text check) reads as
+ * a failure on a green step. Every declared member produces exactly one of these,
+ * whether it held or not.
+ */
+export interface WebCheck {
+  subject: 'url' | 'text' | 'visible'
+  /** The assertion in full, in the words a mismatch uses. */
+  expected: string
+  /** What the page had FOR THIS MEMBER — never another member's value. */
+  actual: string
+  ok: boolean
+}
+
 export interface WebStepResult {
   /** The address after the step, as `pathname + search` (never the ephemeral origin). */
   url: string
@@ -62,6 +80,12 @@ export interface WebStepResult {
   screenshot?: string
   /** Wall clock of the step. */
   durationMs: number
+  /**
+   * Every member of the step's expectation with what the page answered it. Empty
+   * when the step asserted nothing AND when it never got to assert (its action
+   * failed first) — the record tells those apart by whether the step declared one.
+   */
+  checks: readonly WebCheck[]
   /** The unmet expectation, when the step failed. */
   mismatch?: ExpectMismatch
   /** The infrastructure reason, when the step could not be taken at all. */
@@ -187,57 +211,109 @@ async function awaitTarget(
   }
 }
 
+/** What one pass over a web expectation saw: every member, and the first miss. */
+interface WebObservation {
+  checks: WebCheck[]
+  /** The FIRST member that missed, in the fixed order — the step's failure. */
+  mismatch: ExpectMismatch | null
+}
+
 /**
  * Evaluate a web expectation ONCE, in a fixed order (address, then text, then
- * presence) with the first miss returned — the cli `evaluateExpect` contract, so a
- * reader gets one deterministic failure per step whichever driver produced it.
+ * presence). EVERY declared member is evaluated — a member that holds must never
+ * end the pass, or a step asserting an address and a page's words would go green on
+ * the address alone — and the FIRST miss is the step's failure, which is the cli
+ * `evaluateExpect` contract: one deterministic failure per step, whichever driver
+ * produced it.
+ *
+ * The pass also returns what each member SAW, because that is the step's record: a
+ * green step has to be able to show what it checked and what answered it.
  */
-async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<ExpectMismatch | null> {
+async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<WebObservation> {
+  const checks: WebCheck[] = []
+  let mismatch: ExpectMismatch | null = null
+  /** Record one member. The FIRST miss becomes the failure; later ones only record. */
+  const record = (check: Omit<WebCheck, 'ok'>, miss: ExpectMismatch | null): void => {
+    if (miss) mismatch ??= miss
+    checks.push({ ...check, ok: miss === null })
+  }
+
   if (expect.url) {
     const address = pageAddress(page)
-    const miss = matchTextMatcher('url', 'the address', expect.url, address)
-    if (miss) return miss
+    record(
+      {
+        subject: 'url',
+        expected: describeTextMatcher('the address', expect.url),
+        actual: `the address was ${JSON.stringify(address)}`,
+      },
+      matchTextMatcher('url', 'the address', expect.url, address),
+    )
   }
   if (expect.text) {
-    let text: string
+    const label = expect.within ? `the ${describeWebLocator(expect.within)} text` : 'the page text'
+    const expected = describeTextMatcher(label, expect.text)
+    let scoped: { text: string } | { mismatch: ExpectMismatch }
     if (expect.within) {
       const scope = webLocator(page, expect.within)
       const found = await scope.count().catch(() => 0)
-      if (found !== 1) return await targetMismatch(page, expect.within, found, 'the text of')
-      text = await scope.innerText().catch(() => '')
+      scoped =
+        found === 1
+          ? { text: await scope.innerText().catch(() => '') }
+          : { mismatch: await targetMismatch(page, expect.within, found, 'the text of') }
     } else {
-      text = await readVisibleText(page)
+      scoped = { text: await readVisibleText(page) }
     }
-    const label = expect.within ? `the ${describeWebLocator(expect.within)} text` : 'the page text'
-    const miss = matchTextMatcher('text', label, expect.text, text)
-    if (miss) return miss
+    if ('mismatch' in scoped) {
+      // The text could not be read at all — the scope is the miss, and its own
+      // words are the honest actual for the text member.
+      record({ subject: 'text', expected, actual: scoped.mismatch.actual }, scoped.mismatch)
+    } else {
+      record(
+        { subject: 'text', expected, actual: `${label} was ${JSON.stringify(truncate(scoped.text))}` },
+        matchTextMatcher('text', label, expect.text, scoped.text),
+      )
+    }
   }
   if (expect.visible) {
-    const locator = webLocator(page, expect.visible)
+    const target = expect.visible
+    const expected = `${describeWebLocator(target)} is visible`
+    const locator = webLocator(page, target)
     const found = await locator.count().catch(() => 0)
-    if (found !== 1) return await targetMismatch(page, expect.visible, found, 'to see')
-    if (!(await locator.isVisible().catch(() => false))) {
-      return await targetMismatch(page, expect.visible, 0, 'to see')
+    const visible = found === 1 && (await locator.isVisible().catch(() => false))
+    if (visible) {
+      record({ subject: 'visible', expected, actual: expected }, null)
+    } else {
+      const miss = await targetMismatch(page, target, found === 1 ? 0 : found, 'to see')
+      record(
+        {
+          subject: 'visible',
+          expected,
+          // `count === 1` but hidden is the one case the target vocabulary cannot
+          // name for itself: the element IS on the page, it just is not shown.
+          actual: found === 1 ? `${describeWebLocator(target)} is on the page but not visible` : miss.actual,
+        },
+        miss,
+      )
     }
   }
-  return null
+  return { checks, mismatch }
 }
 
 /**
  * Wait for a web expectation to HOLD, until the deadline. The loop is the wait:
- * there is no separate "settle" phase to race, and the failure reported when the
- * budget runs out is the one the page was still showing.
+ * there is no separate "settle" phase to race, and what is reported when the budget
+ * runs out is the LAST observation — the page as it actually stayed.
  */
 async function awaitWebExpect(
   page: Page,
   expect: GuardWebExpect,
   deadline: number,
   signal?: AbortSignal,
-): Promise<ExpectMismatch | null> {
+): Promise<WebObservation> {
   for (;;) {
-    const miss = await evaluateWebExpect(page, expect)
-    if (!miss) return null
-    if (signal?.aborted || Date.now() >= deadline) return miss
+    const observed = await evaluateWebExpect(page, expect)
+    if (!observed.mismatch) return observed
+    if (signal?.aborted || Date.now() >= deadline) return observed
     await tick()
   }
 }
@@ -264,6 +340,7 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
   const deadline = started + timeoutMs
   let mismatch: ExpectMismatch | null = null
   let infra: string | undefined
+  let checks: readonly WebCheck[] = []
 
   try {
     if (isWebNavigateStep(step)) {
@@ -301,7 +378,9 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
   }
 
   if (!mismatch && !infra && step.expect) {
-    mismatch = await awaitWebExpect(page, step.expect, deadline, opts.signal)
+    const observed = await awaitWebExpect(page, step.expect, deadline, opts.signal)
+    checks = observed.checks
+    mismatch = observed.mismatch
   }
 
   const shot = await screenshot(page, opts.evidenceDir, opts.stepIndex)
@@ -310,6 +389,7 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
     visibleText: await readVisibleText(page),
     ...(shot ? { screenshot: shot } : {}),
     durationMs: Date.now() - started,
+    checks,
     ...(mismatch ? { mismatch } : {}),
     ...(infra ? { infra } : {}),
   }
