@@ -508,8 +508,8 @@ into a per-doc session; its disposition is settled in §6.3.
 
 Per §3.2, every LLM task is an agent session. Common rules: one model
 (§3.4), the standard malformed-turn policy (§3.3), a per-session turn
-budget (defaults below, provisional until the reference benchmark run
-calibrates them) and token ceiling.
+budget (defaults below, provisional — §6.4 says what settles them) and
+token ceiling.
 
 Two rules follow from §6.1's principle. A session's turn budget IS the
 bound, so a session that exhausts it ends on a structured
@@ -520,6 +520,23 @@ matching transcript event (§3.3), and the corpus field for it is the
 everything runs NO session: discovery (the repo walk plus the registered
 web sources), area grouping, the heading-widened membership net, and
 persistence are free string work and stay that way.
+
+**What the agent shape buys the scan.** Generate's sessions earn their
+tools by acting on the world — author, run, repair. The scan reads, so
+the question is fair: what does a tool call get it that one prompt
+cannot? The answer is the overlap session, and it is the same answer as
+§6.2's first problem. Judging whether two docs disagree needs their
+disputed passages in full, but a prompt must choose its inputs BEFORE it
+runs, so a one-shot pass has exactly two options: send every doc's full
+text (accurate, and the cost curve that problem describes) or send
+outlines only (cheap, and it misses what the outline does not say). A
+session chooses AFTER it starts — it reads outlines, notices two docs
+circling the same subject, and spends a tool call opening just those
+sections. Cost tracks suspicion instead of corpus size, which is what
+makes an explicit budget a real bound rather than a truncation. The
+other two sessions use tools for the same reason at smaller stakes: a
+doc that defers to another doc is judged by opening it, and two labels
+are merged by looking at how their docs actually use them.
 
 Three sessions, in order; each consumes the one before it.
 
@@ -637,8 +654,16 @@ problem says must not be allowed to drive cost.
 
 Unchanged items are excluded and labeled ("N of M docs changed"); when
 nothing changed the estimate has no stages and the confirm prompt is
-skipped — identical presentation to setup and generate. Turn ranges are
-provisional until the reference benchmark run calibrates them.
+skipped — identical presentation to setup and generate.
+
+Turn ranges are provisional, and the analyze-only pivot changed what
+will settle them. The reference corpus no longer exercises this
+workstream — its spec-consolidation coverage was deleted for testing an
+engine this plan reimplements — and the six analyze docs it keeps are
+far too small to calibrate a budget against: no area there can exhaust
+anything. The numbers are settled by running the scan over a real
+corpus at documentation scale, where the pair count is the problem §6.2
+describes, and only then written back here.
 
 ### 6.5 Implementation plan
 
