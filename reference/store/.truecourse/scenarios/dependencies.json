@@ -32,6 +32,10 @@
         {
           "flowId": "run-llm-rules-through-the-provider-api-transport",
           "need": "at least one source file the LLM rules accept, so the run reports a non-zero file count, and at least one deterministic finding so the violation summary is not empty"
+        },
+        {
+          "flowId": "filter-the-violation-list",
+          "need": "a project whose analysis yields findings at MORE THAN ONE severity and in more than one category, at least one of them raised by an LLM rule (the Detection switch is unfalsifiable without both kinds), attributed to at least one service or module (the Top Offenders table must have a first row) and with at least one code finding carrying a file path (the Code Hotspots table must have a row); the first finding of the severity-sorted list must be critical or high, and the analysis must carry findings at severities OTHER than that one, without which the category counts could not be shown to respond to the severity filter"
         }
       ]
     },
@@ -63,6 +67,14 @@
         {
           "flowId": "run-llm-rules-through-the-claude-code-transport",
           "need": "a long-lived token from `claude setup-token` that answers a non-interactive `claude -p` prompt without prompting for authentication"
+        },
+        {
+          "flowId": "run-an-analysis-from-the-dashboard",
+          "need": "a long-lived token from `claude setup-token` that answers a non-interactive `claude -p`: the scenario answers the dashboard's LLM confirm with `Run LLM rules`, so the run makes real model calls through the transport saved at the first-run question, and the run must last long enough for the progress-card milestones to be observed"
+        },
+        {
+          "flowId": "filter-the-violation-list",
+          "need": "a token that answers a non-interactive `claude -p`, so the arranging `truecourse analyze --llm --llm-transport cli` produces the LLM-detected findings the Detection milestone narrows to"
         }
       ],
       "services": [
@@ -148,6 +160,31 @@
       "needs": [],
       "services": [
         "dotnet"
+      ]
+    },
+    {
+      "name": "host-service-session",
+      "class": "supplied",
+      "summary": "a host session that permits installing, starting and removing a USER-LEVEL background service (launchd on macOS, `systemd --user` on Linux, the SCM on Windows) and reading its log file — the sandbox isolates HOME and env, but it cannot fabricate a service supervisor, so a flow that installs one blocks until a machine says it may",
+      "registration": {
+        "kind": "env",
+        "vars": [
+          {
+            "name": "TRUECOURSE_GUARD_HOST_SERVICE",
+            "description": "set to `1` on a machine whose session owns a user-level service supervisor (`launchctl` for the logged-in GUI session, or `systemctl --user` with a running user manager) AND where the runner may install, start, stop and remove `com.truecourse.server` / `truecourse.service` plus write under `~/.truecourse/logs/`. The scenario leaves no service behind: its last step uninstalls. Not a secret",
+            "secret": false
+          }
+        ]
+      },
+      "needs": [
+        {
+          "flowId": "run-the-dashboard-as-a-background-service",
+          "need": "a session where `truecourse dashboard --service` can really install and start a user-level service that survives the starting shell, where `dashboard status` sees the supervisor, where the service writes `~/.truecourse/logs/*.log` for `dashboard logs` to tail, and where `dashboard stop` / `dashboard uninstall` can remove it again; also a free TCP port 3001 on the host, since the dashboard's URL is not runner-allocated"
+        }
+      ],
+      "services": [
+        "launchd",
+        "systemd-user"
       ]
     }
   ]

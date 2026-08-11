@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-10T20:49:52.736Z",
+  "generatedAt": "2026-08-11T08:18:26.453Z",
   "recipeFingerprint": "sha256:cce10ba954d77edc4ba4971695141ec5e35cf64ae9a9e1e591a7ac3aa9e9b9c8",
   "interfaces": [
     {
@@ -4998,6 +4998,1138 @@
       }
     },
     {
+      "id": "cli/dashboard",
+      "type": "cli",
+      "title": "truecourse dashboard",
+      "group": "dashboard",
+      "entry": {
+        "command": [
+          "dashboard"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "dashboard"
+          ],
+          "flags": [
+            "--reconfigure",
+            "--service",
+            "--console",
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Start the TrueCourse dashboard and open it in your browser."
+        }
+      ],
+      "fingerprint": "sha256:d4d213322f7fb40cfada963f76850fd2e1f5be558cf43546dbe742fe1015b989",
+      "contract": {
+        "summary": "`truecourse dashboard` — start the local server (console or background service) and open the browser at this repository.",
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "dashboard"
+            ],
+            "description": "Start the TrueCourse dashboard and open it in your browser",
+            "options": [
+              {
+                "flag": "--reconfigure",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Re-prompt for console vs background service mode. Forces the run-mode question even when `~/.truecourse/config.json` already exists, and persists the answer. Ignored when `--service` or `--console` is also passed (the explicit mode is read first)."
+              },
+              {
+                "flag": "--service",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Run as a background service (skips mode prompt). Mutually exclusive with `--console`: passing both prints `error: --service and --console are mutually exclusive` on stderr and exits 1 before any other work. Wins over the saved `runMode` and over `--reconfigure`, and persists the mode once it starts."
+              },
+              {
+                "flag": "--console",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "command",
+                "description": "Run in this terminal (skips mode prompt). Mutually exclusive with `--service` (same error path). Refuses with exit 1 while a dashboard service is installed AND running, rather than colliding on the port."
+              },
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0 (commander built-in)."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program; prints the version and exits 0."
+              }
+            ],
+            "positionals": [],
+            "subcommands": [
+              "stop",
+              "status",
+              "logs",
+              "uninstall",
+              "help [command]"
+            ],
+            "io": {
+              "consumes": {
+                "prompts": [
+                  {
+                    "kind": "select",
+                    "marker": "How should TrueCourse run its LLM calls?",
+                    "answerHint": "Claude Code | API",
+                    "submit": "enter",
+                    "when": "no saved transport, TRUECOURSE_LLM_TRANSPORT unset, stdin is a TTY"
+                  },
+                  {
+                    "kind": "select",
+                    "marker": "How would you like to run the dashboard?",
+                    "answerHint": "Background service (Recommended) | Console",
+                    "submit": "enter",
+                    "when": "no `~/.truecourse/config.json` yet (or `--reconfigure`), no `--service`/`--console`, stdin is a TTY"
+                  }
+                ],
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "the registry and the global config the first-run check reads"
+                  },
+                  {
+                    "var": "TRUECOURSE_LLM_TRANSPORT",
+                    "when": "the first-run wizard skip check"
+                  },
+                  {
+                    "var": "PORT",
+                    "when": "the server URL — 3001 when unset"
+                  },
+                  {
+                    "var": "PATH",
+                    "when": "macOS service install — copied into the launchd plist so the service finds `claude`"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "<cli dist>/server.mjs",
+                    "when": "the packaged server entry — absent → exit 1"
+                  },
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "the saved `runMode`, and the first-run `llm.transport` check"
+                  },
+                  {
+                    "path": "<cwd ancestors>/.truecourse/",
+                    "when": "repo resolution for the URL to open — none → the repository list opens"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the project lookup; the repo is registered on first use"
+                  },
+                  {
+                    "path": "~/.truecourse/.env",
+                    "when": "service install — the variables baked into the service definition"
+                  },
+                  {
+                    "path": "~/Library/LaunchAgents/com.truecourse.server.plist",
+                    "when": "macOS — the installed-service check"
+                  },
+                  {
+                    "path": "~/.config/systemd/user/truecourse.service",
+                    "when": "Linux — the installed-service check"
+                  },
+                  {
+                    "path": "the Windows SCM service `truecourse.exe`",
+                    "when": "Windows — the installed-service check (`sc.exe query`)"
+                  },
+                  {
+                    "path": "http://localhost:<PORT>/api/health",
+                    "when": "the readiness probe — polled every 250ms for up to 30s"
+                  },
+                  {
+                    "path": "~/.truecourse/logs/*.log",
+                    "when": "service mode that never became healthy — the tails are printed"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "Opening TrueCourse dashboard"
+                  },
+                  {
+                    "stream": "stderr",
+                    "marker": "error: --service and --console are mutually exclusive",
+                    "when": "both flags were passed"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Packaged server entry not found.",
+                    "when": "no `server.mjs` beside the CLI entry — a dev checkout"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard run mode is not configured.",
+                    "when": "non-interactive, nothing configured and no mode flag"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Pass --service for the background service or --console to run in this terminal.",
+                    "when": "the same non-interactive refusal"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "A dashboard service is already installed and running.",
+                    "when": "console mode was chosen while the service runs"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Starting dashboard server...",
+                    "when": "console mode"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Installing background service...",
+                    "when": "service mode, nothing installed yet"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Starting background service...",
+                    "when": "service mode, installed but stopped"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Failed to start server: ",
+                    "when": "console mode — the child process could not spawn"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Server did not become healthy in time.",
+                    "when": "console mode — the 30s health probe expired"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Service started but server hasn't responded on the health endpoint.",
+                    "when": "service mode — the 30s health probe expired"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Log dir: ",
+                    "when": "the service health timeout"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "No log files have appeared yet",
+                    "when": "the service health timeout and the log dir holds no `.log` file"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Service mode failed: ",
+                    "when": "install or start threw — console mode is then attempted"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Falling back to console mode.",
+                    "when": "the same service failure"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Opening http://localhost:",
+                    "when": "the browser is launched at the resolved URL"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard open at ",
+                    "when": "the server answered the health probe"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Press Ctrl+C to stop the server.",
+                    "when": "console mode"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Stop the dashboard with: truecourse dashboard stop",
+                    "when": "service mode"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Cancelled.",
+                    "when": "the run-mode question was cancelled"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Usage:",
+                    "when": "`--help` / `-h`"
+                  }
+                ],
+                "rows": [
+                  {
+                    "role": "footer",
+                    "stream": "stdout",
+                    "template": "Dashboard open at <url>",
+                    "slots": [
+                      {
+                        "name": "url",
+                        "kind": "text"
+                      }
+                    ],
+                    "when": "the browser was opened — the URL carries the repo slug, or the bare origin when no `.truecourse/` was found"
+                  },
+                  {
+                    "role": "header",
+                    "stream": "stdout",
+                    "template": "----- <file> (last <lines> lines) -----",
+                    "slots": [
+                      {
+                        "name": "file",
+                        "kind": "text"
+                      },
+                      {
+                        "name": "lines",
+                        "kind": "count"
+                      }
+                    ],
+                    "when": "the service health timeout — one block per live `.log` file in `~/.truecourse/logs/`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "0",
+                    "when": "service mode — the browser was opened and the CLI returned"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "the run-mode question was cancelled"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "`--help` / `-h`"
+                  },
+                  {
+                    "exit": "1",
+                    "when": "`--service` and `--console` were both passed"
+                  },
+                  {
+                    "exit": "1",
+                    "when": "no packaged server entry was found"
+                  },
+                  {
+                    "exit": "1",
+                    "when": "non-interactive with no configured and no passed run mode"
+                  },
+                  {
+                    "exit": "1",
+                    "when": "console mode while a dashboard service is installed and running"
+                  },
+                  {
+                    "exit": "1",
+                    "when": "console mode — the server process failed to spawn"
+                  },
+                  {
+                    "exit": "1",
+                    "when": "console mode — the server was not healthy within 30s"
+                  },
+                  {
+                    "exit": "1",
+                    "when": "service mode — the server was not healthy within 30s"
+                  },
+                  {
+                    "exit": "unknown",
+                    "when": "console mode — the CLI blocks until the server exits and returns the child's own status"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "the mode was decided this run (first run, `--reconfigure`, or a mode flag) AND it started"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/",
+                    "when": "the resolved repo was registered on first use"
+                  },
+                  {
+                    "path": "<repo>/.truecourse/.gitignore",
+                    "when": "first creation of the store directory"
+                  },
+                  {
+                    "path": "~/.truecourse/registry.json",
+                    "when": "the repo was registered, or its `lastOpened` refreshed"
+                  },
+                  {
+                    "path": "~/.truecourse/logs/",
+                    "when": "service install — created before the supervisor starts"
+                  },
+                  {
+                    "path": "~/.truecourse/logs/dashboard.log.1",
+                    "when": "service mode — a live log over 10MB is rotated (up to 5 archives)"
+                  },
+                  {
+                    "path": "~/Library/LaunchAgents/com.truecourse.server.plist",
+                    "when": "macOS service install"
+                  },
+                  {
+                    "path": "~/.config/systemd/user/truecourse.service",
+                    "when": "Linux service install"
+                  },
+                  {
+                    "path": "~/.truecourse/logs/dashboard.out.log",
+                    "when": "service mode — the supervisor's stdout capture"
+                  },
+                  {
+                    "path": "~/.truecourse/logs/dashboard.err.log",
+                    "when": "service mode — the supervisor's stderr capture"
+                  }
+                ]
+              }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              },
+              {
+                "prompt": "How would you like to run the dashboard?",
+                "kind": "select"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "cli/dashboard-stop",
+      "type": "cli",
+      "title": "truecourse dashboard stop",
+      "group": "dashboard",
+      "entry": {
+        "command": [
+          "dashboard",
+          "stop"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "dashboard",
+            "stop"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Stop the dashboard."
+        }
+      ],
+      "fingerprint": "sha256:e9457c56b986b22c6ec6b741d91bc716d136c7831bc1cb78b3dc3fa9c2a661c0",
+      "contract": {
+        "summary": "`truecourse dashboard stop`.",
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "dashboard",
+              "stop"
+            ],
+            "description": "Stop the dashboard",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "prompts": [
+                  {
+                    "kind": "select",
+                    "marker": "How should TrueCourse run its LLM calls?",
+                    "answerHint": "Claude Code | API",
+                    "submit": "enter",
+                    "when": "no saved transport, TRUECOURSE_LLM_TRANSPORT unset, stdin is a TTY"
+                  }
+                ],
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "the global config the first-run check reads"
+                  },
+                  {
+                    "var": "TRUECOURSE_LLM_TRANSPORT",
+                    "when": "the first-run wizard skip check"
+                  },
+                  {
+                    "var": "PORT",
+                    "when": "the health URL probed to detect a console-mode dashboard"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "the first-run `llm.transport` check — the running state is probed, never read from `runMode`"
+                  },
+                  {
+                    "path": "~/Library/LaunchAgents/com.truecourse.server.plist",
+                    "when": "macOS — the installed-service check"
+                  },
+                  {
+                    "path": "~/.config/systemd/user/truecourse.service",
+                    "when": "Linux — the installed-service check"
+                  },
+                  {
+                    "path": "the Windows SCM service `truecourse.exe`",
+                    "when": "Windows — the installed-service check"
+                  },
+                  {
+                    "path": "http://localhost:<PORT>/api/health",
+                    "when": "the single liveness probe"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "Stopping dashboard service...",
+                    "when": "a supervised service is running"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard service stopped.",
+                    "when": "the platform stop returned"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "A dashboard is running in console mode (not managed by the service).",
+                    "when": "something answers the health endpoint but no service is running"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard is not running.",
+                    "when": "no service and nothing on the port"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Usage:",
+                    "when": "`--help` / `-h`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "0",
+                    "when": "the service was stopped"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "console mode, or nothing running — the message printed"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "`--help` / `-h`"
+                  },
+                  {
+                    "exit": "unknown",
+                    "when": "the platform stop command itself failed — Linux/Windows do not catch it"
+                  }
+                ],
+                "writes": []
+              }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "cli/dashboard-status",
+      "type": "cli",
+      "title": "truecourse dashboard status",
+      "group": "dashboard",
+      "entry": {
+        "command": [
+          "dashboard",
+          "status"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "dashboard",
+            "status"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Show dashboard status."
+        }
+      ],
+      "fingerprint": "sha256:13ace0c17b9a1826abe01edbe4ea388c96ce0dbe2aaee63f2a822b844ed87290",
+      "contract": {
+        "summary": "`truecourse dashboard status`.",
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "dashboard",
+              "status"
+            ],
+            "description": "Show dashboard status",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "prompts": [
+                  {
+                    "kind": "select",
+                    "marker": "How should TrueCourse run its LLM calls?",
+                    "answerHint": "Claude Code | API",
+                    "submit": "enter",
+                    "when": "no saved transport, TRUECOURSE_LLM_TRANSPORT unset, stdin is a TTY"
+                  }
+                ],
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "the global config the first-run check reads"
+                  },
+                  {
+                    "var": "TRUECOURSE_LLM_TRANSPORT",
+                    "when": "the first-run wizard skip check"
+                  },
+                  {
+                    "var": "PORT",
+                    "when": "the health URL, and the URL printed back"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "the first-run `llm.transport` check — `runMode` is deliberately not consulted"
+                  },
+                  {
+                    "path": "~/Library/LaunchAgents/com.truecourse.server.plist",
+                    "when": "macOS — the installed-service check"
+                  },
+                  {
+                    "path": "~/.config/systemd/user/truecourse.service",
+                    "when": "Linux — the installed-service check"
+                  },
+                  {
+                    "path": "the Windows SCM service `truecourse.exe`",
+                    "when": "Windows — the installed-service check"
+                  },
+                  {
+                    "path": "http://localhost:<PORT>/api/health",
+                    "when": "the single liveness probe"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard service is running",
+                    "when": "the supervisor reports the service active"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Server is healthy at ",
+                    "when": "the service runs and the health endpoint answered"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Service process is running but server is not responding at ",
+                    "when": "the service runs but the health endpoint did not answer"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard is running in console mode at ",
+                    "when": "the health endpoint answers with no service running"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard service is installed but not running.",
+                    "when": "the service is installed, stopped, and nothing answers the port"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard is not running.",
+                    "when": "no service installed and nothing answers the port"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Usage:",
+                    "when": "`--help` / `-h`"
+                  }
+                ],
+                "rows": [
+                  {
+                    "role": "header",
+                    "stream": "stdout",
+                    "template": "Dashboard service is running (PID: <pid>)",
+                    "slots": [
+                      {
+                        "name": "pid",
+                        "kind": "count"
+                      }
+                    ],
+                    "when": "the supervisor reported a pid — without one the line ends after `running`"
+                  },
+                  {
+                    "role": "footer",
+                    "stream": "stdout",
+                    "template": "Dashboard is running in console mode at <url>",
+                    "slots": [
+                      {
+                        "name": "url",
+                        "kind": "text"
+                      }
+                    ],
+                    "when": "console mode — the origin, never a repo path"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "0",
+                    "when": "the status printed — every state, including not running"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "`--help` / `-h`"
+                  }
+                ],
+                "writes": []
+              }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "cli/dashboard-logs",
+      "type": "cli",
+      "title": "truecourse dashboard logs",
+      "group": "dashboard",
+      "entry": {
+        "command": [
+          "dashboard",
+          "logs"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "dashboard",
+            "logs"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Tail dashboard logs (service mode only)."
+        }
+      ],
+      "fingerprint": "sha256:9cd01ac3dbbb1955f4e2ddea8636c7ef9ee7e1fa435131bdb06b93b46e5032b8",
+      "contract": {
+        "summary": "`truecourse dashboard logs`.",
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "dashboard",
+              "logs"
+            ],
+            "description": "Tail dashboard logs (service mode only)",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "prompts": [
+                  {
+                    "kind": "select",
+                    "marker": "How should TrueCourse run its LLM calls?",
+                    "answerHint": "Claude Code | API",
+                    "submit": "enter",
+                    "when": "no saved transport, TRUECOURSE_LLM_TRANSPORT unset, stdin is a TTY"
+                  }
+                ],
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "the global config the first-run check reads"
+                  },
+                  {
+                    "var": "TRUECOURSE_LLM_TRANSPORT",
+                    "when": "the first-run wizard skip check"
+                  },
+                  {
+                    "var": "PORT",
+                    "when": "the health probe that decides console vs service"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "the first-run `llm.transport` check"
+                  },
+                  {
+                    "path": "~/Library/LaunchAgents/com.truecourse.server.plist",
+                    "when": "macOS — the installed-service check"
+                  },
+                  {
+                    "path": "~/.config/systemd/user/truecourse.service",
+                    "when": "Linux — the installed-service check"
+                  },
+                  {
+                    "path": "the Windows SCM service `truecourse.exe`",
+                    "when": "Windows — the installed-service check"
+                  },
+                  {
+                    "path": "http://localhost:<PORT>/api/health",
+                    "when": "the single liveness probe"
+                  },
+                  {
+                    "path": "~/.truecourse/logs/*.log",
+                    "when": "the tail set — live `.log` files only, rotated `.log.N` archives excluded"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard is running in console mode — logs print to its terminal.",
+                    "when": "the health endpoint answers with no service running"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "No log files found. Is the service running?",
+                    "when": "the log dir holds no live `.log` file"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Expected under: ",
+                    "when": "the same empty-log-dir path"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Usage:",
+                    "when": "`--help` / `-h`"
+                  }
+                ],
+                "rows": [
+                  {
+                    "role": "header",
+                    "stream": "stdout",
+                    "template": "----- <file> (last <lines> lines) -----",
+                    "slots": [
+                      {
+                        "name": "file",
+                        "kind": "text"
+                      },
+                      {
+                        "name": "lines",
+                        "kind": "count"
+                      }
+                    ],
+                    "when": "the initial dump — one block per live `.log` file, 50 lines each"
+                  },
+                  {
+                    "role": "row",
+                    "stream": "stdout",
+                    "template": "[<file>] <line>",
+                    "slots": [
+                      {
+                        "name": "file",
+                        "kind": "text"
+                      },
+                      {
+                        "name": "line",
+                        "kind": "text"
+                      }
+                    ],
+                    "when": "the follow — every new line appended to a watched file, tagged with its basename"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "0",
+                    "when": "console mode — the message printed and the command returned"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "no live log file was found"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "the follow was interrupted — SIGINT/SIGTERM unwatch and exit 0"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "`--help` / `-h`"
+                  }
+                ],
+                "writes": []
+              }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "cli/dashboard-uninstall",
+      "type": "cli",
+      "title": "truecourse dashboard uninstall",
+      "group": "dashboard",
+      "entry": {
+        "command": [
+          "dashboard",
+          "uninstall"
+        ]
+      },
+      "steps": [
+        {
+          "kind": "invoke",
+          "command": [
+            "dashboard",
+            "uninstall"
+          ],
+          "flags": [
+            "--help",
+            "-h",
+            "--version",
+            "-V"
+          ],
+          "label": "Remove the background service and revert to console mode."
+        }
+      ],
+      "fingerprint": "sha256:f1d9df9cef83032cb9cf8b1ed5fa562fe5118f046581cf3805f9d12901dbe977",
+      "contract": {
+        "summary": "`truecourse dashboard uninstall`.",
+        "commands": [
+          {
+            "path": [
+              "truecourse",
+              "dashboard",
+              "uninstall"
+            ],
+            "description": "Remove the background service and revert to console mode",
+            "options": [
+              {
+                "flag": "--help",
+                "short": "-h",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Print this command's help and exit 0."
+              },
+              {
+                "flag": "--version",
+                "short": "-V",
+                "takesValue": false,
+                "valueRequired": false,
+                "scope": "program",
+                "description": "Inherited from the program."
+              }
+            ],
+            "positionals": [],
+            "io": {
+              "consumes": {
+                "prompts": [
+                  {
+                    "kind": "select",
+                    "marker": "How should TrueCourse run its LLM calls?",
+                    "answerHint": "Claude Code | API",
+                    "submit": "enter",
+                    "when": "no saved transport, TRUECOURSE_LLM_TRANSPORT unset, stdin is a TTY"
+                  }
+                ],
+                "env": [
+                  {
+                    "var": "TRUECOURSE_HOME",
+                    "when": "the global config the first-run check reads"
+                  },
+                  {
+                    "var": "TRUECOURSE_LLM_TRANSPORT",
+                    "when": "the first-run wizard skip check"
+                  }
+                ],
+                "reads": [
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "`runMode` — anything but `service` ends the command untouched"
+                  },
+                  {
+                    "path": "~/Library/LaunchAgents/com.truecourse.server.plist",
+                    "when": "macOS — the installed-service check"
+                  },
+                  {
+                    "path": "~/.config/systemd/user/truecourse.service",
+                    "when": "Linux — the installed-service check"
+                  },
+                  {
+                    "path": "the Windows SCM service `truecourse.exe`",
+                    "when": "Windows — the installed-service check"
+                  }
+                ]
+              },
+              "produces": {
+                "output": [
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard isn't installed as a service — nothing to uninstall.",
+                    "when": "the saved `runMode` is not `service`"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Dashboard service is not installed.",
+                    "when": "`runMode` is `service` but no service exists"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Removing background service...",
+                    "when": "an installed service is being removed"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Service removed. Dashboard will run in console mode next time.",
+                    "when": "the removal returned"
+                  },
+                  {
+                    "stream": "stdout",
+                    "marker": "Usage:",
+                    "when": "`--help` / `-h`"
+                  }
+                ],
+                "exits": [
+                  {
+                    "exit": "0",
+                    "when": "the service was removed"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "nothing to uninstall — either message printed"
+                  },
+                  {
+                    "exit": "0",
+                    "when": "`--help` / `-h`"
+                  },
+                  {
+                    "exit": "unknown",
+                    "when": "Windows without `node-windows` — the platform layer throws and nothing catches it"
+                  }
+                ],
+                "writes": [
+                  {
+                    "path": "~/.truecourse/config.json",
+                    "when": "`runMode` set to `console` — after removal, and also when the service was already gone"
+                  },
+                  {
+                    "path": "~/Library/LaunchAgents/com.truecourse.server.plist",
+                    "when": "macOS — the plist is unloaded and deleted"
+                  },
+                  {
+                    "path": "~/.config/systemd/user/truecourse.service",
+                    "when": "Linux — the unit is stopped, disabled and deleted"
+                  }
+                ]
+              }
+            },
+            "sequence": [
+              {
+                "prompt": "How should TrueCourse run its LLM calls?",
+                "kind": "select"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "id": "api/get-api-capabilities",
       "type": "api",
       "title": "GET /api/capabilities",
@@ -9575,6 +10707,743 @@
       "startingState": "code-analysis-section-open",
       "endState": "guard-section-open",
       "fingerprint": "sha256:50a6d196d960baca6e757f0ab171cce945672a6dbd30047588f39e865f0b1066"
+    },
+    {
+      "id": "web/open-an-unanalyzed-repository",
+      "type": "web",
+      "title": "Open a repository's page at its URL, before its first analysis",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "navigate",
+          "route": "/repos/{repoId}"
+        }
+      ],
+      "startingState": "dashboard-serving",
+      "endState": "repo-no-analysis-open",
+      "apiEffects": [
+        "api/get-api-repos-id",
+        "api/get-api-repos-id-analyses",
+        "api/get-api-repos-id-violations",
+        "api/get-api-repos-id-violations-summary",
+        "api/get-api-repos-id-analytics-trend",
+        "api/get-api-repos-id-analytics-breakdown",
+        "api/get-api-repos-id-analytics-top-offenders",
+        "api/get-api-repos-id-analytics-resolution"
+      ],
+      "fingerprint": "sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b"
+    },
+    {
+      "id": "web/run-an-analysis-from-the-header",
+      "type": "web",
+      "title": "Run an analysis from the header's Analyze button",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Analyze\""
+        }
+      ],
+      "startingState": "repo-no-analysis-open",
+      "endState": "analysis-running",
+      "apiEffects": [
+        "api/post-api-repos-id-analyses"
+      ],
+      "fingerprint": "sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0"
+    },
+    {
+      "id": "web/stash-pending-changes-before-a-run",
+      "type": "web",
+      "title": "Answer the stash question with \"Stash and analyze committed state\"",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Stash and analyze committed state\""
+        }
+      ],
+      "startingState": "stash-prompt-open",
+      "endState": "analysis-running",
+      "apiEffects": [],
+      "fingerprint": "sha256:86f841f6315f31c81f7ef7b815fe74571400cfbed18b2adecb96edfa61be3d41"
+    },
+    {
+      "id": "web/approve-the-llm-rules-for-a-run",
+      "type": "web",
+      "title": "Approve the LLM cost estimate and let the model rules run",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Run LLM rules\""
+        }
+      ],
+      "startingState": "llm-estimate-open",
+      "endState": "analysis-running",
+      "apiEffects": [],
+      "fingerprint": "sha256:3fe0121eef3d02251e93c109949965a4e45210570d805a6b86d31b1e001fe6dc"
+    },
+    {
+      "id": "web/skip-the-llm-rules-for-a-run",
+      "type": "web",
+      "title": "Decline the LLM cost estimate and keep the run deterministic",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Skip — deterministic rules only\""
+        }
+      ],
+      "startingState": "llm-estimate-open",
+      "endState": "analysis-running",
+      "apiEffects": [],
+      "fingerprint": "sha256:392bccc47ef75a7e46fdd093cfdf09319e6c087ab8fdfa3e0479fb0458447971"
+    },
+    {
+      "id": "web/cancel-a-running-analysis",
+      "type": "web",
+      "title": "Cancel a running analysis from the progress card",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Cancel\""
+        }
+      ],
+      "startingState": "analysis-running",
+      "endState": "analysis-cancelling",
+      "apiEffects": [
+        "api/post-api-repos-id-analyses-cancel"
+      ],
+      "fingerprint": "sha256:0f37495aff5cc82bc249e7b20e1e05237f29080752acf96e6a11df3a83c0c1bf"
+    },
+    {
+      "id": "web/filter-violations-by-severity",
+      "type": "web",
+      "title": "Narrow the violation list to one severity",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Severity\""
+        },
+        {
+          "kind": "activate",
+          "target": "button \"{severity}\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "violations-filtered-by-severity",
+      "apiEffects": [],
+      "fingerprint": "sha256:e9acaea6d38040f1fab95eab43b48530b85545487c32c6e071bdda212898f723"
+    },
+    {
+      "id": "web/search-the-violation-list",
+      "type": "web",
+      "title": "Narrow the violation list with a search term",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "input",
+          "target": "textbox \"Search violations...\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "violations-searched",
+      "apiEffects": [],
+      "fingerprint": "sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8"
+    },
+    {
+      "id": "web/narrow-violations-to-llm-findings",
+      "type": "web",
+      "title": "Narrow the violation list to the LLM-detected findings",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"LLM\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "violations-filtered-to-llm-findings",
+      "apiEffects": [],
+      "fingerprint": "sha256:0e3b1ca745de56bf25056c3d6f96b1ff8bb378f126e3607c0733995d553906b7"
+    },
+    {
+      "id": "web/clear-the-category-filter",
+      "type": "web",
+      "title": "Clear the category filter from the Filtered by row",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Clear category filter\""
+        }
+      ],
+      "startingState": "violations-filtered-by-category",
+      "endState": "repo-report-open",
+      "apiEffects": [],
+      "fingerprint": "sha256:18a5373cac7ad9ac45654464f5558e0d0cd58e247a36ba59fc85d9acfce3de26"
+    },
+    {
+      "id": "web/reveal-a-violations-fix-prompt",
+      "type": "web",
+      "title": "Expand a violation card's fix prompt",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Fix Prompt\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "fix-prompt-revealed",
+      "apiEffects": [],
+      "fingerprint": "sha256:a0549257254680368ecf653658d195e25543e591d5cc0b9d52e9f49870cd893a"
+    },
+    {
+      "id": "web/copy-a-violations-fix-prompt",
+      "type": "web",
+      "title": "Copy a violation's fix prompt to the clipboard",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Copy Fix\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "fix-prompt-copied",
+      "apiEffects": [],
+      "fingerprint": "sha256:2885a044de4a5575057534ebbb83bbcb70cb37673654e0d517d23359e66d28fa"
+    },
+    {
+      "id": "web/sort-top-offenders-by-critical-count",
+      "type": "web",
+      "title": "Re-sort Top Offenders by critical count",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "columnheader \"Critical\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "top-offenders-sorted-by-critical",
+      "apiEffects": [],
+      "fingerprint": "sha256:e256ac3c6a19dcc62b2cb36abf570fbb2d237765d95717290b85b5a7681dfebd"
+    },
+    {
+      "id": "web/scope-violations-to-a-top-offender",
+      "type": "web",
+      "title": "Scope the violation list to one Top Offenders service or module",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "row \"{offender}\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "violations-scoped-to-an-offender",
+      "apiEffects": [],
+      "fingerprint": "sha256:44dcd33611b1fc05785831e67c34e5261fe75340e0b07a4caa426ef2b721f3c3"
+    },
+    {
+      "id": "web/scope-violations-to-a-hotspot-file",
+      "type": "web",
+      "title": "Scope the violation list to one Code Hotspots file",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "row \"{file}\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "violations-scoped-to-a-file",
+      "apiEffects": [],
+      "fingerprint": "sha256:a1c96f99fe85e6a0298adaef8ff4b94d4475c28f89158b9812622d7819c10709"
+    },
+    {
+      "id": "web/open-the-graphs-tab",
+      "type": "web",
+      "title": "Open the architecture graph from the tab rail",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Graphs\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "graph-open",
+      "apiEffects": [
+        "api/get-api-repos-id-graph"
+      ],
+      "fingerprint": "sha256:a8f319bb14ef3182f51fa57b6ce896ee8fe0b6fedbc3591efe3921ff3d842c8f"
+    },
+    {
+      "id": "web/change-the-graph-depth-to-modules",
+      "type": "web",
+      "title": "Take the architecture graph down to module depth",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Modules\""
+        }
+      ],
+      "startingState": "graph-open",
+      "endState": "graph-at-module-depth",
+      "apiEffects": [
+        "api/get-api-repos-id-graph"
+      ],
+      "fingerprint": "sha256:e0b7054e06ffdf0e5bd1e322d3305bee2e1bd08e795f50c84128d74ead61741f"
+    },
+    {
+      "id": "web/fit-the-graph-to-the-viewport",
+      "type": "web",
+      "title": "Fit the whole architecture graph into the viewport",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Fit view\""
+        }
+      ],
+      "startingState": "graph-open",
+      "endState": "graph-fitted",
+      "apiEffects": [],
+      "fingerprint": "sha256:24b2d4f4612ada4af1613f970985c8bd1666bf374051b519ed6a3793a1243cbf"
+    },
+    {
+      "id": "web/reset-the-graph-layout",
+      "type": "web",
+      "title": "Throw away the saved graph positions with Auto layout",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Auto layout\""
+        }
+      ],
+      "startingState": "graph-open",
+      "endState": "graph-layout-reset",
+      "apiEffects": [
+        "api/delete-api-repos-id-graph-positions",
+        "api/get-api-repos-id-graph"
+      ],
+      "fingerprint": "sha256:2641ce7b3a1924f4c4bc9ca888302e059cb81c7107ca48fd4ef03a5d6472ccdb"
+    },
+    {
+      "id": "web/collapse-every-graph-container",
+      "type": "web",
+      "title": "Collapse every container node of the graph",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Collapse All\""
+        }
+      ],
+      "startingState": "graph-at-module-depth",
+      "endState": "graph-containers-collapsed",
+      "apiEffects": [
+        "api/put-api-repos-id-graph-collapsed",
+        "api/put-api-repos-id-graph-positions"
+      ],
+      "fingerprint": "sha256:c609dd474b055a514cc23ea888f27976509b1c775bca0b05cea819f30c7ad3fa"
+    },
+    {
+      "id": "web/open-the-files-tab",
+      "type": "web",
+      "title": "Open the file tree from the tab rail",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Files\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "file-tree-open",
+      "apiEffects": [
+        "api/get-api-repos-id-files",
+        "api/get-api-repos-id-violations-summary",
+        "api/get-api-repos-id-graph"
+      ],
+      "fingerprint": "sha256:5fb4d0b52704c626640e10e136399172d65b2b5a85f9d5758042c7b5cb9a4dc7"
+    },
+    {
+      "id": "web/open-a-file-in-the-code-viewer",
+      "type": "web",
+      "title": "Open a file in the code viewer at its shareable URL",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "navigate",
+          "route": "/repos/{repoId}?tab=files&file={filePath}"
+        }
+      ],
+      "startingState": "dashboard-serving",
+      "endState": "code-viewer-open",
+      "apiEffects": [
+        "api/get-api-repos-id",
+        "api/get-api-repos-id-analyses",
+        "api/get-api-repos-id-files",
+        "api/get-api-repos-id-file-content",
+        "api/get-api-repos-id-violations",
+        "api/get-api-repos-id-violations-summary",
+        "api/get-api-repos-id-graph"
+      ],
+      "fingerprint": "sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106"
+    },
+    {
+      "id": "web/open-the-flows-tab",
+      "type": "web",
+      "title": "Open the detected execution flows from the tab rail",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Flows\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "flow-list-open",
+      "apiEffects": [
+        "api/get-api-repos-id-flows"
+      ],
+      "fingerprint": "sha256:683da4b398098a8228b7f2f166b2bf38d2faaa253faa2ec369ead343a0371740"
+    },
+    {
+      "id": "web/open-a-flow-diagram",
+      "type": "web",
+      "title": "Open one flow's sequence diagram",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"{flowName}\""
+        }
+      ],
+      "startingState": "flow-list-open",
+      "endState": "flow-diagram-open",
+      "apiEffects": [
+        "api/get-api-repos-id-flows-flowid",
+        "api/get-api-repos-id-violations"
+      ],
+      "fingerprint": "sha256:15cf10b4168e6f254370eba9df0c6d53ab6eaa9886024f9a8d757ffa11e7d3f6"
+    },
+    {
+      "id": "web/enrich-a-flow-with-descriptions",
+      "type": "web",
+      "title": "Have the model write descriptions for a flow",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Enrich\""
+        }
+      ],
+      "startingState": "flow-diagram-open",
+      "endState": "flow-enriched",
+      "apiEffects": [
+        "api/post-api-repos-id-flows-flowid-enrich"
+      ],
+      "fingerprint": "sha256:61f9786140876e453249c32f3eaab516b2ca3b4eaeae01a386ef4a7a21ac3cb8"
+    },
+    {
+      "id": "web/open-the-databases-tab",
+      "type": "web",
+      "title": "Open the detected datastores from the tab rail",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Databases\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "database-list-open",
+      "apiEffects": [
+        "api/get-api-repos-id-databases",
+        "api/get-api-repos-id-graph"
+      ],
+      "fingerprint": "sha256:651814ae697b721770a6f2abb7de2574ded29a89e72364e5ccdc9c4a3c07b083"
+    },
+    {
+      "id": "web/open-a-database-schema",
+      "type": "web",
+      "title": "Open one database's schema as an ER diagram",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"{databaseName}\""
+        }
+      ],
+      "startingState": "database-list-open",
+      "endState": "database-schema-open",
+      "apiEffects": [
+        "api/get-api-repos-id-databases-dbid-schema"
+      ],
+      "fingerprint": "sha256:fb1ecb0dcf861ac9f18abab27c4eadb0d245798819c019da48e93b9459cee338"
+    },
+    {
+      "id": "web/switch-the-schema-to-the-table-list",
+      "type": "web",
+      "title": "Switch a database's schema from the ER diagram to the table list",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Table List\""
+        }
+      ],
+      "startingState": "database-schema-open",
+      "endState": "schema-table-list-open",
+      "apiEffects": [],
+      "fingerprint": "sha256:48a48266188b8ab5a211acad66ead6ca482d1265fdb00390b97955bd253561d5"
+    },
+    {
+      "id": "web/open-the-analyses-tab",
+      "type": "web",
+      "title": "Open the run history from the tab rail",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Analyses\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "analyses-list-open",
+      "apiEffects": [],
+      "fingerprint": "sha256:99935db45642dad41bd691d1337633251701f4923cfaa8080d6ad3588b996f60"
+    },
+    {
+      "id": "web/view-a-past-analysis",
+      "type": "web",
+      "title": "Load a past run into every view from the Analyses table",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "row \"{analysis}\""
+        }
+      ],
+      "startingState": "analyses-list-open",
+      "endState": "past-analysis-selected",
+      "apiEffects": [],
+      "fingerprint": "sha256:c4cc6cb16a3959e98e87b8527523b42cc5ec690117c4defc0cbf1a3f2a0cf37b"
+    },
+    {
+      "id": "web/open-a-runs-usage-breakdown",
+      "type": "web",
+      "title": "Open the token-usage breakdown of a past run",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"View usage breakdown\""
+        }
+      ],
+      "startingState": "analyses-list-open",
+      "endState": "usage-breakdown-open",
+      "apiEffects": [
+        "api/get-api-repos-id-analyses-analysisid-usage"
+      ],
+      "fingerprint": "sha256:068dcf3aea5bb2776517f7b5e1382e33e996db36bf03cd73ed80901b5a61ba31"
+    },
+    {
+      "id": "web/delete-a-past-analysis",
+      "type": "web",
+      "title": "Delete a past run from the Analyses table",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Delete analysis\""
+        }
+      ],
+      "startingState": "analyses-list-open",
+      "endState": "past-analysis-deleted",
+      "apiEffects": [
+        "api/delete-api-repos-id-analyses-analysisid"
+      ],
+      "fingerprint": "sha256:fb602ab57d56e95828c094bbeaa05437e75e29ab80de090a121d5ea8a3e8b1ef"
+    },
+    {
+      "id": "web/enter-git-diff-mode",
+      "type": "web",
+      "title": "Switch the repository page into Git Diff mode",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Git Diff\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "diff-mode-on",
+      "apiEffects": [
+        "api/get-api-repos-id-analyses-diff"
+      ],
+      "fingerprint": "sha256:fe3cde9b62d6d10160b130c1458c0c3533aca1c743ee32d03b5869a973c85a74"
+    },
+    {
+      "id": "web/leave-git-diff-mode",
+      "type": "web",
+      "title": "Switch the repository page back to Normal mode",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Normal\""
+        }
+      ],
+      "startingState": "diff-mode-on",
+      "endState": "repo-report-open",
+      "apiEffects": [],
+      "fingerprint": "sha256:9f33c442b170ed78a600166fb8eadbef1c1ae2b56d48603765e6152a25995fbf"
     }
   ],
   "states": {
@@ -9610,6 +11479,130 @@
       {
         "id": "guard-section-open",
         "description": "The Spec Guard section is in view for the same repository, with its own surfaces."
+      },
+      {
+        "id": "repo-no-analysis-open",
+        "description": "The repository's page is open on the Home tab and shows the “No analysis yet” notice instead of a report."
+      },
+      {
+        "id": "analysis-running",
+        "description": "An analysis is in progress for the repository, with the progress card listing its steps at the bottom of the screen."
+      },
+      {
+        "id": "analysis-cancelling",
+        "description": "The running analysis has been asked to stop and the progress card reads “Cancelling...”."
+      },
+      {
+        "id": "stash-prompt-open",
+        "description": "The run has paused on the dirty-working-tree dialog, which reports the modified and untracked counts."
+      },
+      {
+        "id": "llm-estimate-open",
+        "description": "The run has paused on the LLM cost dialog, which reports the file count, rule count and estimated tokens."
+      },
+      {
+        "id": "violations-filtered-by-severity",
+        "description": "The violation list shows one severity's findings only, with a “Filtered by” chip naming it; the analysis itself is untouched."
+      },
+      {
+        "id": "violations-searched",
+        "description": "The violation list shows only the cards matching a search term, with a “Filtered by” chip carrying it."
+      },
+      {
+        "id": "violations-filtered-to-llm-findings",
+        "description": "The violation list shows only findings raised by LLM rules, with a “Filtered by” chip naming the detection type."
+      },
+      {
+        "id": "fix-prompt-revealed",
+        "description": "A violation card is expanded and its ready-to-paste fix prompt is on screen under the card."
+      },
+      {
+        "id": "fix-prompt-copied",
+        "description": "A violation's fix prompt is on the clipboard and its card's copy control reads “Copied!”."
+      },
+      {
+        "id": "top-offenders-sorted-by-critical",
+        "description": "The Top Offenders table is ordered by critical count, with the sort marker on that column."
+      },
+      {
+        "id": "violations-scoped-to-an-offender",
+        "description": "The violation list shows only the findings attributed to one service or module, with a “service” chip naming it."
+      },
+      {
+        "id": "violations-scoped-to-a-file",
+        "description": "The violation list shows only the findings in one file, with a “file” chip naming it."
+      },
+      {
+        "id": "graph-open",
+        "description": "The Graphs tab shows the architecture graph at services depth, with the canvas controls available."
+      },
+      {
+        "id": "graph-at-module-depth",
+        "description": "The architecture graph is at module depth for one scoped service, with the scope selector and the collapse control beside the depth toggle."
+      },
+      {
+        "id": "graph-fitted",
+        "description": "Every node of the architecture graph is inside the viewport at the fitted zoom level."
+      },
+      {
+        "id": "graph-layout-reset",
+        "description": "The repository's saved graph positions for this branch and depth are gone and the graph shows the computed layout."
+      },
+      {
+        "id": "graph-containers-collapsed",
+        "description": "Every container node of the graph is collapsed, and that collapse state is saved for this branch and depth."
+      },
+      {
+        "id": "file-tree-open",
+        "description": "The Files tab shows the repository's file tree, severity-coloured, with nothing opened in the main pane yet."
+      },
+      {
+        "id": "code-viewer-open",
+        "description": "One file's contents are in the code viewer with its violations marked in the gutter."
+      },
+      {
+        "id": "flow-list-open",
+        "description": "The Flows tab lists the detected execution flows grouped by entry service, with nothing opened in the main pane yet."
+      },
+      {
+        "id": "flow-diagram-open",
+        "description": "One flow's sequence diagram is in the main pane with its step player beneath it."
+      },
+      {
+        "id": "flow-enriched",
+        "description": "The open flow carries model-written descriptions, saved back into the analysis, and no longer offers Enrich."
+      },
+      {
+        "id": "database-list-open",
+        "description": "The Databases tab lists the detected datastores, with nothing opened in the main pane yet."
+      },
+      {
+        "id": "database-schema-open",
+        "description": "One database's schema is in the main pane as an ER diagram."
+      },
+      {
+        "id": "schema-table-list-open",
+        "description": "The same database's schema is in the main pane as the expandable table list."
+      },
+      {
+        "id": "analyses-list-open",
+        "description": "The Analyses tab shows the run-history table, newest run first, with the latest one marked."
+      },
+      {
+        "id": "past-analysis-selected",
+        "description": "Every view is showing an older run, with the amber “Viewing analysis from …” banner across the top and Analyze hidden."
+      },
+      {
+        "id": "usage-breakdown-open",
+        "description": "One run's per-call-type token usage is on screen."
+      },
+      {
+        "id": "past-analysis-deleted",
+        "description": "The chosen run is gone from the history table and from the store."
+      },
+      {
+        "id": "diff-mode-on",
+        "description": "The repository page is in Git Diff mode: the working tree is compared against the committed baseline and the diff summary replaces the analytics column."
       }
     ]
   },
