@@ -4389,6 +4389,16 @@ existing scenario names it in both its path and manifest mapping.
 5. "The first open registers the repository" (overview) is unfalsifiable inside
    a flow that also needs a stored analysis — every arranging route registers
    too. Candidate for a later edge flow seeded with a config-only store.
+6. Registration deduplicates by path STRING, not by canonical path (run
+   18-41Z): pasting a macOS `/var/folders/…` temp path into the dashboard field
+   and then running `analyze` in the same directory produced TWO repository
+   cards — one under the symlinked spelling, one under the `/private/var/…`
+   realpath the CLI resolved — and the ambiguous link failed
+   `add-a-repository-by-path`. The fix is realpath-before-register/dedup.
+7. The non-git empty state contradicts the non-git banner (run 18-41Z): with
+   analyze unavailable and the Analyze button correctly hidden, the
+   No-analysis-yet card still says "Click Analyze above". The copy needs a
+   non-git variant.
 
 ### J-index (dashboard scenario wave). Owning workstream
 

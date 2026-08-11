@@ -521,10 +521,14 @@ steps:
     value: Dynamic code evaluation
     expect:
       text:
-        contains: No violations found
+        contains: No violations match the active filters
     note: >-
       Before diff mode, the report still reads the committed baseline: the uncommitted eval
-      finding is absent even though the file is already on disk.
+      finding is absent even though the file is already on disk. The sentence asserted is
+      the filtered empty state's OWN copy — the list renders "No violations match the
+      active filters" whenever a filter is in force (the first authored form said "No
+      violations found", a sentence the client renders nowhere; run 18-41Z failed on
+      exactly that invention).
     milestone:
       - dashboard-diff-normal-is-the-committed-state
   - driver: web

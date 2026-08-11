@@ -77,11 +77,20 @@ steps:
       within:
         role: dialog
         name: Rules
+      visible:
+        role: textbox
+        name: Search rules...
       text:
-        matches: '^(?=[\s\S]*Search rules)(?=[\s\S]*All severities)(?=[\s\S]*Det)(?=[\s\S]*LLM)(?=[\s\S]*Security)(?=[\s\S]*Bugs)(?=[\s\S]*Architecture)(?=[\s\S]*Performance)(?=[\s\S]*Reliability)(?=[\s\S]*Code Quality)(?=[\s\S]*Database)(?=[\s\S]*Style)[\s\S]*$'
+        matches: '^(?=[\s\S]*Severity)(?=[\s\S]*Det)(?=[\s\S]*LLM)(?=[\s\S]*Security)(?=[\s\S]*Bugs)(?=[\s\S]*Architecture)(?=[\s\S]*Performance)(?=[\s\S]*Reliability)(?=[\s\S]*Code Quality)(?=[\s\S]*Database)(?=[\s\S]*Style)[\s\S]*$'
     note: >-
       The panel exposes its own search, severity, detection and category controls. The
-      category labels are the same nine labels used by the violations list.
+      category labels are the same nine labels used by the violations list. Each control
+      is asserted in the form the panel RENDERS it: the search box as the textbox element
+      (its accessible name derives from the placeholder — placeholder text never reaches
+      innerText, so a text lookahead on it can only fail), and the severity control as
+      the word `Severity` its closed trigger shows ("All severities" is an option that
+      exists only while the dropdown is open, and the first authored form borrowed it
+      from the violations list's wording; run 18-41Z failed on both).
     milestone:
       - dashboard-violations-rules-panel-has-its-own-filters
       - dashboard-violations-rules-panel-category-tabs-match
