@@ -94,7 +94,15 @@ steps:
       exit: 0
       stdout:
         matches: ^(?=[\s\S]*A[ ]+\.truecourse/LATEST\.json)(?=[\s\S]*A[ ]+\.truecourse/config\.json)[\s\S]*$
-    note: The documented command sequence, verbatim from the doc, with both files staged.
+    note: >-
+      The documented command sequence, verbatim from the doc, with both files staged.
+      DELIBERATE RED (2026-08-11 re-ruling, superseding the same-day dismissal): analyze
+      has never written config.json (write-on-settings-mutation-only since 5f16005c), so
+      the add step above exits 128 against every shipped engine. The red stays as the
+      living record of the doc/engine drift until either the engine writes the file (the
+      unmerged 620b06ff `ensureProjectConfig`) or the doc's recipe is corrected. The six
+      sibling scenarios stage LATEST.json alone — their staging is arrangement for hook,
+      diff, and worktree claims, and this flow owns the drift.
     milestone:
       - baseline-files-exist-and-are-stageable-after-analyze
   - git:
@@ -112,6 +120,18 @@ steps:
       files:
         src/unsafe.js:
           exists: true
+  - git:
+      - add
+      - src/unsafe.js
+    expect:
+      exit: 0
+    note: >-
+      Tracks the new file before the refresh: analyze's discovery is git-tracked-only
+      (an untracked file is invisible to a full analyze — first observed 2026-08-11,
+      run 12-24Z, LATEST.json totalFiles 2 of 3), and the doc's refresh flow assumes
+      code that will be committed. The analyze-vs-diff inconsistency (a full analyze
+      skips untracked files while `analyze --diff` counts the same files as "new") is
+      ledgered as an engine finding. Prepares; proves nothing.
   - run:
       - analyze
       - '--no-llm'
@@ -122,6 +142,6 @@ steps:
       files:
         .truecourse/LATEST.json:
           contains: Dynamic code evaluation
-    note: The snapshot committed a moment ago did not contain this finding; the re-run rewrote LATEST.json, which is what "commit the updated LATEST.json to refresh the baseline" depends on. `--no-stash` keeps the new file in the tree — the stash decision itself belongs to the dirty-tree flow.
+    note: The snapshot committed a moment ago did not contain this finding; the re-run rewrote LATEST.json, which is what "commit the updated LATEST.json to refresh the baseline" depends on. `--no-stash` keeps the staged-but-uncommitted file in the tree — the stash decision itself belongs to the dirty-tree flow.
     milestone:
       - rerun-analyze-updates-latest-json

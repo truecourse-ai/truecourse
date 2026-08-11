@@ -71,7 +71,6 @@ steps:
   - git:
       - add
       - .truecourse/LATEST.json
-      - .truecourse/config.json
     expect:
       exit: 0
   - git:
@@ -109,11 +108,11 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*NEW ISSUES)(?=[\s\S]*Unsafe JSON\.parse)(?=[\s\S]*RESOLVED)(?=[\s\S]*Summary: [0-9]+ new issues, [0-9]+ resolved)[\s\S]*$'
+        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*Summary: [0-9]+ new issues, [0-9]+ resolved)[\s\S]*$'
       files:
         .truecourse/diff.json:
           contains: Unsafe JSON.parse
-    note: Both docs state the new/resolved sentence, so one observation carries both claim ids. The report's shape — changed files, a new set, a resolved set, a summary — is itself the evidence that the WORKING TREE was compared with the committed baseline rather than re-listed in full.
+    note: 'Both docs state the new/resolved sentence, so one observation carries both claim ids. The command prints the changed-file count and the new/resolved summary and defers itemization to `truecourse list --diff` (asserted two steps below) — the docs promise "new/resolved violations from your uncommitted changes", never an output shape, and the first authored form over-asserted NEW ISSUES/RESOLVED section headers this stdout never carried (first executed 2026-08-11; the step was masked by the config.json staging failure before that). The introduced finding itself is proven as DATA: diff.json carries the new violation''s title, which is also what makes `diff-writes-diff-json` falsifiable.'
     milestone:
       - analyze-diff-reports-new-and-resolved
       - analyze-diff-reports-new-and-resolved-overview

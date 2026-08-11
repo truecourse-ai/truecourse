@@ -65,7 +65,6 @@ steps:
   - git:
       - add
       - .truecourse/LATEST.json
-      - .truecourse/config.json
       - .truecourse/hooks.yaml
     expect:
       exit: 0

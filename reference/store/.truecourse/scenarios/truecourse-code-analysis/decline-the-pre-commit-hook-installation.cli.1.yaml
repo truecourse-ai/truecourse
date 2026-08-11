@@ -67,7 +67,6 @@ steps:
   - git:
       - add
       - .truecourse/LATEST.json
-      - .truecourse/config.json
     expect:
       exit: 0
   - git:
