@@ -667,7 +667,39 @@ describes, and only then written back here.
 
 ### 6.5 Implementation plan
 
-To be authored by the owner.
+Prerequisites, external to this workstream: the shared agent loop (§3),
+built once beforehand and shared by §§6–8 — this workstream builds no
+loop machinery (§3.3 Delivery). Phase 0 (§5) lands first as it does for
+every workstream, but none of its remaining deletions touch the scan, so
+Phase A does not wait on it.
+
+**Phase A — deterministic + schema work.** Starts now; needs no loop.
+
+- The corpus carries its own completeness (§6.2). `CuratedCorpusSchema`
+  gains the field that separates a scan which finished from one a budget
+  stopped, with what it did not reach; `CurateStats` stays the run-local
+  record it already is.
+- Heading-widening becomes area MEMBERSHIP rather than pair enumeration
+  (§6.3). The deterministic net still runs and still costs nothing, but
+  its output joins an area's doc set instead of producing candidate pairs
+  to judge.
+- The overlap cache is keyed by area, not by pair (§6.4) — the
+  invalidation change the unit change forces, and what lets the estimate
+  count areas.
+- Retire `CurateModels`' five per-stage model slots (relevance, areaTag,
+  vocab, overlap, verifyOverlap) per §3.4; `fallback` stays.
+- Rewrite the scan estimate per §6.4.
+
+**Phase B — the sessions.** Blocked on the shared loop landing.
+
+- The three sessions of §6.3, in order, each consuming the previous: doc
+  curation, then area settling, then overlap. Area settling closes
+  §6.2's product-axis gap — the `core` verdict becomes a session outcome
+  instead of a prompt sentence. Overlap retires the separate verify
+  pass, whose reason to exist is the cheap/strong model split §3.4
+  removed.
+- Calibrate the budgets: run the scan over a corpus at documentation
+  scale, then write the settled ranges back into §6.4.
 
 ## 7. Workstream: Guard Setup (owner: Sarkis)
 
