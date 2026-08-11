@@ -9,8 +9,8 @@
     ]
   },
   "recipeFingerprint": "sha256:2e8f282a14f5f9124140cc4375023de5b5bc80224a77be875680c02a30acd875",
-  "sectionsTotal": 37,
-  "sectionsChanged": 37,
+  "sectionsTotal": 42,
+  "sectionsChanged": 42,
   "skippedUnchanged": 0,
   "noChanges": false,
   "written": [
@@ -251,6 +251,16 @@
       "anchor": "configuration",
       "file": ".truecourse/scenarios/truecourse-code-analysis/retune-the-hook-policy-in-hooks-yaml.cli.1.yaml",
       "flowId": "retune-the-hook-policy-in-hooks-yaml",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "review-a-repository-analysis-in-the-dashboard.cli.1",
+      "title": "A developer opens the dashboard and reads a repository’s analysis",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "file": ".truecourse/scenarios/truecourse-dashboard/review-a-repository-analysis-in-the-dashboard.cli.1.yaml",
+      "flowId": "review-a-repository-analysis-in-the-dashboard",
       "surface": "cli",
       "status": "never-run"
     },
@@ -921,6 +931,192 @@
       "anchor": "environment-variables",
       "kind": "blocked-on",
       "reason": "the CLAUDE_CODE_* variables tune Claude Code mode — blocked-on the supplied `claude-code-binary` dependency, and unobservable: none of the five settings is echoed by any command."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "Code Analysis shows the architecture graph — Blocked-on a locatable graph surface: the canvas is a ReactFlow region whose nodes, edges, minimap and pane carry no role and no accessible name, and the §10.3 locator policy refuses to guess at one (transform gap G76). Its zoom controls are named, but asserting them would prove a toolbar is mounted, not that the architecture graph rendered. It becomes a flow when the graph region is nameable."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "rules are toggled inline from Code Analysis — Blocked-on the rule-toggle web tasks the analyze area already plans (`web/reenable-rule-from-rules-panel`): the same behavior is carried there through `rules.mdx#individual-rules`, and that flow has no scenario yet. Proving it twice in one run would be redundant coverage; this doc’s restatement joins a flow when that scenario lands."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "noisy rules are silenced inline from Code Analysis — Blocked-on the same rule-toggle web tasks (`web/silence-rule-from-violation-card`), carried by the analyze area’s dashboard flow through `rules.mdx#individual-rules`."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "Guard Coverage shows each spec doc’s sections with their scenario coverage — Awaiting a Guard-surface web flow: the claim needs a repository whose spec corpus and scenario manifest are populated before the dashboard can show coverage at all, which is a seeded-store dependency the web wave has not settled (plan §10.9). The surface itself exists and is named as the doc says."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "blocked sections waiting on a providable third party show as orange Needs setup — Awaiting a Guard-surface web flow, and needs a corpus containing a section blocked only on a providable third party — state no scenario can arrange today."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "a Needs setup section links to the External APIs form — Awaiting a Guard-surface web flow, on the same seeded state as the Needs setup claim; DOC-DRIFT CANDIDATE besides — the doc names the destination “External APIs” and the current UI’s tab is “Dependencies”."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "Guard Coverage walks you through resolving spec conflicts — Awaiting a Guard-surface web flow: resolving a conflict needs a corpus with a flagged overlap in it, which the sandbox has no way to arrange yet."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "Guard Sources manages the registered llms.txt documentation sites — Awaiting a Guard-surface web flow over a seeded sources registry."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "Guard Sources adds a site by URL with a preview before anything is written — Blocked-on network access: adding a site fetches a real llms.txt over the network, and a scenario must not reach the internet. It becomes a flow when the surface can be pointed at a local documentation site."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "Guard Sources refreshes or removes a registered site — Blocked-on the same network access for the refresh half; the remove half awaits a Guard-surface web flow over a seeded sources registry."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "untestable",
+      "reason": "Guard Scenarios lists the committed scenario corpus — DOC-DRIFT CANDIDATE, awaiting the Guard-surface web flow that will surface it: the doc names a “Scenarios” surface and the current UI names it “Tests” (`apps/dashboard/client/src/navigation/registry.ts`). Authored to the doc, so the flow that carries it is expected to run red until the doc or the label moves."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "untestable",
+      "reason": "Guard Scenarios shows the recipe and the last-generate summary — DOC-DRIFT CANDIDATE on the same surface name, and it additionally needs a repository with a recipe and a generate behind it."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "every test reads as View · Story · YAML — Awaiting a Guard-surface web flow over a populated test corpus; the three readings are per-test controls, so the claim needs a committed scenario in the subject repository."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "untestable",
+      "reason": "Guard External APIs shows the third parties the app calls — DOC-DRIFT CANDIDATE, awaiting a Guard-surface web flow: the doc names an “External APIs” surface and the current UI names it “Dependencies”. It also needs a subject that calls a third party."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "untestable",
+      "reason": "Guard External APIs takes a real or sandbox account per third party — DOC-DRIFT CANDIDATE on the same surface name; proving it also means handing the dashboard a real or sandbox account, a supplied dependency the engine must never fabricate."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "the External APIs declaration is committed to recipe.json — Blocked-on the same supplied account: the file assertion is reachable only after the surface has been given one."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "External APIs secrets go to the gitignored overlay — Blocked-on the same supplied account, and the honest form is a negative over a secret — asserting it needs the account first."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "Guard Runs shows each run’s drifts with per-failure evidence — Awaiting a Guard-surface web flow over a subject that has a guard run behind it — a store this scenario’s sandbox does not arrange."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "blocked-on",
+      "reason": "dashboard-triggered work uses the same saved LLM transport as the CLI — Blocked-on the supplied `llm-transport` dependency: proving that dashboard-triggered work runs on the saved transport means really calling a model from the browser-driven run."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "kind": "untestable",
+      "reason": "the dashboard reads the transport selection but never edits credentials — Untestable as stated: “never edits credentials” is a negative over everything the dashboard can do, which no finite scenario closes. The falsifiable half — the saved credentials are byte-identical after a dashboard session — is worth a flow once a transport is bound, and it still would not prove the universal."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "dashboard starts and opens the dashboard — Blocked-on a long-running-process verb the cli driver does not have: `truecourse dashboard` serves until it is stopped, and it OPENS a browser on the user’s machine — a side effect a sandbox must never take. The runner boots the dashboard through the recipe’s own `web.serve`, which is the same server binary the command spawns but not the command itself."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "dashboard --reconfigure re-prompts for the run mode — Blocked-on the same long-running-process verb: the re-prompt is followed by the command serving or installing a service, neither of which a step can leave behind."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "unrealizable",
+      "reason": "dashboard --service runs as a background service — Unrealizable in a sandbox: the service mode installs a launchd/systemd unit on the machine, which is state outside the sandbox by definition."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "dashboard --service skips the mode prompt — Blocked-on the same service installation — the flag’s prompt-skipping half is only observable on a run that goes on to install the service."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "dashboard --console runs in this terminal — Blocked-on the long-running-process verb: the command holds the terminal until it is stopped, so a step that runs it never returns."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "dashboard --console skips the mode prompt — Blocked-on the same long-running-process verb."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "dashboard stop stops the dashboard — Blocked-on the same long-running-process verb: stopping is only observable against a dashboard this scenario could start and leave running."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "dashboard status shows the dashboard status — Blocked-on the same long-running-process verb for the running half; the not-running half would assert a state no step arranged."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "unrealizable",
+      "reason": "dashboard logs tails the dashboard logs, service mode only — Unrealizable in a sandbox: the logs come from the installed background service, which a sandbox must not install."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "unrealizable",
+      "reason": "dashboard uninstall removes the background service — Unrealizable in a sandbox for the same reason: there is no machine service to remove."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "kind": "blocked-on",
+      "reason": "the first dashboard run asks console or background service — Blocked-on the long-running-process verb: the question is answerable on a TTY, but every answer leaves a serving dashboard or an installed service behind."
     }
   ],
   "birthFindings": [],
@@ -929,20 +1125,22 @@
   "llmFailures": [],
   "orphaned": [],
   "flows": {
-    "total": 33,
-    "settled": 33,
+    "total": 35,
+    "settled": 35,
     "unsettled": 0,
     "skipped": 0,
     "dismissed": 0,
     "orphaned": 0,
     "subsumed": 0,
-    "noFlowClaims": 96,
+    "noFlowClaims": 127,
     "unsettledAreas": []
   },
   "interfaces": {
-    "total": 22,
+    "total": 60,
     "bySurface": {
-      "cli": 22
+      "cli": 22,
+      "api": 32,
+      "web": 6
     }
   },
   "usage": {

@@ -200,6 +200,32 @@ describe('interfaceFingerprint', () => {
     )
   })
 
+  /**
+   * `apiEffects` — the UI-to-API relation (2026-08-11). What a click reaches
+   * behind the glass is not WHICH task it is, so it parses, it distinguishes
+   * "established none" from "not established", and it moves no identity.
+   */
+  it('the api relation parses, and an empty list is a real answer', () => {
+    const withEffects = iface([ACTIVATE], {
+      type: 'web',
+      apiEffects: ['api/get-api-repos', 'api/get-api-repos-id-violations'],
+    })
+    expect(InterfaceSchema.parse(JSON.parse(JSON.stringify(withEffects)))).toEqual(withEffects)
+    // ESTABLISHED NONE — a purely client-side interaction reaches no route, and
+    // saying so is different from saying nothing (the omitted case below).
+    const clientSideOnly = iface([ACTIVATE], { type: 'web', apiEffects: [] })
+    expect(InterfaceSchema.parse(JSON.parse(JSON.stringify(clientSideOnly))).apiEffects).toEqual([])
+    expect(InterfaceSchema.parse(JSON.parse(JSON.stringify(iface([ACTIVATE])))).apiEffects).toBeUndefined()
+    // An empty REF is not an answer at all.
+    expect(() => InterfaceSchema.parse({ ...clientSideOnly, apiEffects: [''] })).toThrow()
+  })
+
+  it('the api relation never moves the fingerprint', () => {
+    const bare = iface([ACTIVATE], { type: 'web' })
+    expect(interfaceFingerprint({ ...bare, apiEffects: ['api/get-api-repos'] })).toBe(bare.fingerprint)
+    expect(interfaceFingerprint({ ...bare, apiEffects: [] })).toBe(bare.fingerprint)
+  })
+
   it('a label is cosmetic — it never moves the fingerprint', () => {
     expect(fp([{ ...INVOKE, label: 'add a task' }])).toBe(fp([INVOKE]))
     expect(fp([{ ...REQUEST, label: 'create' }])).toBe(fp([REQUEST]))
@@ -861,6 +887,10 @@ describe('the reference catalog', () => {
     // thing — beside the 32 per-operation api entries and the 3 per-task web ones.
     // The command COUNT did not move (a tree's commands were already enumerated);
     // what moved is which entry each one lives in.
+    //
+    // 60 since 2026-08-11: the dashboard area's first RUNNING web flow needed three
+    // more tasks — arriving at the home page, narrowing the violation list, and
+    // crossing to the other capability — and each is one entry like every other.
     expect(catalog.interfaces.map((j) => j.id)).toEqual([
       'cli/add',
       'cli/analyze',
@@ -916,9 +946,12 @@ describe('the reference catalog', () => {
       'api/get-api-repos-id-analytics-top-offenders',
       'api/get-api-repos-id-analytics-resolution',
       'api/get-api-rules',
+      'web/open-dashboard-home',
       'web/open-repo-report',
       'web/silence-rule-from-violation-card',
       'web/reenable-rule-from-rules-panel',
+      'web/filter-violations-by-category',
+      'web/switch-to-the-guard-section',
     ])
     // Every command answers "what do I read?" — none is silent. 22 cli commands
     // (one per entry since the split) + the api surface's 32 operations = 54.
@@ -932,20 +965,25 @@ describe('the reference catalog', () => {
 
   it('the web task interfaces carry their state contract, one task each', () => {
     expect(web.map((j) => j.id)).toEqual([
+      'web/open-dashboard-home',
       'web/open-repo-report',
       'web/silence-rule-from-violation-card',
       'web/reenable-rule-from-rules-panel',
+      'web/filter-violations-by-category',
+      'web/switch-to-the-guard-section',
     ])
     for (const j of web) {
       // A task from a specific state: both ends of the state contract present.
       expect(j.startingState).toBeTruthy()
       expect(j.endState).toBeTruthy()
-      // Steps are the user's interactions, each locating by role + accessible
-      // name (the §10.3 locator policy) — never a page inventory.
+      // Steps are the user's interactions: an address the user asks for, or an
+      // element located by role + accessible name (the §10.3 locator policy) —
+      // never a page inventory.
       expect(j.steps.length).toBeLessThanOrEqual(3)
       for (const step of j.steps) {
-        expect(step.kind === 'activate' || step.kind === 'input').toBe(true)
+        expect(['navigate', 'activate', 'input']).toContain(step.kind)
         if ('target' in step) expect(step.target).toMatch(/^[a-z]+ ".+"$/)
+        if ('route' in step) expect(step.route).toMatch(/^\//)
       }
       // The state CHAIN, every side stated: the first step consumes the
       // interface's starting state, each step's output is the next step's input
@@ -964,6 +1002,38 @@ describe('the reference catalog', () => {
       // No command contract: a page task has no argv grammar to carry.
       expect(j.contract).toBeUndefined()
     }
+  })
+
+  /**
+   * THE UI-TO-API RELATION (2026-08-11) — the field plan §2 asks a realization
+   * surface for: which operations a screen reaches. What is checked is that it
+   * points at real entries of THIS catalog and that its two absences stay
+   * distinguishable, because a relation nobody can resolve is worse than none.
+   */
+  it('every web task states which api operations it reaches, by catalog id', () => {
+    const apiIds = new Set(catalog.interfaces.filter((j) => j.type === 'api').map((j) => j.id))
+    for (const j of web) {
+      for (const ref of j.apiEffects ?? []) expect(apiIds, `${j.id} → ${ref}`).toContain(ref)
+    }
+    // Reading the report is READS only; silencing a rule WRITES the rule, then
+    // re-reads what the write changed.
+    expect(catalog.interfaces.find((j) => j.id === 'web/open-repo-report')!.apiEffects).toContain(
+      'api/get-api-repos-id-violations',
+    )
+    expect(
+      catalog.interfaces.find((j) => j.id === 'web/silence-rule-from-violation-card')!.apiEffects,
+    ).toContain('api/patch-api-repos-id-rules-rulekey')
+    // The one task that is established to reach NOTHING: the category tabs filter
+    // state the page already holds. An empty list, never an omitted field.
+    expect(
+      catalog.interfaces.find((j) => j.id === 'web/filter-violations-by-category')!.apiEffects,
+    ).toEqual([])
+    // …and the one still unestablished stays omitted rather than claiming none:
+    // the section switch loads a whole other surface, whose reads the one-hop
+    // resolution has not been run over.
+    expect(
+      catalog.interfaces.find((j) => j.id === 'web/switch-to-the-guard-section')!.apiEffects,
+    ).toBeUndefined()
   })
 
   it('is 100% structured facts — no command carries a sentence about behavior', () => {
@@ -1297,10 +1367,11 @@ describe('the reference catalog', () => {
     )
     // 7 while the catalog was cli-only; 39 with the api surface (2026-08-10); 42
     // with the three web task interfaces (2026-08-11); 57 once the cli's three
-    // multi-command trees became one entry per command (2026-08-10). No two
-    // interfaces share an identity — an operation, a command and a page task
-    // never can.
-    expect(new Set(Object.values(fingerprints)).size).toBe(57)
+    // multi-command trees became one entry per command (2026-08-10); 60 with the
+    // dashboard flow's three further web tasks (2026-08-11). No two interfaces
+    // share an identity — an operation, a command and a page task never can, and
+    // two tasks rooted at the same route are told apart by their steps.
+    expect(new Set(Object.values(fingerprints)).size).toBe(60)
   })
 
   it('the three multi-command trees moved — one entry per command, and the group holds them', () => {

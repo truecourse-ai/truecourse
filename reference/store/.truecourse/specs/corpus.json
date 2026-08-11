@@ -3,6 +3,14 @@
   "generatedAt": "2026-08-07T03:24:38.336Z",
   "docs": [
     {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T02:00:00.000Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
       "ref": "reference/spec-docs/analyze/baseline-and-diff.mdx",
       "kind": "spec",
       "lastTouched": "2026-08-07T02:24:58.957Z",
@@ -65,7 +73,137 @@
         "reference/spec-docs/reference/cli.mdx"
       ],
       "overlaps": []
+    },
+    {
+      "id": "truecourse/dashboard",
+      "product": "truecourse",
+      "concern": "dashboard",
+      "docRefs": [
+        ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md"
+      ],
+      "overlaps": []
     }
   ],
-  "skippedDocs": []
+  "skippedDocs": [
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/analyze/baseline-and-diff.md",
+      "reason": "Not yet curated into any area under this ref: the same published page is already curated as `reference/spec-docs/analyze/baseline-and-diff.mdx`, the snapshot the code-analysis area's claims anchor to. Curating both refs would double every claim in this doc.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/analyze/excluding-files.md",
+      "reason": "Not yet curated into any area under this ref: the same published page is already curated as `reference/spec-docs/analyze/excluding-files.mdx`, the snapshot the code-analysis area's claims anchor to. Curating both refs would double every claim in this doc.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/analyze/git-hooks.md",
+      "reason": "Not yet curated into any area under this ref: the same published page is already curated as `reference/spec-docs/analyze/git-hooks.mdx`, the snapshot the code-analysis area's claims anchor to. Curating both refs would double every claim in this doc.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/analyze/overview.md",
+      "reason": "Not yet curated into any area under this ref: the same published page is already curated as `reference/spec-docs/analyze/overview.mdx`, the snapshot the code-analysis area's claims anchor to. Curating both refs would double every claim in this doc.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/analyze/rules.md",
+      "reason": "Not yet curated into any area under this ref: the same published page is already curated as `reference/spec-docs/analyze/rules.mdx`, the snapshot the code-analysis area's claims anchor to. Curating both refs would double every claim in this doc.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/configuration/llm-transport.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/configuration/models.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/configuration/storage.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/configuration/telemetry.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/conflicts.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/external-services.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/generate.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/overview.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/recipe.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/run.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/seeding.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/setup.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/spec-scan.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/guard/web-sources.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/index.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/installation.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/quickstart.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/reference/claude-code-skills.md",
+      "reason": "Not yet curated into any area — the reference corpus covers analyze (code-analysis) and the dashboard, and this page belongs to neither. It is a fetched page of the registered source, kept on disk and available to force-include when its area is authored.",
+      "category": "not-curated"
+    },
+    {
+      "ref": ".truecourse/specs/sources/docs.truecourse.dev/reference/cli.md",
+      "reason": "Not yet curated into any area under this ref: the same published page is already curated as `reference/spec-docs/reference/cli.mdx`, the snapshot the code-analysis area's claims anchor to. Curating both refs would double every claim in this doc.",
+      "category": "not-curated"
+    }
+  ]
 }

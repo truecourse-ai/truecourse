@@ -726,6 +726,34 @@ export const InterfaceSchema = z
      * `startingState`.
      */
     endState: z.string().min(1).optional(),
+    /**
+     * THE UI-TO-API RELATION: the api operations this task's steps invoke, as
+     * {@link InterfaceSchema.id}s of the api entries in the SAME catalog
+     * (`api/get-api-repos-id-violations`, …). Ids rather than method+path so the
+     * two halves can never drift apart: an operation that is renamed or dropped
+     * takes its id with it, and a dangling ref is a visible break instead of a
+     * string that still reads plausibly.
+     *
+     * Why it exists (plan §2): a surface the docs do not promise — today the
+     * dashboard server's HTTP API — is a REALIZATION surface, recorded so a
+     * scenario can act through it. Without this field the api entries stand
+     * unattached: nothing says WHICH screen reaches them, so neither a reader nor
+     * a generator can tell a route that serves a promised screen from one nothing
+     * reaches. Derived, never authored from docs: the client's own call sites,
+     * resolved one hop through its api-client module (§10.4).
+     *
+     * The absence rule of the contract region applies here too, and both halves
+     * are real answers: OMITTED means the extraction established nothing;
+     * `[]` means it established NONE — a purely client-side interaction (a
+     * filter, a dropdown) that reaches no server at all. A fact the one-hop
+     * resolution cannot settle is simply not listed, never guessed.
+     *
+     * Additive, optional, and NEVER fingerprinted (see
+     * {@link interfaceFingerprint}): learning what a click calls says nothing
+     * about WHICH task it is, so enriching the relation must not re-author a
+     * single scenario.
+     */
+    apiEffects: z.array(z.string().min(1)).optional(),
     /** `sha256:…` over the surface-visible shape — see {@link interfaceFingerprint}. */
     fingerprint: z.string().min(1),
     /** An OpenAPI operation with NO matching route registration: declared surface the
@@ -865,7 +893,9 @@ function stepIdentity(step: InterfaceStep): string {
  * Learning a flag's choices or an exit code must leave every interface identity
  * (and therefore every scenario's grounding and every author-cache key) where it
  * was — the signature is `Pick<Interface, 'type' | 'entry' | 'steps'>` so a caller
- * cannot accidentally fold one in.
+ * cannot accidentally fold one in. {@link InterfaceSchema.apiEffects} is excluded
+ * by the same rule: which operations a click reaches is what the task DOES behind
+ * the glass, not which task it is.
  */
 export function interfaceFingerprint(
   iface: Pick<Interface, 'type' | 'entry' | 'steps'>,

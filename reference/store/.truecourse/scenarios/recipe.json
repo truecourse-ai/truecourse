@@ -10,5 +10,14 @@
       "node",
       "tools/cli/dist/index.js"
     ]
+  },
+  "web": {
+    "build": "pnpm build:dist",
+    "serve": [
+      "node",
+      "dist/server.mjs"
+    ],
+    "healthPath": "/api/health",
+    "readyTimeoutMs": 60000
   }
 }

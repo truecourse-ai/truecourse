@@ -1121,6 +1121,48 @@
           "driver": "web"
         }
       ]
+    },
+    {
+      "flowId": "review-a-repository-analysis-in-the-dashboard",
+      "flowFingerprint": "sha256:41ac476a2bfa0a774ce8545a9898ba8088ed46f67790950b3bd479fab6cc0b1a",
+      "bindings": [
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+          "anchor": "dashboard",
+          "fingerprint": "sha256:e60acdd592b2c39a8d642d76efc2fca99157adf354fc790ff8d971fd09cdbbbe"
+        },
+        {
+          "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+          "anchor": "dashboard/what-s-inside",
+          "fingerprint": "sha256:202814253200787ceed84a413e57a9e8db8688b81f8d719070682ceb632084cd"
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "review-a-repository-analysis-in-the-dashboard.cli.1",
+          "surface": "cli",
+          "status": "never-run"
+        }
+      ],
+      "interfaces": [
+        {
+          "surface": "cli",
+          "interfaceIds": [
+            "cli/analyze"
+          ]
+        },
+        {
+          "surface": "web",
+          "interfaceIds": [
+            "web/open-dashboard-home",
+            "web/open-repo-report",
+            "web/filter-violations-by-category",
+            "web/switch-to-the-guard-section"
+          ]
+        }
+      ],
+      "generationInputsHash": null,
+      "gaps": []
     }
   ]
 }

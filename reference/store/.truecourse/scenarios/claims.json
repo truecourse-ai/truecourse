@@ -2314,6 +2314,348 @@
       "claim": "`CLAUDE_CODE_BINARY`, `CLAUDE_CODE_MODEL`, `CLAUDE_CODE_TIMEOUT_MS`, `CLAUDE_CODE_MAX_RETRIES` and `CLAUDE_CODE_MAX_CONCURRENCY` tune Claude Code mode.",
       "contentHash": "sha256:191aaf714950677f4bea924d9d9bf3bf360371870c6c1c72c49a5b2f459bf635",
       "verifyVia": "combination: Claude Code mode honours each of the five settings"
+    },
+    {
+      "id": "dashboard-one-web-ui-for-both-capabilities",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "title": "the dashboard is one web UI for both capabilities",
+      "claim": "The dashboard is one web UI for both capabilities — code findings and business-logic drift side by side.",
+      "contentHash": "sha256:bddb8d2baa14cf0dc6510705efe4f15f90543ec9ade1330bf2127a14ab07e188",
+      "verifyVia": "web: from a repository’s page the section switcher offers both capabilities, Code Analysis and Spec Guard, without leaving the UI"
+    },
+    {
+      "id": "dashboard-browses-code-findings",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "title": "the dashboard browses code findings",
+      "claim": "The dashboard browses the code findings of the analyzed repository.",
+      "contentHash": "sha256:22c5bfbce621646a7739151616cbff432b32b729b05ea888eb25423d4899572a",
+      "verifyVia": "web: the repository page’s violation list narrows to one category and shows that category’s findings only"
+    },
+    {
+      "id": "dashboard-browses-business-logic-drift",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "title": "the dashboard browses business-logic drift",
+      "claim": "The dashboard browses business-logic drift.",
+      "contentHash": "sha256:0150a784f525c8eddf5991af48ec2412e268aaade87bdd3077119c319cd2b024",
+      "verifyVia": "web: the Spec Guard section opens in the same UI, on the same repository, with its own surfaces"
+    },
+    {
+      "id": "dashboard-code-analysis-architecture-graph",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Code Analysis shows the architecture graph",
+      "claim": "The dashboard’s Code Analysis section shows the architecture graph.",
+      "contentHash": "sha256:a9e27f80a0af1a6a4e42871f2ddf2f479383b645a634959a7788dcdf77e2c34e",
+      "verifyVia": "web: the graph surface renders the analyzed repository’s architecture"
+    },
+    {
+      "id": "dashboard-code-analysis-violations-list",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Code Analysis shows the violations list",
+      "claim": "The dashboard’s Code Analysis section shows the violations list.",
+      "contentHash": "sha256:22fdb0273267bb4203b92eed7168616e43b69180d570bc8419271b94a2ea16ed",
+      "verifyVia": "web: the repository page lists the violations the last analysis recorded"
+    },
+    {
+      "id": "dashboard-code-analysis-severity-category-analytics",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Code Analysis shows severity and category analytics",
+      "claim": "The dashboard’s Code Analysis section shows severity and category analytics.",
+      "contentHash": "sha256:5800de474fc356c02c299be651e84165b3abbd3658bab15ec48a36385830969c",
+      "verifyVia": "web: the report carries a by-severity and a by-category breakdown of the same findings"
+    },
+    {
+      "id": "dashboard-code-analysis-code-hotspots",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Code Analysis shows code hotspots",
+      "claim": "The dashboard’s Code Analysis section shows code hotspots.",
+      "contentHash": "sha256:1c6cdeb3120c328b1d29920dfb4d5d1d0a8a4a546f2797474a207506d70462bd",
+      "verifyVia": "web: the report carries a hotspots list of the files the findings concentrate in"
+    },
+    {
+      "id": "dashboard-code-analysis-trend-over-time",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Code Analysis shows the trend over time",
+      "claim": "The dashboard’s Code Analysis section shows the trend of violations over time.",
+      "contentHash": "sha256:052061495a51b0e57218dca8e64febd17e56a7f02f9a61e4ab246609be533c1a",
+      "verifyVia": "web: the report carries a violation-trend view across the repository’s analyses"
+    },
+    {
+      "id": "dashboard-code-analysis-toggles-rules-inline",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "rules are toggled inline from Code Analysis",
+      "claim": "Rules can be toggled inline from the dashboard’s Code Analysis section.",
+      "contentHash": "sha256:4487d3beca44d257973a3b80bda0813a9defd92af88a150bce748774a5d70fa2",
+      "verifyVia": "web: a rule’s state flips from the report itself and the repository config records it"
+    },
+    {
+      "id": "dashboard-code-analysis-silences-noisy-rules-inline",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "noisy rules are silenced inline from Code Analysis",
+      "claim": "Noisy rules can be silenced inline from the dashboard’s Code Analysis section.",
+      "contentHash": "sha256:8b31e83e741a5f998834e434d6d689a8ce67dc66da60328def9ad2b58e97ba2a",
+      "verifyVia": "web: a rule silenced from a violation card takes its findings out of the list, with no re-analysis"
+    },
+    {
+      "id": "dashboard-guard-coverage-shows-section-scenario-coverage",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Coverage shows each spec doc’s sections with their scenario coverage",
+      "claim": "The dashboard’s Guard section has a Coverage surface that shows each spec doc’s sections with their scenario coverage.",
+      "contentHash": "sha256:e0ec91704a0086f398ea649ec0d5183fca58d55d64d33269c6a8410c6bf936bb",
+      "verifyVia": "web: Coverage lists a doc’s sections, each with the coverage its scenarios give it"
+    },
+    {
+      "id": "dashboard-guard-coverage-marks-providable-blocked-sections-needs-setup",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "blocked sections waiting on a providable third party show as orange Needs setup",
+      "claim": "In Guard Coverage, blocked sections waiting only on a providable third party show as an orange “Needs setup”.",
+      "contentHash": "sha256:359bf162a35b91b1d53ce2b994f1344578cbbcfebac2f9440fedf6a2e6c04629",
+      "verifyVia": "web: a section blocked only on a providable third party renders the Needs setup state"
+    },
+    {
+      "id": "dashboard-guard-coverage-needs-setup-links-to-external-apis",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "a Needs setup section links to the External APIs form",
+      "claim": "A “Needs setup” section in Guard Coverage carries a link to the External APIs form.",
+      "contentHash": "sha256:8ee08c8fc46f44aebcdde6d914d5f7f6273c63e729e2f949b6b297ca4bc9d2f1",
+      "verifyVia": "web: the Needs setup state offers a link that reaches the External APIs form"
+    },
+    {
+      "id": "dashboard-guard-coverage-walks-through-resolving-conflicts",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Coverage walks you through resolving spec conflicts",
+      "claim": "The dashboard’s Guard Coverage surface walks you through resolving spec conflicts.",
+      "contentHash": "sha256:dab454b17e95741e83d4ae71f59537a881a2506438c4e0dabdafeb6cb7273e41",
+      "verifyVia": "web: a flagged conflict is resolvable from Coverage, step by step"
+    },
+    {
+      "id": "dashboard-guard-sources-manages-registered-llms-txt-sites",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Sources manages the registered llms.txt documentation sites",
+      "claim": "The dashboard’s Guard section has a Sources surface that manages the llms.txt documentation sites registered as spec docs.",
+      "contentHash": "sha256:8797cf65b792e9a4a7971f39a4cddca08df95d767e020baf73203d876f882feb",
+      "verifyVia": "web: Sources lists the registered documentation sites and their fetched pages"
+    },
+    {
+      "id": "dashboard-guard-sources-adds-a-site-by-url-with-a-preview",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Sources adds a site by URL with a preview before anything is written",
+      "claim": "Guard Sources adds a documentation site by URL, previewing it before anything is written.",
+      "contentHash": "sha256:a473c63932925844f8bdc2b9b0f65ec74c2412728f57160342d1f9dde7d0f65d",
+      "verifyVia": "web: the add flow shows the preview first, and the store is untouched until it is accepted"
+    },
+    {
+      "id": "dashboard-guard-sources-refreshes-or-removes-a-site",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Sources refreshes or removes a registered site",
+      "claim": "Guard Sources refreshes or removes a registered documentation site.",
+      "contentHash": "sha256:9d0a5273e57aa8d69cbd2949030918724bdce00fa2db0a8feec113b9f09d6307",
+      "verifyVia": "web: a registered site can be refreshed and removed from the same surface"
+    },
+    {
+      "id": "dashboard-guard-scenarios-lists-the-committed-corpus",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Scenarios lists the committed scenario corpus",
+      "claim": "The dashboard’s Guard section has a Scenarios surface that lists the committed scenario corpus.",
+      "contentHash": "sha256:91714e9c4bfcd64bd8bc730bdeb0b061e831a005bbd5435514c5bf4f5eb1d56d",
+      "verifyVia": "web: the Scenarios surface lists every committed scenario"
+    },
+    {
+      "id": "dashboard-guard-scenarios-shows-recipe-and-last-generate",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Scenarios shows the recipe and the last-generate summary",
+      "claim": "The Guard Scenarios surface shows the recipe and the last-generate summary alongside the committed corpus.",
+      "contentHash": "sha256:56c31c5299c6bde0dffbbf7d75b86c08b07e2c1f7ebe1701711a8c1d96dbb816",
+      "verifyVia": "web: the recipe and the last generate’s summary are on the Scenarios surface"
+    },
+    {
+      "id": "dashboard-guard-test-reads-as-view-story-yaml",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "every test reads as View · Story · YAML",
+      "claim": "In the dashboard’s Guard section, every test reads as `View · Story · YAML`.",
+      "contentHash": "sha256:edbffd88a96b8ce6d2ac3ced40c99b7988945eb3411478864e5b6b9e118062f8",
+      "verifyVia": "web: a test offers the three readings named in the doc"
+    },
+    {
+      "id": "dashboard-guard-external-apis-shows-third-parties",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard External APIs shows the third parties the app calls",
+      "claim": "The dashboard’s Guard section has an External APIs surface that shows the third parties the app calls.",
+      "contentHash": "sha256:089f719885ae5d0bc513a852d016ab101abe7362d15e1c53581c8a966185df5c",
+      "verifyVia": "web: the External APIs surface lists the detected third-party services"
+    },
+    {
+      "id": "dashboard-guard-external-apis-takes-an-account-per-service",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard External APIs takes a real or sandbox account per third party",
+      "claim": "The External APIs surface lets you hand guard a real or sandbox account for each third party.",
+      "contentHash": "sha256:917238261e2f6038393e4c1fa5b03f286a90a760dfbbbbf0a7e8479643725421",
+      "verifyVia": "web: an account can be entered per service from that surface"
+    },
+    {
+      "id": "dashboard-guard-external-apis-commits-the-declaration-to-recipe",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "the External APIs declaration is committed to recipe.json",
+      "claim": "The External APIs declaration is committed to `recipe.json`.",
+      "contentHash": "sha256:2d4104d2df7033a644e7c7290b74e53b70c27e0ce5a6e095647229255815e0f6",
+      "verifyVia": "file: the service declaration lands in `.truecourse/scenarios/recipe.json`"
+    },
+    {
+      "id": "dashboard-guard-external-apis-keeps-secrets-in-the-gitignored-overlay",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "External APIs secrets go to the gitignored overlay",
+      "claim": "Secrets entered on the External APIs surface go to the gitignored overlay, not to `recipe.json`.",
+      "contentHash": "sha256:6b4f5800ee07b070b3176d21df26dc17738c537fc436b4e110d68d6f1c4b65e6",
+      "verifyVia": "file: the secret lands in the gitignored overlay and never in the committed recipe"
+    },
+    {
+      "id": "dashboard-guard-runs-shows-drifts-with-evidence",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "Guard Runs shows each run’s drifts with per-failure evidence",
+      "claim": "The dashboard’s Guard section has a Runs surface that shows each run’s drifts with per-failure evidence.",
+      "contentHash": "sha256:2f9eb97b6112d2d2d177e0d7591d0a9a83d5befdf3db9aae7c139200b41fce2f",
+      "verifyVia": "web: a run’s drifts are listed, each reaching the evidence of its failure"
+    },
+    {
+      "id": "dashboard-actions-use-the-saved-llm-transport",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "dashboard-triggered work uses the same saved LLM transport as the CLI",
+      "claim": "Dashboard-triggered scans, generates, and analyses use the same saved LLM transport as the CLI.",
+      "contentHash": "sha256:c1d83c689fa9be69f11ca1567e87841dcbb7e61e41ff69edfc6430a537346b03",
+      "verifyVia": "combination: work started from the dashboard runs on the transport the CLI config saved"
+    },
+    {
+      "id": "dashboard-reads-the-transport-but-never-edits-credentials",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/what-s-inside",
+      "title": "the dashboard reads the transport selection but never edits credentials",
+      "claim": "The dashboard reads the LLM transport selection but never edits credentials.",
+      "contentHash": "sha256:6e78578916c4ef2ad3f0a87b1395fd96993fa3128bf489f6a9b06b597a5805a2",
+      "verifyVia": "file: the saved transport credentials are unchanged by anything the dashboard does"
+    },
+    {
+      "id": "dashboard-command-starts-and-opens-the-dashboard",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard starts and opens the dashboard",
+      "claim": "`truecourse dashboard` starts the dashboard and opens it.",
+      "contentHash": "sha256:f4aefd5fa54a59dfb9e7edbf316635a1a7991ca288755dd8c2cff748b9fa3fdb",
+      "verifyVia": "combination: the dashboard is serving afterwards, and it is opened for the user"
+    },
+    {
+      "id": "dashboard-reconfigure-reprompts-for-run-mode",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard --reconfigure re-prompts for the run mode",
+      "claim": "`truecourse dashboard --reconfigure` re-prompts for console vs background service mode.",
+      "contentHash": "sha256:08be204f277a35e665be2726bca9e1f1848204f81a4466ed33a46cd72159fa42",
+      "verifyVia": "prompt: the run-mode question is asked again"
+    },
+    {
+      "id": "dashboard-service-runs-as-a-background-service",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard --service runs as a background service",
+      "claim": "`truecourse dashboard --service` runs the dashboard as a background service.",
+      "contentHash": "sha256:2f61f1211831c3a8dfa8de70c925dd6af27e9cc4e86c998962fa3ea5f0576026",
+      "verifyVia": "combination: the dashboard runs as a service of the machine, not as a child of the terminal"
+    },
+    {
+      "id": "dashboard-service-skips-the-mode-prompt",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard --service skips the mode prompt",
+      "claim": "`truecourse dashboard --service` skips the run-mode prompt.",
+      "contentHash": "sha256:002d86c27957ef3f0c6ee7f8b3b7e58ac7407971b8ee7f4ca43e92b79fa62f90",
+      "verifyVia": "prompt: no run-mode question is asked"
+    },
+    {
+      "id": "dashboard-console-runs-in-this-terminal",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard --console runs in this terminal",
+      "claim": "`truecourse dashboard --console` runs the dashboard in this terminal.",
+      "contentHash": "sha256:c08dd805bfce6d4ea7ebca114829c13517e07a2bf2544d86a8068b1819487591",
+      "verifyVia": "combination: the dashboard runs as a child of the invoking terminal"
+    },
+    {
+      "id": "dashboard-console-skips-the-mode-prompt",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard --console skips the mode prompt",
+      "claim": "`truecourse dashboard --console` skips the run-mode prompt.",
+      "contentHash": "sha256:afbabf3046c6efee972971f38a4f75e953a89d493ea59db367b511da00be903d",
+      "verifyVia": "prompt: no run-mode question is asked"
+    },
+    {
+      "id": "dashboard-stop-stops-the-dashboard",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard stop stops the dashboard",
+      "claim": "`truecourse dashboard stop` stops the dashboard.",
+      "contentHash": "sha256:3f98943df2fa43c5ddb9d0fd9355fa7fb1c07a5720d417d00015d9476621b362",
+      "verifyVia": "combination: the dashboard is no longer serving afterwards"
+    },
+    {
+      "id": "dashboard-status-shows-dashboard-status",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard status shows the dashboard status",
+      "claim": "`truecourse dashboard status` shows the dashboard status.",
+      "contentHash": "sha256:cd7db25dfe72ab405683a42e0580a103852819e467045486e426227ae5e55e03",
+      "verifyVia": "stdout: the dashboard’s current state"
+    },
+    {
+      "id": "dashboard-logs-tails-dashboard-logs-in-service-mode",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard logs tails the dashboard logs, service mode only",
+      "claim": "`truecourse dashboard logs` tails the dashboard logs, in service mode only.",
+      "contentHash": "sha256:133d525a7f3242838b2132a3a34d0a121f1e4ec8f1da31e0ac83d86f6c3e4e54",
+      "verifyVia": "stdout: the service’s log lines, and nothing to tail when it is not running as a service"
+    },
+    {
+      "id": "dashboard-uninstall-removes-the-background-service",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "dashboard uninstall removes the background service",
+      "claim": "`truecourse dashboard uninstall` removes the background service.",
+      "contentHash": "sha256:2773662636aff9180359624a58d2098978185f143e8ea192680f990ef47aadf6",
+      "verifyVia": "combination: the machine no longer carries the dashboard service"
+    },
+    {
+      "id": "first-dashboard-run-asks-console-or-service",
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "title": "the first dashboard run asks console or background service",
+      "claim": "The first `truecourse dashboard` asks whether to run in this terminal (console) or as a background service.",
+      "contentHash": "sha256:d50a89a14809e777363f500286a170824f9b5849b3fd220a057af185d30f522a",
+      "verifyVia": "prompt: the run-mode question on the first invocation"
     }
   ],
   "untestable": [
@@ -2664,6 +3006,60 @@
       "anchor": "next-steps",
       "text": "Quickstart — The commands above, in the order you'd actually run them.",
       "reason": "Navigation card for another page; asserts no behavior."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard-2",
+      "text": "Fetch the complete documentation index at: https://docs.truecourse.dev/llms.txt",
+      "reason": "The llms.txt harness the docs site prepends to every fetched page — a pointer for whoever is reading the docs, not behavior of the product."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard-2",
+      "text": "Use this file to discover all available pages before exploring further.",
+      "reason": "Same harness block: an instruction to the reader of the documentation index; the product does nothing here."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "text": "One web UI for both capabilities: code findings and business-logic drift side by side. (page description)",
+      "reason": "Page metadata (the description the docs site renders as the lead blockquote) restating the sentence below it; the behavior is claimed from that sentence."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "text": "```bash\ntruecourse dashboard\n```",
+      "reason": "The lead’s bare command block restates the Commands row `truecourse dashboard # Start + open the dashboard`; claimed there, so one statement is not claimed twice in one doc."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "text": "![TrueCourse dashboard](https://raw.githubusercontent.com/truecourse-ai/truecourse/main/assets/screenshot.png)",
+      "reason": "A screenshot of the product; it states no behavior."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard",
+      "text": "…with the architecture graph, analytics, and the spec-curation + guard workflow.",
+      "reason": "The lead sentence’s tail lists what the UI contains; every item is stated again, more specifically, under What’s inside — the architecture graph, the severity/category analytics, and the Guard workflow bullets — and claimed there."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/commands",
+      "text": "`--reconfigure` re-asks later.",
+      "reason": "Restates the `--reconfigure` row of the same command table; claimed there."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/next-steps",
+      "text": "LLM transport — The saved transport the dashboard’s scans and generates run on.",
+      "reason": "Navigation card restating the linked page’s summary; the transport sentence itself is claimed under What’s inside."
+    },
+    {
+      "doc": ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+      "anchor": "dashboard/next-steps",
+      "text": "CLI reference — Every dashboard action has a CLI equivalent.",
+      "reason": "Navigation card pointing at a page outside this area."
     }
   ]
 }

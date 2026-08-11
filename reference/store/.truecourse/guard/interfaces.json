@@ -9420,6 +9420,31 @@
       }
     },
     {
+      "id": "web/open-dashboard-home",
+      "type": "web",
+      "title": "Open the dashboard home and see the registered repositories",
+      "group": "home",
+      "entry": {
+        "method": "GET",
+        "path": "/"
+      },
+      "steps": [
+        {
+          "kind": "navigate",
+          "route": "/",
+          "input": "The dashboard is serving and nothing is open in the browser yet.",
+          "output": "The dashboard is serving with at least one analyzed repository registered; the browser is on the home page, which lists the repositories."
+        }
+      ],
+      "startingState": "The dashboard is serving and nothing is open in the browser yet.",
+      "endState": "The dashboard is serving with at least one analyzed repository registered; the browser is on the home page, which lists the repositories.",
+      "apiEffects": [
+        "api/get-api-capabilities",
+        "api/get-api-repos"
+      ],
+      "fingerprint": "sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33"
+    },
+    {
       "id": "web/open-repo-report",
       "type": "web",
       "title": "Open a repository’s analysis report from the home page",
@@ -9438,6 +9463,15 @@
       ],
       "startingState": "The dashboard is serving with at least one analyzed repository registered; the browser is on the home page, which lists the repositories.",
       "endState": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics.",
+      "apiEffects": [
+        "api/get-api-repos-id",
+        "api/get-api-repos-id-violations",
+        "api/get-api-repos-id-analyses",
+        "api/get-api-repos-id-analytics-trend",
+        "api/get-api-repos-id-analytics-breakdown",
+        "api/get-api-repos-id-analytics-top-offenders",
+        "api/get-api-repos-id-analytics-resolution"
+      ],
       "fingerprint": "sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b"
     },
     {
@@ -9465,6 +9499,14 @@
       ],
       "startingState": "On an analyzed repository’s page with violation cards visible; at least one card belongs to the rule the user wants to silence.",
       "endState": "The rule is disabled for the repository and every violation card from it has left the list, with no re-analysis.",
+      "apiEffects": [
+        "api/patch-api-repos-id-rules-rulekey",
+        "api/get-api-repos-id-violations",
+        "api/get-api-repos-id-analytics-trend",
+        "api/get-api-repos-id-analytics-breakdown",
+        "api/get-api-repos-id-analytics-top-offenders",
+        "api/get-api-repos-id-analytics-resolution"
+      ],
       "fingerprint": "sha256:5b6e81cd9d6944cec14a80b5a424d9f006c5edd6a9f17f402598dd774174ec5c"
     },
     {
@@ -9492,7 +9534,65 @@
       ],
       "startingState": "On an analyzed repository’s page where a rule was disabled earlier, so its violations are hidden from the list.",
       "endState": "The rule is enabled again in the repository’s config and its previously hidden violation cards are back in the list.",
+      "apiEffects": [
+        "api/get-api-repos-id-rules",
+        "api/patch-api-repos-id-rules-rulekey",
+        "api/get-api-repos-id-violations",
+        "api/get-api-repos-id-analytics-trend",
+        "api/get-api-repos-id-analytics-breakdown",
+        "api/get-api-repos-id-analytics-top-offenders",
+        "api/get-api-repos-id-analytics-resolution"
+      ],
       "fingerprint": "sha256:dd50d571a52eb17ec8539648663fea07efd2cb2eb2395871b3d2c65434963d32"
+    },
+    {
+      "id": "web/filter-violations-by-category",
+      "type": "web",
+      "title": "Narrow the violation list to one category",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"{category}\"",
+          "input": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics.",
+          "output": "The violation list shows the chosen category’s findings only, with a “Filtered by” chip naming the category; the analysis itself is untouched."
+        }
+      ],
+      "startingState": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics.",
+      "endState": "The violation list shows the chosen category’s findings only, with a “Filtered by” chip naming the category; the analysis itself is untouched.",
+      "apiEffects": [],
+      "fingerprint": "sha256:443701ef7e9295664459c180e548c8393ad77fb0d4e7246df117aa24147b3b14"
+    },
+    {
+      "id": "web/switch-to-the-guard-section",
+      "type": "web",
+      "title": "Switch the dashboard to the Spec Guard section",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Code Analysis\"",
+          "input": "On a repository’s page in the Code Analysis section, where the section switcher names the section in view.",
+          "output": "The section menu is open, naming both capabilities the dashboard covers: Code Analysis and Spec Guard."
+        },
+        {
+          "kind": "activate",
+          "target": "menuitemradio \"Spec Guard\"",
+          "input": "The section menu is open, naming both capabilities the dashboard covers: Code Analysis and Spec Guard.",
+          "output": "The Spec Guard section is in view for the same repository, with its own surfaces — the other capability, without leaving the UI."
+        }
+      ],
+      "startingState": "On a repository’s page in the Code Analysis section, where the section switcher names the section in view.",
+      "endState": "The Spec Guard section is in view for the same repository, with its own surfaces — the other capability, without leaving the UI.",
+      "fingerprint": "sha256:50a6d196d960baca6e757f0ab171cce945672a6dbd30047588f39e865f0b1066"
     }
   ],
   "source": {

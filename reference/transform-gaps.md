@@ -4077,3 +4077,97 @@ Two things this note is the record of, because they are NOT migrated:
   derivation.
 **Owner:** Interface mapping (the workstream formerly called Journey mapping
 throughout this file).
+
+## The dashboard area — the web driver's first RUNNING flow (2026-08-11)
+
+The §10 ladder's stage 2, on its own subject: the published **Dashboard** page
+becomes an area of the corpus, and one flow of that area is authored as a
+MIXED cli+web scenario and RUN for real. What landed:
+
+| layer | landed |
+|---|---|
+| corpus | `truecourse/dashboard`, one doc ref — `.truecourse/specs/sources/docs.truecourse.dev/dashboard.md`, the registered source's own snapshot — plus **24 `skippedDocs`** entries, one per uncurated sibling page of that source |
+| claims | **38 claims + 9 untestable** over the whole 49-line page, the stale Guard half included, anchored to the five sections `deriveSections` really derives (`dashboard-2` is the doc's lead: the llms.txt harness block) |
+| interfaces | 3 new web tasks (`web/open-dashboard-home`, `web/filter-violations-by-category`, `web/switch-to-the-guard-section`) → 60 entries, and the UI-to-API relation on the web ones (G72, below) |
+| flow | `review-a-repository-analysis-in-the-dashboard` — 7 claims, 4 task interfaces walked in order; the other 31 claims are `noFlowClaims` with reasons |
+| scenario | one mixed file: a cli `analyze --no-llm` seeds the world, six web steps read it. PASSES (2026-08-11), with a screenshot per step and the session video in its evidence |
+| recipe | the `web` block: `build: pnpm build:dist`, `serve: node dist/server.mjs`, `healthPath: /api/health` — the same bundle `truecourse dashboard` spawns |
+
+### G72. There is no UI-to-API relation — CLOSED (schema + reference)
+**What it asked for:** plan §2 requires a realization surface to record which
+screen reaches which operation, so the 32 api entries do not stand unattached.
+**What the store carries now:** `Interface.apiEffects` — the api entries a web
+task's steps invoke, by CATALOG ID (`api/get-api-repos-id-violations`), so a
+renamed or dropped operation breaks the link visibly instead of leaving a
+plausible-looking string. Additive, optional, and outside
+`interfaceFingerprint`: learning what a click calls is not which task it is.
+The absence rule of the contract region applies unchanged, and this area
+exercises both halves — `web/filter-violations-by-category` records `[]`
+(established NONE: the category tabs filter state the page already holds),
+while `web/switch-to-the-guard-section` OMITS the field (the one-hop resolution
+has not been run over the surface it loads).
+**Still open:** nothing PRODUCES it — the reference carries the only relation in
+the store, and the mapper owes the one-hop derivation. Three routes the report
+really loads (`violations/code-summary`, `spec/staleness`, `guard/staleness`)
+have no api entry to point at, so they are absent from the relation rather than
+recorded as unresolved: the api wave scoped its catalog to 32 operations.
+**Owner:** Interface mapping (derive it), dashboard view work (render it — the
+Interfaces pane shows a task's steps and states, not yet what it reaches).
+
+### G79. A page-text assertion reads only the first 2,000 characters
+**What:** `readVisibleText` (`packages/guard-runner/src/web/executor.ts`) caps
+the page's `innerText` at `WEB_TEXT_LIMIT = 2_000` and the `expect.text`
+matcher runs against that truncation, so what a step can assert depends on
+where the text sits on the page. The dashboard's repo report renders 1,898
+characters with a four-violation project: the flow's own assertions fit with
+about a hundred characters to spare, and a fifth violation card would push the
+last title past the cap.
+**What that costs:** the authored assertion had to pick the two finding titles
+the list reaches EARLY (they are asserted; the third and fourth cards are
+deliberately unnamed), which is placement forced by the reader rather than by
+the claim — the web analogue of G36. Scoping with `within` reads the element's
+full text and dodges the cap, but the locator policy needs a role AND an
+accessible name, and the violations region has neither.
+**Fix shape:** cap the EXCERPT that rides evidence, not the text the matcher
+sees; or let `within` address a landmark by role alone.
+**Owner:** Web Driver (runner).
+
+### G80. A mixed scenario is recorded on one surface
+**What:** the manifest entry records `scenarios[].surface` per test, and a
+scenario file declares one `driver`. This flow's scenario is cli AND web — one
+cli step arranging the world, six browser steps proving the claims — so it is
+recorded as `cli` (what the file declares) while its `interfaces` block honestly
+lists both surfaces. `unaccountedSurfaces` therefore reports `web` for the
+entry; it is inert here only because a hand-authored entry carries no
+`generationInputsHash`, and a generated one in the same shape would be left
+unsettled every run.
+**What that costs:** "coverage per surface" cannot be read off the manifest for
+a mixed flow, which is exactly the accounting question §10.9 flags as
+undecided.
+**Owner:** Guard Run / Guard Generate (define per-surface counting under mixed
+scenarios), then the manifest shape follows.
+
+### G81. `result.json` had drifted from the corpus it describes — CORRECTED
+**What:** the generate-result record still reported the CLI wave's numbers:
+33 flows (the web wave added a 34th) and 22 interfaces on one surface (the api
+and web waves added 35 more). Nothing was wrong with the schema; the waves
+simply did not rewrite the tally they invalidated, and the coverage view colours
+from this file.
+**What the store carries now:** the derivation, applied to the corpus as it
+stands — `flows.total`/`settled` = the live flows (35), `noFlowClaims` = the
+flow corpus's own list (127), `interfaces` = the catalog by type (60: 22 cli, 32
+api, 6 web), `sectionsTotal` = every section of every curated doc (42), plus the
+written row and the 31 coverage gaps of this area.
+**Still open:** nothing recomputes it — a hand-authored corpus has no generate
+behind it, so the tally is re-derived by hand at each wave and can drift again
+between them.
+**Owner:** Guard Generate (write it), or a corpus-consistency check.
+
+### J-index (dashboard web wave). Owning workstream
+
+| workstream | items |
+|---|---|
+| Web Driver | G79, G80 (with Guard Run) |
+| Interface mapping | G72 (produce the relation) |
+| dashboard view work | G72 (render the relation) |
+| Guard Generate | G81 |
