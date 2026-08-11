@@ -22,6 +22,19 @@ type RawGraphNode = {
 };
 
 /**
+ * Accessible name for a graph node.
+ *
+ * React Flow renders each node wrapper (`.react-flow__node`) with
+ * `role="group"` and names it solely from `node.ariaLabel` — `group` takes no
+ * name from its contents, so a node without one is an anonymous group that
+ * screen readers (and role-based locators) cannot address. Name every node
+ * with the label it displays, falling back to its id if the payload has none.
+ */
+function nodeAriaLabel(node: { id: string; data: { label?: string } }): string {
+  return node.data.label?.trim() || node.id;
+}
+
+/**
  * After scope filtering, kept containers (serviceGroup / layer / module)
  * still carry sizes laid out for their full set of children. Walk the tree
  * bottom-up and shrink each container to tightly fit its remaining children.
@@ -303,6 +316,7 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
             return {
               id: node.id,
               type: 'database' as const,
+              ariaLabel: nodeAriaLabel(node),
               position: node.position,
               data: {
                 label: node.data.label,
@@ -318,6 +332,7 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
             return {
               id: node.id,
               type: 'method' as const,
+              ariaLabel: nodeAriaLabel(node),
               position: node.position,
               parentId: node.parentId,
               extent: node.extent as 'parent' | undefined,
@@ -330,6 +345,7 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
             return {
               id: node.id,
               type: 'module' as const,
+              ariaLabel: nodeAriaLabel(node),
               position: node.position,
               parentId: node.parentId,
               extent: node.extent as 'parent' | undefined,
@@ -355,6 +371,7 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
             return {
               id: node.id,
               type: 'layer' as const,
+              ariaLabel: nodeAriaLabel(node),
               position: node.position,
               parentId: node.parentId,
               extent: node.extent as 'parent' | undefined,
@@ -376,6 +393,7 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
           return {
             id: node.id,
             type: 'serviceGroup' as const,
+            ariaLabel: nodeAriaLabel(node),
             position: node.position,
             style: node.style,
             data: {
@@ -419,6 +437,7 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
             return {
               id: node.id,
               type: 'database' as const,
+              ariaLabel: nodeAriaLabel(node),
               position: node.position,
               data: {
                 label: node.data.label,
@@ -433,6 +452,7 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
           return {
             id: node.id,
             type: 'service' as const,
+            ariaLabel: nodeAriaLabel(node),
             position: node.position,
             data: {
               label: node.data.label,
