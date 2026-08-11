@@ -16,6 +16,36 @@ export {
   defaultTabForSection,
 } from '@/navigation/registry';
 
+/**
+ * Accessible name for a rail badge.
+ *
+ * The rail BUTTON must keep the bare tab label as its accessible name
+ * ("Home", "Flows", ...) — role-and-name locators and screen-reader users
+ * address it by that exact string, and an aria-label carrying the count would
+ * change it on every analysis. So the count is named on the badge element
+ * instead: a `status` region whose own name carries both the tab and the
+ * number ("Home, 12 violations"), which makes the count — and its movement as
+ * filters or analyses change — readable and assertable on its own.
+ */
+export function railBadgeName(
+  tab: { label: string; badgeNoun?: [string, string] },
+  count: number,
+): string {
+  const [one, many] = tab.badgeNoun ?? ['item', 'items'];
+  return `${tab.label}, ${count} ${count === 1 ? one : many}`;
+}
+
+/** Same, for the new/resolved diff badge: "Home, 3 new, 2 resolved". */
+export function railDiffBadgeName(
+  tab: { label: string },
+  badge: { newCount: number; resolvedCount: number },
+): string {
+  const parts: string[] = [];
+  if (badge.newCount > 0) parts.push(`${badge.newCount} new`);
+  if (badge.resolvedCount > 0) parts.push(`${badge.resolvedCount} resolved`);
+  return `${tab.label}, ${parts.join(', ')}`;
+}
+
 type LeftSidebarProps = {
   section: DashboardSection;
   activeTab: LeftTab | null;
@@ -120,14 +150,22 @@ export function LeftSidebar({
                 if (badge == null) return null;
                 if (typeof badge === 'number') {
                   return badge > 0 ? (
-                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
+                    <span
+                      role="status"
+                      aria-label={railBadgeName(tab, badge)}
+                      className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground"
+                    >
                       {badge}
                     </span>
                   ) : null;
                 }
                 const total = badge.newCount + badge.resolvedCount;
                 return total > 0 ? (
-                  <span className="absolute -right-1 -top-1 flex items-center gap-px rounded-full bg-card border border-border px-1 py-px">
+                  <span
+                    role="status"
+                    aria-label={railDiffBadgeName(tab, badge)}
+                    className="absolute -right-1 -top-1 flex items-center gap-px rounded-full bg-card border border-border px-1 py-px"
+                  >
                     {badge.newCount > 0 && (
                       <span className="text-[8px] font-bold text-red-400">+{badge.newCount}</span>
                     )}

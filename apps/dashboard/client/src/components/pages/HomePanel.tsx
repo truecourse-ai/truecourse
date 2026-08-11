@@ -49,6 +49,8 @@ type HomePanelProps = {
 
 const MIN_PANEL_WIDTH = 300;
 const MAX_PANEL_WIDTH = 800;
+/** Target of the divider's `aria-controls` — the half it resizes. */
+const ANALYTICS_PANEL_ID = 'home-analytics-panel';
 
 export function HomePanel({
   repoId,
@@ -94,6 +96,21 @@ export function HomePanel({
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+  }, [panelWidth]);
+
+  // Keyboard operation of the divider. A separator that carries a value must be
+  // focusable and movable without a mouse — arrows nudge the split, Home/End
+  // take it to its limits — and it keeps `aria-valuenow` honest.
+  const handleResizeKey = useCallback((e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 64 : 16;
+    let next: number | null = null;
+    if (e.key === 'ArrowLeft') next = panelWidth - step;
+    else if (e.key === 'ArrowRight') next = panelWidth + step;
+    else if (e.key === 'Home') next = MIN_PANEL_WIDTH;
+    else if (e.key === 'End') next = MAX_PANEL_WIDTH;
+    if (next === null) return;
+    e.preventDefault();
+    setPanelWidth(Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, next)));
   }, [panelWidth]);
 
   const { trend, breakdown, topOffenders, resolution, codeHotspots, refetch: refetchAnalytics } = useAnalytics(
@@ -161,6 +178,7 @@ export function HomePanel({
     <div className="flex h-full w-full">
       {mode !== 'violations' && (
       <aside
+        id={ANALYTICS_PANEL_ID}
         style={mode === 'full' ? { width: panelWidth } : undefined}
         className={`relative flex h-full flex-col overflow-hidden bg-card ${
           mode === 'full' ? 'shrink-0 border-r border-border' : 'min-w-0 flex-1'
@@ -224,8 +242,22 @@ export function HomePanel({
           </div>
         )}
         {mode === 'full' && (
+          /* The split between the analytics column and the violations list.
+             A window splitter, so it is announced as one: a named, focusable
+             `separator` whose value IS the analytics column's width — without
+             the role it was an anonymous div that neither a screen reader nor
+             a role-and-name locator could reach. */
           <div
-            className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Analytics panel width"
+            aria-valuenow={panelWidth}
+            aria-valuemin={MIN_PANEL_WIDTH}
+            aria-valuemax={MAX_PANEL_WIDTH}
+            aria-controls={ANALYTICS_PANEL_ID}
+            tabIndex={0}
+            onKeyDown={handleResizeKey}
+            className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 focus-visible:bg-primary/50 focus-visible:outline-none"
             onMouseDown={handleResizeDown}
           />
         )}

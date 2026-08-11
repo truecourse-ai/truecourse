@@ -360,11 +360,15 @@ export function ViolationsPanel({
               />
             </div>
             <SeverityDropdown value={severityFilter} onChange={onSeverityFilterChange} counts={activeSeverityCounts} />
-            <div className="flex rounded-md border border-border">
+            {/* Detection switch. Its selected position was marked by colour
+                alone — `aria-pressed` states it, so which of All/Det/LLM is
+                taken is readable rather than inferred from a background. */}
+            <div className="flex rounded-md border border-border" role="group" aria-label="Detection type filter">
               {(['all', 'deterministic', 'llm'] as TypeFilter[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => onTypeFilterChange(t)}
+                  aria-pressed={typeFilter === t}
                   className={`px-2 py-1 text-[10px] font-medium first:rounded-l-md last:rounded-r-md ${
                     typeFilter === t
                       ? 'bg-accent text-accent-foreground'
@@ -381,7 +385,7 @@ export function ViolationsPanel({
 
         {/* Category tabs */}
         <div className="shrink-0 border-b border-border px-3 py-2">
-          <div className="flex gap-1 overflow-x-auto scrollbar-thin">
+          <div className="flex gap-1 overflow-x-auto scrollbar-thin" role="group" aria-label="Violation category filter">
             {categories.map((cat) => {
               const counts = isDiffMode ? diffCategoryCounts : categoryCounts;
               const total = isDiffMode ? (preCategoryDiffCards?.length || 0) : preCategoryFiltered.length;
@@ -390,6 +394,7 @@ export function ViolationsPanel({
                 <button
                   key={cat.value}
                   onClick={() => onCategoryFilterChange(cat.value)}
+                  aria-pressed={categoryFilter === cat.value}
                   className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                     categoryFilter === cat.value
                       ? 'bg-accent text-accent-foreground'

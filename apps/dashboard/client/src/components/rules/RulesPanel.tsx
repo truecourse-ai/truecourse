@@ -225,11 +225,14 @@ export function RulesPanel({ repoId, onRuleToggled }: RulesPanelProps = {}) {
             />
           </div>
           <SeverityDropdown value={severityFilter} onChange={setSeverityFilter} counts={severityCounts} />
-          <div className="flex rounded-md border border-border">
+          {/* Both switches marked their selection with colour alone —
+              `aria-pressed` puts the taken position in the accessibility tree. */}
+          <div className="flex rounded-md border border-border" role="group" aria-label="Rule detection type filter">
             {(['all', 'deterministic', 'llm'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTypeFilter(t)}
+                aria-pressed={typeFilter === t}
                 className={`px-2 py-1 text-[10px] font-medium first:rounded-l-md last:rounded-r-md ${
                   typeFilter === t
                     ? 'bg-accent text-accent-foreground'
@@ -240,11 +243,17 @@ export function RulesPanel({ repoId, onRuleToggled }: RulesPanelProps = {}) {
               </button>
             ))}
           </div>
-          <div className="flex rounded-md border border-border" title="Filter by enabled/disabled status">
+          <div
+            className="flex rounded-md border border-border"
+            role="group"
+            aria-label="Rule status filter"
+            title="Filter by enabled/disabled status"
+          >
             {(['all', 'enabled', 'disabled'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
+                aria-pressed={statusFilter === s}
                 className={`px-2 py-1 text-[10px] font-medium first:rounded-l-md last:rounded-r-md ${
                   statusFilter === s
                     ? 'bg-accent text-accent-foreground'
@@ -263,13 +272,14 @@ export function RulesPanel({ repoId, onRuleToggled }: RulesPanelProps = {}) {
 
       {/* Domain tabs */}
       <div className="shrink-0 border-b border-border px-3 py-2">
-        <div className="flex gap-1.5 overflow-x-auto scrollbar-thin">
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-thin" role="group" aria-label="Rule category filter">
           {domainTabs.map((tab) => {
             const count = tab.value === 'all' ? preCategoryFiltered.length : domainCounts[tab.value] || 0;
             return (
               <button
                 key={tab.value}
                 onClick={() => setFilter(tab.value)}
+                aria-pressed={filter === tab.value}
                 className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                   filter === tab.value
                     ? 'bg-accent text-accent-foreground'
