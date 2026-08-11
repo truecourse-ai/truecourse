@@ -400,7 +400,12 @@ The corpus-path scan (relevance, area-tags, vocabulary reconciliation,
 overlap, curation) re-shaped as agent sessions, over a doc universe
 this workstream also acquires.
 
-STATUS: design in progress (owner: Doil, from 2026-08-08).
+STATUS: design settled 2026-08-11 (owner: Doil). §§6.1–6.5 are the
+binding design; implementation may start per the phasing in §6.5. One
+question is open and does not block it: `transform-gaps.md` G10 and G12
+name Spec Scan as the claims store's owner, against the 2026-08-06
+decisions cited in the boundary above. If those decisions are the ones
+that move, the boundary moves with them.
 
 **Boundary.** This workstream owns everything from doc acquisition to
 `specs/corpus.json`, and nothing after it. Acquisition is in scope
@@ -543,9 +548,13 @@ Three sessions, in order; each consumes the one before it.
 - **Doc curation session** (one per doc, turn budget 5). Prompt: a spec
   curator deciding whether this doc describes user-facing behavior worth
   verifying, and which areas it belongs to. Inputs: the doc's content,
-  the corpus's current area vocabulary, and the corpus doc list (titles
-  and paths). Tools: read another doc (to resolve a reference, or to
-  compare against an area's existing docs before tagging). Done: keep or
+  and nothing else. Today's tagger is cached on doc content alone and is
+  handed neither the vocabulary nor the doc list; putting either in the
+  inputs would put it in the cache key, so adding one doc would
+  re-curate the whole corpus — at flagship prices, on the term §6.4 calls
+  dominant. Tools: read another doc (to resolve a reference), and look up
+  the corpus's current vocabulary and doc list — tool calls do not enter
+  the cache key. Done: keep or
   drop with a reason, plus area tags, each a `product/concern` pair. It
   PROPOSES the axis and does not adjudicate it: labelling each doc
   independently, it cannot see what the other docs chose, so consistency
@@ -602,7 +611,12 @@ Three sessions, in order; each consumes the one before it.
   membership, widening included, deterministically — and the session
   narrows its own reading (outlines first, drilling in only where topics
   collide) under the per-area budget, so the bound is an explicit
-  budget, never a silent thinning of what is considered.
+  budget, never a silent thinning of what is considered. An area whose
+  work outgrows one budget SPLITS into sub-areas that each get their own
+  session; `budget-exhausted` is the signal to split, not a permanent
+  gap. Splitting answers a bound that keeps binding — it is never the
+  default, because subdividing an area also stops comparing across the
+  parts.
 
 There is no relation session. Doc-to-doc relations were removed from the
 design (§6.1) and resolution is section-scoped: the overlap session
