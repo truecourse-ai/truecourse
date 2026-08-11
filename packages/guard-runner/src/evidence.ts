@@ -95,18 +95,66 @@ export interface EvidenceWebStep {
   console?: readonly string[]
 }
 
+/**
+ * ONE member of a request step's expectation beside the response's own answer to it
+ * — see `ApiCheck` in the api expectation module, whose shape this is: the evidence
+ * carries it verbatim, exactly as it carries a web step's checks.
+ */
+export interface EvidenceApiCheck {
+  subject: 'status' | 'headers' | 'body' | 'schema' | 'json'
+  expected: string
+  actual: string
+  ok: boolean
+}
+
+/**
+ * What ONE request step did, for the transcript — a request spawns nothing, so it
+ * has no exit code and no streams: it has a request line, a status, what it asserted
+ * next to what the response answered each assertion, and the body it read. Written
+ * for a passing step and a failing one alike; the question a reader asks about a
+ * request step is always "what came back".
+ */
+export interface EvidenceApiStep {
+  /** What the step did — `GET /api/repos/x/violations?severity=critical`. */
+  command: string
+  /** What it asserted, one line; empty when it asserted nothing. */
+  expectation: string
+  /**
+   * Each member of that expectation with what the response answered IT. Empty when
+   * no response arrived — `expectation` then still says what it was going to check.
+   */
+  checks?: readonly EvidenceApiCheck[]
+  method: string
+  /** The interpolated request path, as sent. */
+  path: string
+  /** The request body as sent (raw or serialized JSON), when it carried one. */
+  requestBody?: string
+  /** HTTP status, or null when the request never completed. */
+  status: number | null
+  /**
+   * Why no response arrived (connection refused, DNS, abort). A request spawns
+   * nothing, so this is never a spawn error — the two read differently and a reader
+   * must not be told the runner failed to start something.
+   */
+  requestError?: string
+  /** The response body — the request step's "stdout", head-truncated. */
+  body: string
+}
+
 export interface EvidenceStep {
   /** 1-based step index. */
   index: number
   /**
    * The step KIND, for the steps that do not spawn the entrypoint: a `git`
    * invocation, a `write`/`delete`/`patch` that only moves sandbox files (and so
-   * has no exit code and no streams), or a `web` step the browser took. Absent
-   * reads as an ordinary `run`.
+   * has no exit code and no streams), a `web` step the browser took, or an `api`
+   * request sent to the sandbox's served surface. Absent reads as an ordinary `run`.
    */
-  kind?: 'git' | 'write' | 'delete' | 'patch' | 'web'
+  kind?: 'git' | 'write' | 'delete' | 'patch' | 'web' | 'api'
   /** The browser's record, on a `web` step. See {@link EvidenceWebStep}. */
   web?: EvidenceWebStep
+  /** The request's record, on an `api` step. See {@link EvidenceApiStep}. */
+  api?: EvidenceApiStep
   /**
    * The command line, as the transcript shows it: the resolved argv for a spawned
    * step, and the paths a `write`/`delete`/`patch` acted on for the file steps.
@@ -201,6 +249,17 @@ export function writeEvidence(params: WriteEvidenceParams): string {
             screenshot: s.web.screenshot,
           }
         : {}),
+      // A request step's record: the request line, each assertion beside its
+      // answer, and the response. `status` and `body` sit at the top level under
+      // the names the api bundle already uses, so one reader serves both bundles.
+      ...(s.api
+        ? {
+            api: s.api,
+            status: s.api.status,
+            ...(s.api.requestError ? { requestError: s.api.requestError } : {}),
+            body: stepExcerpt(s.api.body),
+          }
+        : {}),
       patch: s.patch,
       stdin: s.stdin,
       cwd: s.cwd,
@@ -283,6 +342,32 @@ function renderTranscript(params: WriteEvidenceParams): string {
       }
       lines.push(`   page text:`)
       lines.push(indent(s.web.visibleText))
+      lines.push('')
+      continue
+    }
+    // A request step has no argv and no streams either: it has a request line, a
+    // status, every assertion beside ITS OWN answer, and the body it read. The
+    // pairing rule is the web step's, for the same reason — one answer standing in
+    // for several assertions reads as a failure on a step that passed.
+    if (s.api) {
+      lines.push(`   api:      ${s.api.command}`)
+      if (s.api.requestBody !== undefined) lines.push(`   body:     ${JSON.stringify(s.api.requestBody)}`)
+      lines.push(`   status:   ${s.api.status ?? '(no response)'}${s.timedOut ? ' [timed out]' : ''}`)
+      if (s.api.requestError) lines.push(`   error:    ${s.api.requestError}`)
+      const checks = s.api.checks ?? []
+      for (const check of checks) {
+        lines.push(`   ${check.ok ? '✓' : '✗'} expected: ${check.expected}`)
+        lines.push(`     actual:   ${check.actual}`)
+      }
+      if (checks.length === 0 && s.api.expectation) {
+        lines.push(`   · expected: ${s.api.expectation}`)
+        lines.push(`     actual:   not evaluated — no response arrived`)
+      }
+      if (s.captured && Object.keys(s.captured).length > 0) {
+        lines.push(`   capture:  ${JSON.stringify(s.captured)}`)
+      }
+      lines.push(`   response:`)
+      lines.push(indent(s.api.body))
       lines.push('')
       continue
     }

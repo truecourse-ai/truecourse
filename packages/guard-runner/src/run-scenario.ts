@@ -34,10 +34,9 @@ import { writeEvidence, type EvidenceStep } from './evidence.js'
 import type { ExpectMismatch } from './expect.js'
 import {
   buildStepDrivers,
-  closeStepDrivers,
   driverFor,
   SANDBOX_SETUP_EXPECTED,
-  type StepDriver,
+  type ScenarioDrivers,
 } from './drivers/index.js'
 import type { ResolvedWebSurface } from './recipe.js'
 import { evidenceScenarioDir } from './store.js'
@@ -225,14 +224,15 @@ export async function runScenario(
   const evidenceDir = evidenceScenarioDir(ctx.repoRoot, ctx.runId, scenario.id)
 
   // THE DRIVERS this scenario runs with — built once, closed once. Each owns the
-  // steps it declares and whatever it has to open to take them (the web driver's
-  // served surface and browser open at its FIRST step and not before, because the
-  // surface serves the sandbox that the cli steps ahead of it populate).
-  const drivers: StepDriver[] = buildStepDrivers({
+  // steps it declares and whatever it has to open to take them; the world they SHARE
+  // (the served surface) comes up at the first step that needs it and not before,
+  // because the surface serves the sandbox that the cli steps ahead of it populate.
+  const world: ScenarioDrivers = buildStepDrivers({
     resolvedEntry: ctx.resolvedEntry,
     ...(setup?.git?.identity ? { gitIdentity: setup.git.identity } : {}),
     surface: ctx.web ?? null,
   })
+  const drivers = world.drivers
 
   try {
     // Materialize declared setup capabilities (git, …) after files seeding. A
@@ -464,9 +464,9 @@ export async function runScenario(
     }
   } finally {
     // Every driver's world goes down BEFORE the sandbox directory it acted in: the
-    // web surface runs with the sandbox as its cwd, and killing it first is what
+    // served surface runs with the sandbox as its cwd, and killing it first is what
     // keeps a scenario from leaving a server holding a deleted directory.
-    await closeStepDrivers(drivers)
+    await world.close()
     await stubs?.stop()
     sandbox.cleanup()
   }

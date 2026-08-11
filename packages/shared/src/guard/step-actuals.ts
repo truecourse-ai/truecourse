@@ -58,6 +58,25 @@ export const GuardStepWebActualSchema = z
   .strict()
 export type GuardStepWebActual = z.infer<typeof GuardStepWebActualSchema>
 
+/**
+ * ONE member of an API request step's expectation beside the response's own answer
+ * to it — the same honest pairing a web step records, in the api vocabulary. A
+ * request can assert a status, a header, the body and several json paths at once;
+ * showing the status as "the actual" of all of them reads as a failure on a step
+ * that passed.
+ */
+export const GuardStepApiCheckSchema = z
+  .object({
+    subject: z.enum(['status', 'headers', 'body', 'schema', 'json']),
+    /** The assertion in full — `json total is 2`. */
+    expected: z.string(),
+    /** What the response had for THAT assertion. */
+    actual: z.string(),
+    ok: z.boolean(),
+  })
+  .strict()
+export type GuardStepApiCheck = z.infer<typeof GuardStepApiCheckSchema>
+
 export const GuardStepActualSchema = z
   .object({
     /** 1-based step index — the same position `GuardScenarioStepView.n` names. */
@@ -76,6 +95,14 @@ export const GuardStepActualSchema = z
      * pages and addresses rather than exit codes and streams.
      */
     web: GuardStepWebActualSchema.optional(),
+    /**
+     * Each member of the step's expectation beside the answer it got — recorded by an
+     * API REQUEST step, whose response answers a status assertion, a header assertion
+     * and each json path separately. Absent when the step records no pairs (every cli
+     * step, and a request step that never got a response); a web step's pairs ride in
+     * {@link GuardStepWebActualSchema}.checks, beside the page they were read from.
+     */
+    checks: z.array(GuardStepApiCheckSchema).optional(),
     /**
      * What the step printed, head-truncated at write time; each stream omitted when it
      * was empty. An api request's response body rides as `stdout`, the same mapping the
@@ -127,6 +154,19 @@ const InvocationStepSchema = z
       })
       .passthrough()
       .optional(),
+    /**
+     * api (a request step taken in a SANDBOX scenario): the request line and each
+     * expectation beside the response's answer to it. Read permissively for the same
+     * reason the web record is — a bundle written before a field existed still reads.
+     */
+    api: z
+      .object({
+        command: z.string().optional(),
+        expectation: z.string().optional(),
+        checks: z.array(GuardStepApiCheckSchema).optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough()
 
@@ -145,6 +185,10 @@ function actualLine(step: InvocationStep): string | undefined {
   // A web step returns no code and no status — what it "returned" is where the
   // browser ended up, which is the one line a reader wants beside the screenshot.
   if (step.kind === 'web') return step.url ? `at ${step.url}` : undefined
+  // A request step returns a STATUS. Asked before the exit-code branch because a
+  // sandbox bundle carries both fields in one record shape, and `exit (killed)` on a
+  // step that spawned nothing would be an invention.
+  if (step.kind === 'api') return step.status == null ? undefined : `status ${step.status}`
   if (step.kind && NO_RESULT_KINDS.has(step.kind)) return undefined
   if ('exitCode' in step) return step.exitCode == null ? 'exit (killed)' : `exit ${step.exitCode}`
   if ('status' in step) return step.status == null ? undefined : `status ${step.status}`
@@ -192,11 +236,13 @@ export function parseGuardStepActuals(source: string | unknown): GuardStepActual
   return parsed.data.steps.map((step) => {
     const line = actualLine(step)
     const stdout = step.stdout ?? step.body
+    const checks = step.api?.checks ?? []
     return {
       n: step.index,
       ...(line !== undefined ? { actual: line } : {}),
       durationMs: step.durationMs ?? 0,
       ...webActual(step),
+      ...(checks.length > 0 ? { checks } : {}),
       ...(stdout ? { stdout } : {}),
       ...(step.stderr ? { stderr: step.stderr } : {}),
     }

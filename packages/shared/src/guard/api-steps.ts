@@ -9,6 +9,12 @@
  * process-lifecycle steps `boot` / `signal` / `logs`, which make startup,
  * configuration, shutdown, logging and restart-persistence claims assertable on the
  * same surface.
+ *
+ * The `request` step is ALSO a sandbox step ({@link GuardApiRequestStepSchema}): a
+ * mixed scenario drives the UI to act and then reads the RESULT as structured data
+ * over HTTP, instead of regexing the page for it. The lifecycle three stay here —
+ * they drive a process this module's own driver owns, and in a sandbox the served
+ * surface's lifecycle belongs to the sandbox, not to a step.
  */
 
 import { z } from 'zod'
@@ -18,6 +24,7 @@ import {
   describeStreamMatcher,
   matcherPatterns,
   stepMilestone as milestone,
+  stepNote as note,
 } from './step-parts.js'
 
 // --- Steps (api driver) ----------------------------------------------
@@ -34,10 +41,13 @@ export const GUARD_HTTP_METHODS = [
 ] as const
 
 /**
- * One HTTP request against the recipe's booted server. `path` (and header/body
- * string values) may reference earlier `capture`s as `${name}`; the engine
- * interpolates before sending. Exactly one body form: `body` (raw text, sent
- * as-is) or `json` (a JSON value, serialized with `content-type: application/json`).
+ * One HTTP request against the server under test — the recipe's booted API server
+ * (api scenario), or the sandbox's own served surface (a sandbox scenario, where the
+ * request goes to the SAME origin the browser is driving). `path` (and header/body
+ * string values) may reference earlier captures — as `${name}` on the api driver, as
+ * `${captured:name}` in a sandbox scenario; the engine interpolates before sending.
+ * Exactly one body form: `body` (raw text, sent as-is) or `json` (a JSON value,
+ * serialized with `content-type: application/json`).
  */
 export const GuardHttpRequestSchema = z
   .object({
@@ -134,6 +144,14 @@ export const GuardApiRequestStepSchema = z
     /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
     repeat: z.number().int().positive().optional(),
     expect: GuardApiExpectSchema,
+    /**
+     * The authoring note — why THIS assertion is the falsifiable form of the claim.
+     * The same field a cli or web step carries ({@link note}), and a request step
+     * needs it for the same reason: in a mixed scenario it is the step that says what
+     * the UI could not prove about itself, and a reader has to be told why.
+     * Additive and optional, so no format bump.
+     */
+    note,
     /** The flow milestone this step realizes. See {@link milestone}. */
     milestone,
   })
@@ -275,8 +293,13 @@ export const GuardApiStepSchema = z.union([
   GuardApiLogsStepSchema,
 ])
 
-/** True when the step drives the server over HTTP (the original step kind). */
-export function isApiRequestStep(step: GuardApiStep): step is GuardApiRequestStep {
+/**
+ * True when the step drives the server over HTTP (the original step kind). Takes any
+ * step object, because the `request` step belongs to TWO unions now — the api
+ * scenario's and the sandbox's — and both the cross-step passes and the sandbox
+ * driver registry have to ask the question of a step they have not yet placed.
+ */
+export function isApiRequestStep(step: object): step is GuardApiRequestStep {
   return 'request' in step
 }
 
@@ -304,6 +327,15 @@ export function describeJsonMatcher(m: GuardJsonMatcher): string {
   if (m.contains !== undefined) return `contains “${m.contains}”`
   if (m.matches !== undefined) return `matches /${m.matches}/`
   return describeComparison(m.compare!)
+}
+
+/**
+ * What a request step DOES — `GET /api/repos/x/violations?severity=critical`. The
+ * ONE rendering the step list, the transcript and a failure all use, so a reader
+ * never sees the same request described two ways (the `describeWebCommand` rule).
+ */
+export function describeApiCommand(step: GuardApiRequestStep): string {
+  return `${step.request.method} ${step.request.path}`
 }
 
 export function describeApiExpect(expect: GuardApiExpect): string {

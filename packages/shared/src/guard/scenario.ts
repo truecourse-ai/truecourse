@@ -54,9 +54,11 @@ import {
 } from './cli-steps.js'
 import {
   GUARD_HTTP_METHODS,
+  GuardApiRequestStepSchema,
   GuardApiStepSchema,
   apiStepCaptureNames,
   apiStepPatterns,
+  describeApiCommand,
   describeApiExpect,
   describeApiLifecycleStep,
   isApiRequestStep,
@@ -97,20 +99,45 @@ import {
 export const GUARD_FORMAT_VERSION = 3
 
 
-// --- Steps (web driver) ----------------------------------------------
+// --- Steps (the sandbox's drivers) -----------------------------------
 //
-// The web verbs live in `web-steps.ts` — a driver's vocabulary is its own
-// module, and this one only COMPOSES the drivers into a scenario.
+// Each driver's verbs live in its own module (`cli-steps.ts`, `web-steps.ts`,
+// `api-steps.ts`) — a driver's vocabulary is its own business, and this one only
+// COMPOSES the drivers into a scenario.
 
 /**
- * ONE step of a sandbox scenario: a cli action, or a WEB action taken in the SAME
- * sandbox. The two are one list because the sandbox is ONE WORLD (§2, 2026-08-09) —
- * a real promise spans surfaces ("run the analysis, the dashboard shows it"), and a
- * step list locked to one driver cannot state it. Which executor runs a step is the
- * STEP's business; the scenario's `driver` field is the legacy scenario-level
- * spelling and stays `cli` for a mixed list, on its way to being derived.
+ * ONE step of a sandbox scenario: a cli action, a WEB action, or an HTTP REQUEST —
+ * all taken in the SAME sandbox. They are one list because the sandbox is ONE WORLD
+ * (§2, 2026-08-09) — a real promise spans surfaces ("run the analysis, the dashboard
+ * shows it, the API answers it"), and a step list locked to one driver cannot state
+ * it. Which executor runs a step is the STEP's business; the scenario's `driver`
+ * field is the legacy scenario-level spelling and stays `cli` for a mixed list, on
+ * its way to being derived.
+ *
+ * A `request` step here is the api driver's own verb ({@link
+ * GuardApiRequestStepSchema}), not a copy of it: the same schema, the same matchers,
+ * the same capture channels. What differs is only WHERE it is sent — the sandbox's
+ * served surface (the recipe's `web` block), the same origin the browser drives — so
+ * a scenario can act through the UI and then read the RESULT as structured data
+ * instead of regexing the page for it.
+ *
+ * DRIVER DISAMBIGUATION. A web verb declares `driver: web`, because a step whose only
+ * verb is `expect` would otherwise be ambiguous against every other step's `expect`
+ * BLOCK. Every other verb here is SELF-NAMING — `run`, `git`, `write`, `delete`,
+ * `patch`, `request` — so it declares nothing, and each member of this union is a
+ * `.strict()` object keyed by its own verb. There is no step this union accepts two
+ * readings of.
+ *
+ * The api LIFECYCLE verbs (`boot`, `signal`, `logs`) deliberately stay out: they
+ * drive a server PROCESS the api driver owns, and in a sandbox the served surface's
+ * lifecycle belongs to the sandbox (started at the first step that needs it, torn
+ * down with the scenario), not to a step.
  */
-export const GuardSandboxStepSchema = z.union([GuardCliStepSchema, GuardWebStepSchema])
+export const GuardSandboxStepSchema = z.union([
+  GuardCliStepSchema,
+  GuardWebStepSchema,
+  GuardApiRequestStepSchema,
+])
 
 // --- The closed normalizer set --------------------------------------
 
@@ -569,7 +596,7 @@ export interface InvalidMatchPattern {
 /** Every regex source one step carries — each driver names its own. */
 function stepPatterns(step: GuardSandboxStep | GuardApiStep): Array<{ where: string; pattern: string }> {
   if (isWebStep(step)) return webStepPatterns(step)
-  if ('request' in step || 'boot' in step || 'signal' in step || 'logs' in step) {
+  if (isApiRequestStep(step) || 'boot' in step || 'signal' in step || 'logs' in step) {
     return apiStepPatterns(step as GuardApiStep)
   }
   return cliStepPatterns(step as GuardCliStep)
@@ -609,7 +636,7 @@ export function stepCaptureNames(step: GuardSandboxStep | GuardApiStep): string[
   // A web step READS captured values (in a path, a name, a typed value) and
   // produces none: what a page shows is the assertion, not a value to carry on.
   if (isWebStep(step)) return []
-  if ('request' in step || 'boot' in step || 'signal' in step || 'logs' in step) {
+  if (isApiRequestStep(step) || 'boot' in step || 'signal' in step || 'logs' in step) {
     return apiStepCaptureNames(step as GuardApiStep)
   }
   return cliStepCaptureNames(step as GuardCliStep)
@@ -778,13 +805,28 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
       if (!isApiRequestStep(step)) return { ...base, ...describeApiLifecycleStep(step) }
       return {
         ...base,
-        command: `${step.request.method} ${step.request.path}`,
+        command: describeApiCommand(step),
         expectation: describeApiExpect(step.expect),
         ...(step.repeat != null ? { repeat: step.repeat } : {}),
+        ...(step.note != null ? { note: step.note } : {}),
       }
     })
   }
   return s.steps.map((step, i) => {
+    // A request step taken in the sandbox reads exactly as it does in an api
+    // scenario — `METHOD /path` and its matchers — and wears the `api` kind, because
+    // the surface it acts on is the served one, not the shell.
+    if (isApiRequestStep(step)) {
+      return {
+        n: i + 1,
+        kind: 'api' as const,
+        command: describeApiCommand(step),
+        expectation: describeApiExpect(step.expect),
+        ...milestoneView(step.milestone),
+        ...(step.repeat != null ? { repeat: step.repeat } : {}),
+        ...(step.note != null ? { note: step.note } : {}),
+      }
+    }
     // A web step's row reads like every other row — what it does, what it asserts —
     // and wears the `web` kind the step-kind vocabulary already reserved for it.
     if (isWebStep(step)) {

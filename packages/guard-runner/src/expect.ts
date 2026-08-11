@@ -37,6 +37,14 @@ export interface ExpectMismatch {
     | 'target'
     | 'text'
     | 'url'
+    // The API driver's, for a `request` step taken in the sandbox: the response's
+    // status line, one of its headers, its body as text, its conformance to a
+    // declared schema, and the value at one json path.
+    | 'status'
+    | 'headers'
+    | 'body'
+    | 'schema'
+    | 'json'
   /** Compact description of what was required. */
   expected: string
   /** Compact description of what was observed. */

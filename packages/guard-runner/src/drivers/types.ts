@@ -97,7 +97,7 @@ export interface StepRunContext {
  */
 export interface StepDriver {
   /** The surface this driver acts on — the word a step list and a chip both use. */
-  readonly id: 'cli' | 'web'
+  readonly id: 'cli' | 'web' | 'api'
   /** True when this driver is the one that takes the step. */
   owns(step: GuardSandboxStep): boolean
   execute(step: GuardSandboxStep, ctx: StepRunContext): Promise<StepOutcome>

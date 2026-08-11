@@ -33,6 +33,7 @@ import type {
   OutputExcerpts,
 } from '@truecourse/shared'
 import {
+  isApiRequestStep,
   isDeleteStep,
   isGitStep,
   isOptionalArg,
@@ -93,8 +94,10 @@ export function cliStepDriver(opts: CliStepDriverOptions): StepDriver {
   return {
     id: 'cli',
     // Everything that is not another driver's is this one's. Stated that way round
-    // on purpose: the sandbox surface is the default world a scenario acts in.
-    owns: (step: GuardSandboxStep) => !isWebStep(step),
+    // on purpose: the sandbox surface is the default world a scenario acts in. The
+    // exclusions are named rather than left to the registry's ordering, so a
+    // catch-all can never quietly swallow a verb it has no executor for.
+    owns: (step: GuardSandboxStep) => !isWebStep(step) && !isApiRequestStep(step),
     close: async () => undefined,
     execute: (step, ctx) => executeCliStep(step as GuardCliStep, ctx, opts),
   }

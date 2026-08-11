@@ -63,8 +63,16 @@ describe('guard scenario schema — api driver', () => {
     expect(parsed.normalize).toEqual([])
   })
 
-  it('rejects api verbs under the cli driver and vice versa', () => {
-    expect(() => GuardScenarioSchema.parse({ ...API_SCENARIO, driver: 'cli' })).toThrow()
+  it('the `request` verb crosses into the sandbox; the LIFECYCLE verbs do not', () => {
+    // A sandbox scenario may drive the UI and then read the structured answer over
+    // HTTP, so `request` parses under the cli driver as itself.
+    expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, driver: 'cli' }).success).toBe(true)
+    // `boot`/`signal`/`logs` drive the server PROCESS this driver owns; in a sandbox
+    // the served surface's lifecycle is the sandbox's, not a step's.
+    for (const step of [{ boot: {} }, { signal: { name: 'SIGTERM' } }, { logs: { stream: 'stdout', match: 'up' } }]) {
+      expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, driver: 'cli', steps: [step] }).success).toBe(false)
+    }
+    // And nothing crosses the other way: the api driver runs a server, not a shell.
     const cliSteps = [{ run: ['--version'], expect: { exit: 0 } }]
     expect(() => GuardScenarioSchema.parse({ ...API_SCENARIO, steps: cliSteps })).toThrow()
   })

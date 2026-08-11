@@ -85,6 +85,62 @@ describe('parseGuardStepActuals — the api bundle', () => {
   });
 });
 
+describe('parseGuardStepActuals — a request step taken in a SANDBOX scenario', () => {
+  const apiStep = (over: Record<string, unknown> = {}) => ({
+    index: 3,
+    kind: 'api',
+    argv: [],
+    // The sandbox bundle carries one record shape for every step, so a request step's
+    // record has the cli fields too — and `exit (killed)` on a step that spawned
+    // nothing would be an invention.
+    exitCode: null,
+    durationMs: 18,
+    status: 200,
+    body: '{"total":2}',
+    api: {
+      command: 'GET /api/repos/x/violations?severity=critical',
+      expectation: 'status 200 · total is 2',
+      checks: [
+        { subject: 'status', expected: 'status 200', actual: 'status 200', ok: true },
+        { subject: 'json', expected: 'json total is 2', actual: 'json total was 2', ok: true },
+      ],
+      ...over,
+    },
+  });
+
+  it('reads the status as the actual, the body as the output, and every assertion pair', () => {
+    const actuals = parseGuardStepActuals(bundle([apiStep()]));
+    expect(actuals[0]).toEqual({
+      n: 3,
+      actual: 'status 200',
+      durationMs: 18,
+      checks: [
+        { subject: 'status', expected: 'status 200', actual: 'status 200', ok: true },
+        { subject: 'json', expected: 'json total is 2', actual: 'json total was 2', ok: true },
+      ],
+      stdout: '{"total":2}',
+    });
+  });
+
+  it('a request that never got an answer has no status line and no pairs', () => {
+    const actuals = parseGuardStepActuals(
+      bundle([
+        {
+          index: 1,
+          kind: 'api',
+          argv: [],
+          exitCode: null,
+          durationMs: 4,
+          status: null,
+          api: { command: 'GET /api/notes', expectation: 'status 200', status: null, body: '' },
+        },
+      ]),
+    );
+    expect(actuals[0].actual).toBeUndefined();
+    expect(actuals[0].checks).toBeUndefined();
+  });
+});
+
 describe('parseGuardStepActuals — the web bundle', () => {
   const webStep = (over: Record<string, unknown> = {}) => ({
     index: 1,

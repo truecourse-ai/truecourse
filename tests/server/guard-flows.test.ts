@@ -565,6 +565,37 @@ describe('Guard flow read surfaces', () => {
       expect(mixed.body.flows.find((f: any) => f.flowId === FLOW_ID).drivers).toEqual(['cli', 'web']);
     });
 
+    /**
+     * A REQUEST step is the third driver a sandbox scenario can use — the UI acts,
+     * the request reads the structured answer — so a scenario carrying all three
+     * wears all three chips, in registry order.
+     */
+    it('a request step adds the api driver to a mixed sandbox test', async () => {
+      seed();
+      write(
+        SCENARIO_FILE,
+        SCENARIO_YAML.replace(
+          '  - run: [list, --done]',
+          [
+            '  - driver: web',
+            '    navigate: /tasks',
+            '    milestone: 4',
+            '  - request:',
+            '      method: GET',
+            '      path: /api/tasks?done=true',
+            '    expect:',
+            '      status: 200',
+            '    milestone: 4',
+            '  - run: [list, --done]',
+          ].join('\n'),
+        ),
+      );
+      const res = await request(app).get(url('flows')).expect(200);
+      // Registry order (`cli, api, web`), not step order — the chips read the same
+      // on every row.
+      expect(res.body.flows.find((f: any) => f.flowId === FLOW_ID).drivers).toEqual(['cli', 'api', 'web']);
+    });
+
     it('is 200 with an empty payload on a fresh repo (the tab renders its CTA)', async () => {
       const res = await request(app).get(url('flows')).expect(200);
       expect(res.body).toEqual({

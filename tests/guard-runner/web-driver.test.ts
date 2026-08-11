@@ -25,6 +25,7 @@ import {
   openWebSession,
   resolveWebSurface,
   runScenario,
+  sandboxSurface,
   scenarioUnique,
   WEB_VIDEO_FILE,
   type ResolvedWebSurface,
@@ -531,35 +532,50 @@ describe('the web driver', () => {
   )
 
   it(
-    'a web session closes its own server and browser processes',
+    'the browser session and the SHARED surface each close what they own',
     async () => {
-      // The session seam, checked directly: `runScenario` is one caller of it, and
-      // an orphan check is worth more the closer it sits to the thing that spawns.
+      // The two seams, checked directly: `runScenario` is one caller of them, and an
+      // orphan check is worth more the closer it sits to the thing that spawns. The
+      // ownership split is the point — the session closes the BROWSER and leaves the
+      // server standing (a request step may still be using it); the sandbox's surface
+      // closes the SERVER, after everyone has let go.
       const pidFile = path.join(repo, 'session-server.pid')
       const scoped = makeWebRepo({ env: { TC_WEB_PIDFILE: pidFile } })
       const dir = path.join(scoped, 'evidence')
+      const served = sandboxSurface(webSurfaceOf(scoped))
       try {
         const before = playwrightBrowserPids()
-        const opened = await openWebSession({
-          surface: webSurfaceOf(scoped)!,
+        const surface = await served.open({
           repoRoot: scoped,
-          sandboxCwd: scoped,
-          sandboxEnv: { PATH: process.env.PATH ?? '', TC_WEB_PIDFILE: pidFile },
-          evidenceDir: dir,
-        })
+          sandbox: {
+            cwd: scoped,
+            env: { PATH: process.env.PATH ?? '', TC_WEB_PIDFILE: pidFile },
+          },
+        } as never)
+        expect(surface.ok).toBe(true)
+        if (!surface.ok) return
+        const serverPid = Number(fs.readFileSync(pidFile, 'utf-8'))
+        expect(isAlive(serverPid)).toBe(true)
+
+        const opened = await openWebSession({ server: surface.server, evidenceDir: dir })
         expect(opened.ok).toBe(true)
         if (!opened.ok) return
         const during = playwrightBrowserPids().filter((pid) => !before.includes(pid))
         expect(during.length).toBeGreaterThan(0)
-        const serverPid = Number(fs.readFileSync(pidFile, 'utf-8'))
-        expect(isAlive(serverPid)).toBe(true)
 
         await opened.session.close()
-        expect(isAlive(serverPid)).toBe(false)
         expect(during.filter(isAlive)).toEqual([])
+        // The session owns the browser only: the surface is still serving.
+        expect(isAlive(serverPid)).toBe(true)
         // Closing twice is a no-op, not a second teardown.
         await opened.session.close()
+
+        await served.close()
+        expect(isAlive(serverPid)).toBe(false)
+        // The surface, too, is idempotent.
+        await served.close()
       } finally {
+        await served.close().catch(() => undefined)
         rmrf(scoped)
       }
     },

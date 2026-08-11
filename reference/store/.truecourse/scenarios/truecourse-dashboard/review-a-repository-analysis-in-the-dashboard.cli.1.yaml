@@ -11,12 +11,14 @@ interface:
     - web/open-dashboard-home
     - web/open-repo-report
     - web/filter-violations-by-category
+    - api/get-api-repos-id-violations
     - web/switch-to-the-guard-section
   fingerprints:
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
     - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
     - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
     - sha256:443701ef7e9295664459c180e548c8393ad77fb0d4e7246df117aa24147b3b14
+    - sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02
     - sha256:50a6d196d960baca6e757f0ab171cce945672a6dbd30047588f39e865f0b1066
 binds:
   - doc: .truecourse/specs/sources/docs.truecourse.dev/dashboard.md
@@ -134,12 +136,39 @@ steps:
       text:
         matches: ^(?![\s\S]*console\.log call)(?=[\s\S]*Filtered by)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$
     note: >-
-      "Browses code findings" is falsifiable as a list that ANSWERS: narrowing to one
-      category must keep that category’s finding and drop the others. The negative is
-      the load-bearing half — `console.log call` is a code-quality finding of the same
-      report, and it has to leave the page — and the "Filtered by" chip is the page
-      saying which narrowing is in force. A list that merely rendered would pass the
-      positive and fail this.
+      The ACTION, and what the PAGE promises about it: narrowing to one category keeps
+      that category’s finding and drops the others. The negative is the load-bearing
+      half — `console.log call` is a code-quality finding of the same report, and it
+      has to leave the page — and the "Filtered by" chip is the page saying which
+      narrowing is in force. What the page cannot say for itself is whether it filtered
+      real findings or merely rendered fewer words; the step below asks the app that.
+    milestone:
+      - dashboard-browses-code-findings
+  - request:
+      method: GET
+      path: /api/repos/sample-app/violations?limit=100
+    expect:
+      status: 200
+      json:
+        total:
+          equals: 4
+        violations[2].ruleKey:
+          equals: security/deterministic/eval-usage
+        violations[2].severity:
+          equals: high
+        violations[3].ruleKey:
+          equals: code-quality/deterministic/console-log
+    note: >-
+      The same narrowing, read as DATA rather than as words on a page. The chip filters
+      by the finding’s domain — the first segment of its rule key — so the assertion
+      that makes the step above falsifiable is that both domains are really in the
+      answer: `security/deterministic/eval-usage` is the finding the chip kept, and
+      `code-quality/deterministic/console-log` is the one it dropped, still there in
+      the set the page filtered. A page that rendered fewer words would pass a text
+      match and fail this. Read at the same origin the browser is driving, so it is
+      the same run’s state — `limit` is what makes the route answer the
+      `{violations,total}` envelope instead of a bare array, which is where the count
+      of the whole filtered set lives.
     milestone:
       - dashboard-browses-code-findings
   - driver: web

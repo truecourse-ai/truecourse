@@ -1,11 +1,12 @@
 /**
  * The WEB step driver — a real browser against the web surface the sandbox serves.
  *
- * It owns exactly one piece of state the cli driver does not have: the SESSION (the
- * served surface plus the browser), opened at the first web step and closed by
- * `close`. That laziness is the point of the mixed scenario — the surface serves the
- * sandbox, so it must start AFTER the cli steps that populate what the browser is
- * meant to see.
+ * It owns exactly one piece of state the cli driver does not have: the BROWSER
+ * SESSION, opened at the first web step and closed by `close`. That laziness is the
+ * point of the mixed scenario — the surface serves the sandbox, so it must start
+ * AFTER the cli steps that populate what the browser is meant to see. The SERVER it
+ * drives is the sandbox's shared one (`surface.ts`), which is what lets a `request`
+ * step read the very origin this driver is clicking around in.
  *
  * Everything else it reports in the shared step vocabulary: a missed target or an
  * unmet expectation is a `fail` (the page not showing what the claim promises IS the
@@ -15,7 +16,6 @@
 
 import type { GuardSandboxStep, GuardWebStep } from '@truecourse/shared'
 import { describeWebCommand, describeWebExpect, isWebStep } from '@truecourse/shared'
-import type { ResolvedWebSurface } from '../recipe.js'
 import { stepExcerpt, type EvidenceStep } from '../evidence.js'
 import {
   DEFAULT_WEB_STEP_TIMEOUT_MS,
@@ -25,6 +25,7 @@ import {
 } from '../web/executor.js'
 import { openWebSession, type WebSession } from '../web/session.js'
 import { resolveWebStep } from '../web/tokens.js'
+import type { SandboxSurface } from './surface.js'
 import type { StepDriver, StepOutcome, StepRunContext } from './types.js'
 
 /** The `failure.expected` an infrastructure failure of a web step carries. */
@@ -41,11 +42,13 @@ export const NO_WEB_SURFACE_INFRA =
 
 export interface WebStepDriverOptions {
   /**
-   * The recipe's web surface. `null` when the repo declares none — the driver still
-   * exists and still OWNS web steps, and each one settles as the loud error above.
-   * Refusing to route them would report "unknown step kind", which is a worse lie.
+   * The sandbox's served surface — shared with every other driver that talks to it.
+   * Undeclared (`served.declared === false`) when the repo has no `web` block: the
+   * driver still exists and still OWNS web steps, and each one settles as the loud
+   * error above. Refusing to route them would report "unknown step kind", which is a
+   * worse lie.
    */
-  surface: ResolvedWebSurface | null
+  served: SandboxSurface
 }
 
 /** The driver for every step a browser takes. */
@@ -57,6 +60,8 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
     owns: (step: GuardSandboxStep) => isWebStep(step),
 
     async close() {
+      // Only the browser: the surface belongs to the sandbox, which takes it down
+      // after every driver has let go of it.
       await session?.close()
       session = null
     },
@@ -77,15 +82,13 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
         message,
       })
 
-      if (!opts.surface) return failedToOpen(NO_WEB_SURFACE_INFRA)
+      if (!opts.served.declared) return failedToOpen(NO_WEB_SURFACE_INFRA)
       if (!session) {
+        const surface = await opts.served.open(ctx)
+        if (!surface.ok) return failedToOpen(surface.reason)
         const opened = await openWebSession({
-          surface: opts.surface,
-          repoRoot: ctx.repoRoot,
-          sandboxCwd: ctx.sandbox.cwd,
-          sandboxEnv: ctx.sandbox.env,
+          server: surface.server,
           evidenceDir: ctx.evidenceDir,
-          ...(ctx.signal ? { signal: ctx.signal } : {}),
         })
         if (!opened.ok) return failedToOpen(opened.reason)
         session = opened.session

@@ -435,10 +435,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const cliExec = executable.filter((p) => p.scenario.driver === 'cli')
   const apiExec = executable.filter((p) => p.scenario.driver === 'api')
   // The web surface is per RECIPE, not per scenario: it boots inside whichever
-  // sandbox reaches a web step. What the run needs to know up front is only whether
-  // ANY selected scenario has one, so the surface's build can be skipped otherwise.
+  // sandbox reaches a step that needs it. What the run needs to know up front is only
+  // whether ANY selected scenario has one, so the surface's build can be skipped
+  // otherwise. A `request` step counts as much as a web step — it is sent to that
+  // same served surface, so a request-only scenario needs it built too.
   const webSurface = resolveWebSurface(loaded.recipe)
-  const webExec = cliExec.filter((p) => p.scenario.steps.some((step) => isWebStep(step)))
+  const servedExec = cliExec.filter((p) =>
+    p.scenario.steps.some((step) => isWebStep(step) || isApiRequestStep(step)),
+  )
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
   // Both recipe shapes collapse into ONE named-server map here, and every
@@ -577,10 +581,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       if (stop) return stop
       if (!build.ok) return { status: 'build-failed', build, loadErrors }
 
-      // The WEB surface's own build, and ONLY when this run has web steps in it.
+      // The WEB surface's own build, and ONLY when this run has steps that reach it.
       // Compiling a client is minutes on a real app; a cli-only run must not pay
       // for it, which is the whole reason the web block carries its own command.
-      if (webSurface?.build && webExec.length > 0) {
+      if (webSurface?.build && servedExec.length > 0) {
         const webBuild = await runBuild(
           repoRoot,
           webSurface.build,

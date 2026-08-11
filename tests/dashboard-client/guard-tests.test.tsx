@@ -356,6 +356,33 @@ const WEB_STEPS = [
   },
   STEPS[3],
 ];
+/**
+ * A MIXED list as the server merges it after a run that took both: the browser step
+ * ACTS and asserts the UI-level fact, and the request step reads the structured
+ * answer. A request step returns a STATUS, not an exit code, and its record pairs
+ * every assertion — status, header, each json path — with the response's own answer.
+ */
+const MIXED_STEPS = [
+  WEB_STEPS[1],
+  {
+    n: 3,
+    kind: 'api',
+    command: 'GET /api/repos/sample-app/violations?severity=critical',
+    expectation: 'status 200 · total is 2',
+    milestone: 1,
+    actual: {
+      n: 3,
+      actual: 'status 200',
+      durationMs: 24,
+      checks: [
+        { subject: 'status', expected: 'status 200', actual: 'status 200', ok: true },
+        { subject: 'json', expected: 'json total is 2', actual: 'json total was 2', ok: true },
+      ],
+      stdout: '{"total":2,"violations":[{"ruleKey":"no-eval"}]}',
+    },
+  },
+  STEPS[3],
+];
 /** The claim id a hand-authored test tags a step with, and the sentence behind it. */
 const CLAIM_ID = 'a-task-is-added-and-gets-an-id';
 /** The same file, tagged the way an AUTHORED corpus tags it: by claim IDENTITY. */
@@ -886,6 +913,47 @@ describe('the test, read inside its flow', () => {
     expect(within(web).queryByText('the step printed nothing')).toBeNull();
     expect(within(web).queryByText('the step returns no exit code')).toBeNull();
     expect(within(web).queryByText('output')).toBeNull();
+  });
+
+  it('reads a REQUEST step in api words — the status, every assertion paired, the body', async () => {
+    const user = userEvent.setup();
+    servedSteps = MIXED_STEPS;
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    const row = (n: number) =>
+      within(steps)
+        .getAllByRole('listitem')
+        .find((r) => (r.getAttribute('aria-label') ?? '').startsWith(`Step ${n}:`))!;
+
+    // The row says what it drives and what it does, in the api's own words.
+    expect(row(3)).toHaveTextContent('api');
+    expect(row(3)).toHaveTextContent('GET /api/repos/sample-app/violations?severity=critical');
+
+    await user.click(within(steps).getByRole('button', { name: 'Expand step 3' }));
+    const api = row(3);
+    // EVERY member paired with the RESPONSE's answer to THAT member — the status
+    // never stands in as the actual of a json assertion.
+    const expectations = within(api).getAllByLabelText('expected value');
+    const answers = within(api).getAllByLabelText('actual value');
+    expect(expectations.map((e) => e.textContent)).toEqual(['status 200', 'json total is 2']);
+    expect(answers.map((a) => a.textContent)).toEqual(['status 200', 'json total was 2']);
+    // …and the response body is what the step "printed".
+    expect(within(api).getByLabelText('step output')).toHaveTextContent('"ruleKey":"no-eval"');
+    // Nothing cli-flavoured: a request step neither exits nor spawns.
+    expect(within(api).queryByText('the step returns no exit code')).toBeNull();
+  });
+
+  it('a request step the run never reached shows the authored assertion and nothing else', async () => {
+    const user = userEvent.setup();
+    servedSteps = MIXED_STEPS.map((step) => ({ ...step, actual: undefined }));
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    await user.click(within(steps).getByRole('button', { name: 'Expand step 3' }));
+    const api = within(steps)
+      .getAllByRole('listitem')
+      .find((r) => (r.getAttribute('aria-label') ?? '').startsWith('Step 3:'))!;
+    expect(within(api).getByLabelText('expected value')).toHaveTextContent('status 200 · total is 2');
+    expect(within(api).getAllByText('not recorded in this run').length).toBeGreaterThan(0);
   });
 
   it('a web step the run never reached says so, in web words', async () => {

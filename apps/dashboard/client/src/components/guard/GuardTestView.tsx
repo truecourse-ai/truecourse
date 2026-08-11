@@ -70,6 +70,7 @@ import type {
   GuardInterfaceRow,
   GuardScenarioSetupView,
   GuardScenarioStepView,
+  GuardStepApiCheck,
   GuardStepWebActual,
   GuardTriage,
 } from '@truecourse/shared';
@@ -193,15 +194,47 @@ function NoValue({ children }: { children: ReactNode }) {
 const NOT_RECORDED = 'not recorded in this run';
 
 /**
+ * EVERY member of a step's expectation beside the answer THAT member got — the
+ * honest pairing, in one component because it is one idea on every surface: a
+ * browser step asserting an address and the page's words has two answers, and so
+ * does a request step asserting a status and a json path. Showing one of them
+ * beside all the assertions reads as a failure on a step that passed.
+ */
+function CheckRows({ checks }: { checks: readonly { expected: string; actual: string; ok: boolean }[] }) {
+  return (
+    <>
+      {checks.map((check, i) => (
+        <Fragment key={`${check.expected}-${i}`}>
+          <DiffRow label="expected">
+            <div className="flex min-w-0 items-start gap-1.5">
+              <span
+                aria-label={check.ok ? 'met' : 'not met'}
+                className={`pt-1 text-[11px] ${
+                  check.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                }`}
+              >
+                {check.ok ? '✓' : '✗'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <GuardLongText text={check.expected} label="expected value" />
+              </div>
+            </div>
+          </DiffRow>
+          <DiffRow label="actual">
+            <GuardLongText text={check.actual} label="actual value" />
+          </DiffRow>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/**
  * A WEB step's record, in the browser's own vocabulary. A browser step spawns
  * nothing: it has no exit code and no streams, so "exit 0" and "the step printed
  * nothing" would both be inventions. What it has is an action, an address, each
  * assertion beside THE PAGE'S OWN ANSWER TO THAT ASSERTION, what the page showed,
  * and a picture.
- *
- * The pairing is the point. A step can assert an address and the page's words at
- * once, and showing one answer (the address) beside both assertions reads as a
- * failure on a step that passed.
  */
 function WebStepPanel({
   expected,
@@ -217,28 +250,7 @@ function WebStepPanel({
   return (
     <div className="mt-2 space-y-1">
       {web.checks.length > 0 ? (
-        web.checks.map((check, i) => (
-          <Fragment key={`${check.subject}-${i}`}>
-            <DiffRow label="expected">
-              <div className="flex min-w-0 items-start gap-1.5">
-                <span
-                  aria-label={check.ok ? 'met' : 'not met'}
-                  className={`pt-1 text-[11px] ${
-                    check.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
-                  }`}
-                >
-                  {check.ok ? '✓' : '✗'}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <GuardLongText text={check.expected} label="expected value" />
-                </div>
-              </div>
-            </DiffRow>
-            <DiffRow label="actual">
-              <GuardLongText text={check.actual} label="actual value" />
-            </DiffRow>
-          </Fragment>
-        ))
+        <CheckRows checks={web.checks} />
       ) : (
         <>
           <DiffRow label="expected">
@@ -308,6 +320,7 @@ function StepPanel({
   stderr,
   recorded,
   web,
+  checks,
 }: {
   /** What the step asserts, as authored — empty when it asserts nothing. */
   expected: string;
@@ -319,24 +332,35 @@ function StepPanel({
   recorded: boolean;
   /** The browser's record, on a web step the viewed run took. */
   web?: GuardStepWebActual;
+  /** Each assertion beside its own answer, on a request step the viewed run took. */
+  checks?: readonly GuardStepApiCheck[];
 }) {
   if (web) return <WebStepPanel expected={expected} {...(actual ? { actual } : {})} web={web} />;
   return (
     <div className="mt-2 space-y-1">
-      <DiffRow label="expected">
-        {expected ? (
-          <GuardLongText text={expected} label="expected value" />
-        ) : (
-          <NoValue>this step asserts nothing</NoValue>
-        )}
-      </DiffRow>
-      <DiffRow label="actual">
-        {actual ? (
-          <GuardLongText text={actual} label="actual value" />
-        ) : (
-          <NoValue>{recorded ? 'the step returns no exit code' : NOT_RECORDED}</NoValue>
-        )}
-      </DiffRow>
+      {checks && checks.length > 0 ? (
+        // A request step's response answers its status assertion, its header
+        // assertions and each json path separately — one pair per member, the same
+        // reading a web step gets.
+        <CheckRows checks={checks} />
+      ) : (
+        <>
+          <DiffRow label="expected">
+            {expected ? (
+              <GuardLongText text={expected} label="expected value" />
+            ) : (
+              <NoValue>this step asserts nothing</NoValue>
+            )}
+          </DiffRow>
+          <DiffRow label="actual">
+            {actual ? (
+              <GuardLongText text={actual} label="actual value" />
+            ) : (
+              <NoValue>{recorded ? 'the step returns no exit code' : NOT_RECORDED}</NoValue>
+            )}
+          </DiffRow>
+        </>
+      )}
       <DiffRow label="output">
         {stdout || stderr ? (
           <div className="space-y-1">
@@ -381,12 +405,19 @@ function StepRow({
   // what came back instead); every other row reads its record. An infra failure
   // carries no excerpts, so the record's output stands in for it.
   const recorded = step.actual ?? null;
+  // A request step's record carries one pair per assertion. They REPLACE the single
+  // expected/actual only when they can tell the whole story: on a step that failed
+  // somewhere else (a capture that resolved to nothing), a wall of green ticks would
+  // hide the failure, so the diff keeps the row.
+  const checks = recorded?.checks ?? [];
+  const showChecks = checks.length > 0 && (!diff || checks.some((c) => !c.ok));
   const panel = {
     expected: step.expectation || diff?.expected || '',
     actual: diff?.actual ?? recorded?.actual,
     // A web step's record carries its own expected/actual pairs and its own words
     // for what it "printed"; the cli fields below say nothing true about it.
     ...(recorded?.web ? { web: recorded.web } : {}),
+    ...(showChecks ? { checks } : {}),
     ...(diff && (diff.stdout || diff.stderr)
       ? { stdout: diff.stdout, stderr: diff.stderr }
       : { stdout: recorded?.stdout, stderr: recorded?.stderr }),

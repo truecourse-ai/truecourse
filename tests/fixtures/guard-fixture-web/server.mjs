@@ -26,6 +26,18 @@
  *                   readiness-waiting case: an expectation must WAIT for
  *                   observable state instead of sleeping or racing.
  *
+ * The JSON surface — the SAME state the pages render, read as structured data, which
+ * is what a `request` step is for: drive the UI, then ask the app what actually
+ * happened instead of regexing the page for it.
+ *
+ *   GET  /api/notes      → { notes: [<line>…], total: <n> } from `notes.txt` in the
+ *                          CWD; `?q=` keeps only the lines containing it (the
+ *                          structured analog of the pages' filter)
+ *   POST /api/notes      → { id, line } — appends `{ "line": "…" }` to `notes.txt`
+ *                          (201), so a request step can also ACT and hand the id it
+ *                          minted to the steps after it
+ *   GET  /api/notes/:id  → { id, line } (404 with `{ "error": … }` past the end)
+ *
  * `TC_WEB_PIDFILE`, when set, is written with this process's pid at listen time —
  * the teardown tests read it back to prove nothing outlived the scenario.
  */
@@ -81,6 +93,76 @@ const SLOW = page(
 <script>setTimeout(function () { document.getElementById('slow').textContent = 'ready at last' }, ${delayMs})</script>`,
 )
 
+/** The one piece of state this app has: the lines of `notes.txt` in the CWD. */
+function noteLines() {
+  const notesFile = path.resolve(process.cwd(), 'notes.txt')
+  if (!fs.existsSync(notesFile)) return []
+  return fs
+    .readFileSync(notesFile, 'utf-8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
+function appendNote(line) {
+  const notesFile = path.resolve(process.cwd(), 'notes.txt')
+  fs.appendFileSync(notesFile, `${line}\n`)
+  return noteLines().length - 1
+}
+
+function sendJson(res, status, value) {
+  const body = JSON.stringify(value)
+  res.writeHead(status, { 'content-type': 'application/json' })
+  res.end(body)
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let raw = ''
+    req.on('data', (chunk) => {
+      raw += chunk
+    })
+    req.on('end', () => resolve(raw))
+  })
+}
+
+/** The JSON surface: the same notes, as data. Returns true when it handled the request. */
+async function serveApi(req, res, url) {
+  if (url.pathname === '/api/notes' && req.method === 'GET') {
+    const q = url.searchParams.get('q')
+    const notes = noteLines().filter((line) => q === null || line.includes(q))
+    sendJson(res, 200, { notes, total: notes.length, ...(q === null ? {} : { filter: q }) })
+    return true
+  }
+  if (url.pathname === '/api/notes' && req.method === 'POST') {
+    const raw = await readBody(req)
+    let line
+    try {
+      line = JSON.parse(raw).line
+    } catch {
+      line = undefined
+    }
+    if (typeof line !== 'string' || line.length === 0) {
+      sendJson(res, 400, { error: 'a note needs a non-empty `line`' })
+      return true
+    }
+    sendJson(res, 201, { id: appendNote(line), line })
+    return true
+  }
+  const one = /^\/api\/notes\/(\d+)$/.exec(url.pathname)
+  if (one && req.method === 'GET') {
+    const id = Number(one[1])
+    const lines = noteLines()
+    if (id >= lines.length) {
+      sendJson(res, 404, { error: `no note ${id}` })
+      return true
+    }
+    sendJson(res, 200, { id, line: lines[id] })
+    return true
+  }
+  return false
+}
+
 function notesPage(url) {
   const notesFile = path.resolve(process.cwd(), 'notes.txt')
   const notes = fs.existsSync(notesFile) ? fs.readFileSync(notesFile, 'utf-8').trim() : ''
@@ -93,11 +175,16 @@ ${title === null ? '' : `<p>title: ${escapeHtml(title)}</p>\n`}<p id="notes">${n
   )
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'text/plain' })
     res.end('ok')
+    return
+  }
+  if (url.pathname.startsWith('/api/')) {
+    if (await serveApi(req, res, url)) return
+    sendJson(res, 404, { error: `no route ${req.method} ${url.pathname}` })
     return
   }
   const html =

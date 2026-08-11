@@ -189,8 +189,8 @@ export type { ApiStepCapture, ExecuteApiRequestOptions } from './api/executor.js
 export { CookieJar, defaultCookiePath, cookiePathMatches } from './api/cookies.js'
 export { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 export type { RunCredentialRequestsOptions } from './api/credential-request.js'
-export { evaluateApiExpect, parseJsonBody } from './api/expect.js'
-export type { ApiExpectMismatch, EvaluateApiExpectParams } from './api/expect.js'
+export { evaluateApiExpect, observeApiExpect, parseJsonBody } from './api/expect.js'
+export type { ApiExpectMismatch, ApiCheck, ApiObservation, EvaluateApiExpectParams } from './api/expect.js'
 export {
   interpolate,
   interpolateRequest,
@@ -223,14 +223,30 @@ export type { RunScenarioContext } from './run-scenario.js'
 
 // The step-driver seam — one module per surface, routed by the registry. A step
 // says how it acts; the runner asks who owns it and hands it over.
-export { buildStepDrivers, driverFor, closeStepDrivers, cliStepDriver, webStepDriver } from './drivers/index.js'
+export {
+  buildStepDrivers,
+  driverFor,
+  closeStepDrivers,
+  cliStepDriver,
+  webStepDriver,
+  apiStepDriver,
+  sandboxSurface,
+  resolveRequestStep,
+  NO_SERVED_SURFACE_INFRA,
+  NO_SCHEMA_BINDING_INFRA,
+} from './drivers/index.js'
 export type {
   StepDriver,
   StepOutcome,
   StepRunContext,
+  ScenarioDrivers,
   BuildStepDriversOptions,
   CliStepDriverOptions,
   WebStepDriverOptions,
+  ApiStepDriverOptions,
+  SandboxSurface,
+  SurfaceOpenContext,
+  OpenSurfaceResult,
 } from './drivers/index.js'
 
 export { createSandbox, resolveInSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
@@ -291,6 +307,8 @@ export type {
   EvidenceStep,
   EvidenceWebStep,
   EvidenceWebCheck,
+  EvidenceApiStep,
+  EvidenceApiCheck,
   EvidencePatchOp,
   WriteEvidenceParams,
 } from './evidence.js'

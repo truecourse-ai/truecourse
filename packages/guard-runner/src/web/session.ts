@@ -1,32 +1,28 @@
 /**
- * The scenario's WEB WORLD: the served surface plus the browser driving it, opened
- * LAZILY at the first web step and torn down with the sandbox.
+ * The scenario's BROWSER, pointed at the sandbox's served surface — opened LAZILY at
+ * the first web step and closed with the scenario.
  *
  * Lazily, because a mixed scenario's cli steps must run FIRST and their effects must
- * be there when the surface starts: the surface serves the sandbox, so a `truecourse
- * analyze` step earlier in the list is what the browser then sees. Booting the
- * surface up front would serve an empty world and make that chain untestable.
+ * be there when the browser looks: the surface serves the sandbox, so a `truecourse
+ * analyze` step earlier in the list is what the browser then sees.
  *
- * Torn down with the sandbox, unconditionally: the server is killed as a process
- * GROUP (the api driver's `stop`, so a serve command that shells out leaves nothing
- * behind) and the browser's context and process are closed. Nothing here outlives a
- * scenario, whichever way the scenario ended.
+ * The SERVER is not this module's: it belongs to the sandbox (`drivers/surface.ts`),
+ * because a `request` step reads the same origin the browser drives and one world has
+ * one address. A session therefore takes an already-running server and closes only
+ * what it opened — the browser — which is also the right ORDER: the surface goes down
+ * after the page that was talking to it, or the evidence fills with connection errors.
  */
 
 import fs from 'node:fs'
 import type { Page } from 'playwright-core'
-import type { ResolvedWebSurface } from '../recipe.js'
 import { launchWebBrowser, type WebBrowserHandle } from './browser.js'
-import { startWebSurface, type WebSurfaceHandle } from './surface.js'
+import type { WebSurfaceHandle } from './surface.js'
 
 export interface OpenWebSessionOptions {
-  surface: ResolvedWebSurface
-  repoRoot: string
-  sandboxCwd: string
-  sandboxEnv: NodeJS.ProcessEnv
+  /** The sandbox's running served surface — started by, and owned by, the sandbox. */
+  server: WebSurfaceHandle
   /** Absolute directory screenshots and the session video are written into. */
   evidenceDir: string
-  signal?: AbortSignal
 }
 
 export interface WebSession {
@@ -34,12 +30,12 @@ export interface WebSession {
   page: Page
   /** `http://127.0.0.1:<port>` — what a `navigate` path is appended to. */
   baseUrl: string
-  /** The served surface, for the caller that wants its captured output. */
+  /** The served surface this session drives (the sandbox's, not the session's). */
   server: WebSurfaceHandle
   browser: WebBrowserHandle
   /** Everything the page logged and every uncaught page error, in order. */
   consoleLines(): readonly string[]
-  /** Close the browser and kill the server's process group. Idempotent. */
+  /** Close the browser. Idempotent; the server outlives it and is the sandbox's. */
   close(): Promise<{ video: string | null }>
 }
 
@@ -49,44 +45,21 @@ export type OpenWebSessionResult =
       ok: false
       /** One-line reason, in the words the scenario's `error` will carry. */
       reason: string
-      /** What the surface printed before it gave up, when it printed anything. */
-      stdout?: string
-      stderr?: string
     }
 
 /**
- * Boot the web surface, launch the browser, and hand back the page. Every failure
- * is INFRASTRUCTURE — no page ever existed to assert against — so it is returned,
- * never thrown, and whatever did come up is torn down before returning.
+ * Launch the browser against the sandbox's running surface and hand back the page.
+ * A browser that cannot launch is INFRASTRUCTURE — no page ever existed to assert
+ * against — so it is returned, never thrown. The surface is left exactly as found:
+ * it is the sandbox's, and a request step may still be using it.
  */
 export async function openWebSession(opts: OpenWebSessionOptions): Promise<OpenWebSessionResult> {
   fs.mkdirSync(opts.evidenceDir, { recursive: true })
 
-  const started = await startWebSurface({
-    surface: opts.surface,
-    repoRoot: opts.repoRoot,
-    sandboxCwd: opts.sandboxCwd,
-    sandboxEnv: opts.sandboxEnv,
-    ...(opts.signal ? { signal: opts.signal } : {}),
-  })
-  if (!started.ok) {
-    return {
-      ok: false,
-      reason: `the web surface did not come up: ${started.reason}`,
-      ...(started.stdout ? { stdout: started.stdout } : {}),
-      ...(started.stderr ? { stderr: started.stderr } : {}),
-    }
-  }
-  const server = started.server
-
   const launched = await launchWebBrowser({ videoDir: opts.evidenceDir })
-  if (!launched.ok) {
-    // The surface is already serving; a browser that cannot launch must not leave
-    // it behind. One failure, one teardown.
-    await server.stop()
-    return { ok: false, reason: launched.reason }
-  }
+  if (!launched.ok) return { ok: false, reason: launched.reason }
   const browser = launched.browser
+  const server = opts.server
 
   let closed = false
   let video: string | null = null
@@ -102,11 +75,7 @@ export async function openWebSession(opts: OpenWebSessionOptions): Promise<OpenW
       async close() {
         if (closed) return { video }
         closed = true
-        // The browser first: a page still talking to a server that has just been
-        // killed produces a stream of connection errors in the evidence.
         video = await browser.close()
-        await server.drain()
-        await server.stop()
         return { video }
       },
     },

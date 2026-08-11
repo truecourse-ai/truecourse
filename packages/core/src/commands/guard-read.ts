@@ -58,6 +58,7 @@ import {
   dismissedClaimKey,
   guardGapLabel,
   guardNoFlowClaimGapKind,
+  isApiRequestStep,
   isAwaitingDriver,
   isManualFlowId,
   isWebStep,
@@ -1204,16 +1205,17 @@ function flowInterfaceIds(flowId: string, join: FlowJoin): string[] {
 
 /**
  * The drivers ONE scenario exercises — its STEPS' kinds, not its `driver` field.
- * An api scenario is api throughout; a sandbox scenario is cli for every step the
- * cli driver owns and web for every step the web driver owns, so a mixed one is
- * both. The predicates are the runners' own (`isWebStep` decides which executor
- * takes a step), so this can never disagree with what actually ran.
+ * An api scenario is api throughout; a sandbox scenario wears one chip per driver
+ * its steps use, so a mixed one wears several. The predicates are the runners' own
+ * (`isWebStep` and `isApiRequestStep` are what the registry routes on), so this can
+ * never disagree with what actually ran.
  */
 function scenarioDrivers(scenario: GuardScenario): GuardDriverId[] {
   if (scenario.driver === 'api') return ['api']
   const drivers: GuardDriverId[] = []
-  if (scenario.steps.some((step) => !isWebStep(step))) drivers.push('cli')
+  if (scenario.steps.some((step) => !isWebStep(step) && !isApiRequestStep(step))) drivers.push('cli')
   if (scenario.steps.some((step) => isWebStep(step))) drivers.push('web')
+  if (scenario.steps.some((step) => isApiRequestStep(step))) drivers.push('api')
   return drivers
 }
 
