@@ -1192,7 +1192,7 @@ describe('the test, read inside its flow', () => {
     /**
      * The pictures are a SEQUENCE, so reading them is stepping through them: one
      * click opens the run's screenshots full size and the arrows (and ← / →) walk
-     * them, wrapping at the ends. Escape and a click outside leave. The video is
+     * them, stopping at the ends. Escape and a click outside leave. The video is
      * not in it — a player is already its own full reading.
      */
     describe('the screenshot carousel', () => {
@@ -1221,16 +1221,21 @@ describe('the test, read inside its flow', () => {
         expect(within(lightbox).queryByLabelText('session video')).toBeNull();
       });
 
-      it('steps back and next through the run, wrapping at both ends', async () => {
+      it('steps back and next through the run, stopping at the ends', async () => {
         const user = userEvent.setup();
         const lightbox = await open(user, 'Step 2');
         await user.click(within(lightbox).getByRole('button', { name: 'Next screenshot' }));
         expect(showing()).toBe('Step 10 screenshot');
-        // Past the last one is the first — a walk, never a dead end.
+        // The last one is the last one — the arrow disables instead of wrapping.
+        expect(within(lightbox).getByRole('button', { name: 'Next screenshot' })).toBeDisabled();
         await user.click(within(lightbox).getByRole('button', { name: 'Next screenshot' }));
-        expect(showing()).toBe('Step 1 screenshot');
-        await user.click(within(lightbox).getByRole('button', { name: 'Previous screenshot' }));
         expect(showing()).toBe('Step 10 screenshot');
+        await user.click(within(lightbox).getByRole('button', { name: 'Previous screenshot' }));
+        await user.click(within(lightbox).getByRole('button', { name: 'Previous screenshot' }));
+        expect(showing()).toBe('Step 1 screenshot');
+        expect(within(lightbox).getByRole('button', { name: 'Previous screenshot' })).toBeDisabled();
+        await user.click(within(lightbox).getByRole('button', { name: 'Previous screenshot' }));
+        expect(showing()).toBe('Step 1 screenshot');
       });
 
       it('walks with the arrow keys and leaves on Escape', async () => {

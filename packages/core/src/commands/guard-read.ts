@@ -117,6 +117,7 @@ import {
   type GuardOrphanedCoverage,
   type GuardGenerateReport,
   type GuardRecipeCard,
+  type GuardRecipeSurface,
   type GuardRunFlow,
   type GuardScenario,
   type GuardScenarioInventory,
@@ -2029,31 +2030,52 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
     serve: [...s.serve],
     ...(s.app ? { app: s.app } : {}),
   }));
-  const card = {
-    install: recipe.install ?? null,
+  // The web surface's own preparation, verbatim from the block — the defaults
+  // the runner applies are the RUNNER's, and a card that invented them would
+  // report preparation the file never declared.
+  const web: GuardRecipeSurface | null = recipe.web
+    ? {
+        ...(recipe.web.build ? { build: recipe.web.build } : {}),
+        serve: [...recipe.web.serve],
+        ...(recipe.web.cwd ? { cwd: recipe.web.cwd } : {}),
+        ...(recipe.web.healthPath ? { healthPath: recipe.web.healthPath } : {}),
+        ...(recipe.web.readyTimeoutMs != null ? { readyTimeoutMs: recipe.web.readyTimeoutMs } : {}),
+        ...(recipe.web.env ? { env: { ...recipe.web.env } } : {}),
+      }
+    : null;
+  const cli: GuardRecipeSurface = {
+    ...(recipe.install ? { install: recipe.install } : {}),
     build: recipe.build,
-    entry: recipe.entry ? recipe.entry.slice() : null,
-    serve: recipe.api
-      ? [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])]
-      : null,
-    servers: servers.length > 1 ? servers : null,
-    services: recipe.api?.services
-      ? { up: recipe.api.services.up, ...(recipe.api.services.down ? { down: recipe.api.services.down } : {}) }
-      : null,
-    env: recipe.env ?? null,
-    // The web surface's own preparation, verbatim from the block — the defaults
-    // the runner applies are the RUNNER's, and a card that invented them would
-    // report preparation the file never declared.
-    web: recipe.web
-      ? {
-          ...(recipe.web.build ? { build: recipe.web.build } : {}),
-          serve: [...recipe.web.serve],
-          ...(recipe.web.cwd ? { cwd: recipe.web.cwd } : {}),
-          ...(recipe.web.healthPath ? { healthPath: recipe.web.healthPath } : {}),
-          ...(recipe.web.readyTimeoutMs != null ? { readyTimeoutMs: recipe.web.readyTimeoutMs } : {}),
-          ...(recipe.web.env ? { env: { ...recipe.web.env } } : {}),
-        }
-      : null,
+    ...(recipe.entry ? { entry: recipe.entry.slice() } : {}),
+    ...(recipe.env ? { env: { ...recipe.env } } : {}),
+  };
+  // THE API SURFACE'S SERVER. Its own, when the recipe declares an `api` block —
+  // otherwise the WEB block's, because the runner serves one surface for both web
+  // and `request` steps (`drivers/surface.ts`). Saying "nothing is declared" to an
+  // api reader of a web-only repo would be reporting the opposite of what runs, so
+  // the shared server is carried here and marked as the web surface's.
+  const api: GuardRecipeSurface | null = recipe.api
+    ? {
+        serve: [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])],
+        ...(servers.length > 1 ? { servers } : {}),
+        ...(recipe.api.services
+          ? {
+              services: {
+                up: recipe.api.services.up,
+                ...(recipe.api.services.down ? { down: recipe.api.services.down } : {}),
+              },
+            }
+          : {}),
+      }
+    : web
+      ? { ...web, sharedWithWeb: true }
+      : null;
+  const card = {
+    surfaces: {
+      cli,
+      ...(api ? { api } : {}),
+      ...(web ? { web } : {}),
+    },
   }
   if (!guardsMaterializeInPlace()) {
     const run = await readGuardRunForView(repoKey, commit)

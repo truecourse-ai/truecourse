@@ -241,10 +241,48 @@ describe('Guard routes', () => {
       file: path.join('.truecourse', 'scenarios', 'core', 'a1.yaml'),
     });
     expect(res.body.scenarios[1].headingText).toBe('Beta');
-    // Recipe card: build/entry/env pass through; a fresh fingerprint is computed;
-    // stale is true because it differs from the last run's recorded fingerprint.
-    expect(res.body.recipe).toMatchObject({ build: 'pnpm build', entry: ['node', 'dist/index.js'], env: { APP_MODE: 'test' }, stale: true });
+    // Recipe card: build/entry/env pass through on the surface that runs them; a
+    // fresh fingerprint is computed; stale is true because it differs from the
+    // last run's recorded fingerprint.
+    expect(res.body.recipe).toMatchObject({
+      surfaces: { cli: { build: 'pnpm build', entry: ['node', 'dist/index.js'], env: { APP_MODE: 'test' } } },
+      stale: true,
+    });
     expect(res.body.recipe.fingerprint).toMatch(/^sha256:/);
+    // A cli-only recipe prepares no served surface at all — neither key exists.
+    expect(Object.keys(res.body.recipe.surfaces)).toEqual(['cli']);
+  });
+
+  /**
+   * The api surface of a repo whose recipe has a `web` block and no `api` block:
+   * the runner serves ONE surface for both web steps and `request` steps, so the
+   * wire hands the api scope that same server, marked as the web surface's.
+   */
+  it('scenarios recipe hands the api surface the web block’s server, marked shared', async () => {
+    seed();
+    writeJson('.truecourse/scenarios/recipe.json', {
+      ...RECIPE,
+      web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+    });
+    const res = await request(app).get(url('scenarios')).expect(200);
+    expect(res.body.recipe.surfaces.api).toEqual({
+      build: 'pnpm build:web',
+      serve: ['node', 'dist/web.js'],
+      healthPath: '/health',
+      sharedWithWeb: true,
+    });
+    expect(res.body.recipe.surfaces.web.sharedWithWeb).toBeUndefined();
+  });
+
+  it('scenarios recipe leaves a real api block as itself — no shared marker', async () => {
+    seed();
+    writeJson('.truecourse/scenarios/recipe.json', {
+      ...RECIPE,
+      api: { serve: ['node', 'dist/server.js'] },
+      web: { serve: ['node', 'dist/web.js'] },
+    });
+    const res = await request(app).get(url('scenarios')).expect(200);
+    expect(res.body.recipe.surfaces.api).toEqual({ serve: ['node', 'dist/server.js'] });
   });
 
   it('scenarios recipe stale is null when there is no run to compare', async () => {

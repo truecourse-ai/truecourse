@@ -175,11 +175,18 @@ function stepGlyph(n: number, failedStep: number | undefined, passed: boolean): 
   return passed ? { glyph: '✓', label: 'passed' } : { glyph: '·', label: 'not run' };
 }
 
-/** One labelled line of the step panel — "expected", "actual", "output". */
-function DiffRow({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * One labelled line of the step panel — "expected", "actual", "output". The
+ * verdict mark lives INSIDE the fixed-width label column so every value box
+ * starts at the same left edge whether or not its row carries a mark.
+ */
+function DiffRow({ label, mark, children }: { label: string; mark?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex min-w-0 items-start gap-2">
-      <span className="w-14 shrink-0 pt-1.5 text-[10px] text-muted-foreground">{label}</span>
+      <span className="flex w-14 shrink-0 items-baseline justify-between gap-1 pt-1.5 text-[10px] text-muted-foreground">
+        {label}
+        {mark}
+      </span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -205,20 +212,20 @@ function CheckRows({ checks }: { checks: readonly { expected: string; actual: st
     <>
       {checks.map((check, i) => (
         <Fragment key={`${check.expected}-${i}`}>
-          <DiffRow label="expected">
-            <div className="flex min-w-0 items-start gap-1.5">
+          <DiffRow
+            label="expected"
+            mark={
               <span
                 aria-label={check.ok ? 'met' : 'not met'}
-                className={`pt-1 text-[11px] ${
+                className={`text-[11px] ${
                   check.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
                 }`}
               >
                 {check.ok ? '✓' : '✗'}
               </span>
-              <div className="min-w-0 flex-1">
-                <GuardLongText text={check.expected} label="expected value" />
-              </div>
-            </div>
+            }
+          >
+            <GuardLongText text={check.expected} label="expected value" />
           </DiffRow>
           <DiffRow label="actual">
             <GuardLongText text={check.actual} label="actual value" />

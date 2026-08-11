@@ -1,16 +1,17 @@
 /**
  * The RECIPE as a destination — the preparation a SURFACE runs on, opened from
- * that surface's group in the Interfaces catalog.
+ * that surface's recipe row at the top of the Interfaces catalog.
  *
  * It is artifact-backed like every other guard entity, so it wears the same two
- * readings and no third: the structured card ({@link GuardRecipeCard} — install,
- * build, entry, servers, datastores, the web surface, env, fingerprint and
- * staleness), or the stored `scenarios/recipe.json` verbatim.
+ * readings and no third: the structured card ({@link GuardRecipeCard} — the
+ * surface's own fields, fingerprint and staleness), or the stored
+ * `scenarios/recipe.json` verbatim.
  *
- * The CARD is what the surface scopes: cli reads its install/build/entrypoint, api
- * its servers and datastores, web its web block. The RAW reading is never scoped —
- * a file read verbatim is the whole file, and a "verbatim" that hid half of it
- * would be the one reading a reader cannot trust.
+ * The CARD is what the surface scopes: cli reads its install/build/entrypoint,
+ * api the server it talks to (its own, or the web surface's — the runner serves
+ * one surface for both web and request steps), web the web block. The RAW reading
+ * is never scoped — a file read verbatim is the whole file, and a "verbatim" that
+ * hid half of it would be the one reading a reader cannot trust.
  *
  * Verbatim, with one exception the server owns: an inline credential value is
  * MASKED before it leaves the driver, exactly as `truecourse guard recipe` masks

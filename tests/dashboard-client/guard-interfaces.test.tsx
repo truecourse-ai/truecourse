@@ -4,9 +4,9 @@
  * fresh catalog, so the tab re-renders from the response — no refetch, no socket),
  * the per-surface catalog with the reverse index onto the flows, the SURFACE
  * FILTER over it, the per-surface FAMILIES the catalog groups its entries into,
- * the per-surface RECIPE each surface group opens (the preparation THAT surface
- * runs on, in its two readings), the sequence diagram, and the "Used by flows"
- * click-through into the Flows tab.
+ * the per-surface RECIPE rows the panel opens with (the preparation THAT surface
+ * runs on, in its two readings, in one field grammar for every surface), the
+ * sequence diagram, and the "Used by flows" click-through into the Flows tab.
  *
  * There is no detected-surface banner: the surface groups of the catalog beside
  * the pane ARE that information, and saying it twice is two things to keep in
@@ -33,21 +33,53 @@ const json = (body: unknown) =>
 const FLOW_ID = 'task-lifecycle';
 const SCENARIO_ID = 'task-lifecycle.cli.1';
 
+/** The web surface's preparation — one server, two readers (see {@link RECIPE}). */
+const WEB_SURFACE = {
+  build: 'pnpm build:web',
+  serve: ['node', 'dist/web.js'],
+  healthPath: '/health',
+  readyTimeoutMs: 60000,
+};
+
 /**
- * The recipe the surface groups open, in ONE fixture covering all three kinds of
- * preparation: the cli's install/build/entrypoint + env, the api block's server
- * and datastores, and the web block.
+ * The recipe the surface rows open, as the wire hands it over: preparation PER
+ * SURFACE, every surface in the same shape. This is the reference repo's own
+ * shape — a `web` block and no `api` block — so the api surface carries the web
+ * block's server, marked as shared, because that is the one surface the runner
+ * serves for both web steps and `request` steps.
  */
 const RECIPE: GuardRecipeCard = {
-  install: 'pnpm install --frozen-lockfile',
-  build: 'pnpm build',
-  entry: ['node', 'dist/tasks.js'],
-  serve: ['node', 'dist/server.js'],
-  services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
-  env: { TASKS_HOME: '.tmp/tasks' },
-  web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+  surfaces: {
+    cli: {
+      install: 'pnpm install --frozen-lockfile',
+      build: 'pnpm build',
+      entry: ['node', 'dist/tasks.js'],
+      env: { TASKS_HOME: '.tmp/tasks' },
+    },
+    api: { ...WEB_SURFACE, sharedWithWeb: true },
+    web: WEB_SURFACE,
+  },
   fingerprint: 'sha256:9f2caabbccdd',
   stale: false,
+};
+
+/** A repo that DOES declare an api block: the api surface is its own server. */
+const API_RECIPE: GuardRecipeCard = {
+  ...RECIPE,
+  surfaces: {
+    cli: RECIPE.surfaces.cli!,
+    api: {
+      serve: ['node', 'dist/server.js'],
+      services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+    },
+    web: WEB_SURFACE,
+  },
+};
+
+/** A repo that serves nothing at all — the api surface has no preparation. */
+const CLI_ONLY_RECIPE: GuardRecipeCard = {
+  ...RECIPE,
+  surfaces: { cli: RECIPE.surfaces.cli! },
 };
 
 /**
@@ -233,6 +265,25 @@ const API_MAPPED: GuardInterfacesView = {
         : s,
   ),
   totals: { interfaces: 2, detectedSurfaces: 1, grounded: 1, ungrounded: 1 },
+};
+
+/**
+ * A catalog with ALL THREE runnable surfaces in it — one group each, and so one
+ * recipe row each. The case that proves no surface is quietly left without one.
+ */
+const ALL_SURFACES: GuardInterfacesView = {
+  ...MAPPED,
+  interfaces: [
+    MAPPED.interfaces[0],
+    API_MAPPED.interfaces[0],
+    CLI_AND_WEB.interfaces[CLI_AND_WEB.interfaces.length - 1],
+  ],
+  surfaces: SURFACES.map((s) =>
+    s.surface === 'cli' || s.surface === 'api' || s.surface === 'web'
+      ? { ...s, interfaces: 1, detected: true, source: 'tree' as const }
+      : s,
+  ),
+  totals: { interfaces: 3, detectedSurfaces: 3, grounded: 2, ungrounded: 1 },
 };
 
 /**
@@ -795,13 +846,15 @@ describe('Interfaces tab — the surface filter', () => {
     await within(screen.getByTestId('panel')).findByText('cli/version');
 
     await user.click(within(bar()).getByRole('button', { name: 'Web 1' }));
-    // Just the web surface, with its own family header under it.
-    expect(catalogOutline()).toEqual(['# Web', '# rules', 'web/rules-page']);
+    // Just the web surface — its recipe row, then its own family header under it.
+    expect(catalogOutline()).toEqual(['Web recipe', '# Web', '# rules', 'web/rules-page']);
     expect(within(bar()).getByRole('button', { name: 'Web 1' })).toHaveAttribute('aria-pressed', 'true');
 
     // The chip's count never promised more than the list shows.
     await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
-    expect(catalogOutline().filter((line) => !line.startsWith('#'))).toHaveLength(4);
+    expect(
+      catalogOutline().filter((line) => !line.startsWith('#') && !line.endsWith(' recipe')),
+    ).toHaveLength(4);
 
     // Toggle-off restores the whole catalog.
     await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
@@ -811,9 +864,10 @@ describe('Interfaces tab — the surface filter', () => {
 });
 
 /**
- * THE RECIPE, where preparation belongs: on the SURFACE it prepares. Each surface
- * group leads with its own opener, and the pane shows that surface's blocks —
- * never another surface's. The raw reading stays the whole file.
+ * THE RECIPE, where preparation belongs: on the SURFACE it prepares. The panel
+ * opens with one row per surface the catalog shows — real list rows, not buttons
+ * floating over the list — and the pane shows that surface's fields, never
+ * another surface's. The raw reading stays the whole file.
  */
 describe('Interfaces tab — the per-surface recipe', () => {
   beforeEach(() => {
@@ -834,7 +888,11 @@ describe('Interfaces tab — the per-surface recipe', () => {
   const opener = (label: string) =>
     within(screen.getByTestId('panel')).getByRole('button', { name: `${label} recipe` });
 
-  it('gives every surface group its own opener, and opens that surface’s preparation', async () => {
+  /** A field of the open card, as the reader sees it: its label, then its value. */
+  const field = (label: string) =>
+    (screen.getByText(label).closest('.uppercase') as HTMLElement).nextElementSibling as HTMLElement;
+
+  it('opens each surface’s preparation from its own row', async () => {
     const user = userEvent.setup();
     renderTab();
     await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
@@ -847,25 +905,123 @@ describe('Interfaces tab — the per-surface recipe', () => {
     expect(within(recipe).getByText('pnpm build')).toBeInTheDocument();
     expect(within(recipe).getByText('node dist/tasks.js')).toBeInTheDocument();
     expect(within(recipe).getByText('TASKS_HOME=.tmp/tasks')).toBeInTheDocument();
-    // Somebody else's blocks are not this surface's preparation.
-    expect(within(recipe).queryByText(/dist\/server\.js/)).toBeNull();
+    // Somebody else's fields are not this surface's preparation.
     expect(within(recipe).queryByText(/dist\/web\.js/)).toBeNull();
+    expect(within(recipe).queryByText('Ready when')).toBeNull();
   });
 
-  it('scopes the WEB opener to the web block, and a second click closes it', async () => {
+  it('scopes the WEB row to the web surface, and a second click closes it', async () => {
     const user = userEvent.setup();
     renderTab();
     await within(screen.getByTestId('panel')).findByText('web/tasks-board');
 
     await user.click(opener('Web'));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });
-    expect(within(recipe).getByText('serve: node dist/web.js')).toBeInTheDocument();
-    expect(within(recipe).getByText('build: pnpm build:web')).toBeInTheDocument();
-    expect(within(recipe).getByText('ready when: /health')).toBeInTheDocument();
+    expect(within(recipe).getByText('node dist/web.js')).toBeInTheDocument();
+    expect(within(recipe).getByText('pnpm build:web')).toBeInTheDocument();
+    expect(within(recipe).getByText('/health')).toBeInTheDocument();
     expect(within(recipe).queryByText('node dist/tasks.js')).toBeNull();
 
     await user.click(opener('Web'));
     expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
+  });
+
+  /**
+   * ONE GRAMMAR. Every scope is the same field rows — label over value, the same
+   * labels in the same order, the same value chrome. A scope is a narrowing, so
+   * no scope wears a heading, a prose framing or a layout the others don't.
+   */
+  it('reads every scope in the SAME label-over-value rows', async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('web/tasks-board');
+
+    await user.click(opener('CLI'));
+    const recipe = await screen.findByRole('region', { name: 'Recipe' });
+    const labelsOf = () =>
+      Array.from(recipe.querySelectorAll<HTMLElement>('.uppercase.font-semibold')).map(
+        (el) => el.textContent,
+      );
+    expect(labelsOf()).toEqual(['Install', 'Build', 'Entry', 'Env']);
+    // Label above, value below — the same two-node shape for every field.
+    expect(field('Install')).toHaveTextContent('pnpm install --frozen-lockfile');
+    const cliLabelClass = screen.getByText('Build').className;
+
+    await user.click(opener('Web'));
+    await screen.findByRole('region', { name: 'Recipe' });
+    // The web scope is rows too — in the one field order, with no block heading
+    // and no framing word of its own ("Web surface", "browsed") over them.
+    expect(labelsOf()).toEqual(['Build', 'Serve', 'Ready when', 'Ready timeout']);
+    expect(field('Serve')).toHaveTextContent('node dist/web.js');
+    expect(field('Ready timeout')).toHaveTextContent('60000 ms');
+    expect(screen.getByText('Build').className).toBe(cliLabelClass);
+    expect(within(recipe).queryByText('Web surface')).toBeNull();
+    expect(within(recipe).queryByText('browsed')).toBeNull();
+  });
+
+  /**
+   * THE API SURFACE'S SERVER. The runner serves ONE surface for both web steps
+   * and `request` steps, so a recipe with a `web` block and no `api` block still
+   * has an api server — the web block's. The card shows it, and says whose it is.
+   */
+  it('shows the api surface the shared server, and names its owner in one line', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) =>
+        String(url).includes('/guard/interfaces') ? json(ALL_SURFACES) : json({}),
+      ),
+    );
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('api/get-todos-id');
+
+    await user.click(opener('API'));
+    const recipe = await screen.findByRole('region', { name: 'Recipe' });
+    // A real server, in the same rows the web scope shows it in.
+    expect(within(recipe).getByText('node dist/web.js')).toBeInTheDocument();
+    expect(within(recipe).getByText('/health')).toBeInTheDocument();
+    expect(within(recipe).getByText('Served by the same server as the web surface.')).toBeInTheDocument();
+    // …and never the line that says the opposite of what runs.
+    expect(within(recipe).queryByText(/declares no preparation/)).toBeNull();
+  });
+
+  it('leaves a repo’s OWN api block as itself — no shared-server line', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) =>
+        String(url).includes('/guard/interfaces') ? json(ALL_SURFACES) : json({}),
+      ),
+    );
+    renderTab('/repos/r?tab=interfaces', undefined, { recipe: API_RECIPE });
+    await within(screen.getByTestId('panel')).findByText('api/get-todos-id');
+
+    await user.click(opener('API'));
+    const recipe = await screen.findByRole('region', { name: 'Recipe' });
+    expect(within(recipe).getByText('node dist/server.js')).toBeInTheDocument();
+    expect(within(recipe).getByText('up: docker compose up -d --wait')).toBeInTheDocument();
+    expect(within(recipe).queryByText(/same server as the web surface/)).toBeNull();
+    // Not the web block's server either — the api surface has its own.
+    expect(within(recipe).queryByText('node dist/web.js')).toBeNull();
+  });
+
+  it('says nothing is declared when the recipe serves no surface at all', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) =>
+        String(url).includes('/guard/interfaces') ? json(ALL_SURFACES) : json({}),
+      ),
+    );
+    renderTab('/repos/r?tab=interfaces', undefined, { recipe: CLI_ONLY_RECIPE });
+    await within(screen.getByTestId('panel')).findByText('api/get-todos-id');
+
+    await user.click(opener('API'));
+    const recipe = await screen.findByRole('region', { name: 'Recipe' });
+    expect(
+      within(recipe).getByText('The recipe declares no preparation for this surface.'),
+    ).toBeInTheDocument();
+    expect(within(recipe).queryByText(/same server as the web surface/)).toBeNull();
   });
 
   it('picking an interface navigates AWAY from the recipe — one body, one subject', async () => {
@@ -926,6 +1082,77 @@ describe('Interfaces tab — the per-surface recipe', () => {
 });
 
 /**
+ * WHERE THE RECIPE ROWS SIT, and what they are made of. All of them together at
+ * the TOP of the panel — one per surface the catalog shows, in the catalog's own
+ * surface order — and each one a ROW of the list: the same wrapper, the same
+ * selected paint, the same hover as the interface rows under it. Not a pill, not
+ * a toolbar button, not a lead floating inside a group.
+ */
+describe('Interfaces tab — the recipe rows are the panel’s first rows', () => {
+  const list = () => screen.getByRole('list', { name: 'Interface catalog' });
+  const recipeRow = (label: string) => within(list()).getByRole('button', { name: `${label} recipe` });
+
+  const stub = (view: GuardInterfacesView) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(view) : json({}))),
+    );
+
+  it('leads the panel with a row per surface, before any interface group', async () => {
+    stub(ALL_SURFACES);
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    // Every surface the catalog has, in the order the catalog groups them, and
+    // all of them ahead of the first group header.
+    expect(catalogOutline()).toEqual([
+      'CLI recipe',
+      'API recipe',
+      'Web recipe',
+      '# CLI',
+      'cli/tasks-add',
+      '# API',
+      'api/get-todos-id',
+      '# Web',
+      'web/tasks-board',
+    ]);
+  });
+
+  it('wears the list’s row idiom — the same class as an interface row, no pill', async () => {
+    const user = userEvent.setup();
+    stub(ALL_SURFACES);
+    renderTab();
+    const iface = (await within(screen.getByTestId('panel')).findByText('cli/tasks-add')).closest(
+      '[role="listitem"]',
+    ) as HTMLElement;
+
+    // The row is the row: same wrapper, same paint, same hover. Not a bordered
+    // pill sitting on top of the list.
+    expect(recipeRow('CLI').className).toBe(iface.className);
+    expect(recipeRow('CLI').className).not.toMatch(/rounded/);
+    expect(recipeRow('CLI').closest('[role="listitem"]')).not.toBeNull();
+
+    // Selected, it takes the selected paint an interface row takes — and says so
+    // as a toggle, which an interface row is not.
+    await user.click(recipeRow('CLI'));
+    expect(recipeRow('CLI')).toHaveAttribute('aria-pressed', 'true');
+    expect(recipeRow('CLI').className).toMatch(/bg-primary\/10/);
+    expect(recipeRow('Web')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('narrows with the list: filtered to one surface, only that surface’s recipe', async () => {
+    const user = userEvent.setup();
+    stub(ALL_SURFACES);
+    renderTab();
+    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+
+    await user.click(
+      within(screen.getByRole('group', { name: 'Filter by surface' })).getByRole('button', { name: 'API 1' }),
+    );
+    expect(catalogOutline()).toEqual(['API recipe', '# API', 'api/get-todos-id']);
+  });
+});
+
+/**
  * One entry is one invocable thing, so the tree a reader knows — `rules`,
  * `analyses` — only survives in the catalog's per-entry FAMILY. The panel shows it
  * as the inner level of the one grouping mechanism: surface outside, family inside.
@@ -944,6 +1171,8 @@ describe('Interfaces tab — the families inside a surface', () => {
     // Families read in the order the catalog first names them, never alphabetically,
     // and the two `rules` headers are two families — one per surface.
     expect(catalogOutline()).toEqual([
+      'CLI recipe',
+      'Web recipe',
       '# CLI',
       'cli/version',
       '# rules',
@@ -1001,6 +1230,7 @@ describe('Interfaces tab — the families inside a surface', () => {
     renderTab();
     await screen.findByRole('list', { name: 'Interface catalog' });
     expect(catalogOutline()).toEqual([
+      'CLI recipe',
       '# CLI',
       'cli/tasks-add',
       'cli/tasks-list',

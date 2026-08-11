@@ -6,10 +6,13 @@
  * FLOWS use it (the reverse index — realized or matched-but-blocked; zero means
  * code the spec never mentions, the future infer signal).
  *
- * The one thing here that is not an interface is the RECIPE: each surface group
- * leads with the opener for the preparation THAT surface runs on (cli's build and
- * entrypoint, the api block, the web block). Preparation is per-surface, so it is
- * read where the surface is — never once, in a list of tests, for all of them.
+ * The one thing here that is not an interface is the RECIPE: the panel opens with
+ * one row per surface — the preparation THAT surface runs on (cli's build and
+ * entrypoint, the api server, the web block). Preparation is per-surface, so
+ * there is a row per surface; they sit TOGETHER at the top, before the catalog,
+ * so reading one is a single move rather than a hunt down the groups. The
+ * narrowing that applies to the catalog applies to them: a panel filtered to one
+ * surface offers that surface's recipe alone.
  *
  * The list — its search, its surface filter, its grouping chrome, its preview/pin
  * rows and the scroll-to-selection a cross-navigation jump needs — is the shared
@@ -20,7 +23,12 @@ import { useCallback, useMemo } from 'react';
 import { Hammer } from 'lucide-react';
 import type { GuardDriverId, GuardInterfaceRow } from '@truecourse/shared';
 import { GUARD_DRIVERS, guardDriver, interfaceEntryLabel } from '@truecourse/shared';
-import { EntityList, type EntityListGroup, type FilterOption } from '@/components/ui/entity-list';
+import {
+  EntityList,
+  entityRowClass,
+  type EntityListGroup,
+  type FilterOption,
+} from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 
 export const GUARD_RECIPE_HINT =
@@ -72,16 +80,12 @@ function surfaceLabel(surface: string): string {
  * sticky header, the family is `subordinate` — quieter and indented — and its rows
  * indent to it, so surface > family > interface reads at a glance.
  */
-function bySurface(
-  interfaces: GuardInterfaceRow[],
-  lead: (surface: string) => React.ReactNode,
-): EntityListGroup<GuardInterfaceRow>[] {
+function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterfaceRow>[] {
   return [...bucket(interfaces, (j) => j.type).entries()].map(([surface, rows]) => {
     const group: EntityListGroup<GuardInterfaceRow> = {
       key: surface,
       label: surfaceLabel(surface),
       count: rows.length,
-      lead: lead(surface),
     };
     const families = bucket(rows, (j) => j.group);
     if (families.size === 0) return { ...group, items: rows };
@@ -145,38 +149,56 @@ export function GuardInterfacesPanel({
     [interfaces],
   );
 
-  // The surface's own recipe opener — the group's lead row. Memoized with the
-  // grouping below it so the list is not re-grouped on every render.
-  const recipeOpener = useCallback(
-    (surface: string): React.ReactNode => {
-      if (!hasRecipe || !onToggleRecipe) return null;
-      const open = recipeSurface === surface;
-      return (
-        <div className="border-b border-border px-2 py-1.5">
-          <HoverPopover portal width="wide" align="start" content={GUARD_RECIPE_HINT}>
-            <button
-              type="button"
-              aria-pressed={open}
-              onClick={() => onToggleRecipe(surface as GuardDriverId)}
-              className={`flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] transition-colors ${
-                open
-                  ? 'border-primary bg-primary/10 text-foreground'
-                  : 'border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-              }`}
-            >
-              <Hammer className="h-3 w-3 shrink-0" />
-              {surfaceLabel(surface)} recipe
-            </button>
-          </HoverPopover>
-        </div>
-      );
+  // The recipe rows, one per surface the catalog is showing, TOGETHER at the top
+  // of the list: a headerless group whose rows are the openers. They are rows of
+  // this list, not buttons floating above it — same wrapper, same paint, same
+  // hover — because the only thing that sets them apart is what they open.
+  // Memoized with the grouping below so the list is not re-grouped every render.
+  const recipeRows = useCallback(
+    (shown: readonly string[]): EntityListGroup<GuardInterfaceRow> | null => {
+      if (!hasRecipe || !onToggleRecipe || shown.length === 0) return null;
+      return {
+        key: '',
+        label: '',
+        lead: (
+          <>
+            {shown.map((surface) => {
+              const open = recipeSurface === surface;
+              return (
+                <div key={surface} role="listitem">
+                  <button
+                    type="button"
+                    aria-pressed={open}
+                    onClick={() => onToggleRecipe(surface as GuardDriverId)}
+                    className={entityRowClass({ active: open })}
+                  >
+                    <HoverPopover portal width="wide" align="start" content={GUARD_RECIPE_HINT}>
+                      <span className="flex items-center gap-2 text-[12px] text-foreground">
+                        <Hammer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        {surfaceLabel(surface)} recipe
+                      </span>
+                    </HoverPopover>
+                  </button>
+                </div>
+              );
+            })}
+          </>
+        ),
+      };
     },
     [hasRecipe, recipeSurface, onToggleRecipe],
   );
 
   const group = useCallback(
-    (rows: GuardInterfaceRow[]) => bySurface(rows, recipeOpener),
-    [recipeOpener],
+    (rows: GuardInterfaceRow[]) => {
+      const groups = bySurface(rows);
+      // The surfaces the catalog is SHOWING, in the order it shows them — so the
+      // filter (and the search) narrows the recipe rows by the same rule it
+      // narrows the rows underneath them.
+      const recipes = recipeRows(groups.map((g) => g.key));
+      return recipes ? [recipes, ...groups] : groups;
+    },
+    [recipeRows],
   );
 
   return (

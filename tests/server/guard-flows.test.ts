@@ -893,8 +893,9 @@ describe('Guard flow read surfaces', () => {
 
     /**
      * The CARD (the flows envelope's `recipe`) carries every surface's
-     * preparation, because the Interfaces catalog opens it per surface: the cli's
-     * install/build/entrypoint, the api block, and the web block.
+     * preparation in ONE per-surface shape, because the Interfaces catalog opens
+     * it per surface: the cli's install/build/entrypoint, the api server, the web
+     * block. A surface the recipe says nothing about gets no entry at all.
      */
     it('carries the install step and the web block on the card, per surface', async () => {
       seed();
@@ -906,11 +907,16 @@ describe('Guard flow read surfaces', () => {
         }),
       );
       const res = await request(app).get(url('flows')).expect(200);
-      expect(res.body.recipe).toMatchObject({
-        install: 'pnpm install --frozen-lockfile',
-        build: 'pnpm build',
-        entry: ['node', 'dist/tasks.js'],
+      expect(res.body.recipe.surfaces).toMatchObject({
+        cli: {
+          install: 'pnpm install --frozen-lockfile',
+          build: 'pnpm build',
+          entry: ['node', 'dist/tasks.js'],
+        },
         web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+        // One served surface for web steps AND request steps: with no `api` block
+        // of its own, the api surface is the web block's server.
+        api: { serve: ['node', 'dist/web.js'], healthPath: '/health', sharedWithWeb: true },
       });
     });
 
@@ -918,7 +924,8 @@ describe('Guard flow read surfaces', () => {
       seed();
       writeJson(RECIPE_FILE, recipeWith());
       const res = await request(app).get(url('flows')).expect(200);
-      expect(res.body.recipe).toMatchObject({ install: null, web: null });
+      expect(Object.keys(res.body.recipe.surfaces)).toEqual(['cli']);
+      expect(res.body.recipe.surfaces.cli.install).toBeUndefined();
     });
 
     it('404s with no recipe at all, and for one that does not parse', async () => {

@@ -664,62 +664,73 @@ export interface GuardScenarioListItem {
 }
 
 /**
- * The preparation-recipe card for the Scenarios tab — the committed
- * `recipe.json` (`{ build, entry, serve, services, env }`) plus its current working-tree inputs
- * fingerprint and a staleness signal. `stale` compares the current fingerprint
- * to the last run's recorded `recipeFingerprint` (the only stored baseline);
- * it is `null` when there is no run to compare against.
+ * ONE SURFACE'S preparation, in the SAME fields whatever surface it is: the
+ * commands that make the surface runnable, the argv that starts it, how its
+ * readiness is observed, and the env its processes get. Every scope of the card
+ * reads through this one shape, so cli, api and web can never grow three
+ * different renderings — or three different vocabularies — for the same idea.
+ *
+ * A field the recipe does not declare for the surface is ABSENT: never null,
+ * never a default the file itself never stated (the defaults the runner applies
+ * are the runner's).
  */
-export interface GuardRecipeCard {
+export interface GuardRecipeSurface {
+  /** Shell command run once before the build to fetch dependencies. */
+  install?: string
+  /** Shell command that produces what this surface runs. */
+  build?: string
+  /** Entrypoint argv this surface invokes (cli driver). */
+  entry?: string[]
   /**
-   * Shell command run once before the build to fetch dependencies; null when the
-   * recipe declares none. Part of the cli surface's preparation, like `build`.
+   * Argv that starts this surface's server — the DEFAULT server's, when the
+   * surface declares several (the full inventory is {@link servers}).
    */
-  install?: string | null
-  /** Shell command run once to produce the entrypoint/server. */
-  build: string
-  /** Entrypoint argv (cli driver); null on an api-only recipe. */
-  entry: string[] | null
+  serve?: string[]
   /**
-   * Serve argv (api driver) of the DEFAULT server; null when the recipe has no
-   * `api` block. A multi-server recipe reports its default server here
-   * and the full inventory in {@link servers} — so a card written before servers
-   * existed reads exactly the same.
+   * Every HTTP service the surface declares, in name order. Present only when
+   * there is more than one story to tell; a single server is `serve` alone.
    */
-  serve: string[] | null
-  /**
-   * Every HTTP service the recipe declares, in name order: `null` for a
-   * single-server (or api-less) recipe, so the card only grows a server list when
-   * there is more than one story to tell.
-   */
-  servers?: { name: string; serve: string[]; app?: string }[] | null
+  servers?: { name: string; serve: string[]; app?: string }[]
   /**
    * One-shot datastore orchestration (`api.services`): `up` runs in the repo root
    * once per run before any api scenario (e.g. `docker compose up -d --wait`),
-   * `down` after the last one. Null when the recipe declares none.
+   * `down` after the last one.
    */
-  services: { up: string; down?: string } | null
-  /** Recipe-level env the sandbox inherits; null when none is declared. */
-  env: Record<string, string> | null
+  services?: { up: string; down?: string }
+  /** Path polled until it answers 2xx before this surface's first step. */
+  healthPath?: string
+  /** Where the process runs — `sandbox` (the default) or `repo`. */
+  cwd?: 'sandbox' | 'repo'
+  /** Budget for the surface to become ready, in ms. */
+  readyTimeoutMs?: number
+  /** Env this surface's processes get. */
+  env?: Record<string, string>
   /**
-   * The WEB surface's preparation layer (`web`): how the browsed surface is built,
-   * started and observed ready. Null when the recipe declares no web block — a
-   * repo with no web steps. Absent on a card written before the field existed.
+   * THE API SURFACE'S SHARED SERVER. The runner serves ONE surface for both web
+   * steps and `request` steps (`guard-runner`'s `drivers/surface.ts`: one world
+   * has one address), so a recipe with a `web` block and no `api` block still has
+   * an api server — the web block's. When that is what this block is, it carries
+   * the web block's own fields and says so here, which is why the api scope reads
+   * a real server instead of "nothing declared" and the reader is told whose it
+   * is. Absent on a surface that declares its own preparation.
    */
-  web?: {
-    /** Web-only build, run after the top-level one and only for a run with web steps. */
-    build?: string
-    /** Argv that starts the web surface. */
-    serve: string[]
-    /** Where the process runs — `sandbox` (the default) or `repo`. */
-    cwd?: 'sandbox' | 'repo'
-    /** Path polled until it answers 2xx before the first web step. */
-    healthPath?: string
-    /** Budget for the surface to become ready, in ms. */
-    readyTimeoutMs?: number
-    /** Extra env for the web surface process, on top of the recipe-level `env`. */
-    env?: Record<string, string>
-  } | null
+  sharedWithWeb?: true
+}
+
+/**
+ * The preparation-recipe card — the committed `recipe.json` resolved to ONE
+ * per-surface shape, plus its current working-tree inputs fingerprint and a
+ * staleness signal. `stale` compares the current fingerprint to the last run's
+ * recorded `recipeFingerprint` (the only stored baseline); it is `null` when
+ * there is no run to compare against.
+ */
+export interface GuardRecipeCard {
+  /**
+   * Preparation per surface, keyed by driver id — the one shape every scope of
+   * the card reads. A surface the recipe says nothing about has NO entry at all,
+   * which is how a reader is told there is no preparation for it.
+   */
+  surfaces: Partial<Record<GuardDriverId, GuardRecipeSurface>>
   /** `sha256:…` over the current discovery-input files (package.json, lockfile, …). */
   fingerprint: string
   /**

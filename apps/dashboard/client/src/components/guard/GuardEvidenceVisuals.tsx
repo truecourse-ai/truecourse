@@ -30,9 +30,10 @@ function visualLabel(visual: GuardEvidenceVisual): string {
 /**
  * The open screenshot, full size over the page — the app's one modal idiom (the
  * estimate modal's): a fixed overlay that closes on a click, a stopPropagation'd
- * body, Escape to dismiss. The arrows are the carousel's own: ← and → step, and
- * they wrap, so a sequence can be walked in either direction without dead ends.
- * With a single screenshot there is nothing to step through and no arrow renders.
+ * body, Escape to dismiss. The arrows are the carousel's own: ← and → step and
+ * stop at the ends — a step sequence has a first and a last, and the disabled
+ * arrow is what says "you are at the edge". With a single screenshot there is
+ * nothing to step through and no arrow renders.
  */
 function ScreenshotLightbox({
   repoId,
@@ -51,7 +52,7 @@ function ScreenshotLightbox({
 }) {
   const count = screenshots.length;
   const step = useCallback(
-    (delta: number) => onIndex((index + delta + count) % count),
+    (delta: number) => onIndex(Math.max(0, Math.min(count - 1, index + delta))),
     [count, index, onIndex],
   );
 
@@ -78,49 +79,53 @@ function ScreenshotLightbox({
       aria-modal="true"
       aria-label="Evidence screenshot"
     >
+      {/* Arrows OUTSIDE the header+image column, so the title's left edge and
+          the close button's right edge line up with the image's own edges. */}
       <div
-        className="flex max-h-full w-full max-w-4xl flex-col gap-2"
+        className="flex max-h-full w-full max-w-4xl items-center gap-2"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-white">{label}</span>
-          <span className="truncate font-mono text-[10px] text-white/60">{visual.file}</span>
+        {count > 1 && (
           <button
             type="button"
-            onClick={onClose}
-            aria-label="Close screenshot"
-            className="ml-auto shrink-0 rounded p-1 text-white/80 hover:bg-white/10 hover:text-white"
+            onClick={() => step(-1)}
+            disabled={index === 0}
+            aria-label="Previous screenshot"
+            className="shrink-0 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-white/10"
           >
-            <X className="h-4 w-4" />
+            <ChevronLeft className="h-5 w-5" />
           </button>
-        </div>
-        <div className="flex min-h-0 items-center gap-2">
-          {count > 1 && (
+        )}
+        <div className="flex max-h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-white">{label}</span>
+            <span className="truncate font-mono text-[10px] text-white/60">{visual.file}</span>
             <button
               type="button"
-              onClick={() => step(-1)}
-              aria-label="Previous screenshot"
-              className="shrink-0 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+              onClick={onClose}
+              aria-label="Close screenshot"
+              className="-my-1 -mr-1 ml-auto shrink-0 rounded p-1 text-white/80 hover:bg-white/10 hover:text-white"
             >
-              <ChevronLeft className="h-5 w-5" />
+              <X className="h-4 w-4" />
             </button>
-          )}
+          </div>
           <img
             src={api.guardEvidenceVisualUrl(repoId, where, visual.file)}
             alt={`${label} screenshot`}
             className="min-h-0 w-full flex-1 rounded border border-white/20 bg-white object-contain"
           />
-          {count > 1 && (
-            <button
-              type="button"
-              onClick={() => step(1)}
-              aria-label="Next screenshot"
-              className="shrink-0 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          )}
         </div>
+        {count > 1 && (
+          <button
+            type="button"
+            onClick={() => step(1)}
+            disabled={index === count - 1}
+            aria-label="Next screenshot"
+            className="shrink-0 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-white/10"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        )}
       </div>
     </div>
   );

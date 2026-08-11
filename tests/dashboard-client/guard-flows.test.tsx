@@ -329,10 +329,7 @@ const VIEW: GuardFlowsView = {
   runId: RUN_ID,
   ranAt: '2026-07-24T14:02:00.000Z',
   recipe: {
-    build: 'pnpm build',
-    entry: ['node', 'dist/tasks.js'],
-    serve: null,
-    env: null,
+    surfaces: { cli: { build: 'pnpm build', entry: ['node', 'dist/tasks.js'] } },
     fingerprint: 'sha256:9f2caabbccdd',
     stale: false,
   },

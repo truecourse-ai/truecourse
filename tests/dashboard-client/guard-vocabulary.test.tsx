@@ -549,10 +549,16 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
       <GuardRecipeDetail
         repoId="r"
         recipe={{
-          build: 'pnpm build',
-          entry: ['node', 'dist/tasks.js'],
-          serve: null,
-          env: { TASKS_HOME: '.tmp/tasks' },
+          surfaces: {
+            cli: { build: 'pnpm build', entry: ['node', 'dist/tasks.js'], env: { TASKS_HOME: '.tmp/tasks' } },
+            // The shared-server case, so its one line is swept too.
+            api: {
+              serve: ['node', 'dist/web.js'],
+              healthPath: '/health',
+              services: { up: 'docker compose up -d --wait' },
+              sharedWithWeb: true,
+            },
+          },
           fingerprint: 'sha256:9f2c',
           stale: true,
         }}

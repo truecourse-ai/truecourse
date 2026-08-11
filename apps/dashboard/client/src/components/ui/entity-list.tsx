@@ -87,10 +87,10 @@ export interface EntityListGroup<T> {
   /** A muted line under the header — why these rows are here. */
   hint?: ReactNode;
   /**
-   * An affordance row at the group's TOP, above its rows and nested groups — a
-   * surface-level opener that belongs to the group rather than to any row (the
-   * Interfaces catalog's per-surface Recipe opener). The group's counterpart of
-   * {@link EntityListProps.toolbar}, and never a second narrowing control.
+   * Rows at the group's TOP, above its items and nested groups — rows that belong
+   * to the group rather than to any entity in it (the Interfaces catalog's recipe
+   * rows, which open a surface's preparation). Wear {@link entityRowClass}, so
+   * they read as the list's own rows; never a second narrowing control.
    */
   lead?: ReactNode;
   icon?: LucideIcon;
@@ -175,6 +175,21 @@ const SEARCH_INPUT =
 
 const ROW = 'flex w-full min-w-0 flex-col items-start gap-1 border-b border-border/60 px-3 py-2 text-left';
 
+/**
+ * THE row idiom — the wrapper, the selected paint and the hover of one line in a
+ * list. Exported because a surface-level row that is not an item still has to BE
+ * a row (the Interfaces catalog's recipe rows, which open a preparation rather
+ * than an entity): they wear this, not a look of their own, and a row can never
+ * drift from the rows above it.
+ */
+export function entityRowClass(opts?: { active?: boolean; interactive?: boolean }): string {
+  const active = opts?.active === true;
+  const interactive = opts?.interactive !== false;
+  return `${ROW} transition-colors ${interactive ? 'cursor-pointer' : ''} ${
+    active ? 'bg-primary/10 text-foreground' : interactive ? 'hover:bg-muted/40' : ''
+  }`;
+}
+
 function groupItems<T>(group: EntityListGroup<T>): readonly T[] {
   return group.items ?? [];
 }
@@ -235,9 +250,7 @@ function Row<T>({
           }
         : {})}
       aria-current={active ? 'true' : undefined}
-      className={`${ROW} transition-colors ${open ? 'cursor-pointer' : ''} ${
-        active ? 'bg-primary/10 text-foreground' : open ? 'hover:bg-muted/40' : ''
-      } ${className ?? ''}`}
+      className={`${entityRowClass({ active, interactive: !!open })}${className ? ` ${className}` : ''}`}
     >
       {renderRow(item)}
     </div>
