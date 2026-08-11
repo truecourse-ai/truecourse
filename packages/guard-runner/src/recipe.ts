@@ -518,6 +518,41 @@ export const RecipeApiSchema = z
   })
 
 /**
+ * The web driver's preparation layer — how the WEB SURFACE starts and how its
+ * readiness is observed. Deliberately the api server block's fields under the same
+ * names (`serve`, `cwd`, `healthPath`, `readyTimeoutMs`, `env`): a served web
+ * surface IS a served process, it boots through the very same machinery
+ * (`spawnApiProcess` + `awaitApiServerReady`), and giving the same concept two
+ * spellings would be the fork this parallel exists to avoid.
+ *
+ * The one field the api block has no use for is `build`. A web surface usually has
+ * a CLIENT to compile, and compiling it is expensive — minutes, on a real app. The
+ * recipe's top-level `build` runs before EVERY run; this one runs only when the
+ * selected scenarios actually contain a web step, so a repo whose web surface is
+ * expensive to build does not pay for it on a cli-only run.
+ */
+export const RecipeWebSchema = z
+  .object({
+    /**
+     * Shell command run once in the repo root, AFTER the top-level `build`, and only
+     * when the run has web steps in it. Omit it when the top-level build already
+     * produces the served assets.
+     */
+    build: z.string().min(1).optional(),
+    /** Argv that starts the web surface (resolved like `entry`). The runner sets `PORT`. */
+    serve: z.array(z.string()).min(1),
+    /** Where the process runs — the api block's rule, verbatim. Defaults to `sandbox`. */
+    cwd: z.enum(['sandbox', 'repo']).optional(),
+    /** Path polled until it answers 2xx before the first web step. Defaults to `/`. */
+    healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
+    /** Wall-clock budget for the surface to become ready. Defaults to 60s. */
+    readyTimeoutMs: z.number().int().positive().optional(),
+    /** Extra env for the web surface process, on top of the recipe-level `env`. */
+    env: z.record(z.string(), z.string()).optional(),
+  })
+  .strict()
+
+/**
  * argv0 basenames (compared case-insensitively) that are shell no-ops — they run
  * nothing and exit 0, so an `entry` built on one executes no program under test.
  * A recipe naming one is the sqlfluff-class defect: every scenario "passes"
@@ -587,6 +622,13 @@ export const RecipeSchema = z
       .optional(),
     /** The api driver's preparation layer; present when the repo has api scenarios. */
     api: RecipeApiSchema.optional(),
+    /**
+     * The web surface's preparation layer; present when any scenario carries web
+     * steps. See {@link RecipeWebSchema}. It is not a third "driver block" beside
+     * `entry` and `api`: web steps live inside an ordinary sandbox scenario, so a
+     * repo declaring `web` declares an `entry` (or an `api` block) too.
+     */
+    web: RecipeWebSchema.optional(),
   })
   .strict()
   .refine((r) => r.entry !== undefined || r.api !== undefined, {
@@ -601,6 +643,7 @@ export type RecipeApiExternalEnv = z.infer<typeof RecipeApiExternalEnvSchema>
 export type RecipeApiExternal = z.infer<typeof RecipeApiExternalSchema>
 export type RecipeApiServer = z.infer<typeof RecipeApiServerSchema>
 export type RecipeApi = z.infer<typeof RecipeApiSchema>
+export type RecipeWeb = z.infer<typeof RecipeWebSchema>
 export type Recipe = z.infer<typeof RecipeSchema>
 
 /**
@@ -816,6 +859,47 @@ export function resolveApiServers(recipe: Recipe): ResolvedApiServers {
   // default, so a one-entry `servers` map needs no ceremony.
   const defaultServer = api.defaultServer ?? [...servers.keys()][0] ?? DEFAULT_API_SERVER_NAME
   return { servers, defaultServer }
+}
+
+/** Default readiness path polled on the booted web surface. */
+export const DEFAULT_WEB_HEALTH_PATH = '/'
+/**
+ * Default budget for the web surface to answer its readiness path. Twice the api
+ * default: a web surface commonly boots a framework server that compiles or warms
+ * on first request, and the honest failure of a surface that needs 40s is "your
+ * scenarios are slow", not "guard says your app is broken".
+ */
+export const DEFAULT_WEB_READY_TIMEOUT_MS = 60_000
+
+/** The recipe's web surface with every default applied — the shape the runner boots. */
+export interface ResolvedWebSurface {
+  /** Template argv, `${PORT}` unresolved and paths unresolved (see `resolveEntry`). */
+  serve: readonly string[]
+  cwd: 'sandbox' | 'repo'
+  healthPath: string
+  readyTimeoutMs: number
+  /** `recipe.env` ⊕ `web.env`. */
+  env: Record<string, string>
+  /** The extra build command, when the surface declares one. */
+  build?: string
+}
+
+/**
+ * The recipe's web surface with its defaults applied, or `null` when the repo
+ * declares none — the ONE place the web block's defaults exist, so the runner, the
+ * estimate and any future read surface can never disagree about them.
+ */
+export function resolveWebSurface(recipe: Recipe): ResolvedWebSurface | null {
+  const web = recipe.web
+  if (!web) return null
+  return {
+    serve: web.serve,
+    cwd: web.cwd ?? 'sandbox',
+    healthPath: web.healthPath ?? DEFAULT_WEB_HEALTH_PATH,
+    readyTimeoutMs: web.readyTimeoutMs ?? DEFAULT_WEB_READY_TIMEOUT_MS,
+    env: { ...(recipe.env ?? {}), ...(web.env ?? {}) },
+    ...(web.build ? { build: web.build } : {}),
+  }
 }
 
 /**

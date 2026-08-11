@@ -61,6 +61,8 @@ const InvocationStepSchema = z
     stderr: z.string().optional(),
     /** api: the response body excerpt (the cli `stdout` analog). */
     body: z.string().optional(),
+    /** web: the address the step ended at, `pathname + search`. */
+    url: z.string().optional(),
   })
   .passthrough()
 
@@ -76,6 +78,9 @@ function actualLine(step: InvocationStep): string | undefined {
   if (step.spawnError) return `failed to spawn: ${step.spawnError}`
   if (step.requestError) return `no response: ${step.requestError}`
   if (step.timedOut) return 'timed out'
+  // A web step returns no code and no status — what it "returned" is where the
+  // browser ended up, which is the one line a reader wants beside the screenshot.
+  if (step.kind === 'web') return step.url ? `at ${step.url}` : undefined
   if (step.kind && NO_RESULT_KINDS.has(step.kind)) return undefined
   if ('exitCode' in step) return step.exitCode == null ? 'exit (killed)' : `exit ${step.exitCode}`
   if ('status' in step) return step.status == null ? undefined : `status ${step.status}`

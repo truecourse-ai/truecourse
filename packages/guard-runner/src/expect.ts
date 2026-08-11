@@ -23,7 +23,20 @@ export interface ExpectMismatch {
    * by the runner rather than by an expectation, and both are the step's own
    * failure, never a value quietly flowing on.
    */
-  subject: 'exit' | 'stdout' | 'stderr' | 'output' | 'files' | 'stub' | 'prompt' | 'capture'
+  subject:
+    | 'exit'
+    | 'stdout'
+    | 'stderr'
+    | 'output'
+    | 'files'
+    | 'stub'
+    | 'prompt'
+    | 'capture'
+    // The WEB driver's three: an element the step addressed that the page never
+    // showed (or showed more than once), the page's visible text, and the address.
+    | 'target'
+    | 'text'
+    | 'url'
   /** Compact description of what was required. */
   expected: string
   /** Compact description of what was observed. */
@@ -85,8 +98,31 @@ function truncate(value: string, max = 400): string {
   return value.length > max ? `${value.slice(0, max)}… (${value.length} chars)` : value
 }
 
+/**
+ * A stream matcher against a stream — the cli subjects, whose LABEL is the subject
+ * word itself ("stdout contains …").
+ */
 function matchStream(
   subject: 'stdout' | 'stderr' | 'output',
+  matcher: GuardStreamMatcher,
+  value: string,
+): ExpectMismatch | null {
+  return matchTextMatcher(subject, subject, matcher, value)
+}
+
+/**
+ * THE text-matcher semantics, once: the four matchers (`equals`, `contains`,
+ * `matches`, `compare`) against one piece of text, in a fixed order, with the first
+ * miss reported.
+ *
+ * `subject` is what the mismatch is filed under; `label` is how it reads in the
+ * message. They differ for the web driver, whose subjects are a page and an address
+ * rather than a stream ("the page text contains …") — the same matcher vocabulary,
+ * so it must not be a second implementation of it.
+ */
+export function matchTextMatcher(
+  subject: ExpectMismatch['subject'],
+  label: string,
   matcher: GuardStreamMatcher,
   value: string,
 ): ExpectMismatch | null {
@@ -98,17 +134,17 @@ function matchStream(
   if (matcher.equals !== undefined && value !== matcher.equals) {
     return {
       subject,
-      expected: `${subject} equals ${JSON.stringify(truncate(matcher.equals))}`,
-      actual: `${subject} was ${JSON.stringify(truncate(value))}`,
-      detail: [`--- expected ${subject} (equals) ---`, matcher.equals, `--- actual ${subject} ---`, value],
+      expected: `${label} equals ${JSON.stringify(truncate(matcher.equals))}`,
+      actual: `${label} was ${JSON.stringify(truncate(value))}`,
+      detail: [`--- expected ${label} (equals) ---`, matcher.equals, `--- actual ${label} ---`, value],
     }
   }
   if (matcher.contains !== undefined && !value.includes(matcher.contains)) {
     return {
       subject,
-      expected: `${subject} contains ${JSON.stringify(matcher.contains)}`,
-      actual: `${subject} was ${JSON.stringify(truncate(value))}`,
-      detail: [`expected ${subject} to contain:`, matcher.contains, `--- actual ${subject} ---`, value],
+      expected: `${label} contains ${JSON.stringify(matcher.contains)}`,
+      actual: `${label} was ${JSON.stringify(truncate(value))}`,
+      detail: [`expected ${label} to contain:`, matcher.contains, `--- actual ${label} ---`, value],
     }
   }
   if (matcher.matches !== undefined) {
@@ -122,14 +158,14 @@ function matchStream(
     if (!re || !re.test(value)) {
       return {
         subject,
-        expected: `${subject} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
-        actual: `${subject} was ${JSON.stringify(truncate(value))}`,
-        detail: [`expected ${subject} to match /${matcher.matches}/`, `--- actual ${subject} ---`, value],
+        expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
+        actual: `${label} was ${JSON.stringify(truncate(value))}`,
+        detail: [`expected ${label} to match /${matcher.matches}/`, `--- actual ${label} ---`, value],
       }
     }
   }
   if (matcher.compare) {
-    const m = matchComparison(subject, matcher.compare, value)
+    const m = matchComparison(label, matcher.compare, value)
     if (m) return { ...m, subject }
   }
   return null

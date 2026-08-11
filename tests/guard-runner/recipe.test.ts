@@ -15,7 +15,10 @@ import {
   recipePath,
   resolveApiServers,
   resolveScenarioServer,
+  resolveWebSurface,
   DEFAULT_API_SERVER_NAME,
+  DEFAULT_WEB_HEALTH_PATH,
+  DEFAULT_WEB_READY_TIMEOUT_MS,
   type Recipe,
 } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, FIXTURE_BIN } from './helpers.js'
@@ -1043,5 +1046,76 @@ describe('resolveApiServers', () => {
     expect(missing.reason).toBe(
       'scenario binds server "api-v3", which recipe.json does not declare (declared: web, api-v2)',
     )
+  })
+})
+
+describe('the recipe web block', () => {
+  it('applies its defaults, and layers env recipe ⊕ web.env', () => {
+    const recipe = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      env: { A: 'recipe', B: 'recipe' },
+      web: { serve: ['node', 'web.js'], env: { B: 'web' } },
+    })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    const surface = resolveWebSurface(recipe.recipe)!
+    expect(surface).toMatchObject({
+      serve: ['node', 'web.js'],
+      cwd: 'sandbox',
+      healthPath: DEFAULT_WEB_HEALTH_PATH,
+      readyTimeoutMs: DEFAULT_WEB_READY_TIMEOUT_MS,
+      env: { A: 'recipe', B: 'web' },
+    })
+    // No build command declared ⇒ the top-level build already produced the assets.
+    expect(surface.build).toBeUndefined()
+  })
+
+  it('carries its own build command, and honours declared overrides', () => {
+    const recipe = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      web: {
+        build: 'pnpm --filter client build',
+        serve: ['node', 'web.js'],
+        cwd: 'repo',
+        healthPath: '/healthz',
+        readyTimeoutMs: 5_000,
+      },
+    })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    expect(resolveWebSurface(recipe.recipe)).toMatchObject({
+      build: 'pnpm --filter client build',
+      cwd: 'repo',
+      healthPath: '/healthz',
+      readyTimeoutMs: 5_000,
+    })
+  })
+
+  it('a repo with no web block resolves to no surface', () => {
+    const recipe = loadRaw(repo(), { build: 'true', entry: ['node', 'cli.js'] })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    expect(resolveWebSurface(recipe.recipe)).toBeNull()
+  })
+
+  it('refuses a web block that cannot start or cannot be probed', () => {
+    const noServe = loadRaw(repo(), { build: 'true', entry: ['node', 'cli.js'], web: {} })
+    expect(noServe.ok).toBe(false)
+    const badPath = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      web: { serve: ['node', 'web.js'], healthPath: 'health' },
+    })
+    expect(badPath.ok).toBe(false)
+    if (badPath.ok) return
+    expect(badPath.message).toContain('healthPath must start with /')
+    const unknownField = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      web: { serve: ['node', 'web.js'], port: 3000 },
+    })
+    expect(unknownField.ok).toBe(false)
   })
 })

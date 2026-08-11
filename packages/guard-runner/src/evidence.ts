@@ -56,15 +56,38 @@ export function isFileStepKind(kind: EvidenceStep['kind']): boolean {
   return kind === 'write' || kind === 'delete' || kind === 'patch'
 }
 
+/**
+ * What ONE web step did, for the transcript — a browser step's evidence is visual,
+ * so the record is what it did, where it ended up, what the page said, and the name
+ * of the screenshot that shows it.
+ */
+export interface EvidenceWebStep {
+  /** What the step did — `navigate /notes`, `click button “Save”`. */
+  command: string
+  /** What it asserted, one line; empty when it asserted nothing. */
+  expectation: string
+  /** The address after the step, as `pathname + search`. */
+  url: string
+  /** The screenshot's filename in this evidence dir, absent when none could be taken. */
+  screenshot?: string
+  /** What the page showed, head-truncated. */
+  visibleText: string
+  /** Console lines and page errors seen during the step. */
+  console?: readonly string[]
+}
+
 export interface EvidenceStep {
   /** 1-based step index. */
   index: number
   /**
-   * The step KIND, for the cli steps that do not spawn the entrypoint: a `git`
-   * invocation, or a `write`/`delete`/`patch` that only moves sandbox files (and so
-   * has no exit code and no streams). Absent reads as an ordinary `run`.
+   * The step KIND, for the steps that do not spawn the entrypoint: a `git`
+   * invocation, a `write`/`delete`/`patch` that only moves sandbox files (and so
+   * has no exit code and no streams), or a `web` step the browser took. Absent
+   * reads as an ordinary `run`.
    */
-  kind?: 'git' | 'write' | 'delete' | 'patch'
+  kind?: 'git' | 'write' | 'delete' | 'patch' | 'web'
+  /** The browser's record, on a `web` step. See {@link EvidenceWebStep}. */
+  web?: EvidenceWebStep
   /**
    * The command line, as the transcript shows it: the resolved argv for a spawned
    * step, and the paths a `write`/`delete`/`patch` acted on for the file steps.
@@ -150,6 +173,15 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       index: s.index,
       kind: s.kind,
       argv: s.argv,
+      // A web step's record: what it did, where it ended up, and the screenshot.
+      // `url` is also what the dashboard reads back as this step's ACTUAL line.
+      ...(s.web
+        ? {
+            web: s.web,
+            url: s.web.url,
+            screenshot: s.web.screenshot,
+          }
+        : {}),
       patch: s.patch,
       stdin: s.stdin,
       cwd: s.cwd,
@@ -209,6 +241,19 @@ function renderTranscript(params: WriteEvidenceParams): string {
   lines.push('')
   for (const s of params.steps) {
     lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
+    // A web step has no argv and no streams: it has an action, an address, a
+    // screenshot, and what the page showed. That is its whole record.
+    if (s.web) {
+      lines.push(`   web:      ${s.web.command}`)
+      if (s.web.expectation) lines.push(`   expect:   ${s.web.expectation}`)
+      lines.push(`   at:       ${s.web.url}`)
+      if (s.web.screenshot) lines.push(`   screen:   ${s.web.screenshot}`)
+      for (const line of s.web.console ?? []) lines.push(`   console:  ${line}`)
+      lines.push(`   page text:`)
+      lines.push(indent(s.web.visibleText))
+      lines.push('')
+      continue
+    }
     lines.push(`   ${isFileStepKind(s.kind) ? `${s.kind}:  ` : 'argv:   '} ${JSON.stringify(s.argv)}`)
     // A patch's operations, as authored with their tokens resolved: the file's
     // paths alone would not say what changed in it.

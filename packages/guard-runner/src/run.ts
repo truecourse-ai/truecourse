@@ -11,6 +11,7 @@ import crypto from 'node:crypto'
 import {
   GUARD_FORMAT_VERSION,
   isApiRequestStep,
+  isWebStep,
   worstOutcome,
   type GuardApiScenario,
   type GuardBinds,
@@ -31,6 +32,7 @@ import {
   RecipeError,
   resolveApiServers,
   resolveScenarioServer,
+  resolveWebSurface,
   credentialServers,
   type Recipe,
   type LoadedRecipe,
@@ -432,6 +434,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // the other driver's scenarios from running.
   const cliExec = executable.filter((p) => p.scenario.driver === 'cli')
   const apiExec = executable.filter((p) => p.scenario.driver === 'api')
+  // The web surface is per RECIPE, not per scenario: it boots inside whichever
+  // sandbox reaches a web step. What the run needs to know up front is only whether
+  // ANY selected scenario has one, so the surface's build can be skipped otherwise.
+  const webSurface = resolveWebSurface(loaded.recipe)
+  const webExec = cliExec.filter((p) => p.scenario.steps.some((step) => isWebStep(step)))
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
   // Both recipe shapes collapse into ONE named-server map here, and every
@@ -569,6 +576,22 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       const stop = cancelled('build')
       if (stop) return stop
       if (!build.ok) return { status: 'build-failed', build, loadErrors }
+
+      // The WEB surface's own build, and ONLY when this run has web steps in it.
+      // Compiling a client is minutes on a real app; a cli-only run must not pay
+      // for it, which is the whole reason the web block carries its own command.
+      if (webSurface?.build && webExec.length > 0) {
+        const webBuild = await runBuild(
+          repoRoot,
+          webSurface.build,
+          loaded.recipe.env,
+          opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+          cancel.signal,
+        )
+        const stopWeb = cancelled('build')
+        if (stopWeb) return stopWeb
+        if (!webBuild.ok) return { status: 'build-failed', build: webBuild, loadErrors }
+      }
     }
 
     const resolvedEntry = hasEntry ? resolveEntry(repoRoot, loaded.recipe.entry!) : null
@@ -1013,6 +1036,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               // Every binding is `provided` by construction — the gate above kept the
               // rest out of `runnable` — so this only ever materializes real instances.
               supplied: suppliedInstancesFor(scenario, resolvedDependencies),
+              ...(webSurface ? { web: webSurface } : {}),
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,

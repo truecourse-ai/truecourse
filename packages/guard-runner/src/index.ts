@@ -68,13 +68,18 @@ export {
   DEFAULT_API_HEALTH_PATH,
   DEFAULT_API_READY_TIMEOUT_MS,
   DEFAULT_API_SERVER_NAME,
+  DEFAULT_WEB_HEALTH_PATH,
+  DEFAULT_WEB_READY_TIMEOUT_MS,
   resolveApiServers,
+  resolveWebSurface,
   resolveScenarioServer,
   credentialServers,
 } from './recipe.js'
 export type {
   Recipe,
   RecipeApi,
+  RecipeWeb,
+  ResolvedWebSurface,
   RecipeApiServer,
   ResolvedApiServer,
   ResolvedApiServers,
@@ -87,6 +92,7 @@ export type {
 } from './recipe.js'
 export {
   RecipeSchema,
+  RecipeWebSchema,
   RecipeApiSchema,
   RecipeApiServerSchema,
   RecipeApiCredentialSchema,
@@ -211,8 +217,21 @@ export {
   SANDBOX_SETUP_EXPECTED,
   CAPABILITY_SETUP_EXPECTED,
   ORPHANED_STDIO_INFRA,
+  NO_WEB_SURFACE_INFRA,
 } from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
+
+// The step-driver seam — one module per surface, routed by the registry. A step
+// says how it acts; the runner asks who owns it and hands it over.
+export { buildStepDrivers, driverFor, closeStepDrivers, cliStepDriver, webStepDriver } from './drivers/index.js'
+export type {
+  StepDriver,
+  StepOutcome,
+  StepRunContext,
+  BuildStepDriversOptions,
+  CliStepDriverOptions,
+  WebStepDriverOptions,
+} from './drivers/index.js'
 
 export { createSandbox, resolveInSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
 export type { Sandbox, SandboxOptions } from './sandbox.js'
@@ -239,7 +258,7 @@ export type { StepCapture, ExecuteStepOptions } from './executor.js'
 export { normalize } from './normalizers.js'
 export type { NormalizerContext } from './normalizers.js'
 
-export { evaluateExpect } from './expect.js'
+export { evaluateExpect, matchTextMatcher } from './expect.js'
 export type { ExpectMismatch, EvaluateExpectParams } from './expect.js'
 
 export { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS } from './build.js'
@@ -268,7 +287,33 @@ export type {
 } from './preflight.js'
 
 export { writeEvidence, stepExcerpt, STEP_OUTPUT_LIMIT, isFileStepKind } from './evidence.js'
-export type { EvidenceStep, EvidencePatchOp, WriteEvidenceParams } from './evidence.js'
+export type { EvidenceStep, EvidenceWebStep, EvidencePatchOp, WriteEvidenceParams } from './evidence.js'
+
+// The WEB driver — the served surface, the browser, and the step executor. A web
+// step runs inside an ordinary sandbox scenario, so there is no `runWebScenario`:
+// `runScenario` opens this world at the first web step and closes it at the end.
+export { openWebSession } from './web/session.js'
+export type { WebSession, OpenWebSessionOptions, OpenWebSessionResult } from './web/session.js'
+export { startWebSurface } from './web/surface.js'
+export type { StartWebSurfaceOptions, WebSurfaceHandle } from './web/surface.js'
+export {
+  launchWebBrowser,
+  isBrowserInstalled,
+  BROWSER_MISSING_MESSAGE,
+  WEB_VIEWPORT,
+  WEB_VIDEO_FILE,
+} from './web/browser.js'
+export type { WebBrowserHandle, LaunchWebBrowserOptions } from './web/browser.js'
+export {
+  executeWebStep,
+  webLocator,
+  pageAddress,
+  webScreenshotFile,
+  DEFAULT_WEB_STEP_TIMEOUT_MS,
+  WEB_TEXT_LIMIT,
+} from './web/executor.js'
+export type { WebStepResult, ExecuteWebStepOptions } from './web/executor.js'
+export { resolveWebStep } from './web/tokens.js'
 
 export { patchJsonText, resolvePatchValue, jsonSyntaxPosition, PatchError } from './patch.js'
 export type { PatchJsonTextParams, JsonSyntaxPosition } from './patch.js'

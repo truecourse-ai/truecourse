@@ -11,12 +11,8 @@
 import { z } from 'zod'
 import { OutputExcerptsSchema } from './excerpts.js'
 import { GuardDependencyNeedSchema } from './dependencies.js'
-import {
-  GUARD_FORMAT_VERSION,
-  GuardBindsSchema,
-  hasMilestone,
-  type GuardStepMilestone,
-} from './scenario.js'
+import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
+import { hasMilestone, type GuardStepMilestone } from './step-parts.js'
 
 /**
  * Per-scenario run outcome. `pass` | `fail` | `error` come from executing the
