@@ -1,0 +1,472 @@
+guard: 3
+id: explore-the-architecture-graph.cli.1
+title: A developer walks the architecture graph, its depths and its canvas options
+promise: >-
+  A developer opens the architecture graph, sets its depth and canvas options, and clicks
+  around the detected system.
+flow:
+  id: explore-the-architecture-graph
+  fingerprint: sha256:7f2e66dc1b11f3c7a008ecc4b615b5266f2e4fda73e8f4349329a9704535d46c
+interface:
+  path:
+    - cli/analyze
+    - web/open-dashboard-home
+    - web/open-repo-report
+    - web/open-the-graphs-tab
+    - web/fit-the-graph-to-the-viewport
+    - web/change-the-graph-depth-to-modules
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
+    - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
+    - sha256:a8f319bb14ef3182f51fa57b6ce896ee8fe0b6fedbc3591efe3921ff3d842c8f
+    - sha256:24b2d4f4612ada4af1613f970985c8bd1666bf374051b519ed6a3793a1243cbf
+    - sha256:e0b7054e06ffdf0e5bd1e322d3305bee2e1bd08e795f50c84128d74ead61741f
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: getting-around
+    fingerprint: sha256:b64d05bfdef7ef3cce1d95c719c53884d5a0c419c170d00526cc29d0f98842b2
+  - doc: reference/spec-docs/dashboard/architecture-graph.mdx
+    section: architecture-graph
+    fingerprint: sha256:8a5612d54e962d40f4e4614241783c829f4aeddb8d4aa118c021dc2c8c77cc5e
+  - doc: reference/spec-docs/dashboard/architecture-graph.mdx
+    section: depth
+    fingerprint: sha256:2570d78661c1f8a931db6052d4913ee89b63aad6cc6f0f2da65fcbc1ee990ee0
+  - doc: reference/spec-docs/dashboard/architecture-graph.mdx
+    section: canvas-controls
+    fingerprint: sha256:ef6b663e189646730e61f3957cf6dd5dc2e8690484a0c2d83c7d42ff1c415657
+  - doc: reference/spec-docs/dashboard/architecture-graph.mdx
+    section: clicking-around
+    fingerprint: sha256:d519271e182d695a0b668c0199f931d58384425ea5e54b9eef9498c9d1c6bb77
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module",
+        "workspaces": ["services/*"]
+      }
+    sample-app/prisma/schema.prisma: |
+      datasource db {
+        provider = "postgresql"
+        url      = env("DATABASE_URL")
+      }
+
+      model User {
+        id     Int     @id @default(autoincrement())
+        email  String  @unique
+        name   String?
+        orders Order[]
+      }
+
+      model Order {
+        id     Int   @id @default(autoincrement())
+        userId Int
+        user   User  @relation(fields: [userId], references: [id])
+        total  Float
+      }
+    sample-app/services/api/package.json: |
+      {
+        "name": "api",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/server.js",
+        "dependencies": { "express": "^4.18.2", "pg": "^8.11.3" }
+      }
+    sample-app/services/api/src/server.js: |
+      import express from 'express'
+      import { listUsers, createUser } from './routes.js'
+
+      const app = express()
+
+      app.get('/users', listUsers)
+      app.post('/users', createUser)
+
+      app.listen(3000)
+
+      export default app
+    sample-app/services/api/src/routes.js: |
+      import { findAllUsers, saveUser } from './repositories/user-repository.js'
+
+      export async function listUsers(req, res) {
+        const users = await findAllUsers()
+        res.json(users)
+      }
+
+      export async function createUser(req, res) {
+        const user = await saveUser(req.body)
+        res.json(user)
+      }
+    sample-app/services/api/src/repositories/user-repository.js: |
+      import pg from 'pg'
+
+      const pool = new pg.Pool({ connectionString: 'postgres://localhost:5432/shop' })
+
+      export async function findAllUsers() {
+        const result = await pool.query('SELECT * FROM users')
+        return result.rows
+      }
+
+      export async function saveUser(user) {
+        const result = await pool.query('INSERT INTO users (email) VALUES (' + user.email + ')')
+        return result.rows
+      }
+    sample-app/services/worker/package.json: |
+      {
+        "name": "worker",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/index.js"
+      }
+    sample-app/services/worker/src/index.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+
+      export function main() {
+        console.log('worker starting')
+        return runRule('1 + 1')
+      }
+
+      main()
+      setTimeout(main, 4200)
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - prisma/schema.prisma
+          - services/api/package.json
+          - services/api/src/server.js
+          - services/api/src/routes.js
+          - services/api/src/repositories/user-repository.js
+          - services/worker/package.json
+          - services/worker/src/index.js
+        message: seed the sample app
+normalize: []
+driver: cli
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      output:
+        contains: 2 services
+      files:
+        sample-app/.truecourse/LATEST.json:
+          exists: true
+        sample-app/.truecourse/ui-state.json:
+          absent: true
+    note: >-
+      Arranges the architecture the graph draws — two services (an express api and a
+      worker), three modules, six functions and one postgres datastore reached from code.
+      Two things are asserted rather than assumed: the run really detected TWO services — read
+      from its combined output, where the parse step reports the count, since no interface
+      pins that line to a stream — so "the whole system at once" has more than one thing in
+      it; and no `ui-state.json` exists, so every layout this flow reads is the COMPUTED one
+      rather than somebody's saved arrangement.
+  - driver: web
+    navigate: /
+    expect:
+      visible:
+        role: link
+        name: sample-app
+    note: >-
+      Boots the browser against the surface the sandbox serves. Prepares the click below.
+  - driver: web
+    click:
+      role: link
+      name: sample-app
+    expect:
+      url:
+        contains: /repos/sample-app
+    note: >-
+      Opens the repository, which is where the icon rail with the Graphs tab lives.
+      Prepares the entry below.
+  - driver: web
+    click:
+      role: button
+      name: Graphs
+    expect:
+      url:
+        contains: tab=graphs
+      visible:
+        role: heading
+        name: api
+    note: >-
+      The overview page's tab inventory, taken at its word: picking Graphs from the rail
+      lands on the graph of the analyzed repository. Asserted on the address the tab claims
+      AND on a node of the real analysis being on the canvas — the api service's own card
+      heading, which is the one piece of a React Flow node that carries a role and a name.
+    milestone:
+      - dashboard-overview-graphs-tab-shows-the-architecture-graph
+  - driver: web
+    expect:
+      text:
+        matches: >-
+          ^(?=[\s\S]*api)(?=[\s\S]*worker)(?=[\s\S]*Business Logic)(?=[\s\S]*PostgreSQL)(?=[\s\S]*2
+          tables)[\s\S]*$
+    note: >-
+      What the canvas DRAWS, checked against what the analysis detected: both services by
+      name, a layer inside one of them, and the datastore they talk to — named by its type
+      and carrying the two tables the schema really declares. Nothing here is page
+      furniture; every string comes from the analysis. Modules and functions are drawn at
+      their own depths and are asserted there.
+    milestone:
+      - dashboard-graph-draws-the-detected-architecture
+  - driver: web
+    expect:
+      visible:
+        role: group
+        name: Edge from
+    note: >-
+      The dependency the analysis recorded — the api service's connection to the postgres
+      datastore — drawn as an edge. Edges are the one part of this canvas the browser names
+      for itself: the graph library labels each one "Edge from <source> to <target>", so the
+      assertion is on an edge EXISTING between the drawn nodes. It resolves uniquely because
+      this world has exactly one dependency; a canvas that drew nodes and no edges fails
+      here.
+    milestone:
+      - dashboard-graph-draws-the-dependencies-between-them
+  - driver: web
+    expect:
+      text:
+        matches: ^(?=[\s\S]*Services)(?=[\s\S]*Modules)(?=[\s\S]*Functions)[\s\S]*$
+    note: >-
+      The depth toggle offers exactly the three the doc names. That choosing one REDRAWS the
+      canvas is proved further down, where Modules and Functions are actually taken and the
+      canvas is read at each.
+    milestone:
+      - dashboard-graph-depth-toggle-offers-three-depths
+  - driver: web
+    expect:
+      url:
+        matches: ^(?![\s\S]*mode=)[\s\S]*tab=graphs[\s\S]*$
+      text:
+        matches: ^(?=[\s\S]*api)(?=[\s\S]*worker)[\s\S]*$
+    note: >-
+      The starting depth, which the address states by NOT naming one — the scoped depths
+      write `mode=modules` / `mode=functions` and Services writes nothing — and at it both
+      detected services are on the canvas together. That is what "the whole system at once"
+      means in a world with more than one service.
+    milestone:
+      - dashboard-graph-services-depth-shows-the-whole-system
+  - driver: web
+    click:
+      role: button
+      name: Show edges on hover only
+    expect:
+      visible:
+        role: button
+        name: Show all edges
+    note: >-
+      The first of the three canvas toggles, flipped. The control names the action it will
+      take next, so the flip is observable as the name changing to its opposite. What the
+      claim about this toggle actually promises — that edges stay hidden UNTIL A NODE IS
+      HOVERED — needs a hover the web vocabulary does not have, so this step proves nothing
+      on its own; it prepares the remembered-across-reloads claim below.
+  - driver: web
+    click:
+      role: button
+      name: Switch to L-shaped edges
+    expect:
+      visible:
+        role: button
+        name: Switch to curved edges
+    note: >-
+      The second toggle, flipped the same way and for the same reason. Whether the edges are
+      redrawn curved or square is path geometry the driver cannot read, so this step also
+      only prepares.
+  - driver: web
+    click:
+      role: button
+      name: Disable animations
+    expect:
+      visible:
+        role: button
+        name: Enable animations
+    note: >-
+      The third toggle. Motion is the one thing a screenshot-and-text driver can never see,
+      so again: preparation only. With all three now flipped away from their defaults, the
+      reload below has something to remember.
+  - driver: web
+    navigate: /repos/sample-app?tab=graphs
+    expect:
+      visible:
+        role: button
+        name: Show all edges
+    note: >-
+      A fresh load of the same page, and the toggle is still where it was left — which is
+      the falsifiable half of "remembered in your browser": nothing was written to the
+      repository, and yet the setting survived. The assertion names one of the three
+      because a web expectation names one element; the other two ride the same browser
+      storage and were flipped above so a reader can see the whole block was moved.
+    milestone:
+      - dashboard-graph-canvas-toggles-remembered-in-the-browser
+  - driver: web
+    click:
+      role: button
+      name: Fit view
+    expect:
+      visible:
+        role: button
+        name: Zoom in
+    note: >-
+      The bottom-left cluster, exercised where it can be: Fit view is pressed and answers,
+      and the zoom control sits beside it. What the doc says each control does to the canvas
+      — zoom level, fitted viewport — is a viewport transform with no text, no address and
+      no accessible state, so this step asserts that the cluster OFFERS these controls and
+      that one of them is operable, and no more.
+    milestone:
+      - dashboard-graph-bottom-left-zoom-fit-and-auto-layout
+  - driver: web
+    click:
+      role: heading
+      name: api
+    expect:
+      url:
+        matches: ^(?![\s\S]*tab=databases)[\s\S]*tab=graphs[\s\S]*$
+      visible:
+        role: heading
+        name: api
+    note: >-
+      Clicking a SERVICE node — the first half of the contradiction this flow carries on
+      purpose. The doc says a click on a service, module, function or database node zooms to
+      it: the canvas keeps you, and the node stays under you. That is what is asserted here,
+      because the zoom itself is a viewport transform the driver cannot read, and because
+      staying on the graph is precisely what the database-node step below denies. The node
+      is addressed through the service card's heading, the only named element inside a
+      canvas node.
+    milestone:
+      - dashboard-graph-clicking-a-node-zooms-to-it
+  - driver: web
+    click:
+      role: button
+      name: Modules
+    expect:
+      url:
+        contains: mode=modules
+      text:
+        contains: Select a service
+    note: >-
+      Modules depth with nothing scoped yet, which is exactly the state the doc describes: a
+      card in the middle of the canvas telling you what to pick instead of a graph. It is
+      only reachable because this world has TWO services — with one candidate the selection
+      is made for you and the card never appears.
+    milestone:
+      - dashboard-graph-scoped-depth-prompts-for-a-pick
+  - driver: web
+    expect:
+      visible:
+        role: button
+        name: Select service
+    note: >-
+      And the selector the doc says appears beside the depth toggle is there, waiting for the
+      pick.
+    milestone:
+      - dashboard-graph-scope-selector-sits-by-the-depth-toggle
+  - driver: web
+    click:
+      role: button
+      name: Select service
+    expect:
+      visible:
+        role: button
+        name: worker
+    note: >-
+      Opening the selector; both services are offered. Prepares the pick below.
+  - driver: web
+    click:
+      role: button
+      name: api
+    expect:
+      text:
+        matches: ^(?=[\s\S]*routes)(?=[\s\S]*user-repository)(?![\s\S]*worker)[\s\S]*$
+    note: >-
+      One service scoped, and the canvas is redrawn as its modules: `routes` and
+      `user-repository`, the two modules the analysis found in the api service. The negative
+      is the claim's real content — the other service is NOT on the canvas, which is what
+      makes this depth scoped rather than merely different.
+    milestone:
+      - dashboard-graph-modules-depth-shows-one-service
+  - driver: web
+    click:
+      role: button
+      name: Functions
+    expect:
+      url:
+        contains: mode=functions
+      text:
+        contains: Select a module
+    note: >-
+      Functions depth, scoped one level deeper. The scoped service is carried over and two
+      modules remain candidates, so the canvas asks for the module the same way it asked for
+      the service. Prepares the pick below.
+  - driver: web
+    click:
+      role: button
+      name: Select module
+    expect:
+      visible:
+        role: button
+        name: user-repository
+    note: >-
+      Opening the module selector. Prepares the pick below.
+  - driver: web
+    click:
+      role: button
+      name: user-repository
+    expect:
+      text:
+        matches: ^(?=[\s\S]*findAllUsers)(?=[\s\S]*saveUser)(?![\s\S]*listUsers)[\s\S]*$
+    note: >-
+      The functions of ONE module: the repository's two exported functions are drawn, and
+      the other module's (`listUsers`) is not. Both names come from the analysis, so a
+      canvas that drew every function of the service — or none — fails here.
+    milestone:
+      - dashboard-graph-functions-depth-shows-one-module
+  - driver: web
+    click:
+      role: button
+      name: Services
+    expect:
+      visible:
+        role: heading
+        name: api
+    note: >-
+      Back to the whole system, because the database node only exists at this depth. Prepares
+      the last step.
+  - driver: web
+    click:
+      role: group
+      name: postgres
+    expect:
+      url:
+        contains: tab=databases
+      text:
+        matches: ^(?=[\s\S]*User)(?=[\s\S]*email)[\s\S]*$
+    note: >-
+      The second half of the contradiction, authored exactly as the doc states it: clicking a
+      database node LEAVES the graph for the Databases tab with that database's schema open.
+      The step above says the same click zooms and keeps you on the canvas; both sentences
+      are in the same section, and at most one of them can pass. Whichever fails is the
+      deliverable — doc drift if the UI has one settled behaviour, a product bug if it does
+      something else again. LOCATOR RISK, recorded rather than worked around: canvas nodes
+      carry the graph library's `group` role with NO accessible name, so `postgres` cannot in
+      fact be addressed by the roles-and-labels policy; this is the closest the vocabulary
+      comes to the click the doc describes, and a failure that names the missing target is a
+      true report about an unaddressable node.
+    milestone:
+      - dashboard-graph-clicking-a-database-opens-its-schema
