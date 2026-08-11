@@ -928,8 +928,8 @@ describe('guard-generator prompts', () => {
     // "journey" retired in favour of "interface" across stores, schemas and copy,
     // and this prompt renders that vocabulary, so its text moved without a single
     // rule moving with it. A rename, not vocabulary growth.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('80906df87c31c38a')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('80906df87c31c38a')
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('244fc34ecb318a03')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('244fc34ecb318a03')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
