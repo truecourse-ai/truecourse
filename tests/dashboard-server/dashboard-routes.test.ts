@@ -600,6 +600,36 @@ describe('dashboard routes (seeded store)', () => {
         .expect(200);
       expect(res.body).toBeDefined();
     });
+
+    it('disabled rule drops out of the resolution active count', async () => {
+      const ruleKey = seed.violations[0].ruleKey;
+      const before = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/analytics/resolution`)
+        .expect(200);
+      expect(before.body.totalActive).toBe(2);
+
+      // Same direct-config write as the violations test above — the read side
+      // is what's under test, not PATCH's catalogue validation.
+      await updateProjectConfig(fixture.repoPath, { disabledRules: [ruleKey] });
+      clearLatestCache();
+
+      const after = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/analytics/resolution`)
+        .expect(200);
+      expect(after.body.totalActive).toBe(0);
+
+      // The chips and the donut read the same active set — they must agree.
+      const breakdown = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/analytics/breakdown`)
+        .expect(200);
+      expect(after.body.totalActive).toBe(breakdown.body.total);
+
+      await updateProjectConfig(fixture.repoPath, { disabledRules: [] });
+      const restored = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/analytics/resolution`)
+        .expect(200);
+      expect(restored.body.totalActive).toBe(2);
+    });
   });
 
   // -------------------------------------------------------------------------
