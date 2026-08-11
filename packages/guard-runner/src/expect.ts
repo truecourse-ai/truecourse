@@ -155,12 +155,19 @@ function matchStream(
  * message. They differ for the web driver, whose subjects are a page and an address
  * rather than a stream ("the page text contains …") — the same matcher vocabulary,
  * so it must not be a second implementation of it.
+ *
+ * `limit` is the CHANNEL's width — how much of the value the compact `actual` line
+ * carries. It defaults to the compact 400, and a driver whose channel is wider
+ * passes its own cap (the web driver's page text carries 2000): a mismatch that
+ * re-truncated the value below what the assertion saw would cut the deciding
+ * content out of its own evidence.
  */
 export function matchTextMatcher(
   subject: ExpectMismatch['subject'],
   label: string,
   matcher: GuardStreamMatcher,
   value: string,
+  limit = 400,
 ): ExpectMismatch | null {
   // EVERY matcher the subject declares is evaluated, in this fixed order, and the
   // first that misses is the failure. A matcher that holds must never end the
@@ -168,19 +175,33 @@ export function matchTextMatcher(
   // halves, and skipping the second because the first passed would report a green
   // step that never compared anything.
   if (matcher.equals !== undefined && value !== matcher.equals) {
+    const caseOnly = value.toLowerCase() === matcher.equals.toLowerCase()
     return {
       subject,
       expected: `${label} equals ${JSON.stringify(truncate(matcher.equals))}`,
-      actual: `${label} was ${JSON.stringify(truncate(value))}`,
-      detail: [`--- expected ${label} (equals) ---`, matcher.equals, `--- actual ${label} ---`, value],
+      actual: `${label} was ${JSON.stringify(truncate(value, limit))}${caseNote(caseOnly)}`,
+      detail: [
+        `--- expected ${label} (equals) ---`,
+        matcher.equals,
+        `--- actual ${label} ---`,
+        value,
+        ...caseDetail(subject, caseOnly),
+      ],
     }
   }
   if (matcher.contains !== undefined && !value.includes(matcher.contains)) {
+    const caseOnly = value.toLowerCase().includes(matcher.contains.toLowerCase())
     return {
       subject,
       expected: `${label} contains ${JSON.stringify(matcher.contains)}`,
-      actual: `${label} was ${JSON.stringify(truncate(value))}`,
-      detail: [`expected ${label} to contain:`, matcher.contains, `--- actual ${label} ---`, value],
+      actual: `${label} was ${JSON.stringify(truncate(value, limit))}${caseNote(caseOnly)}`,
+      detail: [
+        `expected ${label} to contain:`,
+        matcher.contains,
+        `--- actual ${label} ---`,
+        value,
+        ...caseDetail(subject, caseOnly),
+      ],
     }
   }
   if (matcher.matches !== undefined) {
@@ -192,19 +213,46 @@ export function matchTextMatcher(
       reError = e instanceof Error ? e.message : String(e)
     }
     if (!re || !re.test(value)) {
+      const caseOnly = re !== null && new RegExp(matcher.matches, 'i').test(value)
       return {
         subject,
         expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
-        actual: `${label} was ${JSON.stringify(truncate(value))}`,
-        detail: [`expected ${label} to match /${matcher.matches}/`, `--- actual ${label} ---`, value],
+        actual: `${label} was ${JSON.stringify(truncate(value, limit))}${caseNote(caseOnly)}`,
+        detail: [
+          `expected ${label} to match /${matcher.matches}/`,
+          `--- actual ${label} ---`,
+          value,
+          ...caseDetail(subject, caseOnly),
+        ],
       }
     }
   }
   if (matcher.compare) {
-    const m = matchComparison(label, matcher.compare, value)
+    const m = matchComparison(label, matcher.compare, value, limit)
     if (m) return { ...m, subject }
   }
   return null
+}
+
+/**
+ * The one diagnosis a text miss makes about itself before a reader starts diffing by
+ * eye: the value HAS the expected words, in a different case. In a truncated actual
+ * that miss reads exactly like missing content — a misread that once turned a
+ * deterministic red into a phantom driver bug — so the mismatch says which of the
+ * two the reader has.
+ */
+function caseNote(caseOnly: boolean): string {
+  return caseOnly ? ' — differs only in letter case' : ''
+}
+
+/** The case-only line of the transcript, with the web-text WHY: CSS renders the case. */
+function caseDetail(subject: ExpectMismatch['subject'], caseOnly: boolean): string[] {
+  if (!caseOnly) return []
+  return subject === 'text'
+    ? [
+        'the miss is letter case alone: the page text is what CSS RENDERS, so a text-transform (an uppercased heading) changes the case the driver reads — assert the case the page shows',
+      ]
+    : ['the miss is letter case alone']
 }
 
 // --- Numeric comparison (the captured-value matcher) -----------------
@@ -240,6 +288,7 @@ export function matchComparison(
   label: string,
   compare: GuardComparison,
   text: string,
+  limit = 400,
 ): Omit<ExpectMismatch, 'subject'> | null {
   let raw = text
   if (compare.number !== undefined) {
@@ -253,7 +302,7 @@ export function matchComparison(
     if (!found || found[1] === undefined) {
       return {
         expected: `${label} to carry a number matching /${compare.number}/${reError ? ` (invalid regex: ${reError})` : ''}`,
-        actual: `${label} was ${JSON.stringify(truncate(text))}`,
+        actual: `${label} was ${JSON.stringify(truncate(text, limit))}`,
         detail: [
           `expected to read a number out of ${label} with /${compare.number}/, but it did not match`,
           `--- actual ${label} ---`,

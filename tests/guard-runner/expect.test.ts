@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { describeTextMatcher, evaluateExpect } from '@truecourse/guard-runner'
+import { describeTextMatcher, evaluateExpect, matchTextMatcher } from '@truecourse/guard-runner'
 
 let cwd: string
 const identity = (t: string): string => t
@@ -127,5 +127,59 @@ describe('describeTextMatcher — a matcher as a RECORD says it', () => {
   it('reads as one phrase for the one-member matchers a scenario usually writes', () => {
     expect(describeTextMatcher('the address', { equals: '/notes' })).toBe('the address equals "/notes"')
     expect(describeTextMatcher('the page text', { matches: '^ok$' })).toBe('the page text matches /^ok$/')
+  })
+})
+
+describe('matchTextMatcher — a case-only miss names itself', () => {
+  // A miss whose only difference is letter case reads, in a truncated actual,
+  // exactly like missing content — that misread cost a whole misdiagnosis once.
+  // The mismatch itself must say which of the two the reader has.
+  it('equals: the actual carries the case-only note', () => {
+    const m = matchTextMatcher('stdout', 'stdout', { equals: 'OK\n' }, 'ok\n')
+    expect(m?.actual).toContain('differs only in letter case')
+  })
+  it('contains: the actual carries the case-only note', () => {
+    const m = matchTextMatcher('stdout', 'stdout', { contains: 'Rate Limit' }, 'error: rate limit hit')
+    expect(m?.actual).toContain('differs only in letter case')
+  })
+  it('matches: the actual carries the case-only note', () => {
+    const m = matchTextMatcher('text', 'the page text', { matches: 'api\\s*2[\\s\\S]*worker' }, 'API\n2\nWORKER')
+    expect(m?.actual).toContain('differs only in letter case')
+  })
+  it('the web text subject explains WHY: the page text is what CSS renders', () => {
+    const m = matchTextMatcher('text', 'the page text', { contains: 'api' }, 'API')
+    expect(m?.detail.join('\n')).toContain('CSS')
+  })
+  it('a cli stream miss does not mention CSS', () => {
+    const m = matchTextMatcher('stdout', 'stdout', { contains: 'api' }, 'API')
+    expect(m?.detail.join('\n')).not.toContain('CSS')
+  })
+  it('a real content miss carries no case note', () => {
+    const m = matchTextMatcher('stdout', 'stdout', { contains: 'api' }, 'nothing here')
+    expect(m?.actual).not.toContain('letter case')
+  })
+  it('an invalid regex never gains the note', () => {
+    const m = matchTextMatcher('stdout', 'stdout', { matches: '(' }, 'anything')
+    expect(m?.expected).toContain('invalid regex')
+    expect(m?.actual).not.toContain('letter case')
+  })
+})
+
+describe('matchTextMatcher — the actual is cut at the CHANNEL width, not below it', () => {
+  // The web text channel carries 2000 chars; a mismatch that re-truncated it to 400
+  // cut the deciding content out of the actual while the assertion had seen it.
+  const long = `${'x'.repeat(450)} the deciding words ${'y'.repeat(50)}`
+  it('the default stays the compact 400', () => {
+    const m = matchTextMatcher('stdout', 'stdout', { contains: 'absent' }, long)
+    expect(m?.actual).not.toContain('the deciding words')
+    expect(m?.actual).toContain(`(${long.length} chars)`)
+  })
+  it('a caller-passed limit keeps the deciding content visible', () => {
+    const m = matchTextMatcher('text', 'the page text', { contains: 'absent' }, long, 2_000)
+    expect(m?.actual).toContain('the deciding words')
+  })
+  it('the limit reaches the comparison matcher too', () => {
+    const m = matchTextMatcher('text', 'the page text', { compare: { number: 'total: (\\d+)' } }, long, 2_000)
+    expect(m?.actual).toContain('the deciding words')
   })
 })

@@ -269,8 +269,11 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
       record({ subject: 'text', expected, actual: scoped.mismatch.actual }, scoped.mismatch)
     } else {
       record(
-        { subject: 'text', expected, actual: `${label} was ${JSON.stringify(truncate(scoped.text))}` },
-        matchTextMatcher('text', label, expect.text, scoped.text),
+        // The page-text channel carries WEB_TEXT_LIMIT chars, and the check's actual
+        // carries the same width — a narrower cut here once hid the deciding content
+        // from the very line that reported the miss.
+        { subject: 'text', expected, actual: `${label} was ${JSON.stringify(truncate(scoped.text, WEB_TEXT_LIMIT))}` },
+        matchTextMatcher('text', label, expect.text, scoped.text, WEB_TEXT_LIMIT),
       )
     }
   }
