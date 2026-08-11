@@ -6,6 +6,7 @@ import type {
   GuardClaimsView,
   GuardDecisions,
   GuardDocCoverage,
+  GuardEvidenceVisual,
   GuardFlowDetail,
   GuardFlowsView,
   GuardGenerateReport,
@@ -1276,6 +1277,49 @@ export async function getGuardEvidence(
   });
   if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
   return res.text();
+}
+
+/**
+ * WHERE a scenario's evidence bundle is, as the visual reads address it: the run it
+ * ran in, or the directory a birth finding stored. The same pair the transcript
+ * reads already split across two functions — one bundle, so one handle.
+ */
+export type GuardEvidenceWhere = { runId: string; scenarioId: string } | { evidencePath: string };
+
+function evidenceWhereParams(where: GuardEvidenceWhere): URLSearchParams {
+  return new URLSearchParams(
+    'runId' in where ? { runId: where.runId, scenarioId: where.scenarioId } : { evidencePath: where.evidencePath },
+  );
+}
+
+/**
+ * The VISUAL evidence of one scenario — the per-step screenshots and the session
+ * video a browser run left, in reading order. Always 200; a run that recorded none
+ * (every cli/api run, and every run written before the web driver existed) answers
+ * with an empty list.
+ */
+export async function getGuardEvidenceVisuals(
+  repoId: string,
+  where: GuardEvidenceWhere,
+): Promise<GuardEvidenceVisual[]> {
+  const body = await fetchApi<{ visuals?: GuardEvidenceVisual[] }>(
+    `/api/repos/${repoId}/guard/evidence/visuals?${evidenceWhereParams(where).toString()}`,
+  );
+  return body.visuals ?? [];
+}
+
+/**
+ * The URL one visual's BYTES are served from — an `<img>`/`<video>` source, not a
+ * fetch: the browser loads it itself, with the media type the route sets.
+ */
+export function guardEvidenceVisualUrl(
+  repoId: string,
+  where: GuardEvidenceWhere,
+  file: string,
+): string {
+  const params = evidenceWhereParams(where);
+  params.set('file', file);
+  return `${BASE_URL}/api/repos/${repoId}/guard/evidence/visual?${params.toString()}`;
 }
 
 /**

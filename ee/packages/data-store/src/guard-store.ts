@@ -103,6 +103,23 @@ interface Manifest {
 /** Evidence pointer prefix (`evidenceRelPath` shape): `.truecourse/guard/evidence/`. */
 const EVIDENCE_PREFIX_SEGMENTS = ['.truecourse', 'guard', 'evidence'];
 
+/**
+ * Read a repo-relative evidence DIRECTORY as the pair it addresses, or `null` when
+ * it is not one: the shape is exactly `<prefix>/<runId>/<scenarioSeg>`, and both
+ * segments must be plain — the hosted analogue of the file store's path
+ * confinement, since there is no path here to resolve.
+ */
+function parseEvidenceDir(evidenceDir: string): { runId: string; scenarioSeg: string } | null {
+  const segs = evidenceDir.split('/');
+  if (segs.length !== EVIDENCE_PREFIX_SEGMENTS.length + 2) return null;
+  if (segs.slice(0, EVIDENCE_PREFIX_SEGMENTS.length).join('/') !== EVIDENCE_PREFIX_SEGMENTS.join('/')) {
+    return null;
+  }
+  const [runId, scenarioSeg] = segs.slice(EVIDENCE_PREFIX_SEGMENTS.length);
+  if (!SAFE_SEGMENT.test(runId!) || !SAFE_SEGMENT.test(scenarioSeg!)) return null;
+  return { runId: runId!, scenarioSeg: scenarioSeg! };
+}
+
 export class PgGuardStore implements GuardStore {
   readonly materializesInPlace = false;
   private readonly content: ContentStore;
@@ -339,17 +356,13 @@ export class PgGuardStore implements GuardStore {
     file: string,
   ): Promise<string | null> {
     if (!SAFE_SEGMENT.test(file)) return null;
-    const segs = evidenceDir.split('/');
-    if (segs.length !== EVIDENCE_PREFIX_SEGMENTS.length + 2) return null;
-    const prefix = segs.slice(0, EVIDENCE_PREFIX_SEGMENTS.length);
-    if (prefix.join('/') !== EVIDENCE_PREFIX_SEGMENTS.join('/')) return null;
-    const [runId, scenarioSeg] = segs.slice(EVIDENCE_PREFIX_SEGMENTS.length);
-    if (!SAFE_SEGMENT.test(runId!) || !SAFE_SEGMENT.test(scenarioSeg!)) return null;
-    const key = `${scenarioSeg}/${file}`;
+    const at = parseEvidenceDir(evidenceDir);
+    if (!at) return null;
+    const key = `${at.scenarioSeg}/${file}`;
     // A run's evidence first (a `fail`/`error` transcript from a persisted run).
     // When a run row matches the runId it is authoritative — a missing key there is
     // a miss, not a cue to fall through to some other report's transcript.
-    const manifest = await this.runEvidenceManifest(repoKey, runId!);
+    const manifest = await this.runEvidenceManifest(repoKey, at.runId);
     if (manifest) {
       const sha = manifest[key];
       return sha ? this.content.get(contentScope.guardEvidence(repoKey), sha) : null;
@@ -358,6 +371,42 @@ export class PgGuardStore implements GuardStore {
     // runId that never created a `guard_runs` row, so the transcript hangs off a
     // `guard_results` evidence manifest instead (see `writeGuardResultEvidence`).
     return this.resolveResultEvidence(repoKey, key);
+  }
+
+  /**
+   * The bundle's file names, out of the same manifest the reads resolve against:
+   * every key under `<scenarioSeg>/`, with the prefix stripped. A run row is
+   * authoritative when one matches; otherwise the newest generate report holding
+   * that scenario's keys answers, mirroring `readGuardEvidenceAt`'s fallback.
+   */
+  async listGuardEvidenceAt(repoKey: string, evidenceDir: string): Promise<string[]> {
+    const at = parseEvidenceDir(evidenceDir);
+    if (!at) return [];
+    const prefix = `${at.scenarioSeg}/`;
+    const manifest =
+      (await this.runEvidenceManifest(repoKey, at.runId)) ??
+      (await this.resultEvidenceManifest(repoKey, prefix));
+    if (!manifest) return [];
+    return Object.keys(manifest)
+      .filter((k) => k.startsWith(prefix))
+      .map((k) => k.slice(prefix.length))
+      .sort();
+  }
+
+  /**
+   * The bytes of one evidence file. The hosted evidence channel is TEXT — the
+   * writers hand it `Record<string, string>` and the content pool stores it as
+   * text — so the bytes of a stored artifact are its UTF-8 encoding. A binary
+   * artifact (a screenshot, a session video) never enters this store, and so is
+   * never listed here either.
+   */
+  async readGuardEvidenceBytesAt(
+    repoKey: string,
+    evidenceDir: string,
+    file: string,
+  ): Promise<Buffer | null> {
+    const text = await this.readGuardEvidenceAt(repoKey, evidenceDir, file);
+    return text == null ? null : Buffer.from(text, 'utf-8');
   }
 
   /** A run row's evidence manifest, or `null` when no row matches the runId. */
@@ -383,6 +432,29 @@ export class PgGuardStore implements GuardStore {
     const sha = manifest?.[manifestKey];
     if (!sha) return null;
     return this.content.get(contentScope.guardEvidence(repoKey), sha);
+  }
+
+  /**
+   * The newest `guard_results` evidence manifest holding ANY key under `prefix`
+   * (`<scenarioSeg>/`) — the listing's half of `resolveResultEvidence`'s fallback,
+   * for a birth finding whose runId created no run row.
+   */
+  private async resultEvidenceManifest(
+    repoKey: string,
+    prefix: string,
+  ): Promise<Record<string, string> | null> {
+    const [row] = await this.db
+      .select({ evidence: guardResults.evidence })
+      .from(guardResults)
+      .where(
+        and(
+          eq(guardResults.repoKey, repoKey),
+          sql`EXISTS (SELECT 1 FROM jsonb_object_keys(${guardResults.evidence}) k WHERE k LIKE ${`${prefix}%`})`,
+        ),
+      )
+      .orderBy(desc(guardResults.createdAt))
+      .limit(1);
+    return row ? ((row.evidence as Record<string, string> | null) ?? {}) : null;
   }
 
   /**

@@ -16,7 +16,9 @@
  *                      milestone list of its own above the test. Every step says
  *                      what it drives (`cli`, `git`, `file`, `api`) and carries its
  *                      own expected/actual/output INLINE
- *   5 evidence         ONE transcript block
+ *   5 evidence         ONE transcript block — plus the run's own screenshots and
+ *                      session video when a browser took any (see
+ *                      {@link GuardEvidenceVisuals}); nothing extra when it did not
  *   6 interface          the code path it drives
  *   footer             labelled rows: Test · File · Flow · Spec
  *
@@ -63,6 +65,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, Braces, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import type {
+  GuardEvidenceVisual,
   GuardFailureDetail,
   GuardInterfaceRow,
   GuardScenarioSetupView,
@@ -74,6 +77,7 @@ import { HoverPopover } from '@/components/ui/hover-popover';
 import * as api from '@/lib/api';
 import { formatGuardDuration } from '@/lib/guard-drifts';
 import type { GuardTestStatusView } from '@/lib/guard-flow-status';
+import { GuardEvidenceVisuals } from './GuardEvidenceVisuals';
 import { GuardInterfaceDiagram } from './GuardInterfaceDiagram';
 import { GuardLongText } from './GuardLongText';
 import { GuardTestSetup } from './GuardTestSetup';
@@ -447,6 +451,8 @@ export function GuardScenarioBody({
   } | null>(null);
   const [evidence, setEvidence] = useState<string | null>(null);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
+  /** The bundle's screenshots + session video; empty for every run that took none. */
+  const [visuals, setVisuals] = useState<GuardEvidenceVisual[]>([]);
 
   const mounted = useRef(true);
   useEffect(() => {
@@ -489,6 +495,14 @@ export function GuardScenarioBody({
       });
   }, [repoId, test.id, evRunId, evPath]);
 
+  // The bundle the visuals are addressed by — the same directory the transcript is
+  // read from, as the pair of primitives above already names it.
+  const where: api.GuardEvidenceWhere | null = evPath
+    ? { evidencePath: evPath }
+    : evRunId
+      ? { runId: evRunId, scenarioId: test.id }
+      : null;
+
   useEffect(() => {
     if (!ev) return;
     setEvidence(null);
@@ -508,6 +522,26 @@ export function GuardScenarioBody({
         if (mounted.current) setEvidenceBusy(false);
       });
   }, [repoId, test.id, ev]);
+
+  // The visuals, on their own read — keyed on the two primitives, so re-rendering
+  // the parent never re-fetches them. A bundle that has none, and a store that
+  // cannot answer for them, leave the section exactly as it was: the transcript
+  // alone. Never blocks the transcript, and never reports a failure of its own.
+  useEffect(() => {
+    if (!evRunId && !evPath) return;
+    setVisuals([]);
+    const from: api.GuardEvidenceWhere = evPath
+      ? { evidencePath: evPath }
+      : { runId: evRunId!, scenarioId: test.id };
+    api
+      .getGuardEvidenceVisuals(repoId, from)
+      .then((found) => {
+        if (mounted.current) setVisuals(found);
+      })
+      .catch(() => {
+        if (mounted.current) setVisuals([]);
+      });
+  }, [repoId, test.id, evRunId, evPath]);
 
   const failed = test.status.plain === 'failed';
   const passed = test.status.plain === 'succeeded' && !failed;
@@ -720,11 +754,13 @@ export function GuardScenarioBody({
           </div>
         </div>
 
-        {/* 5. Evidence — ONE transcript, never repeated as separate sections. */}
-        {ev && (
+        {/* 5. Evidence — ONE transcript, never repeated as separate sections, and
+               the run's own pictures under it when a browser took any. */}
+        {where && (
           <div>
             <div className={LABEL}>Evidence</div>
             <GuardLongText text={evidenceBusy ? 'Loading transcript…' : evidence ?? ''} label="evidence transcript" />
+            <GuardEvidenceVisuals repoId={repoId} where={where} visuals={visuals} />
           </div>
         )}
 

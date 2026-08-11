@@ -17,6 +17,7 @@ import yaml from 'js-yaml'
 import {
   buildDocSectionIndex,
   computeRecipeFingerprint,
+  evidenceRelPath,
   guardClaimsPath,
   dependenciesPath,
   guardFlowsPath,
@@ -51,6 +52,9 @@ import {
   describeGuardScenarioSetup,
   describeGuardScenarioSteps,
   parseGuardStepActuals,
+  guardEvidenceVisual,
+  guardEvidenceVisuals,
+  type GuardEvidenceVisual,
   dismissedClaimKey,
   guardGapLabel,
   guardNoFlowClaimGapKind,
@@ -135,6 +139,8 @@ import {
   readGuardDecisions as readGuardDecisionsStore,
   readGuardEvidence as readGuardEvidenceStore,
   readGuardEvidenceAt as readGuardEvidenceAtStore,
+  listGuardEvidenceAt as listGuardEvidenceAtStore,
+  readGuardEvidenceBytesAt as readGuardEvidenceBytesAtStore,
   readGuardLatest as readGuardLatestStore,
   readGuardResult as readGuardResultStore,
   readGuardRun as readGuardRunStore,
@@ -2303,6 +2309,53 @@ export function readGuardEvidenceAt(
   file = 'transcript.txt',
 ): Promise<string | null> {
   return readGuardEvidenceAtStore(repoRoot, evidenceDir, file)
+}
+
+/**
+ * The evidence DIRECTORY a locator addresses. A run-addressed read resolves to the
+ * same pointer the run itself stored (`evidenceRelPath`), so both addressing modes
+ * reach the store through ONE dir-confined read — a `../`-laced runId or evidenceDir
+ * resolves outside the evidence root and is refused there.
+ */
+function evidenceDirOf(scenarioId: string, from: GuardEvidenceLocator): string {
+  return 'runId' in from ? evidenceRelPath(from.runId, scenarioId) : from.evidenceDir
+}
+
+/**
+ * The VISUAL evidence one scenario left in one run — the per-step screenshots and the
+ * session video a browser run writes next to the transcript, in reading order (see
+ * {@link guardEvidenceVisuals}).
+ *
+ * Read by LISTING the bundle, not by trusting a pointer: the screenshots are named in
+ * `invocation.json` but the session video is named nowhere, so the directory is the
+ * only complete answer. A cli/api bundle holds none and answers `[]`, which is what
+ * makes this additive — a run recorded before the web driver existed renders exactly
+ * as it did.
+ */
+export async function listGuardEvidenceVisuals(
+  repoRoot: string,
+  scenarioId: string,
+  from: GuardEvidenceLocator,
+): Promise<GuardEvidenceVisual[]> {
+  return guardEvidenceVisuals(await listGuardEvidenceAtStore(repoRoot, evidenceDirOf(scenarioId, from)))
+}
+
+/**
+ * ONE visual's raw bytes, with what it IS — the pair a serve route needs to answer
+ * with an honest media type. `null` when the name is not a visual (a transcript is
+ * read as text, through `readGuardEvidence`), when the bundle has no such file, or
+ * when the locator points outside the evidence root.
+ */
+export async function readGuardEvidenceVisual(
+  repoRoot: string,
+  scenarioId: string,
+  from: GuardEvidenceLocator,
+  file: string,
+): Promise<{ visual: GuardEvidenceVisual; bytes: Buffer } | null> {
+  const visual = guardEvidenceVisual(file)
+  if (!visual) return null
+  const bytes = await readGuardEvidenceBytesAtStore(repoRoot, evidenceDirOf(scenarioId, from), file)
+  return bytes == null ? null : { visual, bytes }
 }
 
 // ---------------------------------------------------------------------------

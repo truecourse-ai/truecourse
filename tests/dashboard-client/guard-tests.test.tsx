@@ -31,6 +31,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type {
   GuardDismissedClaim,
+  GuardEvidenceVisual,
   GuardFlowDetail,
   GuardFlowListItem,
   GuardFlowsView,
@@ -339,6 +340,14 @@ let servedSteps: unknown[] = STEPS;
 let servedSetup: GuardScenarioSetupView | undefined;
 /** Every `/guard/scenario` URL the detail asked for — the run it named rides on it. */
 let scenarioRequests: string[] = [];
+/**
+ * The visual half of the bundle the stub server holds. EMPTY by default: that is
+ * what every cli/api run — and every run recorded before the web driver existed —
+ * answers, and the whole suite below reads the page in exactly that state.
+ */
+let servedVisuals: GuardEvidenceVisual[] = [];
+/** Every `/guard/evidence/visuals` URL asked for — it must address the same bundle. */
+let visualsRequests: string[] = [];
 /** Every `/guard/recipe/raw` URL asked for — the raw mode must be LAZY. */
 let recipeRawRequests: string[] = [];
 /** Every spec section the page jumped to, as `[doc, anchor]`. */
@@ -375,6 +384,8 @@ beforeEach(() => {
   dismissedClaims = [];
   servedSteps = STEPS;
   servedSetup = undefined;
+  servedVisuals = [];
+  visualsRequests = [];
   scenarioRequests = [];
   recipeRawRequests = [];
   openedSpec = [];
@@ -397,6 +408,10 @@ beforeEach(() => {
     if (u.includes('/guard/recipe/raw')) {
       recipeRawRequests.push(u);
       return json({ id: RECIPE_FILE, file: RECIPE_FILE, content: RECIPE_RAW });
+    }
+    if (u.includes('/guard/evidence/visuals')) {
+      visualsRequests.push(u);
+      return json({ visuals: servedVisuals });
     }
     if (u.includes('/guard/finding-evidence')) return new Response(BIRTH_TRANSCRIPT, { status: 200 });
     if (u.includes('/guard/evidence')) return new Response(RUN_TRANSCRIPT, { status: 200 });
@@ -1010,6 +1025,105 @@ describe('the test, read inside its flow', () => {
     const pane = screen.getByLabelText('evidence transcript').closest('.flex-1') as HTMLElement;
     expect(pane.className).toContain('overflow-y-auto');
     expect(pane.className).toContain('overflow-x-hidden');
+  });
+
+  /**
+   * A BROWSER run's evidence is visual: a web step spawns nothing, so the only
+   * record of what it did is the picture of where it ended up. Those pictures read
+   * in the evidence section the transcript already lives in — no second pane, no
+   * tab of their own — and they read for a GREEN run exactly as for a red one.
+   */
+  describe('the run’s own pictures, in the evidence section', () => {
+    const WEB_VISUALS: GuardEvidenceVisual[] = [
+      { file: 'step-1.png', kind: 'screenshot', step: 1 },
+      { file: 'step-2.png', kind: 'screenshot', step: 2 },
+      { file: 'step-10.png', kind: 'screenshot', step: 10 },
+      { file: 'session.webm', kind: 'video' },
+    ];
+
+    it('renders the screenshots in STEP order, each labelled by its step', async () => {
+      servedVisuals = WEB_VISUALS;
+      // A PASSING test: visuals are evidence, not failure decoration.
+      renderTest(PASSING_ID);
+      await findSteps();
+
+      const shots = await screen.findByLabelText('evidence screenshots');
+      const images = within(shots).getAllByRole('img');
+      expect(images.map((img) => img.getAttribute('alt'))).toEqual([
+        'Step 1 screenshot',
+        'Step 2 screenshot',
+        'Step 10 screenshot',
+      ]);
+      // Each carries its step as a visible label, next to the picture it names.
+      for (const step of [1, 2, 10]) {
+        expect(within(shots).getByText(`Step ${step}`)).toBeInTheDocument();
+      }
+      // They live INSIDE the evidence section, under the transcript — not beside it.
+      const section = screen.getByText('Evidence').parentElement as HTMLElement;
+      expect(within(section).getByLabelText('evidence transcript')).toBeInTheDocument();
+      expect(section.contains(shots)).toBe(true);
+    });
+
+    it('opens a screenshot full size in a new tab — its own bytes, from the run it ran in', async () => {
+      servedVisuals = WEB_VISUALS;
+      renderTest(PASSING_ID);
+      await findSteps();
+
+      const shots = await screen.findByLabelText('evidence screenshots');
+      const link = within(shots).getAllByRole('link')[0] as HTMLAnchorElement;
+      expect(link.target).toBe('_blank');
+      expect(link.href).toContain('/guard/evidence/visual?');
+      expect(link.href).toContain('file=step-1.png');
+      // Addressed by the run the page is showing, and the scenario it is of.
+      expect(link.href).toContain(`runId=${encodeURIComponent(RUN_ID)}`);
+      expect(link.href).toContain(`scenarioId=${encodeURIComponent(PASSING_ID)}`);
+      // The thumbnail is the same file — one URL, no separate thumbnail pipeline.
+      expect(within(shots).getAllByRole('img')[0]).toHaveAttribute('src', link.href);
+    });
+
+    it('closes with the session video, as a plain player after the screenshots', async () => {
+      servedVisuals = WEB_VISUALS;
+      renderTest(PASSING_ID);
+      await findSteps();
+
+      const video = await screen.findByLabelText('session video');
+      expect(video.tagName).toBe('VIDEO');
+      expect(video).toHaveAttribute('controls');
+      expect(video.getAttribute('src')).toContain('file=session.webm');
+      // After the screenshots: the pictures are the walk-through, the video is the
+      // whole session behind them.
+      const shots = screen.getByLabelText('evidence screenshots');
+      expect(shots.compareDocumentPosition(video) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('a BIRTH bundle is addressed by its stored path, like its transcript', async () => {
+      servedVisuals = [{ file: 'step-1.png', kind: 'screenshot', step: 1 }];
+      renderTest(BIRTH_FAILED_ID);
+      await findSteps();
+
+      const shots = await screen.findByLabelText('evidence screenshots');
+      expect(within(shots).getAllByRole('link')[0]).toHaveAttribute(
+        'href',
+        expect.stringContaining('evidencePath='),
+      );
+      await waitFor(() => expect(visualsRequests.some((u) => u.includes('evidencePath='))).toBe(true));
+    });
+
+    it('a run that took none renders the evidence section EXACTLY as before', async () => {
+      // The default: no visuals in the bundle (every cli/api run, and every run
+      // recorded before the web driver existed).
+      renderTest(PASSING_ID);
+      await findSteps();
+      await waitFor(() =>
+        expect(screen.getByLabelText('evidence transcript')).toHaveTextContent('$ tasks add "write the spec"'),
+      );
+      // The read still HAPPENED — it just found nothing, and nothing is rendered
+      // for it: no empty gallery, no "no screenshots" line, no player.
+      expect(visualsRequests.length).toBeGreaterThan(0);
+      expect(screen.queryByLabelText('evidence screenshots')).toBeNull();
+      expect(screen.queryByLabelText('session video')).toBeNull();
+      expect(screen.queryByRole('img')).toBeNull();
+    });
   });
 
   it('marks a test that failed at BIRTH and reads its birth transcript', async () => {

@@ -22,6 +22,8 @@
  *   GET /:id/guard/recipe/raw    scenarios/recipe.json itself, inline secrets masked
  *   GET /:id/guard/evidence      one evidence file for ?runId=&scenarioId=[&file=transcript.txt]
  *   GET /:id/guard/finding-evidence  one evidence file for a finding by ?path=<evidenceDir>[&file=]
+ *   GET /:id/guard/evidence/visuals  a scenario's screenshots + session video (names only)
+ *   GET /:id/guard/evidence/visual   one of those files, as image/png or video/webm
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
  *   GET /:id/guard/externals     detected + declared external API accounts
@@ -33,7 +35,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import path from 'node:path';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
-import { composeGuardStatus } from '@truecourse/shared';
+import { composeGuardStatus, GUARD_VISUAL_CONTENT_TYPE } from '@truecourse/shared';
 import {
   readManifestForView,
   readGuardRunForView,
@@ -50,6 +52,8 @@ import {
   readGuardRecipeRaw,
   readGuardEvidence,
   readGuardEvidenceAt,
+  listGuardEvidenceVisuals,
+  readGuardEvidenceVisual,
   getGuardDecisions,
   computeGuardStaleness,
   composeDocCoverage,
@@ -62,6 +66,7 @@ import {
   readGuardClaimsForView,
   readGuardRunFlows,
   guardExternalSetupIndexForView,
+  type GuardEvidenceLocator,
 } from '@truecourse/core/commands/guard-read';
 import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
 import { readGuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
@@ -381,6 +386,64 @@ router.get('/:id/guard/evidence', async (req: Request, res: Response, next: Next
       return;
     }
     res.type('text/plain').send(content);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * WHERE a scenario's evidence bundle is, off the query — a run (`?runId=`) or the
+ * evidence directory a birth finding stored (`?evidencePath=`). The same two
+ * addressing modes `/guard/scenario` takes for its per-step actuals, because it is
+ * the same bundle; `null` when the query names neither.
+ */
+function evidenceLocatorOf(req: Request): GuardEvidenceLocator | null {
+  const runId = String(req.query.runId ?? '');
+  if (runId) return { runId };
+  const evidencePath = String(req.query.evidencePath ?? '');
+  return evidencePath ? { evidenceDir: evidencePath } : null;
+}
+
+// The VISUAL evidence of one scenario — the per-step screenshots and the session
+// video a browser run leaves in the bundle, as names + kinds + step indexes (the
+// bytes come from the sibling route below). Always 200: a cli/api run has none, and
+// an empty list is the honest answer for it.
+router.get('/:id/guard/evidence/visuals', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const scenarioId = String(req.query.scenarioId ?? '');
+    const from = evidenceLocatorOf(req);
+    if (!from || ('runId' in from && !scenarioId)) {
+      res.status(400).json({ error: 'Missing ?runId=&scenarioId= or ?evidencePath=.' });
+      return;
+    }
+    res.json({ visuals: await listGuardEvidenceVisuals(repo.path, scenarioId, from) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ONE of those files, as bytes. Served with the media type its KIND dictates —
+// never sniffed, and never a file that is not a visual (a transcript is text and is
+// read through `/guard/evidence`). Path-safe by the same driver confinement the text
+// reads use: an unsafe file name, or a locator resolving outside the evidence root,
+// reads as a miss.
+router.get('/:id/guard/evidence/visual', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const scenarioId = String(req.query.scenarioId ?? '');
+    const file = String(req.query.file ?? '');
+    const from = evidenceLocatorOf(req);
+    if (!from || !file || ('runId' in from && !scenarioId)) {
+      res.status(400).json({ error: 'Missing ?file= and ?runId=&scenarioId= or ?evidencePath=.' });
+      return;
+    }
+    const found = await readGuardEvidenceVisual(repo.path, scenarioId, from, file);
+    if (!found) {
+      res.status(404).json({ error: 'Evidence not found.' });
+      return;
+    }
+    res.type(GUARD_VISUAL_CONTENT_TYPE[found.visual.kind]).send(found.bytes);
   } catch (e) {
     next(e);
   }

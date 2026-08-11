@@ -319,6 +319,33 @@ describe('PgGuardStore — evidence (pglite + Postgres content)', () => {
     expect(await store.readGuardEvidenceAt(REPO, rel, 'log.txt')).toBe('hi');
   });
 
+  // The bundle LISTING + the bytes read — the pair the dashboard's visual evidence
+  // is served through. The hosted evidence channel is text (the writers hand it
+  // `Record<string, string>`), so bytes here are that text's UTF-8 encoding; what
+  // matters is that both address exactly one scenario's slice of the manifest.
+  it('lists one scenario’s files out of the run manifest, and reads their bytes', async () => {
+    await store.writeGuardRun(REPO, makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' }));
+    const rel = await store.writeGuardEvidence(REPO, 'r1', 's1', {
+      'transcript.txt': 'ran help, exit 0',
+      'invocation.json': '{"ok":true}',
+    });
+    // A SIBLING scenario in the same run must never leak into the listing.
+    await store.writeGuardEvidence(REPO, 'r1', 's2', { 'transcript.txt': 'other' });
+
+    expect(await store.listGuardEvidenceAt(REPO, rel)).toEqual(['invocation.json', 'transcript.txt']);
+    expect((await store.readGuardEvidenceBytesAt(REPO, rel, 'transcript.txt'))?.toString('utf-8')).toBe(
+      'ran help, exit 0',
+    );
+    // Absent files, unsafe segments and dirs outside the evidence prefix answer nothing.
+    expect(await store.readGuardEvidenceBytesAt(REPO, rel, 'missing.png')).toBeNull();
+    expect(await store.readGuardEvidenceBytesAt(REPO, rel, '../escape')).toBeNull();
+    expect(await store.listGuardEvidenceAt(REPO, '../../etc')).toEqual([]);
+    expect(await store.listGuardEvidenceAt(REPO, '.truecourse/guard/evidence/r1')).toEqual([]);
+    // A run that wrote nothing for that scenario lists nothing.
+    expect(await store.listGuardEvidenceAt(REPO, '.truecourse/guard/evidence/r1/s404')).toEqual([]);
+    expect(await store.listGuardEvidenceAt('other/repo', rel)).toEqual([]);
+  });
+
   it('rejects an unsafe evidence file name on write', async () => {
     await store.writeGuardRun(REPO, makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' }));
     await expect(store.writeGuardEvidence(REPO, 'r1', 's1', { '../evil': 'x' })).rejects.toThrow(/unsafe/i);
@@ -406,6 +433,25 @@ describe('PgGuardStore — birth-finding (result) evidence (pglite + Postgres co
     expect(await scopeCount(db, contentScope.guardEvidence(REPO))).toBe(2);
     // isolated by repo
     expect(await store.readGuardEvidenceAt('other/repo', evPath, 'transcript.txt')).toBeNull();
+  });
+
+  it('lists a birth bundle through the same result fallback the reads use', async () => {
+    await store.writeGuardResult(refAt('c1'), makeReport());
+    await store.writeGuardResultEvidence(refAt('c1'), 's5', {
+      'transcript.txt': 'birth run failed at step 2',
+      'diff.txt': 'expected exit 0, got 1',
+    });
+    // A second finding on the same report — one scenario's slice, never the report's.
+    await store.writeGuardResultEvidence(refAt('c1'), 's6', { 'transcript.txt': 'another' });
+
+    const evPath = '.truecourse/guard/evidence/gen-run-1/s5';
+    expect(await store.listGuardEvidenceAt(REPO, evPath)).toEqual(['diff.txt', 'transcript.txt']);
+    expect((await store.readGuardEvidenceBytesAt(REPO, evPath, 'diff.txt'))?.toString('utf-8')).toBe(
+      'expected exit 0, got 1',
+    );
+    // No report holds that scenario's keys → nothing listed, and nothing leaks by repo.
+    expect(await store.listGuardEvidenceAt(REPO, '.truecourse/guard/evidence/gen-run-1/s404')).toEqual([]);
+    expect(await store.listGuardEvidenceAt('other/repo', evPath)).toEqual([]);
   });
 
   it('the run-row read still wins for a real run; birth evidence resolves only via the fallback', async () => {

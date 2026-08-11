@@ -14,6 +14,14 @@ import { setupTestFixture, teardownTestFixture, type TestFixture } from '../help
 const RUN_ID = '2026-07-07T00-00-00Z_abc12345';
 const DOC = 'docs/spec.md';
 
+/**
+ * Bytes that are NOT valid UTF-8 (the PNG signature, and a WebM/EBML header) — a
+ * read that decoded them as text would round-trip them into replacement characters,
+ * so an exact buffer comparison is what proves the visual routes are binary-safe.
+ */
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe, 0x01]);
+const WEBM_BYTES = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0xff, 0x80, 0x42]);
+
 const LATEST = {
   run: { runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
   summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0 },
@@ -89,7 +97,37 @@ describe('Guard routes', () => {
     fs.writeFileSync(f, content);
   };
   const writeJson = (rel: string, obj: unknown) => write(rel, JSON.stringify(obj, null, 2));
+  const writeBytes = (rel: string, bytes: Buffer) => {
+    const f = path.join(root, rel);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, bytes);
+  };
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
+
+  /**
+   * A GET whose body is read as BYTES. superagent decodes a response as text by
+   * default, which is exactly what a screenshot must never be put through — so the
+   * binary routes are asserted against the raw buffer.
+   */
+  const binary = (suffix: string) =>
+    request(app)
+      .get(suffix)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+
+  /** The visual half of `a1`'s bundle — out of step order on disk, on purpose. */
+  function seedVisuals() {
+    const dir = `.truecourse/guard/evidence/${RUN_ID}/a1`;
+    writeBytes(`${dir}/step-2.png`, PNG_BYTES);
+    writeBytes(`${dir}/step-10.png`, PNG_BYTES);
+    writeBytes(`${dir}/step-1.png`, PNG_BYTES);
+    writeBytes(`${dir}/session.webm`, WEBM_BYTES);
+    writeJson(`${dir}/invocation.json`, { scenarioId: 'a1', steps: [] });
+  }
 
   function seed() {
     write(DOC, '# Alpha\nbody a\n# Beta\nbody b\n');
@@ -293,6 +331,118 @@ describe('Guard routes', () => {
     seed();
     const res = await request(app).get(url(`evidence?runId=${RUN_ID}&scenarioId=a1`)).expect(200);
     expect(res.text).toBe('hello evidence\n');
+  });
+
+  // --- Visual evidence: a browser run's screenshots + session video ---------
+  //
+  // The bundle's non-text half. Listed (nothing names the video) and served as
+  // BYTES with the media type its kind dictates — a screenshot round-tripped
+  // through a text read would be a corrupted file, so these prove the bytes come
+  // back identical. A bundle with none of them answers an empty list, which is
+  // what keeps every pre-web run rendering exactly as it did.
+
+  it('visuals lists the screenshots in STEP order with the video last', async () => {
+    seed();
+    seedVisuals();
+    const res = await request(app)
+      .get(url(`evidence/visuals?runId=${RUN_ID}&scenarioId=a1`))
+      .expect(200);
+    // Sorted by step, not by filename (`step-10` after `step-2`), and the text
+    // files of the same bundle are not visuals.
+    expect(res.body.visuals).toEqual([
+      { file: 'step-1.png', kind: 'screenshot', step: 1 },
+      { file: 'step-2.png', kind: 'screenshot', step: 2 },
+      { file: 'step-10.png', kind: 'screenshot', step: 10 },
+      { file: 'session.webm', kind: 'video' },
+    ]);
+  });
+
+  it('visuals is EMPTY for a run that took none — the pre-web bundle is unchanged', async () => {
+    seed();
+    const res = await request(app)
+      .get(url(`evidence/visuals?runId=${RUN_ID}&scenarioId=a1`))
+      .expect(200);
+    expect(res.body).toEqual({ visuals: [] });
+    // …and the transcript it does have still reads.
+    await request(app).get(url(`evidence?runId=${RUN_ID}&scenarioId=a1`)).expect(200);
+  });
+
+  it('visuals answers the same bundle by evidence PATH (a birth finding)', async () => {
+    seed();
+    seedVisuals();
+    const dir = `.truecourse/guard/evidence/${RUN_ID}/a1`;
+    const res = await request(app)
+      .get(url(`evidence/visuals?evidencePath=${encodeURIComponent(dir)}`))
+      .expect(200);
+    expect(res.body.visuals.map((v: { file: string }) => v.file)).toEqual([
+      'step-1.png',
+      'step-2.png',
+      'step-10.png',
+      'session.webm',
+    ]);
+  });
+
+  it('visual serves a screenshot as image/png, byte for byte', async () => {
+    seed();
+    seedVisuals();
+    const res = await binary(url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=step-1.png`));
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^image\/png/);
+    expect(Buffer.compare(res.body as Buffer, PNG_BYTES)).toBe(0);
+  });
+
+  it('visual serves the session video as video/webm, byte for byte', async () => {
+    seed();
+    seedVisuals();
+    const res = await binary(
+      url(`evidence/visual?evidencePath=${encodeURIComponent(`.truecourse/guard/evidence/${RUN_ID}/a1`)}&file=session.webm`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^video\/webm/);
+    expect(Buffer.compare(res.body as Buffer, WEBM_BYTES)).toBe(0);
+  });
+
+  it('visual 404s on an absent file and on one that is not a visual', async () => {
+    seed();
+    seedVisuals();
+    await request(app).get(url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=step-9.png`)).expect(404);
+    // The transcript is text and is read through `/guard/evidence` — serving it
+    // here would mean answering with a media type that is a lie.
+    await request(app).get(url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=transcript.txt`)).expect(404);
+  });
+
+  it('the visual reads refuse to escape the evidence root', async () => {
+    seed();
+    seedVisuals();
+    fs.writeFileSync(path.join(root, 'secret.png'), 'not yours');
+    const traversals = [
+      `runId=${encodeURIComponent('../../..')}&scenarioId=a1`,
+      `runId=${RUN_ID}&scenarioId=${encodeURIComponent('../a1')}`,
+      `evidencePath=${encodeURIComponent('.truecourse')}`,
+      `evidencePath=${encodeURIComponent(`.truecourse/guard/evidence/${RUN_ID}/a1/../../../..`)}`,
+    ];
+    for (const where of traversals) {
+      // Nothing outside the evidence root is ever listed…
+      const listed = await request(app).get(url(`evidence/visuals?${where}`)).expect(200);
+      expect(listed.body).toEqual({ visuals: [] });
+      // …and nothing outside it is ever served.
+      await request(app).get(url(`evidence/visual?${where}&file=secret.png`)).expect(404);
+    }
+    // A file name is a plain segment: separators and `..` never resolve.
+    await request(app)
+      .get(url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=${encodeURIComponent('../../../../etc/passwd')}`))
+      .expect(404);
+    await request(app)
+      .get(url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=${encodeURIComponent('../secret.png')}`))
+      .expect(404);
+  });
+
+  it('the visual reads 400 on a locator the query does not carry', async () => {
+    seed();
+    await request(app).get(url('evidence/visuals')).expect(400);
+    await request(app).get(url(`evidence/visuals?runId=${RUN_ID}`)).expect(400);
+    await request(app).get(url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1`)).expect(400);
+    await request(app).get(url('evidence/visual?file=step-1.png')).expect(400);
   });
 
   // --- The merged step list: authored expectations + the run's actuals -------
