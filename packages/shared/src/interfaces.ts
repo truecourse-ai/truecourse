@@ -34,23 +34,6 @@ export const InterfaceStepKindSchema = z.enum([
 ])
 export type InterfaceStepKind = z.infer<typeof InterfaceStepKindSchema>
 
-/**
- * A step's STATE HANDOFF — every step is one user action, and these two fields
- * are the observable world on either side of it: `input` the state the action
- * needs (a dropdown already open, a panel visible), `output` the interaction
- * change it produces (the dropdown IS open, the rule's cards are gone). They
- * chain: the first step's input restates the interface's `startingState`, each
- * step's output is the next step's input, and the last step's output restates
- * the interface's `endState` — {@link InterfaceSchema} enforces all three, so an
- * interface can never claim a path whose middle doesn't connect. One plain
- * sentence each; optional (a catalog written before them parses unchanged);
- * prose about state, so never fingerprinted — see {@link stepIdentity}.
- */
-const interfaceStepStateFields = {
-  input: z.string().min(1).optional(),
-  output: z.string().min(1).optional(),
-}
-
 /** Run a command (cli / tui): the argv PATH plus the flags that command accepts. */
 export const InterfaceInvokeStepSchema = z
   .object({
@@ -61,7 +44,6 @@ export const InterfaceInvokeStepSchema = z
     flags: z.array(z.string()).default([]),
     /** Human one-liner for display; cosmetic — never fingerprinted. */
     label: z.string().optional(),
-    ...interfaceStepStateFields,
   })
   .strict()
 
@@ -73,7 +55,6 @@ export const InterfaceRequestStepSchema = z
     /** Path template as the surface declares it, e.g. `/tasks/:id`. */
     path: z.string().min(1),
     label: z.string().optional(),
-    ...interfaceStepStateFields,
   })
   .strict()
 
@@ -83,7 +64,6 @@ export const InterfaceNavigateStepSchema = z
     kind: z.literal('navigate'),
     route: z.string().min(1),
     label: z.string().optional(),
-    ...interfaceStepStateFields,
   })
   .strict()
 
@@ -93,7 +73,6 @@ export const InterfaceInputStepSchema = z
     kind: z.literal('input'),
     target: z.string().min(1),
     label: z.string().optional(),
-    ...interfaceStepStateFields,
   })
   .strict()
 
@@ -103,7 +82,6 @@ export const InterfaceActivateStepSchema = z
     kind: z.literal('activate'),
     target: z.string().min(1),
     label: z.string().optional(),
-    ...interfaceStepStateFields,
   })
   .strict()
 
@@ -120,6 +98,41 @@ export type InterfaceNavigateStep = z.infer<typeof InterfaceNavigateStepSchema>
 export type InterfaceInputStep = z.infer<typeof InterfaceInputStepSchema>
 export type InterfaceActivateStep = z.infer<typeof InterfaceActivateStepSchema>
 export type InterfaceStep = z.infer<typeof InterfaceStepSchema>
+
+// ---------------------------------------------------------------------------
+// NAMED STATES — the per-area registry an interface's state contract points into
+// (decided 2026-08-11, replacing the one-sentence prose those fields carried).
+// A state is DEFINED ONCE, with an id and one line, and every task that assumes
+// or leaves it references that id. Two tasks chain when their ids are EQUAL,
+// which is the whole reason the prose went: sentences describing the same world
+// two ways can never be matched, and restating each step's side of the handoff
+// made the entries unreadable. Within a task the chain is STEP ORDER, so a step
+// carries no state of its own.
+// ---------------------------------------------------------------------------
+
+/**
+ * A state ID — kebab-case, one token (`repo-report-open`, `rule-silenced`). The
+ * shape is enforced rather than conventional: an id is compared by equality, and
+ * a sentence that slips into the field is a state nothing can ever chain to.
+ */
+export const InterfaceStateIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'a state id is kebab-case — a sentence is not a state id')
+export type InterfaceStateId = z.infer<typeof InterfaceStateIdSchema>
+
+/**
+ * One entry of the registry: the id tasks reference, and the ONE line that says
+ * what world it names. The description is read by a human (and rendered by the
+ * dashboard); nothing matches on it, so rewording it costs nothing.
+ */
+export const InterfaceStateSchema = z
+  .object({
+    id: InterfaceStateIdSchema,
+    /** The world the id names, one line — never the path taken to reach it. */
+    description: z.string().min(1),
+  })
+  .strict()
+export type InterfaceState = z.infer<typeof InterfaceStateSchema>
 
 /** An interface rooted at a cli command — the argv path it starts from. */
 export const InterfaceCommandEntrySchema = z
@@ -711,21 +724,23 @@ export const InterfaceSchema = z
     entry: InterfaceEntrySchema,
     steps: z.array(InterfaceStepSchema).min(1),
     /**
-     * The world the interface ASSUMES, one plain sentence — an interface is one task a
-     * user can perform from a specific state ("on an analyzed repository's page
-     * with violation cards visible"), and this is that state. Decided 2026-08-11
-     * for the web surface; optional so cli/api catalogs written before it parse
-     * unchanged. Never fingerprinted: prose about the state is not WHICH task
-     * the interface is.
+     * The world the interface ASSUMES, as a STATE ID from its area's registry —
+     * an interface is one task a user can perform from a specific state
+     * (`repo-report-open`), and this is that state. Named rather than described
+     * (2026-08-11) so an earlier task's `endState` and this one's `startingState`
+     * chain by equality; the sentence lives once, in
+     * {@link InterfacesFileSchema.states}, and the file refuses an id no registry
+     * defines. Optional so cli/api catalogs carrying none parse unchanged, and
+     * never fingerprinted: the state a task starts from is not WHICH task it is.
      */
-    startingState: z.string().min(1).optional(),
+    startingState: InterfaceStateIdSchema.optional(),
     /**
-     * The observable world the task LEAVES behind, one plain sentence ("the rule
-     * is disabled and its violation cards have left the list") — what a scenario
-     * asserts after walking the steps. Same optionality and fingerprint rules as
-     * `startingState`.
+     * The observable world the task LEAVES behind, as a state id from the same
+     * registry (`rule-silenced`) — what a scenario asserts after walking the
+     * steps, and what the next task in a flow starts from. Same registry,
+     * optionality and fingerprint rules as `startingState`.
      */
-    endState: z.string().min(1).optional(),
+    endState: InterfaceStateIdSchema.optional(),
     /**
      * THE UI-TO-API RELATION: the api operations this task's steps invoke, as
      * {@link InterfaceSchema.id}s of the api entries in the SAME catalog
@@ -765,34 +780,6 @@ export const InterfaceSchema = z
     contract: InterfaceContractSchema.optional(),
   })
   .strict()
-  .superRefine((iface, ctx) => {
-    // THE STATE CHAIN — where both sides of a handoff are stated, they must
-    // agree (whitespace-normalized, the corpus-wide prose rule): the first
-    // step's input restates `startingState`, each step's output is the next
-    // step's input, and the last step's output restates `endState`. A step
-    // that states neither side is tolerated (older catalogs, cli trees); a
-    // stated mismatch is a path whose middle doesn't connect, refused here
-    // rather than discovered by a scenario that hangs on a dropdown that was
-    // never opened.
-    const same = (a: string, b: string) => normalizeToken(a) === normalizeToken(b)
-    const refuse = (path: (string | number)[], message: string) =>
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path, message })
-
-    const first = iface.steps[0]
-    if (iface.startingState && first?.input && !same(iface.startingState, first.input)) {
-      refuse(['steps', 0, 'input'], 'the first step’s input must restate the interface’s startingState')
-    }
-    iface.steps.forEach((step, i) => {
-      const next = iface.steps[i + 1]
-      if (next && step.output && next.input && !same(step.output, next.input)) {
-        refuse(['steps', i + 1, 'input'], `step ${i + 2}’s input must restate step ${i + 1}’s output — the handoff doesn’t connect`)
-      }
-    })
-    const last = iface.steps[iface.steps.length - 1]
-    if (iface.endState && last?.output && !same(iface.endState, last.output)) {
-      refuse(['steps', iface.steps.length - 1, 'output'], 'the last step’s output must restate the interface’s endState')
-    }
-  })
 export type Interface = z.infer<typeof InterfaceSchema>
 
 /**
@@ -810,6 +797,14 @@ export type InterfaceCatalogSource = z.infer<typeof InterfaceCatalogSourceSchema
  * so a catalog written before them parses unchanged and a catalog written with
  * them parses in a reader that ignores them. The number is reserved for a change
  * that BREAKS one of those two directions.
+ *
+ * It did NOT move when the state contract went from prose to named ids
+ * (2026-08-11), and the exception is narrow enough to state exactly: the prose
+ * fields existed for one day, on hand-authored web entries only — no extractor
+ * has ever written one, so the only catalogs carrying them were this repo's own
+ * two copies, migrated with the change. Every catalog a mapping has produced
+ * (cli and api entries, no states, no step handoff) parses unchanged. A removal
+ * that reached data a mapper had shipped WOULD move the number.
  */
 export const InterfacesFileSchema = z
   .object({
@@ -819,10 +814,55 @@ export const InterfacesFileSchema = z
     /** The recipe fingerprint the mapping ran against. */
     recipeFingerprint: z.string(),
     interfaces: z.array(InterfaceSchema),
+    /**
+     * THE STATE REGISTRY, per AREA: interface TYPE (a driver-registry id) → the
+     * states that area's tasks assume and leave, each defined once. The same key
+     * `source` uses, and deliberately NOT {@link InterfaceSchema.group}: chaining
+     * crosses families — the report a `home` task opens is the state every
+     * `repos` task starts from — so a group-scoped registry could not express a
+     * flow's own walk.
+     *
+     * Additive and optional (a catalog that names no states parses unchanged),
+     * and never fingerprinted — see {@link interfaceFingerprint}.
+     */
+    states: z.record(z.string(), z.array(InterfaceStateSchema)).optional(),
     /** Per interface TYPE (a driver-registry id) → how that catalog was derived. */
     source: z.record(z.string(), InterfaceCatalogSourceSchema).optional(),
   })
   .strict()
+  .superRefine((file, ctx) => {
+    // An id is only a NAME if something defines it. Ids resolve in the registry
+    // of the interface's OWN area, so two surfaces may name a state alike and
+    // each mean their own — the `type`-scoping `source` and `group` already use.
+    const registry = new Map<string, Set<string>>()
+    for (const [area, states] of Object.entries(file.states ?? {})) {
+      const ids = new Set<string>()
+      states.forEach((state, i) => {
+        if (ids.has(state.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['states', area, i, 'id'],
+            message: `\`${state.id}\` is defined twice in the \`${area}\` registry`,
+          })
+        }
+        ids.add(state.id)
+      })
+      registry.set(area, ids)
+    }
+    file.interfaces.forEach((iface, i) => {
+      const known = registry.get(iface.type)
+      for (const field of ['startingState', 'endState'] as const) {
+        const id = iface[field]
+        if (id && !known?.has(id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, field],
+            message: `\`${id}\` is not a state the \`${iface.type}\` registry defines`,
+          })
+        }
+      }
+    })
+  })
 export type InterfacesFile = z.infer<typeof InterfacesFileSchema>
 
 /**
@@ -857,11 +897,11 @@ function normalizeToken(text: string): string {
 /**
  * A step's fingerprinted identity: its kind plus the SURFACE-VISIBLE payload —
  * the command path and its flag set, the method + path template, the route, the
- * target. `label` is cosmetic and never folded in, and the state handoff
- * (`input`/`output`) is prose about the world around the action, not WHICH
- * action it is — rewording a dropdown's description must never re-author a
- * scenario. Flags fold as a SET (sorted):
- * which flags a command accepts is the surface, the order help prints them is not.
+ * target. `label` is cosmetic and never folded in, and a step carries no state
+ * at all: within a task the chain IS step order (2026-08-11), and the task's own
+ * two states are ids on the interface, outside the fold. Flags fold as a SET
+ * (sorted): which flags a command accepts is the surface, the order help prints
+ * them is not.
  */
 function stepIdentity(step: InterfaceStep): string {
   switch (step.kind) {
@@ -895,7 +935,9 @@ function stepIdentity(step: InterfaceStep): string {
  * was — the signature is `Pick<Interface, 'type' | 'entry' | 'steps'>` so a caller
  * cannot accidentally fold one in. {@link InterfaceSchema.apiEffects} is excluded
  * by the same rule: which operations a click reaches is what the task DOES behind
- * the glass, not which task it is.
+ * the glass, not which task it is. The STATE CONTRACT is excluded too, and always
+ * was: the world a task assumes and leaves is not WHICH task it is, so naming the
+ * states (2026-08-11) left all 60 reference fingerprints byte-identical.
  */
 export function interfaceFingerprint(
   iface: Pick<Interface, 'type' | 'entry' | 'steps'>,

@@ -13,6 +13,8 @@ import {
   InterfaceSchema,
   InterfaceSequenceSchema,
   InterfaceSlotKindSchema,
+  InterfaceStateIdSchema,
+  InterfaceStateSchema,
   InterfaceStepSchema,
   InterfaceStepKindSchema,
   InterfacesFileSchema,
@@ -80,46 +82,100 @@ describe('interface schemas', () => {
     expect(() => InterfaceSchema.parse({ ...iface([INVOKE]), steps: [] })).toThrow()
   })
 
-  it('a step’s state handoff must chain — start, through every step, to end', () => {
-    const MENU: InterfaceStep = { kind: 'activate', target: 'menuitem "Disable rule for this repo"' }
-    const chained = iface(
-      [
-        { ...ACTIVATE, input: 'on the page', output: 'the dropdown is open' },
-        { ...MENU, input: 'the dropdown is open', output: 'the rule is off' },
-      ],
-      { startingState: 'on the page', endState: 'the rule is off' },
-    )
-    expect(() => InterfaceSchema.parse(chained)).not.toThrow()
-
-    // Whitespace never breaks a handoff — the corpus-wide prose rule.
+  /**
+   * NAMED STATES (2026-08-11). The state contract used to be a sentence per side
+   * and a sentence per STEP, chained by whitespace-normalized prose equality.
+   * What replaced it: a per-area registry of `{ id, description }`, task-level
+   * ids into it, and no step state at all — within a task the chain is step
+   * order. These tests hold the three properties that makes the rework worth
+   * anything: an id is an id, an id resolves, and a step can no longer carry prose.
+   */
+  it('a task’s states are ids, never sentences', () => {
     expect(() =>
-      InterfaceSchema.parse(
-        iface([{ ...ACTIVATE, input: '  on   the page ' }], { startingState: 'on the page' }),
-      ),
+      InterfaceStateSchema.parse({ id: 'repo-report-open', description: 'The report is open.' }),
     ).not.toThrow()
-
-    // A middle handoff that doesn't connect: step 2 needs a state step 1 never produced.
+    // The shape is enforced, because an id is compared by EQUALITY: a sentence
+    // in the field is a state nothing can ever chain to.
+    for (const bad of ['Repo Report Open', 'on an analyzed repository’s page', 'repo_report_open', '-open', 'open-']) {
+      expect(() => InterfaceStateIdSchema.parse(bad), bad).toThrow()
+    }
     expect(() =>
-      InterfaceSchema.parse(
-        iface([
-          { ...ACTIVATE, output: 'the dropdown is open' },
-          { ...MENU, input: 'the panel is open' },
-        ]),
+      InterfaceSchema.parse(iface([ACTIVATE], { startingState: 'On an analyzed repository’s page.' })),
+    ).toThrow()
+  })
+
+  it('a step carries no state — the prose fields are gone from the shape', () => {
+    expect(() => InterfaceStepSchema.parse({ ...ACTIVATE, input: 'on the page' })).toThrow()
+    expect(() => InterfaceStepSchema.parse({ ...ACTIVATE, output: 'the dropdown is open' })).toThrow()
+    expect(() =>
+      InterfaceSchema.parse(iface([{ ...ACTIVATE, output: 'the dropdown is open' } as InterfaceStep])),
+    ).toThrow()
+  })
+
+  it('the registry defines an area’s states once, and an interface’s ids must resolve in it', () => {
+    const web = (over: Partial<Interface> = {}): Interface =>
+      iface([ACTIVATE], {
+        id: 'web/silence-rule',
+        type: 'web',
+        title: 'Silence a rule',
+        entry: { method: 'GET', path: '/repos/{repoId}' },
+        ...over,
+      })
+    const file = (over: Record<string, unknown>) => ({
+      version: 1 as const,
+      generatedAt: '2026-08-11T12:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [web({ startingState: 'repo-report-open', endState: 'rule-silenced' })],
+      states: {
+        web: [
+          { id: 'repo-report-open', description: 'The report is open.' },
+          { id: 'rule-silenced', description: 'The rule is off and its cards are gone.' },
+        ],
+      },
+      ...over,
+    })
+    expect(() => InterfacesFileSchema.parse(file({}))).not.toThrow()
+
+    // An id no registry defines is refused — the point of naming states.
+    expect(() =>
+      InterfacesFileSchema.parse(
+        file({ interfaces: [web({ startingState: 'panel-open' })] }),
       ),
-    ).toThrow()
+    ).toThrow(/`panel-open` is not a state the `web` registry defines/)
+    // …including when the registry is absent entirely.
+    expect(() => InterfacesFileSchema.parse(file({ states: undefined }))).toThrow()
 
-    // The boundary restatements: first input = startingState, last output = endState.
+    // The registry is scoped to the AREA: a cli entry cannot borrow a web state.
     expect(() =>
-      InterfaceSchema.parse(iface([{ ...ACTIVATE, input: 'somewhere else' }], { startingState: 'on the page' })),
-    ).toThrow()
-    expect(() =>
-      InterfaceSchema.parse(iface([{ ...ACTIVATE, output: 'half done' }], { endState: 'done' })),
-    ).toThrow()
+      InterfacesFileSchema.parse(
+        file({ interfaces: [iface([INVOKE], { startingState: 'repo-report-open' })] }),
+      ),
+    ).toThrow(/the `cli` registry/)
 
-    // A step that states neither side is tolerated — older catalogs, cli trees.
+    // One definition per id — a state described twice is two answers.
     expect(() =>
-      InterfaceSchema.parse(iface([ACTIVATE], { startingState: 's', endState: 'e' })),
-    ).not.toThrow()
+      InterfacesFileSchema.parse(
+        file({
+          states: {
+            web: [
+              { id: 'repo-report-open', description: 'The report is open.' },
+              { id: 'rule-silenced', description: 'The rule is off and its cards are gone.' },
+              { id: 'repo-report-open', description: 'The report is open, again.' },
+            ],
+          },
+        }),
+      ),
+    ).toThrow(/defined twice/)
+
+    // Additive: a catalog that names no states at all parses unchanged.
+    expect(
+      InterfacesFileSchema.parse({
+        version: 1 as const,
+        generatedAt: '2026-08-11T12:00:00.000Z',
+        recipeFingerprint: 'sha256:recipe',
+        interfaces: [iface([INVOKE])],
+      }).states,
+    ).toBeUndefined()
   })
 
   it('round-trips an interfaces file through JSON', () => {
@@ -194,10 +250,16 @@ describe('interfaceFingerprint', () => {
     expect(interfaceFingerprint(shape)).toBe(interfaceFingerprint({ ...shape }))
   })
 
-  it('the state handoff is prose about the world, never identity', () => {
-    expect(fp([{ ...ACTIVATE, input: 'the dropdown is open', output: 'the rule is off' }])).toBe(
-      fp([ACTIVATE]),
-    )
+  it('the state contract is the world around the task, never identity', () => {
+    // The fold takes `type | entry | steps`, so the states cannot reach it — the
+    // invariant that let the whole corpus be renamed with no fingerprint moving.
+    const stated = iface([ACTIVATE], {
+      type: 'web',
+      startingState: 'repo-report-open',
+      endState: 'rule-silenced',
+    })
+    expect(stated.fingerprint).toBe(iface([ACTIVATE], { type: 'web' }).fingerprint)
+    expect(interfaceFingerprint(stated)).toBe(stated.fingerprint)
   })
 
   /**
@@ -978,30 +1040,86 @@ describe('the reference catalog', () => {
       expect(j.endState).toBeTruthy()
       // Steps are the user's interactions: an address the user asks for, or an
       // element located by role + accessible name (the §10.3 locator policy) —
-      // never a page inventory.
+      // never a page inventory. And, since 2026-08-11, nothing else: the per-step
+      // prose is gone, so a step is its kind and its target and no world around it.
       expect(j.steps.length).toBeLessThanOrEqual(3)
       for (const step of j.steps) {
         expect(['navigate', 'activate', 'input']).toContain(step.kind)
         if ('target' in step) expect(step.target).toMatch(/^[a-z]+ ".+"$/)
         if ('route' in step) expect(step.route).toMatch(/^\//)
+        expect(Object.keys(step).sort()).toEqual(['kind', 'target' in step ? 'target' : 'route'].sort())
       }
-      // The state CHAIN, every side stated: the first step consumes the
-      // interface's starting state, each step's output is the next step's input
-      // (a dropdown opened is what the menu click needs), and the last step
-      // yields the interface's end state.
-      expect(j.steps[0].input).toBe(j.startingState)
-      j.steps.forEach((step, i) => {
-        expect(step.input).toBeTruthy()
-        expect(step.output).toBeTruthy()
-        const next = j.steps[i + 1]
-        if (next) expect(next.input).toBe(step.output)
-      })
-      expect(j.steps[j.steps.length - 1].output).toBe(j.endState)
       // The identity recomputes through the real fold.
       expect(j.fingerprint).toBe(interfaceFingerprint(j))
       // No command contract: a page task has no argv grammar to carry.
       expect(j.contract).toBeUndefined()
     }
+  })
+
+  /**
+   * NAMED STATES (2026-08-11). The dashboard area's registry, authored from the
+   * six tasks' own prose: eight states, each defined once, each referenced by id.
+   * The pin is the SIZE — a registry that grows a state per task is prose with
+   * extra steps, and the whole point is that tasks meet on shared names.
+   */
+  it('the web area’s states are a small registry, and every task points into it', () => {
+    const registry = catalog.states!.web
+    expect(registry.map((s) => s.id)).toEqual([
+      'dashboard-serving',
+      'dashboard-home-open',
+      'repo-report-open',
+      'violations-filtered-by-category',
+      'rule-silenced',
+      'rule-reenabled',
+      'code-analysis-section-open',
+      'guard-section-open',
+    ])
+    // 8 states for 6 tasks (12 references): four of them are shared, which is the
+    // registry earning its keep — `repo-report-open` is where two tasks start,
+    // `rule-silenced` is one task's end and the next one's beginning.
+    const referenced = web.flatMap((j) => [j.startingState!, j.endState!])
+    expect(referenced).toHaveLength(12)
+    expect(new Set(referenced).size).toBe(8)
+    // Every state is described once, in one line, and no id is dead weight.
+    for (const state of registry) {
+      expect(state.description).not.toMatch(/\n/)
+      expect(referenced, state.id).toContain(state.id)
+    }
+    // Only the web area has states today; cli and api tasks state none.
+    expect(Object.keys(catalog.states!)).toEqual(['web'])
+    for (const j of contracted) {
+      expect(j.startingState).toBeUndefined()
+      expect(j.endState).toBeUndefined()
+    }
+  })
+
+  /**
+   * CHAIN INTEGRITY BY ID EQUALITY — the property the rework exists for. The PoC
+   * mixed flow `review-analysis-and-silence-a-rule-in-the-dashboard` walks three
+   * tasks in order (its notes name them); under prose each handoff was two
+   * sentences saying the same thing two ways, and nothing could check it. Now the
+   * end of one task IS the start of the next, by string equality.
+   */
+  it('the PoC flow’s tasks chain end-to-start, by id', () => {
+    const walk = [
+      'web/open-repo-report',
+      'web/silence-rule-from-violation-card',
+      'web/reenable-rule-from-rules-panel',
+    ].map((id) => catalog.interfaces.find((j) => j.id === id)!)
+
+    expect(walk.map((j) => [j.startingState, j.endState])).toEqual([
+      ['dashboard-home-open', 'repo-report-open'],
+      ['repo-report-open', 'rule-silenced'],
+      ['rule-silenced', 'rule-reenabled'],
+    ])
+    walk.forEach((j, i) => {
+      const next = walk[i + 1]
+      if (next) expect(next.startingState, `${j.id} → ${next.id}`).toBe(j.endState)
+    })
+    // And the walk's own entry state is reachable: the home task produces it.
+    expect(catalog.interfaces.find((j) => j.id === 'web/open-dashboard-home')!.endState).toBe(
+      walk[0].startingState,
+    )
   })
 
   /**

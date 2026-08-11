@@ -1767,18 +1767,14 @@ decision applies unchanged — the mapper never reads docs):
 - **Identity**: the entry route plus the task's interaction steps
   (activate / input, role + accessible-name targets). Several journeys
   share a route; the steps distinguish them.
-- **State contract**: `startingState` / `endState`, one plain sentence
-  each — the world the task assumes and the observable world it leaves
-  (schema fields landed 2026-08-11, optional, never fingerprinted).
-  The starting state is what a scenario must arrange (or an earlier
-  journey must have produced); the end state is what it asserts.
-  Each STEP carries the same contract in miniature (`input`/`output`,
-  landed the same day): the state the action needs and the interaction
-  change it produces (clicking "More actions" outputs "the dropdown is
-  open"; the menu click inputs it). The schema enforces the chain —
-  first input restates `startingState`, each output is the next input,
-  last output restates `endState` — so a stated path whose middle
-  doesn't connect is refused at parse.
+- **State contract**: `startingState` / `endState` are NAMED STATE IDS
+  referencing the per-area state registry (§10.2's 2026-08-11 decision,
+  superseding the same-day prose form: sentences and per-step
+  input/output fields are gone — within a task, the chain is step
+  order). The starting state is what a scenario must arrange (or an
+  earlier task must have produced); the end state is what it asserts;
+  chaining across tasks is id equality, validated against the registry
+  at parse. States stay optional and never fingerprinted.
 - **Consumes/produces analog**: route parameters and form inputs
   consumed; navigations produced (which route a click leads to) and API
   effects produced (which operations an interaction triggers, via the

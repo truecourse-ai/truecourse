@@ -9431,13 +9431,11 @@
       "steps": [
         {
           "kind": "navigate",
-          "route": "/",
-          "input": "The dashboard is serving and nothing is open in the browser yet.",
-          "output": "The dashboard is serving with at least one analyzed repository registered; the browser is on the home page, which lists the repositories."
+          "route": "/"
         }
       ],
-      "startingState": "The dashboard is serving and nothing is open in the browser yet.",
-      "endState": "The dashboard is serving with at least one analyzed repository registered; the browser is on the home page, which lists the repositories.",
+      "startingState": "dashboard-serving",
+      "endState": "dashboard-home-open",
       "apiEffects": [
         "api/get-api-capabilities",
         "api/get-api-repos"
@@ -9456,13 +9454,11 @@
       "steps": [
         {
           "kind": "activate",
-          "target": "link \"{repoName}\"",
-          "input": "The dashboard is serving with at least one analyzed repository registered; the browser is on the home page, which lists the repositories.",
-          "output": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics."
+          "target": "link \"{repoName}\""
         }
       ],
-      "startingState": "The dashboard is serving with at least one analyzed repository registered; the browser is on the home page, which lists the repositories.",
-      "endState": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics.",
+      "startingState": "dashboard-home-open",
+      "endState": "repo-report-open",
       "apiEffects": [
         "api/get-api-repos-id",
         "api/get-api-repos-id-violations",
@@ -9486,19 +9482,15 @@
       "steps": [
         {
           "kind": "activate",
-          "target": "button \"More actions\"",
-          "input": "On an analyzed repository’s page with violation cards visible; at least one card belongs to the rule the user wants to silence.",
-          "output": "The violation card’s actions dropdown is open, offering “Disable rule for this repo”."
+          "target": "button \"More actions\""
         },
         {
           "kind": "activate",
-          "target": "menuitem \"Disable rule for this repo\"",
-          "input": "The violation card’s actions dropdown is open, offering “Disable rule for this repo”.",
-          "output": "The rule is disabled for the repository and every violation card from it has left the list, with no re-analysis."
+          "target": "menuitem \"Disable rule for this repo\""
         }
       ],
-      "startingState": "On an analyzed repository’s page with violation cards visible; at least one card belongs to the rule the user wants to silence.",
-      "endState": "The rule is disabled for the repository and every violation card from it has left the list, with no re-analysis.",
+      "startingState": "repo-report-open",
+      "endState": "rule-silenced",
       "apiEffects": [
         "api/patch-api-repos-id-rules-rulekey",
         "api/get-api-repos-id-violations",
@@ -9521,19 +9513,15 @@
       "steps": [
         {
           "kind": "activate",
-          "target": "button \"Browse Rules\"",
-          "input": "On an analyzed repository’s page where a rule was disabled earlier, so its violations are hidden from the list.",
-          "output": "The Rules panel is open over the page, listing the repository’s rules with their on/off switches; the silenced rule shows as disabled."
+          "target": "button \"Browse Rules\""
         },
         {
           "kind": "activate",
-          "target": "switch \"Enable {rule}\"",
-          "input": "The Rules panel is open over the page, listing the repository’s rules with their on/off switches; the silenced rule shows as disabled.",
-          "output": "The rule is enabled again in the repository’s config and its previously hidden violation cards are back in the list."
+          "target": "switch \"Enable {rule}\""
         }
       ],
-      "startingState": "On an analyzed repository’s page where a rule was disabled earlier, so its violations are hidden from the list.",
-      "endState": "The rule is enabled again in the repository’s config and its previously hidden violation cards are back in the list.",
+      "startingState": "rule-silenced",
+      "endState": "rule-reenabled",
       "apiEffects": [
         "api/get-api-repos-id-rules",
         "api/patch-api-repos-id-rules-rulekey",
@@ -9557,13 +9545,11 @@
       "steps": [
         {
           "kind": "activate",
-          "target": "button \"{category}\"",
-          "input": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics.",
-          "output": "The violation list shows the chosen category’s findings only, with a “Filtered by” chip naming the category; the analysis itself is untouched."
+          "target": "button \"{category}\""
         }
       ],
-      "startingState": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics.",
-      "endState": "The violation list shows the chosen category’s findings only, with a “Filtered by” chip naming the category; the analysis itself is untouched.",
+      "startingState": "repo-report-open",
+      "endState": "violations-filtered-by-category",
       "apiEffects": [],
       "fingerprint": "sha256:443701ef7e9295664459c180e548c8393ad77fb0d4e7246df117aa24147b3b14"
     },
@@ -9579,22 +9565,54 @@
       "steps": [
         {
           "kind": "activate",
-          "target": "button \"Code Analysis\"",
-          "input": "On a repository’s page in the Code Analysis section, where the section switcher names the section in view.",
-          "output": "The section menu is open, naming both capabilities the dashboard covers: Code Analysis and Spec Guard."
+          "target": "button \"Code Analysis\""
         },
         {
           "kind": "activate",
-          "target": "menuitemradio \"Spec Guard\"",
-          "input": "The section menu is open, naming both capabilities the dashboard covers: Code Analysis and Spec Guard.",
-          "output": "The Spec Guard section is in view for the same repository, with its own surfaces — the other capability, without leaving the UI."
+          "target": "menuitemradio \"Spec Guard\""
         }
       ],
-      "startingState": "On a repository’s page in the Code Analysis section, where the section switcher names the section in view.",
-      "endState": "The Spec Guard section is in view for the same repository, with its own surfaces — the other capability, without leaving the UI.",
+      "startingState": "code-analysis-section-open",
+      "endState": "guard-section-open",
       "fingerprint": "sha256:50a6d196d960baca6e757f0ab171cce945672a6dbd30047588f39e865f0b1066"
     }
   ],
+  "states": {
+    "web": [
+      {
+        "id": "dashboard-serving",
+        "description": "The dashboard is serving and nothing is open in the browser yet."
+      },
+      {
+        "id": "dashboard-home-open",
+        "description": "The browser is on the dashboard home page, which lists the registered repositories, at least one of them analyzed."
+      },
+      {
+        "id": "repo-report-open",
+        "description": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics."
+      },
+      {
+        "id": "violations-filtered-by-category",
+        "description": "The violation list shows one category’s findings only, with a “Filtered by” chip naming it; the analysis itself is untouched."
+      },
+      {
+        "id": "rule-silenced",
+        "description": "A rule is disabled for the repository and every violation card from it has left the list, with no re-analysis."
+      },
+      {
+        "id": "rule-reenabled",
+        "description": "The rule is enabled again in the repository’s config and its previously hidden violation cards are back in the list."
+      },
+      {
+        "id": "code-analysis-section-open",
+        "description": "The repository’s page is in the Code Analysis section, with the section switcher naming the section in view."
+      },
+      {
+        "id": "guard-section-open",
+        "description": "The Spec Guard section is in view for the same repository, with its own surfaces."
+      }
+    ]
+  },
   "source": {
     "cli": "tree",
     "api": "tree",
