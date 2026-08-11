@@ -10603,6 +10603,32 @@
       "fingerprint": "sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b"
     },
     {
+      "id": "web/add-repository-by-path",
+      "type": "web",
+      "title": "Add a local repository by pasting its path",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/"
+      },
+      "steps": [
+        {
+          "kind": "input",
+          "target": "textbox \"Paste repository path...\""
+        },
+        {
+          "kind": "activate",
+          "target": "button \"Add Repository\""
+        }
+      ],
+      "startingState": "dashboard-home-open",
+      "endState": "repository-added-from-path",
+      "apiEffects": [
+        "api/post-api-repos"
+      ],
+      "fingerprint": "sha256:d2e6f6892ab10429a5c19edad08b906ba986e31c42c70d35ef7ce87fc250dc8b"
+    },
+    {
       "id": "web/silence-rule-from-violation-card",
       "type": "web",
       "title": "Silence a noisy rule from a violation card",
@@ -10666,6 +10692,28 @@
       "fingerprint": "sha256:dd50d571a52eb17ec8539648663fea07efd2cb2eb2395871b3d2c65434963d32"
     },
     {
+      "id": "web/disable-rule-from-rules-panel",
+      "type": "web",
+      "title": "Disable one rule from its switch in the Rules panel",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "switch \"Disable {ruleName}\""
+        }
+      ],
+      "startingState": "rules-panel-open",
+      "endState": "rule-silenced",
+      "apiEffects": [
+        "api/patch-api-repos-id-rules-rulekey"
+      ],
+      "fingerprint": "sha256:18eb008d52759dba8c815de6f6e8b0beb1e95f4e491cbc65d21b4f8587f67f66"
+    },
+    {
       "id": "web/filter-violations-by-category",
       "type": "web",
       "title": "Narrow the violation list to one category",
@@ -10707,6 +10755,88 @@
       "startingState": "code-analysis-section-open",
       "endState": "guard-section-open",
       "fingerprint": "sha256:50a6d196d960baca6e757f0ab171cce945672a6dbd30047588f39e865f0b1066"
+    },
+    {
+      "id": "web/open-rules-panel",
+      "type": "web",
+      "title": "Open the repository's Rules panel",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Browse Rules\""
+        }
+      ],
+      "startingState": "repo-report-open",
+      "endState": "rules-panel-open",
+      "apiEffects": [
+        "api/get-api-repos-id-rules"
+      ],
+      "fingerprint": "sha256:1075cb6b160eabf76668728d8b5bc600866d29e070cc3cfc0da7da12bd89491f"
+    },
+    {
+      "id": "web/search-rules-panel",
+      "type": "web",
+      "title": "Search the open Rules panel",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "input",
+          "target": "textbox \"Search rules...\""
+        }
+      ],
+      "startingState": "rules-panel-open",
+      "endState": "rules-panel-filtered",
+      "apiEffects": [],
+      "fingerprint": "sha256:abda9b0ec5d1d988331f0ad4c88044e10b5ee8772207111835b08e0b51f37543"
+    },
+    {
+      "id": "web/filter-rules-by-detection",
+      "type": "web",
+      "title": "Filter the open Rules panel to deterministic rules",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Det\""
+        }
+      ],
+      "startingState": "rules-panel-open",
+      "endState": "rules-panel-filtered",
+      "apiEffects": [],
+      "fingerprint": "sha256:14c8aa092d7b09c58c018a81fa9759f5e997359e60942f0c924ee3e2a078a081"
+    },
+    {
+      "id": "web/filter-rules-by-category",
+      "type": "web",
+      "title": "Filter the open Rules panel by category",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Security\""
+        }
+      ],
+      "startingState": "rules-panel-open",
+      "endState": "rules-panel-filtered",
+      "apiEffects": [],
+      "fingerprint": "sha256:394d78d91742a75cc9fd48411710e7016d36318be393c15f220131be20c69534"
     },
     {
       "id": "web/open-an-unanalyzed-repository",
@@ -10778,6 +10908,26 @@
       "endState": "analysis-running",
       "apiEffects": [],
       "fingerprint": "sha256:86f841f6315f31c81f7ef7b815fe74571400cfbed18b2adecb96edfa61be3d41"
+    },
+    {
+      "id": "web/analyze-working-tree-without-stashing",
+      "type": "web",
+      "title": "Answer the stash question by analyzing the working tree as-is",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Don't stash — analyze working tree as-is\""
+        }
+      ],
+      "startingState": "stash-prompt-open",
+      "endState": "analysis-running",
+      "apiEffects": [],
+      "fingerprint": "sha256:c5258cd7c25e4f8b5a00f8e84aa6c1d0c4fffa5a62f99bbf52f3467dba3d2083"
     },
     {
       "id": "web/approve-the-llm-rules-for-a-run",
@@ -11070,6 +11220,28 @@
       "fingerprint": "sha256:e0b7054e06ffdf0e5bd1e322d3305bee2e1bd08e795f50c84128d74ead61741f"
     },
     {
+      "id": "web/change-the-graph-depth-to-functions",
+      "type": "web",
+      "title": "Take the architecture graph down to function depth",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Functions\""
+        }
+      ],
+      "startingState": "graph-at-module-depth",
+      "endState": "graph-at-function-depth",
+      "apiEffects": [
+        "api/get-api-repos-id-graph"
+      ],
+      "fingerprint": "sha256:575e9ef3dd46d13a8f7062b627fb08d5b56e2a12aa44cd5a992da445dcc52d30"
+    },
+    {
       "id": "web/fit-the-graph-to-the-viewport",
       "type": "web",
       "title": "Fit the whole architecture graph into the viewport",
@@ -11233,6 +11405,86 @@
       "fingerprint": "sha256:15cf10b4168e6f254370eba9df0c6d53ab6eaa9886024f9a8d757ffa11e7d3f6"
     },
     {
+      "id": "web/search-the-flow-list",
+      "type": "web",
+      "title": "Search the detected flow list",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "input",
+          "target": "textbox \"Search flows...\""
+        }
+      ],
+      "startingState": "flow-list-open",
+      "endState": "flow-list-searched",
+      "apiEffects": [],
+      "fingerprint": "sha256:6f85508f5c6b7ec4027e60e2899f61d69b7faf04a3deca7cf0faaa3199bdd3f6"
+    },
+    {
+      "id": "web/step-forward-through-a-flow",
+      "type": "web",
+      "title": "Advance the open flow's step player",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Step forward\""
+        }
+      ],
+      "startingState": "flow-diagram-open",
+      "endState": "flow-step-one",
+      "apiEffects": [],
+      "fingerprint": "sha256:15ef08076825b63ee71e79ff91e3e00b1a819deaefe1358a69b2d492b3bf2949"
+    },
+    {
+      "id": "web/step-back-through-a-flow",
+      "type": "web",
+      "title": "Move the open flow's step player back",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Step back\""
+        }
+      ],
+      "startingState": "flow-step-one",
+      "endState": "flow-diagram-open",
+      "apiEffects": [],
+      "fingerprint": "sha256:5fbbaab3c7834358a05533a7fba4b6ab1e5de684365ee3d2138523a77eea2902"
+    },
+    {
+      "id": "web/play-the-open-flow",
+      "type": "web",
+      "title": "Play the open flow through to its final step",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"Play\""
+        }
+      ],
+      "startingState": "flow-diagram-open",
+      "endState": "flow-playback-complete",
+      "apiEffects": [],
+      "fingerprint": "sha256:3bb44c92360af7367af69e112b8e55be54a0b8acdb703109469a1b31a9c53f6e"
+    },
+    {
       "id": "web/enrich-a-flow-with-descriptions",
       "type": "web",
       "title": "Have the model write descriptions for a flow",
@@ -11318,6 +11570,26 @@
       "endState": "schema-table-list-open",
       "apiEffects": [],
       "fingerprint": "sha256:48a48266188b8ab5a211acad66ead6ca482d1265fdb00390b97955bd253561d5"
+    },
+    {
+      "id": "web/expand-a-schema-table",
+      "type": "web",
+      "title": "Expand one table in the schema's table-list view",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"{tableName}\""
+        }
+      ],
+      "startingState": "schema-table-list-open",
+      "endState": "schema-table-expanded",
+      "apiEffects": [],
+      "fingerprint": "sha256:3264ac7926b539d43536b7753a37e4c85ac52e14803cce1d0284c5adf4cae009"
     },
     {
       "id": "web/open-the-analyses-tab",
@@ -11444,6 +11716,49 @@
       "endState": "repo-report-open",
       "apiEffects": [],
       "fingerprint": "sha256:9f33c442b170ed78a600166fb8eadbef1c1ae2b56d48603765e6152a25995fbf"
+    },
+    {
+      "id": "web/open-a-changed-file-from-diff",
+      "type": "web",
+      "title": "Open a changed file from the Git Diff summary",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}?view=diff"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"{filePath}\""
+        }
+      ],
+      "startingState": "diff-mode-on",
+      "endState": "code-viewer-open",
+      "apiEffects": [
+        "api/get-api-repos-id-files",
+        "api/get-api-repos-id-file-content"
+      ],
+      "fingerprint": "sha256:e49c14c0f831a0aa350159f96b21be700e9738e0b9218879329ba40e1bbaf72a"
+    },
+    {
+      "id": "web/toggle-a-file-tree-folder",
+      "type": "web",
+      "title": "Collapse or expand a folder in the Files tree",
+      "group": "repos",
+      "entry": {
+        "method": "GET",
+        "path": "/repos/{repoId}?tab=files"
+      },
+      "steps": [
+        {
+          "kind": "activate",
+          "target": "button \"{folderName}\""
+        }
+      ],
+      "startingState": "file-tree-open",
+      "endState": "file-tree-folder-toggled",
+      "apiEffects": [],
+      "fingerprint": "sha256:e3a5b581512b7d01dbb315ea48a53c63dc5356465e227862a178c84b541c3db5"
     }
   ],
   "states": {
@@ -11455,6 +11770,10 @@
       {
         "id": "dashboard-home-open",
         "description": "The browser is on the dashboard home page, which lists the registered repositories, at least one of them analyzed."
+      },
+      {
+        "id": "repository-added-from-path",
+        "description": "A repository submitted through the dashboard's path field is registered and visible as a card on the home page."
       },
       {
         "id": "repo-report-open",
@@ -11479,6 +11798,14 @@
       {
         "id": "guard-section-open",
         "description": "The Spec Guard section is in view for the same repository, with its own surfaces."
+      },
+      {
+        "id": "rules-panel-open",
+        "description": "The Rules dialog is open over a repository report with the repository's rule catalogue loaded."
+      },
+      {
+        "id": "rules-panel-filtered",
+        "description": "The open Rules dialog is narrowed by one of its local search, detection or category controls."
       },
       {
         "id": "repo-no-analysis-open",
@@ -11541,6 +11868,10 @@
         "description": "The architecture graph is at module depth for one scoped service, with the scope selector and the collapse control beside the depth toggle."
       },
       {
+        "id": "graph-at-function-depth",
+        "description": "The architecture graph is at function depth for one scoped module, with only that module's functions on the canvas."
+      },
+      {
         "id": "graph-fitted",
         "description": "Every node of the architecture graph is inside the viewport at the fitted zoom level."
       },
@@ -11557,6 +11888,10 @@
         "description": "The Files tab shows the repository's file tree, severity-coloured, with nothing opened in the main pane yet."
       },
       {
+        "id": "file-tree-folder-toggled",
+        "description": "One folder in the Files tree has been collapsed or expanded through its own row."
+      },
+      {
         "id": "code-viewer-open",
         "description": "One file's contents are in the code viewer with its violations marked in the gutter."
       },
@@ -11565,8 +11900,20 @@
         "description": "The Flows tab lists the detected execution flows grouped by entry service, with nothing opened in the main pane yet."
       },
       {
+        "id": "flow-list-searched",
+        "description": "The Flows sidebar shows only detected flows matching its search text."
+      },
+      {
         "id": "flow-diagram-open",
         "description": "One flow's sequence diagram is in the main pane with its step player beneath it."
+      },
+      {
+        "id": "flow-step-one",
+        "description": "The open flow's step player has advanced from its resting position to the first recorded step."
+      },
+      {
+        "id": "flow-playback-complete",
+        "description": "The open flow's player has advanced automatically through its final recorded step."
       },
       {
         "id": "flow-enriched",
@@ -11583,6 +11930,10 @@
       {
         "id": "schema-table-list-open",
         "description": "The same database's schema is in the main pane as the expandable table list."
+      },
+      {
+        "id": "schema-table-expanded",
+        "description": "One table in the schema list is expanded to show its columns and participating relations."
       },
       {
         "id": "analyses-list-open",

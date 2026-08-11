@@ -2674,6 +2674,375 @@
       "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
+      "id": "add-a-repository-by-path-and-read-its-first-analysis",
+      "title": "Add a repository by path and read its first analysis",
+      "goal": "A developer pastes a repository path into the dashboard, runs its first analysis, and reads the resulting activity and one-run analytics states.",
+      "kind": "happy",
+      "notes": "The repository begins as an unregistered committed project. The dashboard path form is the only registration action before its card appears. A deterministic CLI analysis then creates exactly one run, allowing the card activity stamp and the single-number trend state to be asserted without time or model dependencies.",
+      "startingState": {
+        "stepCreatable": [
+          "the dashboard registration — performed through the path field",
+          "exactly one completed deterministic analysis — produced after registration"
+        ],
+        "seedable": [
+          "an unregistered committed JavaScript repository with one deterministic finding",
+          "env — `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": []
+      },
+      "fingerprint": "sha256:740bba1fe3d9ea35fea6e86c6cdb05321802980bd10afa978a5dafa0f00122f1",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "the-repository-list",
+          "claimTitle": "pasting a path adds a repository"
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "the-repository-list",
+          "claimTitle": "a repository card shows when it last did something"
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "violation-trend",
+          "claimTitle": "with one analysis the trend card shows a single number"
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "the-repository-list",
+          "fingerprint": "sha256:f89f5d9052a1631481a9daf667a84c75b10a1113ef5ad3dfdc98b9792c029e09"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "violation-trend",
+          "fingerprint": "sha256:de157d5c7faf79a459b68bc212c56473f0da3866a92ccd7f7bb6bcb06dbbf5bc"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "open-a-non-git-repository",
+      "title": "Open a non-git repository",
+      "goal": "A developer opens a registered non-git directory and sees why commit-anchored actions are unavailable.",
+      "kind": "error",
+      "notes": "The seed deliberately has no git metadata. The banner is asserted verbatim, while the capitalized Analyze action, Git Diff toggle and Scan specs action are absent. The navigation cannot receive a second interface identity because it collides with the same route step used for an unanalyzed git repository (G83).",
+      "startingState": {
+        "stepCreatable": [
+          "the registered `.truecourse/` store — produced by `truecourse add`"
+        ],
+        "seedable": [
+          "a JavaScript directory with no enclosing git repository",
+          "env — `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": []
+      },
+      "fingerprint": "sha256:cb5bc83e5d1dfd657c2b455fb17148601776e9da65b3311022e0ae028111f5d8",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "repositories-without-git",
+          "claimTitle": "a non-git directory shows an amber banner"
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "repositories-without-git",
+          "claimTitle": "a non-git directory hides Analyze, the diff toggle and spec scan"
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "when-analyze-is-unavailable",
+          "claimTitle": "Analyze and the diff toggle are hidden outside a git repository"
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "repositories-without-git",
+          "fingerprint": "sha256:ddb175d2a123b788a1262b4de754178669acf3d405f7836af93b313a470fc4cc"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "when-analyze-is-unavailable",
+          "fingerprint": "sha256:8878478a9826bf5860c0c5d220035f84cbc8b05ceecf3c0176fd203e4fc208e0"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "apply-repository-rule-settings-to-a-dashboard-run",
+      "title": "Apply repository rule settings to a dashboard run",
+      "goal": "A developer runs analysis from the dashboard and verifies that categories, the LLM toggle and disabled rules come from config.json.",
+      "kind": "happy",
+      "notes": "The seed contains one security finding from an enabled rule, one finding from a disabled security rule, and one finding outside the enabled category set. The completed deterministic run retains only the first. Absence of the model gate proves the LLM toggle, and an API total of one ties the same exclusions to analytics.",
+      "startingState": {
+        "stepCreatable": [
+          "the completed dashboard analysis — started by the flow"
+        ],
+        "seedable": [
+          "a committed JavaScript repository with security and code-quality findings",
+          "config enabling only security, disabling LLM rules and disabling eval-usage",
+          "env — `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": []
+      },
+      "fingerprint": "sha256:501c662631dfde2042c16a5914ccf139fd9dc08687102bcb3dc7047fd46761d3",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "running-an-analysis",
+          "claimTitle": "a dashboard run honors the enabled categories from `config.json`"
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "running-an-analysis",
+          "claimTitle": "a dashboard run honors the LLM-rules toggle from `config.json`"
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "running-an-analysis",
+          "claimTitle": "a dashboard run honors the disabled rules from `config.json`"
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "silencing-a-rule",
+          "claimTitle": "a disabled rule is skipped on future analyses"
+        },
+        {
+          "order": 5,
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "analytics",
+          "claimTitle": "the analytics numbers exclude disabled rules"
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "running-an-analysis",
+          "fingerprint": "sha256:a9c2bd895f631408f92f838c08fc2c718a7579063bd7ca19f87101ee67a34085"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "silencing-a-rule",
+          "fingerprint": "sha256:ddcc931b1ee2c4bb7a92f7bf2ec56bd2581387d327883d315380b1cd19e7c5af"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "analytics",
+          "fingerprint": "sha256:595c8359f70db803d2151fb14a20a9458de29543077447a1c77ef5b6f56d2974"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "inspect-and-filter-the-rules-panel",
+      "title": "Inspect and filter the Rules panel",
+      "goal": "A developer uses the Rules panel's controls, reads a complete rule row, and verifies that its switch shares state with the CLI.",
+      "kind": "happy",
+      "notes": "The scenario inventories the panel's independent controls, isolates eval-usage through search, and reads its visible metadata and language badges. It then disables the rule from the UI, reads the repository rule API, and flips the same key through both CLI actions. Hover explanations remain a separate driver gap.",
+      "startingState": {
+        "stepCreatable": [
+          "one deterministic analysis — produced before the panel opens",
+          "the disabled rule state — produced by the panel switch"
+        ],
+        "seedable": [
+          "a committed JavaScript repository containing eval usage",
+          "env — `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": []
+      },
+      "fingerprint": "sha256:bcf156753bb2eb33e13827d294b865a05d2f3600a24f3920e8318317845cd2dc",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "the-rules-catalog",
+          "claimTitle": "the Rules panel has its own search, severity and Det / LLM controls"
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "the-rules-catalog",
+          "claimTitle": "the panel's category tabs match the violations list"
+        },
+        {
+          "order": 3,
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "the-rules-catalog",
+          "claimTitle": "a rule row shows name, description, severity, category and detection kind"
+        },
+        {
+          "order": 4,
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "the-rules-catalog",
+          "claimTitle": "a rule row shows a badge per language"
+        },
+        {
+          "order": 5,
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "the-rules-catalog",
+          "claimTitle": "the rule switch writes to the same `disabledRules` list"
+        },
+        {
+          "order": 6,
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "the-rules-catalog",
+          "claimTitle": "the same rule toggles exist on the command line"
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/dashboard/violations.mdx",
+          "anchor": "the-rules-catalog",
+          "fingerprint": "sha256:bc0c6e0b25089bb35998924198385ef5d5fc12ae7a4f40a00659bea3f9182ee8"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "analyze-committed-state-from-the-dashboard",
+      "title": "Analyze the committed state from the dashboard",
+      "goal": "A developer with pending work chooses the stash path and verifies that the dashboard analyzes the last commit rather than the temporary working-tree file.",
+      "kind": "happy",
+      "notes": "The dirty file is created only after the repository is committed and registered. The run is deterministic, so the final violations response can distinguish the committed vulnerable file from the temporary vulnerable file without relying on model output. The dashboard's stash/restore implementation owns the transient git operation; the scenario observes the promised baseline through the stored findings.",
+      "startingState": {
+        "stepCreatable": [
+          "one untracked source file carrying a deterministic finding — written after registration so it exists only in the working tree",
+          "the completed dashboard analysis — started and answered through the web steps in this flow"
+        ],
+        "seedable": [
+          "a committed JavaScript repository with a deterministic finding in the committed state",
+          "repository config with LLM rules disabled",
+          "env — `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": []
+      },
+      "fingerprint": "sha256:11945be25c3484ea949b9c1e317a7b814b39897c97c0fe8c954ccd17b2073d3f",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "before-the-run-starts",
+          "claimTitle": "Stash and analyze committed state anchors the baseline to the last commit"
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "an analysis stashes, analyzes the committed code and restores your changes"
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "before-the-run-starts",
+          "fingerprint": "sha256:03a985b61a5a89f0a9b9dcf4b466c831ae0b27f0a7433c18bbe7bf9d008b9d85"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "fingerprint": "sha256:6cd5e6a4cbc13bc96064ba33fcc66ab2f58ef7af918c3ba639004383a82c8037"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "analyze-a-clean-repository-from-the-dashboard",
+      "title": "Analyze a clean repository from the dashboard",
+      "goal": "A developer starts a dashboard analysis from a clean source tree and verifies that TrueCourse's own untracked store file does not trigger the dirty-tree gate.",
+      "kind": "happy",
+      "notes": "The source tree is committed, then registration creates `.truecourse/`, and the flow writes one extra untracked file inside that directory. The first post-click state must be the running analysis with no stash question. This proves both claims together: the repository is clean in user-owned paths, while the only filesystem change is one the docs say never counts.",
+      "startingState": {
+        "stepCreatable": [
+          "an untracked `.truecourse/reference-probe.json` file — written after registration so the exclusion is exercised rather than assumed",
+          "the completed dashboard analysis — started through the web interface in this flow"
+        ],
+        "seedable": [
+          "a committed JavaScript repository with no modified or untracked files outside `.truecourse/`",
+          "repository config with LLM rules disabled",
+          "env — `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": []
+      },
+      "fingerprint": "sha256:928a3eaf798873cd7133100e3c18bf53235ca4f2dd744c07f94c24443bd39951",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "before-the-run-starts",
+          "claimTitle": "the stash prompt is skipped when the tree is clean"
+        },
+        {
+          "order": 2,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "before-the-run-starts",
+          "claimTitle": "`.truecourse/` files never count as changes"
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "before-the-run-starts",
+          "fingerprint": "sha256:03a985b61a5a89f0a9b9dcf4b466c831ae0b27f0a7433c18bbe7bf9d008b9d85"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "skip-llm-rules-from-the-dashboard",
+      "title": "Skip LLM rules from the dashboard",
+      "goal": "A developer reaches the dashboard's LLM estimate, chooses the deterministic-only path, and verifies that the completed analysis records no model provider.",
+      "kind": "happy",
+      "notes": "A transport name is supplied only to bypass the first-run question and make the estimate gate reachable; the scenario supplies no model credential and performs no model call. The completed analysis is read from the API, where a null provider distinguishes the Skip path from an approved LLM run, while a known deterministic finding proves the run still did useful analysis.",
+      "startingState": {
+        "stepCreatable": [
+          "the LLM estimate dialog — reached by pressing Analyze with LLM rules enabled",
+          "the completed deterministic-only analysis — produced after choosing Skip"
+        ],
+        "seedable": [
+          "a committed JavaScript repository with a known deterministic finding",
+          "repository config with LLM rules enabled",
+          "env — `TRUECOURSE_LLM_TRANSPORT=claude-code`, `TRUECOURSE_TELEMETRY=0`"
+        ],
+        "supplied": []
+      },
+      "fingerprint": "sha256:1fc60bfdd80efedd691ebc90614cc78d6798d5fe9caee5e87e2aa2dd381fab0f",
+      "milestones": [
+        {
+          "order": 1,
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "before-the-run-starts",
+          "claimTitle": "Skip runs deterministic rules only"
+        }
+      ],
+      "bindings": [
+        {
+          "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+          "anchor": "before-the-run-starts",
+          "fingerprint": "sha256:03a985b61a5a89f0a9b9dcf4b466c831ae0b27f0a7433c18bbe7bf9d008b9d85"
+        }
+      ],
+      "composedOf": [],
+      "synthesisInputsHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
       "id": "run-an-analysis-from-the-dashboard",
       "title": "Run an analysis from the dashboard",
       "goal": "A developer presses Analyze in the dashboard, answers the dirty-tree and LLM gates, and watches the run to completion.",
@@ -2862,7 +3231,7 @@
           "llm-transport \u2014 needed by the arranging analyze so LLM-detected findings exist for the Detection switch"
         ]
       },
-      "fingerprint": "sha256:b6db5c583d0164d3c829804ecd0e5bd9e76c3994df13ec8b5418c7b1c3d30764",
+      "fingerprint": "sha256:ea7d9fc200e192d35a9dfffab2ed4eaeaa30258b42a010a70f05e945eb948f23",
       "milestones": [
         {
           "order": 1,
@@ -2979,6 +3348,18 @@
           "doc": "reference/spec-docs/dashboard/violations.mdx",
           "anchor": "filters",
           "claimTitle": "clicking a Code Hotspots row scopes the list"
+        },
+        {
+          "order": 19,
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "top-offenders",
+          "claimTitle": "Top Offenders shows critical and high counts alongside"
+        },
+        {
+          "order": 20,
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "top-offenders",
+          "claimTitle": "the Top Offenders header re-sorts the list"
         }
       ],
       "bindings": [
@@ -2996,6 +3377,11 @@
           "doc": "reference/spec-docs/dashboard/overview.mdx",
           "anchor": "getting-around",
           "fingerprint": "sha256:b64d05bfdef7ef3cce1d95c719c53884d5a0c419c170d00526cc29d0f98842b2"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "top-offenders",
+          "fingerprint": "sha256:760352abbe60c1aeb1fae94ec940530554d58c82fc452f2e4d253b2c7e8d5e9d"
         }
       ],
       "composedOf": [],
@@ -3168,7 +3554,7 @@
       "title": "Read the analytics of a run",
       "goal": "A developer reads the analytics column of an analysis and uses each widget to narrow the violations list beside it.",
       "kind": "happy",
-      "notes": "The analytics column read top to bottom, then used as what the page says it also is \u2014 a filter bank. The summary chips come first because they describe the run as a whole; the trend next, which is why the flow's starting state arranges TWO analyses with a fix between them (with one analysis there is no delta to colour and no resolved count to raise). Then each widget below the summary row is clicked: the general claim that clicking into a chart narrows the list is proved by the first such click and the specific ones by their own widgets, with the clear-by-clicking-again claim placed between the donut and the severity chart so the next widget starts from an unfiltered list.\n\nThe offender and hotspot rows appear here in their ANALYTICS-page form; the violations page's own restatements of the same two behaviours are proved in `filter-the-violation-list`. Cross-doc repeats are separate claims by the extraction rule and each is proved where its page puts it \u2014 the run will therefore exercise the same UI twice, which is intended, not redundancy to be pruned.\n\nDeliberately left for a later batch, from sections this flow binds: the stale chip (its boundary is \"open more than 7 days\", which no scenario can arrange without faking clock time \u2014 a strong untestable/blocked candidate); the twenty-analysis cap on the trend (needs 21 runs) and its single-analysis fallback (needs a repository with exactly one, contradicting this flow's two); the ringed past-run point and the diff-mode replacement of the whole column, both proved in `review-run-history-and-enter-diff-mode` where those states exist; the Top Offenders header re-sort and its two attribution rules; the hotspot row's worst-severity marker; and \"these numbers exclude disabled rules\", which needs a disabled rule and belongs with the silencing flow's batch.\n\nREALIZATION RISKS: the summary chips' hover explanations were left out on purpose \u2014 hover-only text is the interaction a web driver is least likely to produce honestly, and a claim proved by a hover the driver fakes is worse than a gap. The red-up/green-down milestone asserts a COLOUR treatment, which needs a computed-style read rather than text; if the driver cannot, it becomes a gap. The resolve chip renders a duration whose value depends on the seeded timestamps \u2014 it must be asserted as \"a duration is rendered\", never as a number. REALIZATION FEEDBACK (scenario batch): the supplied analysis-target binding proved unnecessary \u2014 every requirement here is met by a deterministic seeded project the scenario arranges and analyzes itself, which is what makes the content-exact assertions falsifiable; moved to seedable.",
+      "notes": "The analytics column is read top to bottom, then used as a filter bank. Two deterministic analyses make the trend and resolution metrics falsifiable; the scenario reads the summary, category, severity, offender and hotspot widgets and exercises stable row-based filters. Top Offenders sorting/counts and hotspot severity are covered. Hover explanations, the seven-day boundary, the twenty-analysis cap and attribution-only aggregation are explicit no-flow claims.",
       "startingState": {
         "stepCreatable": [
           "two analyses over the supplied target \u2014 arranged by two `truecourse analyze --no-llm` steps with a fix in between, so a violation is resolved between them and the trend has a previous run to compare against",
@@ -3180,7 +3566,7 @@
         ],
         "supplied": []
       },
-      "fingerprint": "sha256:d3b4913c56ff0b982d945fd091dc1dd97bcd5b1453c385dfa3fa2fa2d3b533b0",
+      "fingerprint": "sha256:52327b3f9c969229222756c58b3511bdb373917f4fa5526728fc58bb28867f2d",
       "milestones": [
         {
           "order": 1,
@@ -3308,6 +3694,12 @@
           "doc": "reference/spec-docs/dashboard/analytics.mdx",
           "anchor": "code-hotspots",
           "claimTitle": "clicking a hotspot row filters the list to that file"
+        },
+        {
+          "order": 21,
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "code-hotspots",
+          "claimTitle": "each hotspot shows its worst severity"
         }
       ],
       "bindings": [
@@ -3367,7 +3759,7 @@
         ],
         "supplied": []
       },
-      "fingerprint": "sha256:7f2e66dc1b11f3c7a008ecc4b615b5266f2e4fda73e8f4349329a9704535d46c",
+      "fingerprint": "sha256:8b8a2acf42f3d90f056fe1554b3a38515c188d1f2d51f105e48647643a1a77ba",
       "milestones": [
         {
           "order": 1,
@@ -3490,6 +3882,18 @@
           "anchor": "clicking-around",
           "claimTitle": "clicking a database node opens its schema",
           "note": "The contradicting outcome: the same click that milestone 12 says zooms to a database node is said here to leave the graph entirely. Both are carried on purpose; at most one can pass, and the failure is the deliverable."
+        },
+        {
+          "order": 20,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "databases",
+          "claimTitle": "a database node in the graph opens the same view"
+        },
+        {
+          "order": 21,
+          "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+          "anchor": "canvas-controls",
+          "claimTitle": "a Live / Offline pill shows the event-stream connection"
         }
       ],
       "bindings": [
@@ -3517,6 +3921,11 @@
           "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
           "anchor": "clicking-around",
           "fingerprint": "sha256:d519271e182d695a0b668c0199f931d58384425ea5e54b9eef9498c9d1c6bb77"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "databases",
+          "fingerprint": "sha256:343f87b6cc7b66f3e65dac226275b52acc4e5b114f6b55af25caf2635f91f0c1"
         }
       ],
       "composedOf": [],
@@ -3527,7 +3936,7 @@
       "title": "Walk files, flows and databases",
       "goal": "A developer browses the file tree and code viewer, opens a detected execution flow, and reads a datastore's schema.",
       "kind": "happy",
-      "notes": "The three tabs that read the working copy, walked as one session in the order the page introduces them, entering each from the overview page's tab inventory. Files first: what the tree lists (git-tracked files only), how names and folders carry severity, then INTO the code viewer twice \u2014 once from a violation card's Open, which is where that violations-page claim honestly lands, and then reading the viewer's own surface (highlighting, breadcrumb, issue count, the gutter bar spanning the finding's lines, the finding row beneath it). The `?file=` URL is asserted at that point because the file is open. Flows next: what they are, how the sidebar groups them, the sequence diagram a flow opens as, and the player stepping through it. Databases last: the sidebar's list, the two views a datastore offers and which of them is the default.\n\nA COMPOSITION TENSION IS CARRIED HERE, honestly. Milestone 3 says the tree lists every file GIT TRACKS (and that an untracked file is absent), while milestone 4 \u2014 the overview page's \"the server reads the repository from disk\" \u2014 is observed as a file written on disk appearing in the tree with no upload step. Both hold only if the written file is COMMITTED first; if the scenario writes an untracked file, exactly one of the two milestones must fail. The scenario should commit the written file and note that it is proving the disk-reading claim within the tracked-files rule, and the run should be read with that in mind: an untracked-file observation here would be the doc's own inconsistency surfacing, not an authoring error.\n\nDeliberately left for a later batch, from sections this flow binds: the shared tab strip's mechanics (single-click preview, preview replacement, double-click pinning, databases always opening pinned, and switching away and back) \u2014 one coherent tab-strip journey; the tree's top-level-expanded default and folder click; the crosshair and the Filter bar (they focus the GRAPH and the list, so they belong with the graph's `Arriving from elsewhere` batch); the viewer's fix-prompt expansion and its Normal-versus-diff content pair (diff mode is flow 10's world); the flow sidebar's search box, trigger/step/severity row, datastore colouring and per-step violations; the whole Enrich sub-journey (four claims, an LLM call and a store write, plus its two negative conditions); the datastore row's type/table/service metadata, the cache exception, the ER diagram's key/nullable/relation marks, the violating-table outline and its hover, the expandable table list, and the graph-node entry into the same view; and the `?flow=` URL and the sidebar-drag claim.\n\nREALIZATION RISKS: the sequence-diagram and ER-diagram milestones assert rendered diagram structure (a column per participant, a row per step, arrow direction; a default view) which may only be observable through the diagram's DOM \u2014 if it renders to canvas, they become gaps. The player milestone needs a step-highlight state to be readable between clicks. The gutter-bar milestone asserts a colour and a line span, again a computed-style read. REALIZATION FEEDBACK (scenario batch): the supplied analysis-target binding proved unnecessary \u2014 every requirement here is met by a deterministic seeded project the scenario arranges and analyzes itself, which is what makes the content-exact assertions falsifiable; moved to seedable.",
+      "notes": "One working-copy journey across Files, Flows and Databases. It proves tracked-file behavior and folder toggling, enters the code viewer from a real finding, checks file and flow URLs, searches and plays a flow, opens both schema views, expands a table, and verifies shared tabs plus last-item restoration. Styling, double-click pinning, graph-focus geometry, Enrich and ER-diagram visual encodings are explicit no-flow claims.",
       "startingState": {
         "stepCreatable": [
           "the `.truecourse/` store and its analysis \u2014 written by an arranging `truecourse analyze --no-llm` step over the supplied target"
@@ -3538,7 +3947,7 @@
         ],
         "supplied": []
       },
-      "fingerprint": "sha256:7f590db2ac6ae9626b4ce5a0015bf79ebc66a3706161b27db83db86769af6f82",
+      "fingerprint": "sha256:6b4cd72498b48219f23fbc9e44a23093659475b82d958117d57e69c18531aad1",
       "milestones": [
         {
           "order": 1,
@@ -3666,6 +4075,60 @@
           "anchor": "databases",
           "claimTitle": "the ER diagram is the default view",
           "note": "Asserted on the first open, before either view is chosen \u2014 later it is unfalsifiable."
+        },
+        {
+          "order": 21,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "files-flows-and-databases",
+          "claimTitle": "Files, Flows and Databases share a tab strip"
+        },
+        {
+          "order": 22,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "files-flows-and-databases",
+          "claimTitle": "switching away and back reopens what you were looking at"
+        },
+        {
+          "order": 23,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "flows",
+          "claimTitle": "a search box sits over the flow list"
+        },
+        {
+          "order": 24,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "flows",
+          "claimTitle": "the player plays the flow through"
+        },
+        {
+          "order": 25,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "databases",
+          "claimTitle": "each datastore shows its type, table count and connected services"
+        },
+        {
+          "order": 26,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "databases",
+          "claimTitle": "the table list expands to columns and relations"
+        },
+        {
+          "order": 27,
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "shareable-urls",
+          "claimTitle": "the URL carries the open flow"
+        },
+        {
+          "order": 28,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "files",
+          "claimTitle": "top-level folders are expanded to start"
+        },
+        {
+          "order": 29,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "files",
+          "claimTitle": "clicking a folder expands or collapses it"
         }
       ],
       "bindings": [
@@ -3723,7 +4186,7 @@
       "title": "Review run history and enter diff mode",
       "goal": "A developer reads the run history, loads an older analysis into every view, returns to latest, and compares the working tree against the committed baseline.",
       "kind": "happy",
-      "notes": "Two journeys the page itself chains: reading the history and then using the baseline it describes. The Analyses tab is read first (order, row metadata, the latest marker), then a row click loads an older run into every view, where the amber banner, the ringed trend point and the hidden Analyze/diff controls all belong to the same past-run state \u2014 and the hidden-controls claim is proved TWICE on purpose, once from the history page and once from the running-analyses page's own list of unavailability conditions, because cross-doc repeats are separate claims. Return to latest leaves that state, which is also the precondition for the diff half: the toggle only exists on the latest run.\n\nThe diff half then presses Analyze in Git Diff mode and reads the four things the page promises \u2014 a diff check rather than a full analysis, new-versus-resolved against the committed baseline, the banner, and the analytics column replaced by the four chips \u2014 and closes on the claim that the Analyses table did NOT grow, which is only falsifiable because the table was counted at the start of the flow. This flow deliberately keeps its own state seedable rather than supplied: every assertion is structural over findings the seed itself introduces and removes, so nothing here needs a real codebase.\n\nDeliberately left for a later batch, from sections this flow binds: the twenty-row cap (needs 21 stored analyses); the coins icon, its per-call-type usage breakdown and the cost column (all need an LLM-spending run, which this deterministic flow deliberately avoids); the trash icon, its confirmation and the baseline rebuild after deleting the newest run (a destructive history-management journey of its own); and most of `Git Diff mode`'s detail \u2014 Normal being the committed state, the stash-analyze-restore cycle, the severity chart of new findings, the changed-file list with its A/M/D marks and the deleted-file exception, the struck-through resolved cards, the filters still applying, the graph's dimming and gained/lost badges, untracked files appearing in the tree, the viewer showing uncommitted content, the kept last result, the stale-baseline warning, and the `truecourse analyze --diff` cross-check. That is a second diff-focused flow's worth of material and is left whole rather than sampled.\n\nREALIZATION RISKS: the row-metadata milestone lists eight fields including a proportional bar and a duration \u2014 it must be asserted field-structurally against the stored run, never against literal values. The ringed-point milestone is a rendered marker on a chart (a computed-style or SVG-attribute read). The past-run dropdown milestone asserts an ABSENCE first (no dropdown with one analysis) and a presence after the second run, so it constrains the order of the two arranging analyses.",
+      "notes": "A deterministic two-run history journey followed by a working-tree diff. It proves ordering, latest and past selection, selected-run analytics, hidden past-run controls, Normal committed content, diff URL/execution, severity and A/M/D summaries, new/resolved ordering, changed-file navigation, untracked on-disk content, filtering, retained results, and that diff runs do not enter history. Native-confirm deletion, provider usage, twenty-run caps, style-only states, stale-baseline orchestration and CLI/web equality are explicit no-flow claims.",
       "startingState": {
         "stepCreatable": [
           "two analyses over the seeded project \u2014 arranged by two `truecourse analyze --no-llm` steps, without which there is no past run to load and no past-run dropdown in the header",
@@ -3736,7 +4199,7 @@
         ],
         "supplied": []
       },
-      "fingerprint": "sha256:4686bb7cbcf154531711c61c8133d4de3d66dd10336f4c5ee5e26ad0881b8c80",
+      "fingerprint": "sha256:542f79f0fdba1c5402ea550f1776d06ddcfb8a93d15bd287ee41286333fad51a",
       "milestones": [
         {
           "order": 1,
@@ -3866,6 +4329,84 @@
           "anchor": "the-analyses-tab",
           "claimTitle": "diff runs are not listed in the Analyses table",
           "note": "Falsifiable only because the table's row count was read at the start of the flow."
+        },
+        {
+          "order": 21,
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "following-the-run-you-selected",
+          "claimTitle": "the widgets are recomputed as of the selected run"
+        },
+        {
+          "order": 22,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "Normal is the committed state"
+        },
+        {
+          "order": 23,
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "shareable-urls",
+          "claimTitle": "the URL carries diff mode"
+        },
+        {
+          "order": 24,
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "following-the-run-you-selected",
+          "claimTitle": "diff mode replaces the analytics column"
+        },
+        {
+          "order": 25,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "the diff column carries a severity chart of the new findings"
+        },
+        {
+          "order": 26,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "changed files are listed marked A, M or D"
+        },
+        {
+          "order": 27,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "clicking a changed file opens it"
+        },
+        {
+          "order": 28,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "the Files tab also lists untracked files in diff mode"
+        },
+        {
+          "order": 29,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "the code viewer shows your uncommitted content in diff mode"
+        },
+        {
+          "order": 30,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "the list filters still apply in diff mode"
+        },
+        {
+          "order": 31,
+          "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+          "anchor": "git-diff-mode",
+          "claimTitle": "the last diff result is kept"
+        },
+        {
+          "order": 32,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "files/the-code-viewer",
+          "claimTitle": "Normal mode shows the committed content of the file"
+        },
+        {
+          "order": 33,
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "files/the-code-viewer",
+          "claimTitle": "Git Diff mode shows what is on disk"
         }
       ],
       "bindings": [
@@ -3890,6 +4431,11 @@
           "fingerprint": "sha256:de157d5c7faf79a459b68bc212c56473f0da3866a92ccd7f7bb6bcb06dbbf5bc"
         },
         {
+          "doc": "reference/spec-docs/dashboard/analytics.mdx",
+          "anchor": "following-the-run-you-selected",
+          "fingerprint": "sha256:00fcbd22a411d92157c1a5b1bac8a4f5f2f53c49b4d3e6c983e4f4d7d8c7a367"
+        },
+        {
           "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
           "anchor": "when-analyze-is-unavailable",
           "fingerprint": "sha256:8878478a9826bf5860c0c5d220035f84cbc8b05ceecf3c0176fd203e4fc208e0"
@@ -3898,6 +4444,16 @@
           "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
           "anchor": "git-diff-mode",
           "fingerprint": "sha256:6cd5e6a4cbc13bc96064ba33fcc66ab2f58ef7af918c3ba639004383a82c8037"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/overview.mdx",
+          "anchor": "shareable-urls",
+          "fingerprint": "sha256:9d2179f678b0f8990a2708a23510b306c1ee3bf35be01dae1f6c860f71e5921a"
+        },
+        {
+          "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+          "anchor": "files/the-code-viewer",
+          "fingerprint": "sha256:443cba96b0145936949afedc864bb80cf4ea3d6e4c8a94cbf244448b89eb9b4e"
         }
       ],
       "composedOf": [],
@@ -4690,6 +5246,480 @@
       "anchor": "individual-rules",
       "claimTitle": "the dashboard Rules panel toggles rules",
       "reason": "Flow review-analysis-and-silence-a-rule-in-the-dashboard removed 2026-08-11 by user direction. The claim is an analyze-doc statement about the dashboard UI; the behavior itself is exercised by the dashboard area\u2019s read-a-violation-card-and-silence-its-rule flow, but those milestones anchor the dashboard docs\u2019 own claims, so this analyze-doc claim currently reaches no flow."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "claimTitle": "`--console` skips the mode prompt",
+      "reason": "Server lifecycle/configuration is outside browser replay; scenarios attach to the user-managed server (transform gap G87)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "starting-and-stopping",
+      "claimTitle": "`PORT` moves the server's port",
+      "reason": "Server lifecycle/configuration is outside browser replay; scenarios attach to the user-managed server (transform gap G87)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "claimTitle": "Browse picks a directory to add",
+      "reason": "The native directory chooser cannot be answered by the web step vocabulary (transform gap G84)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "claimTitle": "the trash icon removes the repository from the list",
+      "reason": "The destructive action is gated by native window.confirm, which the runner cannot answer (transform gap G84)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "claimTitle": "the trash icon deletes the repo's `.truecourse/` directory",
+      "reason": "The destructive action is gated by native window.confirm, which the runner cannot answer (transform gap G84)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "claimTitle": "removing a repository leaves the source code untouched",
+      "reason": "The destructive action is gated by native window.confirm, which the runner cannot answer (transform gap G84)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "claimTitle": "removing a repository deletes committed store files too",
+      "reason": "The destructive action is gated by native window.confirm, which the runner cannot answer (transform gap G84)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "getting-around",
+      "claimTitle": "sidebar panels can be dragged wider",
+      "reason": "This is a pointer-drag and geometry claim; the web vocabulary has no drag gesture or computed-width assertion (transform gap G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "claimTitle": "closing the dirty-tree dialog cancels the run",
+      "reason": "The prompt branch needs a distinct starting world or Escape/cancel path that current state identity and keyboard vocabulary cannot express (G83/G86)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "claimTitle": "the stash prompt is skipped in a subdirectory of a larger repository",
+      "reason": "The prompt branch needs a distinct starting world or Escape/cancel path that current state identity and keyboard vocabulary cannot express (G83/G86)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "claimTitle": "the stash prompt is skipped when git is unavailable",
+      "reason": "The prompt branch needs a distinct starting world or Escape/cancel path that current state identity and keyboard vocabulary cannot express (G83/G86)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "claimTitle": "the estimate is the same one the CLI prints",
+      "reason": "Cross-driver equality needs captured web values, which the runner does not expose (transform gap G91)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "claimTitle": "Cancel stops the run",
+      "reason": "The terminal state is deferred through the analysis socket, and the runner cannot coordinate cancellation or inject a deterministic failure (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "claimTitle": "a failed run turns the card red and shows the error",
+      "reason": "The terminal state is deferred through the analysis socket, and the runner cannot coordinate cancellation or inject a deterministic failure (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "while-it-runs",
+      "claimTitle": "the failed card is dismissed with the X",
+      "reason": "The terminal state is deferred through the analysis socket, and the runner cannot coordinate cancellation or inject a deterministic failure (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "which-llm-the-dashboard-uses",
+      "claimTitle": "a transport change applies to the next run without a restart",
+      "reason": "This changes the managed server's process environment between runs, outside scenario authority."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "claimTitle": "Analyze and the diff toggle are hidden in the Spec Guard section",
+      "reason": "Outside the requested Analyze-tab scope: this claim requires entering Spec Guard."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "claimTitle": "`--stash` / `--no-stash` pre-answer the stash prompt",
+      "reason": "These are CLI prompt flags, not an Analyze-tab browser interaction; a web journey cannot prove CLI prompt pre-answering."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "when-analyze-is-unavailable",
+      "claimTitle": "`--llm` / `--no-llm` pre-answer the LLM prompt",
+      "reason": "These are CLI prompt flags, not an Analyze-tab browser interaction; a web journey cannot prove CLI prompt pre-answering."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "claimTitle": "backticked identifiers render as code",
+      "reason": "The remaining distinction is semantic styling, hover state, inaccessible menu scope, or provider telemetry not exposed to web expectations (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "claimTitle": "an architecture finding shows its `service / module / function` target",
+      "reason": "No deterministic source seed produces the required architecture-targeted finding, and graph centering/depth geometry is not observable (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "a-violation-card",
+      "claimTitle": "Locate zooms the graph onto the target",
+      "reason": "No deterministic source seed produces the required architecture-targeted finding, and graph centering/depth geometry is not observable (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "claimTitle": "a disabled rule costs nothing to run",
+      "reason": "Proving zero cost requires negative provider-call/metering telemetry that the page and API do not expose."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "silencing-a-rule",
+      "claimTitle": "resolved findings in diff mode do not offer the disable action",
+      "reason": "The absent action is inside a closed per-card overflow; a page-wide negative cannot attribute its absence to the resolved card."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "claimTitle": "a language badge's hover text says whether the rule is supported and why",
+      "reason": "Hover-only content is not expressible or observable in the web vocabulary (transform gap G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "claimTitle": "each summary chip has a hover explanation",
+      "reason": "Hover-only content is not expressible or observable in the web vocabulary (transform gap G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "summary-row",
+      "claimTitle": "the stale chip counts violations open more than 7 days",
+      "reason": "The seven-day boundary needs controllable time or imported timestamped findings; scenario setup supports neither."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "violation-trend",
+      "claimTitle": "the trend chart covers the 20 most recent analyses",
+      "reason": "The cap needs 21 completed runs; history cannot be seeded and repeated server analyses exceed the runner's long-process model (G87)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "claimTitle": "only findings attributed to a service or module are counted",
+      "reason": "Attribution aggregation cannot be isolated from rendered totals without importing synthetic analysis records; setup cannot seed store internals."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/analytics.mdx",
+      "anchor": "top-offenders",
+      "claimTitle": "architecture findings raised on code count toward the mapped module",
+      "reason": "Attribution aggregation cannot be isolated from rendered totals without importing synthetic analysis records; setup cannot seed store internals."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "depth",
+      "claimTitle": "a single candidate is selected for you",
+      "reason": "The one-candidate world collides with the same depth-toggle interface used by the multi-candidate world (G83)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "top-level nodes can be dragged to move them",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "positions are saved per branch and per depth",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "the arrangement survives a reload and a new analysis",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "Auto layout throws the saved positions away",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "container nodes collapse and expand at Modules and Functions depth",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "the button next to the scope selector collapses or expands everything",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "collapse state is saved like positions",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "positions and collapse state live in `ui-state.json`",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arranging-it",
+      "claimTitle": "`ui-state.json` is gitignored",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "claimTitle": "a toggle switches between move mode and select mode",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "claimTitle": "the canvas has a minimap",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "canvas-controls",
+      "claimTitle": "Offline means progress updates do not arrive until it reconnects",
+      "reason": "Forcing and correlating an event-stream disconnect is unsupported (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "claimTitle": "Locate selects and centers the violation's target",
+      "reason": "No deterministic source seed produces the required architecture-targeted finding, and graph centering/depth geometry is not observable (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "claimTitle": "Locate switches depth for module and function targets",
+      "reason": "No deterministic source seed produces the required architecture-targeted finding, and graph centering/depth geometry is not observable (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "claimTitle": "the Files crosshair dims unrelated nodes and zooms to the rest",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "anchor": "arriving-from-elsewhere",
+      "claimTitle": "the path focus is cleared from the tree or its filter bar",
+      "reason": "The claim depends on pointer drag, persisted geometry, canvas styling, or unnamed React Flow nodes, none observable by the current web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "claimTitle": "a single click previews an item",
+      "reason": "Preview/pin is style state and double-click is absent from the web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "claimTitle": "the next preview replaces the previous one",
+      "reason": "Preview/pin is style state and double-click is absent from the web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "claimTitle": "a double click pins an item",
+      "reason": "Preview/pin is style state and double-click is absent from the web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files-flows-and-databases",
+      "claimTitle": "databases always open pinned",
+      "reason": "Preview/pin is style state and double-click is absent from the web vocabulary (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "claimTitle": "the crosshair dims unrelated nodes in the graph",
+      "reason": "The outcome is stateful graph focus plus dimming/zoom, blocked by state identity and geometry observability (G83/G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "claimTitle": "the crosshair narrows the violations list to that path",
+      "reason": "The outcome is stateful graph focus plus dimming/zoom, blocked by state identity and geometry observability (G83/G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files",
+      "claimTitle": "a Filter bar shows what is focused and clears it",
+      "reason": "The outcome is stateful graph focus plus dimming/zoom, blocked by state identity and geometry observability (G83/G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "files/the-code-viewer",
+      "claimTitle": "clicking the finding row expands its fix prompt",
+      "reason": "The code-viewer finding row is an unnamed div, not a role-addressable control."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "claimTitle": "each flow shows a trigger icon, its step count and a severity-colored name",
+      "reason": "The remaining behavior is icon/color/edge/badge geometry rather than distinct text or URL state (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "claimTitle": "database reads and writes are colored by the datastore",
+      "reason": "The remaining behavior is icon/color/edge/badge geometry rather than distinct text or URL state (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "claimTitle": "steps carry the violations that target them",
+      "reason": "The remaining behavior is icon/color/edge/badge geometry rather than distinct text or URL state (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "claimTitle": "Enrich appears for an undescribed flow on the latest analysis",
+      "reason": "The premise needs a live provider call and, for Enrich, a socket-deferred write; deterministic replay cannot arrange it reliably (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "claimTitle": "Enrich asks the LLM to write descriptions",
+      "reason": "The premise needs a live provider call and, for Enrich, a socket-deferred write; deterministic replay cannot arrange it reliably (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "claimTitle": "Enrich saves the descriptions back into the analysis",
+      "reason": "The premise needs a live provider call and, for Enrich, a socket-deferred write; deterministic replay cannot arrange it reliably (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "flows",
+      "claimTitle": "Enrich is not offered on past analyses or in diff mode",
+      "reason": "The premise needs a live provider call and, for Enrich, a socket-deferred write; deterministic replay cannot arrange it reliably (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "claimTitle": "caches show no table count",
+      "reason": "A cache requires another analyzer world that collides with the relational database-list state (G83)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "claimTitle": "the ER diagram marks keys, nullable columns and relations",
+      "reason": "The remaining behavior is icon/color/edge/badge geometry rather than distinct text or URL state (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "claimTitle": "tables with violations are outlined and carry a warning count",
+      "reason": "The remaining behavior is icon/color/edge/badge geometry rather than distinct text or URL state (G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "anchor": "databases",
+      "claimTitle": "hovering the warning count reads the findings",
+      "reason": "Hover-only content is not expressible or observable in the web vocabulary (transform gap G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "claimTitle": "the Analyses tab tables your 20 most recent analyses",
+      "reason": "The cap needs 21 completed runs; history cannot be seeded and repeated server analyses exceed the runner's long-process model (G87)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "claimTitle": "the coins icon appears when the run spent tokens",
+      "reason": "The premise needs a live provider call and, for Enrich, a socket-deferred write; deterministic replay cannot arrange it reliably (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "claimTitle": "the coins icon opens a usage breakdown per call type",
+      "reason": "The premise needs a live provider call and, for Enrich, a socket-deferred write; deterministic replay cannot arrange it reliably (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "claimTitle": "the usage breakdown shows cost when the provider reports one",
+      "reason": "The premise needs a live provider call and, for Enrich, a socket-deferred write; deterministic replay cannot arrange it reliably (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "claimTitle": "the trash icon deletes an analysis after a confirmation",
+      "reason": "The destructive action is gated by native window.confirm, which the runner cannot answer (transform gap G84)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "the-analyses-tab",
+      "claimTitle": "deleting the newest run rebuilds the current-state baseline",
+      "reason": "The destructive action is gated by native window.confirm, which the runner cannot answer (transform gap G84)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "claimTitle": "without a baseline the dashboard tells you to run a full analysis",
+      "reason": "Git Diff is unavailable in the no-analysis state, so the documented no-baseline prompt is unreachable through the controls."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "claimTitle": "deleted files are not clickable",
+      "reason": "The deleted row is arranged, but expectations cannot assert an element's disabled state; clicking it would test the inverse."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "claimTitle": "resolved findings are struck through and dimmed",
+      "reason": "The remaining behavior is native confirmation, provider-only state, disabled state, or computed presentation not exposed to expectations (G84/G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "claimTitle": "the graph dims everything your changes did not touch",
+      "reason": "The remaining behavior is native confirmation, provider-only state, disabled state, or computed presentation not exposed to expectations (G84/G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "claimTitle": "the graph badges affected nodes with violations gained or lost",
+      "reason": "The remaining behavior is native confirmation, provider-only state, disabled state, or computed presentation not exposed to expectations (G84/G88)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "claimTitle": "a changed baseline warns you to re-run the diff",
+      "reason": "The state needs a diff, a socket-driven replacement baseline, and correlation to the retained result; no stable orchestration point exists (G85)."
+    },
+    {
+      "doc": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "anchor": "git-diff-mode",
+      "claimTitle": "diff mode is the dashboard's view of `truecourse analyze --diff`",
+      "reason": "Cross-driver equality needs captured web values, which the runner does not expose (transform gap G91)."
     }
   ]
 }

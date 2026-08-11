@@ -6,7 +6,7 @@ promise: >-
   search, severity, detection, categories and the analytics rows.
 flow:
   id: filter-the-violation-list
-  fingerprint: sha256:b6db5c583d0164d3c829804ecd0e5bd9e76c3994df13ec8b5418c7b1c3d30764
+  fingerprint: sha256:ea7d9fc200e192d35a9dfffab2ed4eaeaa30258b42a010a70f05e945eb948f23
 interface:
   path:
     - cli/analyze
@@ -19,6 +19,7 @@ interface:
     - web/filter-violations-by-category
     - web/clear-the-category-filter
     - api/get-api-repos-id-analytics-top-offenders
+    - web/sort-top-offenders-by-critical-count
     - web/scope-violations-to-a-top-offender
   fingerprints:
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
@@ -31,6 +32,7 @@ interface:
     - sha256:443701ef7e9295664459c180e548c8393ad77fb0d4e7246df117aa24147b3b14
     - sha256:18a5373cac7ad9ac45654464f5558e0d0cd58e247a36ba59fc85d9acfce3de26
     - sha256:20d30c8fda90f6423876dc6b99ee8c4fa849502a5a9477da7e58bd99b961c8f5
+    - sha256:e256ac3c6a19dcc62b2cb36abf570fbb2d237765d95717290b85b5a7681dfebd
     - sha256:44dcd33611b1fc05785831e67c34e5261fe75340e0b07a4caa426ef2b721f3c3
 binds:
   - doc: reference/spec-docs/dashboard/violations.mdx
@@ -42,6 +44,9 @@ binds:
   - doc: reference/spec-docs/dashboard/overview.mdx
     section: getting-around
     fingerprint: sha256:b64d05bfdef7ef3cce1d95c719c53884d5a0c419c170d00526cc29d0f98842b2
+  - doc: reference/spec-docs/dashboard/analytics.mdx
+    section: top-offenders
+    fingerprint: sha256:760352abbe60c1aeb1fae94ec940530554d58c82fc452f2e4d253b2c7e8d5e9d
 needs:
   - analysis-target
   - claude-login
@@ -185,13 +190,25 @@ steps:
       name: Severity
     expect:
       text:
-        matches: '^(?=[\s\S]*All severities)(?=[\s\S]*Critical)(?=[\s\S]*High)(?=[\s\S]*Medium)(?=[\s\S]*Low)(?=[\s\S]*(Critical|High|Medium|Low)\s*\d)[\s\S]*$'
+        matches: '^(?=[\s\S]*All severities\s*\d)(?=[\s\S]*Critical\s*\d)(?=[\s\S]*High\s*\d)(?=[\s\S]*Medium\s*\d)(?=[\s\S]*Low\s*\d)[\s\S]*$'
+        compare:
+          number: 'All severities\s*(\d+)'
+          atLeast: 1
+          atMost: '${captured:total}'
     note: >-
       The severity control, opened. It offers the four levels the doc names (beside the
-      all-severities entry that clears it), and at least one of them carries a number
-      right after its label — the live count, which the dropdown renders inside the
-      option itself. The count is asserted as adjacency rather than as a value: the
-      numbers belong to the bound project.
+      all-severities entry that clears it), and EVERY one of the five carries a number
+      right after its label — the live count the dropdown renders inside the option
+      itself. Requiring all five is the falsifiable half: this control counts zeros too,
+      unlike the category tabs below, which omit a count at zero, so an option without a
+      number here is a real regression rather than an empty band. The counts themselves
+      belong to the bound project and stay adjacency, with ONE exception: the
+      all-severities entry, whose number is compared against the analysis. It must be at
+      least 1 (the searched finding is on screen a step above, so the set these counts are
+      taken over is not empty) and at most the analysis's own unfiltered total, which is
+      what makes them counts OF this analysis rather than decoration. Not an equality, and
+      deliberately: the search entered above is still in force and the option counts follow
+      it, so the number here is the searched subset's, which no API call can restate.
     milestone:
       - dashboard-violations-severity-dropdown-offers-four-levels
       - dashboard-violations-severity-options-carry-live-counts
@@ -312,10 +329,27 @@ steps:
       json:
         offenders[0].name:
           exists: true
+        offenders[0].criticalCount:
+          exists: true
+        offenders[0].highCount:
+          exists: true
     note: >-
       The name of the service or module the analytics column ranks first — the row the
       next step clicks. Taken from the app rather than written here, because which
       service a bound project ranks first is not knowable at authoring time.
+    milestone:
+      - dashboard-analytics-top-offenders-shows-critical-and-high-counts
+  - driver: web
+    click:
+      role: columnheader
+      name: Critical
+      exact: true
+    expect:
+      text:
+        contains: Critical ↓
+    note: The Critical header becomes the active descending sort key.
+    milestone:
+      - dashboard-analytics-top-offenders-header-re-sorts
   - driver: web
     click:
       role: row

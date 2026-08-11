@@ -6,7 +6,7 @@ promise: >-
   violations list beside it.
 flow:
   id: read-the-analytics-of-a-run
-  fingerprint: sha256:d3b4913c56ff0b982d945fd091dc1dd97bcd5b1453c385dfa3fa2fa2d3b533b0
+  fingerprint: sha256:52327b3f9c969229222756c58b3511bdb373917f4fa5526728fc58bb28867f2d
 interface:
   path:
     - cli/analyze
@@ -286,11 +286,15 @@ steps:
         matches: ^(?=[\s\S]*Violation Trend)(?=[\s\S]*Total Active)(?=[\s\S]*New)(?=[\s\S]*Resolved)[\s\S]*$
     note: >-
       The trend card, asserted on the three series the doc says it plots. Authored to the
-      doc's sentence and expected to be RED: the legend resolves its labels through the
-      chart config by data key, and the total-active series is configured under a different
-      key, so the first legend entry renders as a colour swatch with no words at all. That
-      is a product finding worth keeping visible, not a scenario to weaken — the two series
-      that do render are asserted alongside it so a failure names exactly which one is
+      doc's sentence and authored RED: the legend resolved its labels through the chart
+      config by data key, the total-active series was configured under a different key,
+      and the first legend entry rendered as a colour swatch with no words at all. The
+      scenario was kept as the doc states it rather than weakened to the swatch, the
+      finding was reported, and the chart was fixed — its config is now keyed by the data
+      key each series is drawn with, so the legend names Total Active like the other two.
+      This step passes as of that fix; the assertion is unchanged, which is the point of
+      having authored it to the doc in the first place. The two series that always
+      rendered stay asserted alongside it so a regression names exactly which one is
       missing.
     milestone:
       - dashboard-analytics-trend-plots-active-new-and-resolved
@@ -339,7 +343,7 @@ steps:
     expect:
       text:
         matches: >-
-          ^[\s\S]*Code Hotspots[\s\S]*server\.js\s*8[\s\S]*index\.js\s*4[\s\S]*user-repository\.js\s*3[\s\S]*$
+          ^[\s\S]*Code Hotspots[\s\S]*server\.js\s*8\s*(critical|high|medium|low)[\s\S]*index\.js\s*4\s*(critical|high|medium|low)[\s\S]*user-repository\.js\s*3\s*(critical|high|medium|low)[\s\S]*$
     note: >-
       The hotspot table, read as the doc describes it: the files with the most code
       violations, in descending order, each with its count. Three files carry findings in
@@ -348,6 +352,7 @@ steps:
       rows render basenames only, which is what the assertion names.
     milestone:
       - dashboard-analytics-hotspots-lists-ten-files-by-code-violations
+      - dashboard-analytics-hotspot-shows-its-worst-severity
   - driver: web
     click:
       role: row

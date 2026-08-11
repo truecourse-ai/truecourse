@@ -1,0 +1,179 @@
+guard: 3
+id: inspect-and-filter-the-rules-panel.cli.1
+title: A developer inspects, filters and toggles a rule from the Rules panel
+promise: >-
+  A developer opens the Rules panel, uses its local controls, reads a rule's metadata and
+  language badges, then verifies the UI and CLI share disabledRules.
+flow:
+  id: inspect-and-filter-the-rules-panel
+  fingerprint: sha256:bcf156753bb2eb33e13827d294b865a05d2f3600a24f3920e8318317845cd2dc
+interface:
+  path:
+    - cli/analyze
+    - web/open-repo-report
+    - web/open-rules-panel
+    - web/search-rules-panel
+    - web/disable-rule-from-rules-panel
+    - api/get-api-repos-id-rules
+    - cli/rules-enable
+    - cli/rules-disable
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
+    - sha256:1075cb6b160eabf76668728d8b5bc600866d29e070cc3cfc0da7da12bd89491f
+    - sha256:abda9b0ec5d1d988331f0ad4c88044e10b5ee8772207111835b08e0b51f37543
+    - sha256:18eb008d52759dba8c815de6f6e8b0beb1e95f4e491cbc65d21b4f8587f67f66
+    - sha256:dfafa6540da39d72e15e6872c15dd11a557df83a196c2cf356cafd34f3e70678
+    - sha256:2977512e713caaeaeb76cd62699ef08da750393f9aa81d585b5d43064a179f1c
+    - sha256:9473e87965b8ca6a84302cc600b2776e92e066b2ee4f940555b4a98fb71c9c3b
+binds:
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: the-rules-catalog
+    fingerprint: sha256:bc0c6e0b25089bb35998924198385ef5d5fc12ae7a4f40a00659bea3f9182ee8
+setup:
+  files:
+    sample-app/package.json: |
+      { "name": "sample-app", "version": "1.0.0", "type": "module" }
+    sample-app/src/index.js: |
+      export function evaluate(source) {
+        return eval(source)
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed the repository
+normalize: []
+driver: cli
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      visible:
+        role: button
+        name: Browse Rules
+  - driver: web
+    click:
+      role: button
+      name: Browse Rules
+      exact: true
+    expect:
+      within:
+        role: dialog
+        name: Rules
+      text:
+        matches: '^(?=[\s\S]*Search rules)(?=[\s\S]*All severities)(?=[\s\S]*Det)(?=[\s\S]*LLM)(?=[\s\S]*Security)(?=[\s\S]*Bugs)(?=[\s\S]*Architecture)(?=[\s\S]*Performance)(?=[\s\S]*Reliability)(?=[\s\S]*Code Quality)(?=[\s\S]*Database)(?=[\s\S]*Style)[\s\S]*$'
+    note: >-
+      The panel exposes its own search, severity, detection and category controls. The
+      category labels are the same nine labels used by the violations list.
+    milestone:
+      - dashboard-violations-rules-panel-has-its-own-filters
+      - dashboard-violations-rules-panel-category-tabs-match
+  - driver: web
+    fill:
+      role: textbox
+      name: Search rules...
+    value: Dynamic code evaluation
+    expect:
+      within:
+        role: dialog
+        name: Rules
+      text:
+        matches: '^(?=[\s\S]*Dynamic code evaluation)(?=[\s\S]*Use of eval)(?=[\s\S]*HIGH)(?=[\s\S]*Security)(?=[\s\S]*Deterministic)(?=[\s\S]*JS)(?=[\s\S]*PY)(?=[\s\S]*C#)[\s\S]*$'
+    note: >-
+      One rule row is isolated and read field by field: name, description, severity,
+      category, detection kind, and one visible badge for each catalogued language.
+    milestone:
+      - dashboard-violations-rule-row-shows-its-metadata
+      - dashboard-violations-rule-row-shows-a-badge-per-language
+  - driver: web
+    fill:
+      role: textbox
+      name: Search rules...
+    value: ''
+    expect:
+      within:
+        role: dialog
+        name: Rules
+      text:
+        contains: Dynamic code evaluation
+  - driver: web
+    click:
+      role: switch
+      name: Disable Dynamic code evaluation
+      exact: true
+    expect:
+      within:
+        role: dialog
+        name: Rules
+      text:
+        contains: Disabled
+    note: Disables the selected rule through its repository-local switch.
+  - request:
+      method: GET
+      path: /api/repos/sample-app/rules
+    expect:
+      status: 200
+      body:
+        matches: '^(?=[\s\S]*security/deterministic/eval-usage)(?=[\s\S]*"enabled":false)[\s\S]*$'
+    note: >-
+      The repository rule response reads the same disabledRules-backed state the panel
+      just wrote.
+    milestone:
+      - dashboard-violations-rule-switch-writes-to-disabledrules
+  - run:
+      - rules
+      - enable
+      - security/deterministic/eval-usage
+    cwd: sample-app
+    expect:
+      exit: 0
+      stdout:
+        contains: Enabled
+      files:
+        sample-app/.truecourse/config.json:
+          contains: '"disabledRules": []'
+    note: >-
+      The CLI enable, aimed at the key the PANEL disabled a moment ago, and the file is
+      how that is proved rather than taken on trust: the repository config the panel wrote
+      the key into now carries an EMPTY disabled list. The emptiness is asserted as
+      written content because the file vocabulary has no negative matcher — a key that is
+      gone leaves `[]` behind, which says the same thing positively, and says it about the
+      one file both writers own.
+  - run:
+      - rules
+      - disable
+      - security/deterministic/eval-usage
+    cwd: sample-app
+    expect:
+      exit: 0
+      stdout:
+        contains: Disabled
+      files:
+        sample-app/.truecourse/config.json:
+          contains: security/deterministic/eval-usage
+    note: >-
+      The command-line enable and disable actions operate on the same rule key the panel
+      changed, proving the documented CLI counterparts exist — and the pair of file reads
+      is what makes "the same disabledRules" a measurement instead of a claim: the key the
+      panel wrote is the key this command removes and puts back, in the repository's own
+      `config.json`. The API step above reads the panel's write through the server; these
+      two read the store the doc says both surfaces share.
+    milestone:
+      - dashboard-violations-cli-offers-the-same-rule-toggles

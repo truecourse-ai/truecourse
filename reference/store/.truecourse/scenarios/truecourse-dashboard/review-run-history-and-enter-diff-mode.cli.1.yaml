@@ -6,7 +6,7 @@ promise: >-
   latest, and compares the working tree against the committed baseline.
 flow:
   id: review-run-history-and-enter-diff-mode
-  fingerprint: sha256:4686bb7cbcf154531711c61c8133d4de3d66dd10336f4c5ee5e26ad0881b8c80
+  fingerprint: sha256:542f79f0fdba1c5402ea550f1776d06ddcfb8a93d15bd287ee41286333fad51a
 interface:
   path:
     - cli/analyze
@@ -15,7 +15,10 @@ interface:
     - web/open-the-analyses-tab
     - web/view-a-past-analysis
     - web/search-the-violation-list
+    - web/open-a-file-in-the-code-viewer
     - web/enter-git-diff-mode
+    - web/open-a-changed-file-from-diff
+    - web/leave-git-diff-mode
     - web/run-an-analysis-from-the-header
     - web/skip-the-llm-rules-for-a-run
   fingerprints:
@@ -25,7 +28,10 @@ interface:
     - sha256:99935db45642dad41bd691d1337633251701f4923cfaa8080d6ad3588b996f60
     - sha256:c4cc6cb16a3959e98e87b8527523b42cc5ec690117c4defc0cbf1a3f2a0cf37b
     - sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8
+    - sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106
     - sha256:fe3cde9b62d6d10160b130c1458c0c3533aca1c743ee32d03b5869a973c85a74
+    - sha256:e49c14c0f831a0aa350159f96b21be700e9738e0b9218879329ba40e1bbaf72a
+    - sha256:9f33c442b170ed78a600166fb8eadbef1c1ae2b56d48603765e6152a25995fbf
     - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
     - sha256:392bccc47ef75a7e46fdd093cfdf09319e6c087ab8fdfa3e0479fb0458447971
 binds:
@@ -41,12 +47,18 @@ binds:
   - doc: reference/spec-docs/dashboard/analytics.mdx
     section: violation-trend
     fingerprint: sha256:de157d5c7faf79a459b68bc212c56473f0da3866a92ccd7f7bb6bcb06dbbf5bc
+  - doc: reference/spec-docs/dashboard/analytics.mdx
+    section: following-the-run-you-selected
+    fingerprint: sha256:00fcbd22a411d92157c1a5b1bac8a4f5f2f53c49b4d3e6c983e4f4d7d8c7a367
   - doc: reference/spec-docs/dashboard/running-analyses.mdx
     section: when-analyze-is-unavailable
     fingerprint: sha256:8878478a9826bf5860c0c5d220035f84cbc8b05ceecf3c0176fd203e4fc208e0
   - doc: reference/spec-docs/dashboard/history-and-diff.mdx
     section: git-diff-mode
     fingerprint: sha256:6cd5e6a4cbc13bc96064ba33fcc66ab2f58ef7af918c3ba639004383a82c8037
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: files/the-code-viewer
+    fingerprint: sha256:443cba96b0145936949afedc864bb80cf4ea3d6e4c8a94cbf244448b89eb9b4e
 setup:
   files:
     sample-app/package.json: |
@@ -312,15 +324,26 @@ steps:
       visible:
         role: row
         name: ${captured:secondCommit}
+      within:
+        role: row
+        name: ${captured:secondCommit}
       text:
-        matches: ^[\s\S]*main[\s\S]*${captured:secondCommit}[\s\S]*$
+        matches: ^[\s\S]*main[\s\S]*${captured:secondCommit}[\s\S]*-\s*$
     note: >-
       One row, read field by field against the run it describes: it is addressable BY the
-      commit the run was anchored to, and it carries the branch the run was on immediately
-      before that hash. The other fields the doc lists — provider, service count, severity
-      counts and their bar, duration, tokens — are values the sandbox decides run by run,
-      so they are asserted as the columns that carry them (the step above) rather than as
-      literals that would only be asserting on this machine.
+      commit the run was anchored to, it carries the branch the run was on immediately
+      before that hash, and its LAST field — the Tokens cell, the column the tab step
+      reads as usage — says the run spent nothing. The read is scoped INSIDE the row
+      rather than taken page-wide, because a field is only a field of this run if it is
+      read from this run's row; the trailing anchor is what makes it the token cell
+      specifically, since Tokens is the last column carrying text (the Actions cell is
+      icons only). The dash is the value the panel renders for no usage, and it is
+      knowable here for the same reason the counts above are: both arranging runs are
+      `--no-llm`, so the run summary records zero tokens. The remaining fields the doc
+      lists — provider, service count, severity counts and their bar, duration — are
+      values the sandbox decides run by run, so they stay asserted as the columns that
+      carry them (the step above) rather than as literals that would only be asserting on
+      this machine.
     milestone:
       - dashboard-analyses-row-shows-run-metadata
   - driver: web
@@ -389,6 +412,7 @@ steps:
       narrowing is not tampering with the state under test.
     milestone:
       - dashboard-analyses-every-view-switches-to-that-run
+      - dashboard-analytics-widgets-recomputed-for-the-selected-run
   - driver: web
     fill:
       role: textbox
@@ -455,12 +479,62 @@ steps:
           const result = await pool.query('INSERT INTO users (email) VALUES (' + user.email + ')')
           return result.rows
         }
+      sample-app/new-helper.js: |
+        export function evaluatePending(source) {
+          return eval(source)
+        }
     note: >-
       The uncommitted working-tree edit the diff half is about, written so both sides of the
       comparison exist: the worker starts evaluating its input again (a finding the
       committed baseline does not have) and the repository stops selecting every column (a
       finding the baseline DOES have). Left uncommitted on purpose — that is what "your
       pending changes" means.
+  - git:
+      - rm
+      - services/api/src/server.js
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: Removes one tracked file so the diff summary has a real deleted entry alongside its added and modified entries.
+  - driver: web
+    navigate: /repos/sample-app?tab=files&file=services%2Fworker%2Fsrc%2Findex.js
+    expect:
+      url:
+        matches: '^(?![\s\S]*view=diff)[\s\S]*file=[\s\S]*index\.js[\s\S]*$'
+      text:
+        matches: '^(?=[\s\S]*return Number\(source\))(?![\s\S]*return eval\(source\))[\s\S]*$'
+    note: Normal mode reads the committed worker even after its working-tree copy has changed.
+    milestone:
+      - dashboard-files-normal-mode-shows-committed-content
+  - driver: web
+    click:
+      role: button
+      name: Home
+    expect:
+      visible:
+        role: button
+        name: Git Diff
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: Dynamic code evaluation
+    expect:
+      text:
+        contains: No violations found
+    note: >-
+      Before diff mode, the report still reads the committed baseline: the uncommitted eval
+      finding is absent even though the file is already on disk.
+    milestone:
+      - dashboard-diff-normal-is-the-committed-state
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: ''
+    expect:
+      text:
+        matches: '^(?![\s\S]*Filtered by:)[\s\S]*$'
   - driver: web
     click:
       role: button
@@ -474,6 +548,7 @@ steps:
       Analyze button is what runs the comparison, which the next step presses.
     milestone:
       - dashboard-diff-toggle-chooses-normal-or-git-diff
+      - dashboard-overview-url-carries-diff-mode
   - driver: web
     click:
       role: button
@@ -515,6 +590,17 @@ steps:
       names stand in their place. The negatives are what make it a replacement.
     milestone:
       - dashboard-diff-analytics-replaced-by-four-chips
+      - dashboard-analytics-diff-mode-replaces-the-column
+  - driver: web
+    expect:
+      text:
+        matches: '^(?=[\s\S]*By Severity)(?=[\s\S]*High)(?=[\s\S]*Changed files)(?=[\s\S]*\bA\b)(?=[\s\S]*\bM\b)(?=[\s\S]*\bD\b)[\s\S]*$'
+    note: >-
+      The diff analytics column charts the severity of new findings and labels actual added,
+      modified and deleted files with A, M and D.
+    milestone:
+      - dashboard-diff-severity-chart-of-new-findings
+      - dashboard-diff-changed-files-marked-a-m-d
   - driver: web
     expect:
       text:
@@ -529,6 +615,68 @@ steps:
     milestone:
       - dashboard-diff-compares-worktree-against-the-baseline
       - dashboard-diff-list-shows-new-then-resolved
+  - driver: web
+    click:
+      role: button
+      name: new-helper.js
+    expect:
+      url:
+        matches: '^[\s\S]*view=diff[\s\S]*file=[\s\S]*new-helper\.js[\s\S]*$'
+      text:
+        matches: '^(?=[\s\S]*new-helper\.js)(?=[\s\S]*evaluatePending)(?=[\s\S]*eval\(source\))[\s\S]*$'
+    note: >-
+      The added-file row opens the code viewer; its URL, file tree and source all identify
+      the untracked working-tree file and its uncommitted content.
+    milestone:
+      - dashboard-diff-clicking-a-changed-file-opens-it
+      - dashboard-diff-files-tab-lists-untracked-files
+      - dashboard-diff-code-viewer-shows-uncommitted-content
+      - dashboard-files-diff-mode-shows-on-disk-content
+  - driver: web
+    click:
+      role: button
+      name: Home
+    expect:
+      text:
+        contains: Showing working tree state (uncommitted changes)
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: Dynamic code evaluation
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Dynamic code evaluation)(?![\s\S]*SELECT \* in production code)[\s\S]*$'
+    note: The normal violation search still narrows the new-and-resolved diff list.
+    milestone:
+      - dashboard-diff-filters-still-apply
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: ''
+    expect:
+      text:
+        contains: SELECT * in production code
+  - driver: web
+    click:
+      role: button
+      name: Normal
+      exact: true
+    expect:
+      text:
+        matches: '^(?![\s\S]*Showing working tree state)(?=[\s\S]*15\s*active)[\s\S]*$'
+  - driver: web
+    click:
+      role: button
+      name: Git Diff
+      exact: true
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Showing working tree state)(?=[\s\S]*Dynamic code evaluation)(?=[\s\S]*SELECT \* in production code)[\s\S]*$'
+    note: Returning to Git Diff restores the completed result without another analysis run.
+    milestone:
+      - dashboard-diff-last-result-is-kept
   - driver: web
     click:
       role: button

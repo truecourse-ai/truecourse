@@ -1774,6 +1774,17 @@ re-scope note; first doc-drift candidate logged there (the docs'
 "Shield icon" Rules-panel entry point vs the client's "Browse Rules"
 control).
 
+STATUS UPDATE 2026-08-11 — the Code Analysis-only reference wave now carries
+55 web interfaces inside a 114-interface catalog and 51 settled flows/scenarios.
+Seven new flows cover committed-state stashing, clean-tree handling, the
+deterministic-only LLM path, path registration and first-analysis state,
+non-git repositories, repository rule settings, and the Rules panel. Existing
+dashboard flows now also cover flow search/playback, shared tabs, expanded
+schemas, history/diff details, Top Offenders sorting, hotspot severity, folder
+toggles, and graph connection state. All 301 dashboard claims are accounted for
+exactly once: 222 in executable flows and 79 as evidence-based no-flow claims.
+G90 is closed; remaining driver limitations are recorded under G83–G88/G91.
+
 Sequencing and method are the same reference-first ladder as CLI and API,
 and strictly after the API path is stable:
 

@@ -385,6 +385,76 @@
       "status": "never-run"
     },
     {
+      "id": "add-a-repository-by-path-and-read-its-first-analysis.cli.1",
+      "title": "A developer pastes a repository path and returns after its first analysis",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "the-repository-list",
+      "file": ".truecourse/scenarios/truecourse-dashboard/add-a-repository-by-path-and-read-its-first-analysis.cli.1.yaml",
+      "flowId": "add-a-repository-by-path-and-read-its-first-analysis",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "open-a-non-git-repository.cli.1",
+      "title": "A developer opens a registered directory that is not a git repository",
+      "doc": "reference/spec-docs/dashboard/overview.mdx",
+      "anchor": "repositories-without-git",
+      "file": ".truecourse/scenarios/truecourse-dashboard/open-a-non-git-repository.cli.1.yaml",
+      "flowId": "open-a-non-git-repository",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "apply-repository-rule-settings-to-a-dashboard-run.cli.1",
+      "title": "A dashboard analysis obeys the repository's category, LLM and disabled-rule settings",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "running-an-analysis",
+      "file": ".truecourse/scenarios/truecourse-dashboard/apply-repository-rule-settings-to-a-dashboard-run.cli.1.yaml",
+      "flowId": "apply-repository-rule-settings-to-a-dashboard-run",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "inspect-and-filter-the-rules-panel.cli.1",
+      "title": "A developer inspects, filters and toggles a rule from the Rules panel",
+      "doc": "reference/spec-docs/dashboard/violations.mdx",
+      "anchor": "the-rules-catalog",
+      "file": ".truecourse/scenarios/truecourse-dashboard/inspect-and-filter-the-rules-panel.cli.1.yaml",
+      "flowId": "inspect-and-filter-the-rules-panel",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "analyze-committed-state-from-the-dashboard.cli.1",
+      "title": "A developer stashes pending work and analyzes the committed state",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "file": ".truecourse/scenarios/truecourse-dashboard/analyze-committed-state-from-the-dashboard.cli.1.yaml",
+      "flowId": "analyze-committed-state-from-the-dashboard",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "analyze-a-clean-repository-from-the-dashboard.cli.1",
+      "title": "A developer analyzes a clean repository whose only new file belongs to TrueCourse",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "file": ".truecourse/scenarios/truecourse-dashboard/analyze-a-clean-repository-from-the-dashboard.cli.1.yaml",
+      "flowId": "analyze-a-clean-repository-from-the-dashboard",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
+      "id": "skip-llm-rules-from-the-dashboard.cli.1",
+      "title": "A developer skips LLM rules and keeps the dashboard analysis deterministic",
+      "doc": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "anchor": "before-the-run-starts",
+      "file": ".truecourse/scenarios/truecourse-dashboard/skip-llm-rules-from-the-dashboard.cli.1.yaml",
+      "flowId": "skip-llm-rules-from-the-dashboard",
+      "surface": "cli",
+      "status": "never-run"
+    },
+    {
       "id": "run-an-analysis-from-the-dashboard.cli.1",
       "title": "A developer presses Analyze, answers both gates, and watches the run to completion",
       "doc": "reference/spec-docs/dashboard/overview.mdx",
@@ -1339,22 +1409,22 @@
   "llmFailures": [],
   "orphaned": [],
   "flows": {
-    "total": 44,
-    "settled": 44,
+    "total": 51,
+    "settled": 51,
     "unsettled": 0,
     "skipped": 0,
     "dismissed": 0,
     "orphaned": 0,
     "subsumed": 0,
-    "noFlowClaims": 131,
+    "noFlowClaims": 210,
     "unsettledAreas": []
   },
   "interfaces": {
-    "total": 99,
+    "total": 114,
     "bySurface": {
       "cli": 27,
       "api": 32,
-      "web": 40
+      "web": 55
     }
   },
   "usage": {

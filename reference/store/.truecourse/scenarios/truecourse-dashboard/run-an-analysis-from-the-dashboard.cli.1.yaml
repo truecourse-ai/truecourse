@@ -12,6 +12,7 @@ interface:
     - cli/add
     - web/open-an-unanalyzed-repository
     - web/run-an-analysis-from-the-header
+    - web/analyze-working-tree-without-stashing
     - web/approve-the-llm-rules-for-a-run
     - cli/list
     - cli/analyze
@@ -23,6 +24,7 @@ interface:
     - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
     - sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b
     - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
+    - sha256:c5258cd7c25e4f8b5a00f8e84aa6c1d0c4fffa5a62f99bbf52f3467dba3d2083
     - sha256:3fe0121eef3d02251e93c109949965a4e45210570d805a6b86d31b1e001fe6dc
     - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8

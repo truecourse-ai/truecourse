@@ -1,0 +1,54 @@
+guard: 3
+id: open-a-non-git-repository.cli.1
+title: A developer opens a registered directory that is not a git repository
+promise: >-
+  A developer opens a non-git directory and sees the warning while Analyze and the
+  commit-anchored controls stay unavailable.
+flow:
+  id: open-a-non-git-repository
+  fingerprint: sha256:cb5bc83e5d1dfd657c2b455fb17148601776e9da65b3311022e0ae028111f5d8
+interface:
+  path:
+    - cli/add
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: repositories-without-git
+    fingerprint: sha256:ddb175d2a123b788a1262b4de754178669acf3d405f7836af93b313a470fc4cc
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: when-analyze-is-unavailable
+    fingerprint: sha256:8878478a9826bf5860c0c5d220035f84cbc8b05ceecf3c0176fd203e4fc208e0
+setup:
+  files:
+    sample-app/package.json: |
+      { "name": "sample-app", "version": "1.0.0", "type": "module" }
+    sample-app/src/index.js: |
+      export const value = 1
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+normalize: []
+driver: cli
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: Registers the directory without creating a git repository around it.
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      text:
+        matches: '^(?=[\s\S]*This directory is not a git repository)(?=[\s\S]*commit-anchored baselines, diff, and history)(?![\s\S]*Analyze)(?![\s\S]*Git Diff)(?![\s\S]*Scan specs)[\s\S]*$'
+    note: >-
+      The amber banner explains the git requirement. Its lowercase “analyze” prose remains,
+      while the capitalized Analyze action, Git Diff toggle, and Scan specs action are all
+      absent. The navigation step is intentionally not assigned a second interface: it has
+      the same route/step fingerprint as opening an unanalyzed git repository but a distinct
+      state contract, the G83 identity collision.
+    milestone:
+      - dashboard-overview-non-git-directory-shows-an-amber-banner
+      - dashboard-overview-non-git-directory-hides-analyze-diff-and-spec-scan
+      - dashboard-analyze-hidden-outside-a-git-repository

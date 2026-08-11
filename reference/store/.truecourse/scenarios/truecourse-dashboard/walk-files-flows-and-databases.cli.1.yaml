@@ -6,32 +6,44 @@ promise: >-
   reads a datastore's schema.
 flow:
   id: walk-files-flows-and-databases
-  fingerprint: sha256:7f590db2ac6ae9626b4ce5a0015bf79ebc66a3706161b27db83db86769af6f82
+  fingerprint: sha256:6b4cd72498b48219f23fbc9e44a23093659475b82d958117d57e69c18531aad1
 interface:
   path:
     - cli/analyze
     - web/open-dashboard-home
     - web/open-repo-report
     - web/open-the-files-tab
+    - web/toggle-a-file-tree-folder
     - web/open-a-file-in-the-code-viewer
     - web/search-the-violation-list
     - web/open-the-flows-tab
+    - web/search-the-flow-list
     - web/open-a-flow-diagram
+    - web/step-forward-through-a-flow
+    - web/step-back-through-a-flow
+    - web/play-the-open-flow
     - web/open-the-databases-tab
     - web/open-a-database-schema
     - web/switch-the-schema-to-the-table-list
+    - web/expand-a-schema-table
   fingerprints:
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
     - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
     - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
     - sha256:5fb4d0b52704c626640e10e136399172d65b2b5a85f9d5758042c7b5cb9a4dc7
+    - sha256:e3a5b581512b7d01dbb315ea48a53c63dc5356465e227862a178c84b541c3db5
     - sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106
     - sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8
     - sha256:683da4b398098a8228b7f2f166b2bf38d2faaa253faa2ec369ead343a0371740
+    - sha256:6f85508f5c6b7ec4027e60e2899f61d69b7faf04a3deca7cf0faaa3199bdd3f6
     - sha256:15cf10b4168e6f254370eba9df0c6d53ab6eaa9886024f9a8d757ffa11e7d3f6
+    - sha256:15ef08076825b63ee71e79ff91e3e00b1a819deaefe1358a69b2d492b3bf2949
+    - sha256:5fbbaab3c7834358a05533a7fba4b6ab1e5de684365ee3d2138523a77eea2902
+    - sha256:3bb44c92360af7367af69e112b8e55be54a0b8acdb703109469a1b31a9c53f6e
     - sha256:651814ae697b721770a6f2abb7de2574ded29a89e72364e5ccdc9c4a3c07b083
     - sha256:fb1ecb0dcf861ac9f18abab27c4eadb0d245798819c019da48e93b9459cee338
     - sha256:48a48266188b8ab5a211acad66ead6ca482d1265fdb00390b97955bd253561d5
+    - sha256:3264ac7926b539d43536b7753a37e4c85ac52e14803cce1d0284c5adf4cae009
 binds:
   - doc: reference/spec-docs/dashboard/overview.mdx
     section: getting-around
@@ -215,7 +227,7 @@ steps:
       url:
         contains: tab=files
       text:
-        matches: ^(?=[\s\S]*package\.json)(?=[\s\S]*prisma)(?=[\s\S]*services)[\s\S]*$
+        matches: ^(?=[\s\S]*package\.json)(?=[\s\S]*prisma)(?=[\s\S]*services)(?=[\s\S]*api)(?=[\s\S]*worker)[\s\S]*$
     note: >-
       The overview page's tab inventory, taken at its word for Files: the tab renders the
       repository's tree, named by the entries the seed really committed at its top level.
@@ -223,6 +235,24 @@ steps:
       proved further down, where a file is actually opened and read.
     milestone:
       - dashboard-overview-files-tab-shows-the-tree-and-code-viewer
+      - dashboard-files-top-level-folders-start-expanded
+  - driver: web
+    click:
+      role: button
+      name: services
+    expect:
+      text:
+        matches: '^(?=[\s\S]*services)(?![\s\S]*routes\.js)(?![\s\S]*worker)[\s\S]*$'
+  - driver: web
+    click:
+      role: button
+      name: services
+    expect:
+      text:
+        matches: '^(?=[\s\S]*api)(?=[\s\S]*worker)[\s\S]*$'
+    note: The same folder row collapses its children and expands them again.
+    milestone:
+      - dashboard-files-folder-click-expands-or-collapses
   - write:
       sample-app/notes-scratch.js: |
         export const note = 'not committed yet'
@@ -383,6 +413,17 @@ steps:
     milestone:
       - dashboard-flows-sidebar-groups-by-entry-service
   - driver: web
+    fill:
+      role: textbox
+      name: Search flows...
+    value: listUsers
+    expect:
+      text:
+        matches: '^(?=[\s\S]*routes\.listUsers)(?![\s\S]*routes\.createUser)(?![\s\S]*src\.runRule)[\s\S]*$'
+    note: The flow sidebar search narrows all service groups to the matching flow.
+    milestone:
+      - dashboard-flows-sidebar-has-a-search-box
+  - driver: web
     click:
       role: button
       name: routes.listUsers
@@ -400,6 +441,7 @@ steps:
       participants and methods it can.
     milestone:
       - dashboard-flows-open-as-a-sequence-diagram
+      - dashboard-overview-url-carries-the-open-flow
   - driver: web
     click:
       role: button
@@ -427,6 +469,17 @@ steps:
   - driver: web
     click:
       role: button
+      name: Play
+      exact: true
+    expect:
+      text:
+        contains: Step 3 of 3
+    note: Play advances the open flow to its final recorded step.
+    milestone:
+      - dashboard-flows-player-plays-the-flow-through
+  - driver: web
+    click:
+      role: button
       name: Databases
     expect:
       url:
@@ -449,6 +502,7 @@ steps:
       schema — fails here.
     milestone:
       - dashboard-databases-sidebar-lists-detected-datastores
+      - dashboard-databases-sidebar-shows-type-tables-and-services
   - driver: web
     click:
       role: button
@@ -478,3 +532,31 @@ steps:
       the claim.
     milestone:
       - dashboard-databases-schema-shown-two-ways
+  - driver: web
+    click:
+      role: button
+      name: User
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Column)(?=[\s\S]*id)(?=[\s\S]*email)(?=[\s\S]*name)(?=[\s\S]*Relations)(?=[\s\S]*Order)[\s\S]*$'
+    note: Expanding a table exposes its columns and the relation attached to that table.
+    milestone:
+      - dashboard-databases-table-list-expands-columns-and-relations
+  - driver: web
+    click:
+      role: button
+      name: Flows
+    expect:
+      text:
+        contains: routes.listUsers
+  - driver: web
+    click:
+      role: button
+      name: Databases
+    expect:
+      text:
+        matches: '^(?=[\s\S]*user-repository\.js)(?=[\s\S]*routes\.listUsers)(?=[\s\S]*postgres)(?=[\s\S]*User)(?=[\s\S]*email)[\s\S]*$'
+    note: Switching away and back restores the datastore that was last open in this pane.
+    milestone:
+      - dashboard-panes-shared-tab-strip
+      - dashboard-panes-switching-back-reopens-the-last-item

@@ -6,7 +6,7 @@ promise: >-
   around the detected system.
 flow:
   id: explore-the-architecture-graph
-  fingerprint: sha256:7f2e66dc1b11f3c7a008ecc4b615b5266f2e4fda73e8f4349329a9704535d46c
+  fingerprint: sha256:8b8a2acf42f3d90f056fe1554b3a38515c188d1f2d51f105e48647643a1a77ba
 interface:
   path:
     - cli/analyze
@@ -15,6 +15,7 @@ interface:
     - web/open-the-graphs-tab
     - web/fit-the-graph-to-the-viewport
     - web/change-the-graph-depth-to-modules
+    - web/change-the-graph-depth-to-functions
   fingerprints:
     - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
     - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
@@ -22,6 +23,7 @@ interface:
     - sha256:a8f319bb14ef3182f51fa57b6ce896ee8fe0b6fedbc3591efe3921ff3d842c8f
     - sha256:24b2d4f4612ada4af1613f970985c8bd1666bf374051b519ed6a3793a1243cbf
     - sha256:e0b7054e06ffdf0e5bd1e322d3305bee2e1bd08e795f50c84128d74ead61741f
+    - sha256:575e9ef3dd46d13a8f7062b627fb08d5b56e2a12aa44cd5a992da445dcc52d30
 binds:
   - doc: reference/spec-docs/dashboard/overview.mdx
     section: getting-around
@@ -38,6 +40,9 @@ binds:
   - doc: reference/spec-docs/dashboard/architecture-graph.mdx
     section: clicking-around
     fingerprint: sha256:d519271e182d695a0b668c0199f931d58384425ea5e54b9eef9498c9d1c6bb77
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: databases
+    fingerprint: sha256:343f87b6cc7b66f3e65dac226275b52acc4e5b114f6b55af25caf2635f91f0c1
 setup:
   files:
     sample-app/package.json: |
@@ -216,7 +221,7 @@ steps:
     expect:
       text:
         matches: >-
-          ^(?=[\s\S]*api)(?=[\s\S]*worker)(?=[\s\S]*Business Logic)(?=[\s\S]*PostgreSQL)(?=[\s\S]*2
+          ^(?=[\s\S]*Live)(?=[\s\S]*api)(?=[\s\S]*worker)(?=[\s\S]*Business Logic)(?=[\s\S]*PostgreSQL)(?=[\s\S]*2
           tables)[\s\S]*$
     note: >-
       What the canvas DRAWS, checked against what the analysis detected: both services by
@@ -226,6 +231,7 @@ steps:
       their own depths and are asserted there.
     milestone:
       - dashboard-graph-draws-the-detected-architecture
+      - dashboard-graph-live-offline-pill-shows-connection
   - driver: web
     expect:
       visible:
@@ -463,10 +469,13 @@ steps:
       The step above says the same click zooms and keeps you on the canvas; both sentences
       are in the same section, and at most one of them can pass. Whichever fails is the
       deliverable — doc drift if the UI has one settled behaviour, a product bug if it does
-      something else again. LOCATOR RISK, recorded rather than worked around: canvas nodes
-      carry the graph library's `group` role with NO accessible name, so `postgres` cannot in
-      fact be addressed by the roles-and-labels policy; this is the closest the vocabulary
-      comes to the click the doc describes, and a failure that names the missing target is a
-      true report about an unaddressable node.
+      something else again. The locator was AUTHORED AGAINST A DEFECT and no longer is:
+      canvas nodes carried the graph library's `group` role with no accessible name, so
+      `postgres` could not be addressed by the roles-and-labels policy at all and this step
+      was the closest the vocabulary came to the click the doc describes. The app fix
+      landed — every architecture-graph node now carries its own name — so the group
+      locator resolves against a real accessible name and a failure here is now about the
+      BEHAVIOUR the two sentences disagree on, which is what this step was always for.
     milestone:
       - dashboard-graph-clicking-a-database-opens-its-schema
+      - dashboard-databases-graph-node-opens-the-same-view

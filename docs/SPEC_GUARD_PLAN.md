@@ -5147,3 +5147,16 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
     line is written by a real transition. The analysis pass is reported from `mapOnce`, so
     it lands on step 1 or step 2 depending on which one actually pays for it.
+
+90. **Code Analysis web reference expansion (2026-08-11).** STATUS: BUILT —
+    CLAIM-COMPLETE. The hand-authored reference corpus adds 15 stateful web interfaces
+    and seven executable mixed-driver flows, scoped to the dashboard's Code Analysis tab.
+    The added flows cover committed-state stashing, clean-tree handling, deterministic-only
+    LLM execution, path registration and first-analysis state, non-git repositories,
+    repository rule settings, and the Rules panel. Existing scenarios were expanded for
+    flow search/playback, shared tabs, schema rows, run history and diff details, analytics,
+    folder toggles, and graph connection state. The corpus totals are 114 interfaces
+    (55 web), 51 settled flows and 51 scenarios. Every one of the 301 dashboard claims is
+    accounted for exactly once: 222 by executable milestones and 79 by explicit no-flow
+    reasons tied to driver/state limitations. G90 is closed; remaining limitations are
+    tracked under G83–G88 and G91 rather than represented as false executable coverage.
