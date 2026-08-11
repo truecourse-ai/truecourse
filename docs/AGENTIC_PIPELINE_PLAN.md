@@ -196,8 +196,39 @@ tool/outcome schema gets **one re-ask** (invalid output quoted back, same
 turn budget); two consecutive malformed turns end the session with a
 structured `malformed` failure — never an exception, never a stranded task.
 
+**Hard limit + resume (decision 2026-08-11).** The turn budget is a HARD
+LIMIT with one purpose: no session may loop forever. Reaching it IS a
+failure — the session ends with the structured `budget-exhausted` failure
+outcome naming what it did not reach; it is never a success, never a
+partial success, never a silent truncation, and no workstream may
+re-interpret it. The other half of the same decision is RESUME,
+implemented once in `runAgentLoop`: every session persists its transcript
+and provider session id as it runs, so a session that failed on the limit
+(or was interrupted) can be resumed with a fresh budget and continues from
+the exact point it stopped — claude-code mode re-enters via
+`--resume <session>`, api mode replays the persisted message history, and
+resume also accepts a new observation message (the shape §8.12's fidelity
+re-entry consumes). Command re-runs offer resume over restart. Workstreams
+set NUMBERS only — each session type's hard limit and token ceiling — plus
+the session definitions §3.2 assigns them (prompt, inputs, tools,
+done-condition). All limit mechanics, the failure semantics, and resume
+live in the shared loop; no workstream section defines or re-implements
+any of it.
+
+**No deterministic substitution on failure (decision 2026-08-11).** When
+a session fails — budget-exhausted, malformed, transport error — the
+engine NEVER falls back to a deterministic approximation of the
+session's job and never completes the work another way. The failure
+persists as a structured status in the command's result JSON (the
+store's existing convention: scan's `llmFailures`, generate's
+`result.json` / `llm-failed`), the command reports it loudly, and the
+path forward is resume (above) or a re-run. Deterministic-FIRST is
+unaffected: running a deterministic path BEFORE deciding a session is
+needed (§7.1) is design, not fallback. What is forbidden is
+deterministic work standing in for a failed session's outcome.
+
 **Module placement.** The loop (`runAgentLoop`: turn budget, token ceiling,
-tool dispatch, transcript events, re-ask) lives in
+tool dispatch, transcript events, re-ask, session persistence + resume) lives in
 `packages/shared/src/llm/agent-loop.ts` — transport-agnostic, next to the
 seam, exported through `transport.ts` like `guardrail.ts`. The claude-code
 turn adapter lives beside `cliTransport` in `transport.ts`; the api turn
@@ -244,6 +275,32 @@ call counts, so the estimate is rebuilt rather than patched:
   with which turn ranges, and what its caches exclude. This common section
   fixes only the principles and the presentation shape, so all three
   commands present the same estimate shape to the user.
+
+### 3.6 Observability (decision 2026-08-11, generalizing §8.7)
+
+Common to EVERY agentic command (scan, setup, generate — any command
+that runs sessions); workstream sections define only their own display
+specifics on top of it.
+
+- **The dashboard gets everything, live.** The loop's transcript events
+  (system, turn, reply, tool result, re-ask, outcome,
+  budget-exhaustion) append to a gitignored jsonl artifact per work
+  item as they happen; the dashboard server's existing store watcher
+  tails the files and forwards appended lines over the existing
+  sockets. The CLI knows nothing about the dashboard — if it is up you
+  watch live, if not the same files replay later. One append-only file,
+  two readers; no CLI↔server coupling. Transcripts persist with the
+  run, so "why does this output look like this" is answered by reading,
+  at any later time.
+- **The CLI shows simple progress only** — continuously moving counters
+  that always sum, no per-item rows, no per-turn detail — and ALWAYS
+  prints the dashboard deep link to the live view at start
+  ("watch live: <url>").
+- **Progress renders in exactly one place**: the dashboard's live
+  streaming view. The dashboard shows a toast linking to it; no
+  separate progress panel for streaming commands. `guard run` keeps its
+  bounded progress panel as today — a run is bounded execution, not a
+  stream to follow.
 
 ## 4. The reference corpus (the benchmark)
 
@@ -401,11 +458,11 @@ overlap, curation) re-shaped as agent sessions, over a doc universe
 this workstream also acquires.
 
 STATUS: design settled 2026-08-11 (owner: Doil). §§6.1–6.5 are the
-binding design; implementation may start per the phasing in §6.5. One
-question is open and does not block it: `transform-gaps.md` G10 and G12
-name Spec Scan as the claims store's owner, against the 2026-08-06
-decisions cited in the boundary above. If those decisions are the ones
-that move, the boundary moves with them.
+binding design; implementation may start per the phasing in §6.5. The
+one open question is CLOSED (2026-08-11, Mushegh): claims stay with
+Guard Generate per the 2026-08-06 decisions; `transform-gaps.md` G1,
+G2, G10 and G12 carried a stale Spec Scan ownership and have been
+corrected to match.
 
 **Boundary.** This workstream owns everything from doc acquisition to
 `specs/corpus.json`, and nothing after it. Acquisition is in scope
@@ -434,11 +491,14 @@ dropped on parse — so the scope sentence above names no chains.
 stage that grows fastest — overlap — is bounded by giving each session
 an explicit turn budget and letting it narrow its own reading (outlines
 first, drilling in only where topics collide), never by the engine
-pre-filtering what it will consider. A bound that binds is REPORTED, so
-a reader can tell "no overlap found" from "the budget ran out";
-`CuratedCorpusSchema` v3 has no field for this, and the gap is recorded
-in §6.2. Silently reducing what the engine considers is the one failure
-this workstream refuses.
+pre-filtering what it will consider. The limit itself — hard cap,
+failure on exhaustion, resume — is §3.3's shared mechanism, not this
+workstream's to design. What is scan-specific is PERSISTENCE: a bound
+that bound must be readable from the corpus itself, so a reader can tell
+"no overlap found" from "the budget ran out"; `CuratedCorpusSchema` v3
+has no field for this, and the gap is recorded in §6.2. Silently
+reducing what the engine considers is the one failure this workstream
+refuses.
 
 **Vocabulary reconciliation** is named above because §3.2 admits no
 unclassified LLM stage and `curate()`'s vocab pass is one today (cached
@@ -486,11 +546,13 @@ into a per-doc session; its disposition is settled in §6.3.
   area `truecourse/code-analysis` and recorded the reason as "a product
   axis the reference never chose", because the authoring path never
   reads the tagger's prompt and `core/code-analysis` was the stated
-  answer all along. Under §3.2 every session ends on a structured
-  outcome, so the design must decide whether the doc-curation session's
-  done-condition VALIDATES the product axis or whether a deterministic
-  backstop corrects it afterwards — the scan already runs one such
-  backstop for third-party drops (`thirdPartyRestored`).
+  answer all along. Settled per §3.3's no-substitution rule
+  (2026-08-11): the axis is validated by SESSIONS — the doc-curation
+  session proposes it and the area-settling session (§6.3) adjudicates
+  it — and no deterministic backstop corrects agent output afterwards; a
+  session that cannot settle the axis fails and persists that status.
+  (The current engine's `thirdPartyRestored` backstop is the old
+  pattern, not a precedent to extend.)
   `transform-gaps.md` G29 states this as a forced axis; the axis is not
   forced — `core` exists for exactly this case.
 - **The corpus cannot say how complete it is.** §6.1's principle
@@ -511,20 +573,20 @@ into a per-doc session; its disposition is settled in §6.3.
 
 ### 6.3 Sessions
 
-Per §3.2, every LLM task is an agent session. Common rules: one model
-(§3.4), the standard malformed-turn policy (§3.3), a per-session turn
-budget (defaults below, provisional — §6.4 says what settles them) and
-token ceiling.
+Per §3.2, every LLM task is an agent session. The common rules are §3's
+entirely — one model (§3.4), the malformed-turn policy, the hard turn
+limit that fails on exhaustion and resumes (§3.3). This section sets
+only the NUMBERS (defaults below, provisional — §6.4 says what settles
+them) and each session's prompt, inputs, tools, and done-condition.
 
-Two rules follow from §6.1's principle. A session's turn budget IS the
-bound, so a session that exhausts it ends on a structured
-`budget-exhausted` outcome naming what it did not reach — never an "I
-found nothing" that reads like completeness; the loop already emits the
-matching transcript event (§3.3), and the corpus field for it is the
-§6.2 schema addition. And a step whose deterministic path settles
-everything runs NO session: discovery (the repo walk plus the registered
-web sources), area grouping, the heading-widened membership net, and
-persistence are free string work and stay that way.
+Two rules follow from §6.1's principle. Exhaustion semantics are the
+loop's (§3.3); the scan adds only WHERE that failure persists — the
+corpus field of §6.2 — so "no overlap found" and "the budget ran out"
+stay distinguishable in the committed file, never an "I found nothing"
+that reads like completeness. And a step whose deterministic path
+settles everything runs NO session: discovery (the repo walk plus the
+registered web sources), area grouping, the heading-widened membership
+net, and persistence are free string work and stay that way.
 
 **What the agent shape buys the scan.** Generate's sessions earn their
 tools by acting on the world — author, run, repair. The scan reads, so
@@ -611,12 +673,13 @@ Three sessions, in order; each consumes the one before it.
   membership, widening included, deterministically — and the session
   narrows its own reading (outlines first, drilling in only where topics
   collide) under the per-area budget, so the bound is an explicit
-  budget, never a silent thinning of what is considered. An area whose
-  work outgrows one budget SPLITS into sub-areas that each get their own
-  session; `budget-exhausted` is the signal to split, not a permanent
-  gap. Splitting answers a bound that keeps binding — it is never the
-  default, because subdividing an area also stops comparing across the
-  parts.
+  budget, never a silent thinning of what is considered. An exhausted
+  session RESUMES first (§3.3) — fresh budget, same session, continuing
+  from where it stopped. An area whose work outgrows even resumed
+  budgets SPLITS into sub-areas that each get their own session;
+  `budget-exhausted` is the signal, not a permanent gap. Splitting
+  answers a bound that keeps binding — it is never the default, because
+  subdividing an area also stops comparing across the parts.
 
 There is no relation session. Doc-to-doc relations were removed from the
 design (§6.1) and resolution is section-scoped: the overlap session
@@ -970,13 +1033,15 @@ That is enforced, not hoped for:
 
 ### 7.4 Sessions (final; decisions 2026-08-07)
 
-Per §3.2, every LLM task is an agent session. Common rules: one model
-(§3.4), the standard malformed-turn policy (§3.3), a per-session turn
-budget (defaults below, provisional until the reference benchmark run
-calibrates them) and token ceiling. Per the deterministic-first
-principle (§7.1), a step whose deterministic path settles everything
-runs NO session at all — §3.2 mandates the call shape of LLM tasks, not
-that every step involve one.
+Per §3.2, every LLM task is an agent session. The common rules are §3's
+entirely — one model (§3.4), the malformed-turn policy, the hard turn
+limit that fails on exhaustion and resumes (§3.3). This section sets
+only the NUMBERS (defaults below, provisional until the reference
+benchmark run calibrates them) and each session's prompt, inputs,
+tools, and done-condition. Per the deterministic-first principle
+(§7.1), a step whose deterministic path settles everything runs NO
+session at all — §3.2 mandates the call shape of LLM tasks, not that
+every step involve one.
 
 - **Recipe repair session** (turn budget 15). The deterministic
   propose→verify path stays primary and runs first; a deterministic
@@ -1455,15 +1520,8 @@ already one. These are the seed definitions for the owner to refine.
 
 The split (decision 2026-08-06, supersedes both the #857 display spec and
 the earlier per-flow-rows CLI draft): the CLI shows simple progress; the
-dashboard gets everything.
-
-- **No progress panel for the streaming commands** (decision 2026-08-08,
-  scoped 2026-08-08): for scan, setup, and generate — the agentic,
-  streaming work — the dashboard shows a TOAST with a link to the live
-  streaming view; progress renders in exactly one place, the view the
-  toast links to, and the progress panel dies for those commands with
-  the implementation. `guard run` KEEPS its current progress panel as it
-  exists today (a run is bounded execution, not a stream to follow).
+dashboard gets everything. This is now the COMMON rule of §3.6 for every
+agentic command; what follows is generate's own display specifics.
 
 - **CLI — simple progress.** One continuously updating summary built from
   the partition counter that always sums —
@@ -1505,9 +1563,11 @@ dashboard gets everything.
   everywhere. The owner formalizes this into the workstream's estimation
   algorithm per §3.5 (session types, work items, turn ranges, cache
   exclusions).
-- **Budgets**: per-flow turn cap (default ~8) and token ceiling; the ledger
-  caps attempts across runs. A budget-exhausted worker retires the flow with
-  its transcript — loud, in-run.
+- **Budgets**: the numbers only — per-flow turn cap (default ~8) and token
+  ceiling; the hard-limit and resume mechanics are §3.3's. Exhaustion is a
+  failed session per §3.3; the ledger caps attempts across runs, so a
+  budget-exhausted worker is ledgered like any failed attempt, and past
+  the cap the flow retires with its transcript — loud, in-run.
 
 ### 8.9 Implementation plan (seed record)
 
@@ -1620,9 +1680,9 @@ at settle.
 **Verification stays outside the agent.**
 - In-loop fidelity: when the loop settles a PASSING scenario, the existing
   fidelity runner (fresh context, judge model) reviews it before acceptance;
-  a high-confidence flag RESUMES the still-open session (the loop grows a
-  `resume` option: prior messages + sessionId + a new observation message)
-  for one heal attempt; a second flag rejects + ledgers exactly as today.
+  a high-confidence flag RESUMES the still-open session with the flag as
+  the new observation (the loop's shared resume capability, §3.3) for one
+  heal attempt; a second flag rejects + ledgers exactly as today.
 - Confirmation: settled-passing candidates from all workers batch into ONE
   final birth round in fresh sandboxes (today's machinery, kept — the gate
   of record). A confirm flip re-opens the session once with the evidence

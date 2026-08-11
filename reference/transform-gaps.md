@@ -56,7 +56,9 @@ plan §8.2 asks for in both directions (claim → its doc section, claim → the
 carry it → the scenario steps that prove it) and per-claim coverage state.
 **Still open:** nothing PRODUCES the store — the extract stage does not write claims yet, so
 the reference carries the only claim corpus in the store today.
-**Owner:** Spec Scan / Guard Generate (write it from extraction).
+**Owner:** Guard Generate (write it from extraction). Ownership settled 2026-08-11: claims —
+extraction, the store, and everything built on them — belong to Guard Generate; Spec Scan
+stops at `specs/corpus.json` (plan §6.1).
 
 ### G2. Untestable doc statements (37) have nowhere to live — CLOSED (store + view)
 **What:** the reference records every behavioral sentence that deliberately did NOT become
@@ -68,7 +70,8 @@ the same file as the claims, because the two halves are one extraction record.
 reached no flow.
 **View:** rendered under each doc in the Claims tab, visually separated, with its reason.
 **Still open:** nothing produces it (same as G1).
-**Owner:** Spec Scan.
+**Owner:** Guard Generate (the untestable list is the other half of G1's extraction record,
+same producer; ownership settled 2026-08-11).
 
 ### G3. Claim dependency vocabulary (`needs[]`) has nowhere to live — STORED, not consumed
 **What:** each claim declares what the world must provide before it can be proven:
@@ -159,7 +162,7 @@ Owner: Guard Generate.
 SENTENCE, its `verify-via` and its `needs[]` have no field. The transform parks the
 verbatim sentence in `note` (a free-text synthesis field) as the least-lossy home
 available: the field is being used for data it was not designed for.
-Owner: Spec Scan (claims store), Guard Generate (milestone schema).
+Owner: Guard Generate (claims store and milestone schema; ownership settled 2026-08-11).
 
 **G11. `goal` is a required field the reference does not author.**
 `GuardFlowSchema.goal` is mandatory; the reference authors one title sentence per flow, so
@@ -173,7 +176,7 @@ The reference states `claims-total: 120`, `carried-by-flows: 106`, `gapped: 14`,
 appears exactly once across flows or gaps". `noFlowClaims` carries the 14 gapped claims
 with their reasons (this part survives), but with no claim inventory (G1) the totals and
 the exactly-once invariant cannot be checked by the engine.
-Owner: Spec Scan + Guard Generate.
+Owner: Guard Generate (ownership settled 2026-08-11).
 
 **G13. The 11 `authored-decisions` have no store home.**
 They are the runner capabilities the benchmark implies (mid-scenario file mutation,
@@ -422,9 +425,9 @@ Owner: Guard Generate (runner).
 
 | workstream | items |
 |---|---|
-| Spec Scan | G10, G12, G27, G28, G29 — G1 + G2 (claims store) and G33 (lead section) done, both awaiting a PRODUCER |
+| Spec Scan | G27, G28, G29 — G33 (lead section) done in the store, awaiting its producer (the rebuilt scan) |
 | Guard Setup | G3 (stored, not consumed), G4, G5, G8, G22, G24, G30, G31 |
-| Guard Generate | G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27 — G34 (tty answer delivery) and G35 (directory assertions) done in the runner; G36 (file matcher has one substring per path, no regex) open |
+| Guard Generate | G1, G2, G5, G6, G7, G8, G9, G10, G11, G12, G13, G14, G15, G16, G17, G18, G19, G20, G21, G22, G23, G24, G25, G26, G27 — claims ownership settled 2026-08-11 (G1 + G2 store + view done, extraction must write them); G34 (tty answer delivery) and G35 (directory assertions) done in the runner; G36 (file matcher has one substring per path, no regex) open |
 | dashboard view work | G6 (kind badge), G8 + G24 (blocked/supplied surface), G20 (step notes), G26 (never-run state) — G1 + G2 (claims view), G4 + G5 (journeys view) done |
 
 ---
