@@ -18,11 +18,18 @@
  * The binary is NOT downloaded on demand. A missing browser is a loud, actionable
  * message naming the install command — never a mid-run network fetch, which would
  * make a run's cost depend on what happened to be cached.
+ *
+ * `playwright-core` itself is OPT-IN: an optional peerDependency of this package,
+ * not a dependency, so a repo with no web surface never pays for a browser
+ * automation library it will not run. That is why the only value import of it in
+ * this package is the `await import()` below — a static import would load it at
+ * module init for every guard run, cli-only ones included, and would be bundled
+ * into the published CLI. Everything else imports `type`s, which erase.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
+import type { Browser, BrowserContext, BrowserType, Page } from 'playwright-core'
 
 /**
  * The pinned viewport. 1280×800 is the smallest common desktop size at which a
@@ -65,13 +72,60 @@ export const BROWSER_MISSING_MESSAGE =
   'the web driver needs the Chromium browser, which is not installed — run ' +
   '`pnpm exec playwright-core install chromium` (guard never downloads a browser mid-run)'
 
-/** True when the browser binary the runner would launch is not on this machine. */
-export function isBrowserInstalled(): boolean {
+/**
+ * The message an absent `playwright-core` earns. It names BOTH commands, in order,
+ * because installing the library alone still leaves no browser to launch — a
+ * message that named only the first would just buy the user a second failure.
+ */
+export const PLAYWRIGHT_MISSING_MESSAGE =
+  'the web driver needs `playwright-core`, which is not installed — add playwright-core, ' +
+  'then run `playwright-core install chromium` (web steps are opt-in; guard never installs either one mid-run)'
+
+/** The lazily-loaded `chromium` launcher, or the reason it could not be loaded. */
+type ChromiumLoad = { ok: true; chromium: BrowserType } | { ok: false; reason: string }
+
+/** True when the throw is Node saying the specifier resolved to nothing. */
+function isModuleNotFound(e: unknown): boolean {
+  const code = (e as NodeJS.ErrnoException | null)?.code
+  return code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND'
+}
+
+/**
+ * Load `playwright-core`. Absent is an EXPECTED outcome, not a crash: the package
+ * is opt-in, so a repo that never declared a web surface has every right not to
+ * have it, and a repo that did gets the two-command remedy instead of a stack trace.
+ * A package that IS installed but throws on load is a different fault and says so —
+ * reporting "not installed" for a broken install would send the user to the wrong fix.
+ */
+async function loadChromium(): Promise<ChromiumLoad> {
+  try {
+    const { chromium } = await import('playwright-core')
+    return { ok: true, chromium }
+  } catch (e) {
+    if (isModuleNotFound(e)) return { ok: false, reason: PLAYWRIGHT_MISSING_MESSAGE }
+    return {
+      ok: false,
+      reason: `playwright-core is installed but failed to load: ${e instanceof Error ? e.message : String(e)}`,
+    }
+  }
+}
+
+/** True when the Chromium binary this launcher would start is on the machine. */
+function isBinaryPresent(chromium: BrowserType): boolean {
   try {
     return fs.existsSync(chromium.executablePath())
   } catch {
     return false
   }
+}
+
+/**
+ * True when the browser the runner would launch is ready — `playwright-core`
+ * installed AND its Chromium binary present on this machine.
+ */
+export async function isBrowserInstalled(): Promise<boolean> {
+  const loaded = await loadChromium()
+  return loaded.ok && isBinaryPresent(loaded.chromium)
 }
 
 /**
@@ -83,7 +137,10 @@ export function isBrowserInstalled(): boolean {
 export async function launchWebBrowser(
   opts: LaunchWebBrowserOptions,
 ): Promise<{ ok: true; browser: WebBrowserHandle } | { ok: false; reason: string }> {
-  if (!isBrowserInstalled()) return { ok: false, reason: BROWSER_MISSING_MESSAGE }
+  const loaded = await loadChromium()
+  if (!loaded.ok) return { ok: false, reason: loaded.reason }
+  const chromium = loaded.chromium
+  if (!isBinaryPresent(chromium)) return { ok: false, reason: BROWSER_MISSING_MESSAGE }
   fs.mkdirSync(opts.videoDir, { recursive: true })
 
   let browser: Browser

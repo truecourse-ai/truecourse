@@ -111,6 +111,11 @@ run(
     // The pty binding a `tty:` guard step needs is a NATIVE module — it cannot be
     // bundled; it is installed from the CLI's dependencies and resolved at runtime.
     '--external:@lydell/node-pty',
+    // The browser a `web:` guard step drives is OPT-IN (an optional peer of
+    // guard-runner). Keeping it external leaves the runner's `await import` a real
+    // runtime resolution: absent → the step's two-command install message; present
+    // → the user's own install, browsers and all, which no bundle could carry.
+    '--external:playwright-core',
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
@@ -143,6 +148,8 @@ run(
     // The pty binding a `tty:` guard step needs is a NATIVE module — it cannot be
     // bundled; it is installed from the CLI's dependencies and resolved at runtime.
     '--external:@lydell/node-pty',
+    // Opt-in browser automation — see the dashboard-server bundle above.
+    '--external:playwright-core',
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
@@ -250,6 +257,9 @@ console.log('\nGenerating package.json...');
 const analyzerPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/analyzer/package.json'), 'utf-8'));
 const corePkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/core/package.json'), 'utf-8'));
 const cliPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/cli/package.json'), 'utf-8'));
+const guardRunnerPkg = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'packages/guard-runner/package.json'), 'utf-8'),
+);
 const publishPkg = {
   name: 'truecourse',
   version: cliPkg.version || '0.1.0',
@@ -268,6 +278,17 @@ const publishPkg = {
     '@clack/prompts': cliPkg.dependencies['@clack/prompts'],
     'typescript': analyzerPkg.dependencies['typescript'],
     'web-tree-sitter': analyzerPkg.dependencies['web-tree-sitter'],
+  },
+  // Browser automation for `web:` guard steps, carried over from guard-runner. An
+  // OPTIONAL PEER is the only shape that declares the supported version without
+  // installing it — `optionalDependencies` are installed by default, so the
+  // majority of users, who never run a web step, would still download a browser
+  // automation library. Absent, a web step fails with its two-command remedy.
+  peerDependencies: {
+    'playwright-core': guardRunnerPkg.peerDependencies['playwright-core'],
+  },
+  peerDependenciesMeta: {
+    'playwright-core': { optional: true },
   },
   optionalDependencies: {
     'node-windows': '^1.0.0-beta.8',

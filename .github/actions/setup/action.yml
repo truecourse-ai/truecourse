@@ -57,6 +57,21 @@ runs:
       run: pnpm install --frozen-lockfile
       shell: bash
 
+    # The web driver's browser. playwright-core is an optional peer (kept as a
+    # workspace devDependency for our own suite) and NEVER downloads binaries
+    # on install — the web-driver tests need chromium present, so CI installs
+    # it explicitly, cached on the pinned playwright-core version.
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          playwright-${{ runner.os }}-
+
+    - name: Install chromium for the web driver
+      run: pnpm --filter @truecourse/guard-runner exec playwright-core install chromium
+      shell: bash
+
     - name: Build packages
       run: pnpm build
       shell: bash

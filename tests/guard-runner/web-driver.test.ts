@@ -132,10 +132,13 @@ describe('the web driver', () => {
   let repo: string
   let pidsBefore: number[]
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // The suite is meaningless without the browser, and skipping silently would be
     // the "green for the wrong reason" this whole engine exists to prevent.
-    expect(isBrowserInstalled(), 'chromium must be installed for the web driver suite').toBe(true)
+    expect(
+      await isBrowserInstalled(),
+      'playwright-core + chromium must be installed for the web driver suite',
+    ).toBe(true)
     pidsBefore = playwrightBrowserPids()
     repo = makeWebRepo()
   })

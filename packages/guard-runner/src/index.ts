@@ -300,6 +300,7 @@ export {
   launchWebBrowser,
   isBrowserInstalled,
   BROWSER_MISSING_MESSAGE,
+  PLAYWRIGHT_MISSING_MESSAGE,
   WEB_VIEWPORT,
   WEB_VIDEO_FILE,
 } from './web/browser.js'
