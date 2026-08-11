@@ -1671,6 +1671,21 @@ it up without vocabulary changes.
 
 ### 10.2 Known problems the design must solve
 
+- **States are NAMED, per area; step prose is gone** (decided
+  2026-08-11). A task interface's startingState/endState reference a
+  small per-area STATE REGISTRY (id + one-line description, defined
+  once) — chaining across interfaces matches ids, never sentences. The
+  per-step input/output prose is removed: within a task, the chain is
+  step order; restating it in free text made entries unreadable and
+  unmatchable. States stay un-fingerprinted.
+- **A future, explicitly-advisory LLM-oracle step** (recorded
+  2026-08-11, PoC later): "ask a model whether the page shows X" for
+  questions no structural assertion can state. It must not weaken the
+  foundation — deterministic verification stays model-free; an oracle
+  step would be a DISTINCT class with its own verdict channel, designed
+  deliberately before any use.
+
+
 - **Web journeys are a new mapping problem.** A CLI journey is a command
   grammar; a web journey is pages, navigation, interactive elements, and
   the authenticated states that gate them. What the mapper extracts, what
