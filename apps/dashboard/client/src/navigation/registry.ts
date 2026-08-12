@@ -65,14 +65,6 @@ export interface TabDescriptor {
   noPanel?: boolean;
   /** Gate the tab on this capability. Omit for OSS tabs. */
   requiredCapability?: Capability;
-  /**
-   * Singular + plural noun for what this tab's rail badge counts. The rail
-   * button keeps its bare `label` as its accessible name (role-and-name
-   * locators address it by that exact string), so the COUNT is named on the
-   * badge element instead — "<label>, <n> <noun>", e.g. "Home, 12 violations".
-   * Omit for a tab whose badge should just read "<label>, <n> items".
-   */
-  badgeNoun?: [singular: string, plural: string];
 }
 
 export interface SectionDescriptor {
@@ -102,14 +94,14 @@ export const SECTIONS: SectionDescriptor[] = [
     icon: Network,
     defaultTab: 'home',
     tabs: [
-      { id: 'home', label: 'Home', icon: Home, noPanel: true, badgeNoun: ['violation', 'violations'] },
+      { id: 'home', label: 'Home', icon: Home, noPanel: true },
       { id: 'graphs', label: 'Graphs', icon: Network, noPanel: true },
       // Flows / Files / Databases need the repo on local disk — OSS-only (gated on
       // the `local-filesystem` capability the hosted edition omits).
-      { id: 'flows', label: 'Flows', icon: Workflow, requiredCapability: 'local-filesystem', badgeNoun: ['flow', 'flows'] },
+      { id: 'flows', label: 'Flows', icon: Workflow, requiredCapability: 'local-filesystem' },
       { id: 'files', label: 'Files', icon: FolderTree, requiredCapability: 'local-filesystem' },
-      { id: 'databases', label: 'Databases', icon: Database, requiredCapability: 'local-filesystem', badgeNoun: ['database', 'databases'] },
-      { id: 'analyses', label: 'Analyses', icon: ClipboardList, noPanel: true, badgeNoun: ['analysis', 'analyses'] },
+      { id: 'databases', label: 'Databases', icon: Database, requiredCapability: 'local-filesystem' },
+      { id: 'analyses', label: 'Analyses', icon: ClipboardList, noPanel: true },
       // Hosted-only: the EE Code Quality decomposition splits the OSS combined
       // `home` into separate Analytics / Violations tabs. Gated on `workspace`
       // (always advertised by the EE plugin, never by OSS), so OSS keeps its
