@@ -428,6 +428,12 @@ router.get('/:id/guard/evidence/visuals', async (req: Request, res: Response, ne
 // read through `/guard/evidence`). Path-safe by the same driver confinement the text
 // reads use: an unsafe file name, or a locator resolving outside the evidence root,
 // reads as a miss.
+//
+// RANGE-AWARE, because the video's scrubber lives or dies on it: a media element
+// only offers seeking when the server answers byte ranges — Chromium classifies a
+// plain-200 resource as a stream and pins `video.seekable` to zero even when the
+// file's own metadata is complete. The bytes are already in memory, so a range is
+// a subarray, not a second read; screenshots get partial reads for free.
 router.get('/:id/guard/evidence/visual', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
@@ -443,7 +449,25 @@ router.get('/:id/guard/evidence/visual', async (req: Request, res: Response, nex
       res.status(404).json({ error: 'Evidence not found.' });
       return;
     }
-    res.type(GUARD_VISUAL_CONTENT_TYPE[found.visual.kind]).send(found.bytes);
+    const bytes = found.bytes;
+    res.type(GUARD_VISUAL_CONTENT_TYPE[found.visual.kind]);
+    res.setHeader('Accept-Ranges', 'bytes');
+    const ranges = req.range(bytes.length);
+    if (ranges === -1) {
+      // Unsatisfiable — the 416 that names the real size, so the client can re-ask.
+      res.status(416).setHeader('Content-Range', `bytes */${bytes.length}`);
+      res.end();
+      return;
+    }
+    if (Array.isArray(ranges) && ranges.type === 'bytes' && ranges.length === 1) {
+      const { start, end } = ranges[0]!;
+      res.status(206).setHeader('Content-Range', `bytes ${start}-${end}/${bytes.length}`);
+      res.send(bytes.subarray(start, end + 1));
+      return;
+    }
+    // No Range header — or one this route does not slice by (malformed, a unit
+    // other than bytes, a multipart ask): the whole file is always a valid answer.
+    res.send(bytes);
   } catch (e) {
     next(e);
   }

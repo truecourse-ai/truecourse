@@ -364,7 +364,7 @@ describe('GuardDriftsView — passed group', () => {
     // The verdict card carries the result — one line for a pass, no failure block.
     // The duration lives HERE only: a row says which test and how it stands, and
     // nothing more.
-    expect(await screen.findByText('Verdict')).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Test verdict' })).toBeInTheDocument();
     expect(screen.getByText('passed')).toBeInTheDocument();
     expect(screen.getByText('4ms')).toBeInTheDocument();
     // A pass from a run that captured no transcript (no evidencePath) shows none —
@@ -406,7 +406,7 @@ describe('GuardDriftsView — passed group', () => {
     renderView();
     await user.click(await screen.findByText('passing claim'));
     // Still the positive one-line verdict…
-    expect(await screen.findByText('Verdict')).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Test verdict' })).toBeInTheDocument();
     // …plus its own transcript, fetched on mount and shown open like a failure's
     // (no toggle) — a green guard's proof of what executed.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
@@ -664,7 +664,7 @@ describe('GuardDriftsView — bug 1: evidence state resets across selections', (
     // Single-click the passing scenario (preview replaces the tab): a pass has NO
     // evidence section and the failed transcript must be gone (fresh keyed instance).
     await user.click(screen.getByText('passing claim'));
-    expect(await screen.findByText('Verdict')).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Test verdict' })).toBeInTheDocument();
     expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
     expect(screen.queryByText('EVIDENCE-FOR-s-fail')).not.toBeInTheDocument();
 

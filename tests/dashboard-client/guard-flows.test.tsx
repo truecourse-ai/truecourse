@@ -1070,9 +1070,14 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
     // …and then everything the test detail used to carry on a tab of its own.
     expect(screen.queryByText("What it checks")).toBeNull();
     expect(screen.getByText(DETAIL.surfaces[0].title!)).toBeInTheDocument();
-    expect(screen.getByText("Verdict")).toBeInTheDocument();
+    // The verdict band, then the workspace, then the drawers the record hangs in.
+    expect(
+      screen.getByRole("region", { name: "Test verdict" }),
+    ).toBeInTheDocument();
     expect(await screen.findByLabelText("test steps")).toBeInTheDocument();
-    expect(screen.getByText("Visual evidence")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Selected step details"),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "Interfaces used by this flow" }),
     ).toBeInTheDocument();
@@ -1189,7 +1194,7 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
     expect(why.tagName).not.toBe("BUTTON");
     expect(why.querySelector("button")).toBeNull();
     expect(why.className).not.toMatch(/hover:|cursor-pointer/);
-    expect(screen.queryByText("Verdict")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Test verdict" })).toBeNull();
     expect(screen.queryByLabelText("test steps")).toBeNull();
   });
 
@@ -1222,10 +1227,12 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
     );
     // The stored file REPLACES the page — never two readings at once.
     expect(screen.queryByText("What it checks")).toBeNull();
-    expect(screen.queryByText("Verdict")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Test verdict" })).toBeNull();
 
     await user.click(within(modes).getByRole("button", { name: "View" }));
-    expect(screen.getByText("Verdict")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Test verdict" }),
+    ).toBeInTheDocument();
   });
 
   it("offers the FLOW entry instead when the flow has no test to show", async () => {
@@ -1246,13 +1253,17 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
   });
 
   it("reads its interfaces through the TEST that walks them — never a second list", () => {
-    // The scenario body draws each interface the test grounds on. A flow-level list
-    // of the same ids beside it would be the same fact told twice.
+    // The scenario body holds each interface the test grounds on, in its own
+    // drawer. A flow-level list of the same ids beside it would be the same fact
+    // told twice, so the word appears exactly once — on that drawer.
     renderDetail();
     expect(
       screen.getByRole("region", { name: "Interfaces used by this flow" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Interfaces")).toBeNull();
+    expect(screen.getAllByText("Interfaces")).toHaveLength(1);
+    expect(
+      screen.getByText("Interfaces").closest("button"),
+    ).toHaveAttribute("aria-controls", "guard-drawer-interfaces");
   });
 
   it("keeps the flow-level interface list for a flow with no test at all", () => {
@@ -2111,7 +2122,9 @@ describe("GuardDriftDetail — the run’s own record", () => {
     // Same skeleton, different feed: the provenance line is the only tell.
     expect(screen.getByText(`As of run ${RUN_ID}`)).toBeInTheDocument();
     expect(screen.queryByText("Latest state")).not.toBeInTheDocument();
-    expect(screen.getByText("Verdict")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Test verdict" }),
+    ).toBeInTheDocument();
     expect(await screen.findByLabelText("test steps")).toBeInTheDocument();
     // …and no surface pill: the merged model dropped them everywhere.
     expect(screen.queryByText("CLI test")).toBeNull();

@@ -653,6 +653,23 @@ describe('GuardTestView — a claim-tagged step list reads as its claims, not as
     expect(within(steps).getAllByRole('listitem')).toHaveLength(CLAIM_STEPS.length);
   });
 
+  /**
+   * A drawer promises a reading. This model carries NO evidence ref at all (a test
+   * whose run captured nothing, and every test read before a run existed), so the
+   * transcript drawer must not be offered — an opened drawer with nothing behind
+   * it is the one thing worse than no drawer.
+   */
+  it('offers no Transcript drawer when the test has no evidence at all', async () => {
+    render(<GuardTestView repoId="r" test={MODEL} interfaces={null} onOpenSpec={() => {}} />);
+    const steps = await screen.findByLabelText('test steps');
+    await within(steps).findAllByRole('listitem');
+
+    expect(screen.queryByRole('button', { name: /^Transcript/ })).toBeNull();
+    expect(screen.queryByLabelText('evidence transcript')).toBeNull();
+    // The interfaces drawer still reads — it is a fact about the test, not the run.
+    expect(screen.getByRole('button', { name: /^Interfaces/ })).toBeInTheDocument();
+  });
+
   it('heads a trailing untagged group "Checks" — never "Prepare" after the last claim', async () => {
     vi.stubGlobal(
       'fetch',

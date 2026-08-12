@@ -750,25 +750,32 @@ const search = () => screen.getByTestId("search").textContent ?? "";
  * "Loading steps…", because a failure must read even for a file that never parses
  * into steps. Finding it therefore settles nothing. TWO fetches fill the page —
  * the scenario source brings the step ROWS, and the flow join brings the result
- * they are painted from (pass/fail/not-reached), the failure card, the evidence
- * pointer and the milestone chain their sections are headed by. Waiting on the
- * container alone reads a half-loaded page, which is only ever a question of
- * which tick the mocked fetch lands on.
+ * they are painted from (pass/fail/not-reached), the failure sentence, the evidence
+ * pointer and the milestone chain their dividers name. Waiting on the container
+ * alone reads a half-loaded page, which is only ever a question of which tick the
+ * mocked fetch lands on.
  */
 async function findSteps(): Promise<HTMLElement> {
   const steps = await screen.findByLabelText("test steps");
   // The scenario source landed: the file's steps, not the loading line.
   await within(steps).findAllByRole("listitem");
-  // The flow join landed: a milestone section is headed by its CLAIM, and only
-  // the flow detail carries claims. It arrives with the result in one state
-  // update, so this one signal proves both.
-  await waitFor(() =>
-    expect(
-      within(steps).getByText("Milestone 1").parentElement,
-    ).toHaveTextContent(/Milestone 1 — \S/),
-  );
+  // The flow join landed: a milestone divider links the SECTION its steps prove,
+  // and only the flow detail carries that address. It arrives with the result in
+  // one state update, so this one signal proves both.
+  await within(steps).findAllByRole("button", { name: /^§/ });
   return steps;
 }
+
+/** Open one reading of the selected step — the inspector's tabs. */
+const inspectorTab = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: "Result" | "Output" | "Screen" | "Info",
+) =>
+  user.click(
+    within(selectedStepDetails()).getByRole("tab", {
+      name: new RegExp(`^${name}`),
+    }),
+  );
 
 const selectedStepDetails = () =>
   screen.getByLabelText("Selected step details");
@@ -784,28 +791,24 @@ describe("the test, read inside its flow", () => {
     expect(await findSteps()).toBeInTheDocument();
   });
 
-  it("keeps the verdict above an investigation workspace, with transcript after it", async () => {
+  it("keeps the verdict above the workspace, with the drawers after it", async () => {
     renderTest(PASSING_ID);
     const steps = await findSteps();
 
+    // The page reads top-down in the order a reader asks: the verdict, the
+    // investigation, then the supporting record it can open if it needs to.
     const order = [
-      "Verdict",
-      "Steps",
-      "Interfaces used by this flow",
-      "Transcript",
+      screen.getByRole("region", { name: "Test verdict" }),
+      steps,
+      screen.getByRole("button", { name: /^Transcript/ }),
+      screen.getByRole("button", { name: /^Interfaces/ }),
     ];
-    const positions = order.map((label) => {
-      const el = screen.getByText(label);
-      return {
-        label,
-        top: Array.from(document.querySelectorAll("*")).indexOf(el),
-      };
-    });
+    const flat = Array.from(document.querySelectorAll("*"));
+    const positions = order.map((el) => flat.indexOf(el));
     for (let i = 1; i < positions.length; i++) {
-      expect(
-        positions[i].top,
-        `${positions[i].label} after ${positions[i - 1].label}`,
-      ).toBeGreaterThan(positions[i - 1].top);
+      expect(positions[i], `element ${i} follows ${i - 1}`).toBeGreaterThan(
+        positions[i - 1],
+      );
     }
 
     // The merged flow header already states the goal. Its embedded test starts at
@@ -832,10 +835,14 @@ describe("the test, read inside its flow", () => {
         '$ tasks add "write the spec"',
       ),
     );
-    // Visual evidence stays with the selected step; the flow-level interface path
-    // follows the workspace as a compact hand-off before the supporting transcript.
+    // The inspector is the other half of the workspace; a cli run recorded nothing
+    // visual, so there is no filmstrip and its step is offered no Screen tab.
     expect(screen.getByLabelText("Selected step details")).toBeInTheDocument();
-    expect(screen.getByText("Visual evidence")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Run filmstrip" })).toBeNull();
+    expect(
+      within(selectedStepDetails()).queryByRole("tab", { name: /^Screen/ }),
+    ).toBeNull();
+    // The flow-level interface path is a drawer — a hand-off, not the read.
     expect(
       screen.getByRole("region", { name: "Interfaces used by this flow" }),
     ).toBeInTheDocument();
@@ -927,18 +934,36 @@ describe("the test, read inside its flow", () => {
     // The stage the failure came from and the step + milestone it broke at. The
     // diff itself reads at the step; the verdict never guesses a claim title.
     expect(screen.getByText("failed (birth)")).toBeInTheDocument();
-    const card = screen
-      .getByText(/Failed at step/)
-      .closest("div.rounded.border") as HTMLElement;
-    expect(within(card).getByText(/milestone 1/)).toBeInTheDocument();
-    expect(within(card).queryByText(BIRTH_CLAIM.title)).toBeNull();
-    expect(within(card).queryByText("Expected")).toBeNull();
-    expect(within(card).queryByText("Actual")).toBeNull();
-    expect(within(card).queryByLabelText("expected value")).toBeNull();
-    expect(within(card).queryByLabelText("actual value")).toBeNull();
-    // Red is a BORDER, never a fill.
-    expect(card.className).toMatch(/border-red-500/);
-    expect(card.className).not.toMatch(/bg-red-/);
+    const band = screen.getByRole("region", { name: "Test verdict" });
+    expect(within(band).getByText(/Failed at step 2 of 4/)).toBeInTheDocument();
+    expect(within(band).getByText(/milestone 1/)).toBeInTheDocument();
+    expect(within(band).queryByText(BIRTH_CLAIM.title)).toBeNull();
+    expect(within(band).queryByText("Expected")).toBeNull();
+    expect(within(band).queryByText("Actual")).toBeNull();
+    expect(within(band).queryByLabelText("expected value")).toBeNull();
+    expect(within(band).queryByLabelText("actual value")).toBeNull();
+    // The band is a LINE, not a card, and it is never painted red: the status word
+    // already says red, and the diff it would decorate is at the step.
+    expect(band.className).not.toMatch(/bg-red-|border-red-/);
+  });
+
+  // The failure surfaces in redundant channels, and the sentence naming it is one
+  // of them: it is the way TO the step, not a restatement of it.
+  it("jumps to the failing step from the verdict sentence", async () => {
+    const user = userEvent.setup();
+    renderTest(BIRTH_FAILED_ID);
+    const steps = await findSteps();
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 1" }),
+    );
+    expect(
+      within(steps).getByRole("button", { name: "Inspect step 2" }),
+    ).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByText(/Failed at step 2/));
+    expect(
+      within(steps).getByRole("button", { name: "Inspect step 2" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("paints each step from the viewed result — pass, fail, not reached", async () => {
@@ -996,14 +1021,20 @@ describe("the test, read inside its flow", () => {
       pressed: true,
     });
     expect(selected).toBeInTheDocument();
+    // Its row leads the list, above the milestone dividers of the file as it
+    // stands today — the recorded run is not part of that file any more.
     const recorded = within(steps).getByText(
       "Recorded run · earlier test revision",
     );
-    const current = within(steps).getByText("Current test definition");
+    const current = within(steps).getByText("M1");
     expect(
       recorded.compareDocumentPosition(current) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    // …and the verdict band says how far the current definition has moved.
+    expect(
+      screen.getByText(/current definition has 3 steps/),
+    ).toBeInTheDocument();
 
     const inspector = selectedStepDetails();
     expect(
@@ -1201,10 +1232,15 @@ describe("the test, read inside its flow", () => {
     expect(
       within(selectedStepDetails()).getByLabelText("step output"),
     ).toHaveTextContent("step 2 output");
-    // The sections the list is read BY are always visible.
-    for (const header of ["Prepare", "Milestone 1", "Milestone 2"]) {
-      expect(within(steps).getByText(header)).toBeInTheDocument();
+    // The dividers the list is read BY are always visible — thin now: a milestone
+    // is its number, and the claim SENTENCE reads in the inspector instead.
+    for (const divider of ["Prepare", "M1", "M2"]) {
+      expect(within(steps).getByText(divider)).toBeInTheDocument();
     }
+    expect(within(steps).queryByText(new RegExp(CLAIMS[0]))).toBeNull();
+    expect(
+      within(selectedStepDetails()).getByText(`Milestone 1 — ${CLAIMS[0]}`),
+    ).toBeInTheDocument();
   });
 
   it("reads a WEB step in web words — each assertion beside ITS answer, the address, the page", async () => {
@@ -1334,19 +1370,27 @@ describe("the test, read inside its flow", () => {
     expect(screen.queryByText(/^stderr$/i)).toBeNull();
   });
 
-  it("groups the steps by MILESTONE, headed by the claim — no per-row tags", async () => {
+  it("groups the steps by MILESTONE, on a divider thin enough to scan past", async () => {
+    const user = userEvent.setup();
     renderTest(PASSING_ID);
     const steps = await findSteps();
-    // The un-annotated preparation step heads its own section…
+    // The un-annotated preparation step heads its own group…
     expect(within(steps).getByText("Prepare")).toBeInTheDocument();
-    // …then each milestone, named by the claim its steps realize.
-    expect(within(steps).getByText("Milestone 1")).toBeInTheDocument();
-    expect(within(steps).getByText(new RegExp(CLAIMS[0]))).toBeInTheDocument();
-    expect(within(steps).getByText("Milestone 2")).toBeInTheDocument();
-    expect(within(steps).getByText(new RegExp(CLAIMS[1]))).toBeInTheDocument();
-    // The tag that used to ride each row is gone — the header carries it now.
+    // …then each milestone, by its NUMBER: the divider costs one line, and the
+    // claim sentence it used to carry reads in the inspector of every step under it.
+    expect(within(steps).getByText("M1")).toBeInTheDocument();
+    expect(within(steps).getByText("M2")).toBeInTheDocument();
+    for (const claim of CLAIMS)
+      expect(within(steps).queryByText(new RegExp(claim))).toBeNull();
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 4" }),
+    );
+    expect(
+      within(selectedStepDetails()).getByText(`Milestone 2 — ${CLAIMS[1]}`),
+    ).toBeInTheDocument();
+    // The tag that used to ride each row is gone — the divider carries it now.
     expect(within(steps).queryByText(/^milestone \d+$/)).toBeNull();
-    // Sections, not a re-ordering: every step still renders, in file order.
+    // Groups, not a re-ordering: every step still renders, in file order.
     expect(within(steps).getAllByRole("listitem")).toHaveLength(STEPS.length);
   });
 
@@ -1362,9 +1406,10 @@ describe("the test, read inside its flow", () => {
 
     const links = within(steps).getAllByRole("button", { name: /^§/ });
     expect(links).toHaveLength(2); // one per milestone group — never on Prepare
-    expect(links[0]).toHaveTextContent("§ Creating tasks");
-    // The header's own words are untouched: the claim SENTENCE still reads in full.
-    expect(within(steps).getByText(new RegExp(CLAIMS[0]))).toBeInTheDocument();
+    // The divider spends its width on the steps, so the section it links to is
+    // named where a link's name belongs — accessibly, and in the title on hover.
+    expect(links[0]).toHaveAccessibleName("§ Creating tasks");
+    expect(links[0]).toHaveAttribute("title", `${DOC} § Creating tasks`);
 
     await user.click(links[0]);
     expect(openedSpec).toEqual([[DOC, "tasks/creating-tasks"]]);
@@ -1397,13 +1442,25 @@ describe("the test, read inside its flow", () => {
   });
 
   it("heads a milestone the flow does not name by its number alone", async () => {
+    const user = userEvent.setup();
     // The birth flow declares milestone 1 only; the file's step 4 realizes 2.
     renderTest(BIRTH_FAILED_ID);
     const steps = await findSteps();
+    // A milestone the flow DOES name reads its claim in the inspector…
     expect(
-      within(steps).getByText(new RegExp(BIRTH_CLAIM.title)),
+      within(selectedStepDetails()).getByText(
+        new RegExp(`Milestone 1 — ${BIRTH_CLAIM.title}`),
+      ),
     ).toBeInTheDocument();
-    expect(within(steps).getByText("Milestone 2")).toBeInTheDocument();
+    // …and the one it does not is its number alone, on the divider and in the
+    // inspector — never a blank and never a borrowed claim.
+    expect(within(steps).getByText("M2")).toBeInTheDocument();
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 4" }),
+    );
+    expect(
+      within(selectedStepDetails()).getByText("Milestone 2"),
+    ).toBeInTheDocument();
   });
 
   it("switches between the page and the raw file, and defaults to the page", async () => {
@@ -1469,15 +1526,16 @@ describe("the test, read inside its flow", () => {
     expect(block.className).toContain("whitespace-pre");
     expect(block.className).not.toContain("whitespace-pre-wrap");
     expect(block.className).toContain("overflow-x-auto");
-    // Height is still the page's job.
+    // Height is the PANE's job — the block never grows its own scrollbar.
     expect(block.className).not.toMatch(/overflow-y|max-h-/);
-    // Nothing in its ancestry scrolls: the pane is the only scroll context.
+    // Nothing between the block and its pane scrolls: a pane is the only scroll
+    // context any block on this page has, and it is marked as one.
     for (
       let el = block.parentElement;
       el && el.tagName !== "BODY";
       el = el.parentElement
     ) {
-      if (el.className.includes("flex-1")) break;
+      if (el.hasAttribute("data-pane")) break;
       expect(el.className).not.toMatch(
         /overflow-(auto|scroll|y-auto|y-scroll)|max-h-/,
       );
@@ -1523,13 +1581,22 @@ describe("the test, read inside its flow", () => {
         }
       }
     }
-    // The pane's own scroll: down, explicitly — `overflow-y-auto` on its own would
-    // compute the x axis to `auto` and hand a wide line the whole page.
-    const pane = screen
-      .getByLabelText("evidence transcript")
-      .closest(".flex-1") as HTMLElement;
-    expect(pane.className).toContain("overflow-y-auto");
-    expect(pane.className).toContain("overflow-x-hidden");
+    // EVERY pane scrolls down explicitly and clips sideways — `overflow-y-auto` on
+    // its own would compute the x axis to `auto` and hand a wide line the whole page.
+    const panes = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-pane]"),
+    );
+    expect(panes.length).toBeGreaterThan(2);
+    for (const pane of panes) {
+      expect(pane.className).toContain("overflow-y-auto");
+      expect(pane.className).toContain("overflow-x-hidden");
+    }
+    // …and each data block sits inside one.
+    for (const label of ["expected value", "step output", "evidence transcript"])
+      expect(
+        screen.getByLabelText(label).closest("[data-pane]"),
+        label,
+      ).not.toBeNull();
   });
 
   /**
@@ -1909,6 +1976,261 @@ describe("an existing claim dismissal, read-only from the test that failed", () 
   });
 });
 
+/**
+ * THE WORKSPACE ITSELF — one selection, projected into every pane.
+ *
+ * These pin the mechanics the recomposition is FOR: hover as a preview channel
+ * that never costs a reader their place, tabs that split one step's record by the
+ * question being asked, drawers that keep the supporting record out of the failure
+ * path, and a filmstrip that is a second index onto the same selection.
+ */
+describe("the investigation workspace", () => {
+  const VISUALS: GuardEvidenceVisual[] = [
+    { file: "step-1.png", kind: "screenshot", step: 1 },
+    { file: "step-2.png", kind: "screenshot", step: 2 },
+    { file: "session.webm", kind: "video" },
+  ];
+
+  const inspector = () => screen.getByLabelText("Selected step details");
+  const tab = (name: string) =>
+    within(inspector()).getByRole("tab", { name: new RegExp(`^${name}`) });
+  const panel = (id: string) =>
+    document.getElementById(`step-panel-${id}`) as HTMLElement;
+
+  it("splits one step's record into counted tabs, opening on the verdict", async () => {
+    const user = userEvent.setup();
+    servedSteps = STEPS_STOPPED_AT_2;
+    renderTest(BIRTH_FAILED_ID);
+    await findSteps();
+
+    // Result is the reading a red step is opened for, so it is the open one.
+    expect(tab("Result")).toHaveAttribute("aria-selected", "true");
+    expect(panel("result")).not.toHaveClass("hidden");
+    expect(panel("output")).toHaveClass("hidden");
+    // The volume rides ON the tab, so a reader knows what is behind it first:
+    // the failure printed one line on each stream.
+    expect(tab("Output")).toHaveTextContent("Output2");
+
+    await user.click(tab("Output"));
+    expect(tab("Output")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Result")).toHaveAttribute("aria-selected", "false");
+    expect(panel("output")).not.toHaveClass("hidden");
+    expect(panel("result")).toHaveClass("hidden");
+    expect(within(panel("output")).getByLabelText("step output")).toHaveTextContent(
+      "analyzing 4211 files",
+    );
+  });
+
+  it("offers a step that captured NOTHING no Screen tab, and a captured one a tab", async () => {
+    const user = userEvent.setup();
+    servedVisuals = VISUALS;
+    servedSteps = WEB_STEPS;
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+
+    // Step 4 recorded no picture: it is offered no such reading, and no browser
+    // vocabulary at all.
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 4" }),
+    );
+    expect(
+      within(inspector()).queryByRole("tab", { name: /^Screen/ }),
+    ).toBeNull();
+
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 2" }),
+    );
+    await user.click(tab("Screen"));
+    expect(
+      within(panel("screen")).getByRole("button", {
+        name: "Step 2 — open full size",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("an applicable tab with nothing behind it SAYS so — never a blank panel", async () => {
+    const user = userEvent.setup();
+    servedSteps = STEPS_STOPPED_AT_2;
+    renderTest(BIRTH_FAILED_ID);
+    const steps = await findSteps();
+    // Step 4 was never reached: its Output tab still opens, and says why.
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 4" }),
+    );
+    await user.click(tab("Output"));
+    expect(
+      within(panel("output")).getByText("not recorded in this run"),
+    ).toBeInTheDocument();
+    // …and a step that ran with nothing set around it says that too.
+    await user.click(tab("Info"));
+    expect(
+      within(panel("info")).getByText("this step runs with nothing set around it"),
+    ).toBeInTheDocument();
+  });
+
+  it("previews a hovered step and gives the selection back on leave", async () => {
+    const user = userEvent.setup();
+    renderTest(BIRTH_FAILED_ID);
+    const steps = await findSteps();
+    const failing = within(steps).getByRole("button", {
+      name: "Inspect step 2",
+    });
+    expect(within(inspector()).getByText("Step 2")).toBeInTheDocument();
+
+    // Sweeping the list re-aims the inspector WITHOUT moving the pin: the failing
+    // row is still the selected one, so a reader never loses their place.
+    await user.hover(within(steps).getByRole("button", { name: "Inspect step 4" }));
+    expect(within(inspector()).getByText("Step 4")).toBeInTheDocument();
+    expect(failing).toHaveAttribute("aria-pressed", "true");
+
+    await user.unhover(within(steps).getByRole("button", { name: "Inspect step 4" }));
+    expect(within(inspector()).getByText("Step 2")).toBeInTheDocument();
+  });
+
+  it("walks the list with the arrow keys, one selection at a time", async () => {
+    const user = userEvent.setup();
+    servedSteps = STEPS_ALL_RAN;
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    const row = (n: number) =>
+      within(steps).getByRole("button", { name: `Inspect step ${n}` });
+    // Roving focus: only the selected row is in the tab order.
+    expect(row(1)).toHaveAttribute("tabindex", "0");
+    expect(row(2)).toHaveAttribute("tabindex", "-1");
+
+    row(1).focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(row(3)).toHaveAttribute("aria-pressed", "true");
+    expect(within(inspector()).getByText("Step 3")).toBeInTheDocument();
+    await user.keyboard("{ArrowUp}");
+    expect(row(2)).toHaveAttribute("aria-pressed", "true");
+    // The ends are ends — the walk stops rather than wrapping.
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(row(1)).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("opens the picture with Enter on a step that recorded one", async () => {
+    const user = userEvent.setup();
+    servedVisuals = VISUALS;
+    servedSteps = WEB_STEPS;
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 2" }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Evidence screenshot" }),
+    ).toBeNull();
+    await user.keyboard("{Enter}");
+    expect(
+      screen.getByRole("dialog", { name: "Evidence screenshot" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the supporting record in drawers, closed until asked for", async () => {
+    const user = userEvent.setup();
+    renderTest(PASSING_ID);
+    await findSteps();
+
+    const transcript = screen.getByRole("button", { name: /^Transcript/ });
+    const drawer = document.getElementById("guard-drawer-transcript")!;
+    expect(transcript).toHaveAttribute("aria-expanded", "false");
+    expect(drawer).toHaveClass("hidden");
+
+    await user.click(transcript);
+    expect(transcript).toHaveAttribute("aria-expanded", "true");
+    expect(drawer).not.toHaveClass("hidden");
+
+    // One at a time: opening another closes this one, so the drawers can never
+    // eat the workspace they sit under.
+    await user.click(screen.getByRole("button", { name: /^Interfaces/ }));
+    expect(transcript).toHaveAttribute("aria-expanded", "false");
+    expect(
+      document.getElementById("guard-drawer-interfaces")!,
+    ).not.toHaveClass("hidden");
+  });
+
+  describe("the filmstrip — the run's second index onto the same selection", () => {
+    it("marks the failing tile and pins its step on click", async () => {
+      const user = userEvent.setup();
+      servedVisuals = VISUALS;
+      servedSteps = WEB_STEPS_FAILED_AT_2;
+      renderTest(BIRTH_FAILED_ID);
+      await findSteps();
+
+      const strip = await screen.findByRole("region", { name: "Run filmstrip" });
+      const tile = (n: number) =>
+        within(strip).getByRole("button", { name: `Select Step ${n} screenshot` });
+      // The failing tile is marked in the ONE colour a failure is allowed.
+      expect(within(strip).getByText("failed")).toBeInTheDocument();
+      expect(tile(2)).toHaveAttribute("aria-pressed", "true");
+
+      await user.click(tile(1));
+      expect(tile(1)).toHaveAttribute("aria-pressed", "true");
+      expect(
+        within(screen.getByLabelText("test steps")).getByRole("button", {
+          name: "Inspect step 1",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("keeps the session video a plain player, opened from Replay", async () => {
+      const user = userEvent.setup();
+      servedVisuals = VISUALS;
+      renderTest(PASSING_ID);
+      await findSteps();
+
+      const replay = await screen.findByRole("button", { name: /Replay/ });
+      expect(replay).toHaveAttribute("aria-expanded", "false");
+      const video = screen.getByLabelText("session video");
+      expect(video.tagName).toBe("VIDEO");
+      expect(video).toHaveAttribute("controls");
+      expect(document.getElementById("guard-session-replay")!).toHaveClass(
+        "hidden",
+      );
+
+      await user.click(replay);
+      expect(replay).toHaveAttribute("aria-expanded", "true");
+      expect(
+        document.getElementById("guard-session-replay")!,
+      ).not.toHaveClass("hidden");
+    });
+
+    it("renders no strip at all for a run that captured nothing", async () => {
+      renderTest(PASSING_ID);
+      await findSteps();
+      expect(screen.queryByRole("region", { name: "Run filmstrip" })).toBeNull();
+    });
+  });
+
+  /**
+   * `object-contain` only ever fits a picture to the box it is IN, so a box sized
+   * by its content renders a small screenshot small — the exact thing the full-size
+   * reading exists to answer. jsdom lays nothing out, so the fix is pinned as the
+   * structure that produces it: a viewport-sized box, and an image told to fill it.
+   */
+  it("gives the lightbox picture a viewport-sized box, so a small shot scales up", async () => {
+    const user = userEvent.setup();
+    servedVisuals = VISUALS;
+    servedSteps = WEB_STEPS;
+    renderTest(PASSING_ID);
+    await findSteps();
+    await user.click(
+      screen.getByRole("button", { name: "Step 1 — open full size" }),
+    );
+    const lightbox = screen.getByRole("dialog", { name: "Evidence screenshot" });
+    const picture = within(lightbox).getByRole("img");
+    expect(picture.className).toContain("object-contain");
+    // The image fills its cell…
+    expect(picture.className).toMatch(/(^|\s)h-full(\s|$)/);
+    expect(picture.className).toMatch(/(^|\s)w-full(\s|$)/);
+    // …and that cell is sized from the VIEWPORT, never from the picture.
+    const box = lightbox.firstElementChild as HTMLElement;
+    expect(box.className).toContain("h-[85vh]");
+    expect(box.className).toContain("w-[90vw]");
+  });
+});
+
 describe("the step list reads a claim-identity milestone as its claim", () => {
   // An authored test tags its steps with claim IDs, not flow positions. The claim
   // corpus is what turns an id into the sentence the group header reads, and it
@@ -1943,7 +2265,7 @@ describe("the step list reads a claim-identity milestone as its claim", () => {
   });
 });
 
-describe("the SETUP section — the world the steps start in", () => {
+describe("SETUP as step 0 — the world the steps start in", () => {
   /**
    * The starting world a seeded, git-backed, env-carrying test declares. Composed
    * server-side off the same parse as the steps, so the page renders it and never
@@ -1964,8 +2286,16 @@ describe("the SETUP section — the world the steps start in", () => {
     env: ["NO_COLOR=1", "TASKS_HOME=.tmp/tasks"],
   };
 
-  /** The section's settle point — it lands with the same scenario-source fetch. */
-  const findSetup = () => screen.findByLabelText("test setup");
+  /**
+   * The setup's settle point. It is not a standing section any more: it is STEP 0
+   * of the same list, so reading it means selecting that row — exactly what a
+   * reader does. The row lands with the same scenario-source fetch as the steps.
+   */
+  const findSetup = async (): Promise<HTMLElement> => {
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Inspect setup" }));
+    return screen.getByLabelText("test setup");
+  };
 
   it("renders the seeded files COLLAPSED — the path is the row, the content one click", async () => {
     const user = userEvent.setup();
@@ -2026,20 +2356,48 @@ describe("the SETUP section — the world the steps start in", () => {
 
   it("renders NOTHING at all for a test that declares no setup", async () => {
     renderTest(PASSING_ID);
-    // The steps landed, so the source did — and it carried no setup: no section,
-    // and no empty heading standing in for one.
+    // The steps landed, so the source did — and it carried no setup: no row, no
+    // inspector for one, and no empty heading standing in for it.
     await findSteps();
     expect(screen.queryByLabelText("test setup")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Inspect setup" })).toBeNull();
     expect(screen.queryByText("Setup")).toBeNull();
   });
 
-  it("reads the world BEFORE the steps that run in it", async () => {
+  it("reads as step 0 — BEFORE the steps that run in it, in the same list", async () => {
     servedSetup = SETUP;
     renderTest(PASSING_ID);
-    const setup = await findSetup();
-    const steps = await screen.findByLabelText("test steps");
+    const steps = await findSteps();
+    const rows = within(steps).getAllByRole("listitem");
+    // First row of the list, ahead of every authored step.
+    expect(rows[0]).toHaveAccessibleName(
+      "Step 0: setup — the world the steps start in",
+    );
+    expect(rows[1]).toHaveAccessibleName(/^Step 1:/);
+    // A failing test still opens on its failure — setup is a row, not a detour.
     expect(
-      setup.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+      within(steps).getByRole("button", { name: "Inspect step 1" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("selecting step 0 puts the starting world in the ONE inspector", async () => {
+    const user = userEvent.setup();
+    servedSetup = SETUP;
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    // Nothing of the setup is on the page until its row is chosen.
+    expect(screen.queryByLabelText("test setup")).toBeNull();
+
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect setup" }),
+    );
+    const inspector = selectedStepDetails();
+    expect(within(inspector).getByText("Setup")).toBeInTheDocument();
+    expect(within(inspector).getByLabelText("test setup")).toBeInTheDocument();
+    // …and the step it replaced is one click back.
+    await user.click(
+      within(steps).getByRole("button", { name: "Inspect step 1" }),
+    );
+    expect(screen.queryByLabelText("test setup")).toBeNull();
   });
 });

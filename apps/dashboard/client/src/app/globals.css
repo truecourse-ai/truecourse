@@ -202,9 +202,15 @@
   background: oklch(0.5 0 0 / 50%);
 }
 
-/* The flow detail lives beside a persistent inventory rail, so its usable width
-   can differ sharply from the viewport. Compose the investigation from its own
-   container: evidence stays first and readable when the detail pane is narrow. */
+/* The investigation is a FIXED-HEIGHT split: the workspace never scrolls, its two
+   panes do. Both panes therefore need `min-height: 0` — a flex/grid item defaults
+   to `min-height: auto`, which lets a long step list push the whole page taller
+   instead of scrolling inside its own box.
+
+   The flow detail lives beside a persistent inventory rail, so its usable width can
+   differ sharply from the viewport: the split is composed from its OWN container,
+   not the viewport, and stacks below 68rem with the STEPS on top — where it broke
+   is read before why. */
 .guard-investigation {
   container-type: inline-size;
 }
@@ -212,22 +218,28 @@
 .guard-investigation-layout {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-}
-
-.guard-investigation-inspector {
-  order: 1;
+  gap: 0.625rem;
+  height: 100%;
+  min-height: 0;
 }
 
 .guard-investigation-timeline {
+  order: 1;
+  flex: 1 1 40%;
+  min-height: 0;
+}
+
+.guard-investigation-inspector {
   order: 2;
+  flex: 1 1 60%;
+  min-height: 0;
 }
 
 @container (min-width: 68rem) {
   .guard-investigation-layout {
     display: grid;
-    grid-template-columns: minmax(28rem, 0.78fr) minmax(40rem, 1.22fr);
-    align-items: start;
+    grid-template-columns: minmax(22rem, 0.8fr) minmax(28rem, 1.2fr);
+    align-items: stretch;
   }
 
   .guard-investigation-timeline {
@@ -236,8 +248,6 @@
   }
 
   .guard-investigation-inspector {
-    position: sticky;
-    top: 0.75rem;
     grid-column: 2;
     grid-row: 1;
   }

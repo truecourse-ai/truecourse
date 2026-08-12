@@ -1,25 +1,47 @@
 /**
- * The VISUAL half of an evidence bundle, inside the investigation rail: the
- * selected step's screenshot at reading size, the per-step sequence beneath it,
- * and the session video after them.
+ * The VISUAL half of an evidence bundle, split by what each piece is evidence OF:
+ *
+ *   {@link GuardRunFilmstrip}     the RUN as a strip of tiles, one per captured
+ *                                 step, in step order — the workspace's second
+ *                                 index onto the same selection the step list
+ *                                 carries. Hovering a tile previews it at reading
+ *                                 size and re-aims the inspector; clicking pins
+ *                                 that step. The failing tile is marked, because a
+ *                                 reader scanning pictures is looking for exactly
+ *                                 one of them. The session video hangs off the end
+ *                                 as Replay: it is the whole session, not a step.
+ *   {@link GuardStepScreenshot}   ONE step's screenshot, inside that step's
+ *                                 inspector, on its `Screen` tab — the picture is
+ *                                 the step's own record, exactly like its url and
+ *                                 its page text. A cli/api step recorded no
+ *                                 picture, so it is offered no such tab.
+ *   {@link GuardScreenshotLightbox} the run's screenshots as ONE CAROUSEL, full
+ *                                 size, in the app — opened from the Screen tab or
+ *                                 with Enter on a step that has one. A browser run
+ *                                 is a sequence, and reading it means stepping
+ *                                 through it: back and next, ← and →, Escape or a
+ *                                 click outside to leave. The video is not in it: a
+ *                                 player is already its own full reading, and a
+ *                                 control surface that scrubs does not belong under
+ *                                 arrow keys that step.
+ *
+ * THE LIGHTBOX GIVES THE PICTURE REAL HEIGHT. `object-contain` only ever fits an
+ * image to the box it is IN, so a box sized by its content leaves a small
+ * screenshot rendered small — the exact complaint the full-size reading exists to
+ * answer. The overlay therefore hands the image column a viewport-sized box
+ * (90vw × 85vh) and lets `object-contain` scale UP into it.
  *
  * A web step spawns nothing — no exit code, no streams — so a picture is the only
  * record of what it did. It renders for a GREEN run exactly as for a red one:
  * visuals are evidence, not failure decoration.
  *
  * Additive by construction. A bundle with no visuals (every cli/api run, and every
- * run recorded before the web driver existed) renders NOTHING — the evidence section
- * is then the transcript alone, unchanged.
- *
- * A thumbnail selects its timeline step; the featured screenshot opens the run's
- * screenshots as ONE CAROUSEL, full size, in the app:
- * a browser run is a sequence, and reading it means stepping through it — back and
- * next, ← and →, Escape or a click outside to leave. The video is not in it: a
- * player is already its own full reading, and a control surface that scrubs does
- * not belong under arrow keys that step.
+ * run recorded before the web driver existed) renders NOTHING — no strip, no empty
+ * gallery, no "no screenshots" line.
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronLeft,
@@ -43,7 +65,7 @@ function visualLabel(visual: GuardEvidenceVisual): string {
  * arrow is what says "you are at the edge". With a single screenshot there is
  * nothing to step through and no arrow renders.
  */
-function ScreenshotLightbox({
+export function GuardScreenshotLightbox({
   repoId,
   where,
   screenshots,
@@ -81,16 +103,18 @@ function ScreenshotLightbox({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="Evidence screenshot"
     >
-      {/* Arrows OUTSIDE the header+image column, so the title's left edge and
-          the close button's right edge line up with the image's own edges. */}
+      {/* The box is sized from the VIEWPORT, never from the picture: an image
+          column that only ever grows to its content renders a 600px screenshot at
+          600px. Arrows sit OUTSIDE the header+image column, so the title's left
+          edge and the close button's right edge line up with the image's own. */}
       <div
-        className="flex max-h-full w-full max-w-4xl items-center gap-2"
+        className="flex h-[85vh] w-[90vw] items-stretch gap-2"
         onClick={(e) => e.stopPropagation()}
       >
         {count > 1 && (
@@ -99,13 +123,13 @@ function ScreenshotLightbox({
             onClick={() => step(-1)}
             disabled={index === 0}
             aria-label="Previous screenshot"
-            className="shrink-0 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-white/10"
+            className="my-auto shrink-0 cursor-pointer rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-white/10"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
         )}
-        <div className="flex max-h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
-          <div className="flex items-center gap-2">
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <span className="text-xs font-medium text-white">{label}</span>
             <span className="truncate font-mono text-[10px] text-white/60">
               {visual.file}
@@ -114,7 +138,7 @@ function ScreenshotLightbox({
               type="button"
               onClick={onClose}
               aria-label="Close screenshot"
-              className="-my-1 -mr-1 ml-auto shrink-0 rounded p-1 text-white/80 hover:bg-white/10 hover:text-white"
+              className="-my-1 -mr-1 ml-auto shrink-0 cursor-pointer rounded p-1 text-white/80 hover:bg-white/10 hover:text-white"
             >
               <X className="h-4 w-4" />
             </button>
@@ -122,7 +146,7 @@ function ScreenshotLightbox({
           <img
             src={api.guardEvidenceVisualUrl(repoId, where, visual.file)}
             alt={`${label} screenshot`}
-            className="min-h-0 w-full flex-1 rounded border border-white/20 bg-white object-contain"
+            className="h-full min-h-0 w-full flex-1 rounded border border-white/20 bg-white object-contain"
           />
         </div>
         {count > 1 && (
@@ -131,7 +155,7 @@ function ScreenshotLightbox({
             onClick={() => step(1)}
             disabled={index === count - 1}
             aria-label="Next screenshot"
-            className="shrink-0 rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-white/10"
+            className="my-auto shrink-0 cursor-pointer rounded-full bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-white/10"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
@@ -141,188 +165,238 @@ function ScreenshotLightbox({
   );
 }
 
-export function GuardEvidenceVisuals({
+/**
+ * One step's screenshot, on its inspector's `Screen` tab. Clicking it opens the
+ * run's carousel at this step ({@link GuardScreenshotLightbox}, owned by the page
+ * so the tab and the carousel share one open state) — the same thing Enter on the
+ * step row does.
+ */
+export function GuardStepScreenshot({
   repoId,
   where,
-  visuals,
-  selectedStep,
+  visual,
+  onOpen,
+}: {
+  repoId: string;
+  where: api.GuardEvidenceWhere;
+  visual: GuardEvidenceVisual;
+  onOpen: () => void;
+}) {
+  const label = visualLabel(visual);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`${label} — open full size`}
+      className="group block w-full cursor-pointer rounded outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      <img
+        src={api.guardEvidenceVisualUrl(repoId, where, visual.file)}
+        alt={`${label} screenshot`}
+        className="w-full rounded border border-border bg-muted object-contain object-top"
+      />
+      <span className="mt-1 block text-right text-[10px] text-muted-foreground group-hover:text-foreground">
+        Open full size
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The hovered tile at reading size, over the page — the strip's preview channel.
+ * It opens BELOW the strip (the strip lives at the top of the workspace, so above
+ * it there is only the app header) and clamps to the viewport on both axes: a
+ * first or last tile's preview slides inward instead of bleeding off the edge.
+ */
+function TilePreview({
+  src,
+  label,
+  rect,
+}: {
+  src: string;
+  label: string;
+  rect: DOMRect;
+}) {
+  const width = Math.min(544, window.innerWidth * 0.7);
+  const half = width / 2 + 8;
+  const center = Math.min(
+    Math.max(rect.left + rect.width / 2, half),
+    window.innerWidth - half,
+  );
+  const top = rect.bottom + 8;
+  return createPortal(
+    <div
+      role="tooltip"
+      className="pointer-events-none fixed z-50 -translate-x-1/2 rounded border border-border bg-popover p-1 shadow-md shadow-black/20"
+      style={{ left: center, top }}
+    >
+      <img
+        src={src}
+        alt={`${label} screenshot`}
+        className="rounded bg-muted object-contain object-top"
+        style={{
+          width,
+          maxHeight: Math.max(120, window.innerHeight - top - 16),
+        }}
+      />
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * THE RUN AS A STRIP — one tile per captured step, in step order, doubling as the
+ * step scrubber. It is not a time axis: guard runs 2–24 steps, so a tile maps to a
+ * step, and the strip and the step list are two indexes onto one selection.
+ */
+export function GuardRunFilmstrip({
+  repoId,
+  where,
+  screenshots,
+  videos,
+  activeStep,
   failedStep,
   onSelectStep,
+  onPreviewStep,
 }: {
   repoId: string;
   /** The bundle these came from — the same handle their bytes are addressed by. */
   where: api.GuardEvidenceWhere;
-  /** In reading order, as the server listed them: screenshots by step, video last. */
-  visuals: readonly GuardEvidenceVisual[];
-  /** The timeline step currently being inspected. */
-  selectedStep?: number;
+  /** In step order, as the server listed them. */
+  screenshots: readonly GuardEvidenceVisual[];
+  /** The session recording, when the run kept one. */
+  videos: readonly GuardEvidenceVisual[];
+  /** The step the workspace is currently showing — selected, or merely previewed. */
+  activeStep?: number;
   /** The one screenshot that records the failure, when the run has it. */
   failedStep?: number;
-  /** Keep the timeline and visual sequence on the same step. */
-  onSelectStep?: (step: number) => void;
+  /** Pin the workspace to this step. */
+  onSelectStep: (step: number) => void;
+  /** Preview this step without moving the pin; null restores the selection. */
+  onPreviewStep: (step: number | null) => void;
 }) {
-  const screenshots = visuals.filter((v) => v.kind === "screenshot");
-  const videos = visuals.filter((v) => v.kind === "video");
-  // Which screenshot the carousel is showing; null = closed. Keyed on the
-  // sequence ITSELF (its file names), so a different test's evidence closes it
-  // and an ordinary re-render — `visuals` may be a fresh array — does not.
-  const sequence = screenshots.map((v) => v.file).join("|");
-  const [open, setOpen] = useState<number | null>(null);
-  useEffect(() => setOpen(null), [sequence]);
-  const selectedIndex =
-    selectedStep == null
-      ? 0
-      : screenshots.findIndex((visual) => visual.step === selectedStep);
-  const selected = selectedIndex >= 0 ? screenshots[selectedIndex] : undefined;
-  const selectScreenshot = (index: number) => {
-    const visual = screenshots[index];
-    if (visual?.step != null) onSelectStep?.(visual.step);
-  };
+  const [preview, setPreview] = useState<{
+    file: string;
+    label: string;
+    rect: DOMRect;
+  } | null>(null);
+  const [replay, setReplay] = useState(false);
 
-  if (visuals.length === 0) return null;
+  if (screenshots.length === 0) return null;
 
   return (
-    <div className="mt-2 space-y-3">
-      {screenshots.length > 0 && (
-        <div>
-          {selected ? (
-            <div>
-              <div className="mb-1.5 flex min-w-0 items-center gap-2">
-                <span className="text-[11px] font-medium text-foreground">
-                  {visualLabel(selected)}
-                </span>
-                {selected.step === failedStep && (
-                  <span className="text-[10px] font-medium text-red-600 dark:text-red-400">
-                    failure
-                  </span>
-                )}
-                <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">
-                  {selectedIndex + 1} of {screenshots.length}
-                </span>
-                {screenshots.length > 1 && (
-                  <div className="flex shrink-0 items-center rounded border border-border">
-                    <button
-                      type="button"
-                      onClick={() => selectScreenshot(selectedIndex - 1)}
-                      disabled={selectedIndex === 0}
-                      aria-label="Previous evidence screenshot"
-                      className="rounded-l p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-30"
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => selectScreenshot(selectedIndex + 1)}
-                      disabled={selectedIndex === screenshots.length - 1}
-                      aria-label="Next evidence screenshot"
-                      className="rounded-r border-l border-border p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-30"
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpen(selectedIndex)}
-                aria-label={`${visualLabel(selected)} — open full size`}
-                className="group block w-full rounded outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <img
-                  src={api.guardEvidenceVisualUrl(repoId, where, selected.file)}
-                  alt={`${visualLabel(selected)} screenshot`}
-                  className="aspect-video max-h-[28rem] w-full rounded border border-border bg-muted object-contain object-top"
-                />
-                <span className="mt-1 block text-right text-[10px] text-muted-foreground group-hover:text-foreground">
-                  Open full size
-                </span>
-              </button>
-            </div>
-          ) : selectedStep != null ? (
-            <p className="rounded border border-dashed border-border px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
-              No screenshot was recorded for step {selectedStep}. Choose a
-              captured step below to inspect its page.
-            </p>
-          ) : null}
-
-          <ul
-            aria-label="evidence screenshots"
-            className="scrollbar-thin mt-2 flex snap-x gap-2 overflow-x-auto pb-2"
-          >
-            {screenshots.map((visual) => {
-              const label = visualLabel(visual);
-              const active = visual.file === selected?.file;
-              return (
-                <li key={visual.file} className="w-32 shrink-0 snap-start">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (visual.step != null) onSelectStep?.(visual.step);
-                    }}
-                    aria-label={`Select ${label} screenshot`}
-                    aria-pressed={active}
-                    className={`block w-full rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                      active ? "ring-1 ring-primary" : ""
+    <section
+      aria-label="Run filmstrip"
+      className="min-w-0 shrink-0"
+      onMouseLeave={() => {
+        setPreview(null);
+        onPreviewStep(null);
+      }}
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        <ul
+          aria-label="evidence screenshots"
+          className="scrollbar-thin flex min-w-0 flex-1 snap-x gap-1.5 overflow-x-auto pb-1"
+        >
+          {screenshots.map((visual) => {
+            const label = visualLabel(visual);
+            const active = visual.step != null && visual.step === activeStep;
+            const failed = visual.step === failedStep;
+            return (
+              <li key={visual.file} className="w-24 shrink-0 snap-start">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (visual.step != null) onSelectStep(visual.step);
+                  }}
+                  onMouseEnter={(e) => {
+                    setPreview({
+                      file: visual.file,
+                      label,
+                      rect: e.currentTarget.getBoundingClientRect(),
+                    });
+                    if (visual.step != null) onPreviewStep(visual.step);
+                  }}
+                  // Cleared per tile, not only when the pointer leaves the whole
+                  // section — the Replay button shares the section, and a preview
+                  // that lingers over it reads as a stuck tooltip.
+                  onMouseLeave={() => {
+                    setPreview(null);
+                    onPreviewStep(null);
+                  }}
+                  aria-label={`Select ${label} screenshot`}
+                  aria-pressed={active}
+                  className={`block w-full cursor-pointer rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                    active
+                      ? "ring-1 ring-primary"
+                      : "hover:ring-1 hover:ring-primary/40"
+                  }`}
+                >
+                  <img
+                    src={api.guardEvidenceVisualUrl(repoId, where, visual.file)}
+                    alt={`${label} screenshot`}
+                    className={`aspect-video w-full rounded border bg-muted object-cover object-top ${
+                      failed ? "border-red-500/70" : "border-border"
                     }`}
-                  >
-                    <img
-                      src={api.guardEvidenceVisualUrl(
-                        repoId,
-                        where,
-                        visual.file,
-                      )}
-                      alt={`${label} screenshot`}
-                      className="aspect-video w-full rounded border border-border bg-muted object-cover object-top"
-                    />
-                    <span className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <span>{label}</span>
-                      {visual.step === failedStep && (
-                        <span className="ml-auto font-medium text-red-600 dark:text-red-400">
-                          failed
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                  />
+                  <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <span className="truncate">{label}</span>
+                    {failed && (
+                      <span className="ml-auto font-medium text-red-600 dark:text-red-400">
+                        failed
+                      </span>
+                    )}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {videos.length > 0 && (
+          <button
+            type="button"
+            aria-expanded={replay}
+            aria-controls="guard-session-replay"
+            onClick={() => setReplay((open) => !open)}
+            className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded border border-border px-1.5 py-1 text-[11px] outline-none hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary ${
+              replay ? "bg-muted/60 text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            <CirclePlay aria-hidden className="h-3.5 w-3.5" />
+            Replay
+            <ChevronDown
+              aria-hidden
+              className={`h-3.5 w-3.5 transition-transform ${replay ? "rotate-180" : ""}`}
+            />
+          </button>
+        )}
+      </div>
+      {/* The session recording is the WHOLE run, not any one step, so it opens
+          under the strip rather than inside a tile. */}
+      {videos.length > 0 && (
+        <div
+          id="guard-session-replay"
+          className={`mt-1.5 space-y-1.5 ${replay ? "" : "hidden"}`}
+        >
+          {videos.map((visual) => (
+            <video
+              key={visual.file}
+              src={api.guardEvidenceVisualUrl(repoId, where, visual.file)}
+              controls
+              aria-label="session video"
+              preload="metadata"
+              className="max-h-[45vh] w-full rounded border border-border bg-black"
+            />
+          ))}
         </div>
       )}
-      {videos.length > 0 && (
-        <details className="group overflow-hidden rounded border border-border bg-card/40">
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[11px] font-medium text-foreground outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
-            <CirclePlay className="h-3.5 w-3.5 text-muted-foreground" />
-            Session replay
-            <span className="ml-auto text-[10px] text-muted-foreground">
-              {videos.length} recording{videos.length === 1 ? "" : "s"}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="space-y-2 border-t border-border p-2">
-            {videos.map((visual) => (
-              <video
-                key={visual.file}
-                src={api.guardEvidenceVisualUrl(repoId, where, visual.file)}
-                controls
-                aria-label="session video"
-                preload="metadata"
-                className="aspect-video w-full rounded border border-border bg-black"
-              />
-            ))}
-          </div>
-        </details>
-      )}
-      {open != null && (
-        <ScreenshotLightbox
-          repoId={repoId}
-          where={where}
-          screenshots={screenshots}
-          index={open}
-          onIndex={setOpen}
-          onClose={() => setOpen(null)}
+      {preview && (
+        <TilePreview
+          src={api.guardEvidenceVisualUrl(repoId, where, preview.file)}
+          label={preview.label}
+          rect={preview.rect}
         />
       )}
-    </div>
+    </section>
   );
 }

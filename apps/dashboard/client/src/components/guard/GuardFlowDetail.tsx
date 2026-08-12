@@ -12,13 +12,15 @@
  *                ONLY for a flow with no test: where there IS one, its step list
  *                already groups the steps under those same claims and links those
  *                same sections, and two renderings of one chain is one too many
- *   ————— and then everything the test itself has to say ({@link GuardScenarioBody}):
- *   what it checks · verdict · setup · step investigation + visuals + interfaces · transcript · footer
- *   ————— and last, the ruling:
- *   dismissed    "don't test this flow", or the note and its undo
+ *   ————— and then the test's own WORKSPACE ({@link GuardScenarioBody}), which
+ *   claims every pixel the header leaves: verdict · filmstrip · steps | inspector ·
+ *   drawers (transcript · interfaces · RULINGS) · footer facts. The flow-level
+ *   ruling — "don't test this flow" — lives in that drawer, after the evidence it
+ *   is made on, rather than as a standing block below a page nobody scrolled to.
  *
  * A flow either HAS a test or it doesn't. Has one → the scenario body IS the rest
- * of the page. Doesn't → a WHY-NO-TEST block takes its place: the state, then why,
+ * of the page, and it does not scroll: its panes do. Doesn't → a WHY-NO-TEST block
+ * takes its place (and the ruling stays the page's last block): the state, then why,
  * as two separate reads ("Needs credentials and network access.", "Awaiting web
  * driver.", "Couldn't create the test — will retry next generate."). The one
  * exception is a needs-setup gap: that is a to-do, not a wall, so it carries the
@@ -609,10 +611,17 @@ export function GuardFlowDetail({
         )}
       </div>
 
-      {/* The body owns HEIGHT scrolling only: `overflow-y-auto` alone would compute
-          the x axis to `auto` too and let one wide line scroll the whole page
-          sideways, so x is clipped here and the data blocks scroll themselves. */}
-      <div className="min-w-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-4">
+      {/* A flow WITH a test hands its whole remaining height to that test's
+          workspace, which never scrolls and gives its own panes the scroll. The
+          other bodies (a raw artifact, a why-no-test block, a second surface) are
+          documents, so the box keeps a vertical scroll for them. `overflow-y-auto`
+          alone would compute the x axis to `auto` too and let one wide line scroll
+          the whole page sideways, so x is clipped here and the data blocks scroll
+          themselves. */}
+      <div
+        data-pane
+        className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto overflow-x-hidden px-6 py-4"
+      >
         {raw ? (
           // The stored artifact, whichever one this flow has.
           test ? (
@@ -660,7 +669,9 @@ export function GuardFlowDetail({
                     row.scenarioId ??
                     `${row.surface ?? "none"}-${row.status}-${i}`
                   }
-                  className="space-y-5"
+                  className={`flex min-w-0 flex-col gap-5 ${
+                    model ? "min-h-0 flex-1" : ""
+                  }`}
                 >
                   {rows.length > 1 && row.surface && (
                     // A surface NAME, plain — never a chip. It appears only when
@@ -676,16 +687,27 @@ export function GuardFlowDetail({
                       }}
                       interfaces={interfaces}
                       showGoal={rows.length > 1 || !detail.goal}
-                      showGoalLabel={false}
                       onOpenInterface={onOpenInterface}
                       onOpenSpec={onOpenSpec}
-                      {...(claim && decisions
+                      {...(decisions
                         ? {
-                            action: (
-                              <ClaimDismissalNote
-                                claim={claim}
-                                decisions={decisions}
-                              />
+                            // The rulings ride INSIDE the test's own drawer row:
+                            // a decision belongs after the evidence, and a standing
+                            // block under it was a footer nobody read.
+                            rulings: (
+                              <div className="space-y-3">
+                                <DismissFlowAction
+                                  flowId={detail.flowId}
+                                  title={detail.title}
+                                  decisions={decisions}
+                                />
+                                {claim && (
+                                  <ClaimDismissalNote
+                                    claim={claim}
+                                    decisions={decisions}
+                                  />
+                                )}
+                              </div>
                             ),
                           }
                         : {})}
@@ -738,7 +760,11 @@ export function GuardFlowDetail({
               </div>
             )}
 
-            {decisions && (
+            {/* A flow with a TEST carries its ruling inside that test's drawer
+                row, where the decision follows the evidence it is made on. A flow
+                with none has no such row — the ruling stays the page's last
+                block, exactly as it reads today. */}
+            {decisions && !test && (
               <DismissFlowAction
                 flowId={detail.flowId}
                 title={detail.title}
