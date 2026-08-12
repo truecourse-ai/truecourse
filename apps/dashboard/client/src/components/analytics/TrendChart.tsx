@@ -11,12 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { TrendResponse } from '@/lib/api';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
-// Keys must match the `dataKey` of the series they describe: both the legend
-// (`item.dataKey`) and the tooltip resolve a series' label and `--color-<key>`
-// through this map. A series whose dataKey has no entry here renders an
-// unlabeled swatch.
 const chartConfig = {
-  active: { label: 'Total Active', color: 'var(--chart-1)' },
+  total: { label: 'Total Active', color: 'var(--chart-1)' },
   new: { label: 'New', color: 'var(--color-destructive, #ef4444)' },
   resolved: { label: 'Resolved', color: 'var(--chart-3)' },
 } satisfies ChartConfig;
@@ -50,11 +46,10 @@ export function TrendChart({
     );
   }
 
-  // The server's `total` is already the active count (new + unchanged) —
-  // subtracting `resolved` again would double-count every resolution.
+  // Compute active count (total minus resolved) for trend display
   const chartData = points.map((p) => ({
     ...p,
-    active: p.total,
+    active: p.total - p.resolved,
     dateLabel: formatDate(p.date),
   }));
 
@@ -104,10 +99,11 @@ export function TrendChart({
               <ChartLegend content={<ChartLegendContent />} />
               <Area
                 dataKey="active"
+                name="total"
                 type="monotone"
-                fill="var(--color-active)"
+                fill="var(--color-total)"
                 fillOpacity={0.15}
-                stroke="var(--color-active)"
+                stroke="var(--color-total)"
                 strokeWidth={2}
                 isAnimationActive={false}
               />
@@ -134,7 +130,7 @@ export function TrendChart({
                   x={selectedPoint.dateLabel}
                   y={selectedPoint.active}
                   r={6}
-                  fill="var(--color-active)"
+                  fill="var(--color-total)"
                   stroke="var(--background)"
                   strokeWidth={2}
                   ifOverflow="visible"
