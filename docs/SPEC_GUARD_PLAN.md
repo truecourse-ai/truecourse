@@ -5256,3 +5256,64 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     guard pipeline cares most about. Candidate fixes: exempt same-source sibling
     docs whose H1/path differ in an operation verb; fold method+path into the
     similarity key; or cap collapse at direct (non-transitive) pairs.
+
+93. **The visual judge — an LLM annotation on failing web steps (2026-08-12).**
+    STATUS: IMPLEMENTED. A web step asserts on the DOM: a role, an accessible name,
+    a substring of the page's text. When one misses, the transcript can say the
+    words were not found and the run leaves a full-page PNG behind — but the first
+    question a human has ("so what WAS on the screen?") is answerable only by
+    opening that PNG out of a gitignored evidence directory. This stage answers it
+    in the transcript: the screenshot the failing step already took, plus the step's
+    claim, its rendered expectation and the deterministic mismatch, go to an
+    OPUS-tier vision call that returns
+    `{ expectedVisible: yes | no | unclear, screenSummary, rationale }`.
+
+    **The rules, all downstream of §10.2's determinism rule.**
+    (a) FAILURE-ONLY: a green run makes zero calls, so the feature is free until
+    something breaks — which is why it is always on and has no flag. (b)
+    ANNOTATION-ONLY: the verdict never moves an outcome, in either direction. Its
+    most valuable answer is `yes` — the expected result IS on screen though the
+    assertion missed, the signature of a brittle locator or matcher, i.e. the TEST
+    being wrong rather than the page — and that is surfaced to a human in those
+    words and acted on by nobody automatically (no triage integration in v1). (c)
+    FAIL-SOFT in every direction: no transport, a thrown call, a reply that will not
+    validate after one corrective re-ask, a screenshot missing or over the 8 MB
+    ceiling — each is a `null` verdict and a run bit-identical to one with no judge.
+    One call per failing scenario (the run stops at the first failing step), cached
+    on the failure identity so a re-run of an unchanged red board is free.
+
+    **The architecture boundary held.** `guard-runner` stays LLM-FREE: it defines a
+    callback TYPE (`GuardVisualJudge`, `visual-judge.ts`) threaded
+    `RunGuardOptions` → `GuardExecInput` → `RunScenarioContext`, and `core`'s
+    `guardRunInProcess` is the ONE place that supplies an implementation. Every
+    other caller of the runner — birth validation, a hosted executor, the whole test
+    suite — runs with no judge and reaches no model. The driver seam stayed intact
+    too: the runner never asks what KIND of step failed, it reads an optional
+    `visual: { screenshotPath, expectation }` off the `fail` outcome that the web
+    driver alone supplies.
+
+    **Transports gained vision.** `LlmRequest` grew `images?: LlmImage[]`
+    (base64 + media type). The cli backend passes `--input-format stream-json` and
+    writes ONE NDJSON user envelope (text block first, then one image block each) —
+    the shape the Claude Agent SDK emits; the api backend switches from `prompt:` to
+    the AI SDK `messages:` content-parts form; the agent mailbox passes `images`
+    through. A text-only request is byte-identical to before on all three.
+
+    **As built.** Transports: `packages/shared/src/llm/transport.ts`
+    (`LlmImage`, `buildCliStdinPayload`, `cliInputFormatArgs`),
+    `packages/llm-api/src/transport.ts` (`promptInputOf`). Schema:
+    `packages/shared/src/guard/visual.ts` (`GuardVisualJudgmentSchema`,
+    `visualAnnotation`, `visualJudgeLines`) + an additive optional
+    `failure.visual` on `GuardFailureDetailSchema` (NO format-version bump).
+    Runner: `guard-runner/src/{visual-judge,run-scenario,run,guard-executor,
+    evidence}.ts`, `drivers/{types,web-driver}.ts`. Engine:
+    `core/src/services/llm/guard-visual-judge.ts` (stage `guard.visualJudge`, cache
+    `guard/visual-judge`, prompt fingerprint, one corrective re-ask, prompt-injection
+    framing that treats every pixel as page DATA). CLI: `guard run`'s close prints
+    `visual judge N screenshots read · M where the expected result LOOKED present`.
+    Tests: `tests/shared/{llm-transport,guard-visual-judge}.test.ts`,
+    `tests/llm-api/transport.test.ts`, `tests/core/{guard-visual-judge,
+    guard-executor}.test.ts`, `tests/cli/guard.test.ts`,
+    `tests/guard-runner/visual-judge.test.ts` (a real browser: the judge fires once
+    on a failing web step, never on a green one, never on a cli step, and a judge
+    that throws leaves the run untouched).
