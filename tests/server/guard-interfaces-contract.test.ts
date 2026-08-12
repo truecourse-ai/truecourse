@@ -80,11 +80,50 @@ const BARE_INTERFACE = {
   fingerprint: 'sha256:j2',
 };
 
+/** A web task carrying the LOCATION CONTRACT — its place, and where it leads. */
+const PLACED_INTERFACE = {
+  id: 'web/open-rules-dialog',
+  type: 'web',
+  title: 'Open the Rules dialog',
+  entry: { method: 'GET', path: '/repos/{repoId}' },
+  steps: [{ kind: 'activate', target: 'button "Rules"' }],
+  at: 'repo-report',
+  to: 'rules-dialog',
+  fingerprint: 'sha256:j3',
+};
+
+/** The places those ids resolve in, readables included — the registry the view carries. */
+const RESOURCES = {
+  web: [
+    { id: 'repo-report', kind: 'screen', title: 'the repository report' },
+    {
+      id: 'rules-dialog',
+      kind: 'dialog',
+      title: 'the Rules dialog',
+      readables: {
+        markers: [{ within: { role: 'dialog', name: 'Rules' }, marker: 'LLM rules' }],
+        controls: [{ control: { role: 'switch', name: 'LLM rules' }, states: ['checked'] }],
+        rows: [
+          {
+            item: 'listitem',
+            template: '<ruleName> <severity>',
+            slots: [
+              { name: 'ruleName', kind: 'text' },
+              { name: 'severity', kind: 'enum', values: ['critical', 'high'] },
+            ],
+          },
+        ],
+      },
+    },
+  ],
+};
+
 const CATALOG = {
   version: 1,
   generatedAt: '2026-08-06T13:39:00.000Z',
   recipeFingerprint: 'sha256:r',
-  interfaces: [CONTRACT_INTERFACE, BARE_INTERFACE],
+  interfaces: [CONTRACT_INTERFACE, BARE_INTERFACE, PLACED_INTERFACE],
+  resources: RESOURCES,
   source: { cli: 'tree' },
 };
 
@@ -132,6 +171,21 @@ describe('Guard interfaces — the contract passthrough', () => {
     const rows = res.body.interfaces as { id: string; group?: string }[];
     expect(rows.find((j) => j.id === 'cli/tasks-add')!.group).toBe('tasks');
     expect('group' in rows.find((j) => j.id === 'cli/tasks-list')!).toBe(false);
+  });
+
+  it('carries the location contract and the resource registry through verbatim', async () => {
+    const res = await request(app).get(url('interfaces')).expect(200);
+    expect(() => GuardInterfacesViewSchema.parse(res.body)).not.toThrow();
+
+    // The row's place, and where the task leads — ids, joined client-side.
+    const opened = res.body.interfaces.find((j: { id: string }) => j.id === 'web/open-rules-dialog');
+    expect(opened).toMatchObject({ at: 'repo-report', to: 'rules-dialog' });
+    // A row without a location grows none — same absence rule as the contract.
+    const bare = res.body.interfaces.find((j: { id: string }) => j.id === 'cli/tasks-list');
+    expect('at' in bare).toBe(false);
+    expect('to' in bare).toBe(false);
+    // The registry travels ONCE, on the view, readables intact.
+    expect(res.body.resources).toEqual(RESOURCES);
   });
 
   it('an interface with no contract grows no empty one — absence survives the compose', async () => {

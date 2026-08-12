@@ -19,7 +19,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
+import type { InterfaceResource, InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
+import { describeWebLocator } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   CLAIM_DRIVERS,
@@ -880,6 +881,16 @@ export interface AuthorUserContext {
    */
   interfaceContracts?: InterfaceContractHint[]
   /**
+   * The PLACES this flow's interfaces act on — the resource-registry entries
+   * their location contract (`at`/`to`) names, `of`-ancestors included, with
+   * their READABLES: what each place visibly shows, as facts in the web
+   * driver's own assertion vocabulary. Grounds web assertions in what the page
+   * really renders instead of doc prose. Empty/absent (no location contract —
+   * every cli/api plan, and web catalogs from before resources) keeps the
+   * prompt byte-identical. USER-prompt only.
+   */
+  resources?: InterfaceResource[]
+  /**
    * api scenarios: the REST of the app's operations — everything the api catalog
    * offers that THIS flow's interfaces do not walk. A flow's SETUP steps
    * routinely need one (signing up before signing in), and with only the flow's own
@@ -975,6 +986,45 @@ export interface AuthorUserContext {
  * requiredness the source does not state — never rendered as "optional", which
  * would be a claim the analysis did not make.
  */
+/**
+ * One resource of the PLACES block: the place's identity line, then one line per
+ * readable, each in the web driver's own words ({@link describeWebLocator} — the
+ * same rendering a step list and a failure use, so the model reads the vocabulary
+ * it must write). A `when` renders as a trailing condition; a readable kind the
+ * place doesn't carry renders nothing.
+ */
+function resourceLines(place: InterfaceResource): string[] {
+  const cond = (when?: string) => (when ? `  [${when}]` : '')
+  const lines = [
+    `- ${place.title} (${place.kind} \`${place.id}\`${place.of ? `, ${place.kind === 'dialog' ? 'over' : 'on'} \`${place.of}\`` : ''})${
+      place.description ? `: ${place.description}` : ''
+    }`,
+  ]
+  const r = place.readables
+  if (!r) return lines
+  for (const m of r.markers ?? []) {
+    lines.push(`    shows “${m.marker}”${m.within ? ` within ${describeWebLocator(m.within)}` : ''}${cond(m.when)}`)
+  }
+  for (const e of r.elements ?? []) {
+    lines.push(`    renders ${describeWebLocator(e.element)}${cond(e.when)}`)
+  }
+  for (const c of r.controls ?? []) {
+    lines.push(`    control ${describeWebLocator(c.control)} exposes ${c.states.join(', ')}${cond(c.when)}`)
+  }
+  for (const row of r.rows ?? []) {
+    const enums = row.slots
+      .filter((s) => s.kind === 'enum')
+      .map((s) => `${s.name} ∈ ${(s.values ?? []).join(' | ')}`)
+      .join('; ')
+    lines.push(
+      `    rows: one ${row.item} per item${row.within ? ` within ${describeWebLocator(row.within)}` : ''}, text \`${row.template}\`${
+        enums ? ` (${enums})` : ''
+      }${cond(row.when)}`,
+    )
+  }
+  return lines
+}
+
 function contractSummary(hint: InterfaceContractHint): string {
   const parts: string[] = []
   for (const [label, fields] of [
@@ -1189,6 +1239,21 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       `realized through: ${ctx.interfacePath.join(' → ')}  (the surfaces matching chose; the`,
       'per-milestone lines below say which serves which)',
     )
+  }
+  // The PLACES block — what each screen/dialog/panel the flow acts on visibly
+  // shows, from the interface catalog's resource registry. Gated on non-empty,
+  // so every plan without a location contract renders byte-identical.
+  if (ctx.resources && ctx.resources.length > 0) {
+    lines.push(
+      '',
+      "PLACES THIS FLOW ACTS ON — from the app's own interface catalog. Each place",
+      'lists what it VISIBLY shows, as assertable facts in the web-step vocabulary.',
+      'Ground your web expectations in THESE — a marker is text the page really',
+      'renders, a control lists the ARIA states it genuinely exposes (assert no',
+      'state on a control not listed here), and a rows shape says what varies in a',
+      'repeated item so you never assert a rendered value as if it were stable.',
+    )
+    for (const place of ctx.resources) lines.push(...resourceLines(place))
   }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and

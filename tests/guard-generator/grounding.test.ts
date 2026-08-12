@@ -14,6 +14,7 @@ import {
   buildInterfaceContractHints,
   buildOtherOperationHints,
   buildOutboundRequestHints,
+  buildResourceHints,
   outboundOverflow,
   MAX_OTHER_OPERATIONS,
   MAX_OUTBOUND_REQUESTS,
@@ -362,5 +363,92 @@ describe('generateGuards — the grounding rides the SAME provider the interface
       { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
     ]);
     expect(buildAuthorUserPrompt(api)).toContain('OTHER OPERATIONS AVAILABLE');
+  });
+});
+
+/**
+ * THE PLACES BLOCK (2026-08-12) — the resource-registry grounding: a web plan's
+ * interfaces carry a location contract (`at`/`to`), and the prompt renders the
+ * named places with their readables so assertions are grounded in what the page
+ * really shows instead of doc prose.
+ */
+describe('buildResourceHints + the PLACES block', () => {
+  const webTask = (id: string, at?: string, to?: string): Interface =>
+    ({
+      id,
+      type: 'web',
+      title: id,
+      entry: { method: 'GET', path: '/' },
+      steps: [{ kind: 'activate', target: 'button "x"' }],
+      ...(at ? { at } : {}),
+      ...(to ? { to } : {}),
+      fingerprint: `fp-${id}`,
+    }) as Interface;
+
+  const REGISTRY = {
+    web: [
+      { id: 'repo-report', kind: 'screen' as const, title: 'the repository report' },
+      {
+        id: 'violations-list',
+        kind: 'panel' as const,
+        of: 'repo-report',
+        title: 'the violation list',
+        readables: {
+          markers: [{ marker: 'Filtered by:', when: 'any filter is active' }],
+          controls: [{ control: { role: 'button' as const, name: 'More actions' }, states: ['expanded' as const] }],
+          rows: [
+            {
+              item: 'listitem' as const,
+              template: '<title> <severity>',
+              slots: [
+                { name: 'title', kind: 'text' as const },
+                { name: 'severity', kind: 'enum' as const, values: ['critical', 'high'] },
+              ],
+            },
+          ],
+        },
+      },
+      { id: 'rules-dialog', kind: 'dialog' as const, of: 'repo-report', title: 'the Rules dialog' },
+    ],
+  };
+
+  it('resolves the plan’s at/to in its area registry, of-ancestors included, deduped in plan order', () => {
+    const hints = buildResourceHints(
+      [webTask('web/a', 'violations-list'), webTask('web/b', 'violations-list', 'rules-dialog')],
+      REGISTRY,
+    );
+    // The panel first (first reached), then the screen it sits on, then the dialog.
+    expect(hints.map((r) => r.id)).toEqual(['violations-list', 'repo-report', 'rules-dialog']);
+  });
+
+  it('contributes nothing without a registry or a location contract — the prompt stays byte-identical', () => {
+    expect(buildResourceHints([webTask('web/a', 'violations-list')], undefined)).toEqual([]);
+    expect(buildResourceHints([webTask('web/a')], REGISTRY)).toEqual([]);
+    // An id the registry does not define is skipped, never guessed at.
+    expect(buildResourceHints([webTask('web/a', 'nowhere')], REGISTRY)).toEqual([]);
+  });
+
+  it('renders each place’s readables in the web driver’s own words', () => {
+    const ctx: AuthorUserContext = {
+      flow: { id: 'f', title: 'T', goal: 'G' },
+      milestones: [],
+      interfacePath: ['web/a'],
+      resources: buildResourceHints([webTask('web/a', 'violations-list')], REGISTRY),
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      probes: [],
+    };
+    const prompt = buildAuthorUserPrompt(ctx);
+    expect(prompt).toContain('PLACES THIS FLOW ACTS ON');
+    expect(prompt).toContain('the violation list (panel `violations-list`, on `repo-report`)');
+    expect(prompt).toContain('shows “Filtered by:”  [any filter is active]');
+    expect(prompt).toContain('control button “More actions” exposes expanded');
+    expect(prompt).toContain('rows: one listitem per item, text `<title> <severity>` (severity ∈ critical | high)');
+    // The bare screen renders its identity line and nothing invented under it.
+    expect(prompt).toContain('the repository report (screen `repo-report`)');
+    // Without resources, the block is absent entirely.
+    const { resources: _dropped, ...bare } = ctx;
+    expect(buildAuthorUserPrompt(bare)).not.toContain('PLACES THIS FLOW ACTS ON');
   });
 });

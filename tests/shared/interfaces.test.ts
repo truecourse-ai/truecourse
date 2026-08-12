@@ -4,7 +4,11 @@ import { describe, it, expect } from 'vitest'
 import {
   INTERFACE_UNKNOWN,
   InterfaceContractSchema,
+  InterfaceControlReadableSchema,
+  InterfaceMarkerReadableSchema,
   InterfaceOptionSchema,
+  InterfaceResourceSchema,
+  InterfaceRowsReadableSchema,
   InterfacePromptFactSchema,
   InterfacePromptSubmitSchema,
   InterfaceReadFactSchema,
@@ -1137,9 +1141,9 @@ describe('the reference catalog', () => {
       'web/toggle-a-file-tree-folder',
     ])
     for (const j of web) {
-      // A task from a specific state: both ends of the state contract present.
-      expect(j.startingState).toBeTruthy()
-      expect(j.endState).toBeTruthy()
+      // Every task is PLACED (2026-08-12): it acts on a resource, leads to one,
+      // or both — the location contract that replaced the `*-open` pseudo-states.
+      expect(j.at ?? j.to, j.id).toBeTruthy()
       // Steps are the user's interactions: an address the user asks for, or an
       // element located by role + accessible name (the §10.3 locator policy) —
       // never a page inventory. And, since 2026-08-11, nothing else: the per-step
@@ -1164,25 +1168,18 @@ describe('the reference catalog', () => {
    * The pin is the SIZE — a registry that grows a state per task is prose with
    * extra steps, and the whole point is that tasks meet on shared names.
    */
-  it('the web area’s states are a small registry, and every task points into it', () => {
+  it('the web area’s states are a registry of WORLDS — the places moved out (2026-08-12)', () => {
     const registry = catalog.states!.web
     expect(registry.map((s) => s.id)).toEqual([
       'dashboard-serving',
-      'dashboard-home-open',
       'repository-added-from-path',
-      'repo-report-open',
       'violations-filtered-by-category',
       'rule-silenced',
       'rule-reenabled',
-      'code-analysis-section-open',
-      'guard-section-open',
-      'rules-panel-open',
       'rules-panel-filtered',
       'repo-no-analysis-open',
       'analysis-running',
       'analysis-cancelling',
-      'stash-prompt-open',
-      'llm-estimate-open',
       'violations-filtered-by-severity',
       'violations-searched',
       'violations-filtered-to-llm-findings',
@@ -1191,36 +1188,31 @@ describe('the reference catalog', () => {
       'top-offenders-sorted-by-critical',
       'violations-scoped-to-an-offender',
       'violations-scoped-to-a-file',
-      'graph-open',
       'graph-at-module-depth',
       'graph-at-function-depth',
       'graph-fitted',
       'graph-layout-reset',
       'graph-containers-collapsed',
-      'file-tree-open',
       'file-tree-folder-toggled',
-      'code-viewer-open',
-      'flow-list-open',
       'flow-list-searched',
-      'flow-diagram-open',
       'flow-step-one',
       'flow-playback-complete',
       'flow-enriched',
-      'database-list-open',
-      'database-schema-open',
       'schema-table-list-open',
       'schema-table-expanded',
-      'analyses-list-open',
       'past-analysis-selected',
-      'usage-breakdown-open',
       'past-analysis-deleted',
       'diff-mode-on',
     ])
-    // 48 states for 55 tasks (110 references): shared states are the registry
-    // earning its keep across filters, tabs and run gates.
-    const referenced = web.flatMap((j) => [j.startingState!, j.endState!])
-    expect(referenced).toHaveLength(110)
-    expect(new Set(referenced).size).toBe(48)
+    // 32 of the original 48 survive: the 16 pruned were pure "<place> is open"
+    // pseudo-states, which the location contract (`at`/`to`) states properly now.
+    // A state field is OPTIONAL since the split — a pure navigation task has no
+    // world to change — so references are counted over what is there.
+    const referenced = web.flatMap((j) =>
+      [j.startingState, j.endState].filter((s): s is string => !!s),
+    )
+    expect(referenced).toHaveLength(51)
+    expect(new Set(referenced).size).toBe(32)
     // Every state is described once, in one line, and no id is dead weight.
     for (const state of registry) {
       expect(state.description).not.toMatch(/\n/)
@@ -1248,19 +1240,86 @@ describe('the reference catalog', () => {
       'web/reenable-rule-from-rules-panel',
     ].map((id) => catalog.interfaces.find((j) => j.id === id)!)
 
-    expect(walk.map((j) => [j.startingState, j.endState])).toEqual([
-      ['dashboard-home-open', 'repo-report-open'],
-      ['repo-report-open', 'rule-silenced'],
-      ['rule-silenced', 'rule-reenabled'],
+    // The contract split (2026-08-12): the WHERE is `at`/`to` into the resource
+    // registry, the WORLD is the state pair — a navigation task carries no world,
+    // an in-place mutation carries no `to`.
+    expect(walk.map((j) => [j.at, j.to, j.startingState, j.endState])).toEqual([
+      ['dashboard-home', 'repo-report', undefined, undefined],
+      ['violations-list', undefined, undefined, 'rule-silenced'],
+      ['violations-list', undefined, 'rule-silenced', 'rule-reenabled'],
     ])
-    walk.forEach((j, i) => {
-      const next = walk[i + 1]
-      if (next) expect(next.startingState, `${j.id} → ${next.id}`).toBe(j.endState)
-    })
-    // And the walk's own entry state is reachable: the home task produces it.
-    expect(catalog.interfaces.find((j) => j.id === 'web/open-dashboard-home')!.endState).toBe(
-      walk[0].startingState,
-    )
+    // The world handoff is still string equality: silencing leaves the state
+    // re-enabling starts from.
+    expect(walk[2].startingState, `${walk[1].id} → ${walk[2].id}`).toBe(walk[1].endState)
+    // The LOCATION handoff resolves through the registry's nesting: task 1 lands
+    // on the report, task 2 acts on the violation list — a panel OF that screen.
+    const resource = (id: string) => catalog.resources!.web.find((r) => r.id === id)!
+    expect(resource(walk[1].at!).of, `${walk[0].id} → ${walk[1].id}`).toBe(walk[0].to)
+    // And the walk's own entry place is reachable: the home task leads there.
+    expect(catalog.interfaces.find((j) => j.id === 'web/open-dashboard-home')!.to).toBe(walk[0].at)
+  })
+
+  /**
+   * THE RESOURCE REGISTRY (2026-08-12) — places made first-class, at the size the
+   * envelope was designed for: a medium number of medium places, each holding the
+   * tasks that act on it. The pin is the SET; readables grow freely inside it.
+   */
+  it('the web area’s resources are the dashboard’s places, and every task points into them', () => {
+    const registry = catalog.resources!.web
+    expect(registry.map((r) => r.id)).toEqual([
+      'dashboard-home',
+      'repo-shell',
+      'repo-report',
+      'analytics-column',
+      'violations-list',
+      'rules-dialog',
+      'stash-prompt-dialog',
+      'llm-estimate-dialog',
+      'analysis-progress-card',
+      'graph-canvas',
+      'file-tree-panel',
+      'code-viewer-pane',
+      'flow-list-panel',
+      'flow-diagram-pane',
+      'database-list-panel',
+      'schema-pane',
+      'analyses-table',
+      'usage-detail-pane',
+      'diff-summary-column',
+      'guard-section',
+    ])
+    // Every place is one a task actually acts on or leads to — no dead entries.
+    const referenced = new Set(web.flatMap((j) => [j.at, j.to].filter((r): r is string => !!r)))
+    for (const r of registry) expect(referenced, r.id).toContain(r.id)
+    // Every nesting chain terminates at something that sits on nothing — no cycles,
+    // and a dialog/panel never dangles.
+    const byId = new Map(registry.map((r) => [r.id, r]))
+    for (const r of registry) {
+      const seen = new Set<string>()
+      let cursor = r
+      while (cursor.of) {
+        expect(seen.has(cursor.id), `cycle through ${cursor.id}`).toBe(false)
+        seen.add(cursor.id)
+        cursor = byId.get(cursor.of)!
+      }
+    }
+    // Only the web area names places today, exactly like the states registry.
+    expect(Object.keys(catalog.resources!)).toEqual(['web'])
+    // The readables carry the shape discipline everywhere they appear: a rows
+    // readable's template and slots agree by schema; spot-check the two the
+    // generator leans on hardest.
+    const rules = byId.get('rules-dialog')!
+    expect(rules.readables!.rows![0].slots.map((s) => s.name)).toEqual([
+      'name',
+      'severity',
+      'description',
+      'category',
+      'detection',
+    ])
+    expect(byId.get('violations-list')!.readables!.controls![0].states).toEqual([
+      'expanded',
+      'disabled',
+    ])
   })
 
   /**
@@ -2017,5 +2076,231 @@ describe('canonicalRoutePath', () => {
     expect(canonicalRoutePath('todos')).toBe('/todos')
     expect(canonicalRoutePath('/todos/')).toBe('/todos')
     expect(canonicalRoutePath('/')).toBe('/')
+  })
+})
+
+/**
+ * The RESOURCE REGISTRY (2026-08-12): places made first-class. A resource is
+ * the envelope — rendering, grounding, reading — while identity stays on the
+ * interaction, so nothing here may ever reach a fingerprint.
+ */
+describe('the resource registry', () => {
+  const ACTIVATE_RULE: InterfaceStep = { kind: 'activate', target: 'switch "LLM rules"' }
+
+  const webIface = (over: Partial<Interface> = {}): Interface =>
+    iface([ACTIVATE_RULE], {
+      id: 'web/silence-rule',
+      type: 'web',
+      title: 'Silence a rule',
+      entry: { method: 'GET', path: '/repos/{repoId}' },
+      ...over,
+    })
+
+  const rulesDialog = (over: Record<string, unknown> = {}) => ({
+    id: 'rules-dialog',
+    kind: 'dialog' as const,
+    title: 'the Rules dialog',
+    ...over,
+  })
+
+  const file = (over: Record<string, unknown> = {}) => ({
+    version: 1 as const,
+    generatedAt: '2026-08-12T12:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [webIface({ at: 'rules-dialog' })],
+    resources: { web: [rulesDialog()] },
+    ...over,
+  })
+
+  it('a resource is a place: id, kind, title — and the kind set is closed at three', () => {
+    expect(() => InterfaceResourceSchema.parse(rulesDialog())).not.toThrow()
+    for (const kind of ['screen', 'dialog', 'panel']) {
+      expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind }))).not.toThrow()
+    }
+    expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'modal' }))).toThrow()
+    expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'dropdown' }))).toThrow()
+    // Ids are kebab-case, exactly like state ids and for the same reason.
+    expect(() => InterfaceResourceSchema.parse(rulesDialog({ id: 'The Rules Dialog' }))).toThrow()
+  })
+
+  it('an interface’s location contract must resolve in its area’s registry', () => {
+    expect(() => InterfacesFileSchema.parse(file())).not.toThrow()
+    expect(() =>
+      InterfacesFileSchema.parse(file({ interfaces: [webIface({ at: 'settings-dialog' })] })),
+    ).toThrow(/`settings-dialog` is not a resource the `web` registry defines/)
+    expect(() =>
+      InterfacesFileSchema.parse(file({ interfaces: [webIface({ at: 'rules-dialog', to: 'nowhere' })] })),
+    ).toThrow(/`nowhere` is not a resource the `web` registry defines/)
+    // …including when the registry is absent entirely.
+    expect(() => InterfacesFileSchema.parse(file({ resources: undefined }))).toThrow()
+    // Scoped to the AREA: a cli entry cannot borrow a web resource.
+    expect(() =>
+      InterfacesFileSchema.parse(file({ interfaces: [iface([INVOKE], { at: 'rules-dialog' })] })),
+    ).toThrow(/the `cli` registry/)
+  })
+
+  it('one definition per place — a resource defined twice is two answers', () => {
+    expect(() =>
+      InterfacesFileSchema.parse(file({ resources: { web: [rulesDialog(), rulesDialog()] } })),
+    ).toThrow(/`rules-dialog` is defined twice in the `web` registry/)
+  })
+
+  it('a panel or dialog sits ON a resource of its own registry; a screen sits on nothing', () => {
+    const screen = { id: 'repo-report', kind: 'screen' as const, title: 'the repository report' }
+    expect(() =>
+      InterfacesFileSchema.parse(
+        file({
+          interfaces: [webIface({ at: 'rules-dialog' })],
+          resources: { web: [screen, rulesDialog({ of: 'repo-report' })] },
+        }),
+      ),
+    ).not.toThrow()
+    // The relation resolves in its own registry, never to itself, and never on a screen.
+    expect(() =>
+      InterfacesFileSchema.parse(
+        file({ resources: { web: [rulesDialog({ of: 'nowhere' })] } }),
+      ),
+    ).toThrow(/`nowhere` is not a resource the `web` registry defines/)
+    expect(() =>
+      InterfacesFileSchema.parse(
+        file({ resources: { web: [rulesDialog({ of: 'rules-dialog' })] } }),
+      ),
+    ).toThrow(/cannot sit on itself/)
+    expect(() => InterfaceResourceSchema.parse({ ...screen, of: 'dashboard-home' })).toThrow(
+      /a screen sits on nothing/,
+    )
+  })
+
+  it('additive: a catalog naming no resources parses unchanged', () => {
+    const parsed = InterfacesFileSchema.parse({
+      version: 1 as const,
+      generatedAt: '2026-08-12T12:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [iface([INVOKE])],
+    })
+    expect(parsed.resources).toBeUndefined()
+  })
+
+  it('the location contract never moves the fingerprint — the migration invariant', () => {
+    const bare = webIface()
+    expect(interfaceFingerprint({ ...bare, at: 'rules-dialog' } as Interface)).toBe(bare.fingerprint)
+    expect(interfaceFingerprint({ ...bare, at: 'rules-dialog', to: 'repo-report' } as Interface)).toBe(
+      bare.fingerprint,
+    )
+  })
+
+  it('round-trips a resource-bearing catalog through JSON', () => {
+    const full = file({
+      interfaces: [webIface({ at: 'rules-dialog', to: 'repo-report' })],
+      resources: {
+        web: [
+          rulesDialog({
+            description: 'The repository’s rule catalog, over the report.',
+            readables: {
+              markers: [{ within: { role: 'dialog', name: 'Rules' }, marker: 'LLM rules' }],
+              elements: [{ element: { role: 'heading', name: 'Rules' } }],
+              controls: [{ control: { role: 'switch', name: 'LLM rules' }, states: ['checked'] }],
+              rows: [
+                {
+                  within: { role: 'dialog', name: 'Rules' },
+                  item: 'listitem',
+                  template: '<ruleName> <severity>',
+                  slots: [
+                    { name: 'ruleName', kind: 'text' },
+                    { name: 'severity', kind: 'enum', values: ['critical', 'high', 'medium', 'low'] },
+                  ],
+                },
+              ],
+            },
+          }),
+          { id: 'repo-report', kind: 'screen', title: 'the repository report' },
+        ],
+      },
+    })
+    const parsed = InterfacesFileSchema.parse(JSON.parse(JSON.stringify(file(full))))
+    expect(parsed).toEqual(full)
+  })
+})
+
+describe('readables', () => {
+  const marker = (over: Record<string, unknown> = {}) => ({ marker: 'Filtered by', ...over })
+
+  it('a marker is a stable substring, optionally scoped the way an expectation scopes', () => {
+    expect(() => InterfaceMarkerReadableSchema.parse(marker())).not.toThrow()
+    expect(() =>
+      InterfaceMarkerReadableSchema.parse(marker({ within: { role: 'dialog', name: 'Rules' } })),
+    ).not.toThrow()
+    // The locator vocabulary is the DRIVER’s own — an unknown role is refused.
+    expect(() =>
+      InterfaceMarkerReadableSchema.parse(marker({ within: { role: 'modal', name: 'Rules' } })),
+    ).toThrow()
+    expect(() => InterfaceMarkerReadableSchema.parse(marker({ marker: '' }))).toThrow()
+  })
+
+  it('a control declares which ARIA states it EXPOSES — the driver’s closed set, never a value', () => {
+    const control = { control: { role: 'switch', name: 'LLM rules' }, states: ['checked'] }
+    expect(() => InterfaceControlReadableSchema.parse(control)).not.toThrow()
+    expect(() =>
+      InterfaceControlReadableSchema.parse({ ...control, states: ['checked', 'disabled'] }),
+    ).not.toThrow()
+    // Exposure, not position: a value is a scenario’s assertion, not a catalog fact.
+    expect(() => InterfaceControlReadableSchema.parse({ ...control, checked: true })).toThrow()
+    expect(() => InterfaceControlReadableSchema.parse({ ...control, states: [] })).toThrow()
+    expect(() => InterfaceControlReadableSchema.parse({ ...control, states: ['open'] })).toThrow()
+    expect(() =>
+      InterfaceControlReadableSchema.parse({ ...control, states: ['checked', 'checked'] }),
+    ).toThrow(/declared once/)
+  })
+
+  it('a rows readable is the cli row grammar transplanted: template and slots must agree', () => {
+    const rows = {
+      item: 'listitem',
+      template: '<ruleName> <severity>',
+      slots: [
+        { name: 'ruleName', kind: 'text' },
+        { name: 'severity', kind: 'enum', values: ['critical', 'high'] },
+      ],
+    }
+    expect(() => InterfaceRowsReadableSchema.parse(rows)).not.toThrow()
+    // A placeholder no slot describes, and a slot the template never prints.
+    expect(() =>
+      InterfaceRowsReadableSchema.parse({ ...rows, template: '<ruleName> <severity> <count>' }),
+    ).toThrow(/no slot declares/)
+    expect(() => InterfaceRowsReadableSchema.parse({ ...rows, template: '<ruleName>' })).toThrow(
+      /never appears in the template/,
+    )
+    // The item is a ROLE — its accessible name varies per item, so a named
+    // locator could never say “any of them”.
+    expect(() => InterfaceRowsReadableSchema.parse({ ...rows, item: 'card' })).toThrow()
+  })
+
+  it('a readable id names ONE fact per resource, across all four kinds', () => {
+    const resource = {
+      id: 'rules-dialog',
+      kind: 'dialog',
+      title: 'the Rules dialog',
+      readables: {
+        markers: [{ id: 'header', marker: 'Rules' }],
+        elements: [{ id: 'header', element: { role: 'heading', name: 'Rules' } }],
+      },
+    }
+    expect(() => InterfaceResourceSchema.parse(resource)).toThrow(/named twice/)
+    // A readable id is kebab-case like every id here.
+    expect(() =>
+      InterfaceMarkerReadableSchema.parse({ id: 'The Header', marker: 'Rules' }),
+    ).toThrow()
+  })
+
+  it('keeps “established as none” and “never established” apart, like every fact region', () => {
+    const bare = InterfaceResourceSchema.parse({ id: 'home', kind: 'screen', title: 'the home page' })
+    expect(bare.readables).toBeUndefined()
+    const none = InterfaceResourceSchema.parse({
+      id: 'home',
+      kind: 'screen',
+      title: 'the home page',
+      readables: { markers: [] },
+    })
+    expect(none.readables?.markers).toEqual([])
+    expect(none.readables?.rows).toBeUndefined()
   })
 })

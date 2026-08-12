@@ -5390,7 +5390,59 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     entryless; run-step still refuses naming `entry`; surface-less browser
     scenario refuses naming `web`, not `entry`).
 
-    (96 is reserved for the resource-registry item landing from `sm/thick-interfaces`.)
+96. **The resource registry — places made first-class, interfaces stay the
+    identity (2026-08-12).** STATUS: BUILT. The web catalog was 55 one-to-two-step
+    task entries that read as confetti: no contract region (the cli got grammar +
+    io facts; web got nothing), and a states registry where 20 of 48 entries were
+    PLACES wearing state ids (`rules-panel-open`). The redesign makes the place
+    the ENVELOPE while identity stays per-interaction (the 2026-08-10 rule, and
+    the fingerprint fold, are untouched):
+    - **Resources** (`packages/shared/src/interfaces.ts`, RESOURCES region): per
+      area, `{ id, kind: screen|dialog|panel, of?, title, description?,
+      readables? }`. `of` is the nesting relation (a panel sits ON a screen, a
+      dialog OVER one) — what keeps a flow's location chain checkable across
+      nesting; a screen carries none. Opened-by is DERIVED (every task whose
+      `to` names the resource), never stored.
+    - **The location contract**: `Interface.at` (the resource the task acts on) /
+      `Interface.to` (where it leaves the user, only when it moves them). Both
+      ids into the area's registry, both validated, neither fingerprinted. The
+      states registry is WORLDS only now; the 16 pure `<place>-open` pseudo-states
+      are gone (`stash-prompt-open` → `at: stash-prompt-dialog`).
+    - **Readables** — the web analog of the cli io facts, in the driver's own
+      assertion vocabulary (`web-steps.ts` locators/states) so they compile to
+      `expect` blocks: `markers` (stable visible text, `within`-scoped),
+      `elements` (role+name presence), `controls` (which ARIA states a control
+      EXPOSES — the grounding the state assertions never had; exposure, never a
+      value), `rows` (the cli row grammar transplanted to the DOM: item role +
+      `within` container + `<slot>` template, typed slots). Absence rule as the
+      contract region; every readable takes an optional `id`, referenced by
+      nothing yet — reserved so a web capture step / count matcher land
+      additively (rung 3, deferred until a real spec claim demands them).
+    - **Consumers**: authoring renders a PLACES block (`buildResourceHints` in
+      `guard-generator/src/grounding.ts` — the plan's `at`/`to` places plus `of`
+      ancestors; `prompts.ts` `resourceLines`), riding the `InterfaceProvider`
+      seam and the snapshot fallback. The dashboard Interfaces tab groups web
+      rows by place (panel) and renders the open task's place card with its
+      readables (pane); `at`/`to` pass through `GuardInterfaceRow`, the registry
+      travels once on `GuardInterfacesView.resources`.
+    - **Reference migration**: 20 places, 32 world/view states (was 48), all 55
+      task entries and ALL fingerprints byte-identical (asserted by the pinned
+      reference tests). No merges: the envelope solves the many-small-entries
+      reading, and the one tempting merge (the two graph-depth entries) would
+      fold two different end states into one entry.
+    - **Recorded, deliberately not done here**: (a)
+      `web/toggle-a-file-tree-folder` targets `button "{folderName}"` but
+      `FileTree.tsx` renders tree rows as unlabelled divs — the locator cannot
+      resolve; fix the markup (role + accessible name, ideally `aria-expanded`)
+      or retire the entry. (b) Per-card controls (`More actions`, `Fix Prompt`,
+      `Copy Fix`) are ambiguous under the strict locator whenever several cards
+      render — rows-scoped addressing is the eventual fix. (c) `mapInterfaces`
+      REWRITES `guard/interfaces.json` from cli+api derivations, dropping
+      hand-authored web entries, states and resources — a Map click on a repo
+      with a hand-authored web catalog loses it; preservation (or the web
+      extractor) is owed. (d) A dozen real controls have no interface entry yet
+      (Return to latest, the rules-dialog Close, the graph scope picker, the
+      run-history dropdown, repository delete, the directory picker dialog).
 
 97. **The `upload` verb — a file the way a user gives one, plus the seed's fixtures
     in sandbox scenarios (2026-08-14, documenso reference corpus).** STATUS: BUILT.

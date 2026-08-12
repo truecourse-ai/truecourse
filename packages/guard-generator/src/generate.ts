@@ -126,6 +126,7 @@ import {
   type GuardUnadjudicatedStage,
   milestoneOrder,
   type Interface,
+  type InterfaceResource,
 } from '@truecourse/shared'
 import {
   planGuardWork,
@@ -207,6 +208,7 @@ import {
   buildInterfaceContractHints,
   buildOtherOperationHints,
   buildOutboundRequestHints,
+  buildResourceHints,
   outboundOverflow,
 } from './grounding.js'
 import { birthValidate, type BirthCandidate, type BirthOutcome, type BirthRound } from './birth.js'
@@ -466,6 +468,14 @@ export interface GuardGenerateModels {
  */
 export type InterfaceProvider = () => Promise<{
   interfaces: Interface[]
+  /**
+   * The catalog's RESOURCE registry, per area — the places the interfaces'
+   * location contract (`at`/`to`) points into, readables included. Rides this
+   * seam so the authoring prompt can ground web assertions in what each place
+   * really shows. Omitted (an older provider, a catalog naming none) renders
+   * no PLACES block, exactly as before the registry existed.
+   */
+  resources?: Record<string, InterfaceResource[]>
   /**
    * The repo's detected third-party dependencies. Derived from the SAME
    * analysis pass as the interfaces — a pure read of the analyzer's import registry —
@@ -1534,6 +1544,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             apiInterfaces,
             outboundRequests: outboundRequestHints,
             outboundRequestsOverflow,
+            ...(mapped.resources ? { resources: mapped.resources } : {}),
             serverIndex,
             ...(taint ? { priorFlag: { title: taint.title, mismatch: taint.mismatch } } : {}),
             onAuthorFailure: options.onAuthorFailure,
@@ -1792,6 +1803,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     apiInterfaces,
                     outboundRequests: outboundRequestHints,
                     outboundRequestsOverflow,
+                    ...(mapped.resources ? { resources: mapped.resources } : {}),
                     serverIndex,
                     retry: retryContext(entry.evidence),
                     onAuthorFailure: options.onAuthorFailure,
@@ -2016,6 +2028,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 apiInterfaces,
                 outboundRequests: outboundRequestHints,
                 outboundRequestsOverflow,
+                ...(mapped.resources ? { resources: mapped.resources } : {}),
                 serverIndex,
                 // The rejection is the correction evidence; it also bypasses the
                 // author cache, which still holds the discarded scenario.
@@ -2684,6 +2697,9 @@ function providedHint(account: ResolvedExternal): ExternalServiceHint {
 /** What ONE analysis pass of the working tree yields this run — see {@link InterfaceProvider}. */
 interface MappedSurface {
   interfaces: Interface[]
+  /** The catalog's resource registry, when the catalog carries one — see
+   *  {@link InterfaceProvider}. Rides both the provider and snapshot paths. */
+  resources?: Record<string, InterfaceResource[]>
   externalServices: DetectedExternalService[]
   /** Per-operation inbound request contracts — the per-interface authoring grounding. */
   requestContracts: ApiRequestContract[]
@@ -2707,6 +2723,7 @@ async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvide
       const mapped = await provider()
       return {
         interfaces: mapped.interfaces,
+        ...(mapped.resources ? { resources: mapped.resources } : {}),
         externalServices: mapped.externalServices ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
@@ -2717,11 +2734,13 @@ async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvide
       /* fall through to the snapshot */
     }
   }
-  // The snapshot carries interfaces only — external services are derived from the
-  // working tree, never persisted, so a degraded run reports none rather than a
-  // stale list.
+  // The snapshot carries interfaces (and their resource registry) only — external
+  // services are derived from the working tree, never persisted, so a degraded
+  // run reports none rather than a stale list.
+  const snapshot = readInterfaceCatalog(repoRoot)
   return {
-    interfaces: readInterfaceCatalog(repoRoot)?.interfaces ?? [],
+    interfaces: snapshot?.interfaces ?? [],
+    ...(snapshot?.resources ? { resources: snapshot.resources } : {}),
     externalServices: [],
     database: null,
     datastoreUrls: [],
@@ -2933,6 +2952,12 @@ async function authorFlowScenario(opts: {
    * on a cli batch or a repo with no api surface.
    */
   apiInterfaces: Interface[]
+  /**
+   * The catalog's resource registry, joined to THIS plan's interfaces below —
+   * the PLACES grounding a web scenario's assertions. Absent (no registry) ⇒
+   * no PLACES block, exactly as before resources existed.
+   */
+  resources?: Record<string, InterfaceResource[]>
   /** The repo's outbound request construction, already capped. */
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
@@ -3025,6 +3050,7 @@ async function authorFlowScenario(opts: {
       otherOperationsOverflow: other.overflow,
       outboundRequests: opts.outboundRequests,
       outboundRequestsOverflow: opts.outboundRequestsOverflow,
+      resources: buildResourceHints(plan.interfaces, opts.resources),
     }, retry),
     ...(opts.priorFlag ? { priorFlag: opts.priorFlag } : {}),
   }
@@ -3202,6 +3228,8 @@ function buildAuthorCtx(
     otherOperationsOverflow: number
     outboundRequests: OutboundRequestHint[]
     outboundRequestsOverflow: number
+    /** The plan's own places, `of`-ancestors included — see `buildResourceHints`. */
+    resources: InterfaceResource[]
   },
   retry?: BirthRetryContext,
 ): AuthorUserContext {
@@ -3217,6 +3245,9 @@ function buildAuthorCtx(
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: authorMilestones(work, plan, surface),
     interfacePath: plan.interfaces.map((j) => j.id),
+    // The plan's PLACES — surface-agnostic (a web plan authors as a cli-driver
+    // scenario with web steps), and gated on non-empty like every grounding block.
+    ...(grounding.resources.length > 0 ? { resources: grounding.resources } : {}),
     areaTags: [...new Set(sections.flatMap((s) => s.areaTags))],
     driver: surface === 'api' ? 'api' : 'cli',
     ...(surface === 'api'

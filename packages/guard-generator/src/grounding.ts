@@ -17,6 +17,7 @@ import type {
   ApiRequestContract,
   DetectedExternalService,
   Interface,
+  InterfaceResource,
   OutboundRequest,
   RequestField,
 } from '@truecourse/shared'
@@ -85,6 +86,36 @@ export function buildOtherOperationHints(
     operations: rest.slice(0, MAX_OTHER_OPERATIONS),
     overflow: Math.max(0, rest.length - MAX_OTHER_OPERATIONS),
   }
+}
+
+/**
+ * The PLACES a plan's interfaces act on: the resources their location contract
+ * names (`at`, `to`), resolved in each interface's own area registry, plus the
+ * resources those sit on (the `of` chain) — a task acting on a panel asserts
+ * against the screen around it too. First-reached order, deduped; an interface
+ * with no location contract (cli, api, an unmigrated web catalog) contributes
+ * nothing, so a plan with none renders the exact prompt it did before.
+ */
+export function buildResourceHints(
+  interfaces: readonly Interface[],
+  resources: Record<string, InterfaceResource[]> | undefined,
+): InterfaceResource[] {
+  if (!resources) return []
+  const hints: InterfaceResource[] = []
+  const seen = new Set<string>()
+  const add = (area: string, id: string | undefined): void => {
+    if (!id || seen.has(id)) return
+    const resource = (resources[area] ?? []).find((r) => r.id === id)
+    if (!resource) return
+    seen.add(id)
+    hints.push(resource)
+    add(area, resource.of)
+  }
+  for (const iface of interfaces) {
+    add(iface.type, iface.at)
+    add(iface.type, iface.to)
+  }
+  return hints
 }
 
 /**

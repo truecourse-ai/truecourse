@@ -21,7 +21,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { Hammer } from 'lucide-react';
-import type { GuardDriverId, GuardInterfaceRow } from '@truecourse/shared';
+import type { GuardDriverId, GuardInterfaceRow, InterfaceResource } from '@truecourse/shared';
 import { GUARD_DRIVERS, guardDriver, interfaceEntryLabel } from '@truecourse/shared';
 import {
   EntityList,
@@ -76,27 +76,36 @@ function surfaceLabel(surface: string): string {
  * An entry the derivation left ungrouped belongs to no family and is not invented
  * one — it sits at its surface's top under no header at all.
  *
+ * A row that carries a LOCATION (`at` — the resource its task acts on) families
+ * under that PLACE instead of its `group`: the resource is the envelope the
+ * catalog reads by (a medium number of places, each holding its tasks), and the
+ * registry's own title labels the header where the catalog defines one.
+ *
  * The two levels never wear the same chrome: the surface keeps the full-weight
  * sticky header, the family is `subordinate` — quieter and indented — and its rows
  * indent to it, so surface > family > interface reads at a glance.
  */
-function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterfaceRow>[] {
+function bySurface(
+  interfaces: GuardInterfaceRow[],
+  resources: Record<string, InterfaceResource[]> | undefined,
+): EntityListGroup<GuardInterfaceRow>[] {
   return [...bucket(interfaces, (j) => j.type).entries()].map(([surface, rows]) => {
     const group: EntityListGroup<GuardInterfaceRow> = {
       key: surface,
       label: surfaceLabel(surface),
       count: rows.length,
     };
-    const families = bucket(rows, (j) => j.group);
+    const titles = new Map((resources?.[surface] ?? []).map((r) => [r.id, r.title]));
+    const families = bucket(rows, (j) => j.at ?? j.group);
     if (families.size === 0) return { ...group, items: rows };
-    const loose = rows.filter((j) => !j.group);
+    const loose = rows.filter((j) => !j.at && !j.group);
     return {
       ...group,
       groups: [
         ...(loose.length > 0 ? [{ key: '', label: '', items: loose }] : []),
         ...[...families.entries()].map(([family, items]) => ({
           key: family,
-          label: family,
+          label: titles.get(family) ?? family,
           subordinate: true,
           items,
         })),
@@ -107,6 +116,7 @@ function bySurface(interfaces: GuardInterfaceRow[]): EntityListGroup<GuardInterf
 
 export function GuardInterfacesPanel({
   interfaces,
+  resources,
   loading,
   error,
   activeId,
@@ -118,6 +128,8 @@ export function GuardInterfacesPanel({
   onOpen,
 }: {
   interfaces: GuardInterfaceRow[];
+  /** The catalog's resource registry, per area — labels the place headers. */
+  resources?: Record<string, InterfaceResource[]>;
   loading: boolean;
   error: string | null;
   activeId: string | null;
@@ -191,14 +203,14 @@ export function GuardInterfacesPanel({
 
   const group = useCallback(
     (rows: GuardInterfaceRow[]) => {
-      const groups = bySurface(rows);
+      const groups = bySurface(rows, resources);
       // The surfaces the catalog is SHOWING, in the order it shows them — so the
       // filter (and the search) narrows the recipe rows by the same rule it
       // narrows the rows underneath them.
       const recipes = recipeRows(groups.map((g) => g.key));
       return recipes ? [recipes, ...groups] : groups;
     },
-    [recipeRows],
+    [recipeRows, resources],
   );
 
   return (

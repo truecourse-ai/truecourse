@@ -419,6 +419,10 @@ export async function guardGenerateInProcess(
           const mapped = await mapInterfaces(repoRoot);
           return {
             interfaces: mapped.catalog.interfaces,
+            // The resource registry rides the same seam. Today's mapper derives
+            // none (hand-authored catalogs carry them), so this is the snapshot's
+            // registry whenever the catalog preserved one.
+            ...(mapped.catalog.resources ? { resources: mapped.catalog.resources } : {}),
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,

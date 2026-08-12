@@ -1678,3 +1678,103 @@ describe('a web task’s state contract', () => {
     expect(diagram.querySelectorAll('[title]')).toHaveLength(2);
   });
 });
+
+/**
+ * THE PLACE ENVELOPE (2026-08-12): a web task carries a LOCATION contract —
+ * `at` the resource it acts on, `to` the one it leads to — and the view carries
+ * the registry those ids resolve in. The pane renders the place with its
+ * READABLES (what the place visibly shows); the panel families web rows under
+ * the place's own title instead of a group slug.
+ */
+describe('a web task’s place', () => {
+  const PLACED: GuardInterfacesView['interfaces'][number] = {
+    id: 'web/open-rules-dialog',
+    type: 'web',
+    title: 'Open the Rules dialog from the repo report',
+    group: 'repos',
+    entry: { method: 'GET', path: '/repos/{repoId}' },
+    steps: [{ kind: 'activate', target: 'button "Rules"' }],
+    at: 'repo-report',
+    to: 'rules-dialog',
+    fingerprint: 'sha256:placed',
+    flows: [],
+    scenarioIds: [],
+  };
+
+  const RESOURCES: NonNullable<GuardInterfacesView['resources']> = {
+    web: [
+      {
+        id: 'repo-report',
+        kind: 'screen',
+        title: 'the repository report',
+        description: 'The repository page’s Home tab: the latest analysis report.',
+        readables: {
+          markers: [{ marker: 'Violations' }],
+          controls: [{ control: { role: 'button', name: 'Rules' }, states: ['pressed'] }],
+          rows: [
+            {
+              item: 'listitem',
+              within: { role: 'list', name: 'Violations' },
+              template: '<ruleName> · <severity>',
+              slots: [
+                { name: 'ruleName', kind: 'text' },
+                { name: 'severity', kind: 'enum', values: ['critical', 'high'] },
+              ],
+            },
+          ],
+        },
+      },
+      { id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog' },
+    ],
+  };
+
+  const openPlaced = () =>
+    renderPane(
+      { ...MAPPED, interfaces: [PLACED], resources: RESOURCES },
+      '/repos/r?tab=interfaces&ginterface=web%2Fopen-rules-dialog',
+    );
+
+  it('renders the place card: the kind, the title, and where the task leads', async () => {
+    openPlaced();
+    expect(await screen.findByText('Where')).toBeInTheDocument();
+    expect(screen.getByText('screen')).toBeInTheDocument();
+    expect(screen.getByText('the repository report')).toBeInTheDocument();
+    // `to` joins to the DESTINATION’s title — the id stays in the store.
+    expect(screen.getByText(/leaves the user at the Rules dialog/)).toBeInTheDocument();
+  });
+
+  it('reads the place’s readables in the driver’s own words', async () => {
+    openPlaced();
+    await screen.findByText('Where');
+    // A marker, a control with its exposed states, and the row grammar.
+    expect(screen.getByText('shows').closest('li')?.textContent).toContain('“Violations”');
+    expect(screen.getByText(/button “Rules” — exposes pressed/)).toBeInTheDocument();
+    expect(screen.getByText('<ruleName> · <severity>')).toBeInTheDocument();
+    expect(screen.getByText(/severity: critical \| high/)).toBeInTheDocument();
+  });
+
+  it('renders no Where block for a task that names no place', async () => {
+    renderPane(
+      { ...MAPPED, interfaces: [{ ...PLACED, at: undefined, to: undefined }], resources: RESOURCES },
+      '/repos/r?tab=interfaces&ginterface=web%2Fopen-rules-dialog',
+    );
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    expect(screen.queryByText('Where')).not.toBeInTheDocument();
+  });
+
+  it('the panel families a placed row under the place’s title, not its group slug', () => {
+    render(
+      <GuardInterfacesPanel
+        interfaces={[PLACED]}
+        resources={RESOURCES}
+        loading={false}
+        error={null}
+        activeId={null}
+        surfaces={[]}
+        onSurfaces={() => {}}
+        onOpen={() => {}}
+      />,
+    );
+    expect(catalogOutline()).toEqual(['# Web', '# the repository report', 'web/open-rules-dialog']);
+  });
+});

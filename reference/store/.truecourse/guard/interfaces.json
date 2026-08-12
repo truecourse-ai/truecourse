@@ -10567,12 +10567,12 @@
         }
       ],
       "startingState": "dashboard-serving",
-      "endState": "dashboard-home-open",
       "apiEffects": [
         "api/get-api-capabilities",
         "api/get-api-repos"
       ],
-      "fingerprint": "sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33"
+      "fingerprint": "sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33",
+      "to": "dashboard-home"
     },
     {
       "id": "web/open-repo-report",
@@ -10589,8 +10589,6 @@
           "target": "link \"{repoName}\""
         }
       ],
-      "startingState": "dashboard-home-open",
-      "endState": "repo-report-open",
       "apiEffects": [
         "api/get-api-repos-id",
         "api/get-api-repos-id-violations",
@@ -10600,7 +10598,9 @@
         "api/get-api-repos-id-analytics-top-offenders",
         "api/get-api-repos-id-analytics-resolution"
       ],
-      "fingerprint": "sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b"
+      "fingerprint": "sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b",
+      "at": "dashboard-home",
+      "to": "repo-report"
     },
     {
       "id": "web/add-repository-by-path",
@@ -10621,12 +10621,12 @@
           "target": "button \"Add Repository\""
         }
       ],
-      "startingState": "dashboard-home-open",
       "endState": "repository-added-from-path",
       "apiEffects": [
         "api/post-api-repos"
       ],
-      "fingerprint": "sha256:d2e6f6892ab10429a5c19edad08b906ba986e31c42c70d35ef7ce87fc250dc8b"
+      "fingerprint": "sha256:d2e6f6892ab10429a5c19edad08b906ba986e31c42c70d35ef7ce87fc250dc8b",
+      "at": "dashboard-home"
     },
     {
       "id": "web/silence-rule-from-violation-card",
@@ -10647,7 +10647,6 @@
           "target": "menuitem \"Disable rule for this repo\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "rule-silenced",
       "apiEffects": [
         "api/patch-api-repos-id-rules-rulekey",
@@ -10657,7 +10656,8 @@
         "api/get-api-repos-id-analytics-top-offenders",
         "api/get-api-repos-id-analytics-resolution"
       ],
-      "fingerprint": "sha256:5b6e81cd9d6944cec14a80b5a424d9f006c5edd6a9f17f402598dd774174ec5c"
+      "fingerprint": "sha256:5b6e81cd9d6944cec14a80b5a424d9f006c5edd6a9f17f402598dd774174ec5c",
+      "at": "violations-list"
     },
     {
       "id": "web/reenable-rule-from-rules-panel",
@@ -10689,7 +10689,8 @@
         "api/get-api-repos-id-analytics-top-offenders",
         "api/get-api-repos-id-analytics-resolution"
       ],
-      "fingerprint": "sha256:dd50d571a52eb17ec8539648663fea07efd2cb2eb2395871b3d2c65434963d32"
+      "fingerprint": "sha256:dd50d571a52eb17ec8539648663fea07efd2cb2eb2395871b3d2c65434963d32",
+      "at": "violations-list"
     },
     {
       "id": "web/disable-rule-from-rules-panel",
@@ -10706,12 +10707,12 @@
           "target": "switch \"Disable {ruleName}\""
         }
       ],
-      "startingState": "rules-panel-open",
       "endState": "rule-silenced",
       "apiEffects": [
         "api/patch-api-repos-id-rules-rulekey"
       ],
-      "fingerprint": "sha256:18eb008d52759dba8c815de6f6e8b0beb1e95f4e491cbc65d21b4f8587f67f66"
+      "fingerprint": "sha256:18eb008d52759dba8c815de6f6e8b0beb1e95f4e491cbc65d21b4f8587f67f66",
+      "at": "rules-dialog"
     },
     {
       "id": "web/filter-violations-by-category",
@@ -10728,10 +10729,10 @@
           "target": "button \"{category}\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "violations-filtered-by-category",
       "apiEffects": [],
-      "fingerprint": "sha256:443701ef7e9295664459c180e548c8393ad77fb0d4e7246df117aa24147b3b14"
+      "fingerprint": "sha256:443701ef7e9295664459c180e548c8393ad77fb0d4e7246df117aa24147b3b14",
+      "at": "violations-list"
     },
     {
       "id": "web/switch-to-the-guard-section",
@@ -10752,9 +10753,9 @@
           "target": "menuitemradio \"Spec Guard\""
         }
       ],
-      "startingState": "code-analysis-section-open",
-      "endState": "guard-section-open",
-      "fingerprint": "sha256:50a6d196d960baca6e757f0ab171cce945672a6dbd30047588f39e865f0b1066"
+      "fingerprint": "sha256:50a6d196d960baca6e757f0ab171cce945672a6dbd30047588f39e865f0b1066",
+      "at": "repo-shell",
+      "to": "guard-section"
     },
     {
       "id": "web/open-rules-panel",
@@ -10771,12 +10772,12 @@
           "target": "button \"Browse Rules\""
         }
       ],
-      "startingState": "repo-report-open",
-      "endState": "rules-panel-open",
       "apiEffects": [
         "api/get-api-repos-id-rules"
       ],
-      "fingerprint": "sha256:1075cb6b160eabf76668728d8b5bc600866d29e070cc3cfc0da7da12bd89491f"
+      "fingerprint": "sha256:1075cb6b160eabf76668728d8b5bc600866d29e070cc3cfc0da7da12bd89491f",
+      "at": "violations-list",
+      "to": "rules-dialog"
     },
     {
       "id": "web/search-rules-panel",
@@ -10793,10 +10794,10 @@
           "target": "textbox \"Search rules...\""
         }
       ],
-      "startingState": "rules-panel-open",
       "endState": "rules-panel-filtered",
       "apiEffects": [],
-      "fingerprint": "sha256:abda9b0ec5d1d988331f0ad4c88044e10b5ee8772207111835b08e0b51f37543"
+      "fingerprint": "sha256:abda9b0ec5d1d988331f0ad4c88044e10b5ee8772207111835b08e0b51f37543",
+      "at": "rules-dialog"
     },
     {
       "id": "web/filter-rules-by-detection",
@@ -10813,10 +10814,10 @@
           "target": "button \"Det\""
         }
       ],
-      "startingState": "rules-panel-open",
       "endState": "rules-panel-filtered",
       "apiEffects": [],
-      "fingerprint": "sha256:14c8aa092d7b09c58c018a81fa9759f5e997359e60942f0c924ee3e2a078a081"
+      "fingerprint": "sha256:14c8aa092d7b09c58c018a81fa9759f5e997359e60942f0c924ee3e2a078a081",
+      "at": "rules-dialog"
     },
     {
       "id": "web/filter-rules-by-category",
@@ -10833,10 +10834,10 @@
           "target": "button \"Security\""
         }
       ],
-      "startingState": "rules-panel-open",
       "endState": "rules-panel-filtered",
       "apiEffects": [],
-      "fingerprint": "sha256:394d78d91742a75cc9fd48411710e7016d36318be393c15f220131be20c69534"
+      "fingerprint": "sha256:394d78d91742a75cc9fd48411710e7016d36318be393c15f220131be20c69534",
+      "at": "rules-dialog"
     },
     {
       "id": "web/open-an-unanalyzed-repository",
@@ -10865,7 +10866,8 @@
         "api/get-api-repos-id-analytics-top-offenders",
         "api/get-api-repos-id-analytics-resolution"
       ],
-      "fingerprint": "sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b"
+      "fingerprint": "sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b",
+      "to": "repo-report"
     },
     {
       "id": "web/run-an-analysis-from-the-header",
@@ -10887,7 +10889,9 @@
       "apiEffects": [
         "api/post-api-repos-id-analyses"
       ],
-      "fingerprint": "sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0"
+      "fingerprint": "sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0",
+      "at": "repo-shell",
+      "to": "analysis-progress-card"
     },
     {
       "id": "web/stash-pending-changes-before-a-run",
@@ -10904,10 +10908,11 @@
           "target": "button \"Stash and analyze committed state\""
         }
       ],
-      "startingState": "stash-prompt-open",
       "endState": "analysis-running",
       "apiEffects": [],
-      "fingerprint": "sha256:86f841f6315f31c81f7ef7b815fe74571400cfbed18b2adecb96edfa61be3d41"
+      "fingerprint": "sha256:86f841f6315f31c81f7ef7b815fe74571400cfbed18b2adecb96edfa61be3d41",
+      "at": "stash-prompt-dialog",
+      "to": "analysis-progress-card"
     },
     {
       "id": "web/analyze-working-tree-without-stashing",
@@ -10924,10 +10929,11 @@
           "target": "button \"Don't stash — analyze working tree as-is\""
         }
       ],
-      "startingState": "stash-prompt-open",
       "endState": "analysis-running",
       "apiEffects": [],
-      "fingerprint": "sha256:c5258cd7c25e4f8b5a00f8e84aa6c1d0c4fffa5a62f99bbf52f3467dba3d2083"
+      "fingerprint": "sha256:c5258cd7c25e4f8b5a00f8e84aa6c1d0c4fffa5a62f99bbf52f3467dba3d2083",
+      "at": "stash-prompt-dialog",
+      "to": "analysis-progress-card"
     },
     {
       "id": "web/approve-the-llm-rules-for-a-run",
@@ -10944,10 +10950,11 @@
           "target": "button \"Run LLM rules\""
         }
       ],
-      "startingState": "llm-estimate-open",
       "endState": "analysis-running",
       "apiEffects": [],
-      "fingerprint": "sha256:3fe0121eef3d02251e93c109949965a4e45210570d805a6b86d31b1e001fe6dc"
+      "fingerprint": "sha256:3fe0121eef3d02251e93c109949965a4e45210570d805a6b86d31b1e001fe6dc",
+      "at": "llm-estimate-dialog",
+      "to": "analysis-progress-card"
     },
     {
       "id": "web/skip-the-llm-rules-for-a-run",
@@ -10964,10 +10971,11 @@
           "target": "button \"Skip — deterministic rules only\""
         }
       ],
-      "startingState": "llm-estimate-open",
       "endState": "analysis-running",
       "apiEffects": [],
-      "fingerprint": "sha256:392bccc47ef75a7e46fdd093cfdf09319e6c087ab8fdfa3e0479fb0458447971"
+      "fingerprint": "sha256:392bccc47ef75a7e46fdd093cfdf09319e6c087ab8fdfa3e0479fb0458447971",
+      "at": "llm-estimate-dialog",
+      "to": "analysis-progress-card"
     },
     {
       "id": "web/cancel-a-running-analysis",
@@ -10989,7 +10997,8 @@
       "apiEffects": [
         "api/post-api-repos-id-analyses-cancel"
       ],
-      "fingerprint": "sha256:0f37495aff5cc82bc249e7b20e1e05237f29080752acf96e6a11df3a83c0c1bf"
+      "fingerprint": "sha256:0f37495aff5cc82bc249e7b20e1e05237f29080752acf96e6a11df3a83c0c1bf",
+      "at": "analysis-progress-card"
     },
     {
       "id": "web/filter-violations-by-severity",
@@ -11010,10 +11019,10 @@
           "target": "button \"{severity}\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "violations-filtered-by-severity",
       "apiEffects": [],
-      "fingerprint": "sha256:e9acaea6d38040f1fab95eab43b48530b85545487c32c6e071bdda212898f723"
+      "fingerprint": "sha256:e9acaea6d38040f1fab95eab43b48530b85545487c32c6e071bdda212898f723",
+      "at": "violations-list"
     },
     {
       "id": "web/search-the-violation-list",
@@ -11030,10 +11039,10 @@
           "target": "textbox \"Search violations...\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "violations-searched",
       "apiEffects": [],
-      "fingerprint": "sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8"
+      "fingerprint": "sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8",
+      "at": "violations-list"
     },
     {
       "id": "web/narrow-violations-to-llm-findings",
@@ -11050,10 +11059,10 @@
           "target": "button \"LLM\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "violations-filtered-to-llm-findings",
       "apiEffects": [],
-      "fingerprint": "sha256:0e3b1ca745de56bf25056c3d6f96b1ff8bb378f126e3607c0733995d553906b7"
+      "fingerprint": "sha256:0e3b1ca745de56bf25056c3d6f96b1ff8bb378f126e3607c0733995d553906b7",
+      "at": "violations-list"
     },
     {
       "id": "web/clear-the-category-filter",
@@ -11071,9 +11080,9 @@
         }
       ],
       "startingState": "violations-filtered-by-category",
-      "endState": "repo-report-open",
       "apiEffects": [],
-      "fingerprint": "sha256:18a5373cac7ad9ac45654464f5558e0d0cd58e247a36ba59fc85d9acfce3de26"
+      "fingerprint": "sha256:18a5373cac7ad9ac45654464f5558e0d0cd58e247a36ba59fc85d9acfce3de26",
+      "at": "violations-list"
     },
     {
       "id": "web/reveal-a-violations-fix-prompt",
@@ -11090,10 +11099,10 @@
           "target": "button \"Fix Prompt\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "fix-prompt-revealed",
       "apiEffects": [],
-      "fingerprint": "sha256:a0549257254680368ecf653658d195e25543e591d5cc0b9d52e9f49870cd893a"
+      "fingerprint": "sha256:a0549257254680368ecf653658d195e25543e591d5cc0b9d52e9f49870cd893a",
+      "at": "violations-list"
     },
     {
       "id": "web/copy-a-violations-fix-prompt",
@@ -11110,10 +11119,10 @@
           "target": "button \"Copy Fix\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "fix-prompt-copied",
       "apiEffects": [],
-      "fingerprint": "sha256:2885a044de4a5575057534ebbb83bbcb70cb37673654e0d517d23359e66d28fa"
+      "fingerprint": "sha256:2885a044de4a5575057534ebbb83bbcb70cb37673654e0d517d23359e66d28fa",
+      "at": "violations-list"
     },
     {
       "id": "web/sort-top-offenders-by-critical-count",
@@ -11130,10 +11139,10 @@
           "target": "columnheader \"Critical\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "top-offenders-sorted-by-critical",
       "apiEffects": [],
-      "fingerprint": "sha256:e256ac3c6a19dcc62b2cb36abf570fbb2d237765d95717290b85b5a7681dfebd"
+      "fingerprint": "sha256:e256ac3c6a19dcc62b2cb36abf570fbb2d237765d95717290b85b5a7681dfebd",
+      "at": "analytics-column"
     },
     {
       "id": "web/scope-violations-to-a-top-offender",
@@ -11150,10 +11159,10 @@
           "target": "row \"{offender}\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "violations-scoped-to-an-offender",
       "apiEffects": [],
-      "fingerprint": "sha256:44dcd33611b1fc05785831e67c34e5261fe75340e0b07a4caa426ef2b721f3c3"
+      "fingerprint": "sha256:44dcd33611b1fc05785831e67c34e5261fe75340e0b07a4caa426ef2b721f3c3",
+      "at": "analytics-column"
     },
     {
       "id": "web/scope-violations-to-a-hotspot-file",
@@ -11170,10 +11179,10 @@
           "target": "row \"{file}\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "violations-scoped-to-a-file",
       "apiEffects": [],
-      "fingerprint": "sha256:a1c96f99fe85e6a0298adaef8ff4b94d4475c28f89158b9812622d7819c10709"
+      "fingerprint": "sha256:a1c96f99fe85e6a0298adaef8ff4b94d4475c28f89158b9812622d7819c10709",
+      "at": "analytics-column"
     },
     {
       "id": "web/open-the-graphs-tab",
@@ -11190,12 +11199,12 @@
           "target": "button \"Graphs\""
         }
       ],
-      "startingState": "repo-report-open",
-      "endState": "graph-open",
       "apiEffects": [
         "api/get-api-repos-id-graph"
       ],
-      "fingerprint": "sha256:a8f319bb14ef3182f51fa57b6ce896ee8fe0b6fedbc3591efe3921ff3d842c8f"
+      "fingerprint": "sha256:a8f319bb14ef3182f51fa57b6ce896ee8fe0b6fedbc3591efe3921ff3d842c8f",
+      "at": "repo-shell",
+      "to": "graph-canvas"
     },
     {
       "id": "web/change-the-graph-depth-to-modules",
@@ -11212,12 +11221,12 @@
           "target": "button \"Modules\""
         }
       ],
-      "startingState": "graph-open",
       "endState": "graph-at-module-depth",
       "apiEffects": [
         "api/get-api-repos-id-graph"
       ],
-      "fingerprint": "sha256:e0b7054e06ffdf0e5bd1e322d3305bee2e1bd08e795f50c84128d74ead61741f"
+      "fingerprint": "sha256:e0b7054e06ffdf0e5bd1e322d3305bee2e1bd08e795f50c84128d74ead61741f",
+      "at": "graph-canvas"
     },
     {
       "id": "web/change-the-graph-depth-to-functions",
@@ -11239,7 +11248,8 @@
       "apiEffects": [
         "api/get-api-repos-id-graph"
       ],
-      "fingerprint": "sha256:575e9ef3dd46d13a8f7062b627fb08d5b56e2a12aa44cd5a992da445dcc52d30"
+      "fingerprint": "sha256:575e9ef3dd46d13a8f7062b627fb08d5b56e2a12aa44cd5a992da445dcc52d30",
+      "at": "graph-canvas"
     },
     {
       "id": "web/fit-the-graph-to-the-viewport",
@@ -11256,10 +11266,10 @@
           "target": "button \"Fit view\""
         }
       ],
-      "startingState": "graph-open",
       "endState": "graph-fitted",
       "apiEffects": [],
-      "fingerprint": "sha256:24b2d4f4612ada4af1613f970985c8bd1666bf374051b519ed6a3793a1243cbf"
+      "fingerprint": "sha256:24b2d4f4612ada4af1613f970985c8bd1666bf374051b519ed6a3793a1243cbf",
+      "at": "graph-canvas"
     },
     {
       "id": "web/reset-the-graph-layout",
@@ -11276,13 +11286,13 @@
           "target": "button \"Auto layout\""
         }
       ],
-      "startingState": "graph-open",
       "endState": "graph-layout-reset",
       "apiEffects": [
         "api/delete-api-repos-id-graph-positions",
         "api/get-api-repos-id-graph"
       ],
-      "fingerprint": "sha256:2641ce7b3a1924f4c4bc9ca888302e059cb81c7107ca48fd4ef03a5d6472ccdb"
+      "fingerprint": "sha256:2641ce7b3a1924f4c4bc9ca888302e059cb81c7107ca48fd4ef03a5d6472ccdb",
+      "at": "graph-canvas"
     },
     {
       "id": "web/collapse-every-graph-container",
@@ -11305,7 +11315,8 @@
         "api/put-api-repos-id-graph-collapsed",
         "api/put-api-repos-id-graph-positions"
       ],
-      "fingerprint": "sha256:c609dd474b055a514cc23ea888f27976509b1c775bca0b05cea819f30c7ad3fa"
+      "fingerprint": "sha256:c609dd474b055a514cc23ea888f27976509b1c775bca0b05cea819f30c7ad3fa",
+      "at": "graph-canvas"
     },
     {
       "id": "web/open-the-files-tab",
@@ -11322,14 +11333,14 @@
           "target": "button \"Files\""
         }
       ],
-      "startingState": "repo-report-open",
-      "endState": "file-tree-open",
       "apiEffects": [
         "api/get-api-repos-id-files",
         "api/get-api-repos-id-violations-summary",
         "api/get-api-repos-id-graph"
       ],
-      "fingerprint": "sha256:5fb4d0b52704c626640e10e136399172d65b2b5a85f9d5758042c7b5cb9a4dc7"
+      "fingerprint": "sha256:5fb4d0b52704c626640e10e136399172d65b2b5a85f9d5758042c7b5cb9a4dc7",
+      "at": "repo-shell",
+      "to": "file-tree-panel"
     },
     {
       "id": "web/open-a-file-in-the-code-viewer",
@@ -11347,7 +11358,6 @@
         }
       ],
       "startingState": "dashboard-serving",
-      "endState": "code-viewer-open",
       "apiEffects": [
         "api/get-api-repos-id",
         "api/get-api-repos-id-analyses",
@@ -11357,7 +11367,8 @@
         "api/get-api-repos-id-violations-summary",
         "api/get-api-repos-id-graph"
       ],
-      "fingerprint": "sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106"
+      "fingerprint": "sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106",
+      "to": "code-viewer-pane"
     },
     {
       "id": "web/open-the-flows-tab",
@@ -11374,12 +11385,12 @@
           "target": "button \"Flows\""
         }
       ],
-      "startingState": "repo-report-open",
-      "endState": "flow-list-open",
       "apiEffects": [
         "api/get-api-repos-id-flows"
       ],
-      "fingerprint": "sha256:683da4b398098a8228b7f2f166b2bf38d2faaa253faa2ec369ead343a0371740"
+      "fingerprint": "sha256:683da4b398098a8228b7f2f166b2bf38d2faaa253faa2ec369ead343a0371740",
+      "at": "repo-shell",
+      "to": "flow-list-panel"
     },
     {
       "id": "web/open-a-flow-diagram",
@@ -11396,13 +11407,13 @@
           "target": "button \"{flowName}\""
         }
       ],
-      "startingState": "flow-list-open",
-      "endState": "flow-diagram-open",
       "apiEffects": [
         "api/get-api-repos-id-flows-flowid",
         "api/get-api-repos-id-violations"
       ],
-      "fingerprint": "sha256:15cf10b4168e6f254370eba9df0c6d53ab6eaa9886024f9a8d757ffa11e7d3f6"
+      "fingerprint": "sha256:15cf10b4168e6f254370eba9df0c6d53ab6eaa9886024f9a8d757ffa11e7d3f6",
+      "at": "flow-list-panel",
+      "to": "flow-diagram-pane"
     },
     {
       "id": "web/search-the-flow-list",
@@ -11419,10 +11430,10 @@
           "target": "textbox \"Search flows...\""
         }
       ],
-      "startingState": "flow-list-open",
       "endState": "flow-list-searched",
       "apiEffects": [],
-      "fingerprint": "sha256:6f85508f5c6b7ec4027e60e2899f61d69b7faf04a3deca7cf0faaa3199bdd3f6"
+      "fingerprint": "sha256:6f85508f5c6b7ec4027e60e2899f61d69b7faf04a3deca7cf0faaa3199bdd3f6",
+      "at": "flow-list-panel"
     },
     {
       "id": "web/step-forward-through-a-flow",
@@ -11439,10 +11450,10 @@
           "target": "button \"Step forward\""
         }
       ],
-      "startingState": "flow-diagram-open",
       "endState": "flow-step-one",
       "apiEffects": [],
-      "fingerprint": "sha256:15ef08076825b63ee71e79ff91e3e00b1a819deaefe1358a69b2d492b3bf2949"
+      "fingerprint": "sha256:15ef08076825b63ee71e79ff91e3e00b1a819deaefe1358a69b2d492b3bf2949",
+      "at": "flow-diagram-pane"
     },
     {
       "id": "web/step-back-through-a-flow",
@@ -11460,9 +11471,9 @@
         }
       ],
       "startingState": "flow-step-one",
-      "endState": "flow-diagram-open",
       "apiEffects": [],
-      "fingerprint": "sha256:5fbbaab3c7834358a05533a7fba4b6ab1e5de684365ee3d2138523a77eea2902"
+      "fingerprint": "sha256:5fbbaab3c7834358a05533a7fba4b6ab1e5de684365ee3d2138523a77eea2902",
+      "at": "flow-diagram-pane"
     },
     {
       "id": "web/play-the-open-flow",
@@ -11479,10 +11490,10 @@
           "target": "button \"Play\""
         }
       ],
-      "startingState": "flow-diagram-open",
       "endState": "flow-playback-complete",
       "apiEffects": [],
-      "fingerprint": "sha256:3bb44c92360af7367af69e112b8e55be54a0b8acdb703109469a1b31a9c53f6e"
+      "fingerprint": "sha256:3bb44c92360af7367af69e112b8e55be54a0b8acdb703109469a1b31a9c53f6e",
+      "at": "flow-diagram-pane"
     },
     {
       "id": "web/enrich-a-flow-with-descriptions",
@@ -11499,12 +11510,12 @@
           "target": "button \"Enrich\""
         }
       ],
-      "startingState": "flow-diagram-open",
       "endState": "flow-enriched",
       "apiEffects": [
         "api/post-api-repos-id-flows-flowid-enrich"
       ],
-      "fingerprint": "sha256:61f9786140876e453249c32f3eaab516b2ca3b4eaeae01a386ef4a7a21ac3cb8"
+      "fingerprint": "sha256:61f9786140876e453249c32f3eaab516b2ca3b4eaeae01a386ef4a7a21ac3cb8",
+      "at": "flow-diagram-pane"
     },
     {
       "id": "web/open-the-databases-tab",
@@ -11521,13 +11532,13 @@
           "target": "button \"Databases\""
         }
       ],
-      "startingState": "repo-report-open",
-      "endState": "database-list-open",
       "apiEffects": [
         "api/get-api-repos-id-databases",
         "api/get-api-repos-id-graph"
       ],
-      "fingerprint": "sha256:651814ae697b721770a6f2abb7de2574ded29a89e72364e5ccdc9c4a3c07b083"
+      "fingerprint": "sha256:651814ae697b721770a6f2abb7de2574ded29a89e72364e5ccdc9c4a3c07b083",
+      "at": "repo-shell",
+      "to": "database-list-panel"
     },
     {
       "id": "web/open-a-database-schema",
@@ -11544,12 +11555,12 @@
           "target": "button \"{databaseName}\""
         }
       ],
-      "startingState": "database-list-open",
-      "endState": "database-schema-open",
       "apiEffects": [
         "api/get-api-repos-id-databases-dbid-schema"
       ],
-      "fingerprint": "sha256:fb1ecb0dcf861ac9f18abab27c4eadb0d245798819c019da48e93b9459cee338"
+      "fingerprint": "sha256:fb1ecb0dcf861ac9f18abab27c4eadb0d245798819c019da48e93b9459cee338",
+      "at": "database-list-panel",
+      "to": "schema-pane"
     },
     {
       "id": "web/switch-the-schema-to-the-table-list",
@@ -11566,10 +11577,10 @@
           "target": "button \"Table List\""
         }
       ],
-      "startingState": "database-schema-open",
       "endState": "schema-table-list-open",
       "apiEffects": [],
-      "fingerprint": "sha256:48a48266188b8ab5a211acad66ead6ca482d1265fdb00390b97955bd253561d5"
+      "fingerprint": "sha256:48a48266188b8ab5a211acad66ead6ca482d1265fdb00390b97955bd253561d5",
+      "at": "schema-pane"
     },
     {
       "id": "web/expand-a-schema-table",
@@ -11589,7 +11600,8 @@
       "startingState": "schema-table-list-open",
       "endState": "schema-table-expanded",
       "apiEffects": [],
-      "fingerprint": "sha256:3264ac7926b539d43536b7753a37e4c85ac52e14803cce1d0284c5adf4cae009"
+      "fingerprint": "sha256:3264ac7926b539d43536b7753a37e4c85ac52e14803cce1d0284c5adf4cae009",
+      "at": "schema-pane"
     },
     {
       "id": "web/open-the-analyses-tab",
@@ -11606,10 +11618,10 @@
           "target": "button \"Analyses\""
         }
       ],
-      "startingState": "repo-report-open",
-      "endState": "analyses-list-open",
       "apiEffects": [],
-      "fingerprint": "sha256:99935db45642dad41bd691d1337633251701f4923cfaa8080d6ad3588b996f60"
+      "fingerprint": "sha256:99935db45642dad41bd691d1337633251701f4923cfaa8080d6ad3588b996f60",
+      "at": "repo-shell",
+      "to": "analyses-table"
     },
     {
       "id": "web/view-a-past-analysis",
@@ -11626,10 +11638,10 @@
           "target": "row \"{analysis}\""
         }
       ],
-      "startingState": "analyses-list-open",
       "endState": "past-analysis-selected",
       "apiEffects": [],
-      "fingerprint": "sha256:c4cc6cb16a3959e98e87b8527523b42cc5ec690117c4defc0cbf1a3f2a0cf37b"
+      "fingerprint": "sha256:c4cc6cb16a3959e98e87b8527523b42cc5ec690117c4defc0cbf1a3f2a0cf37b",
+      "at": "analyses-table"
     },
     {
       "id": "web/open-a-runs-usage-breakdown",
@@ -11646,12 +11658,12 @@
           "target": "button \"View usage breakdown\""
         }
       ],
-      "startingState": "analyses-list-open",
-      "endState": "usage-breakdown-open",
       "apiEffects": [
         "api/get-api-repos-id-analyses-analysisid-usage"
       ],
-      "fingerprint": "sha256:068dcf3aea5bb2776517f7b5e1382e33e996db36bf03cd73ed80901b5a61ba31"
+      "fingerprint": "sha256:068dcf3aea5bb2776517f7b5e1382e33e996db36bf03cd73ed80901b5a61ba31",
+      "at": "analyses-table",
+      "to": "usage-detail-pane"
     },
     {
       "id": "web/delete-a-past-analysis",
@@ -11668,12 +11680,12 @@
           "target": "button \"Delete analysis\""
         }
       ],
-      "startingState": "analyses-list-open",
       "endState": "past-analysis-deleted",
       "apiEffects": [
         "api/delete-api-repos-id-analyses-analysisid"
       ],
-      "fingerprint": "sha256:fb602ab57d56e95828c094bbeaa05437e75e29ab80de090a121d5ea8a3e8b1ef"
+      "fingerprint": "sha256:fb602ab57d56e95828c094bbeaa05437e75e29ab80de090a121d5ea8a3e8b1ef",
+      "at": "analyses-table"
     },
     {
       "id": "web/enter-git-diff-mode",
@@ -11690,12 +11702,13 @@
           "target": "button \"Git Diff\""
         }
       ],
-      "startingState": "repo-report-open",
       "endState": "diff-mode-on",
       "apiEffects": [
         "api/get-api-repos-id-analyses-diff"
       ],
-      "fingerprint": "sha256:fe3cde9b62d6d10160b130c1458c0c3533aca1c743ee32d03b5869a973c85a74"
+      "fingerprint": "sha256:fe3cde9b62d6d10160b130c1458c0c3533aca1c743ee32d03b5869a973c85a74",
+      "at": "repo-shell",
+      "to": "diff-summary-column"
     },
     {
       "id": "web/leave-git-diff-mode",
@@ -11713,9 +11726,10 @@
         }
       ],
       "startingState": "diff-mode-on",
-      "endState": "repo-report-open",
       "apiEffects": [],
-      "fingerprint": "sha256:9f33c442b170ed78a600166fb8eadbef1c1ae2b56d48603765e6152a25995fbf"
+      "fingerprint": "sha256:9f33c442b170ed78a600166fb8eadbef1c1ae2b56d48603765e6152a25995fbf",
+      "at": "repo-shell",
+      "to": "repo-report"
     },
     {
       "id": "web/open-a-changed-file-from-diff",
@@ -11733,12 +11747,13 @@
         }
       ],
       "startingState": "diff-mode-on",
-      "endState": "code-viewer-open",
       "apiEffects": [
         "api/get-api-repos-id-files",
         "api/get-api-repos-id-file-content"
       ],
-      "fingerprint": "sha256:e49c14c0f831a0aa350159f96b21be700e9738e0b9218879329ba40e1bbaf72a"
+      "fingerprint": "sha256:e49c14c0f831a0aa350159f96b21be700e9738e0b9218879329ba40e1bbaf72a",
+      "at": "diff-summary-column",
+      "to": "code-viewer-pane"
     },
     {
       "id": "web/toggle-a-file-tree-folder",
@@ -11755,10 +11770,10 @@
           "target": "button \"{folderName}\""
         }
       ],
-      "startingState": "file-tree-open",
       "endState": "file-tree-folder-toggled",
       "apiEffects": [],
-      "fingerprint": "sha256:e3a5b581512b7d01dbb315ea48a53c63dc5356465e227862a178c84b541c3db5"
+      "fingerprint": "sha256:e3a5b581512b7d01dbb315ea48a53c63dc5356465e227862a178c84b541c3db5",
+      "at": "file-tree-panel"
     }
   ],
   "states": {
@@ -11768,16 +11783,8 @@
         "description": "The dashboard is serving and nothing is open in the browser yet."
       },
       {
-        "id": "dashboard-home-open",
-        "description": "The browser is on the dashboard home page, which lists the registered repositories, at least one of them analyzed."
-      },
-      {
         "id": "repository-added-from-path",
         "description": "A repository submitted through the dashboard's path field is registered and visible as a card on the home page."
-      },
-      {
-        "id": "repo-report-open",
-        "description": "The repository page’s Home tab shows the latest analysis report — the violation cards and their analytics."
       },
       {
         "id": "violations-filtered-by-category",
@@ -11792,24 +11799,12 @@
         "description": "The rule is enabled again in the repository’s config and its previously hidden violation cards are back in the list."
       },
       {
-        "id": "code-analysis-section-open",
-        "description": "The repository’s page is in the Code Analysis section, with the section switcher naming the section in view."
-      },
-      {
-        "id": "guard-section-open",
-        "description": "The Spec Guard section is in view for the same repository, with its own surfaces."
-      },
-      {
-        "id": "rules-panel-open",
-        "description": "The Rules dialog is open over a repository report with the repository's rule catalogue loaded."
-      },
-      {
         "id": "rules-panel-filtered",
         "description": "The open Rules dialog is narrowed by one of its local search, detection or category controls."
       },
       {
         "id": "repo-no-analysis-open",
-        "description": "The repository's page is open on the Home tab and shows the “No analysis yet” notice instead of a report."
+        "description": "The repository has never been analyzed — its report shows the empty state inviting a first run."
       },
       {
         "id": "analysis-running",
@@ -11818,14 +11813,6 @@
       {
         "id": "analysis-cancelling",
         "description": "The running analysis has been asked to stop and the progress card reads “Cancelling...”."
-      },
-      {
-        "id": "stash-prompt-open",
-        "description": "The run has paused on the dirty-working-tree dialog, which reports the modified and untracked counts."
-      },
-      {
-        "id": "llm-estimate-open",
-        "description": "The run has paused on the LLM cost dialog, which reports the file count, rule count and estimated tokens."
       },
       {
         "id": "violations-filtered-by-severity",
@@ -11860,10 +11847,6 @@
         "description": "The violation list shows only the findings in one file, with a “file” chip naming it."
       },
       {
-        "id": "graph-open",
-        "description": "The Graphs tab shows the architecture graph at services depth, with the canvas controls available."
-      },
-      {
         "id": "graph-at-module-depth",
         "description": "The architecture graph is at module depth for one scoped service, with the scope selector and the collapse control beside the depth toggle."
       },
@@ -11884,28 +11867,12 @@
         "description": "Every container node of the graph is collapsed, and that collapse state is saved for this branch and depth."
       },
       {
-        "id": "file-tree-open",
-        "description": "The Files tab shows the repository's file tree, severity-coloured, with nothing opened in the main pane yet."
-      },
-      {
         "id": "file-tree-folder-toggled",
         "description": "One folder in the Files tree has been collapsed or expanded through its own row."
       },
       {
-        "id": "code-viewer-open",
-        "description": "One file's contents are in the code viewer with its violations marked in the gutter."
-      },
-      {
-        "id": "flow-list-open",
-        "description": "The Flows tab lists the detected execution flows grouped by entry service, with nothing opened in the main pane yet."
-      },
-      {
         "id": "flow-list-searched",
         "description": "The Flows sidebar shows only detected flows matching its search text."
-      },
-      {
-        "id": "flow-diagram-open",
-        "description": "One flow's sequence diagram is in the main pane with its step player beneath it."
       },
       {
         "id": "flow-step-one",
@@ -11920,14 +11887,6 @@
         "description": "The open flow carries model-written descriptions, saved back into the analysis, and no longer offers Enrich."
       },
       {
-        "id": "database-list-open",
-        "description": "The Databases tab lists the detected datastores, with nothing opened in the main pane yet."
-      },
-      {
-        "id": "database-schema-open",
-        "description": "One database's schema is in the main pane as an ER diagram."
-      },
-      {
         "id": "schema-table-list-open",
         "description": "The same database's schema is in the main pane as the expandable table list."
       },
@@ -11936,16 +11895,8 @@
         "description": "One table in the schema list is expanded to show its columns and participating relations."
       },
       {
-        "id": "analyses-list-open",
-        "description": "The Analyses tab shows the run-history table, newest run first, with the latest one marked."
-      },
-      {
         "id": "past-analysis-selected",
         "description": "Every view is showing an older run, with the amber “Viewing analysis from …” banner across the top and Analyze hidden."
-      },
-      {
-        "id": "usage-breakdown-open",
-        "description": "One run's per-call-type token usage is on screen."
       },
       {
         "id": "past-analysis-deleted",
@@ -11961,5 +11912,1143 @@
     "cli": "tree",
     "api": "tree",
     "web": "tree"
+  },
+  "resources": {
+    "web": [
+      {
+        "id": "dashboard-home",
+        "kind": "screen",
+        "title": "the dashboard home",
+        "description": "The front page: the CLI hint, the add-a-repository row, and the registered-repository grid.",
+        "readables": {
+          "markers": [
+            {
+              "within": {
+                "role": "heading",
+                "name": "TrueCourse"
+              },
+              "marker": "TrueCourse"
+            },
+            {
+              "marker": "Run this from your project directory:"
+            },
+            {
+              "marker": "npx truecourse add"
+            },
+            {
+              "marker": "No repositories yet",
+              "when": "no repository is registered"
+            },
+            {
+              "marker": "Add a repository path above to get started",
+              "when": "no repository is registered"
+            }
+          ],
+          "elements": [
+            {
+              "element": {
+                "role": "heading",
+                "name": "TrueCourse"
+              }
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "button",
+                "name": "Add Repository"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "the path field is empty or an add is in flight"
+            }
+          ],
+          "rows": [
+            {
+              "item": "link",
+              "template": "<repoName> <repoPath> <activity>",
+              "slots": [
+                {
+                  "name": "repoName",
+                  "kind": "text"
+                },
+                {
+                  "name": "repoPath",
+                  "kind": "text"
+                },
+                {
+                  "name": "activity",
+                  "kind": "enum",
+                  "values": [
+                    "Analyzed",
+                    "Scanned",
+                    "Generated",
+                    "Guarded",
+                    "Not analyzed yet"
+                  ]
+                }
+              ],
+              "when": "one card per registered repository; the activity verb is followed by a locale date except for “Not analyzed yet”"
+            }
+          ]
+        }
+      },
+      {
+        "id": "repo-shell",
+        "kind": "panel",
+        "title": "the repository shell",
+        "description": "The chrome of every repository page: the header (identity, run selector, mode toggle, Analyze), the section switcher, and the icon tab rail.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Viewing analysis from",
+              "when": "a past run is selected instead of the latest"
+            },
+            {
+              "marker": "Showing working tree state (uncommitted changes)",
+              "when": "the selected run analyzed a dirty tree"
+            },
+            {
+              "marker": "This directory is not a git repository",
+              "when": "the repository is not a git repo — analyze and spec scan are unavailable"
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "button",
+                "name": "Analyze"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "label flips to “Analyzing...” and disables while a run is in flight; absent while viewing history"
+            },
+            {
+              "control": {
+                "role": "button",
+                "name": "Code Analysis"
+              },
+              "states": [
+                "expanded"
+              ],
+              "when": "the section switcher trigger — its label is the CURRENT section (“Code Analysis” or “Spec Guard”)"
+            },
+            {
+              "control": {
+                "role": "menuitemradio",
+                "name": "Code Analysis"
+              },
+              "states": [
+                "checked"
+              ],
+              "when": "the switcher menu is open"
+            },
+            {
+              "control": {
+                "role": "menuitemradio",
+                "name": "Spec Guard"
+              },
+              "states": [
+                "checked"
+              ],
+              "when": "the switcher menu is open"
+            }
+          ],
+          "rows": [
+            {
+              "item": "button",
+              "template": "<tabLabel>",
+              "slots": [
+                {
+                  "name": "tabLabel",
+                  "kind": "enum",
+                  "values": [
+                    "Home",
+                    "Graphs",
+                    "Flows",
+                    "Files",
+                    "Databases",
+                    "Analyses",
+                    "Coverage",
+                    "Sources",
+                    "Tests",
+                    "Interfaces",
+                    "Dependencies",
+                    "Runs"
+                  ]
+                }
+              ],
+              "when": "the icon rail — one aria-labelled button per tab of the active section; the label is the accessible name, the button renders icon-only"
+            }
+          ]
+        }
+      },
+      {
+        "id": "repo-report",
+        "kind": "screen",
+        "title": "the repository report",
+        "description": "The repository page’s Home tab: analytics on the left, the violation list on the right; an empty state before the first analysis.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "No analysis yet",
+              "when": "the repository has never been analyzed"
+            },
+            {
+              "marker": "Click Analyze above",
+              "when": "the repository has never been analyzed"
+            }
+          ]
+        }
+      },
+      {
+        "id": "analytics-column",
+        "kind": "panel",
+        "of": "repo-report",
+        "title": "the analytics column",
+        "description": "The report’s left half: resolution chips, the violation trend, category and severity charts, Top Offenders and Code Hotspots.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Violation Trend"
+            },
+            {
+              "marker": "By Category"
+            },
+            {
+              "marker": "By Severity"
+            },
+            {
+              "marker": "Top Offenders"
+            },
+            {
+              "marker": "Code Hotspots"
+            },
+            {
+              "marker": "No change",
+              "when": "the trend delta is zero; otherwise a signed count renders"
+            },
+            {
+              "marker": "Run more analyses to see trends over time",
+              "when": "only one analysis exists"
+            }
+          ],
+          "controls": [],
+          "rows": [
+            {
+              "within": {
+                "role": "table",
+                "name": "Top Offenders"
+              },
+              "item": "row",
+              "template": "<rank> <name> <kind> <total> <critical> <high>",
+              "slots": [
+                {
+                  "name": "rank",
+                  "kind": "count"
+                },
+                {
+                  "name": "name",
+                  "kind": "text"
+                },
+                {
+                  "name": "kind",
+                  "kind": "enum",
+                  "values": [
+                    "service",
+                    "module",
+                    "method",
+                    "database"
+                  ]
+                },
+                {
+                  "name": "total",
+                  "kind": "count"
+                },
+                {
+                  "name": "critical",
+                  "kind": "count"
+                },
+                {
+                  "name": "high",
+                  "kind": "count"
+                }
+              ],
+              "when": "the sorted column header carries a trailing “ ↓” — there is no aria-sort"
+            },
+            {
+              "within": {
+                "role": "table",
+                "name": "Code Hotspots"
+              },
+              "item": "row",
+              "template": "<rank> <fileName> <count> <severity>",
+              "slots": [
+                {
+                  "name": "rank",
+                  "kind": "count"
+                },
+                {
+                  "name": "fileName",
+                  "kind": "text"
+                },
+                {
+                  "name": "count",
+                  "kind": "count"
+                },
+                {
+                  "name": "severity",
+                  "kind": "enum",
+                  "values": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low",
+                    "info"
+                  ]
+                }
+              ],
+              "when": "capped at 10 files; the file name is the basename, the full path lives in the title attribute"
+            }
+          ]
+        }
+      },
+      {
+        "id": "violations-list",
+        "kind": "panel",
+        "of": "repo-report",
+        "title": "the violation list",
+        "description": "The report’s right half: search, severity/detection/category filters, the active-filter chip row, and the virtualised violation cards with their per-card actions.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Filtered by:",
+              "when": "any filter is active — the chip row leads with it"
+            },
+            {
+              "marker": "No violations match the active filters",
+              "when": "filters exclude everything"
+            },
+            {
+              "marker": "No violations yet. Run an analysis to detect violations.",
+              "when": "no analysis has found violations and no filter is active"
+            },
+            {
+              "marker": "Copied!",
+              "when": "for 2 seconds after “Copy Fix” — then the label reverts"
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "button",
+                "name": "More actions"
+              },
+              "states": [
+                "expanded",
+                "disabled"
+              ],
+              "when": "one per violation card — expanded while its menu is open, disabled while the disable-rule request is in flight"
+            }
+          ],
+          "rows": [
+            {
+              "item": "button",
+              "template": "<category> <count>",
+              "slots": [
+                {
+                  "name": "category",
+                  "kind": "enum",
+                  "values": [
+                    "All",
+                    "Security",
+                    "Bugs",
+                    "Architecture",
+                    "Performance",
+                    "Reliability",
+                    "Code Quality",
+                    "Database",
+                    "Style"
+                  ]
+                },
+                {
+                  "name": "count",
+                  "kind": "count"
+                }
+              ],
+              "when": "the category tab strip; the count is omitted when zero, and no tab exposes aria-selected — the active tab is class-only"
+            },
+            {
+              "item": "listitem",
+              "template": "<type> <severity> <title> <content>",
+              "slots": [
+                {
+                  "name": "type",
+                  "kind": "enum",
+                  "values": [
+                    "code",
+                    "service",
+                    "module",
+                    "function",
+                    "database"
+                  ]
+                },
+                {
+                  "name": "severity",
+                  "kind": "enum",
+                  "values": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low",
+                    "info"
+                  ]
+                },
+                {
+                  "name": "title",
+                  "kind": "text"
+                },
+                {
+                  "name": "content",
+                  "kind": "text"
+                }
+              ],
+              "when": "one card per violation, virtualised (off-screen cards are NOT in the DOM); a code violation appends “File: <path>:<line>”, an architectural one “Target: <target>”; the card’s addressable handle is its heading"
+            }
+          ]
+        }
+      },
+      {
+        "id": "rules-dialog",
+        "kind": "dialog",
+        "of": "repo-report",
+        "title": "the Rules dialog",
+        "description": "The rule catalog sheet over the report: search, severity/detection/status/category filters, and one row per rule with its enable/disable switch.",
+        "readables": {
+          "markers": [
+            {
+              "within": {
+                "role": "dialog",
+                "name": "Rules"
+              },
+              "marker": "Rules"
+            },
+            {
+              "within": {
+                "role": "dialog",
+                "name": "Rules"
+              },
+              "marker": "No rules match your search",
+              "when": "the search excludes every rule"
+            },
+            {
+              "within": {
+                "role": "dialog",
+                "name": "Rules"
+              },
+              "marker": "Disabled",
+              "when": "on each row whose rule is off (an uppercase badge)"
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "switch",
+                "name": "Disable"
+              },
+              "states": [
+                "checked",
+                "disabled"
+              ],
+              "when": "one switch per rule row — its accessible name flips “Disable {rule}” ⇄ “Enable {rule}” with its checked state, and it disables while the PATCH is in flight"
+            }
+          ],
+          "rows": [
+            {
+              "within": {
+                "role": "dialog",
+                "name": "Rules"
+              },
+              "item": "listitem",
+              "template": "<name> <severity> <description> <category> <detection>",
+              "slots": [
+                {
+                  "name": "name",
+                  "kind": "text"
+                },
+                {
+                  "name": "severity",
+                  "kind": "enum",
+                  "values": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low",
+                    "info"
+                  ]
+                },
+                {
+                  "name": "description",
+                  "kind": "text"
+                },
+                {
+                  "name": "category",
+                  "kind": "enum",
+                  "values": [
+                    "Security",
+                    "Bugs",
+                    "Architecture",
+                    "Performance",
+                    "Reliability",
+                    "Code Quality",
+                    "Database",
+                    "Style"
+                  ]
+                },
+                {
+                  "name": "detection",
+                  "kind": "enum",
+                  "values": [
+                    "Deterministic",
+                    "LLM"
+                  ]
+                }
+              ],
+              "when": "virtualised; per-language badges (JS/PY/C#) and a trailing “Disabled” follow where they apply; the row’s addressable handles are its heading and its switch"
+            }
+          ]
+        }
+      },
+      {
+        "id": "stash-prompt-dialog",
+        "kind": "dialog",
+        "of": "repo-report",
+        "title": "the stash prompt",
+        "description": "The dirty-working-tree question before a run: stash and analyze the committed state, or analyze the tree as-is.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Stash pending changes?"
+            },
+            {
+              "marker": "modified and",
+              "when": "“Your repository has <n> modified and <m> untracked file(s).” — counts render into the sentence"
+            }
+          ],
+          "elements": [],
+          "controls": [],
+          "rows": []
+        }
+      },
+      {
+        "id": "llm-estimate-dialog",
+        "kind": "dialog",
+        "of": "repo-report",
+        "title": "the LLM estimate dialog",
+        "description": "The pre-flight cost gate: run the LLM rules or skip to deterministic-only. The guard generate flow reuses it in a staged form.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Run LLM rules?",
+              "when": "the analyze form; the staged (guard generate) form titles “Proceed with this run?”"
+            },
+            {
+              "marker": "k tokens",
+              "when": "the analyze body reads “<files> files, <rules> rules (~<k>k tokens).”"
+            }
+          ]
+        }
+      },
+      {
+        "id": "analysis-progress-card",
+        "kind": "panel",
+        "of": "repo-shell",
+        "title": "the analysis progress card",
+        "description": "The bottom-centre checklist overlay while a run is in flight; it floats over every tab and survives tab switches.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Analyzing...",
+              "when": "a run is in flight"
+            },
+            {
+              "marker": "Cancelling...",
+              "when": "a cancel was requested"
+            },
+            {
+              "marker": "Analysis failed",
+              "when": "the run errored"
+            }
+          ],
+          "controls": [],
+          "rows": [
+            {
+              "item": "paragraph",
+              "template": "<stepLabel> <detail>",
+              "slots": [
+                {
+                  "name": "stepLabel",
+                  "kind": "text"
+                },
+                {
+                  "name": "detail",
+                  "kind": "text"
+                }
+              ],
+              "when": "the step checklist renders as plain divs (no list roles); step labels come from the server (“Parsing repository”, “Scanning files”, “<Domain> checks”, “Saving results”), details like “<n> services, <m> files”; each step’s status is an icon only — NOT readable"
+            }
+          ]
+        }
+      },
+      {
+        "id": "graph-canvas",
+        "kind": "screen",
+        "title": "the architecture graph",
+        "description": "The Graphs tab: the React Flow canvas with depth toggle (Services/Modules/Functions), scope selector, canvas toggles and zoom controls.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Live",
+              "when": "the socket is connected; “Offline” otherwise"
+            },
+            {
+              "marker": "Select a service",
+              "when": "module/function depth without a scope — viewing everything at once is hidden for performance"
+            },
+            {
+              "marker": "No graph data",
+              "when": "no analysis exists yet"
+            },
+            {
+              "marker": "Saving...",
+              "when": "node positions are persisting"
+            }
+          ],
+          "elements": [
+            {
+              "element": {
+                "role": "heading",
+                "name": "{serviceName}"
+              },
+              "when": "one heading per service node at services depth"
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "button",
+                "name": "Select module"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "the module scope dropdown disables until a service is scoped"
+            }
+          ]
+        }
+      },
+      {
+        "id": "file-tree-panel",
+        "kind": "panel",
+        "of": "repo-shell",
+        "title": "the file tree",
+        "description": "The Files tab sidebar: git-tracked files (the working tree in diff mode), folders expandable, names coloured by highest violation severity.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "No files found in repository.",
+              "when": "the tree is empty"
+            },
+            {
+              "marker": "Filter:",
+              "when": "a path filter is set"
+            }
+          ],
+          "controls": [],
+          "rows": [
+            {
+              "item": "generic",
+              "template": "<name>",
+              "slots": [
+                {
+                  "name": "name",
+                  "kind": "text"
+                }
+              ],
+              "when": "KNOWN DEFECT: tree rows render as unlabelled divs with no role — a role-based locator cannot resolve a folder or file row today; the severity colouring is colour-only and equally unreadable"
+            }
+          ]
+        }
+      },
+      {
+        "id": "code-viewer-pane",
+        "kind": "panel",
+        "of": "repo-shell",
+        "title": "the code viewer",
+        "description": "The file pane: breadcrumb, per-file issue chip, the source with inline finding rows beneath offending lines.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "issues",
+              "when": "the “<n> issues” chip renders only when the file has findings (singular “issue” at one)"
+            }
+          ],
+          "rows": [
+            {
+              "item": "generic",
+              "template": "<severity> <title> — <content>",
+              "slots": [
+                {
+                  "name": "severity",
+                  "kind": "enum",
+                  "values": [
+                    "CRITICAL",
+                    "HIGH",
+                    "MEDIUM",
+                    "LOW",
+                    "INFO"
+                  ]
+                },
+                {
+                  "name": "title",
+                  "kind": "text"
+                },
+                {
+                  "name": "content",
+                  "kind": "text"
+                }
+              ],
+              "when": "one inline finding row beneath each offending line, rendered by the editor widget (no list roles); clicking it toggles an inline fix prompt"
+            }
+          ]
+        }
+      },
+      {
+        "id": "flow-list-panel",
+        "kind": "panel",
+        "of": "repo-shell",
+        "title": "the flow list",
+        "description": "The Flows tab sidebar: detected execution flows grouped by entry service, with search.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "No flows detected",
+              "when": "no analysis has found flows"
+            }
+          ],
+          "rows": [
+            {
+              "item": "button",
+              "template": "<flowName> <stepCount>",
+              "slots": [
+                {
+                  "name": "flowName",
+                  "kind": "text"
+                },
+                {
+                  "name": "stepCount",
+                  "kind": "count"
+                }
+              ],
+              "when": "grouped under sticky uppercase “<SERVICE> <count>” headers; an optional description sits between name and count; the trigger kind (http/event/cron/startup) is icon+colour only — NOT readable"
+            }
+          ]
+        }
+      },
+      {
+        "id": "flow-diagram-pane",
+        "kind": "panel",
+        "of": "repo-shell",
+        "title": "the flow diagram",
+        "description": "The opened flow: its step diagram plus the player (jump/step/play/speed) and the one-shot Enrich action.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Step",
+              "when": "“Step <current> of <total>” — the player counter"
+            },
+            {
+              "marker": "steps",
+              "when": "the header reads “<flowName> <trigger> <n> steps”"
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "button",
+                "name": "Step back"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "at step 0"
+            },
+            {
+              "control": {
+                "role": "button",
+                "name": "Step forward"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "at the last step"
+            },
+            {
+              "control": {
+                "role": "button",
+                "name": "Jump to start"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "at step 0"
+            },
+            {
+              "control": {
+                "role": "button",
+                "name": "Jump to end"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "at the last step"
+            },
+            {
+              "control": {
+                "role": "button",
+                "name": "Enrich"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "while enriching; the button renders only for a flow with no description — enrichment’s success is its disappearance"
+            }
+          ]
+        }
+      },
+      {
+        "id": "database-list-panel",
+        "kind": "panel",
+        "of": "repo-shell",
+        "title": "the database list",
+        "description": "The Databases tab sidebar: one row per detected datastore.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "No databases detected",
+              "when": "no analysis has found datastores"
+            }
+          ],
+          "rows": [
+            {
+              "item": "button",
+              "template": "<name> <typeLabel> <tables> tables <services> services",
+              "slots": [
+                {
+                  "name": "name",
+                  "kind": "text"
+                },
+                {
+                  "name": "typeLabel",
+                  "kind": "enum",
+                  "values": [
+                    "PostgreSQL",
+                    "Redis",
+                    "MongoDB",
+                    "MySQL",
+                    "SQLite"
+                  ]
+                },
+                {
+                  "name": "tables",
+                  "kind": "count"
+                },
+                {
+                  "name": "services",
+                  "kind": "count"
+                }
+              ],
+              "when": "the tables count is suppressed for redis, the services count when zero; both units pluralise"
+            }
+          ]
+        }
+      },
+      {
+        "id": "schema-pane",
+        "kind": "panel",
+        "of": "repo-shell",
+        "title": "the schema pane",
+        "description": "The opened datastore: an ER diagram or a table list (two sub-views of one pane), tables expandable to columns and relations.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "tables",
+              "when": "the header reads “<dbName> <n> tables[ · <m> relations]”"
+            },
+            {
+              "marker": "Relations",
+              "when": "inside an expanded table that has foreign keys"
+            },
+            {
+              "marker": "No schema detected",
+              "when": "the datastore’s schema could not be parsed"
+            }
+          ],
+          "rows": [
+            {
+              "item": "button",
+              "template": "<tableName> <cols> cols",
+              "slots": [
+                {
+                  "name": "tableName",
+                  "kind": "text"
+                },
+                {
+                  "name": "cols",
+                  "kind": "count"
+                }
+              ],
+              "when": "the table-list sub-view; the disclosure does NOT expose aria-expanded — the open state is a chevron glyph only"
+            }
+          ]
+        }
+      },
+      {
+        "id": "analyses-table",
+        "kind": "screen",
+        "title": "the analyses table",
+        "description": "The Analyses tab: every past run, newest first, with per-run actions (view, usage breakdown, delete). Diff runs are not listed.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "total",
+              "when": "the header reads “Analyses <n> total”"
+            },
+            {
+              "marker": "No analyses yet. Run an analysis to see results here.",
+              "when": "no run has completed"
+            }
+          ],
+          "elements": [
+            {
+              "element": {
+                "role": "columnheader",
+                "name": "Date"
+              }
+            },
+            {
+              "element": {
+                "role": "columnheader",
+                "name": "Violations"
+              }
+            },
+            {
+              "element": {
+                "role": "columnheader",
+                "name": "Tokens"
+              }
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "button",
+                "name": "Delete analysis"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "while the delete is in flight; deletion first raises a native confirm"
+            }
+          ],
+          "rows": [
+            {
+              "item": "row",
+              "template": "<date> <status> <branch> <commit> <provider> <services> <violations> <duration> <tokens>",
+              "slots": [
+                {
+                  "name": "date",
+                  "kind": "text"
+                },
+                {
+                  "name": "status",
+                  "kind": "enum",
+                  "values": [
+                    "latest",
+                    "running",
+                    "cancelling",
+                    "cancelled",
+                    "failed"
+                  ]
+                },
+                {
+                  "name": "branch",
+                  "kind": "text"
+                },
+                {
+                  "name": "commit",
+                  "kind": "text"
+                },
+                {
+                  "name": "provider",
+                  "kind": "text"
+                },
+                {
+                  "name": "services",
+                  "kind": "count"
+                },
+                {
+                  "name": "violations",
+                  "kind": "count"
+                },
+                {
+                  "name": "duration",
+                  "kind": "text"
+                },
+                {
+                  "name": "tokens",
+                  "kind": "text"
+                }
+              ],
+              "when": "the status mark is absent for a completed non-latest run and “latest” marks exactly one row; empty cells render “-”; per-severity counts follow the violation total"
+            }
+          ]
+        }
+      },
+      {
+        "id": "usage-detail-pane",
+        "kind": "panel",
+        "of": "analyses-table",
+        "title": "the usage breakdown",
+        "description": "One run’s token usage per call type, with a totals row; cache and cost columns appear only when the data carries them.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "Usage Detail"
+            },
+            {
+              "marker": "No usage data recorded",
+              "when": "the run recorded none"
+            },
+            {
+              "marker": "Total",
+              "when": "the trailing totals row leads with it"
+            }
+          ],
+          "rows": [
+            {
+              "item": "row",
+              "template": "<callType> <input> <output> <total> <duration>",
+              "slots": [
+                {
+                  "name": "callType",
+                  "kind": "enum",
+                  "values": [
+                    "Service",
+                    "Database",
+                    "Module",
+                    "Code",
+                    "Enrichment",
+                    "Flow"
+                  ]
+                },
+                {
+                  "name": "input",
+                  "kind": "text"
+                },
+                {
+                  "name": "output",
+                  "kind": "text"
+                },
+                {
+                  "name": "total",
+                  "kind": "text"
+                },
+                {
+                  "name": "duration",
+                  "kind": "text"
+                }
+              ],
+              "when": "token cells render as “<n>”, “<n.n>k” or “<n.nn>M” (“-” when empty); Cache Read/Write and Cost columns join where the run carries them"
+            }
+          ]
+        }
+      },
+      {
+        "id": "diff-summary-column",
+        "kind": "panel",
+        "of": "repo-report",
+        "title": "the diff summary",
+        "description": "Replaces the analytics column in Git Diff mode: new/unchanged/resolved/files chips, the new-violations severity chart, and the changed-file list.",
+        "readables": {
+          "markers": [
+            {
+              "marker": "new",
+              "when": "the four chips read “<n> new · <n> unchanged · <n> resolved · <n> files”"
+            },
+            {
+              "marker": "Changed files"
+            },
+            {
+              "marker": "No diff yet",
+              "when": "nothing has been compared since the last change"
+            }
+          ],
+          "controls": [
+            {
+              "control": {
+                "role": "button",
+                "name": "{filePath}"
+              },
+              "states": [
+                "disabled"
+              ],
+              "when": "one button per changed file, disabled for a deleted file"
+            }
+          ],
+          "rows": [
+            {
+              "item": "button",
+              "template": "<status> <path>",
+              "slots": [
+                {
+                  "name": "status",
+                  "kind": "enum",
+                  "values": [
+                    "A",
+                    "M",
+                    "D"
+                  ]
+                },
+                {
+                  "name": "path",
+                  "kind": "text"
+                }
+              ],
+              "when": "A = added, M = modified, D = deleted; the diff card list orders new violations first, then resolved"
+            }
+          ]
+        }
+      },
+      {
+        "id": "guard-section",
+        "kind": "screen",
+        "title": "the Spec Guard section",
+        "description": "The guard half of the repository page, with its own rail tabs (Coverage, Sources, Tests, Interfaces, Dependencies, Runs). Its interior surfaces are their own catalog.",
+        "readables": {
+          "markers": [],
+          "elements": [
+            {
+              "element": {
+                "role": "button",
+                "name": "Coverage"
+              }
+            }
+          ]
+        }
+      }
+    ]
   }
 }

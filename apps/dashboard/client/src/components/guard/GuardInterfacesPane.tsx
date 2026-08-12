@@ -22,8 +22,9 @@ import type {
   GuardInterfaceRow,
   GuardInterfacesView,
   GuardRecipeCard as GuardRecipeCardData,
+  InterfaceResource,
 } from '@truecourse/shared';
-import { guardDriver, interfaceEntryLabel } from '@truecourse/shared';
+import { describeWebLocator, guardDriver, interfaceEntryLabel } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -68,6 +69,95 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
+
+/** One readable line: a fixed lead-in, then the fact in the driver's own words. */
+function ReadableLine({ lead, children }: { lead: string; children: React.ReactNode }) {
+  return (
+    <li className="text-[11px] leading-snug text-muted-foreground">
+      <span className="text-foreground/70">{lead}</span> {children}
+    </li>
+  );
+}
+
+/**
+ * THE PLACE CARD — the resource the open task acts on, from the catalog's own
+ * registry: what kind of place it is, and its READABLES (what the place visibly
+ * shows, as the structured facts a scenario can assert on). Locators render
+ * through {@link describeWebLocator} so the card, a step list and a failure all
+ * use the same words for the same element.
+ */
+function GuardResourceCard({
+  resource,
+  sitsOn,
+  leavesAt,
+}: {
+  resource: InterfaceResource;
+  /** The title of the resource this one sits on/over (`of`), when it has one. */
+  sitsOn?: string;
+  leavesAt?: string;
+}) {
+  const r = resource.readables;
+  return (
+    <div className="rounded border border-border bg-card/40 px-2.5 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {resource.kind}
+        </span>
+        <span className="text-[12px] font-medium text-foreground">{resource.title}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{resource.id}</span>
+        {sitsOn && (
+          <span className="text-[11px] text-muted-foreground">
+            {resource.kind === 'dialog' ? 'over' : 'on'} {sitsOn}
+          </span>
+        )}
+        {leavesAt && (
+          <span className="text-[11px] text-muted-foreground">→ leaves the user at {leavesAt}</span>
+        )}
+      </div>
+      {resource.description && (
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{resource.description}</p>
+      )}
+      {r && (
+        <ul className="mt-1.5 flex flex-col gap-0.5">
+          {r.markers?.map((m, i) => (
+            <ReadableLine key={`m${i}`} lead="shows">
+              “{m.marker}”{m.within ? ` — within ${describeWebLocator(m.within)}` : ''}
+              {m.when ? ` (when ${m.when})` : ''}
+            </ReadableLine>
+          ))}
+          {r.elements?.map((e, i) => (
+            <ReadableLine key={`e${i}`} lead="renders">
+              {describeWebLocator(e.element)}
+              {e.when ? ` (when ${e.when})` : ''}
+            </ReadableLine>
+          ))}
+          {r.rows?.map((row, i) => (
+            <ReadableLine key={`r${i}`} lead="lists">
+              one {row.item} per item{row.within ? ` within ${describeWebLocator(row.within)}` : ''}, shaped{' '}
+              <span className="font-mono text-foreground/80">{row.template}</span>
+              {row.slots.some((s) => s.kind === 'enum') && (
+                <>
+                  {' — '}
+                  {row.slots
+                    .filter((s) => s.kind === 'enum')
+                    .map((s) => `${s.name}: ${(s.values ?? []).join(' | ')}`)
+                    .join(' · ')}
+                </>
+              )}
+              {row.when ? ` (when ${row.when})` : ''}
+            </ReadableLine>
+          ))}
+          {r.controls?.map((c, i) => (
+            <ReadableLine key={`c${i}`} lead="control">
+              {describeWebLocator(c.control)} — exposes {c.states.join(', ')}
+              {c.when ? ` (when ${c.when})` : ''}
+            </ReadableLine>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function GuardInterfacesPane({
   repoId,
@@ -200,6 +290,32 @@ export function GuardInterfacesPane({
             Declared in your API docs, but no code route serves it.
           </p>
         ) : null}
+
+        {/* WHERE the task acts — its place, joined from the registry the view
+            carries. Location before world-state, the way the catalog splits
+            them: `at`/`to` say the place, the states say the world. */}
+        {(() => {
+          if (!active.at) return null;
+          const areaResources = view.resources?.[active.type] ?? [];
+          const place = areaResources.find((res) => res.id === active.at);
+          if (!place) return null;
+          const dest = active.to
+            ? areaResources.find((res) => res.id === active.to)?.title ?? active.to
+            : undefined;
+          const parent = place.of
+            ? areaResources.find((res) => res.id === place.of)?.title ?? place.of
+            : undefined;
+          return (
+            <div className="mt-4">
+              <div className={LABEL}>Where</div>
+              <GuardResourceCard
+                resource={place}
+                {...(parent ? { sitsOn: parent } : {})}
+                {...(dest ? { leavesAt: dest } : {})}
+              />
+            </div>
+          );
+        })()}
 
         {/* The task's state contract: the world it assumes and the world it
             leaves, each a NAMED state of its area's registry. Rendered before

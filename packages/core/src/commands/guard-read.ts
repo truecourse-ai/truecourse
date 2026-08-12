@@ -1596,6 +1596,10 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
     steps: j.steps,
     ...(j.startingState ? { startingState: j.startingState } : {}),
     ...(j.endState ? { endState: j.endState } : {}),
+    // The location contract passes through verbatim — the registry the ids
+    // resolve in travels once, on the view below.
+    ...(j.at ? { at: j.at } : {}),
+    ...(j.to ? { to: j.to } : {}),
     fingerprint: j.fingerprint,
     flows: flowRefs.get(j.id) ?? [],
     scenarioIds: scenarioIdsByInterface.get(j.id) ?? [],
@@ -1615,6 +1619,9 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
     generatedAt: catalog.generatedAt,
     recipeFingerprint: catalog.recipeFingerprint,
     interfaces,
+    // The resource registry, verbatim — defined once in the catalog, joined by
+    // the client (panel labels, the open row's place card).
+    ...(catalog.resources ? { resources: catalog.resources } : {}),
     surfaces,
     totals: {
       interfaces: interfaces.length,

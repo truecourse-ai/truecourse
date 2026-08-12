@@ -1230,6 +1230,7 @@ function RepoPageInner() {
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardInterfacesPanel
                 interfaces={guardInterfaces.view?.interfaces ?? []}
+                {...(guardInterfaces.view?.resources ? { resources: guardInterfaces.view.resources } : {})}
                 loading={guardInterfaces.loading}
                 error={guardInterfaces.error}
                 activeId={guardRecipeSurface ? null : guardInterfaceTabs.activeId}

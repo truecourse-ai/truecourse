@@ -34,6 +34,7 @@ import {
   InterfaceCatalogSourceSchema,
   InterfaceContractSchema,
   InterfaceEntrySchema,
+  InterfaceResourceSchema,
   InterfaceStepSchema,
 } from '../interfaces.js'
 
@@ -1088,6 +1089,12 @@ export const GuardInterfaceRowSchema = z
     startingState: z.string().optional(),
     /** The observable state the task leaves behind, as a state id — verbatim. */
     endState: z.string().optional(),
+    /** The resource the task acts ON, as its area's resource id — verbatim
+     *  (the registry describing the place travels on the VIEW, so the panel can
+     *  group by place and the pane can render the place's readables). */
+    at: z.string().optional(),
+    /** The resource the task leaves the user at, when it moves them — verbatim. */
+    to: z.string().optional(),
     fingerprint: z.string(),
     /**
      * Flows that use this interface — realized (a scenario grounds on it) or merely
@@ -1145,6 +1152,14 @@ export const GuardInterfacesViewSchema = z
     /** The recipe fingerprint the mapping ran against. */
     recipeFingerprint: z.string().nullable(),
     interfaces: z.array(GuardInterfaceRowSchema),
+    /**
+     * The RESOURCE REGISTRY, per area — the catalog's own, verbatim: the places
+     * the rows' `at`/`to` name, each with its kind, title and readables. On the
+     * view (not per row) because a place is defined ONCE and many rows point at
+     * it; the panel joins ids to titles, the pane renders the open row's place.
+     * Absent where the catalog names none (cli/api-only catalogs).
+     */
+    resources: z.record(z.string(), z.array(InterfaceResourceSchema)).optional(),
     /** One row per driver-registry surface (the banner), registry order. */
     surfaces: z.array(GuardInterfaceSurfaceSchema),
     totals: z

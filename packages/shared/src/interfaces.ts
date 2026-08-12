@@ -23,6 +23,7 @@
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { GuardDriverIdSchema } from './guard/drivers.js'
+import { GUARD_WEB_ROLES, GUARD_WEB_STATES, GuardWebLocatorSchema } from './guard/web-steps.js'
 
 /** The closed step vocabulary, shared by every surface. */
 export const InterfaceStepKindSchema = z.enum([
@@ -312,6 +313,43 @@ function templateSlotNames(template: string): string[] {
 }
 
 /**
+ * The template↔slots agreement rule, shared by every row-grammar fact (the cli
+ * row fact and the web rows readable): every `<name>` declared, every declared
+ * slot used, no slot declared twice — so a template can never promise a value the
+ * slots do not describe, and a slot can never describe a value the line does not
+ * print.
+ */
+function rowGrammarIssues(
+  fact: { template: string; slots: readonly InterfaceRowSlot[] },
+  ctx: z.RefinementCtx,
+): void {
+  const declared = fact.slots.map((slot) => slot.name)
+  const duplicate = declared.find((name, i) => declared.indexOf(name) !== i)
+  if (duplicate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['slots'], message: `slot \`${duplicate}\` is declared twice` })
+  }
+  const used = templateSlotNames(fact.template)
+  for (const name of used) {
+    if (!declared.includes(name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['template'],
+        message: `template names \`<${name}>\`, which no slot declares`,
+      })
+    }
+  }
+  for (const name of declared) {
+    if (!used.includes(name)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['slots'],
+        message: `slot \`${name}\` never appears in the template`,
+      })
+    }
+  }
+}
+
+/**
  * One ROW-GRAMMAR fact: the SHAPE of a line of enumerated or tabular output —
  * the literal text the program prints with its varying parts named as `<slot>`
  * placeholders, plus what each slot may hold. This is the one fact kind that
@@ -345,32 +383,7 @@ export const InterfaceRowFactSchema = z
     when: z.string().min(1).optional(),
   })
   .strict()
-  .superRefine((fact, ctx) => {
-    const declared = fact.slots.map((slot) => slot.name)
-    const duplicate = declared.find((name, i) => declared.indexOf(name) !== i)
-    if (duplicate) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['slots'], message: `slot \`${duplicate}\` is declared twice` })
-    }
-    const used = templateSlotNames(fact.template)
-    for (const name of used) {
-      if (!declared.includes(name)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['template'],
-          message: `template names \`<${name}>\`, which no slot declares`,
-        })
-      }
-    }
-    for (const name of declared) {
-      if (!used.includes(name)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['slots'],
-          message: `slot \`${name}\` never appears in the template`,
-        })
-      }
-    }
-  })
+  .superRefine(rowGrammarIssues)
 export type InterfaceRowFact = z.infer<typeof InterfaceRowFactSchema>
 
 /**
@@ -701,6 +714,234 @@ export const InterfaceContractSchema = z
   .strict()
 export type InterfaceContract = z.infer<typeof InterfaceContractSchema>
 
+// ---------------------------------------------------------------------------
+// RESOURCES — the PLACES of a stateful surface, defined once per area
+// (decided 2026-08-12). A web task acts somewhere: a screen, a dialog, a panel.
+// Before this region that somewhere was smeared across the catalog — a `group`
+// naming a family, and a states registry where most entries were really
+// locations (`rules-panel-open` is not a world, it is a place). A resource is
+// the place made first-class: WHERE a task happens, WHAT can be read off it,
+// and — through the interfaces' own `at`/`to` — how a user gets there.
+//
+// The unit of IDENTITY does not move: an interface stays one invocable thing
+// with its own fingerprint (the 2026-08-10 decision), and nothing in this
+// region is ever fingerprinted. A resource is the ENVELOPE — the rendering,
+// grounding and reading unit — so the catalog can present a medium number of
+// medium-sized resources while drift stays per-interaction.
+//
+// READABLES are the web analog of the cli io facts: structured facts about what
+// a resource visibly shows, in the vocabulary the web driver already asserts
+// (`web-steps.ts`) so the generator can compile them to `expect` blocks instead
+// of inventing assertions from doc prose, and the visual judge can be handed
+// "what this screen is supposed to show". The contract region's absence rule
+// applies verbatim: an OMITTED array means the extraction established nothing,
+// an EMPTY one established "none", and nothing here is ever guessed.
+//
+// Every readable takes an optional `id` from day one, deliberately unused by
+// anything yet: it is the name a later capture step (`read the header into
+// ${captured:…}`) or count assertion will reference, reserved now so those land
+// additively — no second format event.
+// ---------------------------------------------------------------------------
+
+/**
+ * A resource id — kebab-case, one token (`repo-report`, `rules-dialog`), the same
+ * enforced shape a state id has and for the same reason: `at`/`to` resolve by
+ * equality, and a sentence that slips into the field is a place nothing can
+ * ever arrive at.
+ */
+export const InterfaceResourceIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'a resource id is kebab-case — a sentence is not a resource id')
+export type InterfaceResourceId = z.infer<typeof InterfaceResourceIdSchema>
+
+/**
+ * What KIND of place it is: a `screen` owns an address (a navigate step reaches
+ * it), a `dialog` opens over one and blocks it, a `panel` is a region of one
+ * that swaps in without leaving it. Closed at three — the vocabulary of places
+ * a web surface has, not of widgets it contains (a dropdown is a control of its
+ * resource, never a resource).
+ */
+export const InterfaceResourceKindSchema = z.enum(['screen', 'dialog', 'panel'])
+export type InterfaceResourceKind = z.infer<typeof InterfaceResourceKindSchema>
+
+/**
+ * A readable's name — same enforced kebab-case as every id here. Optional on
+ * every readable, and referenced by NOTHING yet (see the region header): it
+ * exists so a future capture/count vocabulary can point at one fact without a
+ * format change.
+ */
+export const InterfaceReadableIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'a readable id is kebab-case')
+export type InterfaceReadableId = z.infer<typeof InterfaceReadableIdSchema>
+
+/**
+ * One TEXT MARKER a resource shows: a stable visible substring, as the page
+ * renders it — never a value, a count, or anything that moves between runs
+ * (the varying lines belong to {@link InterfaceRowsReadableSchema}). `within`
+ * scopes it to one element the way a web expectation's `within` does; omitted
+ * means the resource's whole surface. Compiles to `expect: { within, text }`.
+ */
+export const InterfaceMarkerReadableSchema = z
+  .object({
+    id: InterfaceReadableIdSchema.optional(),
+    /** The element the text is read from; omitted ⇒ anywhere on the resource. */
+    within: GuardWebLocatorSchema.optional(),
+    /** The stable substring, as the page renders it. */
+    marker: z.string().min(1),
+    /** The one condition it appears under. */
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+export type InterfaceMarkerReadable = z.infer<typeof InterfaceMarkerReadableSchema>
+
+/**
+ * One NON-INTERACTIVE element the resource renders, as a user finds it: role +
+ * accessible name (`getByRole` semantics, the locator the driver already uses).
+ * The plainest readable — "the thing is there" — for elements whose accessible
+ * name never appears in the page's text (an `aria-label`led region, a heading).
+ * Controls are NOT listed here: what can be clicked is the interactions'
+ * business, and a control worth declaring facts about goes in `controls`.
+ * Compiles to `expect.visible`.
+ */
+export const InterfaceElementReadableSchema = z
+  .object({
+    id: InterfaceReadableIdSchema.optional(),
+    element: GuardWebLocatorSchema,
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+export type InterfaceElementReadable = z.infer<typeof InterfaceElementReadableSchema>
+
+/**
+ * One CONTROL and the ARIA states it EXPOSES — the readable with no cli analog,
+ * and the missing grounding for the driver's state assertions: the expect
+ * vocabulary can already assert `checked | pressed | selected | expanded |
+ * disabled`, but nothing told the generator WHICH controls expose WHICH states,
+ * so it could never safely write one. This fact is that answer, per control.
+ * These are exactly the facts with no text form — a toggle's position renders
+ * as a colour, and only the state assertion states it honestly.
+ *
+ * `states` declares exposure, never a value: which position the switch is in
+ * belongs to a scenario's assertion, not to the catalog.
+ */
+export const InterfaceControlReadableSchema = z
+  .object({
+    id: InterfaceReadableIdSchema.optional(),
+    control: GuardWebLocatorSchema,
+    /** The ARIA states this control exposes — the driver's own closed set. */
+    states: z.array(z.enum(GUARD_WEB_STATES)).min(1),
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((fact) => new Set(fact.states).size === fact.states.length, {
+    path: ['states'],
+    message: 'a state is declared once',
+  })
+export type InterfaceControlReadable = z.infer<typeof InterfaceControlReadableSchema>
+
+/**
+ * One ROW-GRAMMAR readable: the shape of a REPEATED structure the resource
+ * renders — a violation card, a rule row, a repo list item — as the item's
+ * rendered text with its varying parts named `<slot>`, exactly the cli row
+ * fact's rule ({@link InterfaceRowFactSchema}) transplanted to the DOM. The
+ * item is addressed by ROLE (its accessible name varies per item, so a
+ * role+name locator cannot say "any of them"), inside the `within` container
+ * when the role alone is ambiguous on the page.
+ *
+ * What it buys today is bounded honestly: "a row whose text contains X exists"
+ * (`expect.text` scoped to the container) plus the shape itself for the visual
+ * judge and the reader. "Exactly N rows" is NOT assertable — no expect member
+ * counts elements, and the vocabulary grows only when a real claim cannot be
+ * stated without it. A count a page prints as text is a marker, not a row.
+ */
+export const InterfaceRowsReadableSchema = z
+  .object({
+    id: InterfaceReadableIdSchema.optional(),
+    /** The container, when the item role alone is ambiguous on the page. */
+    within: GuardWebLocatorSchema.optional(),
+    /** The repeated element's role — one entry is printed once PER ITEM. */
+    item: z.enum(GUARD_WEB_ROLES),
+    /** The item's rendered text, varying parts written `<name>`. */
+    template: z.string().min(1),
+    /** Every slot the template names. At least one — an item with none is a marker. */
+    slots: z.array(InterfaceRowSlotSchema).min(1),
+    /** The one condition the items appear under. */
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine(rowGrammarIssues)
+export type InterfaceRowsReadable = z.infer<typeof InterfaceRowsReadableSchema>
+
+/**
+ * Everything a resource visibly shows, as structured facts — the four kinds,
+ * each optional under the contract region's absence rule (omitted = nothing
+ * established; empty = established none).
+ */
+export const InterfaceReadablesSchema = z
+  .object({
+    markers: z.array(InterfaceMarkerReadableSchema).optional(),
+    elements: z.array(InterfaceElementReadableSchema).optional(),
+    controls: z.array(InterfaceControlReadableSchema).optional(),
+    rows: z.array(InterfaceRowsReadableSchema).optional(),
+  })
+  .strict()
+export type InterfaceReadables = z.infer<typeof InterfaceReadablesSchema>
+
+/**
+ * ONE PLACE of a surface, defined once in its area's registry. Deliberately
+ * carries NO opened-by list: how a user gets here is what the interfaces' own
+ * `at`/`to` already say (every interface with `to` naming this resource opens
+ * it), and a second copy of that relation could only drift from the first —
+ * a reader joins it, the way `apiEffects` is joined to its api entries.
+ */
+export const InterfaceResourceSchema = z
+  .object({
+    id: InterfaceResourceIdSchema,
+    kind: InterfaceResourceKindSchema,
+    /** The place's name as a reader knows it — "the Rules dialog". */
+    title: z.string().min(1),
+    /**
+     * The resource this one sits ON (a panel) or OVER (a dialog), by id in the
+     * same registry. This is what keeps a flow's location chain CHECKABLE
+     * across nesting: a task that arrives `to: repo-report` hands off to one
+     * acting `at: violations-list` because the panel's `of` chain reaches the
+     * screen — without it the handoff is two ids nothing relates. A screen
+     * carries none: it is the thing everything else is `of`.
+     */
+    of: InterfaceResourceIdSchema.optional(),
+    /** One line on what the place is for. */
+    description: z.string().min(1).optional(),
+    readables: InterfaceReadablesSchema.optional(),
+  })
+  .strict()
+  .superRefine((resource, ctx) => {
+    if (resource.kind === 'screen' && resource.of) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['of'],
+        message: 'a screen sits on nothing — `of` belongs to a panel or a dialog',
+      })
+    }
+    // A readable id is a NAME — one fact per name, across all four kinds, so a
+    // future reference can never point at two facts.
+    const seen = new Set<string>()
+    for (const kind of ['markers', 'elements', 'controls', 'rows'] as const) {
+      resource.readables?.[kind]?.forEach((fact, i) => {
+        if (!fact.id) return
+        if (seen.has(fact.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['readables', kind, i, 'id'],
+            message: `readable \`${fact.id}\` is named twice in this resource`,
+          })
+        }
+        seen.add(fact.id)
+      })
+    }
+  })
+export type InterfaceResource = z.infer<typeof InterfaceResourceSchema>
+
 export const InterfaceSchema = z
   .object({
     /** `<type>/<slug>`, e.g. `cli/tasks-add`. */
@@ -741,6 +982,31 @@ export const InterfaceSchema = z
      * optionality and fingerprint rules as `startingState`.
      */
     endState: InterfaceStateIdSchema.optional(),
+    /**
+     * THE LOCATION CONTRACT, half one: the resource this task acts ON — a
+     * resource id from its area's registry ({@link InterfacesFileSchema.resources}).
+     * Split out of the state contract 2026-08-12: before resources existed,
+     * "where the task happens" rode in `startingState` as pseudo-states
+     * (`rules-panel-open`), and the registry filled with places instead of
+     * worlds. `at` is the place; `startingState` keeps saying the WORLD — a
+     * task can need both ("on the repo report, with a rule silenced").
+     * Optional so cli/api catalogs (and web catalogs written before resources)
+     * parse unchanged, and never fingerprinted: where a task happens is not
+     * WHICH task it is.
+     */
+    at: InterfaceResourceIdSchema.optional(),
+    /**
+     * Half two: the resource the task LEAVES THE USER AT, when — and only when —
+     * it moves them (`open-repo-report` is at `dashboard-home`, to
+     * `repo-report`; closing a dialog is at the dialog, to what it covered).
+     * A task that acts in place carries `at` alone: the location contract is
+     * authored as one piece, so an omitted `to` on an `at`-bearing task means
+     * "stays put", not "unestablished". The join this enables is deliberate:
+     * every task with `to` naming a resource IS that resource's opened-by
+     * list, which is why the resource itself stores none. Same optionality and
+     * fingerprint rules as `at`.
+     */
+    to: InterfaceResourceIdSchema.optional(),
     /**
      * THE UI-TO-API RELATION: the api operations this task's steps invoke, as
      * {@link InterfaceSchema.id}s of the api entries in the SAME catalog
@@ -822,10 +1088,24 @@ export const InterfacesFileSchema = z
      * `repos` task starts from — so a group-scoped registry could not express a
      * flow's own walk.
      *
+     * A state is a WORLD, never a place (2026-08-12): "a rule is silenced" is a
+     * state; "the rules dialog is open" is a location, and locations live in
+     * {@link InterfacesFileSchema.resources}, referenced by the interfaces' own
+     * `at`/`to`. Before the split most of this registry was places wearing
+     * state ids, and two registries describing the same dialog two ways could
+     * never be matched.
+     *
      * Additive and optional (a catalog that names no states parses unchanged),
      * and never fingerprinted — see {@link interfaceFingerprint}.
      */
     states: z.record(z.string(), z.array(InterfaceStateSchema)).optional(),
+    /**
+     * THE RESOURCE REGISTRY, per AREA: interface TYPE → the places that area's
+     * tasks act on, each defined once with what can be read off it — see the
+     * RESOURCES region header. Keyed like `states` and for the same reason:
+     * navigation crosses families. Additive, optional, never fingerprinted.
+     */
+    resources: z.record(z.string(), z.array(InterfaceResourceSchema)).optional(),
     /** Per interface TYPE (a driver-registry id) → how that catalog was derived. */
     source: z.record(z.string(), InterfaceCatalogSourceSchema).optional(),
   })
@@ -849,6 +1129,39 @@ export const InterfacesFileSchema = z
       })
       registry.set(area, ids)
     }
+    // The resource registry resolves the same way, scoped to the same key.
+    const places = new Map<string, Set<string>>()
+    for (const [area, resources] of Object.entries(file.resources ?? {})) {
+      const ids = new Set<string>()
+      resources.forEach((resource, i) => {
+        if (ids.has(resource.id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['resources', area, i, 'id'],
+            message: `\`${resource.id}\` is defined twice in the \`${area}\` registry`,
+          })
+        }
+        ids.add(resource.id)
+      })
+      places.set(area, ids)
+      // The nesting relation resolves in ITS OWN registry, and never to itself.
+      resources.forEach((resource, i) => {
+        if (!resource.of) return
+        if (resource.of === resource.id) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['resources', area, i, 'of'],
+            message: `\`${resource.id}\` cannot sit on itself`,
+          })
+        } else if (!ids.has(resource.of)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['resources', area, i, 'of'],
+            message: `\`${resource.of}\` is not a resource the \`${area}\` registry defines`,
+          })
+        }
+      })
+    }
     file.interfaces.forEach((iface, i) => {
       const known = registry.get(iface.type)
       for (const field of ['startingState', 'endState'] as const) {
@@ -858,6 +1171,17 @@ export const InterfacesFileSchema = z
             code: z.ZodIssueCode.custom,
             path: ['interfaces', i, field],
             message: `\`${id}\` is not a state the \`${iface.type}\` registry defines`,
+          })
+        }
+      }
+      const knownPlaces = places.get(iface.type)
+      for (const field of ['at', 'to'] as const) {
+        const id = iface[field]
+        if (id && !knownPlaces?.has(id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, field],
+            message: `\`${id}\` is not a resource the \`${iface.type}\` registry defines`,
           })
         }
       }
@@ -937,7 +1261,10 @@ function stepIdentity(step: InterfaceStep): string {
  * by the same rule: which operations a click reaches is what the task DOES behind
  * the glass, not which task it is. The STATE CONTRACT is excluded too, and always
  * was: the world a task assumes and leaves is not WHICH task it is, so naming the
- * states (2026-08-11) left all 60 reference fingerprints byte-identical.
+ * states (2026-08-11) left all 60 reference fingerprints byte-identical. The
+ * LOCATION CONTRACT (`at`/`to`) and the resource registry follow the identical
+ * rule (2026-08-12): where a task happens is not which task it is, so making
+ * places first-class moved no fingerprint either.
  */
 export function interfaceFingerprint(
   iface: Pick<Interface, 'type' | 'entry' | 'steps'>,
