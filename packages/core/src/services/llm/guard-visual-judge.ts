@@ -43,6 +43,7 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { resolveFallbackModel, resolveModel } from '../../config/llm-models.js';
+import { installConfiguredLlmTransport } from './install-transport.js';
 
 /** Where verdicts are cached — under `.truecourse/.cache/`, derived and disposable. */
 export const VISUAL_JUDGE_CACHE_NAME = 'guard/visual-judge';
@@ -314,21 +315,36 @@ function quoteInvalidOutput(raw: unknown): string {
 }
 
 /**
+ * The transport the judge calls through. `guard run` is LLM-free up front and
+ * installs no transport at entry, so by the time a web step fails NOTHING has
+ * run the installer — and `getDefaultTransport()` alone would fall back to
+ * spawning `claude` with an api-mode model id the binary rejects: a guaranteed
+ * fast failure and a silently absent verdict. The judge therefore resolves the
+ * user's configured transport itself: `api` mode installs the direct-API
+ * transport as the process default (idempotent — repeat calls are one `stat`),
+ * `claude-code` mode installs nothing and the runner falls back to `claude -p`.
+ * An EE-injected transport is honored either way (the installer never clears a
+ * transport it did not install).
+ */
+export function resolveVisualJudgeTransport(): LlmTransport | undefined {
+  installConfiguredLlmTransport();
+  return getDefaultTransport();
+}
+
+/**
  * The judge `guard run` is wired with: the real transport, the repo's configured
  * model for the stage, and every failure mode flattened to `null`.
  *
  * The transport is resolved LAZILY, inside the call: building it eagerly would
- * resolve the `claude` binary on every run, including the overwhelming majority
- * that never fail a web step.
+ * resolve the `claude` binary (or the API config) on every run, including the
+ * overwhelming majority that never fail a web step.
  */
 export function createGuardVisualJudge(repoRoot: string): GuardVisualJudge {
   return async (input) => {
     let runner: VisualJudgeRunner;
     try {
       runner = spawnVisualJudgeRunner({
-        // The installed transport (api mode, or an EE-injected one) if there is
-        // one; otherwise `claude -p`, exactly as every other stage falls back.
-        transport: getDefaultTransport(),
+        transport: resolveVisualJudgeTransport(),
         model: resolveModel('guard.visualJudge', undefined, repoRoot),
         fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
       });

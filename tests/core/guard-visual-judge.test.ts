@@ -17,10 +17,11 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { resetKvCacheStore } from '@truecourse/llm';
 import type { GuardVisualJudgeInput } from '@truecourse/guard-runner';
-import type { LlmRequest } from '@truecourse/shared/llm';
+import { getDefaultTransport, setDefaultTransport, type LlmRequest } from '@truecourse/shared/llm';
 import {
   buildVisualJudgeUserPrompt,
   MAX_SCREENSHOT_BYTES,
+  resolveVisualJudgeTransport,
   runVisualJudge,
   spawnVisualJudgeRunner,
   visualJudgeCacheKey,
@@ -256,5 +257,53 @@ describe('the cache name lives under the disposable .cache tree', () => {
     const dir = path.join(repo, '.truecourse', '.cache', ...VISUAL_JUDGE_CACHE_NAME.split('/'));
     expect(fs.existsSync(dir)).toBe(true);
     expect(fs.readdirSync(dir)).toHaveLength(1);
+  });
+});
+
+describe('resolveVisualJudgeTransport — the judge respects the configured mode', () => {
+  // `guard run` is LLM-free up front, so NOTHING has installed a transport by the
+  // time a web step fails. The judge must therefore resolve the user's configured
+  // transport itself — in api mode, falling back to spawning `claude` with an
+  // api-mode model id is a guaranteed fast failure and a silently absent verdict
+  // (the bug this describe pins).
+  let home: string;
+  const envBefore = process.env.TRUECOURSE_HOME;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-vj-home-'));
+    process.env.TRUECOURSE_HOME = home;
+  });
+  afterEach(() => {
+    if (envBefore === undefined) delete process.env.TRUECOURSE_HOME;
+    else process.env.TRUECOURSE_HOME = envBefore;
+    // Drop whatever the test installed — the process default must not leak.
+    setDefaultTransport(undefined);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('api mode resolves the configured direct-API transport and installs it', () => {
+    fs.writeFileSync(
+      path.join(home, 'config.json'),
+      JSON.stringify({
+        llm: {
+          transport: 'api',
+          api: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'k',
+            baseURL: 'http://127.0.0.1:9/v1',
+          },
+        },
+      }),
+    );
+    const transport = resolveVisualJudgeTransport();
+    expect(transport).toBeTypeOf('function');
+    expect(getDefaultTransport()).toBe(transport);
+  });
+
+  it('claude-code mode resolves nothing — the runner falls back to `claude -p`', () => {
+    // An empty home: no config.json is the claude-code default.
+    expect(resolveVisualJudgeTransport()).toBeUndefined();
+    expect(getDefaultTransport()).toBeUndefined();
   });
 });
