@@ -4,12 +4,17 @@
  *   {@link GuardRunFilmstrip}     the RUN as a strip of tiles, one per captured
  *                                 step, in step order — the workspace's second
  *                                 index onto the same selection the step list
- *                                 carries. Hovering a tile previews it at reading
- *                                 size and re-aims the inspector; clicking pins
- *                                 that step. The failing tile is marked, because a
- *                                 reader scanning pictures is looking for exactly
- *                                 one of them. The session video hangs off the end
- *                                 as Replay: it is the whole session, not a step.
+ *                                 carries. Hovering a tile shows it at reading
+ *                                 size — the picture only, never the selection;
+ *                                 clicking pins that step. The failing tile is
+ *                                 marked, because a reader scanning pictures is
+ *                                 looking for exactly one of them. The session
+ *                                 video LEADS the strip as the Replay tile —
+ *                                 its own first frame under a play glyph, in the
+ *                                 strip's tile anatomy, set off by a hairline,
+ *                                 because it is evidence like its neighbours but
+ *                                 a different kind: the whole session, not a
+ *                                 step.
  *   {@link GuardStepScreenshot}   ONE step's screenshot, inside that step's
  *                                 inspector, on its `Screen` tab — the picture is
  *                                 the step's own record, exactly like its url and
@@ -254,10 +259,9 @@ export function GuardRunFilmstrip({
   where,
   screenshots,
   videos,
-  activeStep,
+  selectedStep,
   failedStep,
   onSelectStep,
-  onPreviewStep,
 }: {
   repoId: string;
   /** The bundle these came from — the same handle their bytes are addressed by. */
@@ -266,14 +270,12 @@ export function GuardRunFilmstrip({
   screenshots: readonly GuardEvidenceVisual[];
   /** The session recording, when the run kept one. */
   videos: readonly GuardEvidenceVisual[];
-  /** The step the workspace is currently showing — selected, or merely previewed. */
-  activeStep?: number;
+  /** The step the workspace is pinned to. */
+  selectedStep?: number;
   /** The one screenshot that records the failure, when the run has it. */
   failedStep?: number;
   /** Pin the workspace to this step. */
   onSelectStep: (step: number) => void;
-  /** Preview this step without moving the pin; null restores the selection. */
-  onPreviewStep: (step: number | null) => void;
 }) {
   const [preview, setPreview] = useState<{
     file: string;
@@ -288,47 +290,101 @@ export function GuardRunFilmstrip({
     <section
       aria-label="Run filmstrip"
       className="min-w-0 shrink-0"
-      onMouseLeave={() => {
-        setPreview(null);
-        onPreviewStep(null);
-      }}
+      onMouseLeave={() => setPreview(null)}
     >
-      <div className="flex min-w-0 items-start gap-2">
+      {/* The strip is a FRAMED BAND, like the verdict card and the inspector —
+          the run's photographic record is a first-class pane of the workspace,
+          not loose thumbnails floating between two framed neighbours. */}
+      <div className="flex min-w-0 items-start gap-2 rounded border border-border bg-card p-2">
+        {videos.length > 0 && (
+          <>
+            {/* The session video, AS A TILE — the strip's own vocabulary, not a
+                chip beside it. It LEADS the strip: the whole-run record first,
+                then the per-step frames, with a hairline keeping the two kinds
+                of evidence apart. The poster is the recording's first frame
+                (its own honest thumbnail) under a scrim, with the play glyph
+                every video player has taught readers to press. Clicking toggles
+                the player below, exactly as before; the open state wears the
+                selected tile's ring. */}
+            <button
+              type="button"
+              aria-expanded={replay}
+              aria-controls="guard-session-replay"
+              onClick={() => setReplay((open) => !open)}
+              className={`group block w-32 shrink-0 cursor-pointer rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                replay
+                  ? "ring-2 ring-primary"
+                  : "hover:ring-1 hover:ring-primary/40"
+              }`}
+            >
+              <span className="relative block aspect-video w-full overflow-hidden rounded border border-border bg-black">
+                <video
+                  aria-hidden
+                  tabIndex={-1}
+                  muted
+                  preload="metadata"
+                  src={api.guardEvidenceVisualUrl(
+                    repoId,
+                    where,
+                    videos[0]!.file,
+                  )}
+                  className="pointer-events-none h-full w-full object-cover object-top"
+                />
+                {/* The scrim earns the glyph its contrast — a run's first frame
+                    is usually a white page, and a white glyph on it would
+                    vanish. */}
+                <span className="absolute inset-0 flex items-center justify-center bg-black/40 transition-colors group-hover:bg-black/50">
+                  <CirclePlay
+                    aria-hidden
+                    className="h-8 w-8 text-white drop-shadow-sm transition-transform group-hover:scale-110 motion-reduce:transition-none"
+                  />
+                </span>
+              </span>
+              <span className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-muted-foreground group-hover:text-foreground">
+                <span className="truncate">Replay</span>
+                <ChevronDown
+                  aria-hidden
+                  className={`ml-auto h-3 w-3 shrink-0 transition-transform ${replay ? "rotate-180" : ""}`}
+                />
+              </span>
+            </button>
+            {/* The hairline between the two kinds of evidence: one session, many
+                steps. `self-stretch` spans the tile and its label line alike. */}
+            <span aria-hidden className="w-px shrink-0 self-stretch bg-border" />
+          </>
+        )}
         <ul
           aria-label="evidence screenshots"
           className="scrollbar-thin flex min-w-0 flex-1 snap-x gap-1.5 overflow-x-auto pb-1"
         >
           {screenshots.map((visual) => {
             const label = visualLabel(visual);
-            const active = visual.step != null && visual.step === activeStep;
+            const selected =
+              visual.step != null && visual.step === selectedStep;
             const failed = visual.step === failedStep;
             return (
-              <li key={visual.file} className="w-24 shrink-0 snap-start">
+              <li key={visual.file} className="w-32 shrink-0 snap-start">
                 <button
                   type="button"
                   onClick={() => {
                     if (visual.step != null) onSelectStep(visual.step);
                   }}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={(e) =>
                     setPreview({
                       file: visual.file,
                       label,
                       rect: e.currentTarget.getBoundingClientRect(),
-                    });
-                    if (visual.step != null) onPreviewStep(visual.step);
-                  }}
+                    })
+                  }
                   // Cleared per tile, not only when the pointer leaves the whole
                   // section — the Replay button shares the section, and a preview
                   // that lingers over it reads as a stuck tooltip.
-                  onMouseLeave={() => {
-                    setPreview(null);
-                    onPreviewStep(null);
-                  }}
+                  onMouseLeave={() => setPreview(null)}
                   aria-label={`Select ${label} screenshot`}
-                  aria-pressed={active}
+                  aria-pressed={selected}
                   className={`block w-full cursor-pointer rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                    active
-                      ? "ring-1 ring-primary"
+                    selected
+                      ? "ring-2 ring-primary"
                       : "hover:ring-1 hover:ring-primary/40"
                   }`}
                 >
@@ -342,7 +398,8 @@ export function GuardRunFilmstrip({
                   <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
                     <span className="truncate">{label}</span>
                     {failed && (
-                      <span className="ml-auto font-medium text-red-600 dark:text-red-400">
+                      <span className="ml-auto inline-flex items-center gap-0.5 font-medium text-red-600 dark:text-red-400">
+                        <X aria-hidden className="h-3 w-3 shrink-0" />
                         failed
                       </span>
                     )}
@@ -352,24 +409,6 @@ export function GuardRunFilmstrip({
             );
           })}
         </ul>
-        {videos.length > 0 && (
-          <button
-            type="button"
-            aria-expanded={replay}
-            aria-controls="guard-session-replay"
-            onClick={() => setReplay((open) => !open)}
-            className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded border border-border px-1.5 py-1 text-[11px] outline-none hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary ${
-              replay ? "bg-muted/60 text-foreground" : "text-muted-foreground"
-            }`}
-          >
-            <CirclePlay aria-hidden className="h-3.5 w-3.5" />
-            Replay
-            <ChevronDown
-              aria-hidden
-              className={`h-3.5 w-3.5 transition-transform ${replay ? "rotate-180" : ""}`}
-            />
-          </button>
-        )}
       </div>
       {/* The session recording is the WHOLE run, not any one step, so it opens
           under the strip rather than inside a tile. */}

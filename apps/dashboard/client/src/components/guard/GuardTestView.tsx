@@ -16,8 +16,8 @@
  *                   it broke (clickable — it selects that step) and the one
  *                   "Next:" a reader acts on
  *   filmstrip       a browser run only: one tile per captured step, in step order,
- *                   the failing tile marked. Hover previews it at size, click
- *                   selects the step, Replay opens the session video
+ *                   the failing tile marked. Hover shows the tile at reading size,
+ *                   click selects the step, Replay opens the session video
  *   steps  │ inspector    the split that IS the investigation. Left: every step as
  *                   ONE dense line. Right: everything known about the selected one,
  *                   under four tabs. Each pane scrolls itself
@@ -27,9 +27,10 @@
  *
  * ONE SELECTION, and every pane is a projection of it. No pane owns private state:
  * the filmstrip tile, the step row and the inspector are three renderings of the
- * same number. HOVER IS A PREVIEW CHANNEL — sweeping the step list (or the strip)
- * re-renders the inspector without moving the selection, and leaving restores it,
- * so a reader can scan the run without losing their place.
+ * same number. THE SELECTION MOVES ONLY ON A CLICK (or its keyboard equivalent) —
+ * hover never re-aims the inspector, so a pointer crossing the list on its way
+ * somewhere else cannot yank the step a reader is mid-way through reading. The
+ * strip's hover preview shows the TILE at size; it does not touch the selection.
  *
  * FAILURE OWNS THE FIRST SELECTION, and says so in redundant channels: the verdict
  * band names it, the row is tinted, its filmstrip tile is marked. Error tint is the
@@ -544,29 +545,25 @@ const STEP_KIND =
 /**
  * ONE compact step: mark · number · kind · command, with its duration right
  * aligned. Clicking it moves the shared inspector to what that step expected,
- * returned and printed; hovering it previews the same without moving the
- * selection. The command never wraps — the row is for scanning, and the whole
- * text stays reachable in the title and in the inspector header.
+ * returned and printed — the ONLY thing that moves it; hovering a row changes
+ * nothing but the row's own hover paint. The command never wraps — the row is
+ * for scanning, and the whole text stays reachable in the title and in the
+ * inspector header.
  */
 function StepRow({
   step,
   failedStep,
   passed,
   selected,
-  active,
   onSelect,
-  onPreview,
   rowRef,
 }: {
   step: GuardScenarioStepView;
   failedStep: number | undefined;
   passed: boolean;
-  /** The one row the workspace is pinned to — what a mouse-leave returns to. */
+  /** The one row the workspace is pinned to — the inspector's subject. */
   selected: boolean;
-  /** The row the inspector is CURRENTLY showing (selected, or merely hovered). */
-  active: boolean;
   onSelect: () => void;
-  onPreview: () => void;
   rowRef?: (node: HTMLLIElement | null) => void;
 }) {
   const { glyph, label } = stepGlyph(step.n, failedStep, passed);
@@ -578,7 +575,7 @@ function StepRow({
       ref={rowRef}
       aria-label={`Step ${step.n}: ${step.command} — ${label}`}
       className={`border-b border-border/50 last:border-b-0 ${
-        active
+        selected
           ? "bg-primary/[0.055] ring-1 ring-inset ring-primary/20"
           : failed
             ? "bg-red-500/[0.05]"
@@ -592,8 +589,6 @@ function StepRow({
         title={step.command}
         tabIndex={selected ? 0 : -1}
         onClick={onSelect}
-        onFocus={onPreview}
-        onMouseEnter={onPreview}
         className={STEP_ROW}
       >
         <StepMark glyph={glyph} className="h-3 w-3" />
@@ -627,15 +622,11 @@ function StepRow({
  */
 function SetupRow({
   selected,
-  active,
   onSelect,
-  onPreview,
   rowRef,
 }: {
   selected: boolean;
-  active: boolean;
   onSelect: () => void;
-  onPreview: () => void;
   rowRef?: (node: HTMLLIElement | null) => void;
 }) {
   return (
@@ -643,7 +634,7 @@ function SetupRow({
       ref={rowRef}
       aria-label="Step 0: setup — the world the steps start in"
       className={`border-b border-border/50 ${
-        active ? "bg-primary/[0.055] ring-1 ring-inset ring-primary/20" : ""
+        selected ? "bg-primary/[0.055] ring-1 ring-inset ring-primary/20" : ""
       }`}
     >
       <button
@@ -652,8 +643,6 @@ function SetupRow({
         aria-label="Inspect setup"
         tabIndex={selected ? 0 : -1}
         onClick={onSelect}
-        onFocus={onPreview}
-        onMouseEnter={onPreview}
         className={STEP_ROW}
       >
         <Wrench aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -1096,16 +1085,12 @@ function RecordedFailureInspector({
 function RecordedFailureRow({
   failure,
   selected,
-  active,
   onSelect,
-  onPreview,
   rowRef,
 }: {
   failure: GuardFailureDetail;
   selected: boolean;
-  active: boolean;
   onSelect: () => void;
-  onPreview: () => void;
   rowRef: (node: HTMLLIElement | null) => void;
 }) {
   return (
@@ -1117,7 +1102,7 @@ function RecordedFailureRow({
         <li
           ref={rowRef}
           aria-label={`Step ${failure.step}: recorded run failure — failed`}
-          className={`bg-red-500/[0.05] ${active ? "ring-1 ring-inset ring-red-500/35" : ""}`}
+          className={`bg-red-500/[0.05] ${selected ? "ring-1 ring-inset ring-red-500/35" : ""}`}
         >
           <button
             type="button"
@@ -1126,8 +1111,6 @@ function RecordedFailureRow({
             title={failure.expected}
             tabIndex={selected ? 0 : -1}
             onClick={onSelect}
-            onFocus={onPreview}
-            onMouseEnter={onPreview}
             className={STEP_ROW}
           >
             <StepMark glyph="✗" className="h-3 w-3" />
@@ -1352,6 +1335,45 @@ function DrawerTab({
 }
 
 /**
+ * The verdict's OWN paint, at full strength — the one place a status reads at
+ * display size instead of chip size. Same four-colour vocabulary as every guard
+ * chip (`lib/guard-status.ts`): red is a verdict someone must act on, green is
+ * proven, blue is "no verdict yet, and someone can move it", grey is nobody's
+ * to-do. The card wears a wash of the same hue so the eye lands on the ruling
+ * before it reads anything.
+ */
+const VERDICT_TONE: Record<
+  GuardTestStatusView["plain"],
+  { card: string; word: string; Icon: typeof X }
+> = {
+  failed: {
+    card: "border-red-500/35 bg-red-500/[0.04]",
+    word: "text-red-600 dark:text-red-400",
+    Icon: X,
+  },
+  succeeded: {
+    card: "border-emerald-500/35 bg-emerald-500/[0.04]",
+    word: "text-emerald-600 dark:text-emerald-400",
+    Icon: Check,
+  },
+  blocked: {
+    card: "border-sky-500/35 bg-sky-500/[0.04]",
+    word: "text-sky-600 dark:text-sky-400",
+    Icon: Minus,
+  },
+  "never-run": {
+    card: "border-sky-500/35 bg-sky-500/[0.04]",
+    word: "text-sky-600 dark:text-sky-400",
+    Icon: Minus,
+  },
+  "not-testable": {
+    card: "border-border bg-card",
+    word: "text-muted-foreground",
+    Icon: Minus,
+  },
+};
+
+/**
  * THE scenario workspace — no header and no scroll box of its own, so it drops
  * straight into the merged flow detail's body under the flow's header and claims
  * the height that header leaves. {@link GuardTestView} is the same body with a
@@ -1398,12 +1420,8 @@ export function GuardScenarioBody({
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   /** The bundle's screenshots + session video; empty for every run that took none. */
   const [visuals, setVisuals] = useState<GuardEvidenceVisual[]>([]);
-  /** The step the workspace is PINNED to — what a mouse-leave returns to. */
+  /** The step the workspace is pinned to — every pane is a projection of it. */
   const [selectedStepNumber, setSelectedStepNumber] = useState<number | null>(
-    null,
-  );
-  /** The step being previewed under the pointer; null = none, so selection stands. */
-  const [hoveredStepNumber, setHoveredStepNumber] = useState<number | null>(
     null,
   );
   /** Which reading of the active step the inspector is open on. */
@@ -1523,6 +1541,9 @@ export function GuardScenarioBody({
     : passed
       ? "passed"
       : test.status.word.toLowerCase();
+  const verdictTone = VERDICT_TONE[test.status.plain];
+  const verdictHeadline =
+    verdictWord.charAt(0).toUpperCase() + verdictWord.slice(1);
   const milestones = useMemo(
     () => new Map((test.milestones ?? []).map((m) => [m.order, m])),
     [test.milestones],
@@ -1537,7 +1558,6 @@ export function GuardScenarioBody({
     const first = source?.steps[0]?.n ?? null;
     const failure = test.failure?.step;
     setSelectedStepNumber(failure ?? first);
-    setHoveredStepNumber(null);
     setTab("result");
   }, [resultKey, stepSignature]);
 
@@ -1546,13 +1566,11 @@ export function GuardScenarioBody({
     test.failure != null &&
     source != null &&
     !steps.some((step) => step.n === test.failure!.step);
-  // Hover is a PREVIEW channel: it re-aims every pane without moving the pin, so
-  // sweeping the list never costs a reader the step they were reading.
-  const activeStepNumber = hoveredStepNumber ?? selectedStepNumber;
-  const activeStep =
-    steps.find((step) => step.n === activeStepNumber) ?? null;
-  const activeRecordedFailure =
-    recordedFailureMissingFromSource && activeStepNumber === test.failure?.step
+  const selectedStep =
+    steps.find((step) => step.n === selectedStepNumber) ?? null;
+  const selectedRecordedFailure =
+    recordedFailureMissingFromSource &&
+    selectedStepNumber === test.failure?.step
       ? test.failure
       : null;
   const screenshots = visuals.filter((visual) => visual.kind === "screenshot");
@@ -1562,11 +1580,11 @@ export function GuardScenarioBody({
   // fresh array — does not.
   const shotSequence = screenshots.map((visual) => visual.file).join("|");
   useEffect(() => setOpenShot(null), [shotSequence]);
-  /** The active step's own screenshot — the `Screen` tab's value. */
-  const activeShot =
-    activeStepNumber == null
+  /** The selected step's own screenshot — the `Screen` tab's value. */
+  const selectedShot =
+    selectedStepNumber == null
       ? undefined
-      : screenshots.find((visual) => visual.step === activeStepNumber);
+      : screenshots.find((visual) => visual.step === selectedStepNumber);
   const completedSteps = test.failure
     ? steps.filter((step) => step.n < test.failure!.step).length
     : passed
@@ -1578,16 +1596,15 @@ export function GuardScenarioBody({
 
   const inspectStep = (step: number, reveal = false) => {
     setSelectedStepNumber(step);
-    setHoveredStepNumber(null);
     if (reveal)
       requestAnimationFrame(() =>
         stepRows.current.get(step)?.scrollIntoView({ block: "nearest" }),
       );
   };
-  const openActiveShot = () => {
-    if (!activeShot) return;
+  const openSelectedShot = () => {
+    if (!selectedShot) return;
     setOpenShot(
-      screenshots.findIndex((visual) => visual.file === activeShot.file),
+      screenshots.findIndex((visual) => visual.file === selectedShot.file),
     );
   };
 
@@ -1603,9 +1620,9 @@ export function GuardScenarioBody({
   const onListKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" || e.key === " ") {
       // A step that recorded a picture opens it where it is — the list stays put.
-      if (e.key === "Enter" && activeShot) {
+      if (e.key === "Enter" && selectedShot) {
         e.preventDefault();
-        openActiveShot();
+        openSelectedShot();
       }
       return;
     }
@@ -1640,19 +1657,32 @@ export function GuardScenarioBody({
         </p>
       )}
 
-      {/* THE VERDICT, in one or two lines — the status, whose fault it is, where
-          it broke, and the one thing to do next. Everything else about the failure
+      {/* THE VERDICT — the one thing a reader opens this page to learn, so it is
+          the page's single loudest element: the verdict word at display strength
+          with its mark beside it, on a card washed in the verdict's own colour.
+          The status chip is gone from here — a chip whispers, and beside the
+          word at full strength it was the same fact told twice. Everything else
+          on the card stays a quiet 11px fact; everything else about the failure
           reads at the step it happened on. */}
       <section
         aria-label="Test verdict"
-        className="min-w-0 shrink-0 border-b border-border pb-2.5"
+        className={`min-w-0 shrink-0 rounded border px-3 py-2.5 ${verdictTone.card}`}
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <GuardFlowStatusChip
-            status={test.status.plain}
-            word={verdictWord}
-            className="text-[11px]"
-          />
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <h3 className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Verdict
+          </h3>
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <verdictTone.Icon
+              aria-hidden
+              className={`h-4 w-4 shrink-0 ${verdictTone.word}`}
+            />
+            <span
+              className={`text-sm font-semibold leading-none ${verdictTone.word}`}
+            >
+              {verdictHeadline}
+            </span>
+          </span>
           {test.triage && <GuardTriageChip triage={test.triage} />}
           {test.failure?.visual && (
             <GuardVisualChip visual={test.failure.visual} />
@@ -1751,19 +1781,20 @@ export function GuardScenarioBody({
       </section>
 
       {/* THE RUN, AS PICTURES — one tile per captured step, in step order. The
-          strip is the scrubber: hovering previews a tile at size and re-aims the
-          inspector, clicking pins that step. A cli/api run recorded none, so a
-          cli/api run has no strip. */}
+          strip is the scrubber: hovering shows a tile at reading size, clicking
+          pins that step. A cli/api run recorded none, so a cli/api run has no
+          strip. */}
       {where && screenshots.length > 0 && (
         <GuardRunFilmstrip
           repoId={repoId}
           where={where}
           screenshots={screenshots}
           videos={videos}
-          {...(activeStepNumber != null ? { activeStep: activeStepNumber } : {})}
+          {...(selectedStepNumber != null
+            ? { selectedStep: selectedStepNumber }
+            : {})}
           {...(test.failure ? { failedStep: test.failure.step } : {})}
           onSelectStep={(step) => inspectStep(step, true)}
-          onPreviewStep={setHoveredStepNumber}
         />
       )}
 
@@ -1778,7 +1809,6 @@ export function GuardScenarioBody({
         <div className="guard-investigation-layout">
           <div
             className="guard-investigation-timeline flex min-h-0 min-w-0 flex-col"
-            onMouseLeave={() => setHoveredStepNumber(null)}
             onKeyDown={onListKeyDown}
           >
             <div
@@ -1792,11 +1822,7 @@ export function GuardScenarioBody({
                     <RecordedFailureRow
                       failure={test.failure}
                       selected={selectedStepNumber === test.failure.step}
-                      active={activeStepNumber === test.failure.step}
                       onSelect={() => inspectStep(test.failure!.step)}
-                      onPreview={() =>
-                        setHoveredStepNumber(test.failure!.step)
-                      }
                       rowRef={stepRowRef(test.failure.step)}
                     />
                   )}
@@ -1804,9 +1830,7 @@ export function GuardScenarioBody({
                     {source.setup && (
                       <SetupRow
                         selected={selectedStepNumber === SETUP_STEP}
-                        active={activeStepNumber === SETUP_STEP}
                         onSelect={() => inspectStep(SETUP_STEP)}
-                        onPreview={() => setHoveredStepNumber(SETUP_STEP)}
                         rowRef={stepRowRef(SETUP_STEP)}
                       />
                     )}
@@ -1835,9 +1859,7 @@ export function GuardScenarioBody({
                             failedStep={test.failure?.step}
                             passed={passed}
                             selected={step.n === selectedStepNumber}
-                            active={step.n === activeStepNumber}
                             onSelect={() => inspectStep(step.n)}
-                            onPreview={() => setHoveredStepNumber(step.n)}
                             rowRef={stepRowRef(step.n)}
                           />
                         ))}
@@ -1849,9 +1871,7 @@ export function GuardScenarioBody({
                 <RecordedFailureRow
                   failure={test.failure}
                   selected={selectedStepNumber === test.failure.step}
-                  active={activeStepNumber === test.failure.step}
                   onSelect={() => inspectStep(test.failure!.step)}
-                  onPreview={() => setHoveredStepNumber(test.failure!.step)}
                   rowRef={stepRowRef(test.failure.step)}
                 />
               ) : (
@@ -1863,31 +1883,31 @@ export function GuardScenarioBody({
           </div>
 
           <aside className="guard-investigation-inspector min-h-0 min-w-0">
-            {activeRecordedFailure ? (
+            {selectedRecordedFailure ? (
               <RecordedFailureInspector
-                failure={activeRecordedFailure}
+                failure={selectedRecordedFailure}
                 tab={tab}
                 onTab={setTab}
               />
-            ) : activeStepNumber === SETUP_STEP && source?.setup ? (
+            ) : selectedStepNumber === SETUP_STEP && source?.setup ? (
               <SetupInspector setup={source.setup} />
             ) : (
               <StepInspector
-                step={activeStep}
+                step={selectedStep}
                 failedStep={test.failure?.step}
                 passed={passed}
-                claim={stepClaim(activeStep, test, milestones)}
+                claim={stepClaim(selectedStep, test, milestones)}
                 tab={tab}
                 onTab={setTab}
                 {...(test.failure ? { failure: test.failure } : {})}
-                {...(activeShot && where
+                {...(selectedShot && where
                   ? {
                       picture: (
                         <GuardStepScreenshot
                           repoId={repoId}
                           where={where}
-                          visual={activeShot}
-                          onOpen={openActiveShot}
+                          visual={selectedShot}
+                          onOpen={openSelectedShot}
                         />
                       ),
                     }
