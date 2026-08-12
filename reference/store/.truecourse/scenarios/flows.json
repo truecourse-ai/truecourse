@@ -2730,7 +2730,7 @@
       "id": "open-a-non-git-repository",
       "title": "Open a non-git repository",
       "goal": "A developer opens a registered non-git directory and sees why commit-anchored actions are unavailable.",
-      "kind": "error",
+      "kind": "edge",
       "notes": "The seed deliberately has no git metadata. The banner is asserted verbatim, while the capitalized Analyze action, Git Diff toggle and Scan specs action are absent. The navigation cannot receive a second interface identity because it collides with the same route step used for an unanalyzed git repository (G83).",
       "startingState": {
         "stepCreatable": [
