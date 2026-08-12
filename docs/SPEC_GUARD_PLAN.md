@@ -5234,3 +5234,25 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `tests/shared/guard-web-steps.test.ts`, `tests/shared/guard-until-step.test.ts`,
     `tests/guard-runner/web-driver.test.ts` (eight new cases against the fixture's new
     `/controls` page), `tests/guard-runner/run-until-marker.test.ts`.
+
+92. **Near-duplicate chaining collapses distinct endpoint reference pages
+    (2026-08-12, cal.com reference corpus).** STATUS: OPEN. On the cal.diy
+    booking-lifecycle scan (39 curated docs from cal.com's llms.txt sites), the
+    relevance filter's deterministic near-duplicate detector dropped
+    `confirm-a-booking.md`, `decline-a-booking.md`, and
+    `get-a-booking-by-seat-uid.md` as a PAIRWISE CHAIN (confirm ≈ decline ≈
+    get-by-seat-uid ≈ get-a-booking, each hop "kept the fuller copy"), leaving only
+    `get-a-booking.md`. The pages are OpenAPI-generated endpoint references: the
+    boilerplate (headers table, auth note, response scaffolding) dominates the
+    diffable text, so similarity is high even though the documents specify opposite
+    operations — confirm vs decline suppressed each other. Two defects to weigh:
+    (a) chaining — A≈B, B≈C transitively collapses a whole family no member of
+    which is a near-dup of the survivor; (b) the similarity measure ignores the
+    identity-bearing tokens of a reference page (method + path + operation title),
+    which would cheaply separate these. Remedy used in the field: `spec docs
+    include` force-includes (`manualIncludes` in `specs/decisions.json`) — but a
+    user only discovers the drop by auditing `skippedDocs`, so the default silently
+    deletes spec surface on exactly the doc shape (generated API references) the
+    guard pipeline cares most about. Candidate fixes: exempt same-source sibling
+    docs whose H1/path differ in an operation verb; fold method+path into the
+    similarity key; or cap collapse at direct (non-transitive) pairs.
