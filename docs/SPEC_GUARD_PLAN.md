@@ -5362,3 +5362,21 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `uninstall` into `teardown:`. Tests:
     `tests/guard-runner/run-scenario-teardown.test.ts`,
     `tests/shared/guard-scenario-teardown.test.ts`.
+
+95. **The preparation gate reads the scenario's NEED, not its driver tag
+    (2026-08-12, cal.com reference corpus).** STATUS: BUILT. `runGuard` gated
+    every `driver: cli` scenario on `recipe.entry` — but web steps live inside
+    cli scenarios, and a web-only product (cal.com has no CLI) has no honest
+    `entry` to declare, so all 65 of the cal.diy corpus's browser scenarios
+    would have settled error with `recipe.web` present and boot-proven. The
+    gate now derives each cli scenario's preparation from its steps: a `run:`
+    step demands `entry` (unchanged message); browser/`request` steps demand
+    the served web surface, and a missing `web` block settles the same honest
+    unprepared error naming `web`; a scenario needing neither (pure
+    git/write/delete sandbox work) runs on either. The entry preflight probe
+    fires only when a selected scenario actually invokes the entry — a
+    web-only selection must not boot a binary no step runs. As built:
+    `packages/guard-runner/src/run.ts` (`entryExec` beside `servedExec`);
+    tests: `tests/guard-runner/run-driver-preparation.test.ts` (web-only runs
+    entryless; run-step still refuses naming `entry`; surface-less browser
+    scenario refuses naming `web`, not `entry`).

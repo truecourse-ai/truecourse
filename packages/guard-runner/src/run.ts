@@ -12,9 +12,11 @@ import {
   GUARD_FORMAT_VERSION,
   guardExecutionSteps,
   isApiRequestStep,
+  isRunStep,
   isWebStep,
   worstOutcome,
   type GuardApiScenario,
+  type GuardCliStep,
   type GuardBinds,
   type GuardLatest,
   type GuardManifest,
@@ -453,6 +455,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Teardown steps count: a browser or request step there still needs the surface.
     guardExecutionSteps(p.scenario).some((step) => isWebStep(step) || isApiRequestStep(step)),
   )
+  // What a cli scenario NEEDS decides its preparation, not its driver tag: only a
+  // `run:` step invokes the entry, so a scenario with none — a browser-only journey
+  // on a web-only product (cal.com has no CLI) — must not be gated on `entry`. Its
+  // preparation is the served web surface, and a missing one settles the same
+  // honest unprepared error a missing `entry` always has.
+  const entryExec = cliExec.filter((p) =>
+    guardExecutionSteps(p.scenario).some((step) => isRunStep(step as GuardCliStep)),
+  )
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
   // Both recipe shapes collapse into ONE named-server map here, and every
@@ -471,11 +481,23 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     }
   }
   const apiRunnableExec = api ? apiExec.filter((p) => boundServerById.has(p.scenario.id)) : []
-  const prepared = [...(hasEntry ? cliExec : []), ...apiRunnableExec]
+  const cliUnprepared: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; missing: string }[] = []
+  const cliPrepared: typeof cliExec = []
+  for (const p of cliExec) {
+    if (!hasEntry && entryExec.includes(p)) {
+      cliUnprepared.push({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' })
+    } else if (webSurface === undefined && servedExec.includes(p)) {
+      cliUnprepared.push({
+        ...p,
+        missing: 'recipe.json has no `web` block — the scenario’s browser/request steps have no served surface',
+      })
+    } else {
+      cliPrepared.push(p)
+    }
+  }
+  const prepared = [...cliPrepared, ...apiRunnableExec]
   const unprepared = [
-    ...(hasEntry
-      ? []
-      : cliExec.map((p) => ({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' }))),
+    ...cliUnprepared,
     ...(api
       ? unboundApi
       : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
@@ -613,7 +635,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Pre-flight the built entry ONCE before any cli scenario touches it: if it
     // can't even start, that is ONE loud entry-level error, not N indistinguishable
     // scenario failures. Runs under the build phase (before the run counter is announced).
-    if (buildsOwnEntry && resolvedEntry && cliExec.length > 0) {
+    // Probe only when a selected scenario will actually invoke the entry — a
+    // web-only selection must not boot a binary no step runs.
+    if (buildsOwnEntry && resolvedEntry && entryExec.length > 0) {
       const preflight = await preflightEntry({
         resolvedEntry,
         displayEntry: loaded.recipe.entry!,
