@@ -20,7 +20,7 @@
  * no-op — the same fail-soft rule every derived-store reader follows.
  */
 
-import { guardClaimKey, milestoneClaims, type GuardClaimsFile, type GuardFlowsFile, type GuardScenario } from '@truecourse/shared'
+import { guardClaimKey, guardExecutionSteps, milestoneClaims, type GuardClaimsFile, type GuardFlowsFile, type GuardScenario } from '@truecourse/shared'
 import type { ScenarioLoadError } from './scenario-loader.js'
 
 /** Repo-relative path of the flow corpus, for load-error attribution. */
@@ -60,7 +60,9 @@ export function crossCheckClaimRefs(sources: ClaimRefSources): ScenarioLoadError
   const identities = new Set(claims.claims.map(guardClaimKey))
 
   for (const { scenario, file } of scenarios) {
-    for (const [i, step] of scenario.steps.entries()) {
+    // Teardown steps included — a `dashboard uninstall` teardown step legitimately
+    // proves the uninstall claim, so its milestone tag resolves like any other.
+    for (const [i, step] of guardExecutionSteps(scenario).entries()) {
       for (const id of milestoneClaims(step.milestone)) {
         if (byId.has(id)) continue
         errors.push({

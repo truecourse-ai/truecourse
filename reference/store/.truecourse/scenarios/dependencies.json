@@ -171,7 +171,7 @@
         "vars": [
           {
             "name": "TRUECOURSE_GUARD_HOST_SERVICE",
-            "description": "set to `1` on a machine whose session owns a user-level service supervisor (`launchctl` for the logged-in GUI session, or `systemctl --user` with a running user manager) AND where the runner may install, start, stop and remove `com.truecourse.server` / `truecourse.service` plus write under `~/.truecourse/logs/`. The scenario leaves no service behind: its last step uninstalls. Not a secret",
+            "description": "set to `1` on a machine whose session owns a user-level service supervisor (`launchctl` for the logged-in GUI session, or `systemctl --user` with a running user manager) AND where the runner may install, start, stop and remove `com.truecourse.server` / `truecourse.service` plus write under `~/.truecourse/logs/`. The scenario leaves no service behind: `stop` and `uninstall` are its teardown steps, which the runner executes on every exit — a mid-scenario failure included. Not a secret",
             "secret": false
           }
         ]

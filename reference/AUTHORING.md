@@ -219,6 +219,15 @@ Scenario rules (format v3):
   Nothing else exists: no just-in-case sanity checks, no defensive
   trailing steps. Insurance duplicating a claim another flow owns is
   redundant coverage, and a step proving nothing is not authored.
+- HOST state a scenario legitimately mutates OUTSIDE the sandbox (a
+  user-level service it installs, a supervisor registration) is restored
+  by `teardown:` steps, never by trailing main steps: the runner stops at
+  the first failing step, and only teardown runs on every exit —
+  best-effort after a failure, verdict-affecting (and milestone-bearing:
+  a `stop`/`uninstall` teardown step IS that claim's proving step) on a
+  green run. Numbering is continuous after `steps`. Sandbox-only state
+  never earns a teardown — the sandbox is deleted either way (plan
+  item 94).
 - Non-interactive `analyze` steps pass `--llm`/`--no-llm` explicitly
   (the LLM gate is per-run consent, by decision).
 - Never point `TRUECOURSE_HOME` (or any tool home) inside the working

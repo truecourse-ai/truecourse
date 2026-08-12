@@ -15,6 +15,7 @@ import type {
 } from '@truecourse/shared'
 import {
   blockedPreconditionAnnotation,
+  guardExecutionSteps,
   milestoneClaims,
   milestoneOrder,
   visualAnnotation,
@@ -233,6 +234,18 @@ export async function runScenario(
   /** The step currently executing — what a `${captured:…}` miss is attributed to. */
   let stepInFlight = 1
 
+  // The FULL execution sequence: `steps`, then `teardown`, one continuous
+  // numbering. On a green run the boundary is invisible — a teardown step is an
+  // ordinary, verdict-affecting step. It matters on every other exit.
+  const mainCount = scenario.steps.length
+  const allSteps = guardExecutionSteps(scenario)
+  /**
+   * The best-effort teardown pass, assigned once the step machinery exists (it
+   * closes over the drivers and token resolvers). Hoisted so the outermost catch —
+   * which sits outside that machinery's scope — can still restore the host.
+   */
+  let finishTeardown = async (_reached: number): Promise<boolean> => true
+
   /** Where a driver's non-text artifacts land (a screenshot, a session video). */
   const evidenceDir = evidenceScenarioDir(ctx.repoRoot, ctx.runId, scenario.id)
 
@@ -291,42 +304,120 @@ export async function runScenario(
     const resolveEnv = (env: Record<string, string>): Record<string, string> =>
       applyCapturedEnv(applySandboxEnv(applyUniqueEnv(env, ctx.unique), sandbox.cwd), captured)
 
-    for (let i = 0; i < scenario.steps.length; i++) {
-      const step = scenario.steps[i]
+    /**
+     * The context ONE step executes under. `cancellable: false` is the best-effort
+     * teardown discipline: a cancelled run still restores the host, so its teardown
+     * steps run without the run signal (each still bounded by the step budget).
+     */
+    const stepContext = (stepIndex: number, cancellable: boolean) => ({
+      stepIndex,
+      sandbox,
+      repoRoot: ctx.repoRoot,
+      runId: ctx.runId,
+      scenarioId: scenario.id,
+      evidenceDir,
+      tok,
+      resolveExpect,
+      resolveEnv,
+      normText,
+      publishCaptures: (values: Record<string, string>) => {
+        for (const [name, value] of Object.entries(values)) captured.set(name, value)
+      },
+      stepTimeoutMs: ctx.stepTimeoutMs,
+      ...(cancellable && ctx.signal ? { signal: ctx.signal } : {}),
+      ...(ctx.onStep ? { onStep: ctx.onStep } : {}),
+    })
+
+    /**
+     * Execute every teardown step not yet reached, BEST-EFFORT — called on every
+     * non-green exit (a failure, an infrastructure error, a cancellation) so host
+     * state the scenario mutated outside its sandbox is restored on exactly the
+     * runs that used to leak it. `reached` is the 1-based index of the last step
+     * attempted; teardown resumes after it, never before the teardown boundary.
+     * The scenario has ALREADY settled, so nothing here can move the verdict: a
+     * step that misses or cannot run is recorded (`teardownMiss` on its evidence
+     * record) and the loop continues — the next step may still restore what it
+     * owns. Returns false when anything missed, which the result surfaces as the
+     * `teardownIncomplete` annotation.
+     */
+    finishTeardown = async (reached: number): Promise<boolean> => {
+      let complete = true
+      for (let j = Math.max(reached, mainCount); j < allSteps.length; j++) {
+        const step = allSteps[j]
+        const stepIndex = j + 1
+        stubs?.markStep(stepIndex)
+        try {
+          const outcome = await driverFor(step, drivers).execute(step, stepContext(stepIndex, false))
+          if (outcome.status === 'aborted') {
+            complete = false
+            continue
+          }
+          for (const r of outcome.records) r.teardown = true
+          const miss =
+            outcome.status === 'fail'
+              ? { expected: outcome.mismatch.expected, actual: outcome.mismatch.actual }
+              : outcome.status === 'error'
+                ? { expected: outcome.expected, actual: outcome.message }
+                : null
+          if (miss) {
+            complete = false
+            const last = outcome.records[outcome.records.length - 1]
+            if (last) last.teardownMiss = miss
+          }
+          records.push(...outcome.records)
+        } catch (e) {
+          // A `${captured:…}` whose value the interrupted run never produced, or
+          // any other reason the step could not be taken. Recorded, not thrown:
+          // an exception here would mask the scenario's own, already-settled result.
+          complete = false
+          const message = e instanceof Error ? e.message : String(e)
+          records.push({
+            index: stepIndex,
+            teardown: true,
+            argv: [],
+            repeat: 1,
+            iterationsRun: 0,
+            exitCode: null,
+            timedOut: false,
+            spawnError: message,
+            rawStdout: '',
+            rawStderr: '',
+            normStdout: '',
+            normStderr: '',
+            durationMs: 0,
+            teardownMiss: { expected: 'the teardown step to be taken', actual: message },
+          })
+        }
+      }
+      return complete
+    }
+
+    for (let i = 0; i < allSteps.length; i++) {
+      const step = allSteps[i]
       const stepIndex = i + 1
       stepInFlight = stepIndex
       const stepMilestone = milestoneOrder(step.milestone)
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
 
-      if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+      if (ctx.signal?.aborted) {
+        // Cancellation still restores the host: the steps already taken may have
+        // installed exactly what teardown removes. Nothing run yet ⇒ nothing to undo.
+        if (i > 0) await finishTeardown(i)
+        return abortedResult(base, stepIndex, start)
+      }
 
       // THE DISPATCH, and the only thing this loop knows about surfaces: the step
       // says how it acts, the registry says who takes it. What comes back is the
       // shared outcome vocabulary, so everything below is about the SCENARIO —
       // evidence, milestone attribution, the verdict — and nothing below branches
       // on what kind of step it was.
-      const outcome = await driverFor(step, drivers).execute(step, {
-        stepIndex,
-        sandbox,
-        repoRoot: ctx.repoRoot,
-        runId: ctx.runId,
-        scenarioId: scenario.id,
-        evidenceDir,
-        tok,
-        resolveExpect,
-        resolveEnv,
-        normText,
-        publishCaptures: (values) => {
-          for (const [name, value] of Object.entries(values)) captured.set(name, value)
-        },
-        stepTimeoutMs: ctx.stepTimeoutMs,
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
-        ...(ctx.onStep ? { onStep: ctx.onStep } : {}),
-      })
+      const outcome = await driverFor(step, drivers).execute(step, stepContext(stepIndex, true))
       if (ctx.signal?.aborted || outcome.status === 'aborted') {
+        await finishTeardown(stepIndex)
         return abortedResult(base, stepIndex, start)
       }
+      if (stepIndex > mainCount) for (const r of outcome.records) r.teardown = true
       records.push(...outcome.records)
       if (outcome.status === 'ok') continue
 
@@ -349,6 +440,11 @@ export async function runScenario(
               scenarioId: scenario.id,
             })
           : null
+
+      // The teardown steps not yet reached run NOW, best-effort, before the
+      // evidence is written — their records belong in the same bundle, and the
+      // host must be restored on exactly the runs that used to leak it.
+      const teardownComplete = await finishTeardown(stepIndex)
 
       // A step that could not be taken BEFORE it produced any record has nothing to
       // transcribe (a `cwd` that escapes the sandbox is the case): it settles like a
@@ -379,6 +475,7 @@ export async function runScenario(
           outcome: 'error',
           durationMs: Date.now() - start,
           ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+          ...(teardownComplete ? {} : { teardownIncomplete: true }),
           failure: { step: stepIndex, expected: outcome.expected, actual: outcome.message },
           ...(evidencePath ? { evidencePath } : {}),
         }
@@ -389,10 +486,11 @@ export async function runScenario(
         durationMs: Date.now() - start,
         // The flow milestone that broke — absent when the step is plumbing.
         ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+        ...(teardownComplete ? {} : { teardownIncomplete: true }),
         // Plumbing that broke in a MILESTONED scenario is a blocked precondition (a
         // setup step asserting nothing about the spec), not doc-vs-code drift. An
         // annotation only — the outcome stays `fail`.
-        ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
+        ...blockedPreconditionAnnotation(allSteps, stepIndex),
         failure: {
           step: stepIndex,
           expected: outcome.mismatch.expected,
@@ -416,7 +514,7 @@ export async function runScenario(
     // credentials, so there is nothing to redact out of the recorded excerpts.
     const violation = stubs?.settle() ?? null
     if (violation) {
-      const violationStep = violation.step ?? scenario.steps.length
+      const violationStep = violation.step ?? allSteps.length
       const evidencePath = writeEvidence({
         repoRoot: ctx.repoRoot,
         runId: ctx.runId,
@@ -435,13 +533,13 @@ export async function runScenario(
         sandboxCwd: sandbox.cwd,
         envPins: ENV_PINS,
       })
-      const milestone = milestoneOrder(scenario.steps[violationStep - 1]?.milestone)
+      const milestone = milestoneOrder(allSteps[violationStep - 1]?.milestone)
       return {
         ...base,
         outcome: 'fail',
         durationMs: Date.now() - start,
         ...(milestone ? { failedMilestone: milestone } : {}),
-        ...blockedPreconditionAnnotation(scenario.steps, violationStep),
+        ...blockedPreconditionAnnotation(allSteps, violationStep),
         failure: { step: violationStep, expected: violation.expected, actual: violation.actual },
         evidencePath,
       }
@@ -471,6 +569,9 @@ export async function runScenario(
     // naming the reference (the api driver's `UnknownVariableError` rule), never a
     // literal token handed to a child process.
     if (!(e instanceof CapturedValueError)) throw e
+    // The thrower is skipped (re-resolving it would throw identically); the
+    // teardown steps after it still run, best-effort, before evidence is written.
+    const teardownComplete = await finishTeardown(stepInFlight)
     const mismatch: ExpectMismatch = {
       subject: 'capture',
       expected: `\${captured:${e.variable}} to be captured by an earlier step`,
@@ -494,7 +595,8 @@ export async function runScenario(
       ...base,
       outcome: 'fail',
       durationMs: Date.now() - start,
-      ...blockedPreconditionAnnotation(scenario.steps, stepInFlight),
+      ...(teardownComplete ? {} : { teardownIncomplete: true }),
+      ...blockedPreconditionAnnotation(allSteps, stepInFlight),
       failure: { step: stepInFlight, expected: mismatch.expected, actual: mismatch.actual },
       evidencePath,
     }

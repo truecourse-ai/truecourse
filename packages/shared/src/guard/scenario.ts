@@ -139,6 +139,15 @@ export const GuardSandboxStepSchema = z.union([
   GuardApiRequestStepSchema,
 ])
 
+/**
+ * A LIST of sandbox steps — named so the two fields that carry one (`steps`,
+ * `teardown`) share one declaration-emit-sized type reference: inlining the full
+ * step union twice into the scenario schema's declaration exceeds the compiler's
+ * serialization cap (TS7056).
+ */
+export type GuardSandboxStepListSchema = z.ZodArray<typeof GuardSandboxStepSchema>
+const sandboxStepList: GuardSandboxStepListSchema = z.array(GuardSandboxStepSchema)
+
 // --- The closed normalizer set --------------------------------------
 
 export const GuardNormalizerSchema = z.enum([
@@ -526,7 +535,29 @@ export const GuardCliScenarioSchema = z
      * {@link GuardSandboxStepSchema}.
      */
     driver: z.literal('cli'),
-    steps: z.array(GuardSandboxStepSchema).min(1),
+    steps: sandboxStepList.min(1),
+    /**
+     * TEARDOWN steps — the restoration channel for HOST state a scenario
+     * legitimately mutates OUTSIDE its sandbox (a user-level service it installs,
+     * a supervisor registration), which the sandbox's own cleanup can never undo.
+     *
+     * On a green run these are ordinary steps: they execute after `steps` in
+     * order, their expectations are verdict-affecting, and they may carry
+     * milestones (a `dashboard uninstall` teardown step IS the uninstall claim's
+     * proving step). What the channel buys is the OTHER path: after a failure,
+     * an infrastructure error, or a cancellation, the runner still executes every
+     * not-yet-reached teardown step BEST-EFFORT — recorded in evidence, never
+     * changing the settled verdict, continuing past its own misses — so the host
+     * is restored on exactly the runs that used to leak it. A best-effort miss is
+     * annotated on the result (`teardownIncomplete`), never silent.
+     *
+     * Step NUMBERING is continuous: the first teardown step is step
+     * `steps.length + 1` everywhere an index appears (failures, evidence,
+     * load errors). Sandbox-only scenarios don't need this — the sandbox is
+     * deleted either way; a teardown list that only touches sandbox state is
+     * authoring noise. Additive and optional, so no format bump.
+     */
+    teardown: sandboxStepList.min(1).optional(),
   })
   .strict()
 
@@ -551,6 +582,21 @@ export const GuardScenarioSchema = z.discriminatedUnion('driver', [
   GuardCliScenarioSchema,
   GuardApiScenarioSchema,
 ])
+
+/**
+ * A scenario's FULL execution sequence: `steps` followed by `teardown` (cli only —
+ * the api driver's server lifecycle is runner-owned, so it has no teardown
+ * channel). This is the list every whole-scenario pass walks — the loader's
+ * pattern/capture/claim cross-checks, the runner's loop, the step-view — so a
+ * teardown step is numbered, validated, and rendered exactly like the step it is:
+ * index `steps.length + n` for the n-th teardown step.
+ */
+export function guardExecutionSteps(scenario: GuardCliScenario): GuardSandboxStep[]
+export function guardExecutionSteps(scenario: GuardScenario): (GuardSandboxStep | GuardApiStep)[]
+export function guardExecutionSteps(scenario: GuardScenario): (GuardSandboxStep | GuardApiStep)[] {
+  if (scenario.driver === 'cli' && scenario.teardown) return [...scenario.steps, ...scenario.teardown]
+  return [...scenario.steps]
+}
 
 
 export type GuardSandboxStep = z.infer<typeof GuardSandboxStepSchema>
@@ -775,6 +821,12 @@ export interface GuardScenarioStepView {
   /** The authoring note — why this assertion is the falsifiable form of the claim. */
   note?: string
   /**
+   * True for a TEARDOWN step — one that also runs best-effort after a failure to
+   * restore host state (see the scenario schema's `teardown`). Rendered as part of
+   * the one numbered list, wearing this flag.
+   */
+  teardown?: true
+  /**
    * What this step ACTUALLY did in the run the read named — merged in from that run's
    * evidence bundle (see {@link GuardStepActual}). Absent when the read named no run,
    * and when the step never executed in it: the detail then shows the authored half
@@ -812,7 +864,11 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
       }
     })
   }
-  return s.steps.map((step, i) => {
+  // ONE numbered list across the boundary: teardown steps follow the main steps
+  // with continuous numbering, wearing the `teardown` flag — the same indices the
+  // runner's failures and evidence records use.
+  return guardExecutionSteps(s).map((step, i) => {
+    const teardown = i >= s.steps.length ? { teardown: true as const } : {}
     // A request step taken in the sandbox reads exactly as it does in an api
     // scenario — `METHOD /path` and its matchers — and wears the `api` kind, because
     // the surface it acts on is the served one, not the shell.
@@ -825,6 +881,7 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
         ...milestoneView(step.milestone),
         ...(step.repeat != null ? { repeat: step.repeat } : {}),
         ...(step.note != null ? { note: step.note } : {}),
+        ...teardown,
       }
     }
     // A web step's row reads like every other row — what it does, what it asserts —
@@ -837,6 +894,7 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
         expectation: describeWebExpect(step.expect),
         ...milestoneView(step.milestone),
         ...(step.note != null ? { note: step.note } : {}),
+        ...teardown,
       }
     }
     const env = isProcessStep(step)
@@ -853,6 +911,7 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
       ...(step.cwd != null ? { cwd: step.cwd } : {}),
       ...(isRunStep(step) && step.tty ? { tty: true as const } : {}),
       ...(step.note != null ? { note: step.note } : {}),
+      ...teardown,
     }
   })
 }

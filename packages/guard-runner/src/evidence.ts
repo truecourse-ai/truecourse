@@ -208,6 +208,20 @@ export interface EvidenceStep {
    * that flowed. Absent when the step captures nothing.
    */
   captured?: Record<string, string>
+  /**
+   * True for a TEARDOWN step (the scenario's `teardown:` list) — on a green run an
+   * ordinary step wearing the flag, after a failure a best-effort restoration step
+   * whose own outcome never moved the verdict.
+   */
+  teardown?: true
+  /**
+   * A BEST-EFFORT teardown step's unmet expectation (or the reason it could not
+   * run). Advisory by construction: the scenario had already settled when this step
+   * executed, so the miss is recorded here — and as `teardownIncomplete` on the
+   * result — instead of becoming the failure. Never present on a verdict-affecting
+   * step, whose miss is the scenario's `mismatch`.
+   */
+  teardownMiss?: { expected: string; actual: string }
 }
 
 export interface WriteEvidenceParams {
@@ -292,6 +306,8 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       endedAtMarker: s.endedAtMarker,
       spawnError: s.spawnError,
       captured: s.captured,
+      ...(s.teardown ? { teardown: s.teardown } : {}),
+      ...(s.teardownMiss ? { teardownMiss: s.teardownMiss } : {}),
       // What THIS step printed, not just the focus step's files below — the record
       // a reader gets for every executed step, raw and head-truncated.
       stdout: stepExcerpt(s.rawStdout),
@@ -342,7 +358,19 @@ function renderTranscript(params: WriteEvidenceParams): string {
   lines.push(`outcome:  ${params.outcome}`)
   lines.push('')
   for (const s of params.steps) {
-    lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
+    // A teardown step says so in its header; after a failure it also carries its
+    // own best-effort miss, rendered before the body and marked advisory so it can
+    // never read as the scenario's verdict (that stays with the failing step).
+    const marks = [
+      ...(s.index === params.failingStep ? ['(failing)'] : []),
+      ...(s.teardown ? ['(teardown)'] : []),
+    ].join(' ')
+    lines.push(`── step ${s.index} ${marks}`.trimEnd())
+    if (s.teardownMiss) {
+      lines.push(`   ✗ teardown expectation not met (advisory — the scenario had already settled)`)
+      lines.push(`     expected: ${s.teardownMiss.expected}`)
+      lines.push(`     actual:   ${s.teardownMiss.actual}`)
+    }
     // A web step has no argv and no streams: it has an action, an address, a
     // screenshot, what it asserted next to what answered each assertion, and what
     // the page showed. That is its whole record.

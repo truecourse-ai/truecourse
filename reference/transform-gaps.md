@@ -4548,3 +4548,25 @@ above and plan item 91 for the field names and their semantics. Nothing in
 `reference/store/` was re-authored for them: the inventory above still describes
 the corpus as committed, and closing the claims those channels unblock is the
 corpus's own next pass.
+
+### G92. A scenario that installs HOST state had no failure-path cleanup — CLOSED (teardown channel)
+**What:** `run-the-dashboard-as-a-background-service` installs a real user-level
+service (`dashboard --service`, gated by `host-service-session`) and relied on
+its last two steps (`stop`, `uninstall`) to remove it, while the dependency's
+registration text promised "the scenario leaves no service behind". The promise
+only held on a fully green run: the runner stops at the first failing step, the
+sandbox teardown cannot touch a launchd/systemd registration, and before item
+91.4 the mid-flow `logs` step (G87) failed on EVERY run — so every run that got
+that far left the service installed and holding port 3001. The format had no way
+to say "run this even after a failure", and the authoring rule (every step
+proves or prepares) rightly forbade defensive trailing steps.
+**Owner:** Guard Run (schema + runner).
+**STATUS: CAPABILITY BUILT 2026-08-12** (plan item 94) — cli scenarios grew an
+optional `teardown:` step list: ordinary verdict-affecting steps (milestones
+included) on a green run, executed best-effort on every other exit —
+fail, infra error, cancellation — recorded in evidence (`teardown` /
+`teardownMiss`) and surfaced as the result's `teardownIncomplete` annotation
+when a best-effort step misses, never moving the settled verdict. The reference
+scenario IS re-authored against it: `stop`/`uninstall` moved into `teardown:`
+with their milestones intact, and the dependency registration text now states
+the teardown-backed promise.

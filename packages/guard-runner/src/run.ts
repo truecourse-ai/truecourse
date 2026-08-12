@@ -10,6 +10,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import {
   GUARD_FORMAT_VERSION,
+  guardExecutionSteps,
   isApiRequestStep,
   isWebStep,
   worstOutcome,
@@ -449,7 +450,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // same served surface, so a request-only scenario needs it built too.
   const webSurface = resolveWebSurface(loaded.recipe)
   const servedExec = cliExec.filter((p) =>
-    p.scenario.steps.some((step) => isWebStep(step) || isApiRequestStep(step)),
+    // Teardown steps count: a browser or request step there still needs the surface.
+    guardExecutionSteps(p.scenario).some((step) => isWebStep(step) || isApiRequestStep(step)),
   )
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api

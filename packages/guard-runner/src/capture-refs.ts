@@ -14,7 +14,7 @@
  * authoring path checks the identical sentences before a scenario is ever written.
  */
 
-import { captureDefects, type GuardScenario } from '@truecourse/shared'
+import { captureDefects, guardExecutionSteps, type GuardScenario } from '@truecourse/shared'
 import type { ScenarioLoadError } from './scenario-loader.js'
 
 /** One load error per capture rule the loaded corpus breaks. Pure. */
@@ -23,7 +23,10 @@ export function crossCheckCaptureRefs(
 ): ScenarioLoadError[] {
   const errors: ScenarioLoadError[] = []
   for (const { scenario, file } of scenarios) {
-    for (const defect of captureDefects(scenario.steps, scenario.setup)) {
+    // The ONE ordered list, teardown included: a teardown step reading a value a
+    // main step captured is a legitimate chain, and the numbering matches the
+    // runner's (teardown step 1 is step `steps.length + 1`).
+    for (const defect of captureDefects(guardExecutionSteps(scenario), scenario.setup)) {
       errors.push({ file, message: defect.message })
     }
   }

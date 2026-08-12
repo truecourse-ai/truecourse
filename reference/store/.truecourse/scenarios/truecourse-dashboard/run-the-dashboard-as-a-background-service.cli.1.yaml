@@ -141,7 +141,9 @@ steps:
       infrastructure error rather than a verdict. The api driver already has the verb
       this needs (`logs`, with a matcher that ends the wait), and the sandbox step union
       deliberately excludes the lifecycle verbs — that exclusion is what this step runs
-      into. Every step after it therefore depends on the runner reaching them.
+      into. The `--reconfigure` step below therefore depends on the runner reaching it;
+      the service's removal does not — `stop` and `uninstall` are teardown steps, which
+      run on every exit (plan item 94).
     milestone:
       - dashboard-overview-logs-tails-dashboard-logs-in-service-mode
   - run:
@@ -160,11 +162,12 @@ steps:
       Re-asking is only meaningful now that a mode HAS been saved — the `--service` run
       above saved it — so the question appearing here is the flag doing its one job. The
       answer is ESCAPE: cancelling ends the command without starting anything, which
-      leaves the running service and the saved mode exactly as they were for the two
-      steps below. Answering it for real would either re-enter service mode (proving
+      leaves the running service and the saved mode exactly as they were for the
+      teardown steps. Answering it for real would either re-enter service mode (proving
       nothing new) or hand the terminal to console mode and never return.
     milestone:
       - dashboard-overview-reconfigure-reprompts-for-run-mode
+teardown:
   - run:
       - dashboard
       - stop
@@ -177,6 +180,10 @@ steps:
       Stopping what the second step started. The command's own report is the assertion;
       the deeper observation — that the URL no longer answers — belongs to the
       uninstall step below, which is asked for the state of the machine afterwards.
+      TEARDOWN, because the service is HOST state the sandbox cannot undo: on a green
+      run this step proves its claim exactly as a trailing step did, and after any
+      earlier failure (the `logs` gap above included) it still runs, best-effort, so no
+      run leaves a service behind.
     milestone:
       - dashboard-overview-stop-stops-the-dashboard
   - run:

@@ -54,6 +54,7 @@ import {
   parseGuardStepActuals,
   guardEvidenceVisual,
   guardEvidenceVisuals,
+  guardExecutionSteps,
   type GuardEvidenceVisual,
   dismissedClaimKey,
   guardGapLabel,
@@ -1213,10 +1214,11 @@ function flowInterfaceIds(flowId: string, join: FlowJoin): string[] {
  */
 function scenarioDrivers(scenario: GuardScenario): GuardDriverId[] {
   if (scenario.driver === 'api') return ['api']
+  const steps = guardExecutionSteps(scenario)
   const drivers: GuardDriverId[] = []
-  if (scenario.steps.some((step) => !isWebStep(step) && !isApiRequestStep(step))) drivers.push('cli')
-  if (scenario.steps.some((step) => isWebStep(step))) drivers.push('web')
-  if (scenario.steps.some((step) => isApiRequestStep(step))) drivers.push('api')
+  if (steps.some((step) => !isWebStep(step) && !isApiRequestStep(step))) drivers.push('cli')
+  if (steps.some((step) => isWebStep(step))) drivers.push('web')
+  if (steps.some((step) => isApiRequestStep(step))) drivers.push('api')
   return drivers
 }
 
@@ -1687,10 +1689,11 @@ export async function readGuardClaims(repoKey: string, ref?: string): Promise<Gu
     }
   }
 
-  // Scenario steps, indexed by the claim ID their milestone tag names.
+  // Scenario steps, indexed by the claim ID their milestone tag names —
+  // teardown steps included (they carry milestones like any other step).
   const scenariosById = new Map<string, Map<string, GuardClaimScenarioRef>>()
   for (const s of scenarios) {
-    for (const [i, step] of s.steps.entries()) {
+    for (const [i, step] of guardExecutionSteps(s).entries()) {
       for (const id of milestoneClaims(step.milestone)) {
         let byScenario = scenariosById.get(id)
         if (!byScenario) scenariosById.set(id, (byScenario = new Map()))

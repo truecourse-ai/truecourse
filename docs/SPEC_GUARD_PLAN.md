@@ -5317,3 +5317,48 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `tests/guard-runner/visual-judge.test.ts` (a real browser: the judge fires once
     on a failing web step, never on a green one, never on a cli step, and a judge
     that throws leaves the run untouched).
+
+94. **The teardown channel — scenarios that mutate host state clean up on every
+    exit (2026-08-12).** STATUS: IMPLEMENTED. Found by the reference corpus: the
+    dashboard area's background-service flow installs a REAL user-level service
+    (`dashboard --service`, gated by the `host-service-session` supplied
+    dependency) and relied on its last two steps (`stop`, `uninstall`) to remove
+    it — but the runner stops at the first failing step, and the sandbox's own
+    cleanup cannot touch a launchd/systemd registration. Any mid-scenario failure
+    (and, before this item, the guaranteed `logs` follow-mode timeout) left the
+    service installed and holding port 3001. No workaround was possible in
+    authoring: the format had no way to say "run this even after a failure".
+
+    **The channel.** Cli scenarios (only — the api driver's server lifecycle is
+    runner-owned) grew an optional `teardown:` step list, same step union as
+    `steps`, additive so NO format bump. Step numbering is CONTINUOUS
+    (`steps.length + n`), and every whole-scenario pass walks the one concatenated
+    sequence via the new `guardExecutionSteps` helper: the loader's regex/capture/
+    milestone cross-checks, the step-list presentation, driver chips, the served-
+    surface scan.
+
+    **Semantics.** On a GREEN run teardown steps are ordinary, verdict-affecting
+    steps — they may carry milestones (the reference's `stop`/`uninstall` teardown
+    steps ARE those claims' proving steps). On every other exit — fail, infra
+    error, cancellation, even the `${captured:…}` birth-validation throw — the
+    runner executes every not-yet-reached teardown step BEST-EFFORT: without the
+    run signal (a cancelled run still restores the host; each step stays bounded
+    by the step budget), continuing past its own misses, recorded in the same
+    evidence bundle (`teardown` / `teardownMiss` on the step record, an advisory
+    block in the transcript), and NEVER moving the settled verdict. A best-effort
+    miss surfaces as the result's optional `teardownIncomplete` annotation —
+    "host state may remain" is a fact a reader gets told, not a silent leak.
+
+    **As built.** Schema: `shared/src/guard/scenario.ts` (`teardown`,
+    `guardExecutionSteps`, `GuardScenarioStepView.teardown`; a named
+    `GuardSandboxStepListSchema` alias keeps the doubled step union under the
+    TS7056 declaration-emit cap), `shared/src/guard/result.ts`
+    (`teardownIncomplete`). Runner: `guard-runner/src/run-scenario.ts`
+    (`finishTeardown`, hoisted so the outermost catch restores the host too),
+    `evidence.ts`, `scenario-loader.ts`, `claim-refs.ts`, `capture-refs.ts`,
+    `run.ts`. Engine/UI: `core/src/commands/guard-read.ts`,
+    `dashboard-client` step chips (`teardown` badge). Reference:
+    `run-the-dashboard-as-a-background-service.cli.1.yaml` moves `stop`/
+    `uninstall` into `teardown:`. Tests:
+    `tests/guard-runner/run-scenario-teardown.test.ts`,
+    `tests/shared/guard-scenario-teardown.test.ts`.

@@ -164,6 +164,7 @@ export function scenario(
     driver: 'cli',
     ...(partial.setup ? { setup: partial.setup } : {}),
     steps: partial.steps,
+    ...(partial.teardown ? { teardown: partial.teardown } : {}),
     normalize: partial.normalize ?? [],
   }
 }

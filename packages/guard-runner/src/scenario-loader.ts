@@ -18,6 +18,7 @@ import {
   GUARD_FORMAT_VERSION,
   GuardScenarioSchema,
   firstInvalidMatchPattern,
+  guardExecutionSteps,
   type GuardScenario,
 } from '@truecourse/shared'
 import { readGuardClaimsCorpus, readGuardFlowsCorpus, scenariosDir } from './store.js'
@@ -143,7 +144,8 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
     // A `matches` source the schema accepts but `new RegExp` rejects would throw
     // (log matcher) or silently never match (stream/body/json) mid-run, after a
     // sandbox execution has already been paid for. Fail loud at load instead.
-    const badRe = firstInvalidMatchPattern(parsed.data.steps)
+    // Teardown steps are checked too — they execute like any other.
+    const badRe = firstInvalidMatchPattern(guardExecutionSteps(parsed.data))
     if (badRe) {
       errors.push({
         file: rel,

@@ -275,6 +275,18 @@ export const GuardScenarioResultSchema = z
      * failure (nothing executed, so there is no failing step to point at).
      */
     blockedOn: GuardBlockedDependencySchema.optional(),
+    /**
+     * Teardown-incomplete ANNOTATION (always `true` when present): after this
+     * scenario settled, one of its BEST-EFFORT teardown steps (run because an
+     * earlier step had already failed or errored) did not meet its expectation or
+     * could not run — host state the scenario promised to restore may remain (a
+     * user-level service still installed, a supervisor entry left behind). Never an
+     * outcome and never a pass/fail input: the settled verdict stands, and the
+     * evidence transcript carries each teardown step's own record. Absent on every
+     * green run (there a teardown step is an ordinary, verdict-affecting step) and
+     * whenever every best-effort teardown step succeeded.
+     */
+    teardownIncomplete: z.boolean().optional(),
   })
   .strict()
 export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>
