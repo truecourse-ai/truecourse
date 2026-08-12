@@ -154,8 +154,13 @@ describe('the visual judge annotates failing web steps', () => {
       expect(path.basename(asked.screenshotPath)).toBe('step-2.png')
       expect(fs.readFileSync(asked.screenshotPath).subarray(1, 4).toString()).toBe('PNG')
 
-      // The compact annotation the committable board carries…
-      expect(result.failure?.visual).toEqual({ verdict: 'no', summary: NOT_VISIBLE.screenSummary })
+      // The inline annotation the committable board carries — the WHOLE reading,
+      // rationale included, because the dashboard renders from here…
+      expect(result.failure?.visual).toEqual({
+        verdict: 'no',
+        summary: NOT_VISIBLE.screenSummary,
+        rationale: NOT_VISIBLE.rationale,
+      })
       // …the diff, where the full rationale lives…
       const diff = evidenceFile(repo, 'web.judge.cli.1', 'diff.txt')
       expect(diff).toContain('visual-judge:')

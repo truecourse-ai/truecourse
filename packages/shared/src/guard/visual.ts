@@ -41,29 +41,45 @@ export const GuardVisualJudgmentSchema = z
 export type GuardVisualJudgment = z.infer<typeof GuardVisualJudgmentSchema>
 
 /**
- * Cap on the summary stored INLINE in `LATEST.json`. The board is committable and
- * read whole on every dashboard load, so it carries the verdict plus a glance —
- * the full rationale lives in the evidence transcript, where length is free.
+ * Cap on EACH field stored INLINE in `LATEST.json` — a guard against a runaway
+ * reply, never a display budget. The reading renders WHOLE in the dashboard: a
+ * verdict is a few sentences per field, and truncating it was tried (at 240) and
+ * produced a note that trailed off exactly where it got useful. The board is
+ * committable, so the ceiling exists only to keep a pathological reply from
+ * bloating it.
  */
-export const VISUAL_SUMMARY_LIMIT = 240
+export const VISUAL_INLINE_LIMIT = 2000
 
-/** The compact form a run result carries — see {@link VISUAL_SUMMARY_LIMIT}. */
+/** The inline form a run result carries — see {@link VISUAL_INLINE_LIMIT}. */
 export const GuardVisualAnnotationSchema = z
   .object({
     verdict: GuardVisualAnswerSchema,
-    /** The judge's `screenSummary`, truncated to {@link VISUAL_SUMMARY_LIMIT}. */
+    /** The judge's `screenSummary` — what is on screen. */
     summary: z.string(),
+    /**
+     * The judge's `rationale` — WHY the assertion missed against what is
+     * visible, the half a reader actually acts on. Optional only for boards
+     * written before the field existed; every newly judged failure carries it.
+     */
+    rationale: z.string().optional(),
   })
   .strict()
 export type GuardVisualAnnotation = z.infer<typeof GuardVisualAnnotationSchema>
 
-/** Squeeze one judgment into the inline annotation a result stores. */
+/** One inline field: whitespace-collapsed, whole unless pathologically long. */
+function inline(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim()
+  return collapsed.length > VISUAL_INLINE_LIMIT
+    ? `${collapsed.slice(0, VISUAL_INLINE_LIMIT - 1)}…`
+    : collapsed
+}
+
+/** The inline annotation a result stores — the whole reading, both halves. */
 export function visualAnnotation(judgment: GuardVisualJudgment): GuardVisualAnnotation {
-  const summary = judgment.screenSummary.replace(/\s+/g, ' ').trim()
   return {
     verdict: judgment.expectedVisible,
-    summary:
-      summary.length > VISUAL_SUMMARY_LIMIT ? `${summary.slice(0, VISUAL_SUMMARY_LIMIT - 1)}…` : summary,
+    summary: inline(judgment.screenSummary),
+    rationale: inline(judgment.rationale),
   }
 }
 

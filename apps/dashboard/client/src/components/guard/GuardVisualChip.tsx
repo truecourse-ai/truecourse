@@ -64,6 +64,7 @@ export function GuardVisualChip({
       content={
         <div className="space-y-1.5">
           <p>{visual.summary}</p>
+          {visual.rationale && <p>{visual.rationale}</p>}
           <p className="text-muted-foreground">{CAVEAT[visual.verdict]}</p>
           <p className="text-muted-foreground">
             A vision model read the failing step’s screenshot; the deterministic expectation alone

@@ -883,6 +883,8 @@ describe("the test, read inside its flow", () => {
               verdict: "yes",
               summary:
                 "The Security filter is applied — the heading reads “FILTERED BY: CATEGORY”, rendered uppercase.",
+              rationale:
+                "The asserted phrase is present under a different case: the page renders it uppercase via CSS, which is the case the text matcher compared against.",
             },
           },
         },
@@ -901,6 +903,10 @@ describe("the test, read inside its flow", () => {
     expect(within(inspector).getByText("on screen")).toBeInTheDocument();
     expect(
       within(inspector).getByText(/The Security filter is applied/),
+    ).toBeInTheDocument();
+    // …with the rationale — WHY the assertion missed — rendered WHOLE beside it.
+    expect(
+      within(inspector).getByText(/present under a different case/),
     ).toBeInTheDocument();
     // …and says the test-is-wrong signal plainly, in the failure's own pane.
     expect(

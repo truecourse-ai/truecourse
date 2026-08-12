@@ -291,6 +291,9 @@ function VisualJudgeRow({ visual }: { visual: GuardVisualAnnotation }) {
     <DiffRow label="on screen">
       <div className="space-y-1 pt-1 text-[11px] leading-snug">
         <p className="text-foreground">{visual.summary}</p>
+        {visual.rationale && (
+          <p className="text-foreground">{visual.rationale}</p>
+        )}
         {visual.verdict === "yes" && (
           <p className="text-sky-700 dark:text-sky-300">
             The expected result appears visible, so the assertion itself may be

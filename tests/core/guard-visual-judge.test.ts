@@ -206,6 +206,16 @@ describe('the prompts', () => {
     expect(VISUAL_JUDGE_SYSTEM_PROMPT).toContain('the ASSERTION is');
   });
 
+  it('the rationale is a DIAGNOSIS of the miss, not a restated answer', () => {
+    // The reader's question is "why did the assertion miss?" — the prompt must
+    // demand the comparison (absent vs different wording vs different case vs
+    // out of frame vs broken), not a description that stops at what is there.
+    expect(VISUAL_JUDGE_SYSTEM_PROMPT).toContain('WHY the assertion missed');
+    expect(VISUAL_JUDGE_SYSTEM_PROMPT).toContain('DIFFERENT wording');
+    expect(VISUAL_JUDGE_SYSTEM_PROMPT).toContain('different case or format');
+    expect(VISUAL_JUDGE_SYSTEM_PROMPT).toContain('quote the closest match');
+  });
+
   it('the user prompt carries the claim, the expectation and BOTH halves of the mismatch', () => {
     const prompt = buildVisualJudgeUserPrompt(input());
     expect(prompt).toContain('the notes list shows every saved note');

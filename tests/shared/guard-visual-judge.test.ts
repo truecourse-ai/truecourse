@@ -11,7 +11,7 @@ import {
   GuardFailureDetailSchema,
   GuardVisualAnnotationSchema,
   GuardVisualJudgmentSchema,
-  VISUAL_SUMMARY_LIMIT,
+  VISUAL_INLINE_LIMIT,
   visualAnnotation,
   visualJudgeLines,
   type GuardVisualJudgment,
@@ -39,16 +39,33 @@ describe('GuardVisualJudgmentSchema', () => {
 })
 
 describe('visualAnnotation', () => {
-  it('carries the verdict and a whitespace-collapsed summary', () => {
+  it('carries the verdict, the summary AND the rationale — the WHY is the value', () => {
     const annotated = visualAnnotation({ ...judgment, screenSummary: 'a\n  b   c' })
-    expect(annotated).toEqual({ verdict: 'no', summary: 'a b c' })
+    expect(annotated).toEqual({ verdict: 'no', summary: 'a b c', rationale: judgment.rationale })
     expect(GuardVisualAnnotationSchema.safeParse(annotated).success).toBe(true)
   })
 
-  it('caps the inline summary — LATEST.json is compact, the transcript is not', () => {
-    const annotated = visualAnnotation({ ...judgment, screenSummary: 'x'.repeat(1_000) })
-    expect(annotated.summary.length).toBe(VISUAL_SUMMARY_LIMIT)
-    expect(annotated.summary.endsWith('…')).toBe(true)
+  it('renders a real verdict WHOLE — the cap is a runaway guard, not a display budget', () => {
+    // A vision model's reading is a few sentences per field; nothing realistic
+    // reaches the ceiling, so what the reader sees is never cut off mid-thought.
+    const realistic = visualAnnotation(judgment)
+    expect(realistic.summary).toBe(judgment.screenSummary)
+    expect(realistic.rationale).toBe(judgment.rationale)
+
+    const runaway = visualAnnotation({
+      ...judgment,
+      screenSummary: 'x'.repeat(VISUAL_INLINE_LIMIT * 2),
+      rationale: 'y'.repeat(VISUAL_INLINE_LIMIT * 2),
+    })
+    expect(runaway.summary.length).toBe(VISUAL_INLINE_LIMIT)
+    expect(runaway.summary.endsWith('…')).toBe(true)
+    expect(runaway.rationale?.length).toBe(VISUAL_INLINE_LIMIT)
+  })
+
+  it('a board written before `rationale` existed still parses — additive, like `visual` itself', () => {
+    expect(
+      GuardVisualAnnotationSchema.safeParse({ verdict: 'no', summary: 'an old row' }).success,
+    ).toBe(true)
   })
 })
 
