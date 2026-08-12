@@ -196,6 +196,22 @@ tool/outcome schema gets **one re-ask** (invalid output quoted back, same
 turn budget); two consecutive malformed turns end the session with a
 structured `malformed` failure — never an exception, never a stranded task.
 
+**Automatic resume (decision 2026-08-12, from Sarkis's §6 review).** A
+session that exhausts its turn budget may be RESUMED — re-entered with the
+same session id, the same context, and a fresh budget — up to `maxResumes`
+times within the one run; the count is a parameter each session type sets
+(§§6–8), defaulting to 0 so a session that does not opt in behaves exactly
+as before. The reason is scale: at documentation scale a budget that binds
+is the NORMAL path, not a rare failure, and the only thing that can trigger
+a manual resume is the user re-running the whole command — which would make
+one scan a hand-driven sequence of 3–5 invocations. Rules: resumption is
+automatic and invisible to the caller; each resume emits its own transcript
+event, so the turns are attributable; the hard limit is
+`(maxResumes + 1) × budget` and is never negotiable at runtime; and a
+session that exhausts the LAST budget ends exactly as it does today — a
+loud structured `budget-exhausted` outcome naming what it did not reach,
+never an "I found nothing". Resume grants time; it never grants leniency.
+
 **Module placement.** The loop (`runAgentLoop`: turn budget, token ceiling,
 tool dispatch, transcript events, re-ask) lives in
 `packages/shared/src/llm/agent-loop.ts` — transport-agnostic, next to the
@@ -400,8 +416,19 @@ The corpus-path scan (relevance, area-tags, vocabulary reconciliation,
 overlap, curation) re-shaped as agent sessions, over a doc universe
 this workstream also acquires.
 
-STATUS: design settled 2026-08-11 (owner: Doil). §§6.1–6.5 are the
-binding design; implementation may start per the phasing in §6.5. One
+STATUS: design settled 2026-08-11, revised 2026-08-12 (owner: Doil).
+§§6.1–6.5 are the binding design; implementation may start per the
+phasing in §6.5. The 2026-08-12 revision answers Sarkis's review, and
+each answer is stated where it binds: automatic resume becomes a loop
+capability (§3.3) because at documentation scale an exhausted budget is
+the normal path, not a rare failure; engine-side splitting is REMOVED
+rather than assigned an owner (§6.1), because its blind spot is a set of
+doc pairs no corpus can record, and breadth is instead settled by the
+area-settling session that owns the label (§6.3); the cache records each
+session's tool read-set so a changed read invalidates the entry (§6.5,
+Option B); and the overlap outcome now reports the sections it opened, a
+skim detector the review's own budget arguments cannot supply (§6.2).
+Budgets are settled against a real corpus for the first time (§6.4). One
 question is open and does not block it: `transform-gaps.md` G10 and G12
 name Spec Scan as the claims store's owner, against the 2026-08-06
 decisions cited in the boundary above. If those decisions are the ones
@@ -440,6 +467,22 @@ a reader can tell "no overlap found" from "the budget ran out";
 in §6.2. Silently reducing what the engine considers is the one failure
 this workstream refuses.
 
+**A bound scales by RESUMING, never by dividing** (decision 2026-08-12,
+from Sarkis's §6 review). A budget that binds is answered by granting the
+same session another budget — automatically, up to a fixed count, then a
+loud failure (§3.3) — and never by cutting the area into parts. The reason
+is the principle above: both mechanisms leave a gap, but only one of them
+can be written down. A session that exhausts its last budget leaves a gap
+that is a LIST OF DOCS (`notReached`) — the corpus records it and a reader
+knows exactly what it means. A split leaves a gap that is the set of doc
+PAIRS spanning the parts: combinatorial, absent from every output, and
+unrecordable without enumerating precisely the pairs §6.3 stopped
+enumerating. Engine-side splitting is therefore REMOVED from this
+workstream. An area too big to examine is not a scheduling problem to be
+solved over a dead session's corpse — it is a VOCABULARY defect, and it is
+fixed one stage earlier by the area-settling session, which is alive, holds
+the whole corpus, and already owns the label set (§6.3).
+
 **Vocabulary reconciliation** is named above because §3.2 admits no
 unclassified LLM stage and `curate()`'s vocab pass is one today (cached
 under `consolidator/vocab`). It is corpus-wide by construction — it
@@ -461,6 +504,46 @@ into a per-doc session; its disposition is settled in §6.3.
   runs on a cheap, fast model today, which §3.4 retires — the same
   uncapped count moves onto the one flagship model, so the cost curve
   steepens with the count.
+
+  FIELD EVIDENCE 2026-08-12 (the first run of these sessions at
+  documentation scale — 766 Confluence docs from the Plat.ai LOS corpus,
+  hand-driven per §6.3 because the shared loop does not exist yet; 450 docs
+  kept, 875 tag mentions over 199 concerns, settled to 103 areas). What
+  binds is TIME, not context: the largest area's inputs are 54.7 KB (~14k
+  tokens), so no area is close to a context limit, and the cost is entirely
+  the section reads a session spends to rule on a suspicion. Observed
+  drill-in pace is 1.5–3.5 docs/turn. At budget 12, three of the six areas
+  run ended `budget-exhausted` with 11, 15 and 24 docs unreached — meaning
+  a budget that binds is the ordinary case at this scale, not the rare one,
+  which is what §3.3's automatic resume answers. The distribution is what
+  makes that affordable: the median area holds 3 docs and only 13 of 103
+  areas exceed 20, so a raised ceiling is paid for by a handful of areas
+  and the rest never approach it.
+- **A session that skims cannot be told from one that reads.** Of the six
+  areas above, the one that reported full coverage is the least
+  trustworthy: `core/endpoints` (123 docs) closed in 10 turns having
+  "reached" every doc at 12.3 docs/turn — four to eight times the pace of
+  every area that actually opened sections — and returned 0.10 findings per
+  doc, against 0.31 for `core/funding` and 0.22 for `core/auth`, which are
+  the same kind of material (its 120 curated members are `kind: spec`
+  without exception). Turn count cannot separate the two, because a session
+  that never drills in spends few turns BY NOT WORKING. `notReached: []` is therefore not
+  evidence of coverage, and today nothing else is recorded: the outcome
+  carries no measure of what the session actually opened. This is the same
+  defect as the bullet above one level down — a gap that the corpus cannot
+  express — and it is the one an automatic resume will never fix, because a
+  skimming session never exhausts its budget to begin with.
+- **The cache can freeze a result its tool-reads have already made stale**
+  (Sarkis, 2026-08-12). Every session's cache key is its declared INPUTS,
+  and §6.3 deliberately keeps those minimal — doc content for curation, the
+  label sets for settling — so that adding one doc does not re-curate the
+  corpus. But a session also reads through its TOOLS: other docs, the
+  vocabulary, the doc list. That data changes between runs while the key
+  does not, so the first result is kept forever and the run that would
+  disagree with it never happens. The failure is silent by construction:
+  nothing in the corpus says a cached verdict rests on a document that has
+  since been rewritten. §6.5 settles which way this is resolved; what is
+  refused is leaving it unstated.
 - **Section identity survives real docs — landed 2026-08-07, do not
   regress it.** Section derivation read ATX headings only, so a claim
   anchored in a doc's lead paragraph bound to nothing and 6 of 17
@@ -513,8 +596,11 @@ into a per-doc session; its disposition is settled in §6.3.
 
 Per §3.2, every LLM task is an agent session. Common rules: one model
 (§3.4), the standard malformed-turn policy (§3.3), a per-session turn
-budget (defaults below, provisional — §6.4 says what settles them) and
-token ceiling.
+budget and token ceiling, and — where the session type sets one — a count
+of AUTOMATIC RESUMES (§3.3): exhausting the budget re-enters the same
+session with a fresh one, up to `maxResumes` times, and the hard limit is
+`(maxResumes + 1) × budget`. Budgets below are settled by the 2026-08-12
+field run except where marked provisional (§6.4).
 
 Two rules follow from §6.1's principle. A session's turn budget IS the
 bound, so a session that exhausts it ends on a structured
@@ -580,15 +666,36 @@ Three sessions, in order; each consumes the one before it.
   by keeping doc-level detail OUT of the inputs. Tools: look up which
   docs carry a label, and read a doc (to decide whether two labels
   really name one concept) — tool calls do not enter the cache key.
-  Done: the concern merges, the product merges, and a verdict on every
+  Done: the concern merges, the product merges, a verdict on every
   non-`core` product — justified, naming the second separately-deployed
-  application, or collapsed to `core`. That collapse is the one mapping
-  today's normalizer forbids ("never to `core`/`process`"); the
-  prohibition exists because no stage had the authority to make the
-  call, and this session does. This is where §6.2's product-axis rule
-  stops being a prompt sentence.
-- **Overlap session** (one per area, turn budget 12). Prompt: find the
-  real overlaps and conflicting statements among this area's docs.
+  application, or collapsed to `core` — and the SUBDIVISIONS (below). That
+  collapse is the one mapping today's normalizer forbids ("never to
+  `core`/`process`"); the prohibition exists because no stage had the
+  authority to make the call, and this session does. This is where §6.2's
+  product-axis rule stops being a prompt sentence.
+
+  **Subdivision lives here, and nowhere else** (decision 2026-08-12).
+  Merging and subdividing are the same judgment run in two directions —
+  does this label name one subject? — and this is the only session that can
+  make either call, because it is the only one holding the whole label set.
+  So it also splits a concern too broad to BE a subject: an area carrying
+  more than 40 docs is a subdivision candidate, and the session either
+  divides its label into subjects (`endpoints` → the subjects those docs
+  actually describe) or states why the breadth is real. The threshold is a
+  prompt for judgment, never an automatic cut. The field run is the case
+  this answers: `endpoints` and `api` drew 123 and 116 docs, and neither is
+  a subject — they name a SHAPE, which is what a doc-curation session
+  reaches for when it labels a doc alone (§6.3's first session cannot see
+  that 116 siblings chose the same word). Sub-areas are ordinary areas:
+  nothing downstream can tell one from an area that was always separate,
+  and no split is recorded anywhere, because at this point in the pipeline
+  no comparison has been made to lose. This is the whole of §6.1's
+  "resume, never divide" — a division decided by a live session over a
+  label is a curation act; a division imposed on a dead session's area is
+  the unrecordable gap that principle refuses.
+- **Overlap session** (one per area, turn budget 15, `maxResumes` 2 — a
+  hard limit of 45 turns). Prompt: find the real overlaps and conflicting
+  statements among this area's docs.
   Inputs: the area's kept docs PLUS the heading-widened outside docs, as
   titles and outlines, not full contents. The widening stays: the doc
   sessions label independently, so the same subject lands under
@@ -596,7 +703,12 @@ Three sessions, in order; each consumes the one before it.
   compared. It is free string work, and dropping it would be exactly the
   silent thinning §6.1 refuses. Tools: read a doc section. Done: the
   overlap/conflict set with section anchors, an explicit "none found",
-  or `budget-exhausted` naming the docs it did not reach. It absorbs
+  or `budget-exhausted` naming the docs it did not reach — and, in every
+  case, the COUNT OF SECTIONS IT OPENED. That count is §6.2's skim
+  detector, and it is the one signal no budget can supply: a session that
+  declines to read never exhausts anything, so `notReached: []` proves
+  nothing on its own. It belongs in the corpus beside the completeness
+  fields, not in a log line. It absorbs
   today's separate verify pass, which exists only because detection runs
   on a cheap model and over-flags, so a stronger model re-reads each
   flag with full context; §3.4 retires that split, and one flagship
@@ -612,11 +724,15 @@ Three sessions, in order; each consumes the one before it.
   narrows its own reading (outlines first, drilling in only where topics
   collide) under the per-area budget, so the bound is an explicit
   budget, never a silent thinning of what is considered. An area whose
-  work outgrows one budget SPLITS into sub-areas that each get their own
-  session; `budget-exhausted` is the signal to split, not a permanent
-  gap. Splitting answers a bound that keeps binding — it is never the
-  default, because subdividing an area also stops comparing across the
-  parts.
+  work outgrows one budget is RESUMED, not divided (§3.3, §6.1): the same
+  session re-enters with a fresh budget, keeping the whole area in view,
+  twice. Only when the third budget is gone does it end
+  `budget-exhausted` — and that outcome is a real result, not a failure to
+  retry: the docs it reached were compared against the entire area, and
+  the ones it did not are named. The engine never splits an area here.
+  Breadth is settled one stage earlier, by the session that owns the label
+  (above); by the time an overlap session runs, its area is the subject it
+  is going to be.
 
 There is no relation session. Doc-to-doc relations were removed from the
 design (§6.1) and resolution is section-scoped: the overlap session
@@ -646,10 +762,16 @@ the one model's prices:
   BEFORE the doc sessions, so it cannot know whether re-tagging will
   actually move a label or leave a non-`core` product standing — the
   same honesty §7.7 applies to a recipe that may verify clean.
-- **overlap** — 1 × [3, 12] per area whose doc set (its kept docs plus
-  its heading-widened members) holds at least one changed doc.
+- **overlap** — 1 × [3, 45] per area whose doc set (its kept docs plus
+  its heading-widened members) holds at least one changed doc: budget 15,
+  and the ceiling is the hard limit `(maxResumes + 1) × budget` because a
+  resume is invisible to the caller and its turns are real spend (§3.3).
   Re-tagging can move a doc between areas, so this counts the areas
-  visible before the run; a doc that changes areas re-runs both.
+  visible before the run; a doc that changes areas re-runs both. The
+  ceiling is wide on purpose and the range must be PRESENTED as a range
+  (§3.5): the field run's areas are mostly tiny — median 3 docs, 13 of 103
+  above 20 — so the typical area closes in one budget with no resume, and
+  quoting an average here would sell a bill the large areas then break.
 
 Deterministic steps — discovery, grouping, the heading-widened
 membership net, persistence — estimate as free.
@@ -670,14 +792,40 @@ Unchanged items are excluded and labeled ("N of M docs changed"); when
 nothing changed the estimate has no stages and the confirm prompt is
 skipped — identical presentation to setup and generate.
 
-Turn ranges are provisional, and the analyze-only pivot changed what
-will settle them. The reference corpus no longer exercises this
-workstream — its spec-consolidation coverage was deleted for testing an
-engine this plan reimplements — and the six analyze docs it keeps are
-far too small to calibrate a budget against: no area there can exhaust
-anything. The numbers are settled by running the scan over a real
-corpus at documentation scale, where the pair count is the problem §6.2
-describes, and only then written back here.
+**Turn ranges, settled 2026-08-12** by the field run §6.2 records (766
+Confluence docs of the Plat.ai LOS corpus, sessions driven by hand because
+the shared loop does not exist yet). The reference corpus could never have
+settled them — its spec-consolidation coverage was deleted for testing an
+engine this plan reimplements, and its six analyze docs are too small for
+any area to exhaust anything — so these come from the only corpus at
+documentation scale this design has met:
+
+- **doc curation, budget 5, no resumes** — settled and generous. 760 of
+  766 docs finished in ONE turn, 4 in two, and the worst doc in the corpus
+  took 4. The `[1, 5]` range holds, but the estimate's max is the number
+  that misleads: this session's realistic cost is ~1 turn per doc, and
+  since it is the dominant term (one session per doc), an estimate quoting
+  5 overstates the whole scan several-fold. Presentation, not budget, is
+  what needs the care here.
+- **area settling, budget 8, no resumes** — 5 turns used of 8 on a 199-label
+  corpus, `notReached` empty. Kept at 8 rather than trimmed, because
+  subdivision (§6.3) is new work this run did not perform.
+- **overlap, budget 15, `maxResumes` 2** — the one number this run moved,
+  and the reasoning is in §6.2's field evidence. Budget 12 was adequate
+  below ~25 docs and bound hard above it (3 of 6 areas exhausted, 11–24
+  docs unreached at 1.5–3.5 docs/turn). 15 is chosen over a size-scaled
+  formula deliberately: a formula's constant would be fitted to this one
+  corpus, while the resume loop needs no constant — it adapts to a
+  session's actual difficulty, which the field run shows a doc count does
+  not predict (two 41-doc areas ran at 1.5 and 3.5 docs/turn). Flat budget,
+  scaled by resumes, also keeps §6.3's shape: one number per session type.
+
+What remains uncalibrated is what this run could not exercise: the
+subdivision threshold (40 docs) is a judgment prompt whose effect on area
+sizes is unmeasured, and no session here ran under a real resume, so the
+`maxResumes` 2 ceiling is reasoned from observed pace, not observed
+behavior. Both are re-checked on the first loop-driven run and written
+back here.
 
 ### 6.5 Implementation plan
 
@@ -690,9 +838,25 @@ Phase A does not wait on it.
 **Phase A — deterministic + schema work.** Starts now; needs no loop.
 
 - The corpus carries its own completeness (§6.2). `CuratedCorpusSchema`
-  gains the field that separates a scan which finished from one a budget
-  stopped, with what it did not reach; `CurateStats` stays the run-local
-  record it already is.
+  gains, per area: the outcome that separates a scan which finished from
+  one a budget stopped, the docs it did not reach, the turns it spent
+  (resumes included), and the SECTIONS IT OPENED — the last of these being
+  the only field that catches a session which skimmed instead of stopping.
+  `CurateStats` stays the run-local record it already is.
+- **Cache honesty: record the read-set** (decision 2026-08-12, Sarkis's
+  Option B). A session's cache entry stores, beside its keyed inputs, the
+  path and content hash of every file it opened THROUGH A TOOL; a later
+  run treats the entry as a miss when any recorded hash has moved. This
+  keeps §6.3's minimal keys — the property that stops one new doc from
+  re-curating the corpus — while closing §6.2's freeze: a verdict that
+  rested on a document since rewritten is recomputed rather than served
+  forever. Option A (accept the staleness, write an ADR) is REJECTED: the
+  reasoning was sound but its failure mode is a corpus that looks complete
+  and is not, which is the single failure §6.1 exists to refuse, and a
+  read-set is a cheap price for not reintroducing it. The extra cost is
+  bounded by what sessions actually read — curation's tools fire rarely
+  (760 of 766 docs closed in one turn, opening nothing), so most entries
+  carry an empty read-set and behave exactly as today.
 - Heading-widening becomes area MEMBERSHIP rather than pair enumeration
   (§6.3). The deterministic net still runs and still costs nothing, but
   its output joins an area's doc set instead of producing candidate pairs
@@ -704,16 +868,21 @@ Phase A does not wait on it.
   vocab, overlap, verifyOverlap) per §3.4; `fallback` stays.
 - Rewrite the scan estimate per §6.4.
 
-**Phase B — the sessions.** Blocked on the shared loop landing.
+**Phase B — the sessions.** Blocked on the shared loop landing, and now on
+one loop capability specifically: automatic resume (§3.3), without which
+the overlap session's bound cannot scale and a full scan becomes a
+hand-driven sequence of re-runs.
 
 - The three sessions of §6.3, in order, each consuming the previous: doc
   curation, then area settling, then overlap. Area settling closes
   §6.2's product-axis gap — the `core` verdict becomes a session outcome
-  instead of a prompt sentence. Overlap retires the separate verify
-  pass, whose reason to exist is the cheap/strong model split §3.4
-  removed.
-- Calibrate the budgets: run the scan over a corpus at documentation
-  scale, then write the settled ranges back into §6.4.
+  instead of a prompt sentence — and owns subdivision, the only place an
+  area is ever divided. Overlap retires the separate verify pass, whose
+  reason to exist is the cheap/strong model split §3.4 removed.
+- Re-check on the first loop-driven run what the hand-driven one could not
+  (§6.4): whether `maxResumes` 2 is enough in practice, and what the
+  subdivision threshold does to the area-size distribution. Write both
+  back into §6.4.
 
 ## 7. Workstream: Guard Setup (owner: Sarkis)
 
