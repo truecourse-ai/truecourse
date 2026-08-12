@@ -201,17 +201,10 @@ export async function getResolution(
   let timeSum = 0;
   let timeCount = 0;
 
-  // Violations from disabled rules are filtered out of every other view, so
-  // they don't count here either. Resolved entries are bare refs (no ruleKey),
-  // so map id → rule from the `added` rows this walk already reads; a ref whose
-  // rule we never saw stays counted rather than being dropped on a guess.
-  const disabled = new Set<string>((await readProjectConfig(repoPath)).disabledRules ?? []);
-
   // When scoped to a past analysis, stop the chronological walk once we've
   // processed that analysis's file. Future resolutions aren't part of that
   // point-in-time's metrics.
   const firstSeenByViolationId = new Map<string, string>();
-  const ruleKeyByViolationId = new Map<string, string>();
   for (const name of files) {
     const snap = await readAnalysis(repoPath, name);
     if (!snap) continue;
@@ -220,11 +213,8 @@ export async function getResolution(
 
     for (const v of snap.violations.added) {
       if (v.firstSeenAt) firstSeenByViolationId.set(v.id, v.firstSeenAt);
-      ruleKeyByViolationId.set(v.id, v.ruleKey);
     }
     for (const r of snap.violations.resolved) {
-      const ruleKey = ruleKeyByViolationId.get(r.id);
-      if (ruleKey !== undefined && disabled.has(ruleKey)) continue;
       totalResolved++;
       const firstSeen = firstSeenByViolationId.get(r.id);
       if (firstSeen) {
@@ -239,12 +229,11 @@ export async function getResolution(
     if (upToAnalysisId && snap.id === upToAnalysisId) break;
   }
 
-  // Active-at-this-moment: LATEST when no selection (undefined id), otherwise
-  // the reconstructed active set as of the selected analysis. Both go through
-  // the shared resolver, which is what applies the `disabledRules` filter —
-  // reading LATEST directly here left the chips counting violations the list,
-  // the breakdown and the trend had already dropped.
-  const activeSet = await readActiveViolationsForAnalysisId(repoPath, upToAnalysisId);
+  // Active-at-this-moment: LATEST when no selection; otherwise the
+  // reconstructed active set as of the selected analysis.
+  const activeSet = upToAnalysisId
+    ? await readActiveViolationsForAnalysisId(repoPath, upToAnalysisId)
+    : (await readLatest(repoPath))?.violations.filter((v) => v.status === 'new' || v.status === 'unchanged') ?? null;
   if (activeSet) {
     for (const v of activeSet) {
       totalActive++;
