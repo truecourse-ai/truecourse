@@ -14,6 +14,7 @@
  * navigation that errors is an `error` (nothing about the app was observed).
  */
 
+import path from 'node:path'
 import type { GuardSandboxStep, GuardWebStep } from '@truecourse/shared'
 import { describeWebCommand, describeWebExpect, isWebStep } from '@truecourse/shared'
 import { stepExcerpt, type EvidenceStep } from '../evidence.js'
@@ -124,6 +125,17 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
           // The page's own words are this driver's output excerpt — the cli step's
           // `stdout` in the only form a browser has.
           ...(excerpt ? { excerpts: { stdout: excerpt } } : {}),
+          // …and its PICTURE, which is the half no amount of text carries. Offered
+          // to the runner's visual judge; a screenshot that could not be taken
+          // simply offers nothing, and the failure reads exactly as it always did.
+          ...(result.screenshot
+            ? {
+                visual: {
+                  screenshotPath: path.join(ctx.evidenceDir, result.screenshot),
+                  expectation: describeWebExpect(resolved.expect),
+                },
+              }
+            : {}),
         }
       }
       return { status: 'ok', records }

@@ -64,6 +64,8 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
+import { createGuardVisualJudge } from '../services/llm/guard-visual-judge.js';
+import type { GuardVisualJudge } from '@truecourse/guard-runner';
 import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
@@ -708,6 +710,12 @@ export interface GuardRunInProcessOptions {
   scenario?: string;
   /** Fires with each scenario's result as it settles — the CLI streams non-pass lines from it. */
   onScenarioResult?: (result: GuardScenarioResult) => void;
+  /**
+   * Override the visual judge for a failing web step. Production leaves it unset
+   * and gets {@link createGuardVisualJudge}; a test that must never reach a model
+   * passes its own (or a judge that returns `null`).
+   */
+  visualJudge?: GuardVisualJudge;
 }
 
 /**
@@ -715,8 +723,16 @@ export interface GuardRunInProcessOptions {
  * curate/generate drivers. Resolves the repo ref, runs the committed scenarios
  * through the guard-runner, and drives a tracker through GUARD_RUN_STEPS (build →
  * run, with a live per-scenario counter) so the CLI terminal and the dashboard
- * popup show the same stream. Deterministic and LLM-free. Returns the runner's
- * discriminated result untouched — the caller decides how to present each status.
+ * popup show the same stream. Returns the runner's discriminated result untouched
+ * — the caller decides how to present each status.
+ *
+ * Deterministic, with ONE annotation: a failing WEB step's screenshot is shown to
+ * a vision model, whose verdict is recorded beside the failure (see
+ * {@link createGuardVisualJudge}). It cannot move an outcome and it never fires on
+ * a green run, so a passing run is exactly as LLM-free as it always was. THIS is
+ * the boundary the judge is wired at — the guard-runner takes it as an optional
+ * callback, so every caller that does not come through here (birth validation, the
+ * test suite, a hosted executor) runs with no judge and no model at all.
  */
 export async function guardRunInProcess(
   repoRoot: string,
@@ -746,6 +762,8 @@ export async function guardRunInProcess(
       branch,
       commit,
       persist: true,
+      // Failure-only, fail-soft, and unable to change a verdict — see the doc above.
+      visualJudge: options.visualJudge ?? createGuardVisualJudge(repoRoot),
       onPhase: (phase, total) => {
         if (phase === 'build') tracker?.start('build');
         else {

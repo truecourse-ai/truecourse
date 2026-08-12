@@ -13,7 +13,14 @@ import type {
   GuardFileExpect,
   GuardScenarioResult,
 } from '@truecourse/shared'
-import { blockedPreconditionAnnotation, milestoneOrder } from '@truecourse/shared'
+import {
+  blockedPreconditionAnnotation,
+  milestoneClaims,
+  milestoneOrder,
+  visualAnnotation,
+  type GuardVisualJudgment,
+} from '@truecourse/shared'
+import type { GuardVisualJudge } from './visual-judge.js'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import {
@@ -96,6 +103,12 @@ export interface RunScenarioContext {
    * not spawn is not reported.
    */
   onStep?: (observation: StepObservation) => void
+  /**
+   * OPTIONAL visual judge (see {@link GuardVisualJudge}) — asked to look at the
+   * screenshot of a step that has already FAILED, and only then. Absent (every
+   * test, birth validation, any caller without a transport) ⇒ nothing changes.
+   */
+  visualJudge?: GuardVisualJudge
 }
 
 /**
@@ -317,6 +330,26 @@ export async function runScenario(
       records.push(...outcome.records)
       if (outcome.status === 'ok') continue
 
+      // THE VISUAL JUDGE. It runs HERE and nowhere else: the deterministic verdict
+      // is already settled (the expectation's own poll loop has run out), the step
+      // has left a picture of the page it settled against, and nothing below can
+      // change `outcome.status`. One call per failing scenario — the loop returns
+      // on the first failing step, so there is never a second.
+      const failed = outcome.status === 'fail' ? outcome : null
+      const claim = stepClaim(step)
+      const judgment =
+        failed?.visual && ctx.visualJudge && !ctx.signal?.aborted
+          ? await judgeVisually(ctx.visualJudge, {
+              screenshotPath: failed.visual.screenshotPath,
+              ...(claim !== undefined ? { claim } : {}),
+              expectation: failed.visual.expectation,
+              expected: failed.mismatch.expected,
+              actual: failed.mismatch.actual,
+              stepIndex,
+              scenarioId: scenario.id,
+            })
+          : null
+
       // A step that could not be taken BEFORE it produced any record has nothing to
       // transcribe (a `cwd` that escapes the sandbox is the case): it settles like a
       // setup escape, with no bundle, exactly as it always has.
@@ -334,7 +367,7 @@ export async function runScenario(
               steps: records,
               failingStep: stepIndex,
               ...(outcome.status === 'fail'
-                ? { mismatch: outcome.mismatch }
+                ? { mismatch: outcome.mismatch, ...(judgment ? { visual: judgment } : {}) }
                 : { infraMessage: outcome.message }),
               sandboxCwd: sandbox.cwd,
               envPins: ENV_PINS,
@@ -367,6 +400,9 @@ export async function runScenario(
           // The RAW output that produced this mismatch (NOT the normalized text
           // matched against) — head-truncated, empty streams omitted.
           ...(outcome.excerpts ?? {}),
+          // The judge's compact annotation — advisory, and absent whenever no
+          // verdict was reached. The full rationale stayed in the transcript.
+          ...(judgment ? { visual: visualAnnotation(judgment) } : {}),
         },
         ...(evidencePath ? { evidencePath } : {}),
       }
@@ -472,6 +508,35 @@ export async function runScenario(
   }
 }
 
+
+/**
+ * The step's HUMAN-level claim, for the judge: the authoring note if it has one
+ * (it says why this assertion is the falsifiable form of the claim), else the
+ * claim identities of the milestone it realizes. Undefined when it carries
+ * neither, which is honest — a plumbing step is about nothing in particular.
+ */
+function stepClaim(step: GuardCliScenario['steps'][number]): string | undefined {
+  const note = step.note?.trim()
+  if (note) return note
+  const claims = milestoneClaims(step.milestone)
+  return claims.length > 0 ? claims.join(' · ') : undefined
+}
+
+/**
+ * Ask the judge, and never let it matter that it failed. A judge is an optional
+ * annotator over an ALREADY-DECIDED verdict: a thrown call (no transport, a dead
+ * network, a timeout) must leave the run bit-identical to one that had no judge.
+ */
+async function judgeVisually(
+  judge: GuardVisualJudge,
+  input: Parameters<GuardVisualJudge>[0],
+): Promise<GuardVisualJudgment | null> {
+  try {
+    return await judge(input)
+  } catch {
+    return null
+  }
+}
 
 /** The evidence-free `error` a cancelled scenario settles as (result is discarded). */
 function abortedResult(

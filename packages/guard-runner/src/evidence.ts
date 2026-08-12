@@ -16,7 +16,13 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { isPromptKeyedStdin, type GuardBinds, type GuardTtyAnswer } from '@truecourse/shared'
+import {
+  isPromptKeyedStdin,
+  visualJudgeLines,
+  type GuardBinds,
+  type GuardTtyAnswer,
+  type GuardVisualJudgment,
+} from '@truecourse/shared'
 import { evidenceScenarioDir, evidenceRelPath } from './store.js'
 import { listSandboxFiles } from './sandbox.js'
 import type { ExpectMismatch } from './expect.js'
@@ -218,6 +224,14 @@ export interface WriteEvidenceParams {
   /** 1-based index of the failing step; omitted on a `pass` (nothing failed). */
   failingStep?: number
   mismatch?: ExpectMismatch
+  /**
+   * The VISUAL JUDGE's verdict on the failing step's screenshot, when one was
+   * reached. Carried as its own field rather than folded into the mismatch's
+   * `detail` because it is categorically different from everything else there:
+   * `detail` is what the runner MEASURED, this is what a model LOOKED AT. Both
+   * `diff.txt` and the transcript render it from here, so they can never disagree.
+   */
+  visual?: GuardVisualJudgment
   infraMessage?: string
   sandboxCwd: string
   envPins: Record<string, string>
@@ -300,6 +314,9 @@ export function writeEvidence(params: WriteEvidenceParams): string {
     diffLines.push(`expected: ${params.mismatch.expected}`)
     diffLines.push(`actual:   ${params.mismatch.actual}`, '')
     diffLines.push(...params.mismatch.detail)
+    // After the measured evidence, never instead of it: the annotation is the last
+    // word a reader gets, and it is labelled as an annotation on every line.
+    if (params.visual) diffLines.push('', ...visualJudgeLines(params.visual))
   } else if (params.outcome === 'error' && params.infraMessage) {
     diffLines.push(`step ${params.failingStep} — infrastructure error`, '', params.infraMessage)
   } else if (params.outcome === 'pass') {
@@ -430,6 +447,9 @@ function renderTranscript(params: WriteEvidenceParams): string {
     lines.push(`── mismatch (step ${params.failingStep})`)
     lines.push(`   expected: ${params.mismatch.expected}`)
     lines.push(`   actual:   ${params.mismatch.actual}`)
+    for (const line of params.visual ? visualJudgeLines(params.visual) : []) {
+      lines.push(`   ${line}`)
+    }
   } else if (params.infraMessage) {
     lines.push(`── error (step ${params.failingStep})`)
     lines.push(indent(params.infraMessage))

@@ -13,6 +13,7 @@
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { Recipe } from './recipe.js'
 import { runGuard, type RunGuardResult } from './run.js'
+import type { GuardVisualJudge } from './visual-judge.js'
 
 export interface GuardExecInput {
   /** The checkout to build + run against (working-tree root). */
@@ -56,6 +57,12 @@ export interface GuardExecInput {
   signal?: AbortSignal
   onPhase?: (phase: 'build' | 'run', total?: number) => void
   onScenarioSettled?: (done: number, total: number, result: GuardScenarioResult) => void
+  /**
+   * OPTIONAL annotator for failing web steps (see {@link GuardVisualJudge}). Like
+   * `signal` and the callbacks above it is an in-process handle, so a hosted
+   * executor simply ignores it and its runs stay unannotated — never a failure.
+   */
+  visualJudge?: GuardVisualJudge
 }
 
 /** The run report — reuses the existing discriminated union verbatim. */
@@ -88,4 +95,5 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     signal: input.signal,
     onPhase: input.onPhase,
     onScenarioSettled: input.onScenarioSettled,
+    ...(input.visualJudge ? { visualJudge: input.visualJudge } : {}),
   })

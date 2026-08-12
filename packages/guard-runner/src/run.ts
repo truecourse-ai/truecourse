@@ -95,6 +95,7 @@ import {
 import { isInterfaceDrifted } from './interface-drift.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
+import type { GuardVisualJudge } from './visual-judge.js'
 
 export interface RunGuardOptions {
   repoRoot: string
@@ -155,6 +156,13 @@ export interface RunGuardOptions {
   onPhase?: (phase: 'build' | 'run', total?: number) => void
   /** Fires as each scenario settles, with the running done-count. */
   onScenarioSettled?: (done: number, total: number, result: GuardScenarioResult) => void
+  /**
+   * OPTIONAL annotator for FAILING web steps (see {@link GuardVisualJudge}). This
+   * package calls no model; core injects one built from the installed transport.
+   * Omitted ⇒ zero behavior change, which is what every test and birth validation
+   * relies on. A green run never invokes it, so it costs nothing when nothing broke.
+   */
+  visualJudge?: GuardVisualJudge
 }
 
 export type RunGuardResult =
@@ -1045,6 +1053,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               capturePassEvidence,
               signal: cancel.signal,
               onStep: (o) => stepStats.onCliStep(o),
+              // Only the cli/web pool: an api scenario has no screen to look at.
+              ...(opts.visualJudge ? { visualJudge: opts.visualJudge } : {}),
             })
       if (cancel.signal.aborted) return null
       const result: GuardScenarioResult = {

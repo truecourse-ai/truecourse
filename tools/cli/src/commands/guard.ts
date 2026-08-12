@@ -87,6 +87,23 @@ function scenarioLine(s: GuardScenarioResult): string {
 }
 
 /**
+ * The visual judge's activity for a run, or null when it never fired (a green run,
+ * a corpus with no web steps, no transport — all of which are the normal case and
+ * none of which is worth a line).
+ *
+ * It reports COUNTS, never a verdict: the judge decided nothing. The `expected
+ * visible` tally is called out because it is the actionable half — a page that
+ * looked right under a red assertion is the test being wrong, not the app.
+ */
+export function visualJudgeSummary(scenarios: readonly GuardScenarioResult[]): string | null {
+  const verdicts = scenarios.map((s) => s.failure?.visual).filter((v) => v !== undefined);
+  if (verdicts.length === 0) return null;
+  const visible = verdicts.filter((v) => v.verdict === "yes").length;
+  const tail = visible > 0 ? ` · ${visible} where the expected result LOOKED present` : "";
+  return `visual judge ${verdicts.length} screenshot${verdicts.length === 1 ? "" : "s"} read${tail}`;
+}
+
+/**
  * What a BLOCKED scenario prints under its line: the requirement an instance has to
  * satisfy — attributed to the flow that asked for each part, so a reader sees why
  * every expectation is there — and the file to register one in. Nothing executed,
@@ -238,6 +255,13 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
       `flows       ${exercised.size}/${manifest.flows.length} exercised${driftTag}${blockedTag}`,
     );
   }
+
+  // What the visual judge had to say, when a failing web step gave it something to
+  // look at. Reported as ACTIVITY, never as a verdict — and the "expected visible"
+  // count is the interesting half: those are the failures where the page looked
+  // right and the ASSERTION is the likely suspect.
+  const visualLine = visualJudgeSummary(latest.scenarios);
+  if (visualLine) p.log.info(visualLine);
 
   const { pass, fail, error, stale, orphaned, blocked } = latest.summary;
   const parts = [`${pass} passed`];

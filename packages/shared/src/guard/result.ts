@@ -10,6 +10,7 @@
 
 import { z } from 'zod'
 import { OutputExcerptsSchema } from './excerpts.js'
+import { GuardVisualAnnotationSchema } from './visual.js'
 import { GuardDependencyNeedSchema } from './dependencies.js'
 import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
 import { hasMilestone, type GuardStepMilestone } from './step-parts.js'
@@ -121,6 +122,16 @@ export const GuardFailureDetailSchema = z
      * NO format-version bump.
      */
     ...OutputExcerptsSchema.shape,
+    /**
+     * The VISUAL JUDGE's annotation, present only on a failing WEB step whose
+     * screenshot a vision model was asked to read (see {@link
+     * GuardVisualAnnotationSchema}). Advisory: it never moved this outcome — the
+     * deterministic expectation in `expected`/`actual` did. Kept to a verdict plus
+     * a capped one-liner because LATEST is inline-compact; the full rationale is
+     * in the evidence transcript. Optional so pre-change snapshots keep parsing.
+     * NO format-version bump.
+     */
+    visual: GuardVisualAnnotationSchema.optional(),
   })
   .strict()
 export type GuardFailureDetail = z.infer<typeof GuardFailureDetailSchema>

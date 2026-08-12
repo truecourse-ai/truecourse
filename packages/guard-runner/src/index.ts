@@ -221,6 +221,10 @@ export {
 } from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
 
+// The visual-judge seam — a callback TYPE only. This package stays LLM-free; core
+// supplies the implementation. See `visual-judge.ts` for the contract.
+export type { GuardVisualJudge, GuardVisualJudgeInput } from './visual-judge.js'
+
 // The step-driver seam — one module per surface, routed by the registry. A step
 // says how it acts; the runner asks who owns it and hands it over.
 export {
