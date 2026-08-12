@@ -411,6 +411,58 @@ const WEB_STEPS = [
   STEPS[3],
 ];
 /**
+ * The same web step after a run where its TEXT matcher MISSED: the page renders
+ * its heading uppercase (a CSS transform, which is the case `innerText` reports),
+ * so the words are on screen in a different case than the matcher asked for. The
+ * deterministic check is honestly red — and the vision judge's reading of the
+ * step's screenshot says the result IS there, the test-is-wrong signal the
+ * failure carries as `visual`.
+ */
+const WEB_STEPS_FAILED_AT_2 = [
+  {
+    ...STEPS[0],
+    actual: {
+      n: 1,
+      actual: "exit 0",
+      durationMs: 12,
+      stdout: "initialized tasks.json",
+    },
+  },
+  {
+    n: 2,
+    kind: "web",
+    command: "click button “Security”",
+    expectation: "page text contains “Filtered by”",
+    milestone: 1,
+    actual: {
+      n: 2,
+      actual: 'the page text was "FILTERED BY: CATEGORY"',
+      durationMs: 310,
+      web: {
+        action: "click button “Security”",
+        url: "/repos/sample-app",
+        screenshot: "step-2.png",
+        checks: [
+          {
+            subject: "url",
+            expected: 'the address contains "/repos/sample-app"',
+            actual: 'the address was "/repos/sample-app"',
+            ok: true,
+          },
+          {
+            subject: "text",
+            expected: 'the page text contains "Filtered by"',
+            actual: 'the page text was "FILTERED BY: CATEGORY"',
+            ok: false,
+          },
+        ],
+        text: "Code Analysis\nFILTERED BY: CATEGORY",
+      },
+    },
+  },
+  STEPS[3],
+];
+/**
  * A MIXED list as the server merges it after a run that took both: the browser step
  * ACTS and asserts the UI-level fact, and the request step reads the structured
  * answer. A request step returns a STATUS, not an exit code, and its record pairs
@@ -476,6 +528,8 @@ let dismissedClaims: GuardDismissedClaim[] = [];
 let fetchMock: ReturnType<typeof vi.fn>;
 /** Which step list the stub server ships — positional milestones, or claim ids. */
 let servedSteps: unknown[] = STEPS;
+/** The failing flow's detail — a test that needs a different failure swaps it. */
+let servedBirthDetail: GuardFlowDetail = BIRTH_FLOW_DETAIL;
 /** The starting world the stub server ships with the source; undefined = the file declares none. */
 let servedSetup: GuardScenarioSetupView | undefined;
 /** Every `/guard/scenario` URL the detail asked for — the run it named rides on it. */
@@ -497,6 +551,7 @@ const decisionsBody = () =>
 beforeEach(() => {
   dismissedClaims = [];
   servedSteps = STEPS;
+  servedBirthDetail = BIRTH_FLOW_DETAIL;
   servedSetup = undefined;
   servedVisuals = [];
   visualsRequests = [];
@@ -505,7 +560,7 @@ beforeEach(() => {
   fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
     if (u.includes("/guard/flows/")) {
-      return json(u.includes("pathological") ? BIRTH_FLOW_DETAIL : FLOW_DETAIL);
+      return json(u.includes("pathological") ? servedBirthDetail : FLOW_DETAIL);
     }
     if (u.includes("/guard/scenario?")) {
       scenarioRequests.push(u);
@@ -806,6 +861,58 @@ describe("the test, read inside its flow", () => {
     await findSteps();
     expect(screen.queryByText("code drift")).not.toBeInTheDocument();
     expect(screen.queryByText("our defect")).not.toBeInTheDocument();
+  });
+
+  // The judge's reading rides the failure twice, at two altitudes: a chip beside
+  // the status for the glance, and the full reading inside the failing step's
+  // inspector, under its own label, beside the measured rows it must never be
+  // mistaken for.
+  it("wears the judge's reading beside the failure and inside the failing step", async () => {
+    const { triage: _triage, ...birthSurface } = BIRTH_FLOW_DETAIL.surfaces[0]!;
+    servedBirthDetail = {
+      ...BIRTH_FLOW_DETAIL,
+      surfaces: [
+        {
+          ...birthSurface,
+          stage: "run",
+          failure: {
+            step: 2,
+            expected: 'the page text contains "Filtered by"',
+            actual: 'the page text was "FILTERED BY: CATEGORY"',
+            visual: {
+              verdict: "yes",
+              summary:
+                "The Security filter is applied — the heading reads “FILTERED BY: CATEGORY”, rendered uppercase.",
+            },
+          },
+        },
+      ],
+    };
+    servedSteps = WEB_STEPS_FAILED_AT_2;
+    renderTest(BIRTH_FAILED_ID);
+    await findSteps();
+
+    // The chip, in "looks" words — an appearance, never a measurement.
+    expect(screen.getByText("looks present")).toBeInTheDocument();
+
+    // The failing step is selected by default; its inspector carries the reading
+    // under its own "on screen" label…
+    const inspector = selectedStepDetails();
+    expect(within(inspector).getByText("on screen")).toBeInTheDocument();
+    expect(
+      within(inspector).getByText(/The Security filter is applied/),
+    ).toBeInTheDocument();
+    // …and says the test-is-wrong signal plainly, in the failure's own pane.
+    expect(
+      within(inspector).getByText(/assertion itself may be wrong/),
+    ).toBeInTheDocument();
+  });
+
+  it("no judged screenshot, no chip and no row — the annotation never renders empty", async () => {
+    renderTest(BIRTH_FAILED_ID);
+    await findSteps();
+    expect(screen.queryByText(/^looks (present|absent|unclear)$/)).toBeNull();
+    expect(within(selectedStepDetails()).queryByText("on screen")).toBeNull();
   });
 
   it("slims the verdict to WHERE IT BROKE, never the diff", async () => {

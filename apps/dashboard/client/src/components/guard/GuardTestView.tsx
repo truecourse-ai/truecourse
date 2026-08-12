@@ -79,6 +79,7 @@ import type {
   GuardStepApiCheck,
   GuardStepWebActual,
   GuardTriage,
+  GuardVisualAnnotation,
 } from "@truecourse/shared";
 import {
   ArtifactModeSwitch,
@@ -93,6 +94,7 @@ import { GuardEvidenceVisuals } from "./GuardEvidenceVisuals";
 import { GuardLongText } from "./GuardLongText";
 import { GuardTestSetup } from "./GuardTestSetup";
 import { GuardTriageChip } from "./GuardTriageChip";
+import { GuardVisualChip } from "./GuardVisualChip";
 import { GuardFlowStatusChip } from "./GuardStatusBadge";
 import { PRE } from "./detail-styles";
 
@@ -278,6 +280,33 @@ function CheckRows({
 }
 
 /**
+ * THE JUDGE'S READING, inside the failing step's panel — what a vision model saw
+ * in the screenshot the step left behind, under its own label so it sits beside
+ * the measured rows without ever reading as one of them. The `yes` sentence is
+ * the whole reason the judge exists: a reader looking at a red step needs to
+ * know the disagreement may be the assertion's, not the page's.
+ */
+function VisualJudgeRow({ visual }: { visual: GuardVisualAnnotation }) {
+  return (
+    <DiffRow label="on screen">
+      <div className="space-y-1 pt-1 text-[11px] leading-snug">
+        <p className="text-foreground">{visual.summary}</p>
+        {visual.verdict === "yes" && (
+          <p className="text-sky-700 dark:text-sky-300">
+            The expected result appears visible, so the assertion itself may be
+            wrong — a brittle locator or matcher — rather than the page.
+          </p>
+        )}
+        <p className="italic text-muted-foreground">
+          a vision model’s reading of the step’s screenshot — the expectation
+          above alone decided this step
+        </p>
+      </div>
+    </DiffRow>
+  );
+}
+
+/**
  * A WEB step's record, in the browser's own vocabulary. A browser step spawns
  * nothing: it has no exit code and no streams, so "exit 0" and "the step printed
  * nothing" would both be inventions. What it has is an action, an address, each
@@ -288,12 +317,15 @@ function WebStepPanel({
   expected,
   actual,
   web,
+  visual,
 }: {
   /** The authored assertion — the fallback when the step never got to evaluate it. */
   expected: string;
   /** The failure line, when the step failed before asserting anything. */
   actual?: string;
   web: GuardStepWebActual;
+  /** The vision judge's reading of this step's screenshot, on a judged failure. */
+  visual?: GuardVisualAnnotation;
 }) {
   return (
     <div className="mt-2 space-y-1">
@@ -321,6 +353,7 @@ function WebStepPanel({
           </DiffRow>
         </>
       )}
+      {visual && <VisualJudgeRow visual={visual} />}
       <DiffRow label="at">
         <GuardLongText text={web.url} label="page address" head={8} />
       </DiffRow>
@@ -382,6 +415,8 @@ interface StepPanelProps {
   web?: GuardStepWebActual;
   /** Each assertion beside its own answer, on a request step the viewed run took. */
   checks?: readonly GuardStepApiCheck[];
+  /** The vision judge's reading of the step's screenshot, on a judged failure. */
+  visual?: GuardVisualAnnotation;
 }
 
 function StepPanel({
@@ -392,6 +427,7 @@ function StepPanel({
   recorded,
   web,
   checks,
+  visual,
 }: StepPanelProps) {
   if (web)
     return (
@@ -399,6 +435,7 @@ function StepPanel({
         expected={expected}
         {...(actual ? { actual } : {})}
         web={web}
+        {...(visual ? { visual } : {})}
       />
     );
   return (
@@ -428,6 +465,7 @@ function StepPanel({
           </DiffRow>
         </>
       )}
+      {visual && <VisualJudgeRow visual={visual} />}
       <DiffRow label="output">
         {stdout || stderr ? (
           <div className="space-y-1">
@@ -465,6 +503,7 @@ function stepPanelProps(
       ? { actual: diff?.actual ?? recorded?.actual }
       : {}),
     ...(recorded?.web ? { web: recorded.web } : {}),
+    ...(diff?.visual ? { visual: diff.visual } : {}),
     ...(showChecks ? { checks } : {}),
     ...(diff && (diff.stdout || diff.stderr)
       ? {
@@ -692,6 +731,7 @@ function RecordedFailureInspector({
           actual={failure.actual}
           {...(failure.stdout ? { stdout: failure.stdout } : {})}
           {...(failure.stderr ? { stderr: failure.stderr } : {})}
+          {...(failure.visual ? { visual: failure.visual } : {})}
           recorded
         />
       </div>
@@ -1170,6 +1210,9 @@ export function GuardScenarioBody({
               className="text-[11px]"
             />
             {test.triage && <GuardTriageChip triage={test.triage} />}
+            {test.failure?.visual && (
+              <GuardVisualChip visual={test.failure.visual} />
+            )}
             {test.durationMs != null && (
               <span className="text-[11px] text-muted-foreground">
                 {formatGuardDuration(test.durationMs)}
