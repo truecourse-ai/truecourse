@@ -52,7 +52,6 @@ setup:
           - src/index.js
         message: seed the clean source tree
 normalize: []
-driver: cli
 steps:
   - run:
       - add

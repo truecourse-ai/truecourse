@@ -30,13 +30,13 @@ function entry(overrides: Partial<GuardManifestFlow> = {}): GuardManifestFlow {
 
 describe('unaccountedSurfaces', () => {
   it('is empty when the planned surface committed a test', () => {
-    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', surface: 'cli', status: 'passing' }] })
+    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', drivers: ['cli'], status: 'passing' }] })
     expect(unaccountedSurfaces(flow)).toEqual([])
     expect(violatesSettleInvariant(flow)).toBe(false)
   })
 
   it('is empty when a committed test FAILED — a red test is an outcome', () => {
-    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', surface: 'cli', status: 'failing' }] })
+    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', drivers: ['cli'], status: 'failing' }] })
     expect(violatesSettleInvariant(flow)).toBe(false)
   })
 
@@ -57,7 +57,7 @@ describe('unaccountedSurfaces', () => {
         { surface: 'cli', interfaceIds: ['cli/tasks'] },
         { surface: 'api', interfaceIds: ['api/post-tasks'] },
       ],
-      scenarios: [{ id: 'create-a-task.cli.1', surface: 'cli', status: 'passing' }],
+      scenarios: [{ id: 'create-a-task.cli.1', drivers: ['cli'], status: 'passing' }],
     })
     expect(unaccountedSurfaces(flow)).toEqual(['api'])
     expect(violatesSettleInvariant(flow)).toBe(true)

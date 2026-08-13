@@ -14,7 +14,9 @@
       "scenarios": [
         {
           "id": "analyze-a-dirty-tree-with-the-documented-stash-flags.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -48,7 +50,9 @@
       "scenarios": [
         {
           "id": "analyze-a-dirty-working-tree.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -102,7 +106,9 @@
       "scenarios": [
         {
           "id": "analyze-a-repository-for-the-first-time.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -131,7 +137,9 @@
       "scenarios": [
         {
           "id": "analyze-csharp-without-the-roslyn-host.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -159,7 +167,9 @@
       "scenarios": [
         {
           "id": "answer-the-first-run-llm-transport-question.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -187,7 +197,9 @@
       "scenarios": [
         {
           "id": "browse-and-filter-the-rule-catalogue.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -217,7 +229,9 @@
       "scenarios": [
         {
           "id": "choose-and-flip-the-llm-transport.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -252,7 +266,9 @@
       "scenarios": [
         {
           "id": "commit-a-baseline-and-refresh-it.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -305,7 +321,9 @@
       "scenarios": [
         {
           "id": "configure-rule-categories-and-llm-rules-per-repository.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -335,7 +353,9 @@
       "scenarios": [
         {
           "id": "decline-the-pre-commit-hook-installation.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -374,7 +394,9 @@
       "scenarios": [
         {
           "id": "diff-uncommitted-changes-against-the-baseline.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -408,7 +430,9 @@
       "scenarios": [
         {
           "id": "exclude-generated-and-ignored-files-from-analysis.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -437,7 +461,9 @@
       "scenarios": [
         {
           "id": "filter-the-violation-list-and-mistype-a-flag.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -486,7 +512,9 @@
       "scenarios": [
         {
           "id": "install-the-pre-commit-hook-and-enforce-it.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -517,7 +545,9 @@
       "scenarios": [
         {
           "id": "list-violations-before-any-analysis-has-run.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -546,7 +576,9 @@
       "scenarios": [
         {
           "id": "manage-the-pre-commit-hook-through-the-documented-subcommands.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -578,7 +610,9 @@
       "scenarios": [
         {
           "id": "mistype-a-rules-argument.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -608,7 +642,9 @@
       "scenarios": [
         {
           "id": "override-rule-categories-from-the-cli-reference.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -642,7 +678,9 @@
       "scenarios": [
         {
           "id": "page-and-filter-the-violation-list-from-the-cli-reference.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -671,7 +709,9 @@
       "scenarios": [
         {
           "id": "read-the-cli-version-and-help.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -704,7 +744,9 @@
       "scenarios": [
         {
           "id": "read-the-diff-check-through-list-diff.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -733,7 +775,9 @@
       "scenarios": [
         {
           "id": "register-a-repository-without-analyzing-it.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -761,7 +805,9 @@
       "scenarios": [
         {
           "id": "reject-a-severity-value-the-cli-does-not-define.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -790,7 +836,9 @@
       "scenarios": [
         {
           "id": "retune-the-hook-policy-in-hooks-yaml.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -820,7 +868,9 @@
       "scenarios": [
         {
           "id": "run-llm-rules-on-every-commit.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -855,7 +905,9 @@
       "scenarios": [
         {
           "id": "run-llm-rules-through-the-claude-code-transport.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -883,7 +935,9 @@
       "scenarios": [
         {
           "id": "run-llm-rules-through-the-provider-api-transport.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -914,7 +968,9 @@
       "scenarios": [
         {
           "id": "run-the-first-truecourse-command-without-a-terminal.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -943,7 +999,9 @@
       "scenarios": [
         {
           "id": "silence-and-restore-an-individual-rule.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -976,7 +1034,9 @@
       "scenarios": [
         {
           "id": "survive-a-file-that-exceeds-the-per-file-budget.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -1004,7 +1064,9 @@
       "scenarios": [
         {
           "id": "toggle-and-reset-individual-rules-from-the-cli-reference.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -1036,7 +1098,9 @@
       "scenarios": [
         {
           "id": "turn-llm-rules-on-and-off-from-the-cli-reference.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -1070,7 +1134,9 @@
       "scenarios": [
         {
           "id": "work-from-a-fresh-worktree-and-clone.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -1104,7 +1170,11 @@
       "scenarios": [
         {
           "id": "review-a-repository-analysis-in-the-dashboard.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1161,7 +1231,10 @@
       "scenarios": [
         {
           "id": "open-the-dashboard-and-find-your-way-around.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1198,7 +1271,9 @@
       "scenarios": [
         {
           "id": "run-the-dashboard-as-a-background-service.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli"
+          ],
           "status": "never-run"
         }
       ],
@@ -1241,7 +1316,10 @@
       "scenarios": [
         {
           "id": "open-a-repository-before-its-first-analysis.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1286,7 +1364,10 @@
       "scenarios": [
         {
           "id": "add-a-repository-by-path-and-read-its-first-analysis.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1327,7 +1408,10 @@
       "scenarios": [
         {
           "id": "open-a-non-git-repository.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1365,7 +1449,11 @@
       "scenarios": [
         {
           "id": "apply-repository-rule-settings-to-a-dashboard-run.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1406,7 +1494,11 @@
       "scenarios": [
         {
           "id": "inspect-and-filter-the-rules-panel.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1456,7 +1548,11 @@
       "scenarios": [
         {
           "id": "analyze-committed-state-from-the-dashboard.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1498,7 +1594,11 @@
       "scenarios": [
         {
           "id": "analyze-a-clean-repository-from-the-dashboard.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1539,7 +1639,11 @@
       "scenarios": [
         {
           "id": "skip-llm-rules-from-the-dashboard.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1602,7 +1706,11 @@
       "scenarios": [
         {
           "id": "run-an-analysis-from-the-dashboard.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1658,7 +1766,11 @@
       "scenarios": [
         {
           "id": "filter-the-violation-list.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1717,7 +1829,11 @@
       "scenarios": [
         {
           "id": "read-a-violation-card-and-silence-its-rule.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1787,7 +1903,11 @@
       "scenarios": [
         {
           "id": "read-the-analytics-of-a-run.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "api",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1854,7 +1974,10 @@
       "scenarios": [
         {
           "id": "explore-the-architecture-graph.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -1933,7 +2056,10 @@
       "scenarios": [
         {
           "id": "walk-files-flows-and-databases.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "web"
+          ],
           "status": "never-run"
         }
       ],
@@ -2022,7 +2148,10 @@
       "scenarios": [
         {
           "id": "review-run-history-and-enter-diff-mode.cli.1",
-          "surface": "cli",
+          "drivers": [
+            "cli",
+            "web"
+          ],
           "status": "never-run"
         }
       ],

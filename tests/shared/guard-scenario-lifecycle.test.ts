@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   GUARD_FORMAT_VERSION,
-  GuardApiScenarioSchema,
+  GuardScenarioSchema,
   GuardApiStepSchema,
   describeGuardScenarioSteps,
   isApiBootStep,
@@ -19,7 +19,7 @@ import {
 const binds = [{ doc: 'docs/a.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function scenario(steps: unknown[]): unknown {
-  return { guard: 3, id: 's.api.1', title: 't', binds, driver: 'api', steps, normalize: [] }
+  return { guard: 3, id: 's.api.1', title: 't', binds, steps, normalize: [] }
 }
 
 describe('api lifecycle steps — schema', () => {
@@ -71,7 +71,7 @@ describe('api lifecycle steps — schema', () => {
   })
 
   it('a whole scenario mixes request and lifecycle steps', () => {
-    const parsed = GuardApiScenarioSchema.parse(
+    const parsed = GuardScenarioSchema.parse(
       scenario([
         { boot: { env: { LOG_LEVEL: 'debug' } } },
         { request: { method: 'GET', path: '/x' }, expect: { status: 200 } },

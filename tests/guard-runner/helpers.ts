@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { GuardApiScenario, GuardCliScenario, GuardScenario } from '@truecourse/shared'
+import type { GuardApiScenario, GuardSandboxScenario, GuardScenario } from '@truecourse/shared'
 import { buildDocSectionIndex } from '@truecourse/guard-runner'
 
 /** Absolute path to the realistic fixture CLI (`relkit`). */
@@ -149,10 +149,10 @@ export function writeScenarioFile(repo: string, relPath: string, content: string
   fs.writeFileSync(target, content)
 }
 
-/** Build a full, valid cli scenario from a partial spec. */
+/** Build a full, valid SANDBOX scenario from a partial spec. */
 export function scenario(
-  partial: Partial<GuardCliScenario> & Pick<GuardCliScenario, 'id' | 'steps'>,
-): GuardCliScenario {
+  partial: Partial<GuardSandboxScenario> & Pick<GuardSandboxScenario, 'id' | 'steps'>,
+): GuardSandboxScenario {
   return {
     guard: 3,
     id: partial.id,
@@ -161,7 +161,6 @@ export function scenario(
     ...(partial.interface ? { interface: partial.interface } : {}),
     binds: partial.binds ?? specBinds('a/b'),
     ...(partial.needs ? { needs: partial.needs } : {}),
-    driver: 'cli',
     ...(partial.setup ? { setup: partial.setup } : {}),
     steps: partial.steps,
     ...(partial.teardown ? { teardown: partial.teardown } : {}),
@@ -325,7 +324,6 @@ export function apiScenario(
     ...(partial.flow ? { flow: partial.flow } : {}),
     ...(partial.interface ? { interface: partial.interface } : {}),
     binds: partial.binds ?? specBinds('a/b'),
-    driver: 'api',
     ...(partial.server ? { server: partial.server } : {}),
     ...(partial.setup ? { setup: partial.setup } : {}),
     steps: partial.steps,

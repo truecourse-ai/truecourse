@@ -308,7 +308,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     })
 
     const entry = flowEntry(r, 'version')!
-    expect(entry.scenarios.map((s) => s.surface)).toEqual(['cli'])
+    expect(entry.scenarios.map((s) => s.drivers)).toEqual([['cli']])
     expect(entry.interfaces).toEqual([{ surface: 'cli', interfaceIds: ['cli/relkit'] }])
   })
 
@@ -809,7 +809,7 @@ describe('generateGuards — birth validation', () => {
     // DIAGNOSIS it commits with, the durable record the report's committed
     // finding row re-derives from.
     const committed = flowEntry(r, 'version')!.scenarios
-    expect(committed).toMatchObject([{ id: 'version.cli.1', surface: 'cli', status: 'failing' }])
+    expect(committed).toMatchObject([{ id: 'version.cli.1', drivers: ['cli'], status: 'failing' }])
     expect(committed[0].diagnosis).toMatchObject({
       doc: DOC,
       anchor: 'version',
@@ -842,7 +842,7 @@ describe('generateGuards — birth validation', () => {
     // The committed red test — its status AND its diagnosis — stand.
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
     expect(flowEntry(r, 'version')?.scenarios).toMatchObject([
-      { id: 'version.cli.1', surface: 'cli', status: 'failing', diagnosis: { title: 'always broken' } },
+      { id: 'version.cli.1', drivers: ['cli'], status: 'failing', diagnosis: { title: 'always broken' } },
     ])
   })
 
@@ -1327,7 +1327,7 @@ describe('generateGuards — authoring robustness', () => {
     expect(res.written.map((w) => w.flowId)).toEqual(['help'])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
-    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help.cli.1', surface: 'cli', status: 'passing' }])
+    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help.cli.1', drivers: ['cli'], status: 'passing' }])
   })
 
   // A `matches` the schema accepts but `new RegExp` rejects would throw or never
@@ -1403,7 +1403,7 @@ describe('generateGuards — manifest + orphans', () => {
           flowId: 'a-removed-flow',
           flowFingerprint: 'sha256:old',
           bindings: [{ doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old' }],
-          scenarios: [{ id: 'orphan.cli.1', surface: 'cli', status: 'passing' }],
+          scenarios: [{ id: 'orphan.cli.1', drivers: ['cli'], status: 'passing' }],
           generationInputsHash: 'sha256:x',
           gaps: [],
         },
@@ -1421,7 +1421,7 @@ describe('generateGuards — manifest + orphans', () => {
     expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan.cli.1'] }])
     expect(() => GuardManifestSchema.parse(readManifest(r)!)).not.toThrow()
     expect(flowEntry(r, 'a-removed-flow')?.scenarios).toEqual([
-      { id: 'orphan.cli.1', surface: 'cli', status: 'passing' },
+      { id: 'orphan.cli.1', drivers: ['cli'], status: 'passing' },
     ])
     // MARKED: nothing derives it any more, so every reader can say why it has no
     // goal and no milestones instead of rendering a hollow flow.
@@ -1429,7 +1429,7 @@ describe('generateGuards — manifest + orphans', () => {
     // A flow synthesis still produces is never marked.
     expect(flowEntry(r, 'version')?.orphaned).toBeUndefined()
     expect(flowEntry(r, 'version')?.scenarios).toEqual([
-      { id: 'version.cli.1', surface: 'cli', status: 'passing' },
+      { id: 'version.cli.1', drivers: ['cli'], status: 'passing' },
     ])
   })
 
@@ -1964,8 +1964,8 @@ describe('generateGuards — the per-flow pipeline', () => {
     })
 
     expect(res.written.map((w) => w.flowId).sort()).toEqual(['alpha', 'beta'])
-    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha.cli.1', surface: 'cli', status: 'passing' }])
-    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta.cli.1', surface: 'cli', status: 'passing' }])
+    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha.cli.1', drivers: ['cli'], status: 'passing' }])
+    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta.cli.1', drivers: ['cli'], status: 'passing' }])
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.cli.1', 'beta.cli.1'])
     expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.cli.1.yaml'))).toBe(true)
   })

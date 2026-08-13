@@ -46,7 +46,6 @@ setup:
           - src/index.js
         message: seed worktree sample
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

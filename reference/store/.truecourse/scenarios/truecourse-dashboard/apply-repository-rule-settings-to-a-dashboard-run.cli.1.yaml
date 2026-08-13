@@ -58,7 +58,6 @@ setup:
           - src/index.js
         message: seed findings controlled by three settings
 normalize: []
-driver: cli
 steps:
   - run:
       - add

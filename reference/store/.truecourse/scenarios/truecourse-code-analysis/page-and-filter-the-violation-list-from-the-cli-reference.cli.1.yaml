@@ -26,7 +26,6 @@ setup:
     TRUECOURSE_TELEMETRY: '0'
     TRUECOURSE_LLM_TRANSPORT: claude-code
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

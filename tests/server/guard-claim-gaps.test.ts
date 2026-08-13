@@ -64,7 +64,7 @@ const manifest: GuardManifest = {
       flowId: 'read-the-rule-coverage',
       flowFingerprint: 'sha256:f',
       bindings: [{ doc: DOC, anchor: 'rule-coverage', fingerprint: 'sha256:s' }],
-      scenarios: [{ id: 'read-the-rule-coverage.cli.1', surface: 'cli', status: 'passing' }],
+      scenarios: [{ id: 'read-the-rule-coverage.cli.1', drivers: ['cli'], status: 'passing' }],
       interfaces: [],
       gaps: [],
     },
@@ -205,7 +205,7 @@ describe('composeDocCoverage — the five-word derivation', () => {
   it('NEVER RUN — a scenario exists and has never executed', () => {
     const neverRun = {
       ...manifest,
-      flows: [{ ...manifest.flows[0], scenarios: [{ id: 'read-the-rule-coverage.cli.1', surface: 'cli', status: 'never-run' }] }],
+      flows: [{ ...manifest.flows[0], scenarios: [{ id: 'read-the-rule-coverage.cli.1', drivers: ['cli'], status: 'never-run' }] }],
     } as unknown as GuardManifest;
     expect(statusOf({ manifest: neverRun, latest: null, result: null, flows, claims }).status).toBe('never-run');
   });

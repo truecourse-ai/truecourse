@@ -157,7 +157,6 @@ setup:
           - services/worker/src/index.js
         message: seed the sample app
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

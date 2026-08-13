@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { GuardCliScenario, GuardSandboxStep, GuardVisualJudgment } from '@truecourse/shared'
+import type { GuardSandboxScenario, GuardSandboxStep, GuardVisualJudgment } from '@truecourse/shared'
 import {
   isBrowserInstalled,
   loadRecipe,
@@ -81,7 +81,7 @@ interface RunOpts {
 
 async function run(repo: string, steps: GuardSandboxStep[], opts: RunOpts = {}) {
   const id = opts.id ?? 'web.judge.cli.1'
-  const s: GuardCliScenario = scenario({ id, steps, binds: specBinds('a/b') })
+  const s: GuardSandboxScenario = scenario({ id, steps, binds: specBinds('a/b') })
   const surface = webSurfaceOf(repo)
   return await runScenario(s, {
     repoRoot: repo,

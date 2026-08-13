@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { readManifest, buildDocSectionIndex } from '@truecourse/guard-runner'
-import { guardManifestSections } from '@truecourse/shared'
+import { GuardScenarioSchema, guardManifestSections, guardScenarioDrivers } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -80,10 +80,9 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
     // Both committed scenarios are valid api-driver YAML bound to their operation.
     for (const w of res.written) {
       const committed = yaml.load(fs.readFileSync(path.join(r, w.file), 'utf-8')) as {
-        driver: string
         binds: Array<{ doc: string; section: string; fingerprint: string }>
       }
-      expect(committed.driver).toBe('api')
+      expect(guardScenarioDrivers(GuardScenarioSchema.parse(committed))).toEqual(['api'])
       expect(committed.binds[0].doc).toBe(DOC)
       expect(committed.binds[0].section.startsWith('paths/')).toBe(true)
     }
@@ -133,7 +132,7 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
     expect(authorCalls).toBe(1) // no second authoring call
     // The committed scenario stands, its manifest entry carried forward.
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'paths-get-listtodos')!.scenarios).toEqual([
-      { id: 'paths-get-listtodos.api.1', surface: 'api', status: 'passing' },
+      { id: 'paths-get-listtodos.api.1', drivers: ['api'], status: 'passing' },
     ])
   }, 90_000)
 })

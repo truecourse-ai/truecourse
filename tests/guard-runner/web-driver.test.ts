@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { GuardCliScenario, GuardSandboxStep } from '@truecourse/shared'
+import type { GuardSandboxScenario, GuardSandboxStep } from '@truecourse/shared'
 import {
   isBrowserInstalled,
   loadRecipe,
@@ -89,7 +89,7 @@ function webSurfaceOf(repo: string): ResolvedWebSurface | null {
 
 /** Run one scenario in its own sandbox, with the fixture recipe's web surface. */
 async function run(repo: string, steps: GuardSandboxStep[], id = 'web.flow.cli.1') {
-  const s: GuardCliScenario = scenario({ id, steps, binds: specBinds('a/b') })
+  const s: GuardSandboxScenario = scenario({ id, steps, binds: specBinds('a/b') })
   const surface = webSurfaceOf(repo)
   return await runScenario(s, {
     repoRoot: repo,

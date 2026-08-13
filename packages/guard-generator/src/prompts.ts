@@ -373,9 +373,9 @@ NAME the blocker with the right noun — the classes are triaged differently:
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
-It contains ONLY the fields you author (\`driver\` is always "cli"); the engine
-assigns the scenario's id, its flow/interface references, and its section bindings
-itself, so do not emit any field that is not in the schema.
+It contains ONLY the fields you author; the engine assigns the scenario's id, its
+flow/interface references, and its section bindings itself, so do not emit any
+field that is not in the schema.
 ${SCENARIO_JSON_SCHEMA}
 
 # The title states the PROMISE, never the expected output
@@ -401,10 +401,10 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-09 (CAPTURE): rolled by the authored step schema alone — a step may
- * name a piece of its own output (`capture`), later steps read it as
- * `${captured:…}`, and a matcher may carry a numeric `compare` against it. No prose
- * changed; the vocabulary the model may write did. The author cache re-keys once.
+ * PIN 2026-08-12 (the scenario-level `driver` field's REMOVAL): the authored schema
+ * no longer carries it — the driver belongs to the STEP — so the rendered schema and
+ * the sentence that explained the field both shrank. A deletion: nothing new is
+ * authorable, and the author cache re-keys once.
  */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -663,9 +663,9 @@ proves nothing about the doc and reports as a false failure.
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
-It contains ONLY the fields you author (\`driver\` is always "api"); the engine
-assigns the scenario's id, its flow/interface references, and its section bindings
-itself, so do not emit any field that is not in the schema.
+It contains ONLY the fields you author; the engine assigns the scenario's id, its
+flow/interface references, and its section bindings itself, so do not emit any
+field that is not in the schema.
 ${API_SCENARIO_JSON_SCHEMA}
 
 # The title states the PROMISE, never the expected output
@@ -693,10 +693,9 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-09 (CAPTURE): rolled with the cli prompt, by the SHARED half of the
- * vocabulary — every text and json matcher may now carry a numeric `compare`
- * against a captured value. The api driver's own capture (`capture` /
- * `captureHeaders`) is unchanged; only the assertion side grew.
+ * PIN 2026-08-12: rolled with the cli prompt, by the scenario-level `driver` field's
+ * REMOVAL — the authored schema no longer carries it, so the rendered schema and the
+ * sentence that explained it both shrank. A deletion.
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
@@ -1419,7 +1418,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object: { "scenario": { … } } with the scenario matching',
-      `the schema (title, driver "${ctx.driver}", non-empty steps, optional setup/normalize,`,
+      'the schema (title, non-empty steps, optional setup/normalize,',
       '`milestone` on the steps that realize one) — or { "blockedOn": ["<capability>"] }',
       'when the flow needs world-state the sandbox cannot provide. No prose — only the',
       'JSON object.',

@@ -85,7 +85,6 @@ setup:
           - src/unsafe.js
         message: seed the sample app
 normalize: []
-driver: cli
 steps:
   - run:
       - add

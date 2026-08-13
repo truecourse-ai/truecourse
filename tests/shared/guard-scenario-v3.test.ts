@@ -10,13 +10,13 @@ import { describe, it, expect } from 'vitest'
 import {
   GUARD_FORMAT_VERSION,
   GuardCliStepSchema,
-  GuardCliScenarioSchema,
   GuardFlowSchema,
   GuardFlowsFileSchema,
   GuardScenarioSchema,
   GuardStepSchema,
   describeGuardScenarioSteps,
   firstInvalidMatchPattern,
+  guardScenarioDrivers,
   hasMilestone,
   isDeleteStep,
   isGitStep,
@@ -41,7 +41,6 @@ const V3_SCENARIO = {
   id: 'commit-a-baseline.cli.1',
   title: 'A developer commits the baseline and refreshes it',
   binds: BINDS,
-  driver: 'cli',
   normalize: [],
   setup: {
     files: { 'src/index.js': 'export const x = 1\n' },
@@ -85,19 +84,19 @@ describe('guard scenario format v3 — the step vocabulary', () => {
   })
 
   it('round-trips a scenario using every new capability', () => {
-    const parsed = GuardCliScenarioSchema.parse(V3_SCENARIO)
+    const parsed = GuardScenarioSchema.parse(V3_SCENARIO)
     expect(parsed.steps).toHaveLength(5)
     expect(parsed.setup?.git?.identity).toEqual({
       name: 'TrueCourse Reference',
       email: 'reference@truecourse.test',
     })
     expect(parsed.setup?.git?.root).toBe('repo')
-    // The discriminated union routes it too (the loader's entry point).
-    expect(GuardScenarioSchema.parse(V3_SCENARIO).driver).toBe('cli')
+    // ONE schema, and the drivers come off the steps (the loader's entry point).
+    expect(guardScenarioDrivers(GuardScenarioSchema.parse(V3_SCENARIO))).toEqual(['cli'])
   })
 
   it('tells the FIVE cli step kinds apart', () => {
-    const [run, write, del, git, tty] = GuardCliScenarioSchema.parse(V3_SCENARIO).steps
+    const [run, write, del, git, tty] = GuardScenarioSchema.parse(V3_SCENARIO).steps
     // `patch` joined the union after v3 shipped and did NOT move the version — the
     // number gates backward readability, and every v3 file still parses (see
     // GUARD_FORMAT_VERSION). So it is parsed here rather than seeded into the v3
@@ -117,7 +116,7 @@ describe('guard scenario format v3 — the step vocabulary', () => {
   })
 
   it('carries per-step cwd, tty with scripted stdin, and the authoring note', () => {
-    const steps = GuardCliScenarioSchema.parse(V3_SCENARIO).steps
+    const steps = GuardScenarioSchema.parse(V3_SCENARIO).steps
     expect(steps[0].cwd).toBe('repo')
     expect(steps[0].note).toBe('The baseline the commit below is about.')
     expect(isRunStep(steps[4]) && steps[4].stdin).toBe('y\n')
@@ -138,7 +137,7 @@ describe('guard scenario format v3 — the step vocabulary', () => {
   })
 
   it('carries SEVERAL milestones per step, by claim identity or by position', () => {
-    const steps = GuardCliScenarioSchema.parse(V3_SCENARIO).steps
+    const steps = GuardScenarioSchema.parse(V3_SCENARIO).steps
     expect(milestoneRefs(steps[0].milestone)).toEqual([
       'analyze-writes-a-baseline',
       'baseline-is-json',
@@ -229,12 +228,11 @@ describe('guard scenario format v3 — the step vocabulary', () => {
         '--base-url',
         '${supplied:llm-api-credentials.base-url}',
       ])
-      const scenario = GuardCliScenarioSchema.parse({
+      const scenario = GuardScenarioSchema.parse({
         guard: GUARD_FORMAT_VERSION,
         id: 's.cli.1',
         title: 't',
         binds: BINDS,
-        driver: 'cli',
         normalize: [],
         steps: [step],
       })
@@ -266,11 +264,11 @@ describe('guard scenario format v3 — the step vocabulary', () => {
         id: 's.cli.1',
         title: 't',
         binds: BINDS,
-        driver: 'cli',
         normalize: [],
         steps: [{ run: ['analyze', '--llm'], timeoutMs: 900_000, expect: { exit: 0 } }],
       })
-      expect(parsed.driver === 'cli' && isRunStep(parsed.steps[0]) && parsed.steps[0].timeoutMs).toBe(900_000)
+      const first = parsed.steps[0] as { timeoutMs?: number }
+      expect(first.timeoutMs).toBe(900_000)
     })
 
     it('is absent when undeclared — the runner default is not written into the file', () => {
@@ -296,7 +294,6 @@ describe('guard scenario format v3 — the step vocabulary', () => {
           id: 's.cli.1',
           title: 't',
           binds: BINDS,
-          driver: 'cli',
           normalize: [],
           timeoutMs: 900_000,
           steps: [{ run: [], expect: {} }],
@@ -311,7 +308,6 @@ describe('guard scenario format v3 — the step vocabulary', () => {
       id: 's.cli.1',
       title: 't',
       binds: BINDS,
-      driver: 'cli',
       normalize: [],
       steps: [{ run: ['--version'], stdin: 'x', env: { A: 'b' }, repeat: 2, expect: { exit: 0 }, milestone: 1 }],
     }

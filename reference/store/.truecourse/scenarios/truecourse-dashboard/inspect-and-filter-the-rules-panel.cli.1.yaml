@@ -52,7 +52,6 @@ setup:
           - src/index.js
         message: seed the repository
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

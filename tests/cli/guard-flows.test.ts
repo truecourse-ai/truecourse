@@ -157,7 +157,7 @@ async function seedTaskbird(r: string): Promise<void> {
           anchor,
           fingerprint: `sha256:${anchor}`,
         })),
-        scenarios: [{ id: 'task-lifecycle.api.1', surface: 'api' }],
+        scenarios: [{ id: 'task-lifecycle.api.1', drivers: ['api'] }],
         gaps: [
           {
             surface: 'web',
@@ -170,7 +170,7 @@ async function seedTaskbird(r: string): Promise<void> {
       manifestFlow({
         flowId: 'rate-limiting',
         bindings: [{ doc: DOC, anchor: 'auth/rate-limits', fingerprint: 'sha256:auth/rate-limits' }],
-        scenarios: [{ id: 'rate-limiting.api.1', surface: 'api' }],
+        scenarios: [{ id: 'rate-limiting.api.1', drivers: ['api'] }],
       }),
     ]),
   )

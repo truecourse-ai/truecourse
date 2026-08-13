@@ -204,8 +204,8 @@ describe('guard manifest v2 (flow-keyed)', () => {
           { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: 'sha256:l' },
         ],
         scenarios: [
-          { id: 'task-lifecycle.cli.1', surface: 'cli' as const, status: 'passing' as const },
-          { id: 'task-lifecycle.api.1', surface: 'api' as const, status: 'passing' as const },
+          { id: 'task-lifecycle.cli.1', drivers: ['cli'] as const, status: 'passing' as const },
+          { id: 'task-lifecycle.api.1', drivers: ['api'] as const, status: 'passing' as const },
         ],
         interfaces: [
           { surface: 'cli' as const, interfaceIds: ['cli/tasks-add', 'cli/tasks-list'] },
@@ -225,6 +225,17 @@ describe('guard manifest v2 (flow-keyed)', () => {
     // The web plan survives even though NO web scenario exists — that record is the
     // only trace a matched-but-unauthored surface leaves.
     expect(parsed.flows[0].interfaces.find((j) => j.surface === 'web')?.interfaceIds).toEqual(['web/board'])
+  })
+
+  it('folds a LEGACY per-scenario `surface` into the drivers list', () => {
+    // Rows were written that way until the scenario-level driver was retired; the
+    // manifest is committed, so they keep loading — as the one-driver list `surface`
+    // always meant, and never written back.
+    const legacy = JSON.parse(JSON.stringify(manifest))
+    legacy.flows[0].scenarios = [{ id: 'task-lifecycle.cli.1', surface: 'cli', status: 'passing' }]
+    const parsed = GuardManifestSchema.parse(legacy)
+    expect(parsed.flows[0].scenarios[0].drivers).toEqual(['cli'])
+    expect('surface' in parsed.flows[0].scenarios[0]).toBe(false)
   })
 
   it('defaults the generation-inputs hash to null, and gaps/interfaces to []', () => {
@@ -280,7 +291,7 @@ describe('guard manifest v2 (flow-keyed)', () => {
       version: 3 as const,
       flows: [
         { ...manifest.flows[0], flowId: 'one', generationInputsHash: 'sha256:a' },
-        { ...manifest.flows[0], flowId: 'two', generationInputsHash: 'sha256:b', scenarios: [{ id: 'two.cli.1', surface: 'cli' as const }] },
+        { ...manifest.flows[0], flowId: 'two', generationInputsHash: 'sha256:b', scenarios: [{ id: 'two.cli.1', drivers: ['cli'] as const, status: 'passing' as const }] },
       ],
     }
     const [first] = guardManifestSections(twoFlows)

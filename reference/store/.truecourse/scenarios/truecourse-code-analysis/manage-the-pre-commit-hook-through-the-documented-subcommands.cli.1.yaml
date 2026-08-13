@@ -48,7 +48,6 @@ setup:
           - src/index.js
         message: seed hooks sample
 normalize: []
-driver: cli
 steps:
   - run:
       - hooks

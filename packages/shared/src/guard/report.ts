@@ -1030,7 +1030,7 @@ export function guardEvidencePaths(sources: {
  *  half of {@link GuardScenarioDiagnosisSchema}'s durability contract. */
 export function findingFromDiagnosis(
   flowId: string,
-  scenario: { id: string; surface: GuardDriverId },
+  scenario: { id: string; drivers: GuardDriverId[] },
   d: GuardScenarioDiagnosis,
 ): GuardBirthFinding {
   return {
@@ -1048,7 +1048,9 @@ export function findingFromDiagnosis(
     ...(d.evidencePath !== undefined ? { evidencePath: d.evidencePath } : {}),
     ...(d.claim !== undefined ? { claim: d.claim } : {}),
     flowId,
-    surface: scenario.surface,
+    // The (flow, surface) pair a report row is keyed by is the surface the flow was
+    // AUTHORED for — the scenario's primary driver, first in registry order.
+    surface: scenario.drivers[0],
     ...(d.failedMilestone !== undefined ? { failedMilestone: d.failedMilestone } : {}),
     ...(d.priorMilestonesPassed !== undefined ? { priorMilestonesPassed: d.priorMilestonesPassed } : {}),
     ...(d.triage !== undefined ? { triage: d.triage } : {}),

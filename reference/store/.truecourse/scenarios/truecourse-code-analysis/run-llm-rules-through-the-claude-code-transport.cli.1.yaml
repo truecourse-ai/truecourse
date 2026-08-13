@@ -24,7 +24,6 @@ setup:
   env:
     TRUECOURSE_TELEMETRY: '0'
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

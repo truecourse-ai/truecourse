@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   GUARD_FORMAT_VERSION,
-  GuardCliScenarioSchema,
+  GuardScenarioSchema,
   GuardCliStepSchema,
   GuardPatchStepSchema,
   describeGuardScenarioSteps,
@@ -33,7 +33,6 @@ const PATCH_SCENARIO = {
   id: 'break-the-build.cli.1',
   title: 'A broken build command is reported, not run',
   binds: BINDS,
-  driver: 'cli',
   normalize: [],
   steps: [
     { run: ['init'], expect: { exit: 0 } },
@@ -55,7 +54,7 @@ const PATCH_SCENARIO = {
 
 describe('the patch step — the shape a scenario writes', () => {
   it('parses as the fifth cli step kind, file → operations', () => {
-    const parsed = GuardCliScenarioSchema.parse(PATCH_SCENARIO)
+    const parsed = GuardScenarioSchema.parse(PATCH_SCENARIO)
     const step = parsed.steps[1]
     expect(isPatchStep(step)).toBe(true)
     expect(isWriteStep(step)).toBe(false)

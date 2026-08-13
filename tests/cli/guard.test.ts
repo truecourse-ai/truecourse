@@ -965,7 +965,7 @@ function sectionFlow(anchor: string, scenarioIds: string[]): GuardManifestFlow {
     flowId: `docs/x.md#${anchor}`,
     flowFingerprint: 'sha256:x',
     bindings: [{ doc: 'docs/x.md', anchor, fingerprint: 'sha256:x' }],
-    scenarios: scenarioIds.map((id) => ({ id, surface: 'cli' as const })),
+    scenarios: scenarioIds.map((id) => ({ id, drivers: ['cli' as const] })),
     generationInputsHash: null,
     gaps: [],
   }

@@ -74,7 +74,6 @@ describe('exampleFidelityDefect — byte-compare where feasible', () => {
   const EXAMPLES: DocExampleBlock[] = [{ lang: 'sql', content: BLOCK, doc: 'docs/x.md', anchor: 'rule' }]
   const cli = (setupFiles: Record<string, string>, stdin?: string) =>
     ({
-      driver: 'cli' as const,
       steps: [{ run: ['check'], expect: { exit: 0 }, ...(stdin !== undefined ? { stdin } : {}) }],
       setup: { files: setupFiles },
     })
@@ -100,7 +99,6 @@ describe('exampleFidelityDefect — byte-compare where feasible', () => {
   it('a reformatted api request body is the defect', () => {
     const defect = exampleFidelityDefect(
       {
-        driver: 'api',
         steps: [
           { request: { method: 'POST', path: '/q', body: 'select *  from users  where id = 1' }, expect: { status: 200 } },
         ],
@@ -193,7 +191,6 @@ describe('generateGuards — the doc example is embedded byte-for-byte end to en
       return {
         scenario: {
           title: 'the version prints for the documented input',
-          driver: 'cli',
           setup: { files: { 'input.txt': content } },
           steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
         },

@@ -28,7 +28,6 @@ setup:
     TRUECOURSE_TELEMETRY: '0'
     TRUECOURSE_REFERENCE_API_KEY: ${supplied:llm-api-credentials.api-key}
 normalize: []
-driver: cli
 steps:
   - run:
       - config

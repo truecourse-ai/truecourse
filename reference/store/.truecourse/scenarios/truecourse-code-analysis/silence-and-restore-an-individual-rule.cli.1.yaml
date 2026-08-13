@@ -55,7 +55,6 @@ setup:
           - src/unsafe.js
         message: seed noisy sample
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

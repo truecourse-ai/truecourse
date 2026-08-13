@@ -4,6 +4,8 @@ import {
   GuardApiStepSchema,
   GuardStepSchema,
   GUARD_FORMAT_VERSION,
+  guardScenarioDrivers,
+  isApiServerScenario,
   runnableDriverIds,
   awaitingDriverIds,
   isRunnableDriver,
@@ -18,7 +20,6 @@ const API_SCENARIO = {
   flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
   interface: { path: ['api/create-todo'], fingerprints: ['sha256:interface'] },
   binds: BINDS,
-  driver: 'api',
   steps: [
     {
       request: { method: 'POST', path: '/todos', json: { title: 'x' } },
@@ -30,23 +31,26 @@ const API_SCENARIO = {
 }
 
 describe('guard scenario schema — api driver', () => {
-  it('carries an optional `server` the cli driver has no counterpart for', () => {
+  it('carries an optional `server` — the api-server binding, in the shared envelope', () => {
     expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, server: 'api-v2' }).success).toBe(true)
     // Absent is the pre-multi-server meaning: the recipe's default server.
     const bare = GuardScenarioSchema.safeParse(API_SCENARIO)
     expect(bare.success).toBe(true)
-    if (bare.success) expect((bare.data as { server?: string }).server).toBeUndefined()
-    // A cli scenario runs a binary, not a server — the field is refused there.
-    const cli = {
-      guard: GUARD_FORMAT_VERSION,
-      id: 'x.cli.1',
-      title: 'x',
-      binds: BINDS,
-      driver: 'cli',
-      steps: [{ run: ['--version'], expect: { exitCode: 0 } }],
-      server: 'api-v2',
+    if (bare.success) expect(bare.data.server).toBeUndefined()
+  })
+
+  it('drops a LEGACY scenario-level `driver` key — one schema, drivers on the steps', () => {
+    // The field was retired on 2026-08-12; corpora committed before it still load,
+    // and what they declared is thrown away rather than believed.
+    for (const legacy of ['api', 'cli', 'web']) {
+      const parsed = GuardScenarioSchema.safeParse({ ...API_SCENARIO, driver: legacy })
+      expect(parsed.success).toBe(true)
+      if (parsed.success) {
+        expect('driver' in parsed.data).toBe(false)
+        // …and the drivers it really exercises come from the steps, whatever it said.
+        expect(guardScenarioDrivers(parsed.data)).toEqual(['api'])
+      }
     }
-    expect(GuardScenarioSchema.safeParse(cli).success).toBe(false)
   })
 
   it('the api driver is runnable in the registry', () => {
@@ -59,22 +63,35 @@ describe('guard scenario schema — api driver', () => {
 
   it('parses a full api scenario (envelope + api verbs)', () => {
     const parsed = GuardScenarioSchema.parse(API_SCENARIO)
-    expect(parsed.driver).toBe('api')
+    expect(isApiServerScenario(parsed)).toBe(true)
+    expect(guardScenarioDrivers(parsed)).toEqual(['api'])
     expect(parsed.normalize).toEqual([])
   })
 
   it('the `request` verb crosses into the sandbox; the LIFECYCLE verbs do not', () => {
     // A sandbox scenario may drive the UI and then read the structured answer over
-    // HTTP, so `request` parses under the cli driver as itself.
-    expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, driver: 'cli' }).success).toBe(true)
-    // `boot`/`signal`/`logs` drive the server PROCESS this driver owns; in a sandbox
-    // the served surface's lifecycle is the sandbox's, not a step's.
-    for (const step of [{ boot: {} }, { signal: { name: 'SIGTERM' } }, { logs: { stream: 'stdout', match: 'up' } }]) {
-      expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, driver: 'cli', steps: [step] }).success).toBe(false)
+    // HTTP, so `request` sits in one list beside cli steps — and the scenario is no
+    // longer an api-server one, because not every step is an api verb.
+    const mixed = GuardScenarioSchema.safeParse({
+      ...API_SCENARIO,
+      steps: [{ run: ['--version'], expect: { exit: 0 } }, ...API_SCENARIO.steps],
+    })
+    expect(mixed.success).toBe(true)
+    if (mixed.success) {
+      expect(isApiServerScenario(mixed.data)).toBe(false)
+      expect(guardScenarioDrivers(mixed.data)).toEqual(['cli', 'api'])
     }
-    // And nothing crosses the other way: the api driver runs a server, not a shell.
-    const cliSteps = [{ run: ['--version'], expect: { exit: 0 } }]
-    expect(() => GuardScenarioSchema.parse({ ...API_SCENARIO, steps: cliSteps })).toThrow()
+    // `boot`/`signal`/`logs` drive the server PROCESS the api driver owns; in a
+    // sandbox the served surface's lifecycle is the sandbox's, not a step's.
+    for (const step of [{ boot: {} }, { signal: { name: 'SIGTERM' } }, { logs: { stream: 'stdout', match: 'up' } }]) {
+      const withCli = GuardScenarioSchema.safeParse({
+        ...API_SCENARIO,
+        steps: [{ run: ['--version'], expect: { exit: 0 } }, step],
+      })
+      expect(withCli.success).toBe(false)
+      // Alone, in an all-api-verb scenario, the same step is exactly right.
+      expect(GuardScenarioSchema.safeParse({ ...API_SCENARIO, steps: [step] }).success).toBe(true)
+    }
   })
 
   it('a step may capture from response HEADERS (additive, no format bump)', () => {
@@ -93,8 +110,12 @@ describe('guard scenario schema — api driver', () => {
     expect(() => GuardScenarioSchema.parse(API_SCENARIO)).not.toThrow()
   })
 
-  it('rejects an unknown driver', () => {
-    expect(() => GuardScenarioSchema.parse({ ...API_SCENARIO, driver: 'web' })).toThrow()
+  it('refuses a teardown on the api-server path — that server\'s lifecycle is the runner\'s', () => {
+    const withTeardown = {
+      ...API_SCENARIO,
+      teardown: [{ request: { method: 'DELETE', path: '/todos/1' }, expect: { status: 204 } }],
+    }
+    expect(GuardScenarioSchema.safeParse(withTeardown).success).toBe(false)
   })
 
   it('a request carries body OR json, never both', () => {
@@ -124,8 +145,8 @@ describe('guard scenario schema — api driver', () => {
 
   it('an api expect with no schema field still parses (additive, old scenarios unchanged)', () => {
     const parsed = GuardScenarioSchema.parse(API_SCENARIO)
-    expect(parsed.driver).toBe('api')
-    expect((parsed.steps[0].expect as { schema?: boolean }).schema).toBeUndefined()
+    expect(isApiServerScenario(parsed)).toBe(true)
+    expect((parsed.steps[0] as { expect: { schema?: boolean } }).expect.schema).toBeUndefined()
   })
 
   it('still rejects an unknown expect key (strict envelope preserved)', () => {
@@ -145,7 +166,6 @@ describe('guard scenario envelope v3', () => {
       { doc: 'docs/cli.md', section: 'todos/add', fingerprint: 'sha256:add' },
       { doc: 'docs/cli.md', section: 'todos/list', fingerprint: 'sha256:list' },
     ],
-    driver: 'cli',
     steps: [
       { run: ['todos', 'add', 'milk'], expect: { exit: 0 }, milestone: 1 },
       { run: ['todos', 'list'], expect: { exit: 0, stdout: { contains: 'milk' } }, milestone: 2 },
@@ -192,7 +212,7 @@ describe('guard scenario envelope v3', () => {
   it('a cli step carries an optional per-step env overlay; absent parses exactly as today', () => {
     // Absent = today's shape: the field never materializes on the parsed step.
     const plain = GuardScenarioSchema.parse(CLI_SCENARIO)
-    expect(plain.driver === 'cli' && plain.steps.every((s) => s.env === undefined)).toBe(true)
+    expect(plain.steps.every((s) => !('env' in s))).toBe(true)
 
     // Present: the same command observed under two environments in ONE scenario.
     const withEnv = GuardScenarioSchema.parse({
@@ -207,9 +227,9 @@ describe('guard scenario envelope v3', () => {
         },
       ],
     })
-    if (withEnv.driver !== 'cli') throw new Error('expected the cli driver')
-    expect(withEnv.steps[0].env).toBeUndefined()
-    expect(withEnv.steps[1].env).toEqual({ TRUECOURSE_TELEMETRY: '0' })
+    const envOf = (i: number) => (withEnv.steps[i] as { env?: Record<string, string> }).env
+    expect(envOf(0)).toBeUndefined()
+    expect(envOf(1)).toEqual({ TRUECOURSE_TELEMETRY: '0' })
 
     // Values are strings, and the format version does NOT move for an optional field.
     expect(() => GuardStepSchema.parse({ run: [], env: { X: 1 }, expect: { exit: 0 } })).toThrow()

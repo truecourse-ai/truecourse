@@ -42,7 +42,6 @@ setup:
           - src/index.js
         message: seed declined sample
 normalize: []
-driver: cli
 steps:
   - run:
       - hooks

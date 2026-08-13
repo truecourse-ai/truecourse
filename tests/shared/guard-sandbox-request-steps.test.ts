@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import {
   GUARD_FORMAT_VERSION,
   GuardApiRequestStepSchema,
-  GuardCliScenarioSchema,
+  GuardScenarioSchema,
   GuardSandboxStepSchema,
   captureDefects,
   describeApiCommand,
@@ -32,7 +32,7 @@ import {
 const binds = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function mixedScenario(steps: unknown[]): unknown {
-  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, driver: 'cli', steps, normalize: [] }
+  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, steps, normalize: [] }
 }
 
 describe('the request step in the sandbox union', () => {
@@ -75,8 +75,8 @@ describe('the request step in the sandbox union', () => {
     expect(() => GuardSandboxStepSchema.parse({ logs: { stream: 'stdout', match: 'ready' } })).toThrow()
   })
 
-  it('parses as ONE step list with cli and web steps under the cli scenario schema', () => {
-    const parsed = GuardCliScenarioSchema.parse(
+  it('parses as ONE step list with cli and web steps under the one scenario schema', () => {
+    const parsed = GuardScenarioSchema.parse(
       mixedScenario([
         { run: ['analyze'], expect: { exit: 0 } },
         { driver: 'web', click: { role: 'button', name: 'Security' }, expect: { text: { contains: 'Filtered by' } } },
@@ -100,7 +100,7 @@ describe('the request step in the sandbox union', () => {
     // every scenario written before this parses unchanged under this build.
     expect(GUARD_FORMAT_VERSION).toBe(3)
     expect(
-      GuardCliScenarioSchema.parse(mixedScenario([{ run: ['version'], expect: { exit: 0 } }])).steps,
+      GuardScenarioSchema.parse(mixedScenario([{ run: ['version'], expect: { exit: 0 } }])).steps,
     ).toHaveLength(1)
   })
 })

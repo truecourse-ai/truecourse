@@ -57,7 +57,6 @@ setup:
           - src/committed.js
         message: seed the committed baseline
 normalize: []
-driver: cli
 steps:
   - run:
       - add

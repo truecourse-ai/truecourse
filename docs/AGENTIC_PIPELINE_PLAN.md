@@ -94,14 +94,15 @@ Binding decisions:
   promise it as a feature. Testing through the promised surface is
   enough; the un-promised one is a tool, not a subject.
 - **The driver belongs to the STEP, not the scenario** (foundational;
-  decided 2026-08-09). A scenario is driver-agnostic: each step declares
-  how it acts (a CLI invocation, an API request), and the sandbox is ONE
-  world that can both start the service and run the CLI — because real
-  promises span surfaces ("create it through the API, the CLI lists it")
-  and a scenario locked to one driver cannot state them. The
-  scenario-level driver is derived, "the drivers its steps use". Every
-  workstream designs against this; nothing new may deepen the
-  scenario-level-driver assumption. Migration details (what "per
+  decided 2026-08-09; LANDED 2026-08-12). A scenario is driver-agnostic: each
+  step declares how it acts (a CLI invocation, an API request), and the
+  sandbox is ONE world that can both start the service and run the CLI —
+  because real promises span surfaces ("create it through the API, the CLI
+  lists it") and a scenario locked to one driver cannot state them. There is
+  now ONE scenario schema and NO scenario-level driver field: the drivers a
+  scenario exercises are read off its steps, and so is which executor it
+  takes. Every workstream designs against this; nothing new may reintroduce
+  the scenario-level-driver assumption. Migration details (what "per
   surface" coverage counts under mixed scenarios) live with the §9
   entry.
 - **The word is "scenario", never "test"**, in every user-facing surface (CLI
@@ -1769,19 +1770,31 @@ fixes to the run machinery itself.
   interrupted scan or generate resumes from cache on the next run) stay
   recorded gaps rather than growing process-control machinery.
 - **The driver belongs to the STEP, not the scenario** (decided
-  2026-08-09). A real promise often spans surfaces — "create it through
-  the API, the CLI lists it" — and a scenario that is wholly one driver
-  cannot state it. The target: a scenario is driver-agnostic; each step
-  declares how it acts (a CLI invocation, an API request), the sandbox
-  is ONE world that can both start the service and run the CLI, and the
-  step detail already renders its driver as a per-step chip. The
-  scenario-level driver field becomes derived ("the drivers its steps
-  use"); what "one scenario per (flow, surface)" and per-driver coverage
-  counting mean under mixed scenarios is redefined by the owning
-  workstreams when they land this — the decision here is the principle,
-  not the migration. Sequenced behind the api reference wave: the
-  current api-family flows do not need mixing; the first flow that
-  states a cross-surface promise does.
+  2026-08-09). STATUS: LANDED 2026-08-12 (the field is GONE, not derived).
+  A real promise often spans surfaces — "create it through the API, the CLI
+  lists it" — and a scenario that is wholly one driver cannot state it. A
+  scenario is now driver-agnostic: each step declares how it acts (a CLI
+  invocation, an API request), the sandbox is ONE world that can both start
+  the service and run the CLI, and the step detail renders each step's driver
+  as its own chip. What landed:
+  - ONE `GuardScenarioSchema` (no per-driver variants, no discriminator). A
+    legacy `driver:` key is accepted and DROPPED at parse, so corpora
+    committed before the cut still load; nothing writes it again.
+  - Which executor a scenario takes is DERIVED — `isApiServerScenario`: every
+    executed step an api verb ⇒ the recipe's booted server; anything else ⇒
+    the sandbox. The runner's pools, its preparation gate and its ordering all
+    read that one predicate.
+  - What a scenario EXERCISES is derived the same way —
+    `guardScenarioDrivers`, registry order — and `scenarios/manifest.json`
+    records it per scenario as `drivers: GuardDriverId[]` (replacing
+    `surface`, which is folded to a one-driver list on read). Per-driver
+    coverage counting is a UNION: a mixed scenario counts under EACH driver
+    its steps use. That fixed a live defect — every mixed scenario in the
+    reference corpus (17 of 51) was recorded as CLI-only, so the coverage
+    classification lied about it.
+  "One scenario per (flow, surface)" is unchanged as an AUTHORING unit: the
+  surface a flow is authored for is still the generator's own, and it names
+  the file's id.
 - **A step can edit only whole files — grow a patch step** (decided
   2026-08-09: build). STATUS: LANDED 2026-08-09 (JSON patch step, runner-only vocabulary). A flow that must change ONE field of a supplied
   instance's structured file (break the build command in the registered

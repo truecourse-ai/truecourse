@@ -256,7 +256,7 @@ describe('defaultGuardColdGenerate', () => {
     });
     const author: GenerateRunner = async (ctx) => ({
       scenario: stampMilestones(
-        { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+        { title: 'version works', steps: [{ run: ['--version'], expect: { exit: 0 } }] },
         ctx.milestones.length,
       ),
     });

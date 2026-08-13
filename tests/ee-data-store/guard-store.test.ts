@@ -112,7 +112,7 @@ const MANIFEST_JSON = JSON.stringify({
       flowId: 'README.md#intro',
       flowFingerprint: 'sha256:abc',
       bindings: [{ doc: 'README.md', anchor: 'intro', fingerprint: 'sha256:abc' }],
-      scenarios: [{ id: 's1', surface: 'cli' }],
+      scenarios: [{ id: 's1', drivers: ['cli'] }],
       generationInputsHash: null,
       gaps: [],
     },

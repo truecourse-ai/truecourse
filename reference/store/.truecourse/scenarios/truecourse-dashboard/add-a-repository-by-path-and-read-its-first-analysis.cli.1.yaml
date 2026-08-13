@@ -49,7 +49,6 @@ setup:
           - src/index.js
         message: seed the repository
 normalize: []
-driver: cli
 steps:
   - driver: web
     navigate: /

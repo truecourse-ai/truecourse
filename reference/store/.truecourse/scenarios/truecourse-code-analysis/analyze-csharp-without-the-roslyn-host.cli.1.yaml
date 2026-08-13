@@ -51,7 +51,6 @@ setup:
           - src/Report.cs
         message: seed polyglot sample
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

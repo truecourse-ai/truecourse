@@ -59,10 +59,9 @@ import {
   dismissedClaimKey,
   guardGapLabel,
   guardNoFlowClaimGapKind,
-  isApiRequestStep,
+  guardScenarioDrivers,
   isAwaitingDriver,
   isManualFlowId,
-  isWebStep,
   manualFlowId,
   manualFlowScenarioId,
   parseBlockedOnCapabilities,
@@ -406,12 +405,14 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     for (const s of flow.scenarios) ownerByScenario.set(s.id, flow.flowId)
   }
 
+  // The PRIMARY driver (registry order) of each scenario — what a single-surface
+  // row names. The full set a scenario exercises is `guardScenarioDrivers`.
   const driverByScenario = new Map<string, GuardDriverId>()
-  for (const s of scenarioById.values()) driverByScenario.set(s.id, s.driver)
+  for (const s of scenarioById.values()) driverByScenario.set(s.id, guardScenarioDrivers(s)[0])
   const birthStatusByScenario = new Map<string, GuardTestStatus>()
   for (const flow of manifestFlows.values()) {
     for (const s of flow.scenarios) {
-      driverByScenario.set(s.id, s.surface)
+      driverByScenario.set(s.id, s.drivers[0])
       birthStatusByScenario.set(s.id, s.status)
     }
   }
@@ -936,7 +937,7 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
         file: fileById.get(s.id) ?? '',
         handWritten: !ownerByScenario.has(s.id),
         flowId,
-        surface: s.driver,
+        drivers: guardScenarioDrivers(s),
         ...(status ? { status } : {}),
       }
     })
@@ -1206,23 +1207,6 @@ function flowInterfaceIds(flowId: string, join: FlowJoin): string[] {
 }
 
 /**
- * The drivers ONE scenario exercises — its STEPS' kinds, not its `driver` field.
- * An api scenario is api throughout; a sandbox scenario wears one chip per driver
- * its steps use, so a mixed one wears several. The predicates are the runners' own
- * (`isWebStep` and `isApiRequestStep` are what the registry routes on), so this can
- * never disagree with what actually ran.
- */
-function scenarioDrivers(scenario: GuardScenario): GuardDriverId[] {
-  if (scenario.driver === 'api') return ['api']
-  const steps = guardExecutionSteps(scenario)
-  const drivers: GuardDriverId[] = []
-  if (steps.some((step) => !isWebStep(step) && !isApiRequestStep(step))) drivers.push('cli')
-  if (steps.some((step) => isWebStep(step))) drivers.push('web')
-  if (steps.some((step) => isApiRequestStep(step))) drivers.push('api')
-  return drivers
-}
-
-/**
  * The drivers a flow's TESTS exercise, in registry order — read from the committed
  * scenarios, so a flow with a cli test and a web GAP drives cli only (nothing runs
  * on the surface it is still waiting for).
@@ -1236,7 +1220,7 @@ function flowDrivers(surfaces: readonly GuardFlowSurface[], join: FlowJoin): Gua
   const found = new Set<GuardDriverId>()
   for (const surface of surfaces) {
     const scenario = surface.scenarioId ? join.scenarioById.get(surface.scenarioId) : undefined
-    if (scenario) for (const driver of scenarioDrivers(scenario)) found.add(driver)
+    if (scenario) for (const driver of guardScenarioDrivers(scenario)) found.add(driver)
   }
   if (found.size === 0) {
     for (const surface of surfaces) if (surface.surface) found.add(surface.surface)
@@ -2222,12 +2206,10 @@ export async function readGuardScenarioSource(
         const actual = byStep.get(step.n)
         return actual ? { ...step, actual } : step
       })
-      const driver = (parsed as { driver?: GuardDriverId }).driver
       return {
         id,
         file: rel,
         content: raw,
-        ...(driver ? { driver } : {}),
         steps,
         ...(setup ? { setup } : {}),
       }

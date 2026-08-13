@@ -44,7 +44,6 @@ function scenario(id: string): GuardScenario {
     id,
     title: `t-${id}`,
     binds: [{ doc: 'README.md', section: 'intro', fingerprint: 'sha256:f' }],
-    driver: 'cli',
     steps: [{ run: ['--help'], expect: { exit: 0 } }],
     normalize: [],
   };

@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   GUARD_FORMAT_VERSION,
-  GuardCliScenarioSchema,
+  GuardScenarioSchema,
   GuardSandboxStepSchema,
   GuardWebExpectSchema,
   GuardWebLocatorSchema,
@@ -35,7 +35,7 @@ import {
 const binds = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function mixedScenario(steps: unknown[]): unknown {
-  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, driver: 'cli', steps, normalize: [] }
+  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, steps, normalize: [] }
 }
 
 describe('web step schema', () => {
@@ -240,8 +240,8 @@ describe('the history verb', () => {
 })
 
 describe('a mixed cli + web scenario', () => {
-  it('parses as ONE step list under the cli scenario schema', () => {
-    const parsed = GuardCliScenarioSchema.parse(
+  it('parses as ONE step list under the one scenario schema', () => {
+    const parsed = GuardScenarioSchema.parse(
       mixedScenario([
         { run: ['note', 'notes.txt', 'from the CLI'], expect: { exit: 0 } },
         { driver: 'web', navigate: '/notes', expect: { text: { contains: 'from the CLI' } }, milestone: 1 },
@@ -285,7 +285,7 @@ describe('a mixed cli + web scenario', () => {
     // no committed file uses.
     expect(GUARD_FORMAT_VERSION).toBe(3)
     expect(
-      GuardCliScenarioSchema.parse(mixedScenario([{ run: ['version'], expect: { exit: 0 } }])).steps,
+      GuardScenarioSchema.parse(mixedScenario([{ run: ['version'], expect: { exit: 0 } }])).steps,
     ).toHaveLength(1)
   })
 })

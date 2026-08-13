@@ -44,7 +44,6 @@ setup:
           - src/index.js
         message: seed llm hook sample
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

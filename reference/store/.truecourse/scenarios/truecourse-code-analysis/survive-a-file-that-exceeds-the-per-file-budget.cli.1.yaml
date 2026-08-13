@@ -72,7 +72,6 @@ setup:
           - src/bulk.js
         message: seed budget sample
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

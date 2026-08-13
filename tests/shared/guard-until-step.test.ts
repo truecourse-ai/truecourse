@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   GUARD_FORMAT_VERSION,
-  GuardCliScenarioSchema,
+  GuardScenarioSchema,
   GuardSandboxStepSchema,
   GuardStepObjectSchema,
   describeCliCommand,
@@ -26,7 +26,7 @@ import {
 const binds = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function cliScenario(steps: unknown[]): unknown {
-  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, driver: 'cli', steps, normalize: [] }
+  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, steps, normalize: [] }
 }
 
 describe('the `until` field on a run step', () => {
@@ -95,7 +95,7 @@ describe('the `until` field on a run step', () => {
 
   it('the format version does not move — `until` is additive runner-only vocabulary', () => {
     expect(GUARD_FORMAT_VERSION).toBe(3)
-    expect(GuardCliScenarioSchema.parse(cliScenario([{ run: ['version'], expect: { exit: 0 } }])).steps).toHaveLength(
+    expect(GuardScenarioSchema.parse(cliScenario([{ run: ['version'], expect: { exit: 0 } }])).steps).toHaveLength(
       1,
     )
   })

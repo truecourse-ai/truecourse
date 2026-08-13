@@ -303,6 +303,17 @@ export function isApiRequestStep(step: object): step is GuardApiRequestStep {
   return 'request' in step
 }
 
+/**
+ * True when the step belongs to THIS driver's vocabulary at all — a `request` or
+ * one of the three lifecycle verbs. Takes any step object, because the question
+ * "is this step an api verb?" is asked of steps nobody has placed yet: it is what
+ * decides whether a scenario runs against the booted server or in a sandbox
+ * ({@link isApiServerScenario}), and which driver chips a scenario wears.
+ */
+export function isApiStep(step: object): step is GuardApiStep {
+  return isApiRequestStep(step) || 'boot' in step || 'signal' in step || 'logs' in step
+}
+
 /** True when the step (re)starts the server process. */
 export function isApiBootStep(step: GuardApiStep): step is GuardApiBootStep {
   return 'boot' in step

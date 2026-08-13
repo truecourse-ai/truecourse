@@ -45,7 +45,6 @@ setup:
           - src/index.js
         message: seed dirty sample
 normalize: []
-driver: cli
 steps:
   - write:
       src/dirty.js: |

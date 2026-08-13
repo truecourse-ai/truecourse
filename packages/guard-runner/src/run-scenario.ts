@@ -8,7 +8,7 @@
  */
 
 import type {
-  GuardCliScenario,
+  GuardSandboxScenario,
   GuardExpect,
   GuardFileExpect,
   GuardScenarioResult,
@@ -159,7 +159,7 @@ function applyCapturedExpect<E extends GuardExpect | GuardFileExpect>(
 }
 
 export async function runScenario(
-  scenario: GuardCliScenario,
+  scenario: GuardSandboxScenario,
   ctx: RunScenarioContext,
 ): Promise<GuardScenarioResult> {
   const start = Date.now()
@@ -617,7 +617,7 @@ export async function runScenario(
  * claim identities of the milestone it realizes. Undefined when it carries
  * neither, which is honest — a plumbing step is about nothing in particular.
  */
-function stepClaim(step: GuardCliScenario['steps'][number]): string | undefined {
+function stepClaim(step: GuardSandboxScenario['steps'][number]): string | undefined {
   const note = step.note?.trim()
   if (note) return note
   const claims = milestoneClaims(step.milestone)

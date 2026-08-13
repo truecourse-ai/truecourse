@@ -307,7 +307,7 @@ describe('guard onboarding pipeline', () => {
               scenarios: [
                 {
                   id: 'drift1',
-                  surface: 'cli',
+                  drivers: ['cli'],
                   status: 'failing',
                   diagnosis: {
                     doc: 'README.md',
@@ -588,7 +588,7 @@ describe('guard onboarding pipeline', () => {
   });
   const authorVersion: GenerateRunner = async (ctx) => ({
     scenario: stampMilestones(
-      { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
+      { title: 'version works', steps: [{ run: ['--version'], expect: { exit: 0 } }] },
       ctx.milestones.length,
     ),
   });

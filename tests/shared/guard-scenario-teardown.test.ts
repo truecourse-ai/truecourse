@@ -6,19 +6,18 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  GuardCliScenarioSchema,
+  GuardScenarioSchema,
   describeGuardScenarioSteps,
   guardExecutionSteps,
   type GuardApiScenario,
-  type GuardCliScenario,
+  type GuardSandboxScenario,
 } from '@truecourse/shared'
 
-const base: GuardCliScenario = {
+const base: GuardSandboxScenario = {
   guard: 3,
   id: 'svc.cli.1',
   title: 'installs and removes a service',
   binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }],
-  driver: 'cli',
   steps: [
     { run: ['install'], expect: { exit: 0 } },
     { run: ['status'], expect: { exit: 0 } },
@@ -30,20 +29,20 @@ const base: GuardCliScenario = {
   normalize: [],
 }
 
-describe('GuardCliScenarioSchema.teardown', () => {
+describe('the scenario schema’s teardown', () => {
   it('parses a scenario carrying teardown steps', () => {
-    const parsed = GuardCliScenarioSchema.safeParse(base)
+    const parsed = GuardScenarioSchema.safeParse(base)
     expect(parsed.success).toBe(true)
   })
 
   it('rejects an EMPTY teardown list — nothing to restore is spelled by omission', () => {
-    const parsed = GuardCliScenarioSchema.safeParse({ ...base, teardown: [] })
+    const parsed = GuardScenarioSchema.safeParse({ ...base, teardown: [] })
     expect(parsed.success).toBe(false)
   })
 
   it('stays optional — a scenario without it parses exactly as before', () => {
     const { teardown: _teardown, ...bare } = base
-    expect(GuardCliScenarioSchema.safeParse(bare).success).toBe(true)
+    expect(GuardScenarioSchema.safeParse(bare).success).toBe(true)
   })
 })
 
@@ -63,7 +62,6 @@ describe('guardExecutionSteps', () => {
       id: 'api.1',
       title: 'an api scenario',
       binds: base.binds,
-      driver: 'api',
       steps: [{ request: { method: 'GET', path: '/health' }, expect: { status: 200 } }],
       normalize: [],
     }
