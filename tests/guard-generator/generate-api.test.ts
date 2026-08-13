@@ -4,7 +4,7 @@ import path from 'node:path'
 import yaml from 'js-yaml'
 import { spawnGenerateRunner, type AuthorUserContext, type GenerateRunner } from '@truecourse/guard-generator'
 import { readManifest } from '@truecourse/guard-runner'
-import { guardManifestSections } from '@truecourse/shared'
+import { GuardScenarioSchema, guardManifestSections, guardScenarioDrivers } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -71,15 +71,16 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.written).toHaveLength(1)
     expect(res.written[0]).toMatchObject({ anchor: 'list', flowId: 'list', surface: 'api', id: 'list.api.1' })
 
-    // The committed YAML is a valid api-driver scenario, bound to the flow's section.
+    // The committed YAML is a valid api scenario, bound to the flow's section — and
+    // it declares NO scenario-level driver: the surface is read off its steps.
     const file = path.join(r, res.written[0].file)
     const committed = yaml.load(fs.readFileSync(file, 'utf-8')) as {
-      driver: string
       steps: unknown[]
       flow: { id: string }
       binds: { doc: string; section: string }[]
     }
-    expect(committed.driver).toBe('api')
+    expect('driver' in committed).toBe(false)
+    expect(guardScenarioDrivers(GuardScenarioSchema.parse(committed))).toEqual(['api'])
     expect(committed.steps).toHaveLength(1)
     expect(committed.flow.id).toBe('list')
     expect(committed.binds).toEqual([expect.objectContaining({ doc: DOC, section: 'list' })])
@@ -87,7 +88,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const section = guardManifestSections(readManifest(r)).find((s) => s.anchor === 'list')!
     expect(section.scenarioIds).toEqual(['list.api.1'])
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toEqual([
-      { id: 'list.api.1', surface: 'api', status: 'passing' },
+      { id: 'list.api.1', drivers: ['api'], status: 'passing' },
     ])
   }, 60_000)
 
@@ -172,7 +173,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     // so the next generate leaves it alone until an input moves.
     const entry = readManifest(r)!.flows.find((f) => f.flowId === 'list')!
     expect(entry.scenarios).toMatchObject([
-      { id: 'list.api.1', surface: 'api', status: 'failing', diagnosis: { actual: 'status 500' } },
+      { id: 'list.api.1', drivers: ['api'], status: 'failing', diagnosis: { actual: 'status 500' } },
     ])
     expect(entry.generationInputsHash).not.toBeNull()
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
@@ -222,8 +223,8 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.written.map((w) => w.surface).sort()).toEqual(['api', 'cli'])
     expect(res.written.map((w) => w.id).sort()).toEqual(['list.api.1', 'list.cli.1'])
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toEqual([
-      { id: 'list.api.1', surface: 'api', status: 'passing' },
-      { id: 'list.cli.1', surface: 'cli', status: 'passing' },
+      { id: 'list.api.1', drivers: ['api'], status: 'passing' },
+      { id: 'list.cli.1', drivers: ['cli'], status: 'passing' },
     ])
   }, 60_000)
 
@@ -271,7 +272,9 @@ describe('spawnGenerateRunner — per-driver system prompt', () => {
     await runner({ ...base, driver: 'api', recipeServe: ['node', 'server.js'], recipeHealthPath: '/health' })
     await runner({ ...base, driver: 'cli', recipeEntry: ['node', 'cli.js'] })
     expect(systems[0]).toContain('HTTP service')
-    expect(systems[0]).toContain('"api"')
+    // The api prompt embeds the api VOCABULARY (there is no driver field to name).
+    expect(systems[0]).toContain('"request"')
     expect(systems[1]).toContain('command-line program')
+    expect(systems[1]).not.toContain('"request"')
   })
 })

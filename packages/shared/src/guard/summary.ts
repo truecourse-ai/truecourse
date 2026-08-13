@@ -234,7 +234,11 @@ export const GUARD_UNADJUDICATED_REMEDY =
 
 /** What a section's flows say about the driver it would be tested on. */
 interface SectionSurfaces {
-  /** Drivers the section's flows actually own a scenario on. */
+  /**
+   * Drivers the section's flows actually own a scenario on — the UNION over each
+   * scenario's own drivers, so a test that drives the UI and reads the result over
+   * HTTP puts its section under both.
+   */
   scenarios: Set<GuardDriverId>
   /** Drivers an `awaiting-driver` gap on the section's flows waits for. */
   awaiting: Set<GuardDriverId>
@@ -253,7 +257,7 @@ function sectionSurfaces(manifest: GuardManifest): Map<string, SectionSurfaces> 
         view = { scenarios: new Set(), awaiting: new Set(), untestable: false }
         bySection.set(key, view)
       }
-      for (const s of flow.scenarios) view.scenarios.add(s.surface)
+      for (const s of flow.scenarios) for (const driver of s.drivers) view.scenarios.add(driver)
       for (const gap of flow.gaps) {
         if (gap.kind === 'awaiting-driver' && gap.driver) view.awaiting.add(gap.driver)
         else if (gap.kind === 'untestable' || gap.kind === 'no-claim') view.untestable = true

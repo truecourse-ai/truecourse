@@ -72,7 +72,7 @@ function GuardSectionFlowRow({ flow }: { flow: GuardSectionFlow }) {
   return (
     <>
       <div className="flex w-full items-start gap-2">
-        <span className="min-w-0 flex-1 text-[13px] font-medium leading-snug text-foreground">{flow.title}</span>
+        <span className="min-w-0 flex-1 text-[13px] font-normal leading-snug text-foreground">{flow.title}</span>
         <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-primary">
           open
           <ArrowUpRight className="h-3 w-3" />

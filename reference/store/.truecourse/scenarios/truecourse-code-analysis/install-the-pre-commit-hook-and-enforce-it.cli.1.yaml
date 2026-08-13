@@ -58,7 +58,6 @@ setup:
           - src/index.js
         message: seed hooked sample
 normalize: []
-driver: cli
 steps:
   - run:
       - hooks
@@ -135,7 +134,7 @@ steps:
       - add notes
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?![\s\S]*TrueCourse pre-commit check)[\s\S]*$
     note: The identical commit that the hook refused one step earlier goes through, with no hook output at all. This is also how a developer recovers from the no-baseline state, which is why the two steps sit together.
     milestone:
@@ -149,7 +148,6 @@ steps:
   - git:
       - add
       - .truecourse/LATEST.json
-      - .truecourse/config.json
       - .truecourse/hooks.yaml
     expect:
       exit: 0
@@ -181,7 +179,7 @@ steps:
       - add util
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*passed)[\s\S]*$
     note: 'The change introduces a low-severity violation — a real new finding that does not match `block-on: [critical, high]` — so the diff check runs on this commit AND lets it through. Without this step the flow would only prove the hook blocks everything.'
     milestone:
@@ -207,7 +205,7 @@ steps:
       - add unsafe
     expect:
       exit: 1
-      stdout:
+      stderr:
         matches: ^(?=[\s\S]*BLOCKED)(?=[\s\S]*Dynamic code evaluation)(?=[\s\S]*Commit blocked)[\s\S]*$
     note: 'Same policy, same hook, higher severity: blocked, with the offending violation named. The commit is refused — `git log` still ends at "add util".'
     milestone:
@@ -239,7 +237,7 @@ steps:
       - add unsafe
     expect:
       exit: 0
-      stdout:
+      stderr:
         matches: ^(?![\s\S]*TrueCourse pre-commit check)[\s\S]*$
     note: 'The behavioral proof the claim asks for: the very commit that was blocked two steps ago now completes, with no hook output. Asserting only that a file disappeared would be a weaker test of the same sentence.'
     milestone:

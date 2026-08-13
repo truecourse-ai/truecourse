@@ -8,7 +8,8 @@
  * environment (the `setup.http` stub target), a background release watcher, an
  * interactive publish that only asks on a terminal, a channel menu that reads
  * KEYS rather than lines, a two-question release wizard behind a working phase
- * that holds the terminal, a cwd reporter, a both-streams warning, and failure /
+ * that holds the terminal, a cwd reporter, a both-streams warning, a console-mode
+ * server that never returns (`serve`, for the run-until-marker step), and failure /
  * hang commands (for the error paths).
  */
 
@@ -375,6 +376,27 @@ switch (command) {
     const watcher = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: 'inherit' })
     watcher.unref()
     process.stdout.write(`watching in the background (pid ${watcher.pid})\n`)
+    break
+  }
+
+  case 'serve': {
+    // The HELD TERMINAL: a console-mode server that prints a banner, then its
+    // ready marker, and then never returns — the shape of `truecourse dashboard`.
+    // A step can only reach it by declaring the line it waits for (`until`).
+    //   RELKIT_SERVE_MS      how long the "boot" takes before the marker (default 80)
+    //   RELKIT_SERVE_QUIET   never print the marker at all (the marker-never-comes case)
+    //   TC_SERVE_PIDFILE     write this pid there, so a test can prove it was reaped
+    if (process.env.TC_SERVE_PIDFILE) {
+      fs.writeFileSync(process.env.TC_SERVE_PIDFILE, String(process.pid))
+    }
+    process.stdout.write('relkit serve: starting\n')
+    if (process.env.RELKIT_SERVE_QUIET !== '1') {
+      setTimeout(() => {
+        process.stdout.write('relkit serve: listening on http://127.0.0.1:4321\n')
+        process.stdout.write('Press Ctrl-C to stop\n')
+      }, Number(process.env.RELKIT_SERVE_MS ?? 80))
+    }
+    setInterval(() => {}, 1000)
     break
   }
 

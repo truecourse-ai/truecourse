@@ -61,6 +61,8 @@ export type StageId =
   | 'guard.retry'
   | 'guard.fidelity'
   | 'guard.triage'
+  // --- guard run (the one LLM call a run can make) ---
+  | 'guard.visualJudge'
   | 'guard.recipe'
   | 'guard.seed'
   | 'rules.violationGen';
@@ -127,6 +129,13 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // confidence, is acted on without a human — deliberately top-tier like the
   // overlap verify pass; the failure count keeps the spend small.
   'guard.triage': 'opus',
+  // READING A SCREENSHOT of a failed web step — the only LLM call `guard run`
+  // makes, and only ever about a failure. Vision comprehension of a real UI is the
+  // top tier's work (a weaker model confidently mis-reads a rendered page, and the
+  // whole value of this annotation is trustworthiness), and it fires so rarely —
+  // once per failing web scenario, cached on the failure identity — that the spend
+  // is negligible. Opus.
+  'guard.visualJudge': 'opus',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
   // Drafting a seed script writes REAL code against the app's own ORM and

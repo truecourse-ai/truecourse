@@ -13,11 +13,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { GuardCliScenario, GuardSandboxStep } from '@truecourse/shared'
+import type { GuardSandboxScenario, GuardSandboxStep } from '@truecourse/shared'
 import {
   isBrowserInstalled,
   loadRecipe,
@@ -30,7 +29,16 @@ import {
   WEB_VIDEO_FILE,
   type ResolvedWebSurface,
 } from '@truecourse/guard-runner'
-import { FIXTURE_BIN, makeTempRepo, rmrf, scenario, specBinds, writeSpecDoc } from './helpers.js'
+import {
+  FIXTURE_BIN,
+  isAlive,
+  makeTempRepo,
+  playwrightBrowserPids,
+  rmrf,
+  scenario,
+  specBinds,
+  writeSpecDoc,
+} from './helpers.js'
 
 /** Absolute path to the fixture WEB app (two linked pages, a button, a text change). */
 const FIXTURE_WEB_SERVER = fileURLToPath(
@@ -39,31 +47,6 @@ const FIXTURE_WEB_SERVER = fileURLToPath(
 
 /** A browser step is a real browser: generous, but still bounded. */
 const TEST_TIMEOUT_MS = 60_000
-
-/**
- * The chromium processes Playwright has running RIGHT NOW, by pid. Read from the
- * OS, not from our own bookkeeping — the point of an orphan check is to distrust
- * the bookkeeping. A browser Playwright launched is the only thing on the machine
- * whose argv carries both the ms-playwright cache path and a `--user-data-dir`.
- */
-function playwrightBrowserPids(): number[] {
-  return execFileSync('ps', ['-Ao', 'pid=,args='])
-    .toString()
-    .split('\n')
-    .filter((line) => line.includes('/ms-playwright/') && line.includes('--user-data-dir='))
-    .map((line) => Number(line.trim().split(/\s+/)[0]))
-    .filter((pid) => Number.isInteger(pid))
-}
-
-/** True while the process is alive (signal 0 probes without delivering anything). */
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
 
 interface WebRecipeOverrides {
   healthPath?: string
@@ -106,7 +89,7 @@ function webSurfaceOf(repo: string): ResolvedWebSurface | null {
 
 /** Run one scenario in its own sandbox, with the fixture recipe's web surface. */
 async function run(repo: string, steps: GuardSandboxStep[], id = 'web.flow.cli.1') {
-  const s: GuardCliScenario = scenario({ id, steps, binds: specBinds('a/b') })
+  const s: GuardSandboxScenario = scenario({ id, steps, binds: specBinds('a/b') })
   const surface = webSurfaceOf(repo)
   return await runScenario(s, {
     repoRoot: repo,
@@ -578,6 +561,239 @@ describe('the web driver', () => {
         await served.close().catch(() => undefined)
         rmrf(scoped)
       }
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  // --- The observation channels a page's INVISIBLE state needs ----------
+  //
+  // Everything below is state no `text` matcher can reach: an ARIA state, a class
+  // on the document element, an accessible name that is an `aria-label`, and a
+  // history entry. The fixture's `/controls` page carries one of each.
+
+  it(
+    'asserts an ARIA state on a role + name target, and sees it MOVE',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/controls',
+            expect: { state: { role: 'tab', name: 'Home', selected: true } },
+          },
+          // The switch is off, and its position lives in `aria-checked` alone.
+          { driver: 'web', expect: { state: { role: 'switch', name: 'LLM rules', checked: false } } },
+          { driver: 'web', click: { role: 'switch', name: 'LLM rules' } },
+          { driver: 'web', expect: { state: { role: 'switch', name: 'LLM rules', checked: true } } },
+          // The active tab moves to the one that was clicked.
+          { driver: 'web', click: { role: 'tab', name: 'Flows' } },
+          { driver: 'web', expect: { state: { role: 'tab', name: 'Flows', selected: true } } },
+          { driver: 'web', expect: { state: { role: 'tab', name: 'Home', selected: false } } },
+          // A natively disabled control, and a collapsed disclosure.
+          { driver: 'web', expect: { state: { role: 'button', name: 'Publish', disabled: true } } },
+          { driver: 'web', expect: { state: { role: 'button', name: 'Filters', expanded: false } } },
+          { driver: 'web', click: { role: 'button', name: 'Filters' } },
+          { driver: 'web', expect: { state: { role: 'button', name: 'Filters', expanded: true } } },
+        ],
+        'web.state.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.state.cli.1')
+      expect(text).toContain('✓ expected: switch “LLM rules” is checked')
+      expect(text).toContain('   actual:   switch “LLM rules” is checked')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a control whose position is marked by COLOUR alone fails honestly — it exposes no state',
+    async () => {
+      // The three-way detection switch of the real dashboard, in miniature: the
+      // selected position is a class and a colour, and no ARIA state at all. The
+      // step must say THAT, not invent a verdict.
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', navigate: '/controls' },
+          {
+            driver: 'web',
+            expect: { state: { role: 'button', name: 'Detection mode', pressed: true } },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.state-missing.cli.1',
+      )
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('button “Detection mode” is pressed')
+      expect(result.failure?.actual).toContain('exposes no aria-pressed')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'sees a CLASS on the document element and an attribute beside it — dark mode lives nowhere else',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/controls',
+            expect: { class: { absent: 'dark' } },
+          },
+          { driver: 'web', click: { role: 'button', name: 'Toggle theme' } },
+          {
+            driver: 'web',
+            expect: {
+              class: { has: 'dark' },
+              attribute: { name: 'data-theme', value: { equals: 'dark' } },
+            },
+          },
+          // And an attribute of ONE element, addressed the way every other web
+          // step addresses one.
+          {
+            driver: 'web',
+            expect: {
+              attribute: {
+                of: { role: 'button', name: 'Filters' },
+                name: 'aria-expanded',
+                value: { equals: 'false' },
+              },
+            },
+          },
+        ],
+        'web.theme.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.theme.cli.1')
+      expect(text).toContain('✓ expected: the document element has class “dark”')
+      expect(text).toContain('✓ expected: the document element’s data-theme is “dark”')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a class assertion is a TOKEN, not a substring — and a miss quotes the classes that ARE there',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', navigate: '/controls' },
+          {
+            driver: 'web',
+            expect: { class: { of: { role: 'button', name: 'Detection mode' }, has: 'mode' } },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.class-token.cli.1',
+      )
+      // `mode-committed` is on the element; the token `mode` is not.
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.actual).toContain('mode-committed')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'asserts SEVERAL elements visible in one expectation — icon buttons whose names are never in the text',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/controls',
+            expect: {
+              visible: [
+                { role: 'button', name: 'Fit view' },
+                { role: 'button', name: 'Zoom in' },
+                { role: 'button', name: 'Zoom out' },
+              ],
+            },
+          },
+        ],
+        'web.visible-many.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.visible-many.cli.1')
+      // Three assertions, three answers — the pairing rule holds for a list too.
+      expect(text).toContain('✓ expected: button “Fit view” is visible')
+      expect(text).toContain('✓ expected: button “Zoom in” is visible')
+      expect(text).toContain('✓ expected: button “Zoom out” is visible')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'and names the ONE of several targets that was missing',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/controls',
+            expect: {
+              visible: [
+                { role: 'button', name: 'Fit view' },
+                { role: 'button', name: 'Zoom sideways' },
+              ],
+            },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.visible-miss.cli.1',
+      )
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('button “Zoom sideways”')
+      expect(result.failure?.actual).toContain('no button named “Zoom sideways” is on the page')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'moves through the history — Back and Forward, as a user presses them',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', navigate: '/' },
+          { driver: 'web', click: { role: 'link', name: 'Notes' }, expect: { url: { equals: '/notes' } } },
+          { driver: 'web', history: 'back', expect: { url: { equals: '/' }, text: { contains: 'Guard Web Fixture' } } },
+          { driver: 'web', history: 'forward', expect: { url: { equals: '/notes' } } },
+        ],
+        'web.history.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.history.cli.1')
+      expect(text).toContain('web:      go back')
+      expect(text).toContain('web:      go forward')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'moves through the history of a SINGLE-PAGE app, where Back loads no document at all',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', navigate: '/controls', expect: { text: { contains: 'filter: off' } } },
+          {
+            driver: 'web',
+            click: { role: 'button', name: 'Add filter' },
+            expect: { url: { equals: '/controls?filter=on' }, text: { contains: 'filter: on' } },
+          },
+          {
+            driver: 'web',
+            history: 'back',
+            expect: { url: { equals: '/controls' }, text: { contains: 'filter: off' } },
+          },
+        ],
+        'web.history-spa.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
     },
     TEST_TIMEOUT_MS,
   )

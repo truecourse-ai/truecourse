@@ -25,6 +25,25 @@
  *                   "ready at last" after TC_WEB_DELAY_MS (default 400) — the
  *                   readiness-waiting case: an expectation must WAIT for
  *                   observable state instead of sleeping or racing.
+ *   GET /controls → heading "Controls"; the surface the OBSERVATION channels need,
+ *                   because none of it can be seen in visible text:
+ *                     - tab "Home" / tab "Flows" in a tablist, `aria-selected`
+ *                       moving between them on click (the active-tab case);
+ *                     - switch "LLM rules", `aria-checked` flipping on click;
+ *                     - button "Filters", `aria-expanded` flipping on click;
+ *                     - button "Publish", natively `disabled`;
+ *                     - button "Detection mode", whose selected position is marked
+ *                       by a CLASS and a colour and by no ARIA state at all — the
+ *                       element a state assertion must fail honestly on;
+ *                     - button "Toggle theme", which puts the `dark` class on the
+ *                       DOCUMENT ELEMENT and writes `data-theme` beside it (dark
+ *                       mode lives nowhere else — not in text, not in a name);
+ *                     - icon buttons "Fit view" / "Zoom in" / "Zoom out", whose
+ *                       accessible names are `aria-label`s that never appear in the
+ *                       page's text (the several-targets case);
+ *                     - button "Add filter", which pushes `?filter=on` WITHOUT a
+ *                       document navigation and re-renders on `popstate` — so a
+ *                       browser Back is observable in a single-page app too.
  *
  * The JSON surface — the SAME state the pages render, read as structured data, which
  * is what a `request` step is for: drive the UI, then ask the app what actually
@@ -91,6 +110,59 @@ const SLOW = page(
   `<h1>Slow</h1>
 <p id="slow">still working</p>
 <script>setTimeout(function () { document.getElementById('slow').textContent = 'ready at last' }, ${delayMs})</script>`,
+)
+
+/**
+ * The page whose whole state is INVISIBLE: ARIA states, a class on the document
+ * element, accessible names that are `aria-label`s, and a single-page history
+ * entry. Nothing here can be asserted with page text, which is the point.
+ */
+const CONTROLS = page(
+  'Controls',
+  `<h1>Controls</h1>
+<div role="tablist">
+  <button type="button" role="tab" id="tab-home" aria-selected="true">Home</button>
+  <button type="button" role="tab" id="tab-flows" aria-selected="false">Flows</button>
+</div>
+<button type="button" role="switch" id="llm" aria-checked="false">LLM rules</button>
+<button type="button" id="filters" aria-expanded="false">Filters</button>
+<button type="button" id="publish" disabled>Publish</button>
+<button type="button" id="detection" class="mode-committed">Detection mode</button>
+<button type="button" id="theme" aria-label="Toggle theme">◐</button>
+<button type="button" aria-label="Fit view">⤢</button>
+<button type="button" aria-label="Zoom in">+</button>
+<button type="button" aria-label="Zoom out">−</button>
+<button type="button" id="add-filter">Add filter</button>
+<p id="mode">filter: off</p>
+<script>
+function flip(el, attr) { el.setAttribute(attr, el.getAttribute(attr) === 'true' ? 'false' : 'true') }
+document.getElementById('llm').onclick = function () { flip(this, 'aria-checked') }
+document.getElementById('filters').onclick = function () { flip(this, 'aria-expanded') }
+for (const tab of document.querySelectorAll('[role=tab]')) {
+  tab.onclick = function () {
+    for (const other of document.querySelectorAll('[role=tab]')) other.setAttribute('aria-selected', String(other === this))
+  }
+}
+// The detection switch moves by COLOUR and a class — no ARIA state anywhere.
+document.getElementById('detection').onclick = function () {
+  this.className = this.className === 'mode-committed' ? 'mode-working' : 'mode-committed'
+}
+document.getElementById('theme').onclick = function () {
+  const root = document.documentElement
+  const dark = root.classList.toggle('dark')
+  root.setAttribute('data-theme', dark ? 'dark' : 'light')
+}
+function renderMode() {
+  document.getElementById('mode').textContent =
+    new URL(location.href).searchParams.get('filter') === 'on' ? 'filter: on' : 'filter: off'
+}
+document.getElementById('add-filter').onclick = function () {
+  history.pushState({}, '', '/controls?filter=on')
+  renderMode()
+}
+window.addEventListener('popstate', renderMode)
+renderMode()
+</script>`,
 )
 
 /** The one piece of state this app has: the lines of `notes.txt` in the CWD. */
@@ -194,7 +266,9 @@ const server = http.createServer(async (req, res) => {
         ? notesPage(url)
         : url.pathname === '/slow-text'
           ? SLOW
-          : null
+          : url.pathname === '/controls'
+            ? CONTROLS
+            : null
   if (html === null) {
     res.writeHead(404, { 'content-type': 'text/html' })
     res.end(page('Not found', '<h1>Not found</h1>'))

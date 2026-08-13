@@ -178,11 +178,11 @@ describe('generateGuards — batched birth validation (layer a)', () => {
     })
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.cli.1', 'beta.cli.1'])
     const flows = new Map(readManifest(r)!.flows.map((f) => [f.flowId, f]))
-    expect(flows.get('alpha')!.scenarios).toEqual([{ id: 'alpha.cli.1', surface: 'cli', status: 'passing' }])
+    expect(flows.get('alpha')!.scenarios).toEqual([{ id: 'alpha.cli.1', drivers: ['cli'], status: 'passing' }])
     expect(flows.get('alpha')!.generationInputsHash).toBeTruthy()
     // beta's test is committed with its failing status, so its flow SETTLED too.
     expect(flows.get('beta')!.scenarios).toMatchObject([
-      { id: 'beta.cli.1', surface: 'cli', status: 'failing', diagnosis: { title: 'b-bad' } },
+      { id: 'beta.cli.1', drivers: ['cli'], status: 'failing', diagnosis: { title: 'b-bad' } },
     ])
     expect(flows.get('beta')!.generationInputsHash).toBeTruthy()
     expect(res.flows).toMatchObject({ settled: 2, unsettled: 0 })

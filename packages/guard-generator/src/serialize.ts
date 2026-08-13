@@ -1,8 +1,9 @@
 /**
- * Turn a model's raw scenario into a committed, engine-owned `.tc` scenario:
- * assign a collision-safe `<flow-id>.<surface>.<n>` id, OVERWRITE the flow,
- * interface, and section references from the engine's own state (never trust what
- * the model wrote), validate against the strict schema, and serialize to YAML.
+ * Turn a model's raw scenario into a committed, engine-owned scenario: assign a
+ * collision-safe `<flow-id>.<surface>.<n>` id, OVERWRITE the flow, interface, and
+ * section references from the engine's own state (never trust what the model
+ * wrote), validate against the strict schema, and serialize to YAML. The file
+ * carries no scenario-level driver — the driver is the step's.
  * Ownership is tracked by scenario id so regenerating a flow replaces only ITS
  * prior generated files and never a hand-written one.
  */
@@ -64,6 +65,13 @@ export function buildFlowScenario(opts: {
   raw: RawGeneratedScenario
   id: string
   /**
+   * The SURFACE this (flow, surface) authoring call was made for — the engine's
+   * own, never the model's. It no longer lands in the file (the driver is the
+   * step's), but it still gates authoring: you can only author for a driver that
+   * ships, and it decides whether the `server` binding below applies.
+   */
+  surface: GuardDriverId
+  /**
    * The recipe server this scenario runs against. ENGINE-ASSIGNED from the
    * app that serves the flow's operations — the model never authors it — and stamped
    * only when it differs from `defaultServer`, since a scenario naming no server
@@ -72,11 +80,9 @@ export function buildFlowScenario(opts: {
   server?: string
   defaultServer?: string
 }): GuardScenario {
-  const { flow, interfaces, raw, id, server, defaultServer } = opts
-  // A scenario carries its own driver (a runnable one — you can only author + run
-  // for a driver that ships). Validated against the registry, not a hardcoded 'cli'.
-  if (!isRunnableDriver(raw.driver)) {
-    throw new Error(`scenario driver "${raw.driver}" is not a runnable guard driver`)
+  const { flow, interfaces, raw, id, surface, server, defaultServer } = opts
+  if (!isRunnableDriver(surface)) {
+    throw new Error(`scenario surface "${surface}" is not a runnable guard driver`)
   }
   if (interfaces.length === 0) {
     throw new Error(`scenario "${id}" has no grounding interface — every generated scenario realizes an interface path`)
@@ -95,8 +101,7 @@ export function buildFlowScenario(opts: {
       fingerprints: interfaces.map((j) => j.fingerprint || interfaceFingerprint(j)),
     },
     binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
-    driver: raw.driver,
-    ...(raw.driver === 'api' && server && server !== defaultServer ? { server } : {}),
+    ...(surface === 'api' && server && server !== defaultServer ? { server } : {}),
     ...(raw.setup ? { setup: raw.setup } : {}),
     steps: raw.steps,
     normalize: raw.normalize ?? [],

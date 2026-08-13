@@ -10,6 +10,7 @@
 
 import { z } from 'zod'
 import { OutputExcerptsSchema } from './excerpts.js'
+import { GuardVisualAnnotationSchema } from './visual.js'
 import { GuardDependencyNeedSchema } from './dependencies.js'
 import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
 import { hasMilestone, type GuardStepMilestone } from './step-parts.js'
@@ -121,6 +122,16 @@ export const GuardFailureDetailSchema = z
      * NO format-version bump.
      */
     ...OutputExcerptsSchema.shape,
+    /**
+     * The VISUAL JUDGE's annotation, present only on a failing WEB step whose
+     * screenshot a vision model was asked to read (see {@link
+     * GuardVisualAnnotationSchema}). Advisory: it never moved this outcome — the
+     * deterministic expectation in `expected`/`actual` did. Kept to a verdict plus
+     * a capped one-liner because LATEST is inline-compact; the full rationale is
+     * in the evidence transcript. Optional so pre-change snapshots keep parsing.
+     * NO format-version bump.
+     */
+    visual: GuardVisualAnnotationSchema.optional(),
   })
   .strict()
 export type GuardFailureDetail = z.infer<typeof GuardFailureDetailSchema>
@@ -264,6 +275,18 @@ export const GuardScenarioResultSchema = z
      * failure (nothing executed, so there is no failing step to point at).
      */
     blockedOn: GuardBlockedDependencySchema.optional(),
+    /**
+     * Teardown-incomplete ANNOTATION (always `true` when present): after this
+     * scenario settled, one of its BEST-EFFORT teardown steps (run because an
+     * earlier step had already failed or errored) did not meet its expectation or
+     * could not run — host state the scenario promised to restore may remain (a
+     * user-level service still installed, a supervisor entry left behind). Never an
+     * outcome and never a pass/fail input: the settled verdict stands, and the
+     * evidence transcript carries each teardown step's own record. Absent on every
+     * green run (there a teardown step is an ordinary, verdict-affecting step) and
+     * whenever every best-effort teardown step succeeded.
+     */
+    teardownIncomplete: z.boolean().optional(),
   })
   .strict()
 export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>

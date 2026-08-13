@@ -46,7 +46,6 @@ setup:
           - src/index.js
         message: seed worktree sample
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze
@@ -71,7 +70,6 @@ steps:
   - git:
       - add
       - .truecourse/LATEST.json
-      - .truecourse/config.json
       - .truecourse/hooks.yaml
     expect:
       exit: 0
@@ -126,12 +124,14 @@ steps:
     expect:
       exit: 0
       stdout:
-        matches: '^(?=[\s\S]*NEW ISSUES)(?=[\s\S]*console\.log call)(?=[\s\S]*Summary: )[\s\S]*$'
+        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*Summary: [0-9]+ new issues, [0-9]+ resolved)[\s\S]*$'
       files:
         feat-x/.truecourse/history.json:
           absent: true
+        feat-x/.truecourse/diff.json:
+          contains: console.log call
     cwd: feat-x
-    note: 'First command in this checkout, and it produces a result. The absent `history.json` is the public evidence that no full analysis ever ran here: the comparison was made against the baseline committed on main, not against a locally computed one.'
+    note: 'First command in this checkout, and it produces a result. The introduced finding is proven from diff.json (the command prints counts only and defers itemization to `truecourse list --diff`; the first authored form over-asserted section headers — same 2026-08-11 correction as the diff flow). The absent `history.json` is the public evidence that no full analysis ever ran here: the comparison was made against the baseline committed on main, not against a locally computed one.'
     milestone:
       - diff-works-immediately-in-a-new-worktree
       - diff-compares-worktree-against-committed-baseline

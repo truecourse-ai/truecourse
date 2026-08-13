@@ -31,6 +31,7 @@ import {
   authorFailureLine,
   collapseAuthoringErrors,
   blockedDependencyLines,
+  visualJudgeSummary,
 } from '../../tools/cli/src/commands/guard'
 import {
   makeTempRepo,
@@ -534,6 +535,40 @@ describe('recipeFailureLines', () => {
 // non-green runs); `--verbose` restores the full per-scenario listing.
 // ---------------------------------------------------------------------------
 
+describe('visualJudgeSummary', () => {
+  const failing = (visual?: { verdict: 'yes' | 'no' | 'unclear'; summary: string }): GuardScenarioResult =>
+    ({
+      id: 'web.1',
+      title: 't',
+      binds: { doc: 'd', section: 's', fingerprint: 'f' },
+      outcome: 'fail',
+      durationMs: 1,
+      failure: { step: 1, expected: 'e', actual: 'a', ...(visual ? { visual } : {}) },
+    }) as GuardScenarioResult
+
+  it('says nothing when the judge never fired — the normal case', () => {
+    expect(visualJudgeSummary([])).toBeNull()
+    expect(visualJudgeSummary([failing()])).toBeNull()
+  })
+
+  it('counts the screenshots it read', () => {
+    const line = visualJudgeSummary([
+      failing({ verdict: 'no', summary: 'empty list' }),
+      failing({ verdict: 'unclear', summary: 'mid-transition' }),
+    ])
+    expect(line).toBe('visual judge 2 screenshots read')
+  })
+
+  it('calls out the failures where the page LOOKED right — the test-is-wrong signal', () => {
+    const line = visualJudgeSummary([
+      failing({ verdict: 'yes', summary: 'the row is right there' }),
+      failing({ verdict: 'no', summary: 'empty list' }),
+    ])
+    expect(line).toContain('2 screenshots read')
+    expect(line).toContain('1 where the expected result LOOKED present')
+  })
+})
+
 describe('runGuardRun — output shape', () => {
   function gitInit(r: string): void {
     execSync('git init -q -b main', { cwd: r })
@@ -930,7 +965,7 @@ function sectionFlow(anchor: string, scenarioIds: string[]): GuardManifestFlow {
     flowId: `docs/x.md#${anchor}`,
     flowFingerprint: 'sha256:x',
     bindings: [{ doc: 'docs/x.md', anchor, fingerprint: 'sha256:x' }],
-    scenarios: scenarioIds.map((id) => ({ id, surface: 'cli' as const })),
+    scenarios: scenarioIds.map((id) => ({ id, drivers: ['cli' as const] })),
     generationInputsHash: null,
     gaps: [],
   }

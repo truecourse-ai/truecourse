@@ -41,6 +41,20 @@ export type StepOutcome =
       mismatch: ExpectMismatch
       /** What the step produced, for the failure line (a cli stream, a page's text). */
       excerpts?: OutputExcerpts
+      /**
+       * The VISUAL artifact this failure left behind, when the surface has one — a
+       * screenshot, with the step's expectation in words. Supplied by the driver
+       * (only it knows whether its surface can be looked at) and consumed by the
+       * runner's optional visual judge. The runner never asks what KIND of step it
+       * was: the presence of this field IS the answer, which is what keeps §2's
+       * "nothing in the runner branches on a step kind" intact.
+       */
+      visual?: {
+        /** Absolute path to the artifact — it lives in the scenario's evidence dir. */
+        screenshotPath: string
+        /** The step's expectation, one line, as the transcript renders it. */
+        expectation: string
+      }
     }
   /**
    * The step could not be taken. INFRASTRUCTURE, never a verdict about the app:

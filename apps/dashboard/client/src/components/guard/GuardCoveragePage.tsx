@@ -4,8 +4,9 @@
  * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Flows and
  * Runs). Sidebar doc rows open as doc tabs, conflicts as conflict tabs; the strip
  * renders only while ≥1 item tab is open, and carries NO Overview chip — with no
- * doc open the pane is AT REST: one shared EmptyState, "select a document". It is
- * not a second reading of the corpus (the sidebar beside it is that), and not a
+ * doc open the pane is AT REST on the {@link GuardCoverageOverview}: the
+ * corpus-wide numbers, read-only, nothing clickable. It is not a second reading
+ * of the corpus's doc LIST (the sidebar beside it is that), and not a
  * pipeline-stage CTA (the header's own Scan / Generate / Run buttons are). A doc
  * tab renders that doc
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
@@ -26,7 +27,6 @@ import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  BookOpen,
   ExternalLink,
   FileText,
   GitMerge,
@@ -43,7 +43,6 @@ import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { SpecScanButton } from '@/components/spec/SpecScanButton';
 import { WebSourceBadge } from '@/components/spec/WebSourceBadge';
-import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { useCapability } from '@/contexts/CapabilityContext';
 import * as api from '@/lib/api';
@@ -53,6 +52,7 @@ import { corpusHasDoc, parseWebDocRef, webDocLabel } from '@/lib/spec-web-source
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
+import { GuardCoverageOverview } from './GuardCoverageOverview';
 import { GuardDocCoverage, type CoverageFilterMode } from './GuardDocCoverage';
 import { GuardSectionDetail } from './GuardSectionDetail';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
@@ -308,16 +308,22 @@ export function GuardCoveragePage({
       );
     }
 
-    // No doc tab active: the pane is AT REST. Not a stage CTA, not a corpus
-    // overview — the sidebar beside it already carries the corpus and its counts,
-    // and a second reading of the same thing is what this pane keeps growing back.
-    // ONE line, the shared EmptyState, the same as every other guard surface with
-    // nothing selected. A selected doc ALWAYS falls through to the render path
-    // below — including before the first scan, where a doc opened by hand (a page
-    // of a registered web source, say) is a real file on disk with no coverage
-    // bands yet.
+    // No doc tab active: the pane is AT REST on the corpus-wide Overview —
+    // read-only numbers, nothing clickable (the sidebar is where a doc opens).
+    // A selected doc ALWAYS falls through to the render path below — including
+    // before the first scan, where a doc opened by hand (a page of a registered
+    // web source, say) is a real file on disk with no coverage bands yet.
     if (!doc) {
-      return <EmptyState icon={BookOpen} title="Select a document" body="Select a document." />;
+      return (
+        <GuardCoverageOverview
+          repoId={repoId}
+          docsCount={docs.length}
+          claims={claims}
+          staleness={staleness}
+          reloadKey={reloadKey}
+          {...(prRef ? { prRef } : {})}
+        />
+      );
     }
 
     // --- The detail pane: the flows through the selected section -------------

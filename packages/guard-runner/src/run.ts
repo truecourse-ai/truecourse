@@ -10,10 +10,15 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import {
   GUARD_FORMAT_VERSION,
+  guardExecutionSteps,
+  guardScenarioDrivers,
   isApiRequestStep,
+  isApiServerScenario,
+  isRunStep,
   isWebStep,
   worstOutcome,
   type GuardApiScenario,
+  type GuardCliStep,
   type GuardBinds,
   type GuardLatest,
   type GuardManifest,
@@ -95,6 +100,7 @@ import {
 import { isInterfaceDrifted } from './interface-drift.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
+import type { GuardVisualJudge } from './visual-judge.js'
 
 export interface RunGuardOptions {
   repoRoot: string
@@ -155,6 +161,13 @@ export interface RunGuardOptions {
   onPhase?: (phase: 'build' | 'run', total?: number) => void
   /** Fires as each scenario settles, with the running done-count. */
   onScenarioSettled?: (done: number, total: number, result: GuardScenarioResult) => void
+  /**
+   * OPTIONAL annotator for FAILING web steps (see {@link GuardVisualJudge}). This
+   * package calls no model; core injects one built from the installed transport.
+   * Omitted ⇒ zero behavior change, which is what every test and birth validation
+   * relies on. A green run never invokes it, so it costs nothing when nothing broke.
+   */
+  visualJudge?: GuardVisualJudge
 }
 
 export type RunGuardResult =
@@ -428,20 +441,34 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const annotate = (scenario: GuardScenario): { interfaceDrifted?: true } =>
     drifted.has(scenario.id) ? { interfaceDrifted: true } : {}
 
-  // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
-  // scenario needs the `api` block. A scenario whose preparation is missing
-  // settles as an `error` naming the gap (never a silent skip) and never blocks
-  // the other driver's scenarios from running.
-  const cliExec = executable.filter((p) => p.scenario.driver === 'cli')
-  const apiExec = executable.filter((p) => p.scenario.driver === 'api')
+  // WHICH EXECUTOR, read off the steps ({@link isApiServerScenario}): a scenario
+  // whose every step is an api verb runs against the recipe's booted server;
+  // anything else runs in a sandbox. Preparation follows from that — the api path
+  // needs the `api` block, the sandbox path needs whatever its own steps ask for.
+  // A scenario whose preparation is missing settles as an `error` naming the gap
+  // (never a silent skip) and never blocks the other path's scenarios from running.
+  const sandboxExec = executable.filter((p) => !isApiServerScenario(p.scenario))
+  const apiExec = executable.filter(
+    (p): p is (typeof executable)[number] & { scenario: GuardApiScenario } =>
+      isApiServerScenario(p.scenario),
+  )
   // The web surface is per RECIPE, not per scenario: it boots inside whichever
   // sandbox reaches a step that needs it. What the run needs to know up front is only
   // whether ANY selected scenario has one, so the surface's build can be skipped
   // otherwise. A `request` step counts as much as a web step — it is sent to that
   // same served surface, so a request-only scenario needs it built too.
   const webSurface = resolveWebSurface(loaded.recipe)
-  const servedExec = cliExec.filter((p) =>
-    p.scenario.steps.some((step) => isWebStep(step) || isApiRequestStep(step)),
+  const servedExec = sandboxExec.filter((p) =>
+    // Teardown steps count: a browser or request step there still needs the surface.
+    guardExecutionSteps(p.scenario).some((step) => isWebStep(step) || isApiRequestStep(step)),
+  )
+  // What a sandbox scenario NEEDS decides its preparation: only a `run:` step
+  // invokes the entry, so a scenario with none — a browser-only journey on a
+  // web-only product (cal.com has no CLI) — must not be gated on `entry`. Its
+  // preparation is the served web surface, and a missing one settles the same
+  // honest unprepared error a missing `entry` always has.
+  const entryExec = sandboxExec.filter((p) =>
+    guardExecutionSteps(p.scenario).some((step) => isRunStep(step as GuardCliStep)),
   )
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
@@ -455,17 +482,29 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const unboundApi: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; missing: string }[] = []
   if (api) {
     for (const p of apiExec) {
-      const bound = resolveScenarioServer(p.scenario as GuardApiScenario, resolvedServers)
+      const bound = resolveScenarioServer(p.scenario, resolvedServers)
       if (bound.ok) boundServerById.set(p.scenario.id, bound.server)
       else unboundApi.push({ ...p, missing: bound.reason })
     }
   }
   const apiRunnableExec = api ? apiExec.filter((p) => boundServerById.has(p.scenario.id)) : []
-  const prepared = [...(hasEntry ? cliExec : []), ...apiRunnableExec]
+  const sandboxUnprepared: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; missing: string }[] = []
+  const sandboxPrepared: typeof sandboxExec = []
+  for (const p of sandboxExec) {
+    if (!hasEntry && entryExec.includes(p)) {
+      sandboxUnprepared.push({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' })
+    } else if (webSurface === undefined && servedExec.includes(p)) {
+      sandboxUnprepared.push({
+        ...p,
+        missing: 'recipe.json has no `web` block — the scenario’s browser/request steps have no served surface',
+      })
+    } else {
+      sandboxPrepared.push(p)
+    }
+  }
+  const prepared = [...sandboxPrepared, ...apiRunnableExec]
   const unprepared = [
-    ...(hasEntry
-      ? []
-      : cliExec.map((p) => ({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' }))),
+    ...sandboxUnprepared,
     ...(api
       ? unboundApi
       : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
@@ -511,9 +550,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // returns undefined and any stray `schema: true` step errors.
   const schemaBoundDocs = new Set(
     apiExec
-      .filter((p) =>
-        (p.scenario as GuardApiScenario).steps.some((s) => isApiRequestStep(s) && s.expect.schema === true),
-      )
+      .filter((p) => p.scenario.steps.some((s) => isApiRequestStep(s) && s.expect.schema === true))
       .flatMap((p) => p.scenario.binds.map((b) => b.doc)),
   )
   const operationSchemaIndex = schemaBoundDocs.size > 0 ? buildOperationSchemaIndex(repoRoot, schemaBoundDocs) : new Map()
@@ -603,7 +640,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Pre-flight the built entry ONCE before any cli scenario touches it: if it
     // can't even start, that is ONE loud entry-level error, not N indistinguishable
     // scenario failures. Runs under the build phase (before the run counter is announced).
-    if (buildsOwnEntry && resolvedEntry && cliExec.length > 0) {
+    // Probe only when a selected scenario will actually invoke the entry — a
+    // web-only selection must not boot a binary no step runs.
+    if (buildsOwnEntry && resolvedEntry && entryExec.length > 0) {
       const preflight = await preflightEntry({
         resolvedEntry,
         displayEntry: loaded.recipe.entry!,
@@ -855,7 +894,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
     }
 
-    // Scenarios whose driver has no preparation in the recipe settle as errors —
+    // Scenarios whose surface has no preparation in the recipe settle as errors —
     // an honest per-scenario gap, never a silent skip, never a run-wide failure.
     for (const { scenario, verdict, missing } of unprepared) {
       const result: GuardScenarioResult = {
@@ -865,7 +904,13 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
         outcome: 'error',
         durationMs: 0,
-        failure: { step: 1, expected: `the recipe to prepare the ${scenario.driver} driver`, actual: missing },
+        failure: {
+          step: 1,
+          // The driver named is the scenario's PRIMARY one (registry order), which
+          // is the surface whose preparation the recipe is missing.
+          expected: `the recipe to prepare the ${guardScenarioDrivers(scenario)[0]} driver`,
+          actual: missing,
+        },
         ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
@@ -1006,8 +1051,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
+      // WHICH EXECUTOR — the same steps-derived question the preparation split
+      // asked, asked once more where the scenario is actually dispatched.
       const outcome =
-        scenario.driver === 'api'
+        isApiServerScenario(scenario)
           ? await runApiScenario(scenario, {
               repoRoot,
               runId,
@@ -1045,6 +1092,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               capturePassEvidence,
               signal: cancel.signal,
               onStep: (o) => stepStats.onCliStep(o),
+              // Only the cli/web pool: an api scenario has no screen to look at.
+              ...(opts.visualJudge ? { visualJudge: opts.visualJudge } : {}),
             })
       if (cancel.signal.aborted) return null
       const result: GuardScenarioResult = {
@@ -1057,32 +1106,34 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return result
     }
 
-    // TWO POOLS, run concurrently. An api scenario boots a whole target server that
-    // lives for the scenario's duration, so a shared pool at the CLI sandbox width lets
-    // heavyweight servers pile up (the diagnosed cal.com starvation). The api pool caps
-    // parallel scenarios at `apiBootConcurrency` — which bounds RESIDENT servers, not
-    // just boot-starts. `orderReadBeforeWrite` still runs read-only api scenarios ahead
-    // of mutating ones WITHIN the api pool (its ordering only ever mattered for the api
-    // set — cli sandboxes are isolated).
+    // TWO POOLS, run concurrently — split by the same steps-derived path. An
+    // api-server scenario boots a whole target server that lives for the scenario's
+    // duration, so a shared pool at the sandbox width lets heavyweight servers pile up
+    // (the diagnosed cal.com starvation). The api pool caps parallel scenarios at
+    // `apiBootConcurrency` — which bounds RESIDENT servers, not just boot-starts.
+    // `orderReadBeforeWrite` still runs read-only api scenarios ahead of mutating ones
+    // WITHIN the api pool (its ordering only ever mattered for the api set — sandboxes
+    // are isolated).
     const apiRunnable = orderReadBeforeWrite(
-      runnable.filter((x) => x.scenario.driver === 'api' && !externalBlockedIds.has(x.scenario.id)),
+      runnable.filter((x) => isApiServerScenario(x.scenario) && !externalBlockedIds.has(x.scenario.id)),
     )
-    const cliRunnable = runnable.filter((x) => x.scenario.driver !== 'api')
+    const sandboxRunnable = runnable.filter((x) => !isApiServerScenario(x.scenario))
     // The two pools share ONE budget so their combined in-flight count never exceeds
     // `concurrency` — the host-load knob whose violation caused the incident. When both
-    // drivers run, the api pool draws from that budget (capped so it can't starve cli of
-    // its floor of 1) and cli takes the remainder; a single-driver run is unchanged
-    // (api-only ≤ apiCap, cli-only = full width). See `TRUECOURSE_MAX_API_CONCURRENCY`.
-    const bothDrivers = apiRunnable.length > 0 && cliRunnable.length > 0
+    // run, the api pool draws from that budget (capped so it can't starve the sandbox
+    // pool of its floor of 1) and the sandbox pool takes the remainder; a single-path
+    // run is unchanged (api-only ≤ apiCap, sandbox-only = full width). See
+    // `TRUECOURSE_MAX_API_CONCURRENCY`.
+    const bothDrivers = apiRunnable.length > 0 && sandboxRunnable.length > 0
     const apiWidth = bothDrivers
       ? Math.min(apiBootConcurrency(concurrency), Math.max(1, concurrency - 1))
       : apiBootConcurrency(concurrency)
-    const cliWidth = bothDrivers ? Math.max(1, concurrency - apiWidth) : concurrency
-    const [apiResults, cliResults] = await Promise.all([
+    const sandboxWidth = bothDrivers ? Math.max(1, concurrency - apiWidth) : concurrency
+    const [apiResults, sandboxResults] = await Promise.all([
       mapWithConcurrency(apiRunnable, apiWidth, runOne),
-      mapWithConcurrency(cliRunnable, cliWidth, runOne),
+      mapWithConcurrency(sandboxRunnable, sandboxWidth, runOne),
     ])
-    const executed = [...apiResults, ...cliResults].filter((r): r is GuardScenarioResult => r !== null)
+    const executed = [...apiResults, ...sandboxResults].filter((r): r is GuardScenarioResult => r !== null)
     const stop = cancelled('run')
     if (stop) return stop
     results.push(...executed)
@@ -1150,7 +1201,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
  * never treated as read-only.
  */
 function isReadOnlyScenario(scenario: GuardScenario): boolean {
-  if (scenario.driver !== 'api') return false
+  if (!isApiServerScenario(scenario)) return false
   // A lifecycle step (boot/signal/logs) restarts or stops the server under test —
   // the least read-only thing a scenario can do, so one is disqualifying.
   return scenario.steps.every(

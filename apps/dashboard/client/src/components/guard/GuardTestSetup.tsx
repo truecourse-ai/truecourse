@@ -47,9 +47,22 @@ function SetupFile({ path, content }: { path: string; content: string }) {
   );
 }
 
-export function GuardTestSetup({ setup }: { setup: GuardScenarioSetupView }) {
+export function GuardTestSetup({
+  setup,
+  framed = true,
+}: {
+  setup: GuardScenarioSetupView;
+  /**
+   * False inside the step inspector, which is already a card: a card in a card is
+   * two borders around one thing. The sections keep their own dividers either way.
+   */
+  framed?: boolean;
+}) {
   return (
-    <div aria-label="test setup" className="min-w-0 rounded border border-border">
+    <div
+      aria-label="test setup"
+      className={`min-w-0 ${framed ? "rounded border border-border" : ""}`}
+    >
       {setup.files && setup.files.length > 0 && (
         <div className="border-b border-border last:border-b-0">
           <div className={SECTION}>Files</div>

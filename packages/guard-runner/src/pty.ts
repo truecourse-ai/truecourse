@@ -72,12 +72,20 @@
  * input that has already been typed (and swallowed — a spinner holds the terminal
  * and consumes stray keys) until the step's budget runs out. That is precisely the
  * failure prompt-keying removes, and why anything new should be keyed.
+ *
+ * A HELD COMMAND (`until`) is the same mechanism pointed the other way: the step
+ * declares the line it is waiting FOR, and the moment the child writes it the child
+ * is killed and the step settles on the output so far. A console-mode command holds
+ * the terminal by design and is otherwise unreachable — it can only ever spend its
+ * whole budget and land as an infrastructure error. Both features read the child's
+ * output through the same `marker.ts` view, so a marker means one thing here.
  */
 
 import { isPromptKeyedStdin } from '@truecourse/shared'
 import type { StepCapture, ExecuteStepOptions } from './executor.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { DETERMINISM_PINS } from './child-env.js'
+import { markerWatch } from './marker.js'
 
 /** The terminal the child is told it is on — dumb enough to keep output plain. */
 const PTY_TERM = 'xterm-256color'
@@ -142,37 +150,6 @@ function splitAnswers(stdin: string): string[] {
   return stdin.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+/g) ?? []
 }
 
-/**
- * Every escape sequence a terminal program writes to POSITION, COLOR or ERASE —
- * CSI (`ESC [ … final`), OSC (`ESC ] …` up to its BEL/ST terminator) and the
- * two-byte Fe escapes. Stripped before a prompt marker is looked for, so a marker
- * matches the words the program wrote rather than the decoration a prompt library
- * wrapped them in (a spinner redrawing its line, a bold question, a hidden cursor).
- */
-const ANSI_SEQUENCE =
-  /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g
-
-/** What a program WROTE, with the terminal's own doing removed. */
-function markerText(chunk: string): string {
-  return chunk.replace(ANSI_SEQUENCE, '').replaceAll('\r\n', '\n')
-}
-
-/**
- * A tail that may still GROW into something {@link markerText} would transform: a
- * lone `\r` (half of a `\r\n`) or an escape sequence that has not terminated yet.
- * Anchored at both ends, so a COMPLETE sequence followed by text is never held —
- * held bytes wait for the next chunk, and a child that has just drawn its prompt
- * writes nothing more until it is answered.
- */
-const PARTIAL_ESCAPE = /^\u001b(?:\[[0-9;?]*[ -/]*|\][^\u0007\u001b]*|)$/
-
-/** How many trailing characters of `text` must wait for the next chunk. */
-function heldBack(text: string): number {
-  if (text.endsWith('\r')) return 1
-  const esc = text.lastIndexOf('\u001b')
-  if (esc >= 0 && PARTIAL_ESCAPE.test(text.slice(esc))) return text.length - esc
-  return 0
-}
 
 /**
  * What a CANONICAL, echoing line discipline sends back the instant `answer` is
@@ -278,12 +255,13 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
         const keyed = isPromptKeyedStdin(opts.stdin) ? opts.stdin : null
         /** The keyed answer waiting for its question. */
         let awaiting = 0
-        /** Everything the child has written, as {@link markerText} sees it. */
-        let markerView = ''
-        /** Tail bytes that may still grow — see {@link heldBack}. */
-        let markerCarry = ''
-        /** Where the next marker search starts: past the marker just answered. */
-        let markerCursor = 0
+        /**
+         * The questions' view of what the child wrote. Its own, separate from the
+         * held-command watch below, because each carries a CURSOR: sharing one
+         * would let the ready line consume the position a later question searches
+         * from, and two independent buffers cost nothing worth reasoning about.
+         */
+        const prompts = keyed ? markerWatch() : null
 
         /**
          * Type every keyed answer whose question has now been asked. The search
@@ -291,16 +269,11 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
          * scripted ORDER and a repeated wording is two questions, not one.
          */
         function answerAskedPrompts(chunk: string): void {
-          if (settled || !keyed || awaiting >= keyed.length) return
-          const buf = markerCarry + chunk
-          const held = heldBack(buf)
-          markerCarry = held ? buf.slice(buf.length - held) : ''
-          markerView += markerText(held ? buf.slice(0, buf.length - held) : buf)
+          if (settled || !keyed || !prompts || awaiting >= keyed.length) return
+          prompts.feed(chunk)
           while (awaiting < keyed.length) {
             const { marker, answer } = keyed[awaiting]
-            const at = markerView.indexOf(marker, markerCursor)
-            if (at < 0) return
-            markerCursor = at + marker.length
+            if (!prompts.seen(marker)) return
             awaiting += 1
             try {
               child.write(answer)
@@ -310,8 +283,27 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
           }
           // Every answer is delivered: stop tracking what the child writes. The
           // rest of a run's output can be large, and nothing is looking for it.
-          markerView = ''
-          markerCarry = ''
+          prompts.done()
+        }
+
+        // --- The HELD command's ready line (`until`) ---------------------
+        //
+        // A command that never returns is ended by what it PRINTS. The moment the
+        // marker appears the child is killed and the step settles on the output so
+        // far; a marker that never appears leaves `unseenMarker` on the capture,
+        // which the driver reports as the step failing rather than as a timeout.
+
+        const until = opts.until
+        const held = until ? markerWatch() : null
+        let endedAtMarker: string | undefined
+
+        function watchForMarker(chunk: string): void {
+          if (settled || !until || !held || endedAtMarker !== undefined) return
+          held.feed(chunk)
+          if (!held.seen(until)) return
+          endedAtMarker = until
+          held.done()
+          kill()
         }
 
         /** The plain script's answers — empty when the step is prompt-keyed. */
@@ -374,6 +366,7 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
 
         child.onData((data) => {
           output += data
+          watchForMarker(data)
           if (keyed) {
             answerAskedPrompts(data)
             return
@@ -387,17 +380,24 @@ export function executeTtyStep(opts: ExecuteStepOptions): Promise<StepCapture> {
           // question was never asked. Reported as a fact about the run, so the
           // step settles on what happened instead of on how long it took.
           const unasked = keyed && awaiting < keyed.length ? keyed[awaiting].marker : undefined
+          // The same reading for a held command: the ready line the step waits for
+          // never came, and that is a fact about what the command printed.
+          const unseen = until !== undefined && endedAtMarker === undefined ? until : undefined
           finish({
-            exitCode: timedOut ? null : exitCode,
+            // A child WE stopped has no exit status of its own to report.
+            exitCode: timedOut || endedAtMarker !== undefined ? null : exitCode,
             // node-pty reports the signal NUMBER; the capture's field is the name,
-            // and the only signal we ever send is the timeout kill.
-            signal: timedOut || signal ? 'SIGKILL' : null,
+            // and the only signals we ever send are the timeout kill and the one
+            // that ends a held command at its marker.
+            signal: timedOut || endedAtMarker !== undefined || signal ? 'SIGKILL' : null,
             // A terminal has one channel: everything the child wrote is here, with
             // the line discipline's `\r\n` folded back to the `\n` the program sent.
             stdout: output.replaceAll('\r\n', '\n'),
             stderr: '',
             timedOut,
             ...(unasked !== undefined ? { unaskedPrompt: unasked } : {}),
+            ...(endedAtMarker !== undefined ? { endedAtMarker } : {}),
+            ...(unseen !== undefined ? { unseenMarker: unseen } : {}),
             durationMs: Date.now() - start,
           })
         })

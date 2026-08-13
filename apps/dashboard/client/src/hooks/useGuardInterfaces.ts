@@ -1,12 +1,11 @@
 /**
- * The Interfaces-tab catalog (`guard/interfaces`) plus its ONE action, Map. Mapping is
- * deterministic and LLM-free, so it has no estimate and no progress stream: the
- * POST answers with the fresh catalog view and the hook swaps state from that
- * response — no refetch, no socket. Hoisted at page level so the catalog list, the
- * detail pane, and the Flows tab's scenario interfaces all read ONE fetch.
+ * The Interfaces-tab catalog (`guard/interfaces`). Read-only: the catalog is
+ * derived by the engine, not from this tab. Hoisted at page level so the catalog
+ * list, the detail pane, and the Flows tab's scenario interfaces all read ONE
+ * fetch.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { GuardInterfacesView } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
@@ -14,10 +13,6 @@ export interface GuardInterfacesState {
   view: GuardInterfacesView | null;
   loading: boolean;
   error: string | null;
-  /** A Map is in flight (the button's busy state). */
-  mapping: boolean;
-  /** Re-derive the catalog from the working tree; swaps in the response. */
-  map: () => Promise<void>;
 }
 
 export function useGuardInterfaces(
@@ -28,7 +23,6 @@ export function useGuardInterfaces(
 ): GuardInterfacesState {
   const [view, setView] = useState<GuardInterfacesView | null>(null);
   const [loading, setLoading] = useState(false);
-  const [mapping, setMapping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,18 +46,5 @@ export function useGuardInterfaces(
     };
   }, [repoId, enabled, reloadKey, ref]);
 
-  const map = useCallback(async () => {
-    if (!repoId) return;
-    setMapping(true);
-    setError(null);
-    try {
-      setView(await api.mapGuardInterfaces(repoId));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Interface mapping failed');
-    } finally {
-      setMapping(false);
-    }
-  }, [repoId]);
-
-  return { view, loading, error, mapping, map };
+  return { view, loading, error };
 }

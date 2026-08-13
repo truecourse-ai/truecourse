@@ -1,0 +1,111 @@
+guard: 3
+id: analyze-a-clean-repository-from-the-dashboard.cli.1
+title: A developer analyzes a clean repository whose only new file belongs to TrueCourse
+promise: >-
+  A developer starts an analysis from a clean source tree and verifies that an untracked
+  `.truecourse/` file does not open the dirty-tree gate.
+flow:
+  id: analyze-a-clean-repository-from-the-dashboard
+  fingerprint: sha256:928a3eaf798873cd7133100e3c18bf53235ca4f2dd744c07f94c24443bd39951
+interface:
+  path:
+    - cli/add
+    - web/open-an-unanalyzed-repository
+    - web/run-an-analysis-from-the-header
+    - api/get-api-repos-id-analyses
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b
+    - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
+    - sha256:9f14c34aa3bce7a0b7a932adbcacac3414f81efcbb05332005a13d4d338449a1
+binds:
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: before-the-run-starts
+    fingerprint: sha256:03a985b61a5a89f0a9b9dcf4b466c831ae0b27f0a7433c18bbe7bf9d008b9d85
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    sample-app/src/index.js: |
+      export function evaluate(source) {
+        return eval(source)
+      }
+    sample-app/.truecourse/config.json: |
+      {
+        "enableLlmRules": false
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed the clean source tree
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: Registers the committed repository and creates its ignored `.truecourse/` store.
+  - write:
+      sample-app/.truecourse/reference-probe.json: |
+        { "purpose": "prove TrueCourse-owned files do not dirty the analysis gate" }
+    expect:
+      files:
+        sample-app/.truecourse/reference-probe.json:
+          exists: true
+    note: >-
+      Creates one real untracked file after registration, but only inside `.truecourse/`.
+      User-owned source paths remain identical to the commit.
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      visible:
+        role: button
+        name: Analyze
+      text:
+        contains: No analysis yet
+    note: Opens the unanalyzed repository at the Code Analysis Home tab.
+  - driver: web
+    click:
+      role: button
+      name: Analyze
+      exact: true
+    expect:
+      text:
+        matches: '^(?![\s\S]*Stash pending changes\?)(?=[\s\S]*(Analyzing\.\.\.|Dynamic code evaluation))[\s\S]*$'
+    note: >-
+      A single press reaches the run (or its already-refreshed result) without ever showing
+      the stash question. The source tree is clean, and the one untracked TrueCourse-owned
+      file makes the exclusion claim falsifiable in the same observation.
+    milestone:
+      - dashboard-analyze-stash-prompt-skipped-on-a-clean-tree
+      - dashboard-analyze-truecourse-files-never-count-as-changes
+  - driver: web
+    timeoutMs: 180000
+    expect:
+      text:
+        matches: '^(?![\s\S]*Analyzing\.\.\.)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$'
+    note: Waits for the deterministic result to replace the progress card.
+  - request:
+      method: GET
+      path: /api/repos/sample-app/analyses
+    expect:
+      status: 200
+      json:
+        '[0].provider':
+          equals: null
+    note: Confirms that the click completed one deterministic analysis.

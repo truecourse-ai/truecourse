@@ -109,9 +109,10 @@ describe('Guard routes', () => {
    * default, which is exactly what a screenshot must never be put through — so the
    * binary routes are asserted against the raw buffer.
    */
-  const binary = (suffix: string) =>
+  const binary = (suffix: string, headers?: Record<string, string>) =>
     request(app)
       .get(suffix)
+      .set(headers ?? {})
       .buffer(true)
       .parse((res, cb) => {
         const chunks: Buffer[] = [];
@@ -438,6 +439,97 @@ describe('Guard routes', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/^video\/webm/);
     expect(Buffer.compare(res.body as Buffer, WEBM_BYTES)).toBe(0);
+  });
+
+  // --- Range reads: what makes the session video seekable -------------------
+  //
+  // A media element only offers seeking when the server answers byte ranges:
+  // Chromium classifies a plain-200 resource as a stream and pins
+  // `video.seekable` to zero even when the file's own metadata is complete. So
+  // the video scrubber lives or dies on these headers, not on the bytes.
+
+  it('visual advertises Accept-Ranges on the full read', async () => {
+    seed();
+    seedVisuals();
+    const res = await binary(
+      url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=session.webm`),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers['accept-ranges']).toBe('bytes');
+  });
+
+  it('visual answers a Range request with 206 and exactly the asked-for slice', async () => {
+    seed();
+    seedVisuals();
+    const res = await binary(
+      url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=session.webm`),
+      { Range: 'bytes=2-5' },
+    );
+    expect(res.status).toBe(206);
+    expect(res.headers['content-type']).toMatch(/^video\/webm/);
+    expect(res.headers['accept-ranges']).toBe('bytes');
+    expect(res.headers['content-range']).toBe(`bytes 2-5/${WEBM_BYTES.length}`);
+    expect(Buffer.compare(res.body as Buffer, WEBM_BYTES.subarray(2, 6))).toBe(0);
+    // An end past the file clamps to the last byte — the RFC's rule, and what
+    // lets a player ask for "the rest" without knowing the size.
+    const clamped = await binary(
+      url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=session.webm`),
+      { Range: 'bytes=4-99' },
+    );
+    expect(clamped.status).toBe(206);
+    expect(clamped.headers['content-range']).toBe(`bytes 4-${WEBM_BYTES.length - 1}/${WEBM_BYTES.length}`);
+    expect(Buffer.compare(clamped.body as Buffer, WEBM_BYTES.subarray(4))).toBe(0);
+  });
+
+  it('visual serves open-ended and suffix ranges to the end of the file', async () => {
+    seed();
+    seedVisuals();
+    const len = WEBM_BYTES.length;
+    const tail = await binary(
+      url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=session.webm`),
+      { Range: `bytes=${len - 3}-` },
+    );
+    expect(tail.status).toBe(206);
+    expect(tail.headers['content-range']).toBe(`bytes ${len - 3}-${len - 1}/${len}`);
+    expect(Buffer.compare(tail.body as Buffer, WEBM_BYTES.subarray(len - 3))).toBe(0);
+    const suffix = await binary(
+      url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=session.webm`),
+      { Range: 'bytes=-3' },
+    );
+    expect(suffix.status).toBe(206);
+    expect(suffix.headers['content-range']).toBe(`bytes ${len - 3}-${len - 1}/${len}`);
+    expect(Buffer.compare(suffix.body as Buffer, WEBM_BYTES.subarray(len - 3))).toBe(0);
+  });
+
+  it('visual 416s an unsatisfiable range, naming the real size', async () => {
+    seed();
+    seedVisuals();
+    // A start past the end, and a bytes-range that parses to nothing at all,
+    // both read as "nothing satisfiable" — the same verdict express's own
+    // sendFile machinery reaches.
+    for (const range of [`bytes=${WEBM_BYTES.length}-`, 'bytes=nonsense']) {
+      const res = await binary(
+        url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=session.webm`),
+        { Range: range },
+      );
+      expect(res.status).toBe(416);
+      expect(res.headers['content-range']).toBe(`bytes */${WEBM_BYTES.length}`);
+    }
+  });
+
+  it('visual ignores a malformed or non-bytes Range and serves the whole file', async () => {
+    seed();
+    seedVisuals();
+    // A unit this route does not slice by, and a header with no unit at all,
+    // are ignored rather than erred on: the whole file is always a valid answer.
+    for (const range of ['chunks=0-1', 'bytes 0-1']) {
+      const res = await binary(
+        url(`evidence/visual?runId=${RUN_ID}&scenarioId=a1&file=session.webm`),
+        { Range: range },
+      );
+      expect(res.status).toBe(200);
+      expect(Buffer.compare(res.body as Buffer, WEBM_BYTES)).toBe(0);
+    }
   });
 
   it('visual 404s on an absent file and on one that is not a visual', async () => {

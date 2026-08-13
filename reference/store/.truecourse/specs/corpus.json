@@ -51,6 +51,62 @@
       ]
     },
     {
+      "ref": "reference/spec-docs/dashboard/analytics.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T07:46:24.287Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/dashboard/architecture-graph.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T07:46:24.287Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/dashboard/files-flows-databases.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T07:46:24.287Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/dashboard/history-and-diff.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T07:46:24.287Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/dashboard/overview.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T07:46:24.287Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/dashboard/running-analyses.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T07:46:24.287Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
+      "ref": "reference/spec-docs/dashboard/violations.mdx",
+      "kind": "spec",
+      "lastTouched": "2026-08-11T07:46:24.287Z",
+      "areaTags": [
+        "truecourse/dashboard"
+      ]
+    },
+    {
       "ref": "reference/spec-docs/reference/cli.mdx",
       "kind": "spec",
       "lastTouched": "2026-08-07T02:25:54.784Z",
@@ -79,7 +135,14 @@
       "product": "truecourse",
       "concern": "dashboard",
       "docRefs": [
-        ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md"
+        ".truecourse/specs/sources/docs.truecourse.dev/dashboard.md",
+        "reference/spec-docs/dashboard/analytics.mdx",
+        "reference/spec-docs/dashboard/architecture-graph.mdx",
+        "reference/spec-docs/dashboard/files-flows-databases.mdx",
+        "reference/spec-docs/dashboard/history-and-diff.mdx",
+        "reference/spec-docs/dashboard/overview.mdx",
+        "reference/spec-docs/dashboard/running-analyses.mdx",
+        "reference/spec-docs/dashboard/violations.mdx"
       ],
       "overlaps": []
     }

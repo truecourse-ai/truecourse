@@ -125,10 +125,13 @@ function buildViews(
     const chips = [
       ...(entry?.scenarios ?? []).map((s) => {
         const result = resultsByScenario.get(s.id);
-        if (result) return `${s.surface} ${MARK[result.outcome]}`;
+        // A scenario spanning surfaces wears them all — `cli+web ✓` — because that
+        // is what its steps drive.
+        const drivers = s.drivers.join("+");
+        if (result) return `${drivers} ${MARK[result.outcome]}`;
         // No run: the chip speaks for the manifest's inventory status. A test that
         // never executed says so — `✓` there would be a pass nothing ever earned.
-        return `${s.surface} ${s.status === "never-run" ? "never run" : "✓"}`;
+        return `${drivers} ${s.status === "never-run" ? "never run" : "✓"}`;
       }),
       ...(entry?.gaps ?? []).map((g) => `${g.surface} ${gapChipLabel(g)}`),
     ];
@@ -387,7 +390,7 @@ function surfaceLines(
     // A committed scenario passed birth by construction; a run outcome supersedes it.
     const state = result ? `${result.outcome} ${MARK[result.outcome]}` : "birth ✓";
     const drift = result?.interfaceDrifted ? " · interface drifted" : "";
-    return `${s.surface} → ${s.id} (${state}${drift})`;
+    return `${s.drivers.join("+")} → ${s.id} (${state}${drift})`;
   });
   for (const gap of entry?.gaps ?? []) lines.push(`${gap.surface} → ${gapChipLabel(gap)}`);
   return lines;

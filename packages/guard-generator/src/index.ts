@@ -343,6 +343,8 @@ export {
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,
+  type RawGeneratedApiScenario,
+  type RawGeneratedCliScenario,
   type RawGeneratedScenario,
   type AuthoredFlowScenario,
   type RealizationMatch,

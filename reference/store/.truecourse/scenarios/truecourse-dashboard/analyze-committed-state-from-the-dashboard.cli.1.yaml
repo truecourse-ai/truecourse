@@ -1,0 +1,148 @@
+guard: 3
+id: analyze-committed-state-from-the-dashboard.cli.1
+title: A developer stashes pending work and analyzes the committed state
+promise: >-
+  A developer with an untracked vulnerable file chooses the dashboard's stash path and
+  verifies that the completed run reflects the last commit instead.
+flow:
+  id: analyze-committed-state-from-the-dashboard
+  fingerprint: sha256:11945be25c3484ea949b9c1e317a7b814b39897c97c0fe8c954ccd17b2073d3f
+interface:
+  path:
+    - cli/add
+    - web/open-an-unanalyzed-repository
+    - web/run-an-analysis-from-the-header
+    - web/stash-pending-changes-before-a-run
+    - api/get-api-repos-id-violations
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b
+    - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
+    - sha256:86f841f6315f31c81f7ef7b815fe74571400cfbed18b2adecb96edfa61be3d41
+    - sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02
+binds:
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: before-the-run-starts
+    fingerprint: sha256:03a985b61a5a89f0a9b9dcf4b466c831ae0b27f0a7433c18bbe7bf9d008b9d85
+  - doc: reference/spec-docs/dashboard/history-and-diff.mdx
+    section: git-diff-mode
+    fingerprint: sha256:6cd5e6a4cbc13bc96064ba33fcc66ab2f58ef7af918c3ba639004383a82c8037
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    sample-app/src/committed.js: |
+      export function evaluateCommitted(source) {
+        return eval(source)
+      }
+    sample-app/.truecourse/config.json: |
+      {
+        "enableLlmRules": false
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/committed.js
+        message: seed the committed baseline
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: >-
+      Registers the clean committed repository so the dashboard can resolve it. LLM rules
+      are disabled in the repository config; this flow is solely about which filesystem
+      state the deterministic analysis reads.
+  - write:
+      sample-app/src/pending.js: |
+        export function evaluatePending(source) {
+          return eval(source)
+        }
+    expect:
+      files:
+        sample-app/src/pending.js:
+          contains: eval
+    note: >-
+      Creates the discriminating pending change after registration. Both source files have
+      the same deterministic defect, but only `committed.js` belongs to the last commit.
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      visible:
+        role: button
+        name: Analyze
+      text:
+        contains: No analysis yet
+    note: Opens the unanalyzed repository at the Code Analysis Home tab.
+  - driver: web
+    click:
+      role: button
+      name: Analyze
+      exact: true
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Stash pending changes\?)(?=[\s\S]*1 untracked)[\s\S]*$'
+    note: >-
+      The dirty-tree gate sees exactly the one pending source file. This is arrangement for
+      the baseline choice, not the claim itself.
+  - driver: web
+    click:
+      role: button
+      name: Stash and analyze committed state
+      exact: true
+    expect:
+      text:
+        matches: '^(?![\s\S]*Stash pending changes\?)(?=[\s\S]*(Analyzing\.\.\.|Dynamic code evaluation))[\s\S]*$'
+    note: Chooses the documented committed-state path and lets the deterministic run begin.
+  - driver: web
+    timeoutMs: 180000
+    expect:
+      text:
+        matches: '^(?![\s\S]*Analyzing\.\.\.)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$'
+    note: Waits on the refreshed Code Analysis view instead of sleeping for the run.
+  - request:
+      method: GET
+      path: /api/repos/sample-app/violations?limit=200
+    expect:
+      status: 200
+      body:
+        matches: '^(?=[\s\S]*src/committed\.js)(?![\s\S]*src/pending\.js)[\s\S]*$'
+      json:
+        total:
+          equals: 1
+    note: >-
+      The stored findings name the committed vulnerable file and exclude the equally
+      vulnerable untracked file. That observation distinguishes analyzing the last commit
+      from analyzing the working tree as-is. The COUNT is the same observation from the
+      other side and is asserted exactly: the committed tree raises one deterministic
+      finding, and a run that had read the working tree as-is would have raised two — the
+      two files carry the identical defect. One is therefore the number that only the
+      committed state can produce, where "at least one" was satisfied by either.
+    milestone:
+      - dashboard-analyze-stash-option-analyzes-committed-state
+  - git:
+      - status
+      - '--porcelain'
+    cwd: sample-app
+    expect:
+      exit: 0
+      stdout:
+        contains: '?? src/pending.js'
+    note: The exact pending file is back in the working tree after the committed-state run finishes.
+    milestone:
+      - dashboard-diff-analysis-stashes-analyzes-and-restores

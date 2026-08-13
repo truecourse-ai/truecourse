@@ -580,10 +580,10 @@ export interface GuardLatestWithRunFlows extends GuardLatest {
 /**
  * A committed test's source, for the detail view: its STEPS as the reader sees
  * them (the View mode's primary rendering) and the raw YAML behind them (the YAML
- * mode). `steps` is empty when the file doesn't parse as a known driver — the
- * detail then shows the source alone rather than a half-rendered guess. The step
- * list is derived SERVER-SIDE from the parsed file, so the dashboard and the CLI
- * read one source.
+ * mode). `steps` is empty when the file doesn't parse — the detail then shows the
+ * source alone rather than a half-rendered guess. The step list is derived
+ * SERVER-SIDE from the parsed file, so the dashboard and the CLI read one source,
+ * and each row names its own driver ({@link GuardScenarioStepView.kind}).
  */
 export interface GuardScenarioSource {
   id: string
@@ -591,8 +591,6 @@ export interface GuardScenarioSource {
   file: string
   /** Raw YAML text. */
   content: string
-  /** The driver the file declares, when it parsed. */
-  driver?: GuardDriverId
   /** The step list, rendered structurally by the test detail. */
   steps?: GuardScenarioStepView[]
   /**
@@ -650,8 +648,11 @@ export interface GuardScenarioListItem {
    * flow and the drill-down stays total.
    */
   flowId: string
-  /** The surface (driver) it runs on. */
-  surface?: GuardDriverId
+  /**
+   * The drivers its STEPS exercise, in registry order — several for a scenario that
+   * spans surfaces. Empty only for a row recovered without its file.
+   */
+  drivers: GuardDriverId[]
   /**
    * The status the last generate COMMITTED the test with — `failing` for a test
    * that failed its birth execution (committed anyway: the doc and the code

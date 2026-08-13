@@ -5147,3 +5147,236 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
     line is written by a real transition. The analysis pass is reported from `mapOnce`, so
     it lands on step 1 or step 2 depending on which one actually pays for it.
+
+90. **Code Analysis web reference expansion (2026-08-11).** STATUS: BUILT —
+    CLAIM-COMPLETE. The hand-authored reference corpus adds 15 stateful web interfaces
+    and seven executable mixed-driver flows, scoped to the dashboard's Code Analysis tab.
+    The added flows cover committed-state stashing, clean-tree handling, deterministic-only
+    LLM execution, path registration and first-analysis state, non-git repositories,
+    repository rule settings, and the Rules panel. Existing scenarios were expanded for
+    flow search/playback, shared tabs, schema rows, run history and diff details, analytics,
+    folder toggles, and graph connection state. The corpus totals are 114 interfaces
+    (55 web), 51 settled flows and 51 scenarios. Every one of the 301 dashboard claims is
+    accounted for exactly once: 222 by executable milestones and 79 by explicit no-flow
+    reasons tied to driver/state limitations. G90 is closed; remaining limitations are
+    tracked under G83–G88 and G91 rather than represented as false executable coverage.
+
+91. **Driver vocabulary — the five gaps the reference corpus kept filing (2026-08-11).**
+    STATUS: BUILT. The dashboard reference corpus filed the same limitations in step
+    notes and in the `transform-gaps.md` ledger run after run (G87, and three of the
+    channels G88 enumerates): claims that were perfectly observable were authored
+    DELIBERATELY PARTIAL, or rode as no-flow gaps, because the vocabulary had no way to
+    say them. Five capabilities, all additive and all optional — `GUARD_FORMAT_VERSION`
+    stays 3, every committed scenario parses and behaves exactly as before, and no
+    fingerprint moves (see the last paragraph).
+
+    1. **`expect.state` — an ARIA state on a role+name target** (web). The `visible`
+       matcher's shape with the assertion added: `{ role, name, exact?, checked? |
+       pressed? | selected? | expanded? | disabled? }`, several at once allowed and
+       each recorded as its own check, in the fixed order the state list declares.
+       The value read is the `aria-*` attribute where present, else the element's own
+       state (a checkbox's checkedness, an `<option>`'s selectedness, `:disabled`).
+       The deliberate outcome for a control whose position is drawn in COLOUR alone —
+       the dashboard's three-way detection switch — is a FAIL reading "…exposes no
+       aria-pressed state": the state is unobservable to this step and to a screen
+       reader alike, and that is the finding, not a reason to weaken the assertion.
+    2. **`expect.attribute` and `expect.class`** (web). `attribute: { of?, name,
+       value? | present? }` and `class: { of?, has? | absent? }`, both reading the
+       DOCUMENT ELEMENT when `of` names no element — which is where a page keeps what
+       it does not print (dark mode is a `dark` class on `<html>` plus a `theme`
+       storage key, and the theme button's own name never changes). `class` is its own
+       member rather than an attribute matcher because a class attribute is a TOKEN
+       LIST: `contains "dark"` also passes for `darkroom`, and a scenario should never
+       have to spell token boundaries in a regex.
+    3. **`expect.visible` takes a LIST** (web). One expectation, several role+name
+       targets, one check each, and a miss names WHICH target was missing. The
+       motivating claim — the graph canvas's three icon buttons surviving a reload —
+       is one claim, and their accessible names are `aria-label`s that never reach the
+       page's text, so neither a text matcher nor three separate steps could state it.
+       The single-object form is unchanged.
+    4. **`until: { marker }` on a `run` step** (cli). Run until that line appears in
+       what the command writes, then terminate the child and settle the step on the
+       output so far. This is G87: `truecourse dashboard` (console mode) and
+       `dashboard logs` hold the terminal by design, so before this the ONLY outcome
+       available to them was the whole budget spent and a SIGKILL, reported as an
+       infrastructure error that stops the scenario — which is why
+       `open-the-dashboard-and-find-your-way-around` had to put its console step LAST
+       with seven milestones riding on it red-by-timeout. A marker that never appears
+       is a FAIL naming it (the same reading an unasked prompt earns), never a
+       timeout; `expect.exit` beside `until` is refused at load, because a step the
+       runner stops has no exit code of its own. Works on pipes and on a pty, and both
+       marker features (this and the prompt-keyed answers) now read the child's output
+       through one module, `guard-runner/src/marker.ts`.
+    5. **`history: back | forward`** (web). The browser's own two buttons, a verb on
+       the same footing as navigate/click/fill — the web verb set is closed at five
+       now. The traversal's return value is deliberately ignored: a same-document
+       (single-page) Back completes without a navigation response, which is exactly the
+       case the verb exists for, and what the move DID is the expectation's business.
+       The claim "browser Back and Forward move through the views" was previously
+       authored as re-opening the earlier address, which proves that a link works.
+
+    **Fingerprint discipline.** `until` is added to a new `GuardRunStepObjectSchema`
+    (the runner's `run` step) and NOT to `GuardStepObjectSchema`, which
+    `guard-generator` extends for the scenario schema it embeds in the authoring
+    prompt — the `patch` precedent applied to a field. Verified after the change:
+    `GENERATE_PROMPT_FINGERPRINT` is still `1ee6cde76c89e1d9` and
+    `GENERATE_API_PROMPT_FINGERPRINT` still `244fc34ecb318a03`, so no author cache
+    entry is invalidated and no flow is re-authored. Flow fingerprints (milestone
+    composition) and interface fingerprints (an interface's own steps) never folded
+    scenario step content, so neither moves either.
+
+    **As built.** Schemas + rendering: `packages/shared/src/guard/web-steps.ts`,
+    `cli-steps.ts`, `step-actuals.ts` (the web check subject enum gains `state` |
+    `attribute` | `class`; a step record gains `endedAtMarker`, which the actual line
+    renders as "stopped at …" instead of "exit (killed)"). Runner:
+    `guard-runner/src/web/{executor,tokens}.ts`, `drivers/cli-driver.ts`,
+    `{executor,pty,marker,child-kill,evidence,expect}.ts`. Tests:
+    `tests/shared/guard-web-steps.test.ts`, `tests/shared/guard-until-step.test.ts`,
+    `tests/guard-runner/web-driver.test.ts` (eight new cases against the fixture's new
+    `/controls` page), `tests/guard-runner/run-until-marker.test.ts`.
+
+92. **Near-duplicate chaining collapses distinct endpoint reference pages
+    (2026-08-12, cal.com reference corpus).** STATUS: OPEN. On the cal.diy
+    booking-lifecycle scan (39 curated docs from cal.com's llms.txt sites), the
+    relevance filter's deterministic near-duplicate detector dropped
+    `confirm-a-booking.md`, `decline-a-booking.md`, and
+    `get-a-booking-by-seat-uid.md` as a PAIRWISE CHAIN (confirm ≈ decline ≈
+    get-by-seat-uid ≈ get-a-booking, each hop "kept the fuller copy"), leaving only
+    `get-a-booking.md`. The pages are OpenAPI-generated endpoint references: the
+    boilerplate (headers table, auth note, response scaffolding) dominates the
+    diffable text, so similarity is high even though the documents specify opposite
+    operations — confirm vs decline suppressed each other. Two defects to weigh:
+    (a) chaining — A≈B, B≈C transitively collapses a whole family no member of
+    which is a near-dup of the survivor; (b) the similarity measure ignores the
+    identity-bearing tokens of a reference page (method + path + operation title),
+    which would cheaply separate these. Remedy used in the field: `spec docs
+    include` force-includes (`manualIncludes` in `specs/decisions.json`) — but a
+    user only discovers the drop by auditing `skippedDocs`, so the default silently
+    deletes spec surface on exactly the doc shape (generated API references) the
+    guard pipeline cares most about. Candidate fixes: exempt same-source sibling
+    docs whose H1/path differ in an operation verb; fold method+path into the
+    similarity key; or cap collapse at direct (non-transitive) pairs.
+
+93. **The visual judge — an LLM annotation on failing web steps (2026-08-12).**
+    STATUS: IMPLEMENTED. A web step asserts on the DOM: a role, an accessible name,
+    a substring of the page's text. When one misses, the transcript can say the
+    words were not found and the run leaves a full-page PNG behind — but the first
+    question a human has ("so what WAS on the screen?") is answerable only by
+    opening that PNG out of a gitignored evidence directory. This stage answers it
+    in the transcript: the screenshot the failing step already took, plus the step's
+    claim, its rendered expectation and the deterministic mismatch, go to an
+    OPUS-tier vision call that returns
+    `{ expectedVisible: yes | no | unclear, screenSummary, rationale }`.
+
+    **The rules, all downstream of §10.2's determinism rule.**
+    (a) FAILURE-ONLY: a green run makes zero calls, so the feature is free until
+    something breaks — which is why it is always on and has no flag. (b)
+    ANNOTATION-ONLY: the verdict never moves an outcome, in either direction. Its
+    most valuable answer is `yes` — the expected result IS on screen though the
+    assertion missed, the signature of a brittle locator or matcher, i.e. the TEST
+    being wrong rather than the page — and that is surfaced to a human in those
+    words and acted on by nobody automatically (no triage integration in v1). (c)
+    FAIL-SOFT in every direction: no transport, a thrown call, a reply that will not
+    validate after one corrective re-ask, a screenshot missing or over the 8 MB
+    ceiling — each is a `null` verdict and a run bit-identical to one with no judge.
+    One call per failing scenario (the run stops at the first failing step), cached
+    on the failure identity so a re-run of an unchanged red board is free.
+
+    **The architecture boundary held.** `guard-runner` stays LLM-FREE: it defines a
+    callback TYPE (`GuardVisualJudge`, `visual-judge.ts`) threaded
+    `RunGuardOptions` → `GuardExecInput` → `RunScenarioContext`, and `core`'s
+    `guardRunInProcess` is the ONE place that supplies an implementation. Every
+    other caller of the runner — birth validation, a hosted executor, the whole test
+    suite — runs with no judge and reaches no model. The driver seam stayed intact
+    too: the runner never asks what KIND of step failed, it reads an optional
+    `visual: { screenshotPath, expectation }` off the `fail` outcome that the web
+    driver alone supplies.
+
+    **Transports gained vision.** `LlmRequest` grew `images?: LlmImage[]`
+    (base64 + media type). The cli backend passes `--input-format stream-json` and
+    writes ONE NDJSON user envelope (text block first, then one image block each) —
+    the shape the Claude Agent SDK emits; the api backend switches from `prompt:` to
+    the AI SDK `messages:` content-parts form; the agent mailbox passes `images`
+    through. A text-only request is byte-identical to before on all three.
+
+    **As built.** Transports: `packages/shared/src/llm/transport.ts`
+    (`LlmImage`, `buildCliStdinPayload`, `cliInputFormatArgs`),
+    `packages/llm-api/src/transport.ts` (`promptInputOf`). Schema:
+    `packages/shared/src/guard/visual.ts` (`GuardVisualJudgmentSchema`,
+    `visualAnnotation`, `visualJudgeLines`) + an additive optional
+    `failure.visual` on `GuardFailureDetailSchema` (NO format-version bump).
+    Runner: `guard-runner/src/{visual-judge,run-scenario,run,guard-executor,
+    evidence}.ts`, `drivers/{types,web-driver}.ts`. Engine:
+    `core/src/services/llm/guard-visual-judge.ts` (stage `guard.visualJudge`, cache
+    `guard/visual-judge`, prompt fingerprint, one corrective re-ask, prompt-injection
+    framing that treats every pixel as page DATA). CLI: `guard run`'s close prints
+    `visual judge N screenshots read · M where the expected result LOOKED present`.
+    Tests: `tests/shared/{llm-transport,guard-visual-judge}.test.ts`,
+    `tests/llm-api/transport.test.ts`, `tests/core/{guard-visual-judge,
+    guard-executor}.test.ts`, `tests/cli/guard.test.ts`,
+    `tests/guard-runner/visual-judge.test.ts` (a real browser: the judge fires once
+    on a failing web step, never on a green one, never on a cli step, and a judge
+    that throws leaves the run untouched).
+
+94. **The teardown channel — scenarios that mutate host state clean up on every
+    exit (2026-08-12).** STATUS: IMPLEMENTED. Found by the reference corpus: the
+    dashboard area's background-service flow installs a REAL user-level service
+    (`dashboard --service`, gated by the `host-service-session` supplied
+    dependency) and relied on its last two steps (`stop`, `uninstall`) to remove
+    it — but the runner stops at the first failing step, and the sandbox's own
+    cleanup cannot touch a launchd/systemd registration. Any mid-scenario failure
+    (and, before this item, the guaranteed `logs` follow-mode timeout) left the
+    service installed and holding port 3001. No workaround was possible in
+    authoring: the format had no way to say "run this even after a failure".
+
+    **The channel.** Cli scenarios (only — the api driver's server lifecycle is
+    runner-owned) grew an optional `teardown:` step list, same step union as
+    `steps`, additive so NO format bump. Step numbering is CONTINUOUS
+    (`steps.length + n`), and every whole-scenario pass walks the one concatenated
+    sequence via the new `guardExecutionSteps` helper: the loader's regex/capture/
+    milestone cross-checks, the step-list presentation, driver chips, the served-
+    surface scan.
+
+    **Semantics.** On a GREEN run teardown steps are ordinary, verdict-affecting
+    steps — they may carry milestones (the reference's `stop`/`uninstall` teardown
+    steps ARE those claims' proving steps). On every other exit — fail, infra
+    error, cancellation, even the `${captured:…}` birth-validation throw — the
+    runner executes every not-yet-reached teardown step BEST-EFFORT: without the
+    run signal (a cancelled run still restores the host; each step stays bounded
+    by the step budget), continuing past its own misses, recorded in the same
+    evidence bundle (`teardown` / `teardownMiss` on the step record, an advisory
+    block in the transcript), and NEVER moving the settled verdict. A best-effort
+    miss surfaces as the result's optional `teardownIncomplete` annotation —
+    "host state may remain" is a fact a reader gets told, not a silent leak.
+
+    **As built.** Schema: `shared/src/guard/scenario.ts` (`teardown`,
+    `guardExecutionSteps`, `GuardScenarioStepView.teardown`; a named
+    `GuardSandboxStepListSchema` alias keeps the doubled step union under the
+    TS7056 declaration-emit cap), `shared/src/guard/result.ts`
+    (`teardownIncomplete`). Runner: `guard-runner/src/run-scenario.ts`
+    (`finishTeardown`, hoisted so the outermost catch restores the host too),
+    `evidence.ts`, `scenario-loader.ts`, `claim-refs.ts`, `capture-refs.ts`,
+    `run.ts`. Engine/UI: `core/src/commands/guard-read.ts`,
+    `dashboard-client` step chips (`teardown` badge). Reference:
+    `run-the-dashboard-as-a-background-service.cli.1.yaml` moves `stop`/
+    `uninstall` into `teardown:`. Tests:
+    `tests/guard-runner/run-scenario-teardown.test.ts`,
+    `tests/shared/guard-scenario-teardown.test.ts`.
+
+95. **The preparation gate reads the scenario's NEED, not its driver tag
+    (2026-08-12, cal.com reference corpus).** STATUS: BUILT. `runGuard` gated
+    every `driver: cli` scenario on `recipe.entry` — but web steps live inside
+    cli scenarios, and a web-only product (cal.com has no CLI) has no honest
+    `entry` to declare, so all 65 of the cal.diy corpus's browser scenarios
+    would have settled error with `recipe.web` present and boot-proven. The
+    gate now derives each cli scenario's preparation from its steps: a `run:`
+    step demands `entry` (unchanged message); browser/`request` steps demand
+    the served web surface, and a missing `web` block settles the same honest
+    unprepared error naming `web`; a scenario needing neither (pure
+    git/write/delete sandbox work) runs on either. The entry preflight probe
+    fires only when a selected scenario actually invokes the entry — a
+    web-only selection must not boot a binary no step runs. As built:
+    `packages/guard-runner/src/run.ts` (`entryExec` beside `servedExec`);
+    tests: `tests/guard-runner/run-driver-preparation.test.ts` (web-only runs
+    entryless; run-step still refuses naming `entry`; surface-less browser
+    scenario refuses naming `web`, not `entry`).

@@ -1,0 +1,63 @@
+---
+title: "Architecture graph"
+description: "Explore services, modules and functions; arrange the layout and keep it; jump straight to a violation's target."
+---
+
+The **Graphs** tab draws the architecture the analysis detected: services and the layers inside them, the modules and functions under those, the databases they talk to, and the dependencies between them all.
+
+## Depth
+
+The toggle at the top switches between three depths:
+
+* **Services** shows the whole system at once.
+* **Modules** shows the modules of one service.
+* **Functions** shows the functions of one module.
+
+Modules and Functions are scoped on purpose: rendering every module or every function of a large repo at once is hidden for performance. A card in the middle of the canvas tells you what to pick, and a selector appears next to the depth toggle. When there is only one candidate (one service, or one module in the scoped service) it is selected for you.
+
+## Arranging it
+
+Drag any top-level node to move it. Positions are saved per branch and per depth, so the arrangement you make is still there after a reload or a new analysis. **Auto layout** (the grid icon in the bottom-left controls) throws the saved positions away and reverts to the computed layout.
+
+At Modules and Functions depth, container nodes collapse and expand. The button next to the scope selector collapses everything or expands everything. Collapse state is saved the same way as positions.
+
+Both live in `<repo>/.truecourse/ui-state.json`, which is gitignored: it is your local view, not something the team shares.
+
+## Canvas controls
+
+Top of the canvas:
+
+* **Edges on hover only**, which hides dependency edges until you hover a node.
+* **Curved or L-shaped edges.**
+* **Animations on or off.**
+
+These three are remembered in your browser rather than in the repo.
+
+Bottom-left: zoom in, zoom out, fit view, auto layout, and a toggle between move mode (drag the canvas) and select mode (drag nodes).
+
+There is also a minimap, and a **Live / Offline** pill in the top-right corner showing whether the page is connected to the dashboard's event stream. Offline means progress updates will not arrive until it reconnects.
+
+## Clicking around
+
+* Hovering a node at Services depth dims every edge that does not touch it.
+* Clicking a service, module, function or database node zooms to it. Clicking a service group zooms to it and its children.
+* Clicking empty canvas clears the selection and fits the whole graph again.
+* Clicking a **database** node switches to the Databases tab and opens that database's schema.
+
+## Arriving from elsewhere
+
+**Locate** on an architecture violation card jumps here, selects the target and centers it, switching depth if the target is a module or a function.
+
+The crosshair on a row in the **Files** tab dims every node that does not belong to that path and zooms to what is left. Clear it from the tree, or from the filter bar at the top of the tree.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Files, flows and databases" icon="folder-tree" href="/dashboard/files-flows-databases">
+    The other three views over the same analysis.
+  </Card>
+
+  <Card title="Violations" icon="triangle-exclamation" href="/dashboard/violations">
+    Where Locate comes from.
+  </Card>
+</CardGroup>

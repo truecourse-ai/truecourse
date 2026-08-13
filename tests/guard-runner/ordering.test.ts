@@ -5,7 +5,7 @@ import type { GuardScenario } from '@truecourse/shared'
 const binds = [{ doc: 'd.md', section: 's', fingerprint: 'sha256:x' }]
 
 function cli(id: string): GuardScenario {
-  return { guard: 3, id, title: id, binds, driver: 'cli', steps: [{ run: ['x'], expect: { exit: 0 } }], normalize: [] }
+  return { guard: 3, id, title: id, binds, steps: [{ run: ['x'], expect: { exit: 0 } }], normalize: [] }
 }
 function api(id: string, methods: string[]): GuardScenario {
   return {
@@ -13,7 +13,6 @@ function api(id: string, methods: string[]): GuardScenario {
     id,
     title: id,
     binds,
-    driver: 'api',
     steps: methods.map((m) => ({ request: { method: m as 'GET', path: '/x' }, expect: { status: 200 } })),
     normalize: [],
   }

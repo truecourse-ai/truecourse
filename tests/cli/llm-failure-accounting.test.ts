@@ -235,7 +235,6 @@ describe('guard generate — every fidelity review was lost', () => {
         return JSON.stringify({
           scenario: {
             title: 'prints the version',
-            driver: 'cli',
             steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
           },
         });

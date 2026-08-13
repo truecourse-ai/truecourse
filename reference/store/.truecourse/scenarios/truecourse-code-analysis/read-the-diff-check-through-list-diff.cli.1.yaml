@@ -45,7 +45,6 @@ setup:
           - src/index.js
         message: seed diff sample
 normalize: []
-driver: cli
 steps:
   - run:
       - analyze

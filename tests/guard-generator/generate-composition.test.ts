@@ -83,8 +83,8 @@ describe('cliCompositionDefect — `run` is argv, not a command line', () => {
   })
 
   it('is skipped entirely when the recipe declares no cli entry', () => {
-    expect(scenarioCompositionDefect({ driver: 'cli', steps: [step(['npm'])] }, undefined)).toBeNull()
-    expect(scenarioCompositionDefect({ driver: 'cli', steps: [step(['npm'])] }, [])).toBeNull()
+    expect(scenarioCompositionDefect({ steps: [step(['npm'])] }, undefined)).toBeNull()
+    expect(scenarioCompositionDefect({ steps: [step(['npm'])] }, [])).toBeNull()
   })
 })
 

@@ -219,15 +219,16 @@ export function GuardInterfacesPanel({
         match: (j, q) => `${j.id} ${j.title} ${interfaceEntryLabel(j.entry)}`.toLowerCase().includes(q),
       }}
       filter={{
-        label: 'Surface',
-        ariaLabel: 'Filter by surface',
+        label: 'Drivers',
+        ariaLabel: 'Filter by driver',
         options,
         selected: surfaces,
         onChange: onSurfaces,
+        multi: true,
         match: (j, key) => j.type === key,
       }}
       noMatch="No interfaces match these filters."
-      // The MAIN pane carries the single Map CTA — the panel stays quiet.
+      // The MAIN pane says what an empty catalog means — the panel stays quiet.
       emptyText="No interfaces mapped yet."
       renderRow={(iface) => (
         <>

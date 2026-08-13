@@ -42,7 +42,6 @@ setup:
           - src/index.js
         message: seed declined sample
 normalize: []
-driver: cli
 steps:
   - run:
       - hooks
@@ -67,7 +66,6 @@ steps:
   - git:
       - add
       - .truecourse/LATEST.json
-      - .truecourse/config.json
     expect:
       exit: 0
   - git:

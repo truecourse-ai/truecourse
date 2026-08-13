@@ -250,8 +250,8 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
  * One scenario as the model authors it: the behavioral fields only. `id`,
  * `binds`, and `guard` are engine-owned, so we tolerate (and ignore) whatever the
  * model wrote for them via `.passthrough()`. One schema per runnable driver —
- * each authoring prompt embeds ITS driver's schema, and the parse accepts either
- * (keyed on `driver`) so a batch can never smuggle a step vocabulary across drivers.
+ * each authoring prompt embeds ITS driver's schema, and the engine knows which
+ * surface it asked for, so the reply never declares one.
  */
 /**
  * The runner's `run` step, minus the one argv form a MODEL can never write: the
@@ -279,7 +279,6 @@ const AuthoredCliStepSchema = GuardStepObjectSchema.extend({ run: z.array(z.stri
 export const RawGeneratedCliScenarioSchema = z
   .object({
     title: z.string().min(1),
-    driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
     steps: z.array(AuthoredCliStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
@@ -290,7 +289,6 @@ export type RawGeneratedCliScenario = z.infer<typeof RawGeneratedCliScenarioSche
 export const RawGeneratedApiScenarioSchema = z
   .object({
     title: z.string().min(1),
-    driver: z.literal('api'),
     setup: GuardSetupSchema.optional(),
     steps: z.array(GuardApiStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
@@ -298,7 +296,15 @@ export const RawGeneratedApiScenarioSchema = z
   .passthrough()
 export type RawGeneratedApiScenario = z.infer<typeof RawGeneratedApiScenarioSchema>
 
-export const RawGeneratedScenarioSchema = z.discriminatedUnion('driver', [
+/**
+ * A scenario as authored, whichever surface the call was for. The arms are keyed by
+ * their STEP VOCABULARY, not by a declared driver: an authored cli step always
+ * carries `run`, an api step never does, so the union resolves without a
+ * discriminator (and each authoring call parses against its own arm anyway — the
+ * prompt and the schema follow the same `ctx.driver`, so a batch cannot smuggle one
+ * driver's vocabulary into another's).
+ */
+export const RawGeneratedScenarioSchema = z.union([
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
 ])

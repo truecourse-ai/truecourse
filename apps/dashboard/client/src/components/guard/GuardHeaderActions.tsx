@@ -1,22 +1,20 @@
 /**
  * Section-level action button for the Guard tabs — one action per tab: Generate on
  * the Tests tab (synthesizes flows + authors scenarios; opens the estimate modal
- * first), Map on the Interfaces tab (derives the interface catalog from the working
- * tree — deterministic, LLM-free, FREE, so it names its own price and never opens
- * an estimate), and Run on the Runs tab (runs the committed scenarios; no estimate). Rendered inside the page Header
- * alongside the other section actions, mirroring ContractsHeaderActions /
- * VerifyHeaderActions. Both render the same `outline` variant as the Spec
+ * first) and Run on the Runs tab (runs the committed scenarios; no estimate).
+ * Rendered inside the page Header alongside the other section actions, mirroring
+ * ContractsHeaderActions / VerifyHeaderActions. Both render the same `outline` variant as the Spec
  * tab's Scan/Rescan button, so every guard-context header action shares one
  * look. Each button carries its own staleness dot and is disabled — with
  * a HoverPopover reason — while any guard job is in flight.
  */
 
-import { Braces, Loader2, Play, Wand2 } from 'lucide-react';
+import { Loader2, Play, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
 
 interface GuardHeaderActionsProps {
-  kind: 'generate' | 'run' | 'map';
+  kind: 'generate' | 'run';
   onClick: () => void;
   /** This action is in flight. */
   busy: boolean;
@@ -35,20 +33,14 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
       ? busy
         ? 'Generating…'
         : 'Generate'
-      : kind === 'map'
-        ? busy
-          ? 'Mapping…'
-          : 'Map · free, no LLM'
-        : busy
-          ? 'Running…'
-          : 'Run';
+      : busy
+        ? 'Running…'
+        : 'Run';
 
   const staleReason =
     kind === 'generate'
       ? 'The spec corpus changed since the last generate — regenerate to write tests for the edits.'
-      : kind === 'map'
-        ? 'The working tree changed since the last mapping — re-map to re-derive the interfaces.'
-        : 'The tests changed since the last run — re-run to see where they stand.';
+      : 'The tests changed since the last run — re-run to see where they stand.';
 
   const reason = otherBusy
     ? 'A guard job is already running — wait for it to finish.'
@@ -56,7 +48,7 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
       ? staleReason
       : null;
 
-  const Icon = busy ? Loader2 : kind === 'generate' ? Wand2 : kind === 'map' ? Braces : Play;
+  const Icon = busy ? Loader2 : kind === 'generate' ? Wand2 : Play;
 
   return (
     <HoverPopover portal align="end" width="narrow" content={reason}>
@@ -65,7 +57,7 @@ export function GuardHeaderActions({ kind, onClick, busy, otherBusy, stale = fal
         {label}
         {showDot && (
           <span
-            aria-label={kind === 'generate' ? 'changes not yet generated' : kind === 'map' ? 'unmapped changes' : 'changes not yet run'}
+            aria-label={kind === 'generate' ? 'changes not yet generated' : 'changes not yet run'}
             className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-sky-500 ring-2 ring-background"
           />
         )}

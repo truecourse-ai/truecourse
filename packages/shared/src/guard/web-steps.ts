@@ -12,7 +12,7 @@
  *   - the LOCATOR is role + accessible name, closed ({@link GuardWebLocatorSchema});
  *   - the step declares its own DRIVER ({@link webDriver});
  *   - the address is asserted ORIGIN-STRIPPED ({@link GuardWebExpectSchema});
- *   - the verb set is CLOSED at four ({@link GuardWebStepSchema}).
+ *   - the verb set is CLOSED at five ({@link GuardWebStepSchema}).
  */
 
 import { z } from 'zod'
@@ -146,6 +146,121 @@ export const GuardWebLocatorSchema = z
   .strict()
 
 /**
+ * THE ARIA STATES a web step may assert on an element. Closed, and closed at the
+ * states a USER can perceive: a control is on or off (`checked`), held down
+ * (`pressed`), the current one of a set (`selected`), opened or collapsed
+ * (`expanded`), or refused (`disabled`). Everything else an element carries is
+ * implementation.
+ *
+ * Why the vocabulary needs them at all: these are the states with NO text. A tab
+ * strip's active tab, a toggle switch's position, a three-way mode selector — the
+ * page renders each of them as a colour, and a `text` matcher asserting the label
+ * beside them passes whatever position they are in. The state assertion is the only
+ * honest form of the claim.
+ *
+ * The deliberate consequence: an element that exposes NO such state fails the
+ * assertion by saying so ("exposes no aria-pressed state") rather than being
+ * guessed at from a class or a colour. That failure is a real finding — the control
+ * is unobservable to a screen reader too.
+ */
+export const GUARD_WEB_STATES = ['checked', 'pressed', 'selected', 'expanded', 'disabled'] as const
+export type GuardWebState = (typeof GUARD_WEB_STATES)[number]
+
+/**
+ * ONE element and the ARIA state(s) it must be in — the `visible` matcher's shape
+ * with the assertion added: a role, an accessible name, and what that element's
+ * state must BE. Several states of the same element may be named at once (a tab
+ * that is selected AND not disabled); each is evaluated and recorded on its own.
+ */
+export const GuardWebStateSchema = GuardWebLocatorSchema.extend({
+  /** `aria-checked` (or a checkbox/radio's own checkedness). */
+  checked: z.boolean().optional(),
+  /** `aria-pressed` — a toggle button's held-down state. */
+  pressed: z.boolean().optional(),
+  /** `aria-selected` (or an `<option>`'s own selectedness) — the current one of a set. */
+  selected: z.boolean().optional(),
+  /** `aria-expanded` — a disclosure, a dropdown, a collapsible section. */
+  expanded: z.boolean().optional(),
+  /** `aria-disabled`, or the element's own disabled state. */
+  disabled: z.boolean().optional(),
+})
+  .strict()
+  .refine((s) => GUARD_WEB_STATES.some((state) => s[state] !== undefined), {
+    message: `a state expectation names at least one of ${GUARD_WEB_STATES.join(' | ')}`,
+  })
+
+/**
+ * The state assertions one `state` member carries, in the fixed order of
+ * {@link GUARD_WEB_STATES} — so a step asserting two of them fails on the same one
+ * every time, and its record reads the same way on every run.
+ */
+export function webStateAssertions(
+  state: GuardWebStateExpect,
+): Array<{ state: GuardWebState; expected: boolean }> {
+  return GUARD_WEB_STATES.filter((name) => state[name] !== undefined).map((name) => ({
+    state: name,
+    expected: state[name] as boolean,
+  }))
+}
+
+/**
+ * ONE attribute of one element — the DOCUMENT ELEMENT (`<html>`) unless the
+ * expectation names another.
+ *
+ * The document element is the default because that is where the facts a page keeps
+ * outside its text usually live: a theme (`class="dark"`, `data-theme`), a locale, a
+ * feature flag the shell sets. None of them has a role, a name, or a single word of
+ * visible text, so before this member a scenario could press the theme button and
+ * then assert nothing at all about what it did.
+ *
+ * `value` is the shared text-matcher vocabulary applied to the attribute's RAW
+ * value; `present` asserts only that the attribute is (or is not) there, whatever it
+ * says. For `class` specifically, prefer {@link GuardWebClassSchema}: a class
+ * attribute is a TOKEN LIST, and `contains "dark"` on it also passes for
+ * `darkroom-theme`.
+ */
+export const GuardWebAttributeSchema = z
+  .object({
+    /** The element to read it from; omitted ⇒ the document element (`<html>`). */
+    of: GuardWebLocatorSchema.optional(),
+    /** The attribute's name — `data-theme`, `aria-current`, `href`, `class`. */
+    name: z.string().min(1),
+    /** What its value must be. Compared against the raw attribute value. */
+    value: GuardStreamMatcherSchema.optional(),
+    /** Assert only that the attribute is there (`true`) or is not (`false`). */
+    present: z.boolean().optional(),
+  })
+  .strict()
+  .refine((a) => a.value !== undefined || a.present !== undefined, {
+    message: 'an attribute expectation needs a `value` matcher or `present`',
+  })
+
+/**
+ * A CLASS TOKEN on one element — the document element unless another is named.
+ *
+ * Separate from {@link GuardWebAttributeSchema} for one reason that matters: `class`
+ * is a whitespace-separated token list, and every text matcher applied to it is
+ * wrong in a way that passes. `contains "dark"` holds for `darkroom`, `equals "dark"`
+ * breaks the moment any other class joins it, and a regex spelling the token
+ * boundaries is a footgun a scenario should never have to write. This member matches
+ * the way `classList.contains` does, which is what a reader means by "the dark class
+ * is on it".
+ */
+export const GuardWebClassSchema = z
+  .object({
+    /** The element to read the class list from; omitted ⇒ the document element. */
+    of: GuardWebLocatorSchema.optional(),
+    /** A class token the element must carry. */
+    has: z.string().min(1).optional(),
+    /** A class token the element must NOT carry. */
+    absent: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((c) => c.has !== undefined || c.absent !== undefined, {
+    message: 'a class expectation names a `has` or an `absent` token',
+  })
+
+/**
  * What a web step asserts about the page, once its action has been taken. Every
  * field is WAITED on until the step's budget runs out — the page is asynchronous,
  * and the discipline (§10.2) is to wait for OBSERVABLE STATE, never for a duration:
@@ -158,8 +273,18 @@ export const GuardWebLocatorSchema = z
  *  - `url` — the address as `pathname + search`, with the ORIGIN STRIPPED: the
  *    sandbox's port is allocated per run and asserting on it would assert on the
  *    runner. `/notes?title=x` is what a scenario writes and what a failure quotes.
- *  - `visible` — an element that must be present and visible. The plainest form of
- *    "the page arrived": no text to quote, just the thing that must be there.
+ *  - `visible` — an element that must be present and visible, or SEVERAL of them.
+ *    The plainest form of "the page arrived": no text to quote, just the thing that
+ *    must be there. The list form exists because a toolbar of icon buttons is one
+ *    claim ("the canvas controls survived the reload"), and their accessible names
+ *    are `aria-label`s that never appear in the page's text — so a text matcher
+ *    cannot state it and three separate steps would split one claim into three.
+ *  - `state` — an ARIA state of one element. See {@link GuardWebStateSchema}.
+ *  - `attribute` / `class` — what the page keeps OUTSIDE its text, on the document
+ *    element by default. See {@link GuardWebAttributeSchema} / {@link GuardWebClassSchema}.
+ *
+ * The members are additive and every one of them is optional: an expectation
+ * written before they existed asserts exactly what it always did.
  */
 export const GuardWebExpectSchema = z
   .object({
@@ -168,16 +293,37 @@ export const GuardWebExpectSchema = z
     within: GuardWebLocatorSchema.optional(),
     /** Matcher on `pathname + search` — never the origin. See above. */
     url: GuardStreamMatcherSchema.optional(),
-    /** An element that must be present and visible. */
-    visible: GuardWebLocatorSchema.optional(),
+    /** An element that must be present and visible — or a list of them. */
+    visible: z.union([GuardWebLocatorSchema, z.array(GuardWebLocatorSchema).min(1)]).optional(),
+    /** An ARIA state of one element. See {@link GuardWebStateSchema}. */
+    state: GuardWebStateSchema.optional(),
+    /** One attribute of one element (the document element by default). */
+    attribute: GuardWebAttributeSchema.optional(),
+    /** A class TOKEN on one element (the document element by default). */
+    class: GuardWebClassSchema.optional(),
   })
   .strict()
-  .refine((e) => e.text !== undefined || e.url !== undefined || e.visible !== undefined, {
-    message: 'a web expectation needs one of text | url | visible',
-  })
+  .refine(
+    (e) =>
+      e.text !== undefined ||
+      e.url !== undefined ||
+      e.visible !== undefined ||
+      e.state !== undefined ||
+      e.attribute !== undefined ||
+      e.class !== undefined,
+    { message: 'a web expectation needs one of text | url | visible | state | attribute | class' },
+  )
   .refine((e) => e.within === undefined || e.text !== undefined, {
     message: '`within` scopes the `text` matcher — a scope with nothing to match is not an assertion',
   })
+
+/** The presence targets one expectation carries, as a list (empty when it carries none). */
+export function webVisibleTargets(
+  visible: GuardWebExpect['visible'] | undefined,
+): readonly GuardWebLocator[] {
+  if (visible === undefined) return []
+  return Array.isArray(visible) ? visible : [visible]
+}
 
 /**
  * THE STEP-LEVEL DRIVER, made explicit. A step says how it acts; the scenario does
@@ -248,6 +394,33 @@ export const GuardWebFillStepSchema = z
   .strict()
 
 /**
+ * Move through the browser's own HISTORY — Back and Forward, the two buttons every
+ * browser has and no page draws.
+ *
+ * It is a verb rather than a re-navigation because the claim is about the BROWSER:
+ * "Back returns you to the previous view" is not proved by opening the previous
+ * view's address again (that proves a link works). The distinction is load-bearing
+ * in a single-page app, where Back restores state without fetching a document at
+ * all — the case a re-navigation silently converts into a fresh mount.
+ *
+ * Nothing is asserted about the traversal itself: a history entry that is not there
+ * simply leaves the page where it was, and the step's `expect` — an address, the
+ * page's words — is what says whether the move happened. That is the same rule
+ * every other web verb follows: the action acts, the expectation judges.
+ */
+export const GuardWebHistoryStepSchema = z
+  .object({
+    driver: webDriver,
+    /** Which button: the browser's Back, or its Forward. */
+    history: z.enum(['back', 'forward']),
+    expect: GuardWebExpectSchema.optional(),
+    timeoutMs,
+    note,
+    milestone,
+  })
+  .strict()
+
+/**
  * Assert on the page without acting on it — the milestone-bearing step of a web
  * journey, and the reason the step-level `driver` field is explicit (see
  * {@link webDriver}). Its `expect` is required: a step that neither acts nor
@@ -265,24 +438,32 @@ export const GuardWebExpectStepSchema = z
 
 /**
  * ONE web step — one action, or one assertion, taken by a real browser against the
- * web surface the sandbox serves. The verbs are closed at four: navigate, click,
- * fill, expect. There is deliberately no hover, no scroll, no keyboard: each would
- * be a promise about how the page is OPERATED rather than what it PROMISES, and the
- * vocabulary grows only when a real claim cannot be stated without it.
+ * web surface the sandbox serves. The verbs are closed at five: navigate, click,
+ * fill, history, expect. There is deliberately no hover, no scroll, no keyboard:
+ * each would be a promise about how the page is OPERATED rather than what it
+ * PROMISES, and the vocabulary grows only when a real claim cannot be stated
+ * without it — which is exactly what `history` was (2026-08-11: "Back and Forward
+ * move through the views" had no verb, and rode as a re-navigation that proved a
+ * different sentence).
  */
 export const GuardWebStepSchema = z.union([
   GuardWebNavigateStepSchema,
   GuardWebClickStepSchema,
   GuardWebFillStepSchema,
+  GuardWebHistoryStepSchema,
   GuardWebExpectStepSchema,
 ])
 
 export type GuardWebRole = (typeof GUARD_WEB_ROLES)[number]
 export type GuardWebLocator = z.infer<typeof GuardWebLocatorSchema>
+export type GuardWebStateExpect = z.infer<typeof GuardWebStateSchema>
+export type GuardWebAttributeExpect = z.infer<typeof GuardWebAttributeSchema>
+export type GuardWebClassExpect = z.infer<typeof GuardWebClassSchema>
 export type GuardWebExpect = z.infer<typeof GuardWebExpectSchema>
 export type GuardWebNavigateStep = z.infer<typeof GuardWebNavigateStepSchema>
 export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
 export type GuardWebFillStep = z.infer<typeof GuardWebFillStepSchema>
+export type GuardWebHistoryStep = z.infer<typeof GuardWebHistoryStepSchema>
 export type GuardWebExpectStep = z.infer<typeof GuardWebExpectStepSchema>
 export type GuardWebStep = z.infer<typeof GuardWebStepSchema>
 
@@ -310,9 +491,16 @@ export function isWebFillStep(step: GuardWebStep): step is GuardWebFillStep {
   return 'fill' in step
 }
 
+/** True when the web step presses the browser's Back or Forward. */
+export function isWebHistoryStep(step: GuardWebStep): step is GuardWebHistoryStep {
+  return 'history' in step
+}
+
 /** True when the web step only asserts (it takes no action on the page). */
 export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep {
-  return !isWebNavigateStep(step) && !isWebClickStep(step) && !isWebFillStep(step)
+  return (
+    !isWebNavigateStep(step) && !isWebClickStep(step) && !isWebFillStep(step) && !isWebHistoryStep(step)
+  )
 }
 
 /** Every regex source a web step carries, with the path that names it. */
@@ -320,6 +508,9 @@ export function webStepPatterns(step: GuardWebStep): Array<{ where: string; patt
   return [
     ...(step.expect?.text ? matcherPatterns('expect.text', step.expect.text) : []),
     ...(step.expect?.url ? matcherPatterns('expect.url', step.expect.url) : []),
+    ...(step.expect?.attribute?.value
+      ? matcherPatterns('expect.attribute.value', step.expect.attribute.value)
+      : []),
   ]
 }
 
@@ -328,6 +519,41 @@ export function webStepPatterns(step: GuardWebStep): Array<{ where: string; patt
 /** `button “Save”` — one locator, in the words a reader (and a failure) uses. */
 export function describeWebLocator(locator: GuardWebLocator): string {
   return `${locator.role} “${locator.name}”${locator.exact ? ' (exact)' : ''}`
+}
+
+/**
+ * WHOSE state, attribute or class is being read — one element, or the document
+ * element when the expectation names none. The words a failure and a green check
+ * both use, so the two can never describe the same subject differently.
+ */
+export function describeWebSubject(of: GuardWebLocator | undefined): string {
+  return of ? describeWebLocator(of) : 'the document element'
+}
+
+/** `tab “Home” is selected` / `switch “LLM rules” is not checked` — one state member. */
+export function describeWebState(state: GuardWebStateExpect): string {
+  const target = describeWebLocator({ role: state.role, name: state.name, ...(state.exact ? { exact: true } : {}) })
+  return webStateAssertions(state)
+    .map(({ state: name, expected }) => `${target} is ${expected ? '' : 'not '}${name}`)
+    .join(' · ')
+}
+
+/** `the document element’s data-theme is “dark”` — one attribute member. */
+export function describeWebAttribute(attribute: GuardWebAttributeExpect): string {
+  const subject = describeWebSubject(attribute.of)
+  if (attribute.value) return `${subject}’s ${attribute.name} ${describeStreamMatcher(attribute.value)}`
+  return attribute.present
+    ? `${subject} has a ${attribute.name} attribute`
+    : `${subject} has no ${attribute.name} attribute`
+}
+
+/** `the document element has class “dark”` — one class member. */
+export function describeWebClass(cls: GuardWebClassExpect): string {
+  const subject = describeWebSubject(cls.of)
+  return [
+    ...(cls.has !== undefined ? [`${subject} has class “${cls.has}”`] : []),
+    ...(cls.absent !== undefined ? [`${subject} does not have class “${cls.absent}”`] : []),
+  ].join(' · ')
 }
 
 /** What a web step asserts, one line — `address is “/notes” · page text contains “x”`. */
@@ -339,7 +565,12 @@ export function describeWebExpect(expect: GuardWebExpect | undefined): string {
     const where = expect.within ? `${describeWebLocator(expect.within)} text` : 'page text'
     parts.push(`${where} ${describeStreamMatcher(expect.text)}`)
   }
-  if (expect.visible) parts.push(`${describeWebLocator(expect.visible)} is visible`)
+  for (const target of webVisibleTargets(expect.visible)) {
+    parts.push(`${describeWebLocator(target)} is visible`)
+  }
+  if (expect.state) parts.push(describeWebState(expect.state))
+  if (expect.attribute) parts.push(describeWebAttribute(expect.attribute))
+  if (expect.class) parts.push(describeWebClass(expect.class))
   return parts.join(' · ')
 }
 
@@ -348,5 +579,6 @@ export function describeWebCommand(step: GuardWebStep): string {
   if (isWebNavigateStep(step)) return `navigate ${step.navigate}`
   if (isWebClickStep(step)) return `click ${describeWebLocator(step.click)}`
   if (isWebFillStep(step)) return `fill ${describeWebLocator(step.fill)} with “${step.value}”`
+  if (isWebHistoryStep(step)) return `go ${step.history}`
   return 'check the page'
 }

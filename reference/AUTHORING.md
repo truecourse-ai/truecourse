@@ -39,12 +39,16 @@ reference/
   spec-docs/<group>/<page>.mdx     verbatim snapshots of the docs site pages
   store/.truecourse/               the reference, in engine store schemas
     specs/corpus.json              curated docs + areas
+    specs/sources.json             registered llms.txt sites (+ specs/sources/)
     scenarios/claims.json          the claim corpus (+ untestable list)
     scenarios/flows.json           flows with kind/variant/starting-state
-    scenarios/manifest.json        flow -> scenario map
+    scenarios/manifest.json        flow -> scenario map (+ interface plans, gaps)
     scenarios/recipe.json          the real build/invoke recipe
+    scenarios/decisions.json       user-authored dismissals
+    scenarios/dependencies.json    the supplied-dependency catalog
     scenarios/<area>/*.yaml        one scenario per flow (format v3)
-    guard/journeys.json            journeys with full contracts
+    guard/interfaces.json          the interface catalog (cli/api/web) with
+                                   contracts and per-surface state registries
     guard/setup.json               the setup record (ideal-scoped detection)
     guard/result.json              the generate result record
   transform-gaps.md                ledger of schema gaps found while authoring
@@ -71,6 +75,15 @@ Work one area at a time. Delegate each layer to one agent (Opus) with the
 relevant plan sections and this file as its contract; verify between
 layers. Layers 1 and 2 can run in parallel; 3 needs both; 4 to 6 follow.
 
+A batch MAY stop after flows and interfaces (a user-review checkpoint
+before scenarios are spent on them). That intermediate state is recorded
+honestly, never silently: each such flow gets a manifest row carrying its
+interface plan, `scenarios: []`, and a per-surface `blocked-on` gap naming
+the deferred scenario batch. Until the scenarios land, every run and the
+coverage view will — correctly — report these flows as BLOCKED: a flow
+with no scenario has nothing to execute, and the gap is the stated reason.
+The next batch replaces each gap with the flow's scenario.
+
 ### 0. Snapshot the spec source
 
 The spec source is the published docs site (Mintlify), not repo files.
@@ -85,7 +98,7 @@ testable sentence; identity is doc + anchor + title.
 
 The doc set is EVERY doc the area's corpus keeps — including reference
 pages — never a subset. A page used as a cross-check for another layer
-(the CLI reference feeding journeys) is still a claims source; skipping
+(the CLI reference feeding interfaces) is still a claims source; skipping
 it leaves its sections permanently uncovered. Claims about commands
 outside the area are still extracted and land as gaps with reasons, not
 silently omitted.
@@ -105,29 +118,42 @@ silently omitted.
 Target: `scenarios/claims.json` (`GuardClaimsFileSchema`,
 `packages/shared/src/guard/claims.ts`).
 
-### 2. Journeys
+### 2. Interfaces
 
-Derive the area's command journeys from the CLI SOURCE CODE (the source
-of truth), cross-checked against the docs' CLI reference page.
+Derive the area's interface catalog — the code-side unit: WITH WHAT a
+flow is realized — from the SOURCE CODE (the source of truth),
+cross-checked against the docs' CLI reference page. One entry per
+INVOCABLE THING (one command, one HTTP operation, one web task from one
+named starting state); never a command tree folded into an entry, never
+independent invocations rendered as sequential steps.
 
-- COMPLETE grammar: every flag (long, short, takes-value, requiredness,
-  value hint, choices, default, scope, hidden), every positional, every
-  subcommand. Nothing invented, nothing skipped.
+- COMPLETE grammar (cli): every flag (long, short, takes-value,
+  requiredness, value hint, choices, default, scope, hidden), every
+  positional, every subcommand. Nothing invented, nothing skipped.
 - The io contract is STRUCTURED FACTS, never prose. Entries like
   stream+marker (a stable output substring, observed), exit+when,
   prompt kind+marker+when (what a TTY step must answer), file writes,
   env reads — each with an optional short `when` condition. If a fact
   cannot be stated as such an entry, it is not io contract material.
   `unknown` is a legitimate value; guessing is not.
-- Every code-vs-docs discrepancy goes to `diagnostics[]`; code wins for
-  grammar. These diagnostics are the doc-bug feed; do not resolve them
-  silently.
+- Web entries name their `startingState`/`endState` as ids from the
+  file's per-surface state registry (each state one sentence, defined
+  once), and record `apiEffects` — the api interface ids the task's
+  steps invoke, resolved ONE HOP through the client's api-client call
+  sites. Omitted means extraction established nothing; `[]` means it
+  established the task reaches no server. Never guessed.
+- Every code-vs-docs discrepancy is a diagnostic; code wins for
+  grammar; never resolve one silently. The interface schema stores no
+  diagnostics by design (they are run reporting, not interface data),
+  so until they get a store home (plan §7.5; ledger G78/G82) they are
+  preserved VERBATIM in `transform-gaps.md` — the doc-bug feed.
 - Model the POST-Phase-0 target (for example no agent transport) and
-  record each such divergence in `authored-decisions`.
+  record each such divergence as an authored decision (same ledger).
 
-Target: the contract fields on `guard/journeys.json`
-(`packages/shared/src/journeys.ts`). Journey fingerprints must not move
-when contracts are added.
+Target: `guard/interfaces.json` (`packages/shared/src/interfaces.ts`).
+The fingerprint folds ONLY type + entry + steps, so contracts, groups,
+states and apiEffects are additive: adding them must not move any
+existing entry's fingerprint — verify they recompute unchanged.
 
 ### 3. Flows and scenarios
 
@@ -147,7 +173,7 @@ Flow coverage rules:
   starting-state block (step-creatable / seedable / supplied).
 
 Scenario rules (format v3):
-- Steps only through public journeys, plus `git`/`write`/`delete` steps
+- Steps only through public interfaces, plus `git`/`write`/`delete` steps
   for state the docs themselves describe in those terms. Prompt-path
   claims use `tty: true` with scripted stdin answers.
 - State decision rule: durable state that must pre-exist (a codebase
@@ -161,12 +187,47 @@ Scenario rules (format v3):
   observation-based, never content-exact.
 - Assert MEANING (the violation key, the counter, the file path, the
   exit code), never exact prose.
+- Web `text` is what CSS RENDERS, not what the DOM contains: the driver
+  reads `innerText`, so a `text-transform` changes the case you must
+  assert (an uppercased heading reads back as `API`, not `api`) and
+  hidden text is invisible to it. Matchers are case-sensitive — author
+  the case the page shows. A miss that would pass ignoring case names
+  itself in the failure ("differs only in letter case").
+- State a page keeps OUTSIDE its text has its own expect members (added
+  2026-08-11, plan item 91) — use them instead of asserting a label that
+  never changes: `state` (an ARIA state — `checked` | `pressed` |
+  `selected` | `expanded` | `disabled` — on a role+name target, for tab
+  strips, switches and disabled controls), `attribute` and `class` (on
+  the document element by default, which is where a theme lives; `class`
+  matches whole TOKENS, so `has: dark` never passes for `darkroom`).
+  A control that exposes NO state fails saying so — that failure is the
+  finding, and it is not to be papered over with a text assertion.
+- `visible` takes a LIST as well as a single locator: several icon
+  buttons that survive one action are ONE claim, and their accessible
+  names (`aria-label`s) never appear in the page text.
+- Browser Back and Forward are a verb: `- driver: web` + `history: back`
+  (or `forward`). Re-navigating to the old address proves a link, not
+  the history — do not author the one for the other.
+- A command that never returns (a console-mode server, a log follower)
+  is a `run` step with `until: { marker: … }`: the runner stops it the
+  moment that line appears and evaluates the expect against the output so
+  far. Such a step asserts output, never `exit` (the schema refuses it),
+  and it no longer has to be the flow's last step.
 - Milestone-tag each proving step with the claim ids it proves (a step
   may prove several).
 - Every step either proves a claim or prepares for a later claim step.
   Nothing else exists: no just-in-case sanity checks, no defensive
   trailing steps. Insurance duplicating a claim another flow owns is
   redundant coverage, and a step proving nothing is not authored.
+- HOST state a scenario legitimately mutates OUTSIDE the sandbox (a
+  user-level service it installs, a supervisor registration) is restored
+  by `teardown:` steps, never by trailing main steps: the runner stops at
+  the first failing step, and only teardown runs on every exit —
+  best-effort after a failure, verdict-affecting (and milestone-bearing:
+  a `stop`/`uninstall` teardown step IS that claim's proving step) on a
+  green run. Numbering is continuous after `steps`. Sandbox-only state
+  never earns a teardown — the sandbox is deleted either way (plan
+  item 94).
 - Non-interactive `analyze` steps pass `--llm`/`--no-llm` explicitly
   (the LLM gate is per-run consent, by decision).
 - Never point `TRUECOURSE_HOME` (or any tool home) inside the working
@@ -192,7 +253,7 @@ cross-checks must come back clean).
 
 - Every store file parses against the repo's real Zod schemas through
   the real readers; fingerprints recompute; manifest, flows, scenarios,
-  journeys, and claims agree with each other.
+  interfaces, and claims agree with each other.
 - Copy to the live store, open the dashboard, and walk every tab the
   area touches. The user reviews here; iterate on feedback until the
   area is confirmed (draft, review, update, repeat, freeze).

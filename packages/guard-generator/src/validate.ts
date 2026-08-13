@@ -29,6 +29,7 @@ import type { ZodError } from 'zod'
 import {
   captureDefects,
   isApiRequestStep,
+  isApiStep,
   type GuardApiStep,
   type GuardStep,
   type GuardSetup,
@@ -191,25 +192,26 @@ export function apiCompositionDefect(
 }
 
 /**
- * The composition defect of ONE authored scenario, by driver — the single entry
- * point authoring calls before it accepts a scenario. Returns a model-facing
- * one-liner (the corrective re-ask's seed) or null when the scenario composes.
+ * The composition defect of ONE authored scenario — the single entry point
+ * authoring calls before it accepts a scenario. Which rules apply is read off the
+ * STEPS (an all-api-verb scenario gets the api rules, anything else the cli ones),
+ * the same derivation the runner dispatches on, so the checks can never be applied
+ * to a vocabulary they were not written for. Returns a model-facing one-liner (the
+ * corrective re-ask's seed) or null when the scenario composes.
  */
 export function scenarioCompositionDefect(
-  scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
-    | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
+  scenario: { steps: readonly (GuardStep | GuardApiStep)[]; setup?: GuardSetup },
   entry: readonly string[] | undefined,
 ): string | null {
-  // The CAPTURED-value rules first, and for both drivers: they are the same
+  // The CAPTURED-value rules first, and whatever the steps are: they are the same
   // sentences the loader reports, so a scenario that would be a permanent load
   // error is corrected by a re-ask instead of being written to disk.
   const capture = captureDefects(scenario.steps, scenario.setup)[0]
   if (capture) return capture.message
-  if (scenario.driver === 'cli') {
-    // No entry means no cli recipe — authoring never reaches here, and inventing a
-    // program name to compare against would fabricate the very rule it enforces.
-    return entry && entry.length > 0 ? cliCompositionDefect(scenario.steps, entry) : null
-  }
-  return apiCompositionDefect(scenario.steps, scenario.setup)
+  if (scenario.steps.every(isApiStep)) return apiCompositionDefect(scenario.steps, scenario.setup)
+  // No entry means no cli recipe — authoring never reaches here, and inventing a
+  // program name to compare against would fabricate the very rule it enforces.
+  return entry && entry.length > 0
+    ? cliCompositionDefect(scenario.steps as readonly GuardStep[], entry)
+    : null
 }

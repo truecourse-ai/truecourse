@@ -15,6 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
+import { GuardScenarioSchema, guardScenarioDrivers } from '@truecourse/shared'
 import type { AuthorUserContext, MatchRunner } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
@@ -186,12 +187,11 @@ describe('generateGuards — the route gate', () => {
     expect(res.errors).toEqual([])
     expect(res.written).toHaveLength(1)
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
-      driver: string
       server?: string
     }
     // The engine owns the field: the model never authored it, and it is stamped
     // because the flow bound a server OTHER than the recipe's default.
-    expect(committed.driver).toBe('api')
+    expect(guardScenarioDrivers(GuardScenarioSchema.parse(committed))).toEqual(['api'])
     expect(committed.server).toBe('api-v2')
     // The prompt described THAT service — and only its own operations: the web
     // app's `/api/version` is another service's, so the setup catalog drops it.

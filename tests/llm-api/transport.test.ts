@@ -583,3 +583,86 @@ describe('createAiSdkTransport alias', () => {
     expect(createAiSdkTransport).toBe(createApiTransport);
   });
 });
+
+// Vision: a request carrying `images` must reach the provider as a user message
+// made of CONTENT PARTS (text + the image), not as a bare `prompt` string — the
+// only form the AI SDK can hand a picture to a model. A text-only request keeps
+// the `prompt` path byte-for-byte, so adding a vision stage changes nothing for
+// the ~20 text stages.
+describe('createApiTransport — image attachments', () => {
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUg==';
+
+  /** Captures the provider-level prompt the SDK builds for the call. */
+  function promptCapturingModel(text: string) {
+    let prompt: unknown;
+    const model = {
+      ...stubModel({ text }),
+      async doGenerate(opts: { prompt: unknown }) {
+        prompt = opts.prompt;
+        return {
+          content: [{ type: 'text', text }],
+          finishReason: 'stop',
+          usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+          warnings: [],
+        };
+      },
+    };
+    return { model, getPrompt: () => prompt as Array<{ role: string; content: unknown }> };
+  }
+
+  /** Every part of the single user message, whatever the SDK named the kinds. */
+  function userParts(prompt: Array<{ role: string; content: unknown }>) {
+    const user = prompt.find((m) => m.role === 'user');
+    return (user?.content ?? []) as Array<Record<string, unknown>>;
+  }
+
+  it('sends text + image parts on a free-text call', async () => {
+    const { model, getPrompt } = promptCapturingModel('LOOKS FINE');
+    buildModelMock.mockReturnValue(model);
+    const out = await createApiTransport(cfg)({
+      id: 'guard.visualJudge:s1',
+      stage: 'guard.visualJudge',
+      system: 'SYS',
+      user: 'is the banner visible?',
+      images: [{ mediaType: 'image/png', data: PNG_B64 }],
+    });
+    expect(out).toBe('LOOKS FINE');
+    const parts = userParts(getPrompt());
+    expect(parts.length).toBe(2);
+    expect(parts[0]).toMatchObject({ type: 'text', text: 'is the banner visible?' });
+    expect(parts[1].mediaType).toBe('image/png');
+    // The SDK normalizes an image part to its file/image carrier; whichever it
+    // picks, the BYTES must be the ones we handed it.
+    expect(JSON.stringify(parts[1])).toContain(PNG_B64.slice(0, 12));
+    // The system prompt still rides its own channel.
+    expect(JSON.stringify(getPrompt())).toContain('SYS');
+  });
+
+  it('sends text + image parts on a structured-output call too', async () => {
+    const { model, getPrompt } = promptCapturingModel('{"answer":"42"}');
+    buildModelMock.mockReturnValue(model);
+    const out = await createApiTransport(cfg)({
+      id: 'guard.visualJudge:s2',
+      stage: 'guard.visualJudge',
+      system: 'SYS',
+      user: 'U',
+      responseFormat: 'json',
+      schema:
+        '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}',
+      images: [{ mediaType: 'image/png', data: PNG_B64 }],
+    });
+    expect(JSON.parse(out)).toEqual({ answer: '42' });
+    const parts = userParts(getPrompt());
+    expect(parts.map((p) => p.type)).toContain('text');
+    expect(parts.length).toBe(2);
+  });
+
+  it('a text-only request still travels as a single text part', async () => {
+    const { model, getPrompt } = promptCapturingModel('OK');
+    buildModelMock.mockReturnValue(model);
+    await createApiTransport(cfg)({ id: 'a:b', stage: 'a', system: 'SYS', user: 'U' });
+    const parts = userParts(getPrompt());
+    expect(parts.length).toBe(1);
+    expect(parts[0]).toMatchObject({ type: 'text', text: 'U' });
+  });
+});

@@ -1,0 +1,695 @@
+guard: 3
+id: review-run-history-and-enter-diff-mode.cli.1
+title: A developer reads the run history, loads a past run, and diffs the working tree
+promise: >-
+  A developer reads the run history, loads an older analysis into every view, returns to
+  latest, and compares the working tree against the committed baseline.
+flow:
+  id: review-run-history-and-enter-diff-mode
+  fingerprint: sha256:542f79f0fdba1c5402ea550f1776d06ddcfb8a93d15bd287ee41286333fad51a
+interface:
+  path:
+    - cli/analyze
+    - web/open-dashboard-home
+    - web/open-repo-report
+    - web/open-the-analyses-tab
+    - web/view-a-past-analysis
+    - web/search-the-violation-list
+    - web/open-a-file-in-the-code-viewer
+    - web/enter-git-diff-mode
+    - web/open-a-changed-file-from-diff
+    - web/leave-git-diff-mode
+    - web/run-an-analysis-from-the-header
+    - web/skip-the-llm-rules-for-a-run
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
+    - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
+    - sha256:99935db45642dad41bd691d1337633251701f4923cfaa8080d6ad3588b996f60
+    - sha256:c4cc6cb16a3959e98e87b8527523b42cc5ec690117c4defc0cbf1a3f2a0cf37b
+    - sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8
+    - sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106
+    - sha256:fe3cde9b62d6d10160b130c1458c0c3533aca1c743ee32d03b5869a973c85a74
+    - sha256:e49c14c0f831a0aa350159f96b21be700e9738e0b9218879329ba40e1bbaf72a
+    - sha256:9f33c442b170ed78a600166fb8eadbef1c1ae2b56d48603765e6152a25995fbf
+    - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
+    - sha256:392bccc47ef75a7e46fdd093cfdf09319e6c087ab8fdfa3e0479fb0458447971
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: getting-around
+    fingerprint: sha256:b64d05bfdef7ef3cce1d95c719c53884d5a0c419c170d00526cc29d0f98842b2
+  - doc: reference/spec-docs/dashboard/history-and-diff.mdx
+    section: the-analyses-tab
+    fingerprint: sha256:02bc5dc41edccdb60c43f21f103369f34f7a07946d6f0402b72fd95d56a5ac11
+  - doc: reference/spec-docs/dashboard/history-and-diff.mdx
+    section: viewing-a-past-run
+    fingerprint: sha256:15c05b69f95384ebab93e58508d344ce2ffa643fc9d58269cd798dae439d1cec
+  - doc: reference/spec-docs/dashboard/analytics.mdx
+    section: violation-trend
+    fingerprint: sha256:de157d5c7faf79a459b68bc212c56473f0da3866a92ccd7f7bb6bcb06dbbf5bc
+  - doc: reference/spec-docs/dashboard/analytics.mdx
+    section: following-the-run-you-selected
+    fingerprint: sha256:00fcbd22a411d92157c1a5b1bac8a4f5f2f53c49b4d3e6c983e4f4d7d8c7a367
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: when-analyze-is-unavailable
+    fingerprint: sha256:8878478a9826bf5860c0c5d220035f84cbc8b05ceecf3c0176fd203e4fc208e0
+  - doc: reference/spec-docs/dashboard/history-and-diff.mdx
+    section: git-diff-mode
+    fingerprint: sha256:6cd5e6a4cbc13bc96064ba33fcc66ab2f58ef7af918c3ba639004383a82c8037
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: files/the-code-viewer
+    fingerprint: sha256:443cba96b0145936949afedc864bb80cf4ea3d6e4c8a94cbf244448b89eb9b4e
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module",
+        "workspaces": ["services/*"]
+      }
+    sample-app/prisma/schema.prisma: |
+      datasource db {
+        provider = "postgresql"
+        url      = env("DATABASE_URL")
+      }
+
+      model User {
+        id     Int     @id @default(autoincrement())
+        email  String  @unique
+        name   String?
+        orders Order[]
+      }
+
+      model Order {
+        id     Int   @id @default(autoincrement())
+        userId Int
+        user   User  @relation(fields: [userId], references: [id])
+        total  Float
+      }
+    sample-app/services/api/package.json: |
+      {
+        "name": "api",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/server.js",
+        "dependencies": { "express": "^4.18.2", "pg": "^8.11.3" }
+      }
+    sample-app/services/api/src/server.js: |
+      import express from 'express'
+      import { listUsers, createUser } from './routes.js'
+
+      const app = express()
+
+      app.get('/users', listUsers)
+      app.post('/users', createUser)
+
+      app.listen(3000)
+
+      export default app
+    sample-app/services/api/src/routes.js: |
+      import { findAllUsers, saveUser } from './repositories/user-repository.js'
+
+      export async function listUsers(req, res) {
+        const users = await findAllUsers()
+        res.json(users)
+      }
+
+      export async function createUser(req, res) {
+        const user = await saveUser(req.body)
+        res.json(user)
+      }
+    sample-app/services/api/src/repositories/user-repository.js: |
+      import pg from 'pg'
+
+      const pool = new pg.Pool({ connectionString: 'postgres://localhost:5432/shop' })
+
+      export async function findAllUsers() {
+        const result = await pool.query('SELECT * FROM users')
+        return result.rows
+      }
+
+      export async function saveUser(user) {
+        const result = await pool.query('INSERT INTO users (email) VALUES (' + user.email + ')')
+        return result.rows
+      }
+    sample-app/services/worker/package.json: |
+      {
+        "name": "worker",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/index.js"
+      }
+    sample-app/services/worker/src/index.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+
+      export function main() {
+        console.log('worker starting')
+        return runRule('1 + 1')
+      }
+
+      main()
+      setTimeout(main, 4200)
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - prisma/schema.prisma
+          - services/api/package.json
+          - services/api/src/server.js
+          - services/api/src/routes.js
+          - services/api/src/repositories/user-repository.js
+          - services/worker/package.json
+          - services/worker/src/index.js
+        message: seed the sample app
+normalize: []
+steps:
+  - git:
+      - rev-parse
+      - HEAD
+    cwd: sample-app
+    capture:
+      firstCommit:
+        pattern: ^([0-9a-f]{7})
+    expect:
+      exit: 0
+    note: >-
+      Takes the first commit's short hash. The history table renders each run's commit, and
+      two runs seconds apart share a rendered timestamp to the minute — the hashes are what
+      make "newest first" and "which row is which" checkable at all, and capturing them
+      beats writing a literal the sandbox decides.
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      stdout:
+        contains: 16 violations
+    note: >-
+      The first run, on the first commit: sixteen findings, one of which the second commit
+      will fix. Deterministic and free, with the dirty-tree and editor-install questions
+      pre-answered.
+  - driver: web
+    navigate: /
+    expect:
+      visible:
+        role: link
+        name: sample-app
+    note: Boots the browser against the served sandbox. Prepares the click below.
+  - driver: web
+    click:
+      role: link
+      name: sample-app
+    expect:
+      text:
+        matches: ^(?![\s\S]*Latest)(?=[\s\S]*16\s*active)[\s\S]*$
+    note: >-
+      The state that can only be observed once: with a SINGLE analysis on record the header
+      carries no past-run dropdown — there is nothing to choose between — while the report
+      itself is fully rendered, which is what stops the negative from passing on an empty
+      page. The presence half arrives with the second run below, and this is the half that
+      constrains the order of the two arranging analyses.
+    milestone:
+      - dashboard-overview-past-run-dropdown-appears-with-more-than-one-analysis
+  - write:
+      sample-app/services/worker/src/index.js: |
+        export function runRule(source) {
+          return Number(source)
+        }
+
+        export function main() {
+          console.log('worker starting')
+          return runRule('1 + 1')
+        }
+
+        main()
+        setTimeout(main, 4200)
+    note: >-
+      The change between the two runs — the worker stops evaluating its input — so the runs
+      differ in commit AND in findings. Prepares the commit below.
+  - git:
+      - commit
+      - '-am'
+      - stop evaluating the rule source
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: Commits it, so the second analysis is anchored to a different commit than the first.
+  - git:
+      - rev-parse
+      - HEAD
+    cwd: sample-app
+    capture:
+      secondCommit:
+        pattern: ^([0-9a-f]{7})
+    expect:
+      exit: 0
+    note: The second commit's short hash — the newest row's identity in the history table.
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      stdout:
+        contains: 15 violations
+    note: >-
+      The second run: fifteen findings open, one resolved against the first. Two runs on
+      record is what the whole history half of this flow needs.
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      url:
+        contains: /repos/sample-app
+    note: >-
+      A fresh load, so the page is reading the store as it stands after both runs rather
+      than whatever it was showing before them. Prepares the Analyses tab below.
+  - driver: web
+    click:
+      role: button
+      name: Analyses
+    expect:
+      url:
+        contains: tab=analyses
+      text:
+        matches: >-
+          ^(?=[\s\S]*2 total)(?=[\s\S]*Tokens)(?=[\s\S]*Actions)(?=[\s\S]*${captured:firstCommit})[\s\S]*$
+    note: >-
+      The rail's Analyses entry, taken at its word: run history (both runs are there, and
+      the table says so with its own count), token usage (the Tokens column) and deletion
+      (the Actions column, which is where the per-row delete lives — the control itself is
+      icon-only and unnamed, so the column is as close as the vocabulary gets). The COUNT
+      read here is what makes the last step of this flow falsifiable.
+    milestone:
+      - dashboard-overview-analyses-tab-shows-history-usage-and-deletion
+  - driver: web
+    expect:
+      text:
+        matches: ^[\s\S]*${captured:secondCommit}[\s\S]*${captured:firstCommit}[\s\S]*$
+    note: >-
+      Newest first, asserted on identity rather than on rendered time: the row for the
+      SECOND commit precedes the row for the first. Two runs seconds apart render the same
+      date and minute, so a timestamp assertion here would be unfalsifiable — the commit
+      each run was anchored to is not.
+    milestone:
+      - dashboard-analyses-table-is-newest-first
+  - driver: web
+    expect:
+      text:
+        matches: ^(?![\s\S]*latest[\s\S]*latest)(?=[\s\S]*latest[\s\S]*${captured:secondCommit})[\s\S]*$
+    note: >-
+      Exactly one row carries the marker, and it is the newest completed run: the negative
+      half refuses a second occurrence anywhere in the table, and the positive half puts the
+      marker ahead of the second commit's hash — i.e. inside that row, not the older one.
+    milestone:
+      - dashboard-analyses-newest-completed-run-marked-latest
+  - driver: web
+    expect:
+      visible:
+        role: row
+        name: ${captured:secondCommit}
+      within:
+        role: row
+        name: ${captured:secondCommit}
+      text:
+        matches: ^[\s\S]*main[\s\S]*${captured:secondCommit}[\s\S]*-\s*$
+    note: >-
+      One row, read field by field against the run it describes: it is addressable BY the
+      commit the run was anchored to, it carries the branch the run was on immediately
+      before that hash, and its LAST field — the Tokens cell, the column the tab step
+      reads as usage — says the run spent nothing. The read is scoped INSIDE the row
+      rather than taken page-wide, because a field is only a field of this run if it is
+      read from this run's row; the trailing anchor is what makes it the token cell
+      specifically, since Tokens is the last column carrying text (the Actions cell is
+      icons only). The dash is the value the panel renders for no usage, and it is
+      knowable here for the same reason the counts above are: both arranging runs are
+      `--no-llm`, so the run summary records zero tokens. The remaining fields the doc
+      lists — provider, service count, severity counts and their bar, duration — are
+      values the sandbox decides run by run, so they stay asserted as the columns that
+      carry them (the step above) rather than as literals that would only be asserting on
+      this machine.
+    milestone:
+      - dashboard-analyses-row-shows-run-metadata
+  - driver: web
+    click:
+      role: row
+      name: ${captured:firstCommit}
+    expect:
+      visible:
+        role: button
+        name: Return to latest
+    note: >-
+      Clicking the OLDER row loads that analysis: the page enters the past-run state, whose
+      plainest evidence is the way out of it appearing. (The header dropdown is the other
+      affordance the same sentence offers; the row click is the one this flow takes.)
+    milestone:
+      - dashboard-analyses-row-or-dropdown-loads-an-older-run
+  - driver: web
+    expect:
+      text:
+        matches: ^(?=[\s\S]*Viewing analysis from)(?=[\s\S]*not the latest)[\s\S]*$
+    note: >-
+      The banner across the top says which run you are on — asserted on the two halves of
+      the sentence it renders (that a run is being viewed, and that it is not the newest),
+      never on the timestamp between them, which is the sandbox's clock.
+    milestone:
+      - dashboard-analyses-amber-banner-names-the-run
+  - driver: web
+    expect:
+      text:
+        matches: ^(?![\s\S]*Analyze)(?![\s\S]*Git Diff)[\s\S]*$
+    note: >-
+      While a past run is loaded the header carries neither control. One observation, two
+      claims: the history page states it and the running-analyses page restates it in its
+      own list of conditions, and inventing a second weaker step for the second doc would be
+      assertion theater. Both were on screen a moment ago, which is what makes their absence
+      a measurement.
+    milestone:
+      - dashboard-analyses-past-run-hides-analyze-and-diff-toggle
+      - dashboard-analyze-hidden-when-viewing-a-past-analysis
+  - driver: web
+    click:
+      role: button
+      name: Home
+    expect:
+      text:
+        matches: ^(?=[\s\S]*16\s*active)[\s\S]*$
+    note: >-
+      The selected point in time reaches the other views, not just the table — first the
+      analytics half: the summary counts SIXTEEN active, the first run's number. The list
+      half is the next step's business, because the card that proves it sits below the
+      driver's visible-text cap in an unfiltered list (the first authored form asserted it
+      here and went red on exactly that cap).
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: Dynamic code evaluation
+    expect:
+      text:
+        matches: ^(?=[\s\S]*Dynamic code evaluation)[\s\S]*$
+    note: >-
+      The list half, made cap-proof: narrowing the list by the card's own title surfaces
+      the `eval` finding the second commit removed — a card that CANNOT exist in the
+      latest analysis, so its presence here is what proves the violations list really
+      switched to the selected point in time. The search box is the page's own control;
+      narrowing is not tampering with the state under test.
+    milestone:
+      - dashboard-analyses-every-view-switches-to-that-run
+      - dashboard-analytics-widgets-recomputed-for-the-selected-run
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: ''
+    expect:
+      text:
+        matches: ^(?![\s\S]*Filtered by:)[\s\S]*$
+    note: >-
+      Clears the narrowing so the steps after "Return to latest" and the diff half read
+      an unfiltered list — the search would otherwise persist across the view switch.
+      Prepares; proves nothing.
+  - driver: web
+    click:
+      role: button
+      name: Return to latest
+    expect:
+      visible:
+        role: button
+        name: Analyze
+      text:
+        matches: ^(?![\s\S]*Viewing analysis from)(?=[\s\S]*15\s*active)[\s\S]*$
+    note: >-
+      Leaving the past run: the banner is gone, the hidden controls are back, and every view
+      is on the newest analysis again — fifteen active, the count the second run produced.
+      This is also the precondition for the diff half, since the toggle only exists on the
+      latest run.
+    milestone:
+      - dashboard-analyses-return-to-latest-leaves-the-past-run
+  - driver: web
+    expect:
+      visible:
+        role: button
+        name: Git Diff
+    note: >-
+      The header carries the two-way control the overview page inventories. That it CHANGES
+      the view is the next step's business; that the header offers it is this one's.
+    milestone:
+      - dashboard-overview-header-carries-the-normal-git-diff-toggle
+  - write:
+      sample-app/services/worker/src/index.js: |
+        export function runRule(source) {
+          return eval(source)
+        }
+
+        export function main() {
+          console.log('worker starting')
+          return runRule('1 + 1')
+        }
+
+        main()
+        setTimeout(main, 4200)
+      sample-app/services/api/src/repositories/user-repository.js: |
+        import pg from 'pg'
+
+        const pool = new pg.Pool({ connectionString: 'postgres://localhost:5432/shop' })
+
+        export async function findAllUsers() {
+          const result = await pool.query('SELECT id, email FROM users')
+          return result.rows
+        }
+
+        export async function saveUser(user) {
+          const result = await pool.query('INSERT INTO users (email) VALUES (' + user.email + ')')
+          return result.rows
+        }
+      sample-app/new-helper.js: |
+        export function evaluatePending(source) {
+          return eval(source)
+        }
+    note: >-
+      The uncommitted working-tree edit the diff half is about, written so both sides of the
+      comparison exist: the worker starts evaluating its input again (a finding the
+      committed baseline does not have) and the repository stops selecting every column (a
+      finding the baseline DOES have). Left uncommitted on purpose — that is what "your
+      pending changes" means.
+  - git:
+      - rm
+      - services/api/src/server.js
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: Removes one tracked file so the diff summary has a real deleted entry alongside its added and modified entries.
+  - driver: web
+    navigate: /repos/sample-app?tab=files&file=services%2Fworker%2Fsrc%2Findex.js
+    expect:
+      url:
+        matches: '^(?![\s\S]*view=diff)[\s\S]*file=[\s\S]*index\.js[\s\S]*$'
+      text:
+        matches: '^(?=[\s\S]*return Number\(source\))(?![\s\S]*return eval\(source\))[\s\S]*$'
+    note: Normal mode reads the committed worker even after its working-tree copy has changed.
+    milestone:
+      - dashboard-files-normal-mode-shows-committed-content
+  - driver: web
+    click:
+      role: button
+      name: Home
+    expect:
+      visible:
+        role: button
+        name: Git Diff
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: Dynamic code evaluation
+    expect:
+      text:
+        contains: No violations match the active filters
+    note: >-
+      Before diff mode, the report still reads the committed baseline: the uncommitted eval
+      finding is absent even though the file is already on disk. The sentence asserted is
+      the filtered empty state's OWN copy — the list renders "No violations match the
+      active filters" whenever a filter is in force (the first authored form said "No
+      violations found", a sentence the client renders nowhere; run 18-41Z failed on
+      exactly that invention).
+    milestone:
+      - dashboard-diff-normal-is-the-committed-state
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: ''
+    expect:
+      text:
+        matches: '^(?![\s\S]*Filtered by:)[\s\S]*$'
+  - driver: web
+    click:
+      role: button
+      name: Git Diff
+    expect:
+      url:
+        contains: view=diff
+    note: >-
+      The toggle chooses what you are looking at, and the address says which: the working-
+      tree view writes itself into the URL. Nothing has been compared yet — in this mode the
+      Analyze button is what runs the comparison, which the next step presses.
+    milestone:
+      - dashboard-diff-toggle-chooses-normal-or-git-diff
+      - dashboard-overview-url-carries-diff-mode
+  - driver: web
+    click:
+      role: button
+      name: Analyze
+    timeoutMs: 180000
+    expect:
+      text:
+        contains: Showing working tree state (uncommitted changes)
+    note: >-
+      Pressing Analyze in Git Diff mode runs a DIFF CHECK rather than a full analysis, and
+      the page says so with the banner the doc quotes. The two claims are one event: the
+      press produced a diff result (there is no banner without one), and the banner
+      announces the working-tree state. The budget is generous because this runs a real
+      analysis inside the dashboard server's own process.
+    milestone:
+      - dashboard-diff-analyze-runs-a-diff-check
+      - dashboard-diff-banner-announces-working-tree-state
+  - driver: web
+    click:
+      role: button
+      name: Skip — deterministic rules only
+    expect:
+      text:
+        matches: ^(?![\s\S]*Run LLM rules\?)[\s\S]*$
+    note: >-
+      Pressing Analyze in diff mode ALSO opens the LLM confirm (the running-analyses
+      page's dialog; its claims belong to that flow), and the modal blocks every later
+      interaction — the first authored form timed out clicking Analyses behind it.
+      Declining with the dialog's own Skip button keeps this flow deterministic and
+      free. Prepares; proves nothing.
+  - driver: web
+    expect:
+      text:
+        matches: >-
+          ^(?![\s\S]*By Category)(?![\s\S]*Code Hotspots)(?=[\s\S]*new)(?=[\s\S]*unchanged)(?=[\s\S]*resolved)(?=[\s\S]*files)[\s\S]*$
+    note: >-
+      The analytics column is REPLACED, not merely joined: the donut and the hotspot table
+      that were on this side of the screen a moment ago are gone, and the four chips the doc
+      names stand in their place. The negatives are what make it a replacement.
+    milestone:
+      - dashboard-diff-analytics-replaced-by-four-chips
+      - dashboard-analytics-diff-mode-replaces-the-column
+  - driver: web
+    expect:
+      text:
+        matches: '^(?=[\s\S]*By Severity)(?=[\s\S]*High)(?=[\s\S]*Changed files)(?=[\s\S]*\bA\b)(?=[\s\S]*\bM\b)(?=[\s\S]*\bD\b)[\s\S]*$'
+    note: >-
+      The diff analytics column charts the severity of new findings and labels actual added,
+      modified and deleted files with A, M and D.
+    milestone:
+      - dashboard-diff-severity-chart-of-new-findings
+      - dashboard-diff-changed-files-marked-a-m-d
+  - driver: web
+    expect:
+      text:
+        matches: ^[\s\S]*Dynamic code evaluation[\s\S]*SELECT \* in production code[\s\S]*$
+    note: >-
+      The comparison itself, and the order it is listed in. The edit that ADDED a finding
+      (`Dynamic code evaluation`, absent from the committed baseline) and the edit that
+      REMOVED one (`SELECT * in production code`, present in it) are both on screen — which
+      is the working tree measured against the committed baseline — and the new one precedes
+      the resolved one, which is the order the doc promises. Whether the resolved card is
+      struck through and dimmed is a treatment the driver cannot read; its POSITION it can.
+    milestone:
+      - dashboard-diff-compares-worktree-against-the-baseline
+      - dashboard-diff-list-shows-new-then-resolved
+  - driver: web
+    click:
+      role: button
+      name: new-helper.js
+    expect:
+      url:
+        matches: '^[\s\S]*view=diff[\s\S]*file=[\s\S]*new-helper\.js[\s\S]*$'
+      text:
+        matches: '^(?=[\s\S]*new-helper\.js)(?=[\s\S]*evaluatePending)(?=[\s\S]*eval\(source\))[\s\S]*$'
+    note: >-
+      The added-file row opens the code viewer; its URL, file tree and source all identify
+      the untracked working-tree file and its uncommitted content.
+    milestone:
+      - dashboard-diff-clicking-a-changed-file-opens-it
+      - dashboard-diff-files-tab-lists-untracked-files
+      - dashboard-diff-code-viewer-shows-uncommitted-content
+      - dashboard-files-diff-mode-shows-on-disk-content
+  - driver: web
+    click:
+      role: button
+      name: Home
+    expect:
+      text:
+        contains: Showing working tree state (uncommitted changes)
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: Dynamic code evaluation
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Dynamic code evaluation)(?![\s\S]*SELECT \* in production code)[\s\S]*$'
+    note: The normal violation search still narrows the new-and-resolved diff list.
+    milestone:
+      - dashboard-diff-filters-still-apply
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: ''
+    expect:
+      text:
+        contains: SELECT * in production code
+  - driver: web
+    click:
+      role: button
+      name: Normal
+      exact: true
+    expect:
+      text:
+        matches: '^(?![\s\S]*Showing working tree state)(?=[\s\S]*15\s*active)[\s\S]*$'
+  - driver: web
+    click:
+      role: button
+      name: Git Diff
+      exact: true
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Showing working tree state)(?=[\s\S]*Dynamic code evaluation)(?=[\s\S]*SELECT \* in production code)[\s\S]*$'
+    note: Returning to Git Diff restores the completed result without another analysis run.
+    milestone:
+      - dashboard-diff-last-result-is-kept
+  - driver: web
+    click:
+      role: button
+      name: Analyses
+    expect:
+      text:
+        matches: ^(?=[\s\S]*2 total)(?![\s\S]*3 total)[\s\S]*$
+    note: >-
+      The table has not grown: two runs before the diff check, two after it. Falsifiable only
+      because the count was read at the start of this flow, which is why that reading is part
+      of the Analyses-tab step rather than incidental to it.
+    milestone:
+      - dashboard-analyses-diff-runs-are-not-listed

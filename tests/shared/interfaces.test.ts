@@ -950,9 +950,8 @@ describe('the reference catalog', () => {
     // The command COUNT did not move (a tree's commands were already enumerated);
     // what moved is which entry each one lives in.
     //
-    // 60 since 2026-08-11: the dashboard area's first RUNNING web flow needed three
-    // more tasks — arriving at the home page, narrowing the violation list, and
-    // crossing to the other capability — and each is one entry like every other.
+    // 114 since the 2026-08-11 dashboard waves: 27 cli commands, 32 api
+    // operations and 55 Code Analysis web tasks. Registration order is pinned.
     expect(catalog.interfaces.map((j) => j.id)).toEqual([
       'cli/add',
       'cli/analyze',
@@ -976,6 +975,11 @@ describe('the reference catalog', () => {
       'cli/rules-enable',
       'cli/rules-disable',
       'cli/rules-reset',
+      'cli/dashboard',
+      'cli/dashboard-stop',
+      'cli/dashboard-status',
+      'cli/dashboard-logs',
+      'cli/dashboard-uninstall',
       'api/get-api-capabilities',
       'api/post-api-repos',
       'api/get-api-repos',
@@ -1010,29 +1014,127 @@ describe('the reference catalog', () => {
       'api/get-api-rules',
       'web/open-dashboard-home',
       'web/open-repo-report',
+      'web/add-repository-by-path',
       'web/silence-rule-from-violation-card',
       'web/reenable-rule-from-rules-panel',
+      'web/disable-rule-from-rules-panel',
       'web/filter-violations-by-category',
       'web/switch-to-the-guard-section',
+      'web/open-rules-panel',
+      'web/search-rules-panel',
+      'web/filter-rules-by-detection',
+      'web/filter-rules-by-category',
+      'web/open-an-unanalyzed-repository',
+      'web/run-an-analysis-from-the-header',
+      'web/stash-pending-changes-before-a-run',
+      'web/analyze-working-tree-without-stashing',
+      'web/approve-the-llm-rules-for-a-run',
+      'web/skip-the-llm-rules-for-a-run',
+      'web/cancel-a-running-analysis',
+      'web/filter-violations-by-severity',
+      'web/search-the-violation-list',
+      'web/narrow-violations-to-llm-findings',
+      'web/clear-the-category-filter',
+      'web/reveal-a-violations-fix-prompt',
+      'web/copy-a-violations-fix-prompt',
+      'web/sort-top-offenders-by-critical-count',
+      'web/scope-violations-to-a-top-offender',
+      'web/scope-violations-to-a-hotspot-file',
+      'web/open-the-graphs-tab',
+      'web/change-the-graph-depth-to-modules',
+      'web/change-the-graph-depth-to-functions',
+      'web/fit-the-graph-to-the-viewport',
+      'web/reset-the-graph-layout',
+      'web/collapse-every-graph-container',
+      'web/open-the-files-tab',
+      'web/open-a-file-in-the-code-viewer',
+      'web/open-the-flows-tab',
+      'web/open-a-flow-diagram',
+      'web/search-the-flow-list',
+      'web/step-forward-through-a-flow',
+      'web/step-back-through-a-flow',
+      'web/play-the-open-flow',
+      'web/enrich-a-flow-with-descriptions',
+      'web/open-the-databases-tab',
+      'web/open-a-database-schema',
+      'web/switch-the-schema-to-the-table-list',
+      'web/expand-a-schema-table',
+      'web/open-the-analyses-tab',
+      'web/view-a-past-analysis',
+      'web/open-a-runs-usage-breakdown',
+      'web/delete-a-past-analysis',
+      'web/enter-git-diff-mode',
+      'web/leave-git-diff-mode',
+      'web/open-a-changed-file-from-diff',
+      'web/toggle-a-file-tree-folder',
     ])
-    // Every command answers "what do I read?" — none is silent. 22 cli commands
-    // (one per entry since the split) + the api surface's 32 operations = 54.
+    // Every command answers "what do I read?" — none is silent. 27 cli commands
+    // (one per entry since the split) + the api surface's 32 operations = 59.
     const all = contracted.flatMap((j) => j.contract!.commands)
-    expect(all).toHaveLength(54)
+    expect(all).toHaveLength(59)
     expect(all.every((c) => c.io?.consumes?.reads !== undefined)).toBe(true)
-    // 67 cli reads + 105 api reads (the registry lookup, the store files each route
-    // opens, the git objects and the rule catalogue it consults) = 172.
-    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(172)
+    // 97 cli reads + 105 api reads (the registry lookup, store files, git objects
+    // and rule catalogue each operation consults) = 202.
+    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(202)
   })
 
   it('the web task interfaces carry their state contract, one task each', () => {
     expect(web.map((j) => j.id)).toEqual([
       'web/open-dashboard-home',
       'web/open-repo-report',
+      'web/add-repository-by-path',
       'web/silence-rule-from-violation-card',
       'web/reenable-rule-from-rules-panel',
+      'web/disable-rule-from-rules-panel',
       'web/filter-violations-by-category',
       'web/switch-to-the-guard-section',
+      'web/open-rules-panel',
+      'web/search-rules-panel',
+      'web/filter-rules-by-detection',
+      'web/filter-rules-by-category',
+      'web/open-an-unanalyzed-repository',
+      'web/run-an-analysis-from-the-header',
+      'web/stash-pending-changes-before-a-run',
+      'web/analyze-working-tree-without-stashing',
+      'web/approve-the-llm-rules-for-a-run',
+      'web/skip-the-llm-rules-for-a-run',
+      'web/cancel-a-running-analysis',
+      'web/filter-violations-by-severity',
+      'web/search-the-violation-list',
+      'web/narrow-violations-to-llm-findings',
+      'web/clear-the-category-filter',
+      'web/reveal-a-violations-fix-prompt',
+      'web/copy-a-violations-fix-prompt',
+      'web/sort-top-offenders-by-critical-count',
+      'web/scope-violations-to-a-top-offender',
+      'web/scope-violations-to-a-hotspot-file',
+      'web/open-the-graphs-tab',
+      'web/change-the-graph-depth-to-modules',
+      'web/change-the-graph-depth-to-functions',
+      'web/fit-the-graph-to-the-viewport',
+      'web/reset-the-graph-layout',
+      'web/collapse-every-graph-container',
+      'web/open-the-files-tab',
+      'web/open-a-file-in-the-code-viewer',
+      'web/open-the-flows-tab',
+      'web/open-a-flow-diagram',
+      'web/search-the-flow-list',
+      'web/step-forward-through-a-flow',
+      'web/step-back-through-a-flow',
+      'web/play-the-open-flow',
+      'web/enrich-a-flow-with-descriptions',
+      'web/open-the-databases-tab',
+      'web/open-a-database-schema',
+      'web/switch-the-schema-to-the-table-list',
+      'web/expand-a-schema-table',
+      'web/open-the-analyses-tab',
+      'web/view-a-past-analysis',
+      'web/open-a-runs-usage-breakdown',
+      'web/delete-a-past-analysis',
+      'web/enter-git-diff-mode',
+      'web/leave-git-diff-mode',
+      'web/open-a-changed-file-from-diff',
+      'web/toggle-a-file-tree-folder',
     ])
     for (const j of web) {
       // A task from a specific state: both ends of the state contract present.
@@ -1058,7 +1160,7 @@ describe('the reference catalog', () => {
 
   /**
    * NAMED STATES (2026-08-11). The dashboard area's registry, authored from the
-   * six tasks' own prose: eight states, each defined once, each referenced by id.
+   * Code Analysis tasks: each state is defined once and referenced by id.
    * The pin is the SIZE — a registry that grows a state per task is prose with
    * extra steps, and the whole point is that tasks meet on shared names.
    */
@@ -1067,19 +1169,58 @@ describe('the reference catalog', () => {
     expect(registry.map((s) => s.id)).toEqual([
       'dashboard-serving',
       'dashboard-home-open',
+      'repository-added-from-path',
       'repo-report-open',
       'violations-filtered-by-category',
       'rule-silenced',
       'rule-reenabled',
       'code-analysis-section-open',
       'guard-section-open',
+      'rules-panel-open',
+      'rules-panel-filtered',
+      'repo-no-analysis-open',
+      'analysis-running',
+      'analysis-cancelling',
+      'stash-prompt-open',
+      'llm-estimate-open',
+      'violations-filtered-by-severity',
+      'violations-searched',
+      'violations-filtered-to-llm-findings',
+      'fix-prompt-revealed',
+      'fix-prompt-copied',
+      'top-offenders-sorted-by-critical',
+      'violations-scoped-to-an-offender',
+      'violations-scoped-to-a-file',
+      'graph-open',
+      'graph-at-module-depth',
+      'graph-at-function-depth',
+      'graph-fitted',
+      'graph-layout-reset',
+      'graph-containers-collapsed',
+      'file-tree-open',
+      'file-tree-folder-toggled',
+      'code-viewer-open',
+      'flow-list-open',
+      'flow-list-searched',
+      'flow-diagram-open',
+      'flow-step-one',
+      'flow-playback-complete',
+      'flow-enriched',
+      'database-list-open',
+      'database-schema-open',
+      'schema-table-list-open',
+      'schema-table-expanded',
+      'analyses-list-open',
+      'past-analysis-selected',
+      'usage-breakdown-open',
+      'past-analysis-deleted',
+      'diff-mode-on',
     ])
-    // 8 states for 6 tasks (12 references): four of them are shared, which is the
-    // registry earning its keep — `repo-report-open` is where two tasks start,
-    // `rule-silenced` is one task's end and the next one's beginning.
+    // 48 states for 55 tasks (110 references): shared states are the registry
+    // earning its keep across filters, tabs and run gates.
     const referenced = web.flatMap((j) => [j.startingState!, j.endState!])
-    expect(referenced).toHaveLength(12)
-    expect(new Set(referenced).size).toBe(8)
+    expect(referenced).toHaveLength(110)
+    expect(new Set(referenced).size).toBe(48)
     // Every state is described once, in one line, and no id is dead weight.
     for (const state of registry) {
       expect(state.description).not.toMatch(/\n/)
@@ -1162,24 +1303,26 @@ describe('the reference catalog', () => {
     // The count the schema now guarantees: every io entry is one of the seven
     // fact kinds. 1530 while cli/spec and cli/guard were in the catalog
     // (2026-08-09); 443 with the analyze-only corpus (2026-08-10); 997 once the
-    // api surface joined the same day (554 of them on its 32 operations).
+    // api surface joined the same day (554 of them on its 32 operations); 1135
+    // after the dashboard CLI family and full Code Analysis interface wave.
     const facts = all.reduce((n, c) => {
       const io = c.io ?? {}
       const sides = [io.consumes ?? {}, io.produces ?? {}]
       return n + sides.reduce((m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0), 0)
     }, 0)
-    expect(facts).toBe(997)
+    expect(facts).toBe(1135)
   })
 
   it('carries the row grammar of every enumerated listing the CLI prints', () => {
     const rowsOf = (commandPath: string) => command(commandPath).io!.produces!.rows!
 
     // 89 with the spec and guard trees' listings (2026-08-09); back to the
-    // 25 shapes of the 7-interface catalog with those trees gone (2026-08-10).
-    // The api surface adds none and the number holds: a row grammar is the shape
+    // 25 shapes of the 7-interface catalog with those trees gone (2026-08-10),
+    // then 31 when the dashboard CLI family joined. The api and web surfaces add
+    // none: a row grammar is the shape
     // of a PRINTED line, and a JSON response has no such thing.
     const all = contracted.flatMap((j) => j.contract!.commands)
-    expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(25)
+    expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(31)
     expect(rowsOf('truecourse analyze')).toHaveLength(3)
     expect(rowsOf('truecourse list')).toHaveLength(9)
     expect(rowsOf('truecourse rules categories')).toHaveLength(2)
@@ -1221,12 +1364,12 @@ describe('the reference catalog', () => {
   })
 
   it('says how every prompt is answered — select and text on Enter, a confirm on a keypress', () => {
-    // 40, and the api surface leaves it there: an HTTP operation asks nothing on
-    // stdin, so its contracts carry no prompt list at all (2026-08-10).
+    // 46 after the dashboard CLI family joined; api and web operations ask
+    // nothing on stdin, so their contracts carry no prompt list.
     const prompts = contracted
       .flatMap((j) => j.contract!.commands)
       .flatMap((c) => c.io?.consumes?.prompts ?? [])
-    expect(prompts).toHaveLength(40)
+    expect(prompts).toHaveLength(46)
     expect(prompts.every((p) => p.submit !== undefined)).toBe(true)
     // The two delivery classes the runner's terminal layer has, and which prompt
     // kind lands in which: a y/n confirm submits on the character itself.
@@ -1360,9 +1503,8 @@ describe('the reference catalog', () => {
   it('every INTERACTIVE command carries its question sequence, and no other command does', () => {
     const all = cli.flatMap((j) => j.contract!.commands)
     const interactive = all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) > 0)
-    // 40 while the spec and guard trees were in the catalog; 13 over the
-    // analyze-only corpus (2026-08-10).
-    expect(interactive).toHaveLength(13)
+    // 18 over the Code Analysis corpus after the dashboard CLI family joined.
+    expect(interactive).toHaveLength(18)
     for (const command of interactive) {
       expect(command.sequence, command.path.join(' ')).toBeDefined()
     }
@@ -1387,7 +1529,7 @@ describe('the reference catalog', () => {
   it('the sequence is a REGION, not a fact — the io tally does not move for it', () => {
     // The decision the pins above encode: a sequence entry is the ORDER over
     // questions the prompt facts already carry, so counting it would count every
-    // question twice. 997 io facts with sequences, 997 without.
+    // question twice. 1135 io facts with sequences, 1135 without.
     const all = contracted.flatMap((j) => j.contract!.commands)
     const facts = (command: InterfaceCommandContract) => {
       const io = command.io ?? {}
@@ -1396,9 +1538,9 @@ describe('the reference catalog', () => {
         0,
       )
     }
-    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(997)
+    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(1135)
     // …and the sequences really are there to have been excluded.
-    expect(all.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0)).toBe(40)
+    expect(all.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0)).toBe(46)
   })
 
   it('branches the first-run wizard exactly as the CLI asks it', () => {
@@ -1435,9 +1577,9 @@ describe('the reference catalog', () => {
       // `?? []` because a contract may carry no prompt list at all — the api
       // operations do not, having no stdin to ask on (2026-08-10).
       .filter((c) => (c.io?.consumes?.prompts ?? []).some((p) => p.marker.startsWith('How should TrueCourse run')))
-    // Every interactive command in the catalog can be asked it — 13 of them over
-    // the analyze-only corpus (2026-08-10); it was >30 with the spec and guard trees.
-    expect(asked).toHaveLength(13)
+    // Every interactive command in the catalog can be asked it — 18 across the
+    // Code Analysis CLI surface; it was >30 with the spec and guard trees.
+    expect(asked).toHaveLength(18)
     for (const command of asked) {
       const sequence = command.sequence as InterfaceSequenceNode[]
       expect(sequence[0].prompt, command.path.join(' ')).toBe('How should TrueCourse run its LLM calls?')
@@ -1483,13 +1625,10 @@ describe('the reference catalog', () => {
     expect(fingerprints['cli/root']).toBe(
       'sha256:816d25a9ace7be600d9664a00ede4f1e461c89530d18667feb5f35be022e3757',
     )
-    // 7 while the catalog was cli-only; 39 with the api surface (2026-08-10); 42
-    // with the three web task interfaces (2026-08-11); 57 once the cli's three
-    // multi-command trees became one entry per command (2026-08-10); 60 with the
-    // dashboard flow's three further web tasks (2026-08-11). No two interfaces
+    // 114 after the dashboard CLI and Code Analysis web waves. No two interfaces
     // share an identity — an operation, a command and a page task never can, and
     // two tasks rooted at the same route are told apart by their steps.
-    expect(new Set(Object.values(fingerprints)).size).toBe(60)
+    expect(new Set(Object.values(fingerprints)).size).toBe(114)
   })
 
   it('the three multi-command trees moved — one entry per command, and the group holds them', () => {

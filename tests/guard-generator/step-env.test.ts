@@ -70,9 +70,9 @@ describe('generateGuards — per-step env', () => {
     // The overlay survives serialization and re-parses under the strict schema.
     const committed = loadScenarios(r).scenarios[0] as GuardScenario
     expect(() => GuardScenarioSchema.parse(committed)).not.toThrow()
-    if (committed.driver !== 'cli') throw new Error('expected a cli scenario')
-    expect(committed.steps[0].env).toBeUndefined()
-    expect(committed.steps[1].env).toEqual({ MODE: 'ci' })
+    const envOf = (i: number) => (committed.steps[i] as { env?: Record<string, string> }).env
+    expect(envOf(0)).toBeUndefined()
+    expect(envOf(1)).toEqual({ MODE: 'ci' })
   })
 
   it('birth runs the overlay for real: a step asserting an env nobody declared fails', async () => {

@@ -1,0 +1,76 @@
+---
+title: "Violations"
+description: "Filter the findings list, copy fix prompts, jump to the code, and silence noisy rules."
+---
+
+The **Home** tab is split in two: [analytics](/dashboard/analytics) on the left, the violations list on the right. Drag the divider between them to give either side more room.
+
+The list shows the active findings of the analysis you are viewing, sorted by severity and then by newest first.
+
+## Filters
+
+Four controls sit above the list, and they combine:
+
+* **Search** matches the finding's title and description, and the name of the service, module or function it targets.
+* **Severity** is a dropdown of Critical, High, Medium and Low, each with a live count.
+* **Detection** is a three-way switch: **All**, **Det** (deterministic rules) or **LLM** (rules that called the model).
+* **Category tabs** run across the second row (All, Security, Bugs, Architecture, Performance, Reliability, Code Quality, Database, Style) with a count on each.
+
+Counts respond to the other filters, so the category counts reflect your current search and severity choice rather than the whole analysis.
+
+Two more filters arrive from the analytics side: clicking a row in **Top Offenders** scopes the list to that service or module, and clicking a row in **Code Hotspots** scopes it to that file.
+
+Whatever is active shows up as a **Filtered by** row of chips above the list. Each chip has an X that clears just that filter.
+
+The whole filtered list scrolls in one continuous view. There are no pages to click through.
+
+## A violation card
+
+Each card carries:
+
+* a badge for what the finding is attached to (`code`, `service`, `module`, `function` or `database`) and a badge for its severity,
+* the title and description, with backticked identifiers rendered as code,
+* for code findings, the file path and line; for architecture findings, the target as `service / module / function`,
+* **Fix Prompt**, which expands the ready-to-paste instruction for fixing it, and **Copy Fix**, which copies that text to your clipboard.
+
+The action on the top right depends on the finding. Code findings get **Open**, which opens the file in the code viewer scrolled to the line. Architecture findings get **Locate**, which switches to the Graphs tab and zooms the graph onto the target.
+
+## Silencing a rule
+
+The **⋮** menu on a card offers **Disable rule for this repo**, showing the rule key it will disable.
+
+Choosing it:
+
+* immediately hides every violation from that rule, both from the list and from the analytics numbers,
+* adds the rule key to `disabledRules` in `<repo>/.truecourse/config.json`, which is shared with the CLI and intended to be committed,
+* skips the rule on future analyses, so it costs nothing to run.
+
+Nothing is deleted. The violations stay in the stored analysis, so re-enabling the rule brings them back without re-running anything.
+
+Resolved findings in [diff mode](/dashboard/history-and-diff#git-diff-mode) do not offer the action.
+
+## The rules catalog
+
+The shield button at the right of the filter row opens the **Rules** panel: every rule this repository is analyzed against.
+
+It has its own search, severity dropdown, **Det / LLM** switch, and an **All / On / Off** switch that carries a count of how many rules you currently have disabled. The category tabs match the ones on the violations list.
+
+Each rule shows its name, description, severity, category, whether it is deterministic or LLM-powered, and a badge per language (JS, PY, C#) whose hover text says whether the rule is supported, partial, not applicable or unsupported for that language, and why.
+
+The switch on each rule turns it on or off for this repository. It writes to the same `disabledRules` list as the card menu, and the violations list and analytics refresh straight away.
+
+<Tip>
+  The same toggles exist on the command line: `truecourse rules list`, `truecourse rules disable <ruleKey>`, `truecourse rules enable <ruleKey>`. See [Rules](/analyze/rules).
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Analytics" icon="chart-line" href="/dashboard/analytics">
+    Trends, breakdowns, offenders and hotspots, all wired into these filters.
+  </Card>
+
+  <Card title="Files and code" icon="file-code" href="/dashboard/files-flows-databases">
+    Read a finding in context, with markers in the gutter.
+  </Card>
+</CardGroup>

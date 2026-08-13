@@ -41,7 +41,7 @@ describe('loadScenarios', () => {
   it('records a schema-invalid file as a load error (never a crash)', () => {
     const r = repo()
     writeRecipe(r)
-    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ guard: 3, id: 'x', driver: 'cli' }))
+    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ guard: 3, id: 'x' }))
 
     const { scenarios, errors } = loadScenarios(r)
     expect(scenarios).toEqual([])
@@ -61,7 +61,6 @@ describe('loadScenarios', () => {
         id: 'old',
         title: 'an older corpus',
         binds: { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' },
-        driver: 'cli',
         steps: [{ run: ['--version'], expect: { exit: 0 } }],
       }),
     )

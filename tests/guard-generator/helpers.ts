@@ -23,6 +23,8 @@ import {
   type GuardGenerateResult,
   type InterfaceProvider,
   type MatchRunner,
+  type RawGeneratedApiScenario,
+  type RawGeneratedCliScenario,
   type RawGeneratedScenario,
   type SeedDraftDatabase,
   type TriageRunner,
@@ -91,19 +93,19 @@ export function bindsFor(repo: string, docRel: string, headingText: string): Gua
   return [{ doc: docRel, section: section.anchor, fingerprint: section.fingerprint }]
 }
 
-/** A raw generated scenario as a model would return it (behavioral fields only). */
+/** A raw generated CLI scenario as a model would return it (behavioral fields only). */
 export function raw(
   title: string,
-  steps: RawGeneratedScenario['steps'],
+  steps: RawGeneratedCliScenario['steps'],
   extra: Partial<RawGeneratedScenario> = {},
 ): RawGeneratedScenario {
-  return { title, driver: 'cli', steps, ...extra }
+  return { title, steps, ...extra }
 }
 
 /** A scenario running `--version` and expecting exit 0 (passes against relkit). */
-export const PASSING_STEPS: RawGeneratedScenario['steps'] = [{ run: ['--version'], expect: { exit: 0 } }]
+export const PASSING_STEPS: RawGeneratedCliScenario['steps'] = [{ run: ['--version'], expect: { exit: 0 } }]
 /** A scenario running `boom` but expecting exit 0 (relkit exits 7 → fails). */
-export const FAILING_STEPS: RawGeneratedScenario['steps'] = [{ run: ['boom'], expect: { exit: 0 } }]
+export const FAILING_STEPS: RawGeneratedCliScenario['steps'] = [{ run: ['boom'], expect: { exit: 0 } }]
 
 // ---------------------------------------------------------------------------
 // Interfaces (the code half)
@@ -523,17 +525,17 @@ export function writeApiRecipe(
 /** A raw generated api scenario as a model would return it. */
 export function rawApi(
   title: string,
-  steps: Extract<RawGeneratedScenario, { driver: 'api' }>['steps'],
+  steps: RawGeneratedApiScenario['steps'],
   extra: Partial<RawGeneratedScenario> = {},
 ): RawGeneratedScenario {
-  return { title, driver: 'api', steps, ...extra } as RawGeneratedScenario
+  return { title, steps, ...extra } as RawGeneratedScenario
 }
 
 /** An api step listing the fixture's empty todos (passes against the fixture). */
-export const PASSING_API_STEPS: Extract<RawGeneratedScenario, { driver: 'api' }>['steps'] = [
+export const PASSING_API_STEPS: RawGeneratedApiScenario['steps'] = [
   { request: { method: 'GET', path: '/todos' }, expect: { status: 200, json: { todos: { equals: [] } } } },
 ]
 /** An api step asserting /boom answers 200 (the fixture answers 500 → fails). */
-export const FAILING_API_STEPS: Extract<RawGeneratedScenario, { driver: 'api' }>['steps'] = [
+export const FAILING_API_STEPS: RawGeneratedApiScenario['steps'] = [
   { request: { method: 'GET', path: '/boom' }, expect: { status: 200 } },
 ]

@@ -47,7 +47,37 @@ function resolveExpect(expect: GuardWebExpect, tok: Tok): GuardWebExpect {
     ...(expect.text ? { text: resolveMatcher(expect.text, tok) } : {}),
     ...(expect.url ? { url: resolveMatcher(expect.url, tok) } : {}),
     ...(expect.within ? { within: resolveLocator(expect.within, tok) } : {}),
-    ...(expect.visible ? { visible: resolveLocator(expect.visible, tok) } : {}),
+    // One target or several — the list form resolves element by element, so a
+    // toolbar of targets carries tokens exactly as a single one does.
+    ...(expect.visible
+      ? {
+          visible: Array.isArray(expect.visible)
+            ? expect.visible.map((target) => resolveLocator(target, tok))
+            : resolveLocator(expect.visible, tok),
+        }
+      : {}),
+    // A state assertion is a locator with booleans on it: only the name interpolates.
+    ...(expect.state ? { state: { ...expect.state, name: tok(expect.state.name) } } : {}),
+    ...(expect.attribute
+      ? {
+          attribute: {
+            ...expect.attribute,
+            ...(expect.attribute.of ? { of: resolveLocator(expect.attribute.of, tok) } : {}),
+            name: tok(expect.attribute.name),
+            ...(expect.attribute.value ? { value: resolveMatcher(expect.attribute.value, tok) } : {}),
+          },
+        }
+      : {}),
+    ...(expect.class
+      ? {
+          class: {
+            ...expect.class,
+            ...(expect.class.of ? { of: resolveLocator(expect.class.of, tok) } : {}),
+            ...(expect.class.has !== undefined ? { has: tok(expect.class.has) } : {}),
+            ...(expect.class.absent !== undefined ? { absent: tok(expect.class.absent) } : {}),
+          },
+        }
+      : {}),
   }
 }
 

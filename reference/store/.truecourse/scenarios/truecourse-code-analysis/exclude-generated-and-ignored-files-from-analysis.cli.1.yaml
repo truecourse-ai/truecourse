@@ -101,7 +101,6 @@ setup:
           - lib/src/generated/b.js
         message: seed excludes sample
 normalize: []
-driver: cli
 steps:
   - write:
       .git/info/exclude: |

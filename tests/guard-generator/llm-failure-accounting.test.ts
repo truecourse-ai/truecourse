@@ -92,7 +92,7 @@ function commitPriorFlow(r: string): { manifest: string; scenario: string; file:
         flowId: 'version',
         flowFingerprint: 'fp-version',
         bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds.fingerprint }],
-        scenarios: [{ id: 'version.cli.1', surface: 'cli', status: 'passing' }],
+        scenarios: [{ id: 'version.cli.1', drivers: ['cli'], status: 'passing' }],
         interfaces: [],
         // A null hash re-detects the flow as work, so the run really does re-author
         // it — and really would delete its file on a zero-survivor pass.

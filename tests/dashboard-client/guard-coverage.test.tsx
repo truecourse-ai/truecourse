@@ -312,10 +312,10 @@ afterEach(() => {
 describe('GuardCoveragePage — the no-document pane is ONE shared empty state', () => {
   beforeEach(stubFetch);
 
-  // The stage CTAs are gone. Whatever the pipeline flags say, a pane with nothing
-  // selected says ONE thing: pick a document. "What next?" is the header's own
-  // Scan / Generate / Run buttons, and the corpus at a glance is the sidebar —
-  // this pane must never grow a second reading of either.
+  // The stage CTAs are gone. Whatever the pipeline flags say, a pane with
+  // nothing selected rests on the corpus-wide OVERVIEW — read-only numbers,
+  // nothing clickable. "What next?" is the header's own Scan / Generate / Run
+  // buttons; the doc list is the sidebar.
   const STAGES: [string, GuardStaleness][] = [
     ['no corpus at all', { ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false }],
     ['a corpus with no guards', { ...ALL_TRUE, hasGenerated: false, hasRun: false }],
@@ -326,14 +326,15 @@ describe('GuardCoveragePage — the no-document pane is ONE shared empty state',
   ];
 
   for (const [what, staleness] of STAGES) {
-    it(`says "Select a document" and nothing else with ${what}`, async () => {
+    it(`rests on the read-only Overview with ${what}`, async () => {
       renderPage(staleness, '/repos/r');
-      expect(await screen.findByText('Select a document')).toBeInTheDocument();
+      expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
       for (const retired of ['No spec corpus', 'No guards generated', 'No guard run yet']) {
         expect(screen.queryByText(retired), retired).toBeNull();
       }
-      // Nor the claims overview it used to grow into.
-      expect(screen.queryByRole('region', { name: 'Claims overview' })).toBeNull();
+      // Read-only: the overview offers no buttons and no links at all.
+      const pane = screen.getByText('Coverage overview').closest('div')!.parentElement!;
+      expect(pane.querySelectorAll('button, a')).toHaveLength(0);
     });
   }
 
@@ -343,7 +344,7 @@ describe('GuardCoveragePage — the no-document pane is ONE shared empty state',
     // its tab open would be a dead end.
     renderPage({ ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false });
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
-    expect(screen.queryByText('Select a document')).not.toBeInTheDocument();
+    expect(screen.queryByText('Coverage overview')).not.toBeInTheDocument();
   });
 
   it('renders the raw doc markdown pre-generate when a doc is selected', async () => {
@@ -689,11 +690,12 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     expect(decodeURIComponent(search())).toContain(OVERLAP_KEY);
   });
 
-  it('shows no strip while no item tab is open', () => {
-    // No ?guard/?gconf → the no-selection pane fills the tab, no strip.
+  it('shows no strip while no item tab is open', async () => {
+    // No ?guard/?gconf → the Overview pane fills the tab, no strip.
     renderHarness({ ...ALL_TRUE, hasRun: false });
-    expect(screen.getByText('Select a document')).toBeInTheDocument();
-    expect(screen.queryByText('Overview')).toBeNull();
+    expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
+    // No tab-strip chip named Overview — the rest state is the pane, not a tab.
+    expect(screen.queryByRole('tab')).toBeNull();
   });
 
   it('carries NO Overview chip — nothing selected IS the pane', async () => {
@@ -714,7 +716,7 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     await user.click(closeBtn('docs/SPEC.md'));
     // Last item tab closed → the strip is gone and the pane is at rest.
     expect(screen.queryByText('Overview')).toBeNull();
-    expect(await screen.findByText('Select a document')).toBeInTheDocument();
+    expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
     expect(search()).not.toContain('guard=');
   });
 

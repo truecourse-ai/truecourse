@@ -16,7 +16,13 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { isPromptKeyedStdin, type GuardBinds, type GuardTtyAnswer } from '@truecourse/shared'
+import {
+  isPromptKeyedStdin,
+  visualJudgeLines,
+  type GuardBinds,
+  type GuardTtyAnswer,
+  type GuardVisualJudgment,
+} from '@truecourse/shared'
 import { evidenceScenarioDir, evidenceRelPath } from './store.js'
 import { listSandboxFiles } from './sandbox.js'
 import type { ExpectMismatch } from './expect.js'
@@ -62,7 +68,7 @@ export function isFileStepKind(kind: EvidenceStep['kind']): boolean {
  * shape this is: the evidence carries it verbatim.
  */
 export interface EvidenceWebCheck {
-  subject: 'url' | 'text' | 'visible'
+  subject: 'url' | 'text' | 'visible' | 'state' | 'attribute' | 'class'
   expected: string
   actual: string
   ok: boolean
@@ -183,6 +189,12 @@ export interface EvidenceStep {
   iterationsRun: number
   exitCode: number | null
   timedOut: boolean
+  /**
+   * The ready line this step was run UNTIL, present when the runner stopped the
+   * child at it. Both the transcript and the dashboard's actual line read it, so
+   * neither reports our own SIGKILL as the command's outcome.
+   */
+  endedAtMarker?: string
   spawnError?: string
   rawStdout: string
   rawStderr: string
@@ -196,6 +208,20 @@ export interface EvidenceStep {
    * that flowed. Absent when the step captures nothing.
    */
   captured?: Record<string, string>
+  /**
+   * True for a TEARDOWN step (the scenario's `teardown:` list) — on a green run an
+   * ordinary step wearing the flag, after a failure a best-effort restoration step
+   * whose own outcome never moved the verdict.
+   */
+  teardown?: true
+  /**
+   * A BEST-EFFORT teardown step's unmet expectation (or the reason it could not
+   * run). Advisory by construction: the scenario had already settled when this step
+   * executed, so the miss is recorded here — and as `teardownIncomplete` on the
+   * result — instead of becoming the failure. Never present on a verdict-affecting
+   * step, whose miss is the scenario's `mismatch`.
+   */
+  teardownMiss?: { expected: string; actual: string }
 }
 
 export interface WriteEvidenceParams {
@@ -212,6 +238,14 @@ export interface WriteEvidenceParams {
   /** 1-based index of the failing step; omitted on a `pass` (nothing failed). */
   failingStep?: number
   mismatch?: ExpectMismatch
+  /**
+   * The VISUAL JUDGE's verdict on the failing step's screenshot, when one was
+   * reached. Carried as its own field rather than folded into the mismatch's
+   * `detail` because it is categorically different from everything else there:
+   * `detail` is what the runner MEASURED, this is what a model LOOKED AT. Both
+   * `diff.txt` and the transcript render it from here, so they can never disagree.
+   */
+  visual?: GuardVisualJudgment
   infraMessage?: string
   sandboxCwd: string
   envPins: Record<string, string>
@@ -269,8 +303,11 @@ export function writeEvidence(params: WriteEvidenceParams): string {
       iterationsRun: s.iterationsRun,
       exitCode: s.exitCode,
       timedOut: s.timedOut,
+      endedAtMarker: s.endedAtMarker,
       spawnError: s.spawnError,
       captured: s.captured,
+      ...(s.teardown ? { teardown: s.teardown } : {}),
+      ...(s.teardownMiss ? { teardownMiss: s.teardownMiss } : {}),
       // What THIS step printed, not just the focus step's files below — the record
       // a reader gets for every executed step, raw and head-truncated.
       stdout: stepExcerpt(s.rawStdout),
@@ -293,6 +330,9 @@ export function writeEvidence(params: WriteEvidenceParams): string {
     diffLines.push(`expected: ${params.mismatch.expected}`)
     diffLines.push(`actual:   ${params.mismatch.actual}`, '')
     diffLines.push(...params.mismatch.detail)
+    // After the measured evidence, never instead of it: the annotation is the last
+    // word a reader gets, and it is labelled as an annotation on every line.
+    if (params.visual) diffLines.push('', ...visualJudgeLines(params.visual))
   } else if (params.outcome === 'error' && params.infraMessage) {
     diffLines.push(`step ${params.failingStep} — infrastructure error`, '', params.infraMessage)
   } else if (params.outcome === 'pass') {
@@ -318,7 +358,19 @@ function renderTranscript(params: WriteEvidenceParams): string {
   lines.push(`outcome:  ${params.outcome}`)
   lines.push('')
   for (const s of params.steps) {
-    lines.push(`── step ${s.index} ${s.index === params.failingStep ? '(failing)' : ''}`.trimEnd())
+    // A teardown step says so in its header; after a failure it also carries its
+    // own best-effort miss, rendered before the body and marked advisory so it can
+    // never read as the scenario's verdict (that stays with the failing step).
+    const marks = [
+      ...(s.index === params.failingStep ? ['(failing)'] : []),
+      ...(s.teardown ? ['(teardown)'] : []),
+    ].join(' ')
+    lines.push(`── step ${s.index} ${marks}`.trimEnd())
+    if (s.teardownMiss) {
+      lines.push(`   ✗ teardown expectation not met (advisory — the scenario had already settled)`)
+      lines.push(`     expected: ${s.teardownMiss.expected}`)
+      lines.push(`     actual:   ${s.teardownMiss.actual}`)
+    }
     // A web step has no argv and no streams: it has an action, an address, a
     // screenshot, what it asserted next to what answered each assertion, and what
     // the page showed. That is its whole record.
@@ -400,7 +452,14 @@ function renderTranscript(params: WriteEvidenceParams): string {
       lines.push('')
       continue
     }
-    lines.push(`   exit:    ${s.exitCode ?? '(killed)'}${s.timedOut ? ' [timed out]' : ''}`)
+    // A held command ends because the runner stopped it at its ready line. Saying
+    // "(killed)" for that would read as an infrastructure failure on a green step.
+    if (s.endedAtMarker !== undefined) lines.push(`   until:   stopped at ${JSON.stringify(s.endedAtMarker)}`)
+    lines.push(
+      `   exit:    ${
+        s.endedAtMarker !== undefined ? '(stopped at its marker)' : (s.exitCode ?? '(killed)')
+      }${s.timedOut ? ' [timed out]' : ''}`,
+    )
     if (s.spawnError) lines.push(`   spawn:   ${s.spawnError}`)
     // The values this step handed forward — the api transcript's `capture:` line.
     if (s.captured && Object.keys(s.captured).length > 0) {
@@ -416,6 +475,9 @@ function renderTranscript(params: WriteEvidenceParams): string {
     lines.push(`── mismatch (step ${params.failingStep})`)
     lines.push(`   expected: ${params.mismatch.expected}`)
     lines.push(`   actual:   ${params.mismatch.actual}`)
+    for (const line of params.visual ? visualJudgeLines(params.visual) : []) {
+      lines.push(`   ${line}`)
+    }
   } else if (params.infraMessage) {
     lines.push(`── error (step ${params.failingStep})`)
     lines.push(indent(params.infraMessage))

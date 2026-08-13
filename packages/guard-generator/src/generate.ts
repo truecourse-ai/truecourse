@@ -90,6 +90,8 @@ import {
   dismissedClaimKey,
   firstInvalidMatchPattern,
   guardDriver,
+  guardScenarioDrivers,
+  isApiServerScenario,
   isRunnableDriver,
   runnableDriverIds,
   unaccountedSurfaces,
@@ -1730,11 +1732,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // yield N indistinguishable failures. Every cli candidate is skipped (its flow
       // stays unsettled); the ONE loud error was recorded once. Api candidates
       // proceed (the api server has its own preflight inside the runner).
-      const dead = round1.some((c) => c.scenario.driver === 'cli') && (await deadEntry())
-      const pool = dead ? round1.filter((c) => c.scenario.driver !== 'cli') : round1
+      const dead = round1.some((c) => !isApiServerScenario(c.scenario)) && (await deadEntry())
+      const pool = dead ? round1.filter((c) => isApiServerScenario(c.scenario)) : round1
       if (dead) {
         for (const c of round1) {
-          if (c.scenario.driver === 'cli') taskByKey.get(c.ref)!.errored = true
+          if (!isApiServerScenario(c.scenario)) taskByKey.get(c.ref)!.errored = true
         }
       }
       if (pool.length > 0) {
@@ -1870,7 +1872,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const flowOrder = new Map(works.map((w, i) => [w.flow.id, i]))
   const apiFailures: BirthOutcome[] = []
   for (const o of round2Failures) {
-    if (o.candidate.scenario.driver === 'api') apiFailures.push(o)
+    if (isApiServerScenario(o.candidate.scenario)) apiFailures.push(o)
     else settleFailedTest(taskByKey.get(o.candidate.ref)!, o)
   }
   apiFailures.sort(
@@ -2343,9 +2345,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // A failing test COMMITS WITH its diagnosis: the manifest entry
         // is the durable record — it travels with the corpus and survives every
         // no-op generate, so the report's committed row re-derives from it.
+        // The drivers are read off the STEPS the model actually authored, not off
+        // the surface the flow was authored FOR: a cli plan whose scenario ends up
+        // driving the browser records both, and every per-driver tally follows.
         scenarios.push({
           id: c.scenario.id,
-          surface,
+          drivers: guardScenarioDrivers(c.scenario),
           status,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
@@ -2978,9 +2983,7 @@ async function authorFlowScenario(opts: {
   )
   const exampleDefectOf = (scenario: RawGeneratedScenario): string | null =>
     exampleFidelityDefect(
-      scenario.driver === 'api'
-        ? { driver: 'api', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) }
-        : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
+      { steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
       exampleBlocks,
     )
 
@@ -3145,9 +3148,7 @@ function authorFailureReason(raw: string): string {
  */
 function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): string | null {
   return scenarioCompositionDefect(
-    scenario.driver === 'api'
-      ? { driver: 'api', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) }
-      : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
+    { steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
     recipe.entry,
   )
 }
@@ -3449,6 +3450,7 @@ function safeBuild(
       interfaces: task.plan.interfaces,
       raw,
       id,
+      surface: task.surface,
       ...(task.server ? { server: task.server } : {}),
       defaultServer,
     })
@@ -3698,7 +3700,6 @@ function normalizeFidelity(r: {
 function scenarioBehavior(scenario: GuardScenario): string {
   return JSON.stringify({
     title: scenario.title,
-    driver: scenario.driver,
     setup: scenario.setup ?? null,
     steps: scenario.steps,
     normalize: scenario.normalize ?? [],

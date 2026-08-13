@@ -12,13 +12,15 @@
  *                ONLY for a flow with no test: where there IS one, its step list
  *                already groups the steps under those same claims and links those
  *                same sections, and two renderings of one chain is one too many
- *   ————— and then everything the test itself has to say ({@link GuardScenarioBody}):
- *   what it checks · verdict · setup · steps · evidence · interface · footer
- *   ————— and last, the ruling:
- *   dismissed    "don't test this flow", or the note and its undo
+ *   ————— and then the test's own WORKSPACE ({@link GuardScenarioBody}), which
+ *   claims every pixel the header leaves: verdict · filmstrip · steps | inspector ·
+ *   drawers (transcript · interfaces · RULINGS) · footer facts. The flow-level
+ *   ruling — "don't test this flow" — lives in that drawer, after the evidence it
+ *   is made on, rather than as a standing block below a page nobody scrolled to.
  *
  * A flow either HAS a test or it doesn't. Has one → the scenario body IS the rest
- * of the page. Doesn't → a WHY-NO-TEST block takes its place: the state, then why,
+ * of the page, and it does not scroll: its panes do. Doesn't → a WHY-NO-TEST block
+ * takes its place (and the ruling stays the page's last block): the state, then why,
  * as two separate reads ("Needs credentials and network access.", "Awaiting web
  * driver.", "Couldn't create the test — will retry next generate."). The one
  * exception is a needs-setup gap: that is a to-do, not a wall, so it carries the
@@ -49,9 +51,9 @@
  * to show, and it is whichever one exists ({@link ArtifactModeSwitch}).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpRight, Ban, Braces, Layers, PenLine } from 'lucide-react';
-import { guardFindingClass } from '@truecourse/shared';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, Ban, Braces, Layers, PenLine } from "lucide-react";
+import { guardFindingClass } from "@truecourse/shared";
 import type {
   GuardClaimIdentity,
   GuardFlowDetail as GuardFlowDetailData,
@@ -59,12 +61,16 @@ import type {
   GuardFlowScenarioRow,
   GuardGenerateError,
   GuardInterfaceRow,
-} from '@truecourse/shared';
-import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
-import { HoverPopover } from '@/components/ui/hover-popover';
-import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
-import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
-import { collapseAuthoringAttempts } from '@/lib/guard-report';
+} from "@truecourse/shared";
+import {
+  ArtifactModeSwitch,
+  ArtifactRaw,
+  useArtifactMode,
+} from "@/components/ui/artifact-view";
+import { HoverPopover } from "@/components/ui/hover-popover";
+import { useGuardArtifactRaw } from "@/hooks/useGuardArtifactRaw";
+import type { GuardDecisionsState } from "@/hooks/useGuardDecisions";
+import { collapseAuthoringAttempts } from "@/lib/guard-report";
 import {
   GUARD_DISMISS_FLOW_ACTION,
   GUARD_DISMISS_FLOW_HINT,
@@ -76,16 +82,26 @@ import {
   guardTestStatusView,
   guardWhyNoTest,
   surfaceLabel,
-} from '@/lib/guard-flow-status';
-import type { GuardTestBinds } from '@/lib/guard-tests';
-import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
-import { GuardScenarioBody, type GuardEvidenceRef, type GuardTestViewModel } from './GuardTestView';
-import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip, GuardToolDefectChip } from './GuardStatusBadge';
+} from "@/lib/guard-flow-status";
+import type { GuardTestBinds } from "@/lib/guard-tests";
+import { GuardNeedsSetupCta } from "./GuardNeedsSetupCta";
+import {
+  GuardScenarioBody,
+  type GuardEvidenceRef,
+  type GuardTestViewModel,
+} from "./GuardTestView";
+import {
+  GuardDismissedChip,
+  GuardFlowStatusChip,
+  GuardNotInSpecsChip,
+  GuardToolDefectChip,
+} from "./GuardStatusBadge";
 
-const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
+const LABEL =
+  "mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground";
 
 const BTN =
-  'inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
+  "inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground";
 
 /**
  * The flow's milestones, as a PLAIN LIST — the claim sentences in order, each
@@ -107,8 +123,12 @@ function MilestoneList({
           key={m.order}
           className="flex min-w-0 items-start gap-2 border-b border-border/60 px-3 py-2 last:border-b-0"
         >
-          <span className="w-4 shrink-0 text-[11px] text-muted-foreground">{m.order}</span>
-          <span className="min-w-0 flex-1 text-[12px] leading-snug text-foreground">{m.claimTitle}</span>
+          <span className="w-4 shrink-0 text-[11px] text-muted-foreground">
+            {m.order}
+          </span>
+          <span className="min-w-0 flex-1 text-[12px] leading-snug text-foreground">
+            {m.claimTitle}
+          </span>
           <button
             type="button"
             onClick={() => onOpenSpec(m.doc, m.anchor)}
@@ -117,7 +137,9 @@ function MilestoneList({
           >
             {/* Without `min-w-0` the label refuses to shrink and spills past the
                 button, widening the pane instead of ellipsising. */}
-            <span className="min-w-0 truncate">§ {m.headingText ?? m.anchor}</span>
+            <span className="min-w-0 truncate">
+              § {m.headingText ?? m.anchor}
+            </span>
             <ArrowUpRight className="h-3 w-3 shrink-0" />
           </button>
         </li>
@@ -157,7 +179,7 @@ function WhyNoTest({
     <div
       role="group"
       aria-label="Why there is no test yet"
-      className={`rounded border border-border px-3 py-2 ${needsSetup ? 'bg-sky-500/[0.07]' : 'bg-muted/20'}`}
+      className={`rounded border border-border px-3 py-2 ${needsSetup ? "bg-sky-500/[0.07]" : "bg-muted/20"}`}
     >
       <GuardFlowStatusChip status={guardPlainStatus(row.status)} />
       {needsSetup ? (
@@ -172,14 +194,20 @@ function WhyNoTest({
         />
       ) : (
         <p className="mt-1.5 text-[12px] leading-snug text-muted-foreground">
-          {guardWhyNoTest(row.gap, { attempted, ...(blocked ? { blocked } : {}) })}
+          {guardWhyNoTest(row.gap, {
+            attempted,
+            ...(blocked ? { blocked } : {}),
+          })}
         </p>
       )}
       {/* WHY authoring could not produce a test, from the run's own words —
           deduped by message shape with the attempt count, so a flow re-asked
           three times reads as one reason tried three times, not three rows. */}
-      {row.status === 'authoring-error' && !blocked && (
-        <AuthoringAttempts errors={errors} {...(row.surface ? { surface: row.surface } : {})} />
+      {row.status === "authoring-error" && !blocked && (
+        <AuthoringAttempts
+          errors={errors}
+          {...(row.surface ? { surface: row.surface } : {})}
+        />
       )}
     </div>
   );
@@ -203,7 +231,7 @@ function AuthoringAttempts({
             {a.message}
           </span>
           <span className="shrink-0 text-[10px] text-muted-foreground">
-            {a.attempts} attempt{a.attempts === 1 ? '' : 's'}
+            {a.attempts} attempt{a.attempts === 1 ? "" : "s"}
           </span>
         </li>
       ))}
@@ -250,7 +278,7 @@ function DismissFlowAction({
       <div>
         <div className={LABEL}>Dismissed</div>
         <p className="text-[12px] leading-relaxed text-muted-foreground">
-          {GUARD_FLOW_DISMISSED_SENTENCE}{' '}
+          {GUARD_FLOW_DISMISSED_SENTENCE}{" "}
           <button
             type="button"
             disabled={ruling}
@@ -261,7 +289,9 @@ function DismissFlowAction({
           </button>
         </p>
         {dismissal.note && (
-          <p className="mt-1 text-[11px] italic leading-relaxed text-muted-foreground">{dismissal.note}</p>
+          <p className="mt-1 text-[11px] italic leading-relaxed text-muted-foreground">
+            {dismissal.note}
+          </p>
         )}
       </div>
     );
@@ -269,11 +299,18 @@ function DismissFlowAction({
 
   return (
     <div>
-      <HoverPopover portal align="start" width="wide" content={GUARD_DISMISS_FLOW_HINT}>
+      <HoverPopover
+        portal
+        align="start"
+        width="wide"
+        content={GUARD_DISMISS_FLOW_HINT}
+      >
         <button
           type="button"
           disabled={ruling}
-          onClick={() => void rule(() => decisions.dismissFlow({ flowId, title }))}
+          onClick={() =>
+            void rule(() => decisions.dismissFlow({ flowId, title }))
+          }
           className={`${BTN} disabled:opacity-50`}
         >
           <Ban className="h-3 w-3 shrink-0" />
@@ -297,8 +334,15 @@ function failedMilestoneClaim(
   milestones: readonly GuardFlowMilestoneView[],
 ): GuardClaimIdentity | null {
   const failed = row.failedMilestone;
-  const milestone = failed != null ? milestones.find((m) => m.order === failed) : undefined;
-  return milestone ? { doc: milestone.doc, anchor: milestone.anchor, title: milestone.claimTitle } : null;
+  const milestone =
+    failed != null ? milestones.find((m) => m.order === failed) : undefined;
+  return milestone
+    ? {
+        doc: milestone.doc,
+        anchor: milestone.anchor,
+        title: milestone.claimTitle,
+      }
+    : null;
 }
 
 /**
@@ -341,7 +385,10 @@ function ClaimDismissalNote({
   return (
     <div className="mt-3 text-[11px] text-muted-foreground">
       <p>
-        {dismissal.auto ? 'Guard dismissed this claim automatically' : 'This claim is dismissed'} —{' '}
+        {dismissal.auto
+          ? "Guard dismissed this claim automatically"
+          : "This claim is dismissed"}{" "}
+        —{" "}
         <button
           type="button"
           disabled={ruling}
@@ -352,7 +399,9 @@ function ClaimDismissalNote({
         </button>
       </p>
       {/* The machine's stated reason, verbatim — never re-worded. */}
-      {dismissal.auto && dismissal.reason && <p className="mt-1 italic leading-relaxed">{dismissal.reason}</p>}
+      {dismissal.auto && dismissal.reason && (
+        <p className="mt-1 italic leading-relaxed">{dismissal.reason}</p>
+      )}
     </div>
   );
 }
@@ -363,28 +412,33 @@ function scenarioModel(
   detail: GuardFlowDetailData,
   binds: GuardTestBinds | undefined,
 ): GuardTestViewModel {
-  const view = guardTestStatusView({ status: row.status, ...(row.stage ? { stage: row.stage } : {}) });
+  const view = guardTestStatusView({
+    status: row.status,
+    ...(row.stage ? { stage: row.stage } : {}),
+  });
   // A BIRTH failure's transcript is addressed by its stored path (no run wrote it);
   // a run's transcript is addressed by run + test id — the run THAT ROW came from,
   // since the board is merged across runs and the detail's own `runId` is only the
   // run that wrote it last.
   const rowRunId = row.runId ?? detail.runId;
   const evidence: GuardEvidenceRef | null =
-    row.stage === 'birth' && row.evidencePath
-      ? { kind: 'birth', path: row.evidencePath }
-      : row.hasEvidence && rowRunId != null && row.stage !== 'birth'
-        ? { kind: 'run', runId: rowRunId }
+    row.stage === "birth" && row.evidencePath
+      ? { kind: "birth", path: row.evidencePath }
+      : row.hasEvidence && rowRunId != null && row.stage !== "birth"
+        ? { kind: "run", runId: rowRunId }
         : null;
   return {
     id: row.scenarioId!,
     title: row.title ?? row.scenarioId!,
     status: view,
-    provenance: 'Latest state',
+    provenance: "Latest state",
     ...(row.durationMs != null ? { durationMs: row.durationMs } : {}),
     ...(row.failure ? { failure: row.failure } : {}),
     // The verdict the generate reached about this birth failure — whose fault it is.
     ...(row.triage ? { triage: row.triage } : {}),
-    ...(row.failedMilestone != null ? { failedMilestone: row.failedMilestone } : {}),
+    ...(row.failedMilestone != null
+      ? { failedMilestone: row.failedMilestone }
+      : {}),
     // The chain the step list is grouped under — each section headed by the claim
     // its steps realize, addressed by position (`milestones`) or by claim id
     // (`claimTitles`, the claim corpus). A test may use either.
@@ -433,7 +487,9 @@ export function GuardFlowDetail({
   // OUR OWN withheld defects (a faulty scenario, a fidelity rejection). They are
   // never a status and never red — nothing was committed and nothing in the repo
   // is broken — so they ride as a muted marker beside the status chip.
-  const toolDefects = detail.findings.filter((f) => guardFindingClass(f) === 'defect').length;
+  const toolDefects = detail.findings.filter(
+    (f) => guardFindingClass(f) === "defect",
+  ).length;
 
   // A flow with no surface at all has no test AND no gap to explain it — whether
   // authoring ran and failed, or nothing has been attempted for it yet. Both read
@@ -447,13 +503,26 @@ export function GuardFlowDetail({
   const rows: GuardFlowScenarioRow[] =
     detail.surfaces.length > 0
       ? detail.surfaces
-      : [{ status: 'unguarded', birthPassed: false, hasEvidence: false, interfacePath: [] }];
+      : [
+          {
+            status: "unguarded",
+            birthPassed: false,
+            hasEvidence: false,
+            interfacePath: [],
+          },
+        ];
 
   // The flow's TRUTH ON DISK: its test's YAML when it has one, else its own entry
   // in the flow corpus. One switch, whichever artifact exists.
   const test = rows.find((r) => r.scenarioId != null) ?? null;
-  const { mode, setMode, raw } = useArtifactMode(test ? 'YAML' : 'JSON');
-  const flowRaw = useGuardArtifactRaw(repoId, 'flow', detail.flowId, raw && !test, prRef);
+  const { mode, setMode, raw } = useArtifactMode(test ? "YAML" : "JSON");
+  const flowRaw = useGuardArtifactRaw(
+    repoId,
+    "flow",
+    detail.flowId,
+    raw && !test,
+    prRef,
+  );
 
   // Every committed test on the flow as its scenario model, by id. Keyed rather
   // than singular so a second surface renders its OWN test rather than nothing.
@@ -462,14 +531,24 @@ export function GuardFlowDetail({
       new Map(
         rows
           .filter((r) => r.scenarioId != null)
-          .map((r) => [r.scenarioId!, scenarioModel(r, detail, binds?.get(r.scenarioId!))]),
+          .map((r) => [
+            r.scenarioId!,
+            scenarioModel(r, detail, binds?.get(r.scenarioId!)),
+          ]),
       ),
     [rows, detail, binds],
   );
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
-      <div className="min-w-0 border-b border-border bg-card px-6 py-4">
+      {/* The page's ONE vertical scroll, and the header scrolls WITH it — a
+          pinned title bar cost height the reading needs. x is clipped so a wide
+          line can only scroll its own block. */}
+      <div
+        data-pane
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
+      >
+      <div className="min-w-0 shrink-0 border-b border-border bg-card px-6 py-4">
         <div className="flex flex-wrap items-center gap-2">
           {/* The SAME word the flow wears in the list, in the SAME first position
               every guard row and header puts it — one vocabulary, one table. */}
@@ -477,7 +556,9 @@ export function GuardFlowDetail({
             status={guardFlowPlainStatus({
               status: detail.status,
               bucket: detail.bucket,
-              findings: detail.findings.filter((f) => guardFindingClass(f) !== 'defect').length,
+              findings: detail.findings.filter(
+                (f) => guardFindingClass(f) !== "defect",
+              ).length,
             })}
           />
           {/* Not a status: the same marker the list row wears. The sentence below
@@ -488,7 +569,11 @@ export function GuardFlowDetail({
           {dismissed && <GuardDismissedChip />}
           {toolDefects > 0 && <GuardToolDefectChip />}
           {detail.epic && (
-            <HoverPopover portal width="narrow" content={`Epic flow — chains ${detail.composedOf.length} flows.`}>
+            <HoverPopover
+              portal
+              width="narrow"
+              content={`Epic flow — chains ${detail.composedOf.length} flows.`}
+            >
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <Layers className="h-3 w-3" />
                 epic
@@ -496,30 +581,44 @@ export function GuardFlowDetail({
             </HoverPopover>
           )}
           {detail.manual && (
-            <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
+            <HoverPopover
+              portal
+              width="narrow"
+              content="Hand-written test — it belongs to no synthesized flow."
+            >
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <PenLine className="h-3 w-3" />
                 manual
               </span>
             </HoverPopover>
           )}
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{detail.flowId}</span>
-          <ArtifactModeSwitch format={test ? 'YAML' : 'JSON'} mode={mode} onSelect={setMode} className="ml-auto" />
+          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+            {detail.flowId}
+          </span>
+          <ArtifactModeSwitch
+            format={test ? "YAML" : "JSON"}
+            mode={mode}
+            onSelect={setMode}
+            className="ml-auto"
+          />
         </div>
-        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">{detail.title}</h2>
+        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">
+          {detail.title}
+        </h2>
         {detail.goal ? (
-          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{detail.goal}</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+            {detail.goal}
+          </p>
         ) : (
           detail.orphaned && (
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{GUARD_UNDERIVED_SENTENCE}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              {GUARD_UNDERIVED_SENTENCE}
+            </p>
           )
         )}
       </div>
 
-      {/* The body owns HEIGHT scrolling only: `overflow-y-auto` alone would compute
-          the x axis to `auto` too and let one wide line scroll the whole page
-          sideways, so x is clipped here and the data blocks scroll themselves. */}
-      <div className="min-w-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-4">
         {raw ? (
           // The stored artifact, whichever one this flow has.
           test ? (
@@ -542,20 +641,35 @@ export function GuardFlowDetail({
             {!test && detail.milestones.length > 0 && (
               <div>
                 <div className={LABEL}>Milestones</div>
-                <MilestoneList milestones={detail.milestones} onOpenSpec={onOpenSpec} />
+                <MilestoneList
+                  milestones={detail.milestones}
+                  onOpenSpec={onOpenSpec}
+                />
               </div>
             )}
 
             {/* ONE block per surface. With the single surface the corpus produces
                 today there is no label at all — the page IS the test. */}
             {rows.map((row, i) => {
-              const model = row.scenarioId ? models.get(row.scenarioId) : undefined;
+              const model = row.scenarioId
+                ? models.get(row.scenarioId)
+                : undefined;
               // The existing-dismissal note is offered on a FAILING test only, and
               // only when the failing milestone's claim resolves.
               const claim =
-                model?.status.plain === 'failed' ? failedMilestoneClaim(row, detail.milestones) : null;
+                model?.status.plain === "failed"
+                  ? failedMilestoneClaim(row, detail.milestones)
+                  : null;
               return (
-                <div key={row.scenarioId ?? `${row.surface ?? 'none'}-${row.status}-${i}`} className="space-y-5">
+                <div
+                  key={
+                    row.scenarioId ??
+                    `${row.surface ?? "none"}-${row.status}-${i}`
+                  }
+                  className={`flex min-w-0 flex-col gap-5 ${
+                    model ? "min-h-0 flex-1" : ""
+                  }`}
+                >
                   {rows.length > 1 && row.surface && (
                     // A surface NAME, plain — never a chip. It appears only when
                     // there is a second surface to tell this one apart from.
@@ -564,19 +678,44 @@ export function GuardFlowDetail({
                   {model ? (
                     <GuardScenarioBody
                       repoId={repoId}
-                      test={{ ...model, ...(claimTitles ? { claimTitles } : {}) }}
+                      test={{
+                        ...model,
+                        ...(claimTitles ? { claimTitles } : {}),
+                      }}
                       interfaces={interfaces}
+                      showGoal={rows.length > 1 || !detail.goal}
                       onOpenInterface={onOpenInterface}
                       onOpenSpec={onOpenSpec}
-                      {...(claim && decisions
-                        ? { action: <ClaimDismissalNote claim={claim} decisions={decisions} /> }
+                      {...(decisions
+                        ? {
+                            // The rulings ride INSIDE the test's own drawer row:
+                            // a decision belongs after the evidence, and a standing
+                            // block under it was a footer nobody read.
+                            rulings: (
+                              <div className="space-y-3">
+                                <DismissFlowAction
+                                  flowId={detail.flowId}
+                                  title={detail.title}
+                                  decisions={decisions}
+                                />
+                                {claim && (
+                                  <ClaimDismissalNote
+                                    claim={claim}
+                                    decisions={decisions}
+                                  />
+                                )}
+                              </div>
+                            ),
+                          }
                         : {})}
-                      {...(!row.outcome && row.stage !== 'birth'
+                      {...(!row.outcome && row.stage !== "birth"
                         ? {
                             notes: (
                               <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-                                The last run has no result for this test — run{' '}
-                                <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code>{' '}
+                                The last run has no result for this test — run{" "}
+                                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                                  truecourse guard run
+                                </code>{" "}
                                 to test it.
                               </p>
                             ),
@@ -618,11 +757,20 @@ export function GuardFlowDetail({
               </div>
             )}
 
-            {decisions && (
-              <DismissFlowAction flowId={detail.flowId} title={detail.title} decisions={decisions} />
+            {/* A flow with a TEST carries its ruling inside that test's drawer
+                row, where the decision follows the evidence it is made on. A flow
+                with none has no such row — the ruling stays the page's last
+                block, exactly as it reads today. */}
+            {decisions && !test && (
+              <DismissFlowAction
+                flowId={detail.flowId}
+                title={detail.title}
+                decisions={decisions}
+              />
             )}
           </>
         )}
+      </div>
       </div>
     </div>
   );

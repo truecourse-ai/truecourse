@@ -472,7 +472,7 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('CORRECTION — your previous response was NOT valid.')
     expect(p).toContain('not json')
     expect(p).toContain('Return exactly ONE JSON object: { "scenario": { … } }')
-    expect(p).toContain('driver "cli"')
+    expect(p).toContain('the schema (title, non-empty steps, optional setup/normalize,')
     expect(p).toContain('{ "blockedOn": ["<capability>"] }')
   })
 
@@ -695,8 +695,12 @@ describe('guard-generator prompts', () => {
     // "journey" retired in favour of "interface" across stores, schemas and copy,
     // and this prompt renders that vocabulary, so its text moved without a single
     // rule moving with it. A rename, not vocabulary growth.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('1ee6cde76c89e1d9')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('1ee6cde76c89e1d9')
+    // RE-PINNED 2026-08-12 by the scenario-level `driver` field's REMOVAL: the
+    // authored schema no longer carries it (the driver is the step's), so the
+    // rendered schema and the sentence that explained the field both shrank. A
+    // deletion, not vocabulary growth — nothing new is authorable.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('aeb52a932671fa68')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('aeb52a932671fa68')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -928,8 +932,11 @@ describe('guard-generator prompts', () => {
     // "journey" retired in favour of "interface" across stores, schemas and copy,
     // and this prompt renders that vocabulary, so its text moved without a single
     // rule moving with it. A rename, not vocabulary growth.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('244fc34ecb318a03')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('244fc34ecb318a03')
+    // RE-PINNED 2026-08-12 with its cli sibling, by the scenario-level `driver`
+    // field's REMOVAL: the authored schema no longer carries it, so the rendered
+    // schema and the sentence that explained it both shrank. A deletion.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('560041f67fb5edfc')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('560041f67fb5edfc')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

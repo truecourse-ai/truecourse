@@ -719,7 +719,7 @@ function DocRowContent({
       <FileText className="mt-0.5 h-3 w-3 shrink-0" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1">
-          <span className="truncate">{label ?? doc.title ?? doc.ref}</span>
+          <span className="truncate text-foreground">{label ?? doc.title ?? doc.ref}</span>
           {workspace && <WorkspaceBadge />}
           {label && <WebSourceBadge />}
         </span>

@@ -83,7 +83,6 @@ const SCRIPT = {
       reply: {
         scenario: {
           title: GREEN_FLOW,
-          driver: 'cli',
           steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
         },
       },
@@ -95,7 +94,6 @@ const SCRIPT = {
       reply: {
         scenario: {
           title: RED_SCENARIO,
-          driver: 'cli',
           steps: [{ run: ['boom'], expect: { exit: 0 }, milestone: 1 }],
         },
       },

@@ -147,7 +147,7 @@ export function GuardDependencyListRow({ dependency }: { dependency: GuardDepend
   return (
     <>
       <div className="flex w-full items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-normal leading-snug text-foreground">
           {dependency.name}
         </span>
         {/* How much RIDES on it, beside what it IS. Muted, never a guard to-do

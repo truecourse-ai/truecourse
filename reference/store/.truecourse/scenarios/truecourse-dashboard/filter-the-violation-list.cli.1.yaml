@@ -1,0 +1,365 @@
+guard: 3
+id: filter-the-violation-list.cli.1
+title: A developer narrows the violations list with search, severity, detection, categories and the analytics rows
+promise: >-
+  A developer narrows the violations list down to the findings they care about using
+  search, severity, detection, categories and the analytics rows.
+flow:
+  id: filter-the-violation-list
+  fingerprint: sha256:ea7d9fc200e192d35a9dfffab2ed4eaeaa30258b42a010a70f05e945eb948f23
+interface:
+  path:
+    - cli/analyze
+    - web/open-dashboard-home
+    - web/open-repo-report
+    - api/get-api-repos-id-violations
+    - web/search-the-violation-list
+    - web/filter-violations-by-severity
+    - web/narrow-violations-to-llm-findings
+    - web/filter-violations-by-category
+    - web/clear-the-category-filter
+    - api/get-api-repos-id-analytics-top-offenders
+    - web/sort-top-offenders-by-critical-count
+    - web/scope-violations-to-a-top-offender
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
+    - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
+    - sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02
+    - sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8
+    - sha256:e9acaea6d38040f1fab95eab43b48530b85545487c32c6e071bdda212898f723
+    - sha256:0e3b1ca745de56bf25056c3d6f96b1ff8bb378f126e3607c0733995d553906b7
+    - sha256:443701ef7e9295664459c180e548c8393ad77fb0d4e7246df117aa24147b3b14
+    - sha256:18a5373cac7ad9ac45654464f5558e0d0cd58e247a36ba59fc85d9acfce3de26
+    - sha256:20d30c8fda90f6423876dc6b99ee8c4fa849502a5a9477da7e58bd99b961c8f5
+    - sha256:e256ac3c6a19dcc62b2cb36abf570fbb2d237765d95717290b85b5a7681dfebd
+    - sha256:44dcd33611b1fc05785831e67c34e5261fe75340e0b07a4caa426ef2b721f3c3
+binds:
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: violations
+    fingerprint: sha256:0b9e2cdf8095b12759c296941f18496d509e77771f0113f32b44186125318023
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: filters
+    fingerprint: sha256:14c3abc83ca26df5fec65c13cff56689fadff1e65e570b579d1ac6bc2566e14f
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: getting-around
+    fingerprint: sha256:b64d05bfdef7ef3cce1d95c719c53884d5a0c419c170d00526cc29d0f98842b2
+  - doc: reference/spec-docs/dashboard/analytics.mdx
+    section: top-offenders
+    fingerprint: sha256:760352abbe60c1aeb1fae94ec940530554d58c82fc452f2e4d253b2c7e8d5e9d
+needs:
+  - analysis-target
+  - claude-login
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--llm'
+      - '--llm-transport'
+      - cli
+      - '--no-stash'
+      - '--no-skills'
+    cwd: .tc-supplied/analysis-target
+    timeoutMs: 1800000
+    expect:
+      exit: 0
+      stdout:
+        matches: '\d+ violations \('
+    note: >-
+      The analysis the whole walk reads, over the bound project — settled CLI ground this
+      flow does not re-prove. It runs WITH the model rules because the Detection switch
+      cannot be told from a stub without findings of both kinds, and `--llm-transport
+      cli` reaches the model through the supplied Claude Code login rather than a saved
+      selection. Nothing about the supplied project is asserted beyond the run having
+      found something: its findings are not knowable at authoring time, so every
+      assertion below is structural or taken from the run itself.
+  - driver: web
+    navigate: /
+    expect:
+      visible:
+        role: link
+        name: analysis-target
+    note: >-
+      The front page over the same sandbox, where the analyzed project is now a card.
+      Prepares the click below and proves nothing: the repository list is the
+      empty-state flow's ground.
+  - driver: web
+    click:
+      role: link
+      name: analysis-target
+    expect:
+      url:
+        contains: /repos/analysis-target
+      visible:
+        role: textbox
+        name: Search violations
+      text:
+        matches: '^(?=[\s\S]*Top Offenders)(?=[\s\S]*Code Hotspots)[\s\S]*$'
+    note: >-
+      Home, and the split it promises: two of the analytics panels on one side and the
+      violations list on the other, each asserted by something only its own half has —
+      the offender and hotspot tables for analytics, the search box that sits above the
+      list for the findings. DELIBERATELY PARTIAL on the second claim tagged here: the
+      divider between the halves is a bare element with no role and no accessible name,
+      and dragging is not in the vocabulary (navigate, click, fill, expect — there is no
+      press-move-release), so that the divider RESIZES the two halves is not proved
+      anywhere in this scenario. Filed as a driver gap; a candidate for a manifest gap
+      row if the vocabulary does not grow.
+    milestone:
+      - dashboard-violations-home-splits-analytics-and-list
+      - dashboard-violations-divider-resizes-the-halves
+  - request:
+      method: GET
+      path: /api/repos/analysis-target/violations?limit=200
+    capture:
+      firstTitle: violations[0].title
+      firstDesc: violations[0].content
+      firstSev: violations[0].severity
+      total: total
+    expect:
+      status: 200
+      json:
+        total:
+          compare:
+            atLeast: 1
+        violations[0].severity:
+          matches: ^(critical|high)$
+    note: >-
+      The same list the page is rendering, read as data — the order the server delivers
+      is the order the client paints, so this is where ordering can be asserted at all.
+      The first finding of the whole set is at the top severity band the bound project
+      carries findings in, which is what "sorted by severity" means for a target whose
+      counts are not knowable here. HONEST LIMIT: the newest-first tiebreak WITHIN a
+      severity is not observable — no card renders a timestamp and two rows cannot be
+      compared to each other by any matcher — so this step proves the severity half
+      only. The captures are what makes the rest of the walk structural: this finding's
+      title, its description and its severity, plus the unfiltered total.
+    milestone:
+      - dashboard-violations-list-sorted-by-severity-then-newest
+  - driver: web
+    expect:
+      text:
+        contains: '${captured:firstTitle}'
+    note: >-
+      The page is showing the analysis it says it is showing: the finding the store
+      returns first for this repository is on screen. Structural rather than
+      content-exact — the title comes from the bound project through the API, never from
+      this file.
+    milestone:
+      - dashboard-violations-list-shows-active-findings-of-the-viewed-analysis
+  - driver: web
+    expect:
+      text:
+        matches: '^(?![\s\S]*Next page)(?![\s\S]*[Pp]age \d+ of)(?![\s\S]*Showing \d+.\d+ of)[\s\S]*$'
+    note: >-
+      "No pages to click through", asserted as the absence of every pagination affordance
+      a paginated list would have to render — a next-page control, a page-N-of-M counter,
+      a showing-X-to-Y band (the last is the CLI listing's own wording, which is what
+      this surface would look like if it paged). HONEST LIMIT: that the list SCROLLS
+      continuously past the viewport cannot be shown — there is no scroll verb, and the
+      list mounts only the rows near the viewport — so what is proved is the negative the
+      doc states, not the scrolling itself.
+    milestone:
+      - dashboard-violations-list-scrolls-continuously
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations
+    value: '${captured:firstDesc}'
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Filtered by)[\s\S]*$'
+        contains: '${captured:firstTitle}'
+    note: >-
+      Search, given a term that appears in the finding's DESCRIPTION — the description
+      itself, captured from the store — and the finding it belongs to survives the
+      narrowing. That is the half of the claim a capture can express: the term is not the
+      title, so a search matching titles alone would drop the card and fail here. The
+      target-name half (a term that is only the name of the service or module a finding
+      is attached to) is not expressible, because a capture returns a whole field and no
+      matcher can pull a name out of one; filed as a gap.
+    milestone:
+      - dashboard-violations-search-matches-title-description-and-target
+  - driver: web
+    click:
+      role: button
+      name: Severity
+    expect:
+      text:
+        matches: '^(?=[\s\S]*All severities\s*\d)(?=[\s\S]*Critical\s*\d)(?=[\s\S]*High\s*\d)(?=[\s\S]*Medium\s*\d)(?=[\s\S]*Low\s*\d)[\s\S]*$'
+        compare:
+          number: 'All severities\s*(\d+)'
+          atLeast: 1
+          atMost: '${captured:total}'
+    note: >-
+      The severity control, opened. It offers the four levels the doc names (beside the
+      all-severities entry that clears it), and EVERY one of the five carries a number
+      right after its label — the live count the dropdown renders inside the option
+      itself. Requiring all five is the falsifiable half: this control counts zeros too,
+      unlike the category tabs below, which omit a count at zero, so an option without a
+      number here is a real regression rather than an empty band. The counts themselves
+      belong to the bound project and stay adjacency, with ONE exception: the
+      all-severities entry, whose number is compared against the analysis. It must be at
+      least 1 (the searched finding is on screen a step above, so the set these counts are
+      taken over is not empty) and at most the analysis's own unfiltered total, which is
+      what makes them counts OF this analysis rather than decoration. Not an equality, and
+      deliberately: the search entered above is still in force and the option counts follow
+      it, so the number here is the searched subset's, which no API call can restate.
+    milestone:
+      - dashboard-violations-severity-dropdown-offers-four-levels
+      - dashboard-violations-severity-options-carry-live-counts
+  - driver: web
+    click:
+      role: button
+      name: '${captured:firstSev}'
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Filtered by)(?=[\s\S]*${captured:firstSev})[\s\S]*$'
+        contains: '${captured:firstTitle}'
+    note: >-
+      Two controls now hold at once, which is the only state in which "they combine" can
+      fail. The severity chosen is the one the searched-for finding actually has, so a
+      list obeying BOTH filters must still contain it — and it does. A list that took
+      only the newer filter would have dropped the search, a list that took only the
+      search would not carry the severity chip: both are asserted here.
+    milestone:
+      - dashboard-violations-four-filters-combine
+  - request:
+      method: GET
+      path: /api/repos/analysis-target/violations?limit=200&severity=${captured:firstSev}
+    capture:
+      sevTotal: total
+    expect:
+      status: 200
+      json:
+        total:
+          compare:
+            atLeast: 1
+    note: >-
+      How many findings the whole analysis has at the severity now in force — the number
+      the category counts are checked against below. It proves nothing on its own; it is
+      the comparand that makes "the counts respond to the other filters" falsifiable
+      against a project whose numbers are not knowable here.
+  - driver: web
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Security)(?=[\s\S]*Bugs)(?=[\s\S]*Architecture)(?=[\s\S]*Performance)(?=[\s\S]*Reliability)(?=[\s\S]*Code Quality)(?=[\s\S]*Database)(?=[\s\S]*Style)(?=[\s\S]*(Security|Bugs|Architecture|Performance|Reliability|Database|Style)\s*\d)[\s\S]*$'
+        compare:
+          number: 'All\s*(\d+)'
+          atMost: '${captured:sevTotal}'
+    note: >-
+      The second filter row, read while the search and severity filters are in force — a state the searched finding itself survives, so the intersection cannot be empty. (First authored AFTER the detection switch: search targets a deterministic description, so the llm position emptied the intersection and the zero-omitted counts left nothing to capture — run 13-13Z. The switch now follows this read.) All nine tabs
+      are there (All is matched by the comparison below rather than by a lookahead, since
+      the bare word appears in several controls), and at least one tab carries a number —
+      counts are omitted at zero, so "every tab carries a count" can only be asserted
+      where a count exists. The comparison is the responding half: with a severity filter
+      set, the All tab cannot count more findings than the analysis HAS at that severity.
+      A count computed over the whole analysis instead would exceed it as soon as the
+      project carries findings at another severity, which the binding requires.
+    milestone:
+      - dashboard-violations-category-tabs-cover-nine-categories
+      - dashboard-violations-category-tabs-carry-counts
+      - dashboard-violations-counts-respond-to-the-other-filters
+  - driver: web
+    click:
+      role: button
+      name: LLM
+      exact: true
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Filtered by)(?=[\s\S]*([Dd][Ee][Tt][Ee][Cc][Tt][Ii][Oo][Nn]))(?=[\s\S]*llm)[\s\S]*$'
+    note: >-
+      The third position of the detection switch, taken. What the page says about it is
+      the chip: a detection filter is in force and its value is the model-detected side —
+      which is why the bound project has to carry LLM findings at all. HONEST LIMIT: the
+      All and Det positions are not exercised here; their labels collide with the
+      category tab All and with each other under substring matching, and the switch marks
+      its selection with colour alone, so a step pressing them could not assert what
+      changed. Their own flows are the honest home for them.
+    milestone:
+      - dashboard-violations-detection-switch-is-three-way
+  - driver: web
+    click:
+      role: button
+      name: Code Quality
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Filtered by)(?=[\s\S]*code-quality)(?=[\s\S]*([Ss][Ee][Vv][Ee][Rr][Ii][Tt][Yy]))(?=[\s\S]*([Dd][Ee][Tt][Ee][Cc][Tt][Ii][Oo][Nn]))(?=[\s\S]*([Ss][Ee][Aa][Rr][Cc][Hh]))[\s\S]*$'
+    note: >-
+      Everything active at once, and the row that says so: a Filtered-by row above the
+      list carrying a chip per filter — the category just chosen, the severity, the
+      detection type and the search. Each is asserted through the chip's own kind word,
+      which is text this row alone renders.
+    milestone:
+      - dashboard-violations-active-filters-show-as-chips
+  - driver: web
+    click:
+      role: button
+      name: Clear category filter
+    expect:
+      text:
+        matches: '^(?![\s\S]*CATEGORY)(?=[\s\S]*Filtered by)(?=[\s\S]*([Ss][Ee][Vv][Ee][Rr][Ii][Tt][Yy]))(?=[\s\S]*([Dd][Ee][Tt][Ee][Cc][Tt][Ii][Oo][Nn]))[\s\S]*$'
+    note: >-
+      One chip's X pressed, and the claim is the asymmetry: the category chip and its
+      value are GONE while the severity and detection chips stand exactly where they
+      were. The negative is the chip's KIND word `CATEGORY` (the rendered-uppercase
+      label only a category chip carries), not the value `code-quality` — the first
+      authored form asserted the value absent page-wide, and the SUPPLIED fixture's own
+      filenames (`code-quality-misc.ts` in the hotspots table) satisfied the substring;
+      a page-wide negative on content a bound instance can legally contain is exactly
+      what the structural-assertions rule forbids (run 13-38Z). ALSO TAGGED HERE, and deliberately unproved: the Home rail
+      icon's violation badge. The badge is a bare number that the icon's own accessible
+      name excludes, with no words beside it to anchor a match, so neither its value nor
+      its movement as this filter cleared can be asserted; filed as a gap (the rail icon
+      needs the count in its accessible name).
+    milestone:
+      - dashboard-violations-chip-x-clears-one-filter
+      - dashboard-overview-home-icon-carries-the-violation-count
+  - request:
+      method: GET
+      path: /api/repos/analysis-target/analytics/top-offenders
+    capture:
+      offender: offenders[0].name
+    expect:
+      status: 200
+      json:
+        offenders[0].name:
+          exists: true
+        offenders[0].criticalCount:
+          exists: true
+        offenders[0].highCount:
+          exists: true
+    note: >-
+      The name of the service or module the analytics column ranks first — the row the
+      next step clicks. Taken from the app rather than written here, because which
+      service a bound project ranks first is not knowable at authoring time.
+    milestone:
+      - dashboard-analytics-top-offenders-shows-critical-and-high-counts
+  - driver: web
+    click:
+      role: columnheader
+      name: Critical
+      exact: true
+    expect:
+      text:
+        contains: Critical ↓
+    note: The Critical header becomes the active descending sort key.
+    milestone:
+      - dashboard-analytics-top-offenders-header-re-sorts
+  - driver: web
+    click:
+      role: row
+      name: '${captured:offender}'
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Filtered by)(?=[\s\S]*([Ss][Ee][Rr][Vv][Ii][Cc][Ee]))[\s\S]*$'
+        contains: '${captured:offender}'
+    note: >-
+      A Top Offenders row is a filter: clicking it scopes the list to that service or
+      module, and the page says so with a chip naming it. The chip's kind word is what
+      distinguishes the scoping from the row merely being highlighted.
+    milestone:
+      - dashboard-violations-top-offender-row-scopes-the-list

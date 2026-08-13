@@ -42,7 +42,6 @@ setup:
           - src/index.js
         message: seed stash sample
 normalize: []
-driver: cli
 steps:
   - write:
       src/index.js: |

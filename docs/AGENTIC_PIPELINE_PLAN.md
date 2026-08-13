@@ -94,14 +94,15 @@ Binding decisions:
   promise it as a feature. Testing through the promised surface is
   enough; the un-promised one is a tool, not a subject.
 - **The driver belongs to the STEP, not the scenario** (foundational;
-  decided 2026-08-09). A scenario is driver-agnostic: each step declares
-  how it acts (a CLI invocation, an API request), and the sandbox is ONE
-  world that can both start the service and run the CLI — because real
-  promises span surfaces ("create it through the API, the CLI lists it")
-  and a scenario locked to one driver cannot state them. The
-  scenario-level driver is derived, "the drivers its steps use". Every
-  workstream designs against this; nothing new may deepen the
-  scenario-level-driver assumption. Migration details (what "per
+  decided 2026-08-09; LANDED 2026-08-12). A scenario is driver-agnostic: each
+  step declares how it acts (a CLI invocation, an API request), and the
+  sandbox is ONE world that can both start the service and run the CLI —
+  because real promises span surfaces ("create it through the API, the CLI
+  lists it") and a scenario locked to one driver cannot state them. There is
+  now ONE scenario schema and NO scenario-level driver field: the drivers a
+  scenario exercises are read off its steps, and so is which executor it
+  takes. Every workstream designs against this; nothing new may reintroduce
+  the scenario-level-driver assumption. Migration details (what "per
   surface" coverage counts under mixed scenarios) live with the §9
   entry.
 - **The word is "scenario", never "test"**, in every user-facing surface (CLI
@@ -196,24 +197,56 @@ tool/outcome schema gets **one re-ask** (invalid output quoted back, same
 turn budget); two consecutive malformed turns end the session with a
 structured `malformed` failure — never an exception, never a stranded task.
 
-**Automatic resume (decision 2026-08-12, from Sarkis's §6 review).** A
-session that exhausts its turn budget may be RESUMED — re-entered with the
-same session id, the same context, and a fresh budget — up to `maxResumes`
-times within the one run; the count is a parameter each session type sets
-(§§6–8), defaulting to 0 so a session that does not opt in behaves exactly
-as before. The reason is scale: at documentation scale a budget that binds
-is the NORMAL path, not a rare failure, and the only thing that can trigger
-a manual resume is the user re-running the whole command — which would make
-one scan a hand-driven sequence of 3–5 invocations. Rules: resumption is
-automatic and invisible to the caller; each resume emits its own transcript
-event, so the turns are attributable; the hard limit is
-`(maxResumes + 1) × budget` and is never negotiable at runtime; and a
-session that exhausts the LAST budget ends exactly as it does today — a
-loud structured `budget-exhausted` outcome naming what it did not reach,
-never an "I found nothing". Resume grants time; it never grants leniency.
+**Hard limit + resume (decision 2026-08-11).** The turn budget is a HARD
+LIMIT with one purpose: no session may loop forever. Reaching it IS a
+failure — the session ends with the structured `budget-exhausted` failure
+outcome naming what it did not reach; it is never a success, never a
+partial success, never a silent truncation, and no workstream may
+re-interpret it. The other half of the same decision is RESUME,
+implemented once in `runAgentLoop`: every session persists its transcript
+and provider session id as it runs, so a session that failed on the limit
+(or was interrupted) can be resumed with a fresh budget and continues from
+the exact point it stopped — claude-code mode re-enters via
+`--resume <session>`, api mode replays the persisted message history, and
+resume also accepts a new observation message (the shape §8.12's fidelity
+re-entry consumes). Command re-runs offer resume over restart. Workstreams
+set NUMBERS only — each session type's hard limit and token ceiling — plus
+the session definitions §3.2 assigns them (prompt, inputs, tools,
+done-condition). All limit mechanics, the failure semantics, and resume
+live in the shared loop; no workstream section defines or re-implements
+any of it.
+
+**No deterministic substitution on failure (decision 2026-08-11).** When
+a session fails — budget-exhausted, malformed, transport error — the
+engine NEVER falls back to a deterministic approximation of the
+session's job and never completes the work another way. The failure
+persists as a structured status in the command's result JSON (the
+store's existing convention: scan's `llmFailures`, generate's
+`result.json` / `llm-failed`), the command reports it loudly, and the
+path forward is resume (above) or a re-run. Deterministic-FIRST is
+unaffected: running a deterministic path BEFORE deciding a session is
+needed (§7.1) is design, not fallback. What is forbidden is
+deterministic work standing in for a failed session's outcome.
+
+**Resume is AUTOMATIC, N times per run (decision 2026-08-12, from
+Sarkis's §6 review).** The mechanics above are unchanged; what changes is
+who triggers them. Resume as decided on 2026-08-11 is offered on a command
+re-run — a user action — and at documentation scale that is not enough: a
+budget that binds is the NORMAL path there, not a rare failure, so a
+single scan would become a hand-driven sequence of 3–5 invocations of the
+whole command. So the loop itself re-enters an exhausted session with a
+fresh budget, up to `maxResumes` times within the one run, before the
+failure surfaces at all. The count is a NUMBER each session type sets
+(§§6–8) per the rule above, defaulting to 0 so a session that does not opt
+in behaves exactly as it does today. Each resume emits its own transcript
+event, so turns stay attributable; the hard limit becomes
+`(maxResumes + 1) × budget` and is never negotiable at runtime; and the
+session that exhausts the LAST budget fails exactly as this section
+already requires — `budget-exhausted`, naming what it did not reach.
+Resume grants time, never leniency.
 
 **Module placement.** The loop (`runAgentLoop`: turn budget, token ceiling,
-tool dispatch, transcript events, re-ask) lives in
+tool dispatch, transcript events, re-ask, session persistence + resume) lives in
 `packages/shared/src/llm/agent-loop.ts` — transport-agnostic, next to the
 seam, exported through `transport.ts` like `guardrail.ts`. The claude-code
 turn adapter lives beside `cliTransport` in `transport.ts`; the api turn
@@ -260,6 +293,32 @@ call counts, so the estimate is rebuilt rather than patched:
   with which turn ranges, and what its caches exclude. This common section
   fixes only the principles and the presentation shape, so all three
   commands present the same estimate shape to the user.
+
+### 3.6 Observability (decision 2026-08-11, generalizing §8.7)
+
+Common to EVERY agentic command (scan, setup, generate — any command
+that runs sessions); workstream sections define only their own display
+specifics on top of it.
+
+- **The dashboard gets everything, live.** The loop's transcript events
+  (system, turn, reply, tool result, re-ask, outcome,
+  budget-exhaustion) append to a gitignored jsonl artifact per work
+  item as they happen; the dashboard server's existing store watcher
+  tails the files and forwards appended lines over the existing
+  sockets. The CLI knows nothing about the dashboard — if it is up you
+  watch live, if not the same files replay later. One append-only file,
+  two readers; no CLI↔server coupling. Transcripts persist with the
+  run, so "why does this output look like this" is answered by reading,
+  at any later time.
+- **The CLI shows simple progress only** — continuously moving counters
+  that always sum, no per-item rows, no per-turn detail — and ALWAYS
+  prints the dashboard deep link to the live view at start
+  ("watch live: <url>").
+- **Progress renders in exactly one place**: the dashboard's live
+  streaming view. The dashboard shows a toast linking to it; no
+  separate progress panel for streaming commands. `guard run` keeps its
+  bounded progress panel as today — a run is bounded execution, not a
+  stream to follow.
 
 ## 4. The reference corpus (the benchmark)
 
@@ -418,21 +477,23 @@ this workstream also acquires.
 
 STATUS: design settled 2026-08-11, revised 2026-08-12 (owner: Doil).
 §§6.1–6.5 are the binding design; implementation may start per the
-phasing in §6.5. The 2026-08-12 revision answers Sarkis's review, and
-each answer is stated where it binds: automatic resume becomes a loop
-capability (§3.3) because at documentation scale an exhausted budget is
-the normal path, not a rare failure; engine-side splitting is REMOVED
-rather than assigned an owner (§6.1), because its blind spot is a set of
-doc pairs no corpus can record, and breadth is instead settled by the
-area-settling session that owns the label (§6.3); the cache records each
-session's tool read-set so a changed read invalidates the entry (§6.5,
-Option B); and the overlap outcome now reports the sections it opened, a
-skim detector the review's own budget arguments cannot supply (§6.2).
-Budgets are settled against a real corpus for the first time (§6.4). One
-question is open and does not block it: `transform-gaps.md` G10 and G12
-name Spec Scan as the claims store's owner, against the 2026-08-06
-decisions cited in the boundary above. If those decisions are the ones
-that move, the boundary moves with them.
+phasing in §6.5. The one open question is CLOSED (2026-08-11, Mushegh):
+claims stay with Guard Generate per the 2026-08-06 decisions;
+`transform-gaps.md` G1, G2, G10 and G12 carried a stale Spec Scan
+ownership and have been corrected to match.
+
+The 2026-08-12 revision answers Sarkis's review, each answer stated where
+it binds: resume becomes AUTOMATIC and N-per-run (§3.3), because at
+documentation scale an exhausted budget is the normal path and a
+user-triggered resume would make one scan several invocations;
+engine-side splitting is REMOVED rather than assigned an owner (§6.1),
+because its blind spot is a set of doc pairs no corpus can record, and
+breadth is instead settled by the area-settling session that owns the
+label (§6.3); the cache records each session's tool read-set so a changed
+read invalidates the entry (§6.5, Option B); and the overlap outcome
+reports the sections it opened, a skim detector the review's own budget
+arguments cannot supply (§6.2). Budgets are settled against a real corpus
+for the first time (§6.4).
 
 **Boundary.** This workstream owns everything from doc acquisition to
 `specs/corpus.json`, and nothing after it. Acquisition is in scope
@@ -461,11 +522,14 @@ dropped on parse — so the scope sentence above names no chains.
 stage that grows fastest — overlap — is bounded by giving each session
 an explicit turn budget and letting it narrow its own reading (outlines
 first, drilling in only where topics collide), never by the engine
-pre-filtering what it will consider. A bound that binds is REPORTED, so
-a reader can tell "no overlap found" from "the budget ran out";
-`CuratedCorpusSchema` v3 has no field for this, and the gap is recorded
-in §6.2. Silently reducing what the engine considers is the one failure
-this workstream refuses.
+pre-filtering what it will consider. The limit itself — hard cap,
+failure on exhaustion, resume — is §3.3's shared mechanism, not this
+workstream's to design. What is scan-specific is PERSISTENCE: a bound
+that bound must be readable from the corpus itself, so a reader can tell
+"no overlap found" from "the budget ran out"; `CuratedCorpusSchema` v3
+has no field for this, and the gap is recorded in §6.2. Silently
+reducing what the engine considers is the one failure this workstream
+refuses.
 
 **A bound scales by RESUMING, never by dividing** (decision 2026-08-12,
 from Sarkis's §6 review). A budget that binds is answered by granting the
@@ -569,11 +633,13 @@ into a per-doc session; its disposition is settled in §6.3.
   area `truecourse/code-analysis` and recorded the reason as "a product
   axis the reference never chose", because the authoring path never
   reads the tagger's prompt and `core/code-analysis` was the stated
-  answer all along. Under §3.2 every session ends on a structured
-  outcome, so the design must decide whether the doc-curation session's
-  done-condition VALIDATES the product axis or whether a deterministic
-  backstop corrects it afterwards — the scan already runs one such
-  backstop for third-party drops (`thirdPartyRestored`).
+  answer all along. Settled per §3.3's no-substitution rule
+  (2026-08-11): the axis is validated by SESSIONS — the doc-curation
+  session proposes it and the area-settling session (§6.3) adjudicates
+  it — and no deterministic backstop corrects agent output afterwards; a
+  session that cannot settle the axis fails and persists that status.
+  (The current engine's `thirdPartyRestored` backstop is the old
+  pattern, not a precedent to extend.)
   `transform-gaps.md` G29 states this as a forced axis; the axis is not
   forced — `core` exists for exactly this case.
 - **The corpus cannot say how complete it is.** §6.1's principle
@@ -594,23 +660,23 @@ into a per-doc session; its disposition is settled in §6.3.
 
 ### 6.3 Sessions
 
-Per §3.2, every LLM task is an agent session. Common rules: one model
-(§3.4), the standard malformed-turn policy (§3.3), a per-session turn
-budget and token ceiling, and — where the session type sets one — a count
-of AUTOMATIC RESUMES (§3.3): exhausting the budget re-enters the same
-session with a fresh one, up to `maxResumes` times, and the hard limit is
-`(maxResumes + 1) × budget`. Budgets below are settled by the 2026-08-12
-field run except where marked provisional (§6.4).
+Per §3.2, every LLM task is an agent session. The common rules are §3's
+entirely — one model (§3.4), the malformed-turn policy, the hard turn
+limit that fails on exhaustion and resumes (§3.3). This section sets only
+the NUMBERS and each session's prompt, inputs, tools, and done-condition.
+Three numbers per session type, not two: the turn budget, the token
+ceiling, and `maxResumes` (§3.3), which makes the effective hard limit
+`(maxResumes + 1) × budget`. The numbers below are settled by the
+2026-08-12 field run except where marked provisional (§6.4).
 
-Two rules follow from §6.1's principle. A session's turn budget IS the
-bound, so a session that exhausts it ends on a structured
-`budget-exhausted` outcome naming what it did not reach — never an "I
-found nothing" that reads like completeness; the loop already emits the
-matching transcript event (§3.3), and the corpus field for it is the
-§6.2 schema addition. And a step whose deterministic path settles
-everything runs NO session: discovery (the repo walk plus the registered
-web sources), area grouping, the heading-widened membership net, and
-persistence are free string work and stay that way.
+Two rules follow from §6.1's principle. Exhaustion semantics are the
+loop's (§3.3); the scan adds only WHERE that failure persists — the
+corpus field of §6.2 — so "no overlap found" and "the budget ran out"
+stay distinguishable in the committed file, never an "I found nothing"
+that reads like completeness. And a step whose deterministic path
+settles everything runs NO session: discovery (the repo walk plus the
+registered web sources), area grouping, the heading-widened membership
+net, and persistence are free string work and stay that way.
 
 **What the agent shape buys the scan.** Generate's sessions earn their
 tools by acting on the world — author, run, repair. The scan reads, so
@@ -729,10 +795,11 @@ Three sessions, in order; each consumes the one before it.
   twice. Only when the third budget is gone does it end
   `budget-exhausted` — and that outcome is a real result, not a failure to
   retry: the docs it reached were compared against the entire area, and
-  the ones it did not are named. The engine never splits an area here.
-  Breadth is settled one stage earlier, by the session that owns the label
-  (above); by the time an overlap session runs, its area is the subject it
-  is going to be.
+  the ones it did not are named. The engine never splits an area here
+  (the 2026-08-11 wording, which split after resumes, is superseded by
+  §6.1's 2026-08-12 decision). Breadth is settled one stage earlier, by
+  the session that owns the label (above); by the time an overlap session
+  runs, its area is the subject it is going to be.
 
 There is no relation session. Doc-to-doc relations were removed from the
 design (§6.1) and resolution is section-scoped: the overlap session
@@ -1167,13 +1234,15 @@ That is enforced, not hoped for:
 
 ### 7.4 Sessions (final; decisions 2026-08-07)
 
-Per §3.2, every LLM task is an agent session. Common rules: one model
-(§3.4), the standard malformed-turn policy (§3.3), a per-session turn
-budget (defaults below, provisional until the reference benchmark run
-calibrates them) and token ceiling. Per the deterministic-first
-principle (§7.1), a step whose deterministic path settles everything
-runs NO session at all — §3.2 mandates the call shape of LLM tasks, not
-that every step involve one.
+Per §3.2, every LLM task is an agent session. The common rules are §3's
+entirely — one model (§3.4), the malformed-turn policy, the hard turn
+limit that fails on exhaustion and resumes (§3.3). This section sets
+only the NUMBERS (defaults below, provisional until the reference
+benchmark run calibrates them) and each session's prompt, inputs,
+tools, and done-condition. Per the deterministic-first principle
+(§7.1), a step whose deterministic path settles everything runs NO
+session at all — §3.2 mandates the call shape of LLM tasks, not that
+every step involve one.
 
 - **Recipe repair session** (turn budget 15). The deterministic
   propose→verify path stays primary and runs first; a deterministic
@@ -1652,15 +1721,8 @@ already one. These are the seed definitions for the owner to refine.
 
 The split (decision 2026-08-06, supersedes both the #857 display spec and
 the earlier per-flow-rows CLI draft): the CLI shows simple progress; the
-dashboard gets everything.
-
-- **No progress panel for the streaming commands** (decision 2026-08-08,
-  scoped 2026-08-08): for scan, setup, and generate — the agentic,
-  streaming work — the dashboard shows a TOAST with a link to the live
-  streaming view; progress renders in exactly one place, the view the
-  toast links to, and the progress panel dies for those commands with
-  the implementation. `guard run` KEEPS its current progress panel as it
-  exists today (a run is bounded execution, not a stream to follow).
+dashboard gets everything. This is now the COMMON rule of §3.6 for every
+agentic command; what follows is generate's own display specifics.
 
 - **CLI — simple progress.** One continuously updating summary built from
   the partition counter that always sums —
@@ -1702,9 +1764,11 @@ dashboard gets everything.
   everywhere. The owner formalizes this into the workstream's estimation
   algorithm per §3.5 (session types, work items, turn ranges, cache
   exclusions).
-- **Budgets**: per-flow turn cap (default ~8) and token ceiling; the ledger
-  caps attempts across runs. A budget-exhausted worker retires the flow with
-  its transcript — loud, in-run.
+- **Budgets**: the numbers only — per-flow turn cap (default ~8) and token
+  ceiling; the hard-limit and resume mechanics are §3.3's. Exhaustion is a
+  failed session per §3.3; the ledger caps attempts across runs, so a
+  budget-exhausted worker is ledgered like any failed attempt, and past
+  the cap the flow retires with its transcript — loud, in-run.
 
 ### 8.9 Implementation plan (seed record)
 
@@ -1817,9 +1881,9 @@ at settle.
 **Verification stays outside the agent.**
 - In-loop fidelity: when the loop settles a PASSING scenario, the existing
   fidelity runner (fresh context, judge model) reviews it before acceptance;
-  a high-confidence flag RESUMES the still-open session (the loop grows a
-  `resume` option: prior messages + sessionId + a new observation message)
-  for one heal attempt; a second flag rejects + ledgers exactly as today.
+  a high-confidence flag RESUMES the still-open session with the flag as
+  the new observation (the loop's shared resume capability, §3.3) for one
+  heal attempt; a second flag rejects + ledgers exactly as today.
 - Confirmation: settled-passing candidates from all workers batch into ONE
   final birth round in fresh sandboxes (today's machinery, kept — the gate
   of record). A confirm flip re-opens the session once with the evidence
@@ -1906,19 +1970,31 @@ fixes to the run machinery itself.
   interrupted scan or generate resumes from cache on the next run) stay
   recorded gaps rather than growing process-control machinery.
 - **The driver belongs to the STEP, not the scenario** (decided
-  2026-08-09). A real promise often spans surfaces — "create it through
-  the API, the CLI lists it" — and a scenario that is wholly one driver
-  cannot state it. The target: a scenario is driver-agnostic; each step
-  declares how it acts (a CLI invocation, an API request), the sandbox
-  is ONE world that can both start the service and run the CLI, and the
-  step detail already renders its driver as a per-step chip. The
-  scenario-level driver field becomes derived ("the drivers its steps
-  use"); what "one scenario per (flow, surface)" and per-driver coverage
-  counting mean under mixed scenarios is redefined by the owning
-  workstreams when they land this — the decision here is the principle,
-  not the migration. Sequenced behind the api reference wave: the
-  current api-family flows do not need mixing; the first flow that
-  states a cross-surface promise does.
+  2026-08-09). STATUS: LANDED 2026-08-12 (the field is GONE, not derived).
+  A real promise often spans surfaces — "create it through the API, the CLI
+  lists it" — and a scenario that is wholly one driver cannot state it. A
+  scenario is now driver-agnostic: each step declares how it acts (a CLI
+  invocation, an API request), the sandbox is ONE world that can both start
+  the service and run the CLI, and the step detail renders each step's driver
+  as its own chip. What landed:
+  - ONE `GuardScenarioSchema` (no per-driver variants, no discriminator). A
+    legacy `driver:` key is accepted and DROPPED at parse, so corpora
+    committed before the cut still load; nothing writes it again.
+  - Which executor a scenario takes is DERIVED — `isApiServerScenario`: every
+    executed step an api verb ⇒ the recipe's booted server; anything else ⇒
+    the sandbox. The runner's pools, its preparation gate and its ordering all
+    read that one predicate.
+  - What a scenario EXERCISES is derived the same way —
+    `guardScenarioDrivers`, registry order — and `scenarios/manifest.json`
+    records it per scenario as `drivers: GuardDriverId[]` (replacing
+    `surface`, which is folded to a one-driver list on read). Per-driver
+    coverage counting is a UNION: a mixed scenario counts under EACH driver
+    its steps use. That fixed a live defect — every mixed scenario in the
+    reference corpus (17 of 51) was recorded as CLI-only, so the coverage
+    classification lied about it.
+  "One scenario per (flow, surface)" is unchanged as an AUTHORING unit: the
+  surface a flow is authored for is still the generator's own, and it names
+  the file's id.
 - **A step can edit only whole files — grow a patch step** (decided
   2026-08-09: build). STATUS: LANDED 2026-08-09 (JSON patch step, runner-only vocabulary). A flow that must change ONE field of a supplied
   instance's structured file (break the build command in the registered
@@ -1970,6 +2046,17 @@ accessible names, web-surface recipe boot, mapper diagnostics) with the
 re-scope note; first doc-drift candidate logged there (the docs'
 "Shield icon" Rules-panel entry point vs the client's "Browse Rules"
 control).
+
+STATUS UPDATE 2026-08-11 — the Code Analysis-only reference wave now carries
+55 web interfaces inside a 114-interface catalog and 51 settled flows/scenarios.
+Seven new flows cover committed-state stashing, clean-tree handling, the
+deterministic-only LLM path, path registration and first-analysis state,
+non-git repositories, repository rule settings, and the Rules panel. Existing
+dashboard flows now also cover flow search/playback, shared tabs, expanded
+schemas, history/diff details, Top Offenders sorting, hotspot severity, folder
+toggles, and graph connection state. All 301 dashboard claims are accounted for
+exactly once: 222 in executable flows and 79 as evidence-based no-flow claims.
+G90 is closed; remaining driver limitations are recorded under G83–G88/G91.
 
 Sequencing and method are the same reference-first ladder as CLI and API,
 and strictly after the API path is stable:
