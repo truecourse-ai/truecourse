@@ -25,3 +25,4 @@ assets/*.pdf
 tests/fixtures/**/bin/
 tests/fixtures/**/obj/
 truecourse_tests/
+platai/

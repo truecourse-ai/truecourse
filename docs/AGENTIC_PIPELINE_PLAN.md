@@ -762,7 +762,7 @@ the one model's prices:
   BEFORE the doc sessions, so it cannot know whether re-tagging will
   actually move a label or leave a non-`core` product standing — the
   same honesty §7.7 applies to a recipe that may verify clean.
-- **overlap** — 1 × [3, 45] per area whose doc set (its kept docs plus
+- **overlap** — 1 × [2, 45] per area whose doc set (its kept docs plus
   its heading-widened members) holds at least one changed doc: budget 15,
   and the ceiling is the hard limit `(maxResumes + 1) × budget` because a
   resume is invisible to the caller and its turns are real spend (§3.3).
@@ -820,12 +820,40 @@ documentation scale this design has met:
   not predict (two 41-doc areas ran at 1.5 and 3.5 docs/turn). Flat budget,
   scaled by resumes, also keeps §6.3's shape: one number per session type.
 
-What remains uncalibrated is what this run could not exercise: the
-subdivision threshold (40 docs) is a judgment prompt whose effect on area
-sizes is unmeasured, and no session here ran under a real resume, so the
-`maxResumes` 2 ceiling is reasoned from observed pace, not observed
-behavior. Both are re-checked on the first loop-driven run and written
-back here.
+**Both open items observed, 2026-08-12** by a second pass over the same
+corpus at budget 15 with subdivision and resumes in place (still driven by
+hand — the shared loop does not exist — so the resume was implemented in the
+dispatch script, not the loop). Full evidence:
+`platai/platai-scan/CALIBRATION.md` (gitignored — customer corpus).
+
+- **The subdivision threshold (40 docs) holds, and its effect is now
+  measured.** It fired on 6 areas, divided 2 and defended 4 with stated
+  reasons. The largest area fell from 123 docs to 42; areas above 40 went
+  from 6 to 4. The result that most supports the §6.3 argument: the 38
+  sub-labels produced by dividing `endpoints` (123) and `auth` (51) ALL
+  routed into areas that already existed — the multi-doc area count went
+  73 → 72, and no area was created. The subjects were already in the
+  vocabulary; the docs had been parked under a word naming their template.
+- **`maxResumes` 2 is confirmed sufficient, and not yet proven tight.** 4
+  of 72 areas (5.6%) exhausted their first budget; all 4 closed on attempt
+  2; none needed a third. The 45-turn hard limit was never approached (the
+  deepest area finished at 29). Two of the four needed only 8 further
+  turns, which is the population a resume rescues and a division would
+  have mangled. The second resume remains headroom this corpus never
+  spent.
+- **The exhaustion rate went to zero.** v1 (budget 12, no resume, no
+  subdivision) ended 3 of 6 areas `budget-exhausted` with 50 docs
+  unreached; v2 ended 0 of 72 exhausted with 0 unreached.
+- **`sectionsOpened` earned its place.** v1 recorded no section count, and
+  its one comparable "completed" area (`notifications`, 42 docs, same
+  prompt) was missing 3 disagreements v2 found. A completed area without a
+  section count is not a judged area — which is exactly what §6.2 claims.
+
+One correction to the range above: the overlap floor of 3 turns is a turn
+too high. Small areas closed in **2**, and 55 of 72 areas finished in 8 or
+fewer, so `[2, 45]` is the honest range — with the same presentation
+caveat as doc curation, since quoting anything near the ceiling
+overstates a corpus whose median area costs 6.5 turns.
 
 ### 6.5 Implementation plan
 
