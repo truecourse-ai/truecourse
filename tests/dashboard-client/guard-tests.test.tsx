@@ -903,8 +903,12 @@ describe("the test, read inside its flow", () => {
     expect(screen.getByText("looks present")).toBeInTheDocument();
 
     // The failing step starts open; its record carries the reading under its
-    // own "on screen" label…
+    // own "on screen" label, AFTER the picture it is a reading of…
     const body = stepBody(2);
+    const labels = within(body)
+      .getAllByText(/^(expected|actual|at|page text|screen|on screen)$/)
+      .map((el) => el.textContent);
+    expect(labels.indexOf("on screen")).toBeGreaterThan(labels.indexOf("screen"));
     expect(within(body).getByText("on screen")).toBeInTheDocument();
     expect(
       within(body).getByText(/The Security filter is applied/),

@@ -326,9 +326,11 @@ function CheckRows({
 }
 
 /**
- * THE JUDGE'S READING, inside the failing step's Result tab — what a vision model
- * saw in the screenshot the step left behind, under its own label so it sits beside
- * the measured rows without ever reading as one of them. The `yes` sentence is
+ * THE JUDGE'S READING, under the PICTURE it read — what a vision model
+ * saw in the screenshot the step left behind, under its own label so it never
+ * reads as one of the measured rows above it. It follows the `screen` row
+ * because it is a reading OF that picture; a judged failure whose bytes are
+ * missing keeps the row, since the verdict is still the honest record. The `yes` sentence is
  * the whole reason the judge exists: a reader looking at a red step needs to
  * know the disagreement may be the assertion's, not the page's.
  */
@@ -433,7 +435,6 @@ function ResultPanel({
           </DiffRow>
         </>
       )}
-      {visual && <VisualJudgeRow visual={visual} />}
       {web && (
         <>
           <DiffRow label="at">
@@ -724,21 +725,30 @@ function StepBody({
       )}
       <ResultPanel {...panel} />
       <OutputPanel {...panel} />
+      {!picture && !panel.web?.screenshot && panel.visual && (
+        <VisualJudgeRow visual={panel.visual} />
+      )}
       {picture ? (
-        <DiffRow label="screen">
-          <div id={`guard-step-screen-${step.n}`} className="max-w-xl pt-1">
-            {picture}
-          </div>
-        </DiffRow>
+        <>
+          <DiffRow label="screen">
+            <div id={`guard-step-screen-${step.n}`} className="max-w-xl pt-1">
+              {picture}
+            </div>
+          </DiffRow>
+          {panel.visual && <VisualJudgeRow visual={panel.visual} />}
+        </>
       ) : (
         panel.web?.screenshot && (
           // The picture's bytes are not in this bundle — its recorded file
           // name is the honest remainder of the record.
-          <DiffRow label="screen">
-            <p className="pt-1 font-mono text-[11px] leading-snug text-muted-foreground">
-              {panel.web.screenshot}
-            </p>
-          </DiffRow>
+          <>
+            <DiffRow label="screen">
+              <p className="pt-1 font-mono text-[11px] leading-snug text-muted-foreground">
+                {panel.web.screenshot}
+              </p>
+            </DiffRow>
+            {panel.visual && <VisualJudgeRow visual={panel.visual} />}
+          </>
         )
       )}
       <InfoPanel step={step} />
@@ -815,6 +825,7 @@ function RecordedFailureBody({ failure }: { failure: GuardFailureDetail }) {
       </p>
       <ResultPanel {...panel} />
       <OutputPanel {...panel} />
+      {panel.visual && <VisualJudgeRow visual={panel.visual} />}
     </div>
   );
 }
