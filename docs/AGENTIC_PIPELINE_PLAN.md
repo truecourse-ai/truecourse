@@ -1270,6 +1270,20 @@ guard-generate plan, for the owner to refine.
 
 ### 8.2 Known problems the design must solve
 
+- **The scenario id still carries a surface and a counter.** Ids are
+  `<flow-id>.<surface>.<n>` (`review-a-repository-analysis.cli.1`), and
+  both suffixes are now dead. `<n>` can never legitimately reach `2`:
+  §2 binds ONE scenario per flow, and partial coverage stays
+  milestone-scoped inside it. `<surface>` predates the step-level driver
+  decision — a flow spanning web and api is ONE mixed test today, so the
+  segment records only the surface it happened to be authored as (the
+  reference PoC reads `.cli.1` while its steps drive cli, web and api),
+  which is the same lie the deleted scenario-level `driver` field told
+  one level up. Generate OWNS the id, so the fix lands here: the id
+  becomes the flow id alone. Nothing reads the shape (it is a name, not
+  a key), so the work is the write path plus a rename of the committed
+  corpora; do it with the authoring rewrite rather than as a standalone
+  churn of every file.
 - **Generate duplicates journey generation.** Today generate derives
   journeys itself, duplicating setup's job. After the split, journeys are
   a setup output only: generate consumes them, and when the sandbox
