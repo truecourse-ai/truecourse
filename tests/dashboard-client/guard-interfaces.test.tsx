@@ -794,7 +794,7 @@ describe('Interfaces tab — the surface filter', () => {
     );
   });
 
-  const bar = () => screen.getByRole('group', { name: 'Filter by surface' });
+  const bar = () => screen.getByRole('group', { name: 'Filter by driver' });
 
   it('offers a chip per surface the catalog HAS, counted by what it keeps', async () => {
     renderTab();
@@ -807,7 +807,7 @@ describe('Interfaces tab — the surface filter', () => {
     expect(within(bar()).queryByRole('button', { name: /^Desktop/ })).toBeNull();
   });
 
-  it('narrows to the surface clicked — its groups stay, the others go', async () => {
+  it('narrows to the drivers clicked — multi-select, a union like the Tests filter', async () => {
     const user = userEvent.setup();
     renderTab();
     await within(screen.getByTestId('panel')).findByText('cli/version');
@@ -817,14 +817,18 @@ describe('Interfaces tab — the surface filter', () => {
     expect(catalogOutline()).toEqual(['Web recipe', '# Web', '# rules', 'web/rules-page']);
     expect(within(bar()).getByRole('button', { name: 'Web 1' })).toHaveAttribute('aria-pressed', 'true');
 
-    // The chip's count never promised more than the list shows.
+    // A second chip WIDENS the selection — never a swap: both stay pressed and
+    // the list is the union of the two.
     await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
+    expect(within(bar()).getByRole('button', { name: 'Web 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(bar()).getByRole('button', { name: 'CLI 4' })).toHaveAttribute('aria-pressed', 'true');
     expect(
       catalogOutline().filter((line) => !line.startsWith('#') && !line.endsWith(' recipe')),
-    ).toHaveLength(4);
+    ).toHaveLength(5);
 
-    // Toggle-off restores the whole catalog.
+    // Toggling both off restores the whole catalog.
     await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
+    await user.click(within(bar()).getByRole('button', { name: 'Web 1' }));
     expect(catalogOutline()).toContain('# Web');
     expect(catalogOutline()).toContain('# CLI');
   });
@@ -1113,7 +1117,7 @@ describe('Interfaces tab — the recipe rows are the panel’s first rows', () =
     await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
 
     await user.click(
-      within(screen.getByRole('group', { name: 'Filter by surface' })).getByRole('button', { name: 'API 1' }),
+      within(screen.getByRole('group', { name: 'Filter by driver' })).getByRole('button', { name: 'API 1' }),
     );
     expect(catalogOutline()).toEqual(['API recipe', '# API', 'api/get-todos-id']);
   });
