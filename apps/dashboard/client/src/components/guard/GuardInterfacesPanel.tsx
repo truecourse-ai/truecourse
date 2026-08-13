@@ -227,7 +227,7 @@ export function GuardInterfacesPanel({
         match: (j, key) => j.type === key,
       }}
       noMatch="No interfaces match these filters."
-      // The MAIN pane carries the single Map CTA — the panel stays quiet.
+      // The MAIN pane says what an empty catalog means — the panel stays quiet.
       emptyText="No interfaces mapped yet."
       renderRow={(iface) => (
         <>

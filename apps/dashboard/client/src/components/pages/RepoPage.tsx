@@ -991,16 +991,6 @@ function RepoPageInner() {
         otherBusy={guardRun.running}
         stale={guardStaleness.generateStale}
       />
-    ) : leftTab === 'interfaces' ? (
-      // Map — the one FREE action: the analyzer + interface mapper are deterministic
-      // and LLM-free, so there is no estimate and no progress stream; the response
-      // is the fresh catalog and the tab swaps state from it.
-      <GuardSectionActions
-        kind="map"
-        onClick={() => void guardInterfaces.map()}
-        busy={guardInterfaces.mapping}
-        otherBusy={guardGen.busy || guardRun.running}
-      />
     ) : leftTab === 'guarddrifts' ? (
       // Run lives on the Drifts tab (it produces the results shown there).
       // Deterministic — no estimate; disabled while a generate is in flight.
@@ -1433,8 +1423,6 @@ function RepoPageInner() {
                 view={guardInterfaces.view}
                 loading={guardInterfaces.loading}
                 error={guardInterfaces.error}
-                mapping={guardInterfaces.mapping}
-                onMap={() => void guardInterfaces.map()}
                 tabs={guardInterfaceTabs}
                 commandTabs={guardCommandTabs}
                 recipe={guardFlows.view?.recipe ?? null}

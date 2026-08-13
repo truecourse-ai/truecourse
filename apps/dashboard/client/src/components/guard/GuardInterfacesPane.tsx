@@ -74,14 +74,12 @@ export function GuardInterfacesPane({
   view,
   loading,
   error,
-  mapping,
   tabs,
   commandTabs,
   recipe = null,
   recipeSurface = null,
   onCloseRecipe,
   prRef,
-  onMap,
   onOpenFlow,
 }: {
   /** Whose store the raw mode reads the open interface's entry out of. */
@@ -89,7 +87,6 @@ export function GuardInterfacesPane({
   view: GuardInterfacesView | null;
   loading: boolean;
   error: string | null;
-  mapping: boolean;
   tabs: GuardTabsState;
   /** The contract's command nav — `?gcmd=`, the same tab model as `tabs`. */
   commandTabs: GuardTabsState;
@@ -101,7 +98,6 @@ export function GuardInterfacesPane({
   onCloseRecipe?: () => void;
   /** The PR head ref scoping the raw read (EE); undefined at repo level. */
   prRef?: string;
-  onMap: () => void;
   onOpenFlow: (flowId: string) => void;
 }) {
   const { activeId, openTabs, open, close } = tabs;
@@ -165,16 +161,7 @@ export function GuardInterfacesPane({
         <EmptyState
           icon={Braces}
           title="No interfaces mapped yet"
-          body={
-            <button
-              type="button"
-              onClick={onMap}
-              disabled={mapping}
-              className="mx-auto mt-1 block rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-muted/40 disabled:opacity-60"
-            >
-              {mapping ? 'Mapping…' : 'Map · free, no LLM'}
-            </button>
-          }
+          body="The interface catalog has not been derived for this repository."
         />
       );
     }

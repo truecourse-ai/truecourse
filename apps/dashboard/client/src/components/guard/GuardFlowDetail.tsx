@@ -541,7 +541,14 @@ export function GuardFlowDetail({
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
-      <div className="min-w-0 border-b border-border bg-card px-6 py-4">
+      {/* The page's ONE vertical scroll, and the header scrolls WITH it — a
+          pinned title bar cost height the reading needs. x is clipped so a wide
+          line can only scroll its own block. */}
+      <div
+        data-pane
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
+      >
+      <div className="min-w-0 shrink-0 border-b border-border bg-card px-6 py-4">
         <div className="flex flex-wrap items-center gap-2">
           {/* The SAME word the flow wears in the list, in the SAME first position
               every guard row and header puts it — one vocabulary, one table. */}
@@ -611,17 +618,7 @@ export function GuardFlowDetail({
         )}
       </div>
 
-      {/* A flow WITH a test hands its whole remaining height to that test's
-          workspace, which never scrolls and gives its own panes the scroll. The
-          other bodies (a raw artifact, a why-no-test block, a second surface) are
-          documents, so the box keeps a vertical scroll for them. `overflow-y-auto`
-          alone would compute the x axis to `auto` too and let one wide line scroll
-          the whole page sideways, so x is clipped here and the data blocks scroll
-          themselves. */}
-      <div
-        data-pane
-        className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto overflow-x-hidden px-6 py-4"
-      >
+      <div className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-4">
         {raw ? (
           // The stored artifact, whichever one this flow has.
           test ? (
@@ -773,6 +770,7 @@ export function GuardFlowDetail({
             )}
           </>
         )}
+      </div>
       </div>
     </div>
   );

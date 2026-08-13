@@ -125,6 +125,17 @@ function FlowRow({ flow, dismissed }: { flow: GuardFlowListItem; dismissed: bool
             </span>
           </HoverPopover>
         )}
+        {/* The drivers this test's STEPS exercise — identity facts, so they wear
+            the plain muted chip, never a verdict colour. A mixed test wears one
+            chip per driver; the same derivation the panel's filter narrows on. */}
+        {flowDrivers(flow).map((driver) => (
+          <span
+            key={driver}
+            className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          >
+            {guardDriver(driver)?.label ?? driver}
+          </span>
+        ))}
       </div>
     </>
   );

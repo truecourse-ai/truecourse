@@ -729,15 +729,25 @@ describe("GuardFlowsPanel — the flow inventory", () => {
     }
   });
 
-  it("carries NO surface chips on a ROW — which surfaces a test drives is a filter", () => {
-    // They came back on every row as the same word, and a reader learned to skip
-    // them. The question they answered is a NARROWING one, and the driver chips
-    // over the list answer it now.
-    renderPanel();
+  it("wears one muted driver chip per driver the test's steps exercise", () => {
+    // Identity facts, not verdicts: a mixed test wears BOTH its chips, a test
+    // with no recorded drivers wears none, and no chip is verdict-coloured.
+    const flows = FLOWS.map((f, i) =>
+      i === 0 ? { ...f, drivers: ["cli", "web"] as const } : f,
+    );
+    renderPanel({ flows: flows as typeof FLOWS });
     const list = screen.getByRole("list", { name: "Test inventory" });
-    for (const text of ["CLI ✗", "CLI ✓", "Web", "CLI", "API"]) {
-      expect(within(list).queryByText(text), text).toBeNull();
+    const chips = [
+      ...within(list).queryAllByText("CLI"),
+      ...within(list).queryAllByText("Web"),
+    ];
+    expect(chips).toHaveLength(2);
+    for (const chip of chips) {
+      expect(chip.className).toContain("bg-muted");
+      expect(chip.className).not.toMatch(/red|emerald|sky/);
     }
+    // No drivers recorded ⇒ no chips — never an invented default.
+    expect(within(list).queryByText("API")).toBeNull();
   });
 
   it("a row for a flow the specs no longer derive carries the same sentence, not a bare id", () => {
@@ -1070,16 +1080,13 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
     // …and then everything the test detail used to carry on a tab of its own.
     expect(screen.queryByText("What it checks")).toBeNull();
     expect(screen.getByText(DETAIL.surfaces[0].title!)).toBeInTheDocument();
-    // The verdict band, then the workspace, then the drawers the record hangs in.
+    // The verdict band, then the step list, then the collapsed record sections.
     expect(
       screen.getByRole("region", { name: "Test verdict" }),
     ).toBeInTheDocument();
     expect(await screen.findByLabelText("test steps")).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Selected step details"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("region", { name: "Interfaces used by this flow" }),
+      screen.getByRole("button", { name: /^Interfaces/ }),
     ).toBeInTheDocument();
     // There is no list of surface ROWS any more — nothing to click through to.
     expect(screen.queryByRole("list", { name: "Tests" })).toBeNull();
@@ -1252,18 +1259,19 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
     );
   });
 
-  it("reads its interfaces through the TEST that walks them — never a second list", () => {
+  it("reads its interfaces through the TEST that walks them — never a second list", async () => {
     // The scenario body holds each interface the test grounds on, in its own
-    // drawer. A flow-level list of the same ids beside it would be the same fact
-    // told twice, so the word appears exactly once — on that drawer.
+    // collapsible section. A flow-level list of the same ids beside it would be
+    // the same fact told twice, so the word appears exactly once — that header.
     renderDetail();
+    const user = userEvent.setup();
+    expect(screen.getAllByText("Interfaces")).toHaveLength(1);
+    const header = screen.getByText("Interfaces").closest("button")!;
+    expect(header).toHaveAttribute("aria-controls", "guard-drawer-interfaces");
+    await user.click(header);
     expect(
       screen.getByRole("region", { name: "Interfaces used by this flow" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Interfaces")).toHaveLength(1);
-    expect(
-      screen.getByText("Interfaces").closest("button"),
-    ).toHaveAttribute("aria-controls", "guard-drawer-interfaces");
   });
 
   it("keeps the flow-level interface list for a flow with no test at all", () => {
@@ -1432,7 +1440,7 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
   it("reads a test that failed its birth execution right here — no click-through", async () => {
     renderDetail({ detail: BIRTH_FAILED_DETAIL });
     // The verdict, in the birth wording, with the failing step open beneath it.
-    expect(screen.getByText("failed (birth)")).toBeInTheDocument();
+    expect(screen.getByText("Failed (birth)")).toBeInTheDocument();
     // Its title is the flow's here (the fixture's test carries the same sentence).
     expect(
       screen.getAllByText(BIRTH_FAILED_DETAIL.surfaces[0].title!).length,
@@ -1458,7 +1466,7 @@ describe("GuardFlowDetail — the flow AND its test, on one page", () => {
     expect(screen.queryByText("Milestones")).not.toBeInTheDocument();
     // …and its test still reads exactly like any other flow's.
     expect(screen.getByText("Purged tasks leave the list")).toBeInTheDocument();
-    expect(screen.getByText("passed")).toBeInTheDocument();
+    expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(await screen.findByLabelText("test steps")).toBeInTheDocument();
   });
 
@@ -2166,7 +2174,7 @@ describe("GuardDriftDetail — the run’s own record", () => {
       failure: undefined,
       failedMilestone: undefined,
     });
-    expect(screen.getByText("passed")).toBeInTheDocument();
+    expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Milestones" })).toBeNull();
     expect(screen.queryByText(/Failed at step/)).toBeNull();
   });

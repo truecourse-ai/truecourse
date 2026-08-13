@@ -427,22 +427,6 @@ const UNMAPPED: GuardInterfacesView = {
   totals: { interfaces: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 },
 };
 
-/** GET returns the unmapped catalog; POST /guard/map answers with the fresh one. */
-function stubMapFlow() {
-  const calls: string[] = [];
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url: string | URL, init?: RequestInit) => {
-      const u = String(url);
-      calls.push(`${init?.method ?? 'GET'} ${u}`);
-      if (u.includes('/guard/map')) return json(MAPPED);
-      if (u.includes('/guard/interfaces')) return json(UNMAPPED);
-      return json({});
-    }),
-  );
-  return calls;
-}
-
 afterEach(() => vi.unstubAllGlobals());
 
 /**
@@ -488,8 +472,6 @@ function InterfacesHarness({
         view={interfaces.view}
         loading={interfaces.loading}
         error={interfaces.error}
-        mapping={interfaces.mapping}
-        onMap={() => void interfaces.map()}
         tabs={tabs}
         commandTabs={commandTabs}
         recipe={recipe}
@@ -524,8 +506,6 @@ function PaneHarness({ view }: { view: GuardInterfacesView }) {
         view={view}
         loading={false}
         error={null}
-        mapping={false}
-        onMap={() => {}}
         tabs={tabs}
         commandTabs={commandTabs}
         onOpenFlow={() => {}}
@@ -557,22 +537,6 @@ const catalogOutline = () =>
     return el.getAttribute('role') === 'listitem' ? text : `# ${text}`;
   });
 
-describe('Interfaces tab — unmapped → Map → mapped', () => {
-  it('offers the free Map CTA while nothing is mapped, then swaps in the response', async () => {
-    const user = userEvent.setup();
-    const calls = stubMapFlow();
-    renderTab();
-
-    expect(await screen.findByText('No interfaces mapped yet')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Map · free, no LLM' }));
-
-    // The catalog arrives from the POST itself — no follow-up GET.
-    expect(await within(screen.getByTestId('panel')).findByText('cli/tasks-add')).toBeInTheDocument();
-    expect(calls.filter((c) => c.startsWith('POST'))).toHaveLength(1);
-    expect(calls.filter((c) => c.includes('/guard/interfaces'))).toHaveLength(1);
-  });
-});
-
 describe('Interfaces tab — the surfaces are the catalog’s, not a banner’s', () => {
   it('carries no detected-surface banner at all — the surface groups are that reading', () => {
     renderPane(CLI_AND_WEB);
@@ -588,9 +552,12 @@ describe('Interfaces tab — the surfaces are the catalog’s, not a banner’s'
     expect(screen.queryByText(/\btree\b|\bprobes\b/)).not.toBeInTheDocument();
   });
 
-  it('says only what to do when nothing is mapped', () => {
+  it('says what an empty catalog means — and offers no action for it', () => {
     renderPane(UNMAPPED);
     expect(screen.getByText('No interfaces mapped yet')).toBeInTheDocument();
+    // The Map trigger is gone: interface derivation is the engine's, not a button.
+    expect(screen.queryByText(/free, no LLM/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Map/ })).toBeNull();
   });
 });
 

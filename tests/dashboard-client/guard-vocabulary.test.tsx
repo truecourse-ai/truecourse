@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { GUARD_COVERAGE_STATUS_PRECEDENCE, GUARD_COVERAGE_STATUS_WORD } from '@truecourse/shared';
 import type {
@@ -744,8 +745,6 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         }}
         loading={false}
         error={null}
-        mapping={false}
-        onMap={() => {}}
         tabs={{
           activeId: 'cli/tasks-add',
           openTabs: [{ id: 'cli/tasks-add', pinned: true }],
@@ -874,9 +873,9 @@ describe('guard hover popovers — none of them can clip', () => {
     expect(expectHoversCannotClip('GuardFlowDetail')).toBeGreaterThan(0);
   });
 
-  it('the merged detail — including the Prepare group header the review caught', async () => {
-    // A source whose first steps realize NO milestone → the "Prepare" group header,
-    // the hover the 2026-07-27 review caught going off-screen.
+  it('the merged detail — its hovers survive an opened step record', async () => {
+    // The divider headers are gone; the detail's hovers now ride the verdict
+    // chips and the rows themselves. The clip rule must hold with a record open.
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string | URL) =>
@@ -906,7 +905,11 @@ describe('guard hover popovers — none of them can clip', () => {
         onOpenInterface={() => {}}
       />,
     );
-    expect(await screen.findByText('Prepare')).toBeInTheDocument();
+    const steps = await screen.findByLabelText('test steps');
+    await within(steps).findAllByRole('listitem');
+    await userEvent
+      .setup()
+      .click(within(steps).getByRole('button', { name: 'Step 2 record' }));
     expect(expectHoversCannotClip('GuardFlowDetail (steps)')).toBeGreaterThan(0);
   });
 

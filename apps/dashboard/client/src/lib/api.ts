@@ -4,6 +4,7 @@ import type {
   GuardArtifactSource,
   GuardClaimIdentity,
   GuardClaimsView,
+  GuardStatusSummary,
   GuardDecisions,
   GuardDocCoverage,
   GuardEvidenceVisual,
@@ -1133,13 +1134,9 @@ export function getGuardInterfaces(repoId: string, ref?: string): Promise<GuardI
   return fetchApi<GuardInterfacesView>(withRef(`/api/repos/${repoId}/guard/interfaces`, ref));
 }
 
-/**
- * Map the working tree's surfaces to interfaces — deterministic, LLM-free, free.
- * The response IS the fresh catalog view, so the tab swaps state from it (no
- * refetch, no socket).
- */
-export function mapGuardInterfaces(repoId: string): Promise<GuardInterfacesView> {
-  return fetchApi<GuardInterfacesView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
+/** The compact status summary (coverage + last run + last generate). Always 200. */
+export function getGuardStatus(repoId: string, ref?: string): Promise<GuardStatusSummary> {
+  return fetchApi<GuardStatusSummary>(withRef(`/api/repos/${repoId}/guard/status`, ref));
 }
 
 /**
