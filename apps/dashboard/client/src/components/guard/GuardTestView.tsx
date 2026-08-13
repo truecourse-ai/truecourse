@@ -113,6 +113,7 @@ import {
 } from "@/components/ui/artifact-view";
 import { HoverPopover } from "@/components/ui/hover-popover";
 import * as api from "@/lib/api";
+import { renderInlineMarkup } from "@/lib/inline-markup";
 import { formatGuardDuration } from "@/lib/guard-drifts";
 import type { GuardTestStatusView } from "@/lib/guard-flow-status";
 import {
@@ -780,7 +781,7 @@ function InfoPanel({ step }: { step: GuardScenarioStepView }) {
       {step.note && (
         <DiffRow label="note">
           <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
-            {step.note}
+            {renderInlineMarkup(step.note)}
           </p>
         </DiffRow>
       )}
