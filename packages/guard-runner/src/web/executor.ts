@@ -150,12 +150,30 @@ async function readVisibleText(page: Page): Promise<string> {
 }
 
 /**
- * The locator for one authored target — role plus accessible name, nothing else.
+ * The locator for one authored target — the handle the member names, compiled 1:1
+ * to the browser engine's own query for it (`getByRole` for the primary member,
+ * `getByPlaceholder` / `getByLabel` / `getByText` / `getByTitle` / `getByAltText`
+ * for the five other things a user perceives). Nothing here can address the
+ * implementation: there is no branch that takes a selector, because the schema has
+ * no member that carries one.
+ *
  * An authored `pick: first` narrows to the first match, so downstream counting sees
  * 0 or 1 and the strict must-be-unambiguous check never fires for declared grids.
  */
 export function webLocator(page: Page, target: GuardWebLocator): Locator {
-  const base = page.getByRole(target.role, { name: target.name, exact: target.exact ?? false })
+  const exact = target.exact ?? false
+  const base =
+    'role' in target
+      ? page.getByRole(target.role, { name: target.name, exact })
+      : 'placeholder' in target
+        ? page.getByPlaceholder(target.placeholder, { exact })
+        : 'label' in target
+          ? page.getByLabel(target.label, { exact })
+          : 'text' in target
+            ? page.getByText(target.text, { exact })
+            : 'title' in target
+              ? page.getByTitle(target.title, { exact })
+              : page.getByAltText(target.alt, { exact })
   return target.pick === 'first' ? base.first() : base
 }
 
@@ -163,8 +181,13 @@ export function webLocator(page: Page, target: GuardWebLocator): Locator {
  * The elements that DO carry the role a missed target named, by their visible text
  * — the single most useful line in a "no such control" failure, because the answer
  * is almost always "it is called something else now".
+ *
+ * Only the ROLE member has such an inventory: "every element with this placeholder"
+ * is the query that just found nothing, and there is no wider set to list. For the
+ * other members the page's own visible text (always in the detail) is the evidence.
  */
 async function roleInventory(page: Page, target: GuardWebLocator): Promise<string[]> {
+  if (!('role' in target)) return []
   try {
     const texts = await page.getByRole(target.role).allInnerTexts()
     return texts.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => t.length > 0).slice(0, ROLE_INVENTORY_LIMIT)
@@ -182,9 +205,13 @@ async function targetMismatch(
 ): Promise<ExpectMismatch> {
   const inventory = await roleInventory(page, target)
   const text = await readVisibleText(page)
+  const missing =
+    'role' in target
+      ? `no ${target.role} named “${target.name}” is on the page`
+      : `nothing on the page matches ${describeWebLocator(target)}`
   const actual =
     found === 0
-      ? `no ${target.role} named “${target.name}” is on the page`
+      ? missing
       : `${found} elements match ${describeWebLocator(target)} — a target must be unambiguous`
   return {
     subject: 'target',
@@ -192,9 +219,13 @@ async function targetMismatch(
     actual,
     detail: [
       `expected ${what} ${describeWebLocator(target)} at ${pageAddress(page)}`,
-      inventory.length > 0
-        ? `the ${target.role} elements on the page are: ${inventory.map((t) => `“${t}”`).join(', ')}`
-        : `the page has no ${target.role} elements at all`,
+      ...('role' in target
+        ? [
+            inventory.length > 0
+              ? `the ${target.role} elements on the page are: ${inventory.map((t) => `“${t}”`).join(', ')}`
+              : `the page has no ${target.role} elements at all`,
+          ]
+        : []),
       '--- visible page text ---',
       text,
     ],

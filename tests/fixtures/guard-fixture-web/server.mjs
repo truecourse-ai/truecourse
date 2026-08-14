@@ -44,6 +44,21 @@
  *                     - button "Add filter", which pushes `?filter=on` WITHOUT a
  *                       document navigation and re-renders on `popstate` — so a
  *                       browser Back is observable in a single-page app too.
+ *   GET /capture  → heading "Capture"; the surface the WIDENED LOCATOR family and
+ *                   the web CAPTURE getters need — every element here is addressed
+ *                   by a handle a USER perceives, and every getter has something
+ *                   real to read:
+ *                     - textbox labelled "Note", placeholder "Search notes",
+ *                       carrying the VALUE `draft-42` (the value getter reads a
+ *                       DOM property no page text ever shows);
+ *                     - paragraph "seats left: 3", which button "Book a seat"
+ *                       decrements — the delta claim's subject;
+ *                     - three listitems inside a list (the count getter);
+ *                     - link "Permalink" whose `href` is `/notes?id=7`;
+ *                     - switch "Email alerts", `aria-checked="true"`;
+ *                     - image with alt text "Company logo";
+ *                     - button with the title "Close the panel";
+ *                     - paragraph "row two of three" (the plain-text handle).
  *   GET /upload   → heading "Upload"; the surface the `upload` verb needs — a
  *                   visible labelled file input, a hidden one behind a button (the
  *                   react-dropzone shape), an `accept=".pdf"` one that refuses
@@ -168,6 +183,38 @@ document.getElementById('add-filter').onclick = function () {
 }
 window.addEventListener('popstate', renderMode)
 renderMode()
+</script>`,
+)
+
+/**
+ * The page every LOCATOR MEMBER and every CAPTURE GETTER has something real to
+ * read on. Nothing here is addressed by a class or an id from a scenario's side:
+ * a placeholder, a label, an alt text, a title and plain visible text are all
+ * things a person sees, which is the whole membership rule of the locator family.
+ */
+const CAPTURE = page(
+  'Capture',
+  `<h1>Capture</h1>
+<p id="seats">seats left: 3</p>
+<button type="button" id="book">Book a seat</button>
+<label for="note">Note</label>
+<input id="note" placeholder="Search notes" value="draft-42">
+<p>row two of three</p>
+<ul>
+  <li>alpha</li>
+  <li>beta</li>
+  <li>gamma</li>
+</ul>
+<p><a id="perma" href="/notes?id=7">Permalink</a></p>
+<button type="button" role="switch" id="alerts" aria-checked="true">Email alerts</button>
+<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Company logo" width="16" height="16">
+<button type="button" id="close" title="Close the panel">×</button>
+<script>
+document.getElementById('book').onclick = function () {
+  const seats = document.getElementById('seats')
+  const left = Number(/seats left: (\\d+)/.exec(seats.textContent)[1])
+  seats.textContent = 'seats left: ' + Math.max(0, left - 1)
+}
 </script>`,
 )
 
@@ -336,9 +383,11 @@ const server = http.createServer(async (req, res) => {
           ? SLOW
           : url.pathname === '/controls'
             ? CONTROLS
-            : url.pathname === '/upload'
-              ? UPLOAD
-              : null
+            : url.pathname === '/capture'
+              ? CAPTURE
+              : url.pathname === '/upload'
+                ? UPLOAD
+                : null
   if (html === null) {
     res.writeHead(404, { 'content-type': 'text/html' })
     res.end(page('Not found', '<h1>Not found</h1>'))

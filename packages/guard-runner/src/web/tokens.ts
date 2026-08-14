@@ -17,13 +17,29 @@ import type {
   GuardWebLocator,
   GuardWebStep,
 } from '@truecourse/shared'
-import { isWebClickStep, isWebFillStep, isWebNavigateStep, isWebUploadStep } from '@truecourse/shared'
+import {
+  isWebClickStep,
+  isWebFillStep,
+  isWebNavigateStep,
+  isWebUploadStep,
+  webLocatorValueKey,
+} from '@truecourse/shared'
 
 type Tok = (text: string) => string
 
-/** A locator with its accessible name resolved (the role is a closed enum). */
-function resolveLocator(locator: GuardWebLocator, tok: Tok): GuardWebLocator {
-  return { ...locator, name: tok(locator.name) }
+/**
+ * A locator with its authored value resolved — whichever handle the member
+ * addresses its element by (the accessible name, a placeholder, a label, the
+ * element's text, a title, an alt text). The role itself is a closed enum and
+ * carries nothing to interpolate.
+ *
+ * Takes any locator-SHAPED object, so a state expectation — a locator with the
+ * ARIA assertions on it — resolves through this one function too.
+ */
+function resolveLocator<T extends object>(locator: T, tok: Tok): T {
+  const key = webLocatorValueKey(locator)
+  const value = (locator as Record<string, unknown>)[key]
+  return typeof value === 'string' ? { ...locator, [key]: tok(value) } : locator
 }
 
 /** A text matcher with every authored value resolved — the comparands included. */
@@ -62,8 +78,8 @@ function resolveExpect(expect: GuardWebExpect, tok: Tok): GuardWebExpect {
             : resolveLocator(expect.visible, tok),
         }
       : {}),
-    // A state assertion is a locator with booleans on it: only the name interpolates.
-    ...(expect.state ? { state: { ...expect.state, name: tok(expect.state.name) } } : {}),
+    // A state assertion is a locator with booleans on it: only its handle interpolates.
+    ...(expect.state ? { state: resolveLocator(expect.state, tok) } : {}),
     ...(expect.attribute
       ? {
           attribute: {

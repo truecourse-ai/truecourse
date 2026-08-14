@@ -844,6 +844,64 @@ describe('the web driver', () => {
     TEST_TIMEOUT_MS,
   )
 
+  it(
+    'compiles every member of the locator family to the browser’s own query for it',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', navigate: '/capture' },
+          // Each member addresses a handle a USER perceives, and each one acts.
+          { driver: 'web', fill: { placeholder: 'Search notes' }, value: 'typed by placeholder' },
+          { driver: 'web', fill: { label: 'Note' }, value: 'typed by label' },
+          {
+            driver: 'web',
+            expect: {
+              visible: [
+                { alt: 'Company logo' },
+                { title: 'Close the panel' },
+                { text: 'row two of three' },
+                { placeholder: 'Search notes' },
+                { label: 'Note' },
+              ],
+            },
+          },
+          // …and a state assertion reads through a non-role handle too.
+          { driver: 'web', expect: { state: { text: 'Email alerts', checked: true } } },
+          { driver: 'web', click: { text: 'Permalink' }, expect: { url: { equals: '/notes?id=7' } } },
+        ],
+        'web.locators.cli.1',
+      )
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.locators.cli.1')
+      expect(text).toContain('fill placeholder “Search notes” with “typed by placeholder”')
+      expect(text).toContain('✓ expected: alt text “Company logo” is visible')
+      expect(text).toContain('✓ expected: text “Email alerts” is checked')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a missed NON-role target says what it looked for, with the page’s own text as evidence',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', navigate: '/capture' },
+          { driver: 'web', click: { placeholder: 'Type a query' }, timeoutMs: 1_500 },
+        ],
+        'web.locator-miss.cli.1',
+      )
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('placeholder “Type a query”')
+      expect(result.failure?.actual).toContain('nothing on the page matches placeholder “Type a query”')
+      const diff = fs.readFileSync(path.join(evidenceDir(repo, 'web.locator-miss.cli.1'), 'diff.txt'), 'utf-8')
+      expect(diff).toContain('visible page text')
+      expect(diff).toContain('seats left: 3')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
   it('leaves no chromium behind across the whole suite', () => {
     expect(playwrightBrowserPids().filter((pid) => !pidsBefore.includes(pid))).toEqual([])
   })

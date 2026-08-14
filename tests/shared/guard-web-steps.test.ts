@@ -104,6 +104,67 @@ describe('web step schema', () => {
   })
 })
 
+describe('the widened locator family', () => {
+  it('accepts the five user-perceivable members beside role + name', () => {
+    expect(GuardWebLocatorSchema.parse({ placeholder: 'Search notes' })).toEqual({ placeholder: 'Search notes' })
+    expect(GuardWebLocatorSchema.parse({ label: 'Title' })).toEqual({ label: 'Title' })
+    expect(GuardWebLocatorSchema.parse({ text: 'no notes yet' })).toEqual({ text: 'no notes yet' })
+    expect(GuardWebLocatorSchema.parse({ title: 'Close the dialog' })).toEqual({ title: 'Close the dialog' })
+    expect(GuardWebLocatorSchema.parse({ alt: 'Company logo' })).toEqual({ alt: 'Company logo' })
+  })
+
+  it('every member carries the same strictness escapes — `exact` and `pick: first`', () => {
+    expect(GuardWebLocatorSchema.parse({ text: '12', exact: true }).exact).toBe(true)
+    expect(GuardWebLocatorSchema.parse({ label: 'Seat', pick: 'first' }).pick).toBe('first')
+    expect(() => GuardWebLocatorSchema.parse({ text: '12', pick: 'last' })).toThrow()
+  })
+
+  it('the implementation-addressing family stays refused, and a member is exactly one', () => {
+    expect(() => GuardWebLocatorSchema.parse({ testId: 'save' })).toThrow()
+    expect(() => GuardWebLocatorSchema.parse({ css: '#save' })).toThrow()
+    expect(() => GuardWebLocatorSchema.parse({ xpath: '//button' })).toThrow()
+    // Two members at once is a locator nobody can read: strict members refuse it.
+    expect(() => GuardWebLocatorSchema.parse({ text: 'a', placeholder: 'b' })).toThrow()
+    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Save', text: 'Save' })).toThrow()
+    expect(() => GuardWebLocatorSchema.parse({ placeholder: '' })).toThrow()
+  })
+
+  it('every step position that took a locator takes the whole family', () => {
+    expect(GuardWebStepSchema.parse({ driver: 'web', click: { text: 'Delete' } })).toBeTruthy()
+    expect(
+      GuardWebStepSchema.parse({ driver: 'web', fill: { placeholder: 'Search notes' }, value: 'x' }),
+    ).toBeTruthy()
+    expect(
+      GuardWebExpectSchema.parse({ visible: { alt: 'Company logo' } }),
+    ).toBeTruthy()
+    expect(
+      GuardWebExpectSchema.parse({ text: { contains: 'x' }, within: { title: 'Summary' } }),
+    ).toBeTruthy()
+    expect(
+      GuardWebExpectSchema.parse({ state: { label: 'LLM rules', checked: true } }),
+    ).toBeTruthy()
+    expect(
+      GuardWebExpectSchema.parse({ attribute: { of: { text: 'Notes' }, name: 'href', present: true } }),
+    ).toBeTruthy()
+    expect(GuardWebExpectSchema.parse({ class: { of: { alt: 'Logo' }, has: 'dark' } })).toBeTruthy()
+  })
+
+  it('describes each member the way a failure quotes it', () => {
+    expect(describeWebLocator({ placeholder: 'Search notes' })).toBe('placeholder “Search notes”')
+    expect(describeWebLocator({ label: 'Title' })).toBe('label “Title”')
+    expect(describeWebLocator({ text: 'no notes yet' })).toBe('text “no notes yet”')
+    expect(describeWebLocator({ title: 'Close' })).toBe('title “Close”')
+    expect(describeWebLocator({ alt: 'Company logo' })).toBe('alt text “Company logo”')
+    expect(describeWebLocator({ text: '12', exact: true, pick: 'first' })).toBe('first text “12” (exact)')
+    expect(describeWebExpect({ visible: { placeholder: 'Search notes' } })).toBe(
+      'placeholder “Search notes” is visible',
+    )
+    expect(describeWebExpect({ state: { label: 'LLM rules', checked: true } })).toBe(
+      'label “LLM rules” is checked',
+    )
+  })
+})
+
 describe('the accessible-state matcher', () => {
   it('asserts an ARIA state on a role + name target', () => {
     const parsed = GuardWebExpectSchema.parse({
