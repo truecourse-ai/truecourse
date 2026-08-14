@@ -6,7 +6,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
-import { deriveApiInterfacesFromTree, type ApiSpecOperation } from '../../packages/interface-mapper/src/api-tree'
+import {
+  buildMountPrefixes,
+  deriveApiInterfacesFromTree,
+  type ApiSpecOperation,
+} from '../../packages/interface-mapper/src/api-tree'
 import type { FileAnalysis } from '../../packages/shared/src/index'
 
 const APP_SOURCE = `
@@ -86,6 +90,110 @@ describe('deriveApiInterfacesFromTree — route registrations', () => {
       `export function buildReport(rows: string[]): string { return rows.join('\\n') }`,
     )
     expect(deriveApiInterfacesFromTree([service])).toEqual([])
+  })
+})
+
+/**
+ * The dashboard-server layout, which is also the mainstream Express one: routers
+ * are declared + registered in per-module files, default-exported, and mounted in
+ * `app.ts` — often BEHIND middleware args (`app.use(prefix, resolver, router)`)
+ * and sometimes one router deep (`adminRouter.use('/users', usersRouter)`).
+ */
+const MULTI_FILE_TREE = [
+  analyze(
+    'src/app.ts',
+    `
+    import express from 'express'
+    import { projectResolver } from './middleware/project.js'
+    import reposRouter from './routes/repos.js'
+    import analysesRouter from './routes/analyses.js'
+    import adminRouter from './routes/admin/index.js'
+    import { getHealth } from './handlers/health.js'
+
+    const app = express()
+    app.use('/api', authGate)
+    app.use('/api/repos', reposRouter)
+    app.use('/api/repos', projectResolver, analysesRouter)
+    app.use('/api/admin', adminRouter)
+    app.get('/api/health', getHealth)
+  `,
+  ),
+  analyze(
+    'src/middleware/project.ts',
+    `export function projectResolver(req, res, next) { next() }`,
+  ),
+  analyze(
+    'src/routes/repos.ts',
+    `
+    import { Router } from 'express'
+    const router = Router()
+    router.post('/', createRepo)
+    router.get('/:id', getRepo)
+    export default router
+  `,
+  ),
+  analyze(
+    'src/routes/analyses.ts',
+    `
+    import { Router } from 'express'
+    const router = Router()
+    router.get('/:id/analyses', listAnalyses)
+    export default router
+  `,
+  ),
+  analyze(
+    'src/routes/admin/index.ts',
+    `
+    import { Router } from 'express'
+    import usersRouter from './users.js'
+    const adminRouter = Router()
+    adminRouter.use('/users', usersRouter)
+    export default adminRouter
+  `,
+  ),
+  analyze(
+    'src/routes/admin/users.ts',
+    `
+    import { Router } from 'express'
+    const router = Router()
+    router.get('/', listUsers)
+    router.delete('/:userId', removeUser)
+    export default router
+  `,
+  ),
+]
+
+describe('deriveApiInterfacesFromTree — routers mounted from another file', () => {
+  it('composes the mount prefix onto a router mounted behind middleware args', () => {
+    const paths = deriveApiInterfacesFromTree(MULTI_FILE_TREE).map((j) => j.title)
+    expect(paths).toContain('GET /api/repos/{id}/analyses')
+    expect(paths).not.toContain('GET /{id}/analyses')
+  })
+
+  it('composes a two-level mount chain', () => {
+    const paths = deriveApiInterfacesFromTree(MULTI_FILE_TREE).map((j) => j.title)
+    expect(paths).toContain('GET /api/admin/users')
+    expect(paths).toContain('DELETE /api/admin/users/{userId}')
+  })
+
+  it('leaves nothing bare across the whole layout', () => {
+    expect(deriveApiInterfacesFromTree(MULTI_FILE_TREE).map((j) => j.title).sort()).toEqual([
+      'DELETE /api/admin/users/{userId}',
+      'GET /api/admin/users',
+      'GET /api/health',
+      'GET /api/repos/{id}',
+      'GET /api/repos/{id}/analyses',
+      'POST /api/repos',
+    ])
+  })
+
+  it('never hands a mount prefix to a middleware module', () => {
+    // `app.use('/api/repos', projectResolver, analysesRouter)` names two things;
+    // only the one that turns out to be a router may claim the prefix.
+    const prefixes = buildMountPrefixes(MULTI_FILE_TREE)
+    expect(prefixes.get('src/middleware/project.ts')).toBeUndefined()
+    expect(prefixes.get('src/routes/analyses.ts')).toBe('/api/repos')
+    expect(prefixes.get('src/routes/admin/users.ts')).toBe('/api/admin/users')
   })
 })
 

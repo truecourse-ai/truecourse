@@ -133,6 +133,40 @@ describe('extractRouteRegistrations', () => {
     expect(mounts[0]).toMatchObject({ path: '/api', routerName: 'apiRouter' })
   })
 
+  it('captures the router mounted behind middleware args', () => {
+    // The dashboard-server idiom: `app.use(prefix, middleware, router)`. Express
+    // mounts EVERY handler arg at the prefix, so every identifier after the path
+    // is a candidate — the middleware ones drop out when a consumer resolves
+    // them against the tree and finds no router.
+    const tree = parse(`
+      const app = express();
+      app.use('/api/repos', projectResolver, analysesRouter);
+      app.use('/api/repos', requireAuth, validate, guardRouter);
+    `)
+
+    const { mounts } = extractRouteRegistrations(tree, '/test.ts', 'typescript')
+
+    expect(mounts).toMatchObject([
+      { path: '/api/repos', routerName: 'projectResolver' },
+      { path: '/api/repos', routerName: 'analysesRouter' },
+      { path: '/api/repos', routerName: 'requireAuth' },
+      { path: '/api/repos', routerName: 'validate' },
+      { path: '/api/repos', routerName: 'guardRouter' },
+    ])
+  })
+
+  it('skips non-identifier mount args', () => {
+    const tree = parse(`
+      const app = express();
+      app.use('/api', express.static(dir), apiRouter);
+      app.use('/inline', (req, res, next) => next());
+    `)
+
+    const { mounts } = extractRouteRegistrations(tree, '/test.ts', 'typescript')
+
+    expect(mounts).toMatchObject([{ path: '/api', routerName: 'apiRouter' }])
+  })
+
   it('includes correct location info', () => {
     const tree = parse(`router.get('/users', getUsers);`)
 

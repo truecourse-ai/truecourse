@@ -56,9 +56,8 @@ function extractJsRoutes(
         const methodName = property.text
 
         if (methodName === 'use') {
-          // app.use('/prefix', routerRef)
-          const mount = extractMount(argsNode, filePath, node)
-          if (mount) mounts.push(mount)
+          // app.use('/prefix', ...middleware, routerRef)
+          mounts.push(...extractMounts(argsNode, filePath, node))
         } else if (HTTP_METHODS.has(methodName)) {
           // router.get('/path', ...middleware, handler)
           const route = extractRoute(methodName, argsNode, filePath, node)
@@ -114,39 +113,50 @@ function extractRoute(
   }
 }
 
-function extractMount(
+/**
+ * `app.use('/prefix', ...middleware, routerRef)` — every named argument after the
+ * path is mounted AT that path by Express, so every identifier among them is a
+ * candidate router and each becomes its own mount. Reading only the argument
+ * right after the path misses the mainstream layout, where a resolver or an auth
+ * guard sits between the prefix and the router
+ * (`app.use('/api/repos', projectResolver, analysesRouter)`).
+ *
+ * The extractor is per-file and the identifiers are usually imported, so it
+ * cannot tell a router from a middleware here — it emits candidates. A consumer
+ * holding the whole tree (`buildMountPrefixes`) resolves each one and drops the
+ * ones that are not routers.
+ */
+function extractMounts(
   argsNode: SyntaxNode,
   filePath: string,
   callNode: SyntaxNode,
-): RouterMount | null {
-  // app.use('/prefix', routerRef)
+): RouterMount[] {
   // Need at least 2 args: path string + identifier
-  if (argsNode.namedChildCount < 2) return null
+  if (argsNode.namedChildCount < 2) return []
 
   const firstArg = argsNode.namedChild(0)
-  if (!firstArg) return null
+  if (!firstArg) return []
 
   const path = extractStringLiteral(firstArg)
-  if (!path) return null
+  if (!path) return []
 
-  const secondArg = argsNode.namedChild(1)
-  if (!secondArg) return null
-
-  // The router argument should be an identifier
-  const routerName = extractIdentifierName(secondArg)
-  if (!routerName) return null
-
-  return {
-    path,
-    routerName,
-    location: {
-      filePath,
-      startLine: callNode.startPosition.row + 1,
-      endLine: callNode.endPosition.row + 1,
-      startColumn: callNode.startPosition.column,
-      endColumn: callNode.endPosition.column,
-    },
+  const location = {
+    filePath,
+    startLine: callNode.startPosition.row + 1,
+    endLine: callNode.endPosition.row + 1,
+    startColumn: callNode.startPosition.column,
+    endColumn: callNode.endPosition.column,
   }
+
+  const mounts: RouterMount[] = []
+  for (let i = 1; i < argsNode.namedChildCount; i++) {
+    const arg = argsNode.namedChild(i)
+    if (!arg) continue
+    const routerName = extractIdentifierName(arg)
+    if (!routerName) continue
+    mounts.push({ path, routerName, location })
+  }
+  return mounts
 }
 
 /**

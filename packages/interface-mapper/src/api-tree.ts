@@ -71,8 +71,8 @@ export function deriveApiInterfacesFromTree(
 
 /**
  * Route registrations across every analyzed file, each path composed with its
- * file's mount prefix (single level — the `flow.service.ts` rule). `ALL` routes
- * are catch-alls, not operations a user contract names — skipped.
+ * file's full mount prefix. `ALL` routes are catch-alls, not operations a user
+ * contract names — skipped.
  */
 function collectRouteOperations(fileAnalyses: readonly FileAnalysis[]): ApiInterfaceSeed[] {
   const prefixes = buildMountPrefixes(fileAnalyses)
@@ -92,21 +92,67 @@ function collectRouteOperations(fileAnalyses: readonly FileAnalysis[]): ApiInter
 }
 
 /**
- * filePath → mount prefix. A mount names a router; the router's file is either
- * the mounting file itself (locally defined) or the analyzed file the router was
- * imported from — resolved WITHOUT the module graph (the mapper has per-file
- * artifacts only) by matching exported name, tie-broken by the import specifier's
- * path suffix.
+ * filePath → full mount prefix. A mount names a router; the router's file is
+ * either the mounting file itself (locally defined) or the analyzed file the
+ * router was imported from — resolved WITHOUT the module graph (the mapper has
+ * per-file artifacts only) by matching exported name, tie-broken by the import
+ * specifier's path suffix.
+ *
+ * Two facts about the mainstream layout the resolution has to survive:
+ *
+ *  - `app.use(prefix, middleware, router)` names more than the router, so the
+ *    analyzer hands over every identifier as a CANDIDATE. A candidate whose file
+ *    neither registers routes nor mounts routers is not a router — it is the
+ *    middleware — and must not swallow the prefix. Were it allowed to, the real
+ *    router would be left bare (`GET /{id}/analyses` for what is served at
+ *    `/api/repos/{id}/analyses`) and every path folded into a fingerprint wrong.
+ *
+ *  - Mounts CHAIN: `app.use('/api/admin', adminRouter)` in one file and
+ *    `adminRouter.use('/users', usersRouter)` in another compose to
+ *    `/api/admin/users`, so each file's prefix is resolved by walking up to the
+ *    file that mounts its mounter. A file mounting a router it declares itself
+ *    ends the walk (there is nothing above it to inherit), as does a cycle.
  */
 export function buildMountPrefixes(fileAnalyses: readonly FileAnalysis[]): Map<string, string> {
-  const prefixes = new Map<string, string>()
+  /** mounted file → the prefix it is mounted at + the file that mounts it. */
+  const edges = new Map<string, { prefix: string; mounter?: string }>()
   for (const fa of fileAnalyses) {
     for (const mount of fa.routerMounts ?? []) {
       const target = resolveMountTarget(fa, mount, fileAnalyses)
-      if (target && !prefixes.has(target.filePath)) prefixes.set(target.filePath, mount.path)
+      if (!target || !isRouterModule(target)) continue
+      if (edges.has(target.filePath)) continue
+      edges.set(target.filePath, {
+        prefix: mount.path,
+        ...(target === fa ? {} : { mounter: fa.filePath }),
+      })
     }
   }
+
+  const prefixes = new Map<string, string>()
+  for (const filePath of edges.keys()) prefixes.set(filePath, resolveFullPrefix(filePath, edges))
   return prefixes
+}
+
+/**
+ * Is this file a router module — i.e. can a mount prefix mean anything for it? A
+ * file that registers routes or mounts further routers is one; a middleware or a
+ * plain helper named in the same `use()` call is not.
+ */
+function isRouterModule(fa: FileAnalysis): boolean {
+  return (fa.routeRegistrations?.length ?? 0) > 0 || (fa.routerMounts?.length ?? 0) > 0
+}
+
+function resolveFullPrefix(
+  filePath: string,
+  edges: Map<string, { prefix: string; mounter?: string }>,
+  seen: Set<string> = new Set(),
+): string {
+  const edge = edges.get(filePath)
+  if (!edge) return ''
+  if (seen.has(filePath)) return edge.prefix
+  seen.add(filePath)
+  const parent = edge.mounter ? resolveFullPrefix(edge.mounter, edges, seen) : ''
+  return parent ? composePath(parent, edge.prefix) : edge.prefix
 }
 
 function resolveMountTarget(
