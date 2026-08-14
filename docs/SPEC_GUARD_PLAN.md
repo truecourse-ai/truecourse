@@ -5711,3 +5711,160 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
       rule above. (e) A `count` ASSERTION (`expect` counting elements) — capture
       can now read a count and `compare` it, which covers the claims seen so far;
       an expectation member would be a second way to say it.
+
+98. **The Surface Object Model — Tier 1: the contract goes surface-native, the
+    resource goes universal (2026-08-15).** STATUS: BUILT. Item 96 made the PLACE
+    first-class for the web surface and left the other two flat. What the cli and
+    api catalogs looked like after it: 60-odd sibling entries with no envelope, a
+    cli contract whose `commands: []` array had been exactly one element long
+    since the 2026-08-10 granularity split, and an api contract IMPERSONATING a
+    cli one — `contract.commands[0].path = ["GET", "/x"]`, response-body markers
+    as `stream: "stdout"` output facts, HTTP statuses as `exit` codes — with the
+    request half (the body/query fields a handler reads) living OUTSIDE the
+    catalog as a separate analysis product joined at prompt time by method+path.
+    Tier 1 makes the RESOURCE the universal envelope and the CONTRACT
+    surface-native, without moving the unit of identity.
+
+    **The evidence.** A fully deterministic prototype over this repo's own
+    surfaces — `truecourse-scratch/som-experiment/REPORT.md`, with `som.json` as
+    its output. It established three things this item then implemented: cli
+    resource formation is trivial and exact (13 groups over 62 commands, the human
+    tree), api noun formation needs a real verb/noun rule (naive last-static-
+    segment minted 87 resources from 137 operations, RPC tails included), and the
+    request contracts join onto operations cleanly by method+path — which is why
+    the join could be replaced by ownership.
+
+    The eight decisions, each with why it went that way:
+
+    - **1. `interfaces[]` stays FLAT; ownership is a reference.** An interface
+      remains one invocable thing with its own fingerprint over `type` + `entry` +
+      `steps` (untouched, and every fingerprint byte-identical — pinned by the
+      reference tests). Ownership lands as `Interface.resource`, an id validated
+      against the entry's OWN area registry, the same area-scoped resolution
+      `at`/`to` use, never fingerprinted. Nesting the entries under their resources
+      would have re-shaped every consumer that iterates the catalog (the
+      fingerprint set, the drift diff, the scenario grounding) to buy a rendering,
+      and a surface whose formation degrades would have had nowhere to put its
+      entries. References-not-copies is the file's standing doctrine.
+    - **2. Resources become universal.** `InterfaceResourceKindSchema` grows
+      `command-group` (a node of the cli command tree) and `rest-noun` (the thing
+      a path names), beside screen/dialog/panel. `of` nests both — `spec-docs` of
+      `spec`, `/api/repos/{id}/analyses` of `/api/repos` — and a ROOT of either
+      carries none, exactly as a screen does; the "a screen sits on nothing" rule
+      stays web-scoped because it is about screens. READABLES stay web
+      vocabulary: they are DOM facts, so a cli/api place carries none — omitted,
+      per the absence rule, never an invented analog.
+    - **3. The contract is a discriminated union on `surface`.** `cli` carries
+      today's shape with `commands: []` collapsed to the singular `command`; `api`
+      carries `operation` in HTTP's own words — `description?`, `request?`
+      (`params | query | body`, three arrays because the three are addressed
+      differently by every caller), `consumes?` (`env`, `reads` — no `prompts`: an
+      HTTP handler asks nobody anything), `produces?` (`statuses`, `body` markers
+      with no stream, `rows` = the shared row grammar minus the stream, `writes`).
+      The operation copies NO identity: method and path live on the entry, once.
+      There is deliberately NO `web` member — a web task's contract is its
+      resource's readables plus the capture vocabulary (items 96, 97), and a
+      member invented ahead of a claim would be a shape nothing fills; the union
+      is exactly what makes it land additively. `contract.surface` must equal the
+      interface's `type`, cross-checked at file level.
+    - **4. ONE home for the api request contract.** `mapInterfaces` writes
+      `collectApiRequestContracts`' output onto each operation as
+      `contract.operation.request`; `buildInterfaceContractHints` reads it there
+      and takes no second argument, and the `requestContracts` plumbing is gone
+      from the `InterfaceProvider` seam, the mapping result and every author call
+      site. Two things stop being possible: the two halves drifting because two
+      derivations composed paths differently, and a run reading the SNAPSHOT
+      catalog having every operation and none of their fields. The
+      `ApiRequestContract` analysis product itself remains — it is the mapper's
+      INPUT. The rendered prompt is unchanged (name + requiredness only), so a
+      hand-authored contract's widened fields enrich the catalog without
+      re-authoring a scenario, and both authoring system-prompt fingerprints hold.
+    - **5. Formation lives in the mapper, once.**
+      `packages/interface-mapper/src/resources.ts`: `formCliResources` (one group
+      per command-tree PARENT, plus the program's own root — a command belongs to
+      the group it is REGISTERED IN, so `spec docs` sits in `spec` and its
+      children sit in `spec-docs`, the way `--help` lists them; without a program
+      name there is no honest root, so top-level commands stay unowned and the
+      nested groups still form) and `formApiResources` (the verb/noun rule below).
+      The reference migration calls the identical functions, so a hand-authored
+      catalog's places are the ones a derived catalog would get.
+    - **6. `version: 2`, a hard bump.** The reader accepts 2 alone. This IS the
+      break the number was reserved for: unlike the additive contract fields and
+      the 2026-08-11 state-id rename (hand-authored web entries only), the api
+      reshape reaches data every api mapping has written. The recovery is the
+      designed one and costs nothing — the snapshot is gitignored and derived, so
+      a v1 file fails parse, reads as "no catalog", and the next map rewrites it.
+    - **7. The hand-authored catalog migrates.**
+      `scripts/migrate-interfaces-v2.mts` — cli contracts to the singular
+      `command`, api costumes to `operation` (argv path dropped, positionals →
+      `request.params`, options → `query`/`body` by the sentence the author opened
+      each description with, stdout markers → `produces.body`, exits →
+      `produces.statuses`, env/reads/writes verbatim), then the same formation
+      rules for the places and the `resource` refs. Web entries, states and the
+      web registry are byte-equal, and the script REFUSES to write if a
+      fingerprint moved. One authored correction rides with it: the costume's
+      `valueRequired` meant "the flag needs a value", so the mechanical mapping
+      overstated `analysisId` as required on the seven routes that read it — the
+      migration is mechanical and authoring is authoring, so that was fixed by
+      hand. This closes `reference/transform-gaps.md` G65, G66, G67, G68 and the
+      api half of G71.
+    - **8. Tier 1 only.** The scenario format, the runner, late binding, the web
+      extractor, POM emission, catalog committability and the `ApiRequestContract`
+      producer are all untouched.
+
+    **The api verb/noun rule**, documented at `formApiResources`. Over the merged
+    path tree, a STATIC node is a NOUN when any of: (a) it has children — a node
+    other paths hang off is structural, and a noun can never be registered under a
+    verb; (b) a GET is rooted exactly at it — GET reads a representation, so
+    something is there to represent (`/analyses/diff`, `/violations/summary` are
+    sub-resources; `/analyses/cancel`, POST alone, is a command issued to
+    `/analyses`); (c) nothing static sits above it — a path's first named segment
+    has no enclosing noun to be an action ON, which is also how the `/api` mount
+    point becomes the tree's root rather than a special case. Otherwise it is an
+    ACTION, and the operations rooted at it belong to the nearest noun above. A
+    path parameter is an INSTANCE, never a place, and one place per parameter
+    POSITION whatever the route table spells it. Two knowable edges, both accepted
+    deliberately because the surface itself is what says so: a write-only
+    sub-resource (PUT with no GET) reads as an action on its parent, and a verb
+    that takes a parameter (`/jobs/retry/{id}`) reads as a noun. Result on the
+    reference's 32 operations: 22 nouns, no RPC tails (`cancel` folds into
+    `api-repos-analyses`, `enrich` into `api-repos-flows`).
+
+    **Consumers**: `GuardInterfaceRow` gains `resource` beside `at`/`to` (the
+    registry already travelled on the view); the Interfaces pane's contract card
+    dispatches on the union and renders an operation natively — request by
+    location, response statuses, body markers, no argv and no "Exit codes"
+    heading; the panel families cli/api rows by their owning place
+    (`at ?? resource ?? group`). The command NAV and its `?gcmd` binding are gone:
+    a cli contract has carried exactly one command since 2026-08-10, so it was a
+    nav onto a list of one.
+
+    **As built**: `packages/shared/src/interfaces.ts`,
+    `packages/shared/src/guard/dashboard.ts`,
+    `packages/interface-mapper/src/resources.ts`,
+    `packages/core/src/services/interface.service.ts`,
+    `packages/core/src/commands/{guard-read,guard-in-process}.ts`,
+    `packages/guard-generator/src/{grounding,generate,prompts}.ts`,
+    `apps/dashboard/client/src/components/guard/{GuardInterfaceContract,GuardInterfacesPane,GuardInterfacesPanel}.tsx`,
+    `scripts/migrate-interfaces-v2.mts`. Tests:
+    `tests/shared/interfaces.test.ts`, `tests/interface-mapper/resources.test.ts`,
+    `tests/core/interface.service.test.ts`,
+    `tests/guard-generator/grounding.test.ts`,
+    `tests/server/guard-interfaces-contract.test.ts`,
+    `tests/dashboard-client/guard-interfaces.test.tsx`.
+
+    **Tier 2 — what this deliberately does NOT do, and what it opens.**
+    (a) A `web` contract member, when a web claim appears that readables and
+    capture cannot carry. (b) The PLACES prompt block following `resource` as well
+    as `at`/`to`, which would put a places block in every cli/api authoring prompt
+    — a real grounding change with a prompt-fingerprint roll attached, so it is a
+    decision of its own. (c) READERS on a resource: a named, typed read compiled
+    from a readable (the `som-experiment` stage C3 prototype), which is what a
+    `read: <resource>.<readable>` shorthand and POM emission would both stand on.
+    (d) Deriving the web registry rather than hand-authoring it — the experiment's
+    stage C measured ~60% place recall from three regex-grade heuristics, so the
+    build derisks downward, and it would retire item 96d as a side effect. (e) The
+    analyzer's router-mount composition on this repo's own dashboard server, which
+    the experiment exposed (123 of 137 paths came out bare): a PRE-EXISTING
+    product bug that degrades today's grounding independently of the SOM, and the
+    cheapest of the three cost centres the report named.
