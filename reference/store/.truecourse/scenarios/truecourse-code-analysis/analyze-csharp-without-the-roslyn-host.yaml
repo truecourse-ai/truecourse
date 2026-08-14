@@ -1,0 +1,67 @@
+id: analyze-csharp-without-the-roslyn-host
+title: A developer analyzes a repository containing C# without building the Roslyn host
+promise: A developer analyzes a repository containing C# without building the Roslyn host
+flow:
+  id: analyze-csharp-without-the-roslyn-host
+  fingerprint: sha256:94679cba0d9b985a57c6e7ff5e68372d61b424f0530ba0d16aaca5051a2fe96a
+interface:
+  path:
+    - cli/analyze
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+binds:
+  - doc: reference/spec-docs/analyze/overview.mdx
+    section: language-support
+    fingerprint: sha256:ce4418cd98a71103c8434e29537bc6310a2c117c769c9926e6e12dbc824fba3c
+setup:
+  files:
+    package.json: |
+      {
+        "name": "polyglot-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+    src/Report.cs: |
+      namespace Sample;
+
+      public static class Report
+      {
+          public static string Render(string input)
+          {
+              return input.Trim();
+          }
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_ROSLYN_HOST: ${sandbox}/no-roslyn-host
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+          - src/Report.cs
+        message: seed polyglot sample
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 1
+      output:
+        matches: (?=[\s\S]*[Rr]oslyn)[\s\S]*
+      files:
+        .truecourse/LATEST.json:
+          absent: true
+    note: 'Fails FAST and loudly: a non-zero exit, an error naming the missing Roslyn host, and no snapshot written. The last assertion is the load-bearing one — the claim is that analysis does not silently fall back to a partial result, and a written LATEST.json would be exactly that partial result. "Without the host" is CONSTRUCTED, not assumed: `TRUECOURSE_ROSLYN_HOST` (documented in the CLI reference''s environment table) is pointed at a path that does not exist, which is the same state the resolver reaches when no host was ever built — it returns no binary and the run aborts. Left to the ambient machine the outcome would be a coin flip: a checkout that ran `dotnet build -c Release tools/csharp-roslyn-host` passes the analysis and this scenario would go green for the wrong reason (observed 2026-08-07).'
+    milestone:
+      - csharp-without-host-fails-fast

@@ -69,7 +69,7 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / sources / tests / interfaces / dependencies / runs tabs', () => {
+  it('the guard section carries coverage / sources / tests / interfaces / dependencies / runs / activity tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
     // sites those docs can come from → the flow-and-test inventory those docs
     // claim), then the code half (interfaces) and what that code talks to
@@ -85,6 +85,7 @@ describe('navigation registry — pure lookups', () => {
       'interfaces',
       'externals',
       'guarddrifts',
+      'activity',
     ]);
     expect(tabsForSection('guard').map((t) => t.label)).toEqual([
       'Coverage',
@@ -93,6 +94,7 @@ describe('navigation registry — pure lookups', () => {
       'Interfaces',
       'Dependencies',
       'Runs',
+      'Activity',
     ]);
     // Dependencies reads and WRITES the working tree (recipe.json + the gitignored
     // overlay), so it is local-filesystem-gated exactly like Files/Flows — a hosted
@@ -269,7 +271,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,sources,guardflows,interfaces,externals,guarddrifts$/,
+      /^coverage,sources,guardflows,interfaces,externals,guarddrifts,activity$/,
     );
     unmount();
 
@@ -281,7 +283,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,guardflows,interfaces,guarddrifts$/,
+      /^coverage,guardflows,interfaces,guarddrifts,activity$/,
     );
   });
 

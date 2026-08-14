@@ -527,13 +527,74 @@ export function materializeSupplied(
     }
     const dest =
       instance.kind === 'config-dir'
-        ? path.join(sandbox.home, instance.homePath!)
+        ? resolveInHome(sandbox.home, instance.homePath!, instance.name)
         : path.join(sandbox.cwd, SUPPLIED_DIR, instance.name)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
-    fs.cpSync(instance.hostPath!, dest, { recursive: true, dereference: false, force: true })
+    copySelfContained(instance.hostPath!, dest, path.resolve(instance.hostPath!))
     values[instance.name] = { path: dest }
   }
   return { values, env, omissions }
+}
+
+/**
+ * The sandbox-HOME containment rule for a `config-dir` destination. The schema
+ * already refuses an absolute or `..`-carrying `homePath`, but the catalog is a
+ * committed file this process may read from any repo, so the invariant is enforced
+ * where the copy actually happens too.
+ */
+function resolveInHome(home: string, homePath: string, name: string): string {
+  const root = path.resolve(home)
+  const dest = path.resolve(root, homePath)
+  if (dest !== root && !dest.startsWith(root + path.sep)) {
+    throw new DependencyCatalogError(
+      `the "${name}" config-dir homePath escapes the sandbox HOME: ${homePath}`,
+    )
+  }
+  return dest
+}
+
+/**
+ * Copy a registered instance into the sandbox as a SELF-CONTAINED tree.
+ *
+ * A plain `cpSync({dereference: false})` would reproduce the host's symlinks
+ * verbatim, and one that points OUTSIDE the instance (an absolute link, a `..`
+ * traversal) would keep pointing at the host from inside the sandbox — a
+ * `write:`/`patch:` step aimed through it would then mutate the developer's real
+ * filesystem, defeating the copy-in guarantee. So: a relative link that resolves
+ * INSIDE the instance is kept as a link (it resolves inside the copy the same
+ * way — the pnpm `node_modules` layout survives untouched); every other link is
+ * MATERIALIZED — its target's content is copied in its place — and a dangling one
+ * is skipped. Nothing in the copy references the host.
+ */
+function copySelfContained(src: string, dest: string, root: string): void {
+  const stat = fs.lstatSync(src)
+  if (stat.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true })
+    for (const entry of fs.readdirSync(src)) {
+      copySelfContained(path.join(src, entry), path.join(dest, entry), root)
+    }
+    return
+  }
+  if (stat.isSymbolicLink()) {
+    const target = fs.readlinkSync(src)
+    const resolved = path.resolve(path.dirname(src), target)
+    const inside =
+      !path.isAbsolute(target) && (resolved === root || resolved.startsWith(root + path.sep))
+    if (inside) {
+      fs.symlinkSync(target, dest)
+      return
+    }
+    let targetStat: fs.Stats
+    try {
+      targetStat = fs.statSync(resolved)
+    } catch {
+      return
+    }
+    if (targetStat.isDirectory()) fs.cpSync(resolved, dest, { recursive: true, dereference: true })
+    else fs.copyFileSync(resolved, dest)
+    return
+  }
+  fs.copyFileSync(src, dest)
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +617,16 @@ export function applySuppliedExpect<E extends GuardExpect | GuardFileExpect>(
   values: SuppliedValues,
 ): E {
   return mapExpectStrings(expect, (text) => applySupplied(text, values))
+}
+
+/** {@link applySupplied} across an env overlay's VALUES (the names are literal). */
+export function applySuppliedEnv(
+  env: Record<string, string>,
+  values: SuppliedValues,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).map(([name, value]) => [name, applySupplied(value, values)]),
+  )
 }
 
 export function applySupplied(text: string, values: SuppliedValues): string {

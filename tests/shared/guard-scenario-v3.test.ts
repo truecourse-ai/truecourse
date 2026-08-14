@@ -8,8 +8,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  GUARD_FORMAT_VERSION,
-  GuardCliStepSchema,
+    GuardCliStepSchema,
   GuardFlowSchema,
   GuardFlowsFileSchema,
   GuardScenarioSchema,
@@ -37,7 +36,6 @@ const BINDS = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 /** A whole scenario using every v3 capability, as a reference file writes it. */
 const V3_SCENARIO = {
-  guard: GUARD_FORMAT_VERSION,
   id: 'commit-a-baseline.cli.1',
   title: 'A developer commits the baseline and refreshes it',
   binds: BINDS,
@@ -79,10 +77,6 @@ const V3_SCENARIO = {
 } as const
 
 describe('guard scenario format v3 — the step vocabulary', () => {
-  it('is version 3', () => {
-    expect(GUARD_FORMAT_VERSION).toBe(3)
-  })
-
   it('round-trips a scenario using every new capability', () => {
     const parsed = GuardScenarioSchema.parse(V3_SCENARIO)
     expect(parsed.steps).toHaveLength(5)
@@ -97,10 +91,9 @@ describe('guard scenario format v3 — the step vocabulary', () => {
 
   it('tells the FIVE cli step kinds apart', () => {
     const [run, write, del, git, tty] = GuardScenarioSchema.parse(V3_SCENARIO).steps
-    // `patch` joined the union after v3 shipped and did NOT move the version — the
-    // number gates backward readability, and every v3 file still parses (see
-    // GUARD_FORMAT_VERSION). So it is parsed here rather than seeded into the v3
-    // reference scenario above, which stays what v3 itself introduced.
+    // `patch` joined the union after the v3 vocabulary shipped, so it is parsed
+    // here rather than seeded into the reference scenario above, which stays what
+    // the v3 vocabulary itself introduced.
     const patch = GuardCliStepSchema.parse({ patch: { 'config.json': { set: { strict: true } } } })
     expect([
       isRunStep(run),
@@ -229,7 +222,6 @@ describe('guard scenario format v3 — the step vocabulary', () => {
         '${supplied:llm-api-credentials.base-url}',
       ])
       const scenario = GuardScenarioSchema.parse({
-        guard: GUARD_FORMAT_VERSION,
         id: 's.cli.1',
         title: 't',
         binds: BINDS,
@@ -260,7 +252,6 @@ describe('guard scenario format v3 — the step vocabulary', () => {
       expect(isGitStep(git) && git.timeoutMs).toBe(5_000)
       // A whole scenario carries it through the envelope unchanged.
       const parsed = GuardScenarioSchema.parse({
-        guard: GUARD_FORMAT_VERSION,
         id: 's.cli.1',
         title: 't',
         binds: BINDS,
@@ -290,7 +281,6 @@ describe('guard scenario format v3 — the step vocabulary', () => {
     it('is a step field, never a scenario one', () => {
       expect(() =>
         GuardScenarioSchema.parse({
-          guard: GUARD_FORMAT_VERSION,
           id: 's.cli.1',
           title: 't',
           binds: BINDS,
@@ -304,7 +294,6 @@ describe('guard scenario format v3 — the step vocabulary', () => {
 
   it('a v2-shaped scenario body parses unchanged under v3', () => {
     const v2Body = {
-      guard: GUARD_FORMAT_VERSION,
       id: 's.cli.1',
       title: 't',
       binds: BINDS,

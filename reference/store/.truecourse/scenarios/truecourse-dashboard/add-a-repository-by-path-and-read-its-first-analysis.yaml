@@ -1,0 +1,128 @@
+id: add-a-repository-by-path-and-read-its-first-analysis
+title: A developer pastes a repository path and returns after its first analysis
+promise: >-
+  A developer adds a local repository from the dashboard path field, runs its first
+  analysis, and reads both the activity stamp and the single-analysis trend state.
+flow:
+  id: add-a-repository-by-path-and-read-its-first-analysis
+  fingerprint: sha256:740bba1fe3d9ea35fea6e86c6cdb05321802980bd10afa978a5dafa0f00122f1
+interface:
+  path:
+    - web/open-dashboard-home
+    - web/add-repository-by-path
+    - cli/analyze
+    - web/open-repo-report
+  fingerprints:
+    - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
+    - sha256:d2e6f6892ab10429a5c19edad08b906ba986e31c42c70d35ef7ce87fc250dc8b
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: the-repository-list
+    fingerprint: sha256:f89f5d9052a1631481a9daf667a84c75b10a1113ef5ad3dfdc98b9792c029e09
+  - doc: reference/spec-docs/dashboard/analytics.mdx
+    section: violation-trend
+    fingerprint: sha256:de157d5c7faf79a459b68bc212c56473f0da3866a92ccd7f7bb6bcb06dbbf5bc
+setup:
+  files:
+    sample-app/package.json: |
+      { "name": "sample-app", "version": "1.0.0", "type": "module" }
+    sample-app/src/index.js: |
+      export function evaluate(source) {
+        return eval(source)
+      }
+    sample-app/.truecourse/config.json: |
+      { "enableLlmRules": false }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed the repository
+normalize: []
+steps:
+  - driver: web
+    navigate: /
+    expect:
+      text:
+        contains: No repositories yet
+    note: Opens the empty repository list before anything has registered the seed.
+  - driver: web
+    fill:
+      role: textbox
+      name: Paste repository path...
+    value: ${sandbox}/sample-app
+    expect:
+      visible:
+        role: button
+        name: Add Repository
+    note: Supplies the sandbox's real absolute repository path to the dashboard field.
+  - driver: web
+    click:
+      role: button
+      name: Add Repository
+      exact: true
+    expect:
+      visible:
+        role: heading
+        name: sample-app
+      text:
+        contains: ${sandbox}/sample-app
+    note: >-
+      The submitted path becomes a repository card with the resolved project name and
+      path, proving that pasting—not a CLI registration—added it.
+    milestone:
+      - dashboard-overview-add-a-repo-by-pasting-a-path
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      stdout:
+        contains: 3 violations
+    note: >-
+      Creates exactly one completed analysis so both following states are falsifiable, and
+      pins WHAT it found while it is still the command's own word: the seed's single
+      `eval` module raises three deterministic findings, which is the number the trend
+      card is read against below. Asserting it here means a seed that stopped raising
+      three fails on the CLI's count rather than silently rewriting what the card is
+      expected to show.
+  - driver: web
+    navigate: /
+    expect:
+      text:
+        matches: '^(?=[\s\S]*sample-app)(?=[\s\S]*Analyzed\s+[A-Z][a-z]{2}\s+\d{1,2})[\s\S]*$'
+    note: >-
+      The card now names the latest lifecycle event as Analyzed and renders its date,
+      rather than retaining the pre-run “Not analyzed yet” footer.
+    milestone:
+      - dashboard-overview-repo-card-shows-last-activity
+  - driver: web
+    click:
+      role: link
+      name: sample-app
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Violation Trend)(?=[\s\S]*\b3\s*Active violations in your first analysis)(?=[\s\S]*Run more analyses to see trends over time)[\s\S]*$'
+    note: >-
+      With exactly one run there is no multi-point chart; the trend card renders the
+      active total as a number and explicitly names this as the first-analysis state. The
+      number is asserted as the value it must be — THREE, the count the arranging run
+      printed — and only immediately before the first-analysis sentence, so a stray digit
+      elsewhere on the page cannot satisfy it. A literal is legitimate here where it would
+      not be in a bound-project flow: this repository is the scenario's own seed, whose
+      one `eval` module raises exactly three deterministic findings, so a card rendering
+      any other number is either the wrong analysis or the wrong arithmetic.
+    milestone:
+      - dashboard-analytics-single-analysis-shows-a-number-instead

@@ -13,8 +13,7 @@ import {
 } from '@truecourse/guard-runner'
 import {
   GuardGenerateReportSchema,
-  GUARD_FORMAT_VERSION,
-  type GuardManifest,
+    type GuardManifest,
   type GuardManifestFlow,
   type GuardLatest,
   type GuardScenarioResult,
@@ -242,7 +241,7 @@ describe('guardGenerateInProcess — grounding progress on the author step', () 
 
     // Re-work the flow (empty manifest); authoring is now a cache HIT, so nothing
     // enters grounding and no probes run.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
     const { tracker, details } = trackAuthorDetails()
     await guardGenerateInProcess(r, { tracker, ...runners })
 
@@ -997,7 +996,6 @@ describe('composeGuardStatus', () => {
 
   it('summarizes coverage: bound sections + the ones owning scenarios', () => {
     const manifest: GuardManifest = {
-      version: GUARD_FORMAT_VERSION,
       flows: [
         sectionFlow('a', ['a.1']),
         sectionFlow('b', []),
@@ -1024,7 +1022,7 @@ describe('composeGuardStatus', () => {
       ...sectionFlow('u', []),
       gaps: [{ surface: 'cli', kind: 'untestable', reason: 'design history' }],
     }
-    const s = composeGuardStatus({ version: GUARD_FORMAT_VERSION, flows: [awaiting, untestable] }, null, null)
+    const s = composeGuardStatus({ flows: [awaiting, untestable] }, null, null)
     expect(s.coverage?.classification.web).toBe(1)
     expect(s.coverage?.classification.untestable).toBe(1)
     expect(s.coverage?.classification.unclassified).toBe(0)
@@ -1040,7 +1038,7 @@ describe('composeGuardStatus', () => {
       ...sectionFlow('c', []),
       gaps: [{ surface: 'cli', kind: 'no-interface', reason: 'nothing was mapped for cli' }],
     }
-    const s = composeGuardStatus({ version: GUARD_FORMAT_VERSION, flows: [guarded, partial, blocked] }, null, null)
+    const s = composeGuardStatus({ flows: [guarded, partial, blocked] }, null, null)
     expect(s.coverage?.flows).toEqual({
       total: 3,
       guarded: 1,
@@ -1163,7 +1161,6 @@ function sampleLatest(scenarios: GuardScenarioResult[]): GuardLatest {
       branch: 'main',
       commit: 'deadbeefcafef00d',
       recipeFingerprint: 'sha256:r',
-      scenarioFormat: GUARD_FORMAT_VERSION,
     },
     summary,
     scenarios,
@@ -1361,7 +1358,6 @@ describe('runGuardStatus (printer)', () => {
       gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
     }
     writeManifest(r, {
-      version: GUARD_FORMAT_VERSION,
       flows: [sectionFlow('a', ['a.1']), partial, sectionFlow('c', [])],
     })
 

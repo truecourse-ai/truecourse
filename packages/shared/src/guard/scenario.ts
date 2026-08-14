@@ -1,5 +1,5 @@
 /**
- * Guard scenario format v3 — the committed, declarative test that realizes ONE
+ * The guard scenario — the committed, declarative test that realizes ONE
  * spec flow. One YAML file per scenario under `.truecourse/scenarios/<area>/`.
  *
  * A scenario is the executable product of a FLOW (spec-side: what to test) and a
@@ -10,7 +10,7 @@
  * lookup. Hand-written scenarios omit `flow`/`interface` and group under the Manual
  * pseudo-flow.
  *
- * Ids are `<flow-id>.<surface>.<n>`.
+ * The id IS the flow id — one scenario per flow.
  *
  * ONE SCHEMA, DRIVERS ON THE STEPS (2026-08-12). There is no scenario-level
  * `driver` field: the driver belongs to the STEP, and everything a surface used to
@@ -20,7 +20,7 @@
  * is accepted and DROPPED at parse, so a corpus committed before the collapse
  * still loads; nothing writes it again.
  *
- * THIS MODULE IS THE COMPOSITION, not the vocabulary. The envelope (`guard`, `id`,
+ * THIS MODULE IS THE COMPOSITION, not the vocabulary. The envelope (`id`,
  * `title`, `flow`, `interface`, `binds`, `server`, `setup`, `steps`, `teardown`,
  * `normalize`) is frozen across drivers and lives here, together with the setup
  * capabilities every driver shares, and the cross-step passes and presentation that
@@ -81,32 +81,6 @@ import {
   webStepPatterns,
   type GuardWebStep,
 } from './web-steps.js'
-
-/**
- * Scenario format version carried in every file and echoed into the run store.
- *
- * v3 grew the cli step vocabulary (`git`, `write`, `delete`, per-step `cwd`/`tty`/
- * `note`), the combined-stream `expect.output` matcher, `${sandbox}` interpolation,
- * git identity/root in setup, and milestones as a LIST of references. Steps written
- * for v2 parse unchanged under it — only the version number moves.
- *
- * WHAT THE NUMBER GATES, and why the `patch` step did not move it (2026-08-09).
- * The loader accepts this number and no other: an older file is turned away with
- * "re-run `truecourse guard generate`" instead of a schema error. So the number
- * buys ONE thing — BACKWARD readability, the promise that a build can still read
- * what earlier builds wrote — and it must move exactly when that promise breaks.
- *
- * It is not forward compatibility for older builds: every schema here is
- * `.strict()`, so ANY growth already fails an older parser. `timeoutMs`, `capture`,
- * `needs`, `promise`, `server` and prompt-keyed `stdin` each did, and none of them
- * bumped. A new step KIND is the same case, not a worse one — an older build
- * rejects a patch-bearing file loudly either way, and every file written before
- * `patch` existed parses unchanged under this build. Bumping would instead turn
- * away the ENTIRE committed corpus and force a full re-author over a vocabulary
- * no existing file uses, which is a cost with no promise behind it.
- */
-export const GUARD_FORMAT_VERSION = 3
-
 
 // --- Steps (the sandbox's drivers) -----------------------------------
 //
@@ -514,8 +488,7 @@ export const GuardScenarioInterfaceRefSchema = z
 
 /** The driver-independent envelope fields (frozen across drivers). */
 const envelope = {
-  guard: z.literal(GUARD_FORMAT_VERSION),
-  /** `<flow-id>.<surface>.<n>` for a generated scenario. */
+  /** The flow's id for a generated scenario — one scenario per flow. */
   id: z.string().min(1),
   /** Restates in one line what the scenario verifies. */
   title: z.string().min(1),
@@ -524,9 +497,9 @@ const envelope = {
    * denormalized at write time so the promise rides the artifact: a reader of the
    * file alone knows what it is FOR without resolving `flow.id`
    * against `flows.json`, which is regenerated and may no longer name it. Written
-   * by the engine, never authored by the model. Additive and optional, so no
-   * format bump — absent on a hand-written scenario and on any file written
-   * before the field (the `interfaceDrifted`/`server` precedent).
+   * by the engine, never authored by the model. Additive and optional — absent on
+   * a hand-written scenario and on any file written before the field (the
+   * `interfaceDrifted`/`server` precedent).
    */
   promise: z.string().min(1).optional(),
   /** The flow realized here; absent on a hand-written scenario (Manual pseudo-flow). */
@@ -546,7 +519,7 @@ const envelope = {
    * Declared explicitly so a binding that carries no `${supplied:…}` token (an
    * authenticated HOME the program finds by itself) is still visible; a scenario
    * that DOES carry tokens binds those names too, whether or not they are listed.
-   * Additive and optional, so no format bump.
+   * Additive and optional.
    */
   needs: z.array(z.string().min(1)).optional(),
   /**
@@ -583,7 +556,7 @@ const GuardScenarioBodySchema = z
      * `steps.length + 1` everywhere an index appears (failures, evidence,
      * load errors). Sandbox-only scenarios don't need this — the sandbox is
      * deleted either way; a teardown list that only touches sandbox state is
-     * authoring noise. Additive and optional, so no format bump.
+     * authoring noise. Additive and optional.
      */
     teardown: sandboxStepList.min(1).optional(),
   })

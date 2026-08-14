@@ -15,7 +15,6 @@
  */
 
 import { z } from 'zod'
-import { GUARD_FORMAT_VERSION } from './scenario.js'
 import { GuardDriverIdSchema, type GuardDriverId } from './drivers.js'
 import { GuardFlowBindingSchema } from './flows.js'
 import { GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
@@ -165,7 +164,6 @@ export type GuardManifestFlow = z.infer<typeof GuardManifestFlowSchema>
 
 export const GuardManifestSchema = z
   .object({
-    version: z.literal(GUARD_FORMAT_VERSION),
     flows: z.array(GuardManifestFlowSchema),
   })
   .strict()

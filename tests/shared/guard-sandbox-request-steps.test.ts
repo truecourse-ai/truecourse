@@ -15,8 +15,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  GUARD_FORMAT_VERSION,
-  GuardApiRequestStepSchema,
+    GuardApiRequestStepSchema,
   GuardScenarioSchema,
   GuardSandboxStepSchema,
   captureDefects,
@@ -32,7 +31,7 @@ import {
 const binds = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function mixedScenario(steps: unknown[]): unknown {
-  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, steps, normalize: [] }
+  return { id: 'f.cli.1', title: 't', binds, steps, normalize: [] }
 }
 
 describe('the request step in the sandbox union', () => {
@@ -95,10 +94,7 @@ describe('the request step in the sandbox union', () => {
     ])
   })
 
-  it('the format version does not move — a request step is additive vocabulary', () => {
-    // The `patch` and web-step precedent: the number gates BACKWARD readability, and
-    // every scenario written before this parses unchanged under this build.
-    expect(GUARD_FORMAT_VERSION).toBe(3)
+  it('a request step is additive vocabulary — prior scenarios parse unchanged', () => {
     expect(
       GuardScenarioSchema.parse(mixedScenario([{ run: ['version'], expect: { exit: 0 } }])).steps,
     ).toHaveLength(1)

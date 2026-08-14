@@ -183,7 +183,7 @@ describe('generation-defect auto-retire', () => {
       extractRunner: versionCliBgUntestable,
       generateRunner: authorBy({ version: raw('now green', PASSING_STEPS) }),
     })
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
     expect(readGuardAutoResolutions(r).entries[KEY]).toBeUndefined()
   })
 })

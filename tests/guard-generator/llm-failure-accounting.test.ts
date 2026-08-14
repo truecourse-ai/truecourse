@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { generateGuards, type FlowsRunner, type GenerateRunner } from '@truecourse/guard-generator'
 import { manifestPath, readManifest, writeManifest, scenariosDir } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, type GuardScenario } from '@truecourse/shared'
+import { type GuardScenario } from '@truecourse/shared'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
@@ -77,22 +77,20 @@ function failing(stages: string[], message: string): LlmTransport {
 function commitPriorFlow(r: string): { manifest: string; scenario: string; file: string } {
   const binds = bindsFor(r, DOC, 'version')
   const scenario: GuardScenario = {
-    guard: GUARD_FORMAT_VERSION,
-    id: 'version.cli.1',
+    id: 'version',
     title: 'prints the version',
     driver: 'cli',
     binds,
     steps: PASSING_STEPS,
   }
-  writeScenarioFile(r, 'cli/version.cli.1.yaml', scenario)
+  writeScenarioFile(r, 'cli/version.yaml', scenario)
   writeManifest(r, {
-    version: GUARD_FORMAT_VERSION,
     flows: [
       {
         flowId: 'version',
         flowFingerprint: 'fp-version',
         bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds.fingerprint }],
-        scenarios: [{ id: 'version.cli.1', drivers: ['cli'], status: 'passing' }],
+        scenarios: [{ id: 'version', drivers: ['cli'], status: 'passing' }],
         interfaces: [],
         // A null hash re-detects the flow as work, so the run really does re-author
         // it — and really would delete its file on a zero-survivor pass.
@@ -101,7 +99,7 @@ function commitPriorFlow(r: string): { manifest: string; scenario: string; file:
       },
     ],
   })
-  const file = path.join(scenariosDir(r), 'cli/version.cli.1.yaml')
+  const file = path.join(scenariosDir(r), 'cli/version.yaml')
   return {
     manifest: fs.readFileSync(manifestPath(r), 'utf-8'),
     scenario: fs.readFileSync(file, 'utf-8'),

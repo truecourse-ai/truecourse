@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { type FidelityRunner } from '@truecourse/guard-generator'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import { loadScenarios, readManifest, writeManifest } from '@truecourse/guard-runner'
-import { GuardGenerateReportSchema, GUARD_FORMAT_VERSION } from '@truecourse/shared'
+import { GuardGenerateReportSchema } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -65,7 +65,7 @@ describe('generateGuards — fidelity review', () => {
     })
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.birthFindings).toEqual([])
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
   })
 
   it('a FLAGGED green scenario becomes a fidelity finding — nothing persisted, the flow re-runs', async () => {
@@ -122,7 +122,7 @@ describe('generateGuards — fidelity review', () => {
     // The healthy flow persisted; the flagged one is a finding. Nothing is held.
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.birthFindings.map((f) => f.title)).toEqual(['bad'])
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
     expect(res.flows.settled).toBe(1)
     expect(res.flows.unsettled).toBe(1)
   })
@@ -159,7 +159,7 @@ describe('generateGuards — fidelity review', () => {
 
     // Force the whole pipeline to re-run (fresh manifest) with the SAME doc: the
     // scenario YAML + flow are byte-identical, so the fidelity review is a cache HIT.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
     calls = 0
     const res2 = await runGenerate({
       repoRoot: r,

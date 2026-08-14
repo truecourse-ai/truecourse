@@ -189,6 +189,7 @@ describe('spec.verifyOverlap', () => {
     const recommendation = (root.properties as Record<string, Record<string, unknown>>).recommendation;
     expect(Object.keys((recommendation.properties ?? {}) as Record<string, unknown>).sort()).toEqual([
       'action',
+      'confidence',
       'fix',
       'rationale',
     ]);

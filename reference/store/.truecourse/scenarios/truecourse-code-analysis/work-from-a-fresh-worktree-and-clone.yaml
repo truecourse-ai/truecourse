@@ -1,0 +1,154 @@
+id: work-from-a-fresh-worktree-and-clone
+title: A developer starts a worktree and a fresh clone and gets the baseline for free
+promise: A developer starts a worktree and a fresh clone and gets the baseline for free
+flow:
+  id: work-from-a-fresh-worktree-and-clone
+  fingerprint: sha256:622a40e69e55ea6005605d89262d7a4f6ca00a21316e58bc51290516efedc71d
+interface:
+  path:
+    - cli/analyze
+    - cli/hooks-install
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:1038639e4b6df928f00ecbcf7f8ddcecf6a249c62ae109d2838192aa506ac539
+binds:
+  - doc: reference/spec-docs/analyze/baseline-and-diff.mdx
+    section: worktrees-and-fresh-clones
+    fingerprint: sha256:3fe55804d8c30ddc769bd99d4fa1f853aca186465169482b4be0aa5981b24faf
+  - doc: reference/spec-docs/analyze/baseline-and-diff.mdx
+    section: diff-analysis
+    fingerprint: sha256:7cc77a195f14d0c09912572aa32d548a9921173dd9bb21c73323aef554e43b75
+setup:
+  files:
+    repo/package.json: |
+      {
+        "name": "worktree-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    repo/src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    root: repo
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed worktree sample
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+    cwd: repo
+  - run:
+      - hooks
+      - install
+    stdin:
+      - marker: 'Install the pre-commit hook?'
+        answer: 'y'
+    tty: true
+    expect:
+      exit: 0
+      files:
+        repo/.truecourse/hooks.yaml:
+          exists: true
+    cwd: repo
+  - git:
+      - add
+      - .truecourse/LATEST.json
+      - .truecourse/hooks.yaml
+    expect:
+      exit: 0
+    cwd: repo
+  - git:
+      - commit
+      - '--no-verify'
+      - '-m'
+      - add truecourse baseline
+    expect:
+      exit: 0
+    cwd: repo
+    note: '`--no-verify` here is plumbing, not the claim: this commit only exists to put the baseline and the policy into git so the other checkouts inherit them.'
+  - git:
+      - worktree
+      - add
+      - ../feat-x
+    expect:
+      exit: 0
+    cwd: repo
+  - git:
+      - clone
+      - .
+      - ../clone-x
+    expect:
+      exit: 0
+      files:
+        feat-x/.truecourse/LATEST.json:
+          exists: true
+        clone-x/.truecourse/LATEST.json:
+          exists: true
+        clone-x/.truecourse/hooks.yaml:
+          exists: true
+    cwd: repo
+    note: No TrueCourse command has ever run in either checkout — the baseline arrived through git alone, because LATEST.json is tracked.
+    milestone:
+      - worktrees-and-clones-inherit-the-baseline
+  - write:
+      feat-x/src/notes.js: |
+        export function notes(rows) {
+          console.log('notes', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        feat-x/src/notes.js:
+          exists: true
+  - run:
+      - analyze
+      - '--diff'
+      - '--no-llm'
+    expect:
+      exit: 0
+      stdout:
+        matches: '^(?=[\s\S]*Changed files: [0-9]+)(?=[\s\S]*Summary: [0-9]+ new issues, [0-9]+ resolved)[\s\S]*$'
+      files:
+        feat-x/.truecourse/history.json:
+          absent: true
+        feat-x/.truecourse/diff.json:
+          contains: console.log call
+    cwd: feat-x
+    note: 'First command in this checkout, and it produces a result. The introduced finding is proven from diff.json (the command prints counts only and defers itemization to `truecourse list --diff`; the first authored form over-asserted section headers — same 2026-08-11 correction as the diff flow). The absent `history.json` is the public evidence that no full analysis ever ran here: the comparison was made against the baseline committed on main, not against a locally computed one.'
+    milestone:
+      - diff-works-immediately-in-a-new-worktree
+      - diff-compares-worktree-against-committed-baseline
+  - git:
+      - add
+      - src/notes.js
+    expect:
+      exit: 0
+    cwd: feat-x
+  - git:
+      - commit
+      - '-m'
+      - add notes
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*passed)[\s\S]*$
+    cwd: feat-x
+    note: The hook installed in the main checkout runs on the worktree's FIRST commit — linked worktrees share the common git dir — and reaches a verdict with no per-checkout cold start. The change is deliberately a low-severity one so this flow proves reachability, not blocking; blocking belongs to `install-the-pre-commit-hook-and-enforce-it`.
+    milestone:
+      - hook-works-on-first-commit-in-a-new-worktree

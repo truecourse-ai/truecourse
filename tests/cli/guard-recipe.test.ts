@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { recipePath, writeGuardLatest } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, type GuardLatest } from '@truecourse/shared'
+import { type GuardLatest } from '@truecourse/shared'
 import { runGuardRecipe } from '../../tools/cli/src/commands/guard-recipe'
 import { unifiedDiff } from '../../tools/cli/src/lib/unified-diff'
 import { makeTempRepo, rmrf } from '../guard-runner/helpers.js'
@@ -44,7 +44,6 @@ async function writeRunWithFingerprint(r: string, fingerprint: string): Promise<
       branch: 'main',
       commit: 'deadbeefcafef00d',
       recipeFingerprint: fingerprint,
-      scenarioFormat: GUARD_FORMAT_VERSION,
     },
     summary: { total: 0, pass: 0, fail: 0, error: 0, stale: 0, orphaned: 0 },
     scenarios: [],

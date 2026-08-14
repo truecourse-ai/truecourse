@@ -1,0 +1,243 @@
+id: install-the-pre-commit-hook-and-enforce-it
+title: A team installs the pre-commit hook and it starts gating their commits
+promise: A team installs the pre-commit hook and it starts gating their commits
+flow:
+  id: install-the-pre-commit-hook-and-enforce-it
+  fingerprint: sha256:fe500d06c9bd7e52bdce2d11702346fa51bf20cd8330dcedaba1f0342375427a
+interface:
+  path:
+    - cli/hooks-status
+    - cli/hooks-install
+    - cli/analyze
+    - cli/hooks-uninstall
+  fingerprints:
+    - sha256:cc07593d0bfb9c5bbe9fb290c2fe3ad39979bb48946f7dc2034429b66a7b00da
+    - sha256:1038639e4b6df928f00ecbcf7f8ddcecf6a249c62ae109d2838192aa506ac539
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:230a4c0926ff198d87f7fd78a0824ed00f5d215073079e0bc54f500faafd8704
+binds:
+  - doc: reference/spec-docs/analyze/git-hooks.mdx
+    section: git-hooks
+    fingerprint: sha256:27f3d2d329ffce52e9c1d802d3bd7e37edb7648a3a6193dcd66b3161b5861f4f
+  - doc: reference/spec-docs/analyze/git-hooks.mdx
+    section: configuration
+    fingerprint: sha256:560774079eb1236364f9892d479911372db98763bc7e668ef8fc97361ee8ee5d
+  - doc: reference/spec-docs/analyze/baseline-and-diff.mdx
+    section: baselines-diff
+    fingerprint: sha256:e49543c814a36d09ff9ed323a2d12269d7371ebae20ebd392381c9374a5cbd4e
+  - doc: reference/spec-docs/analyze/git-hooks.mdx
+    section: how-it-works
+    fingerprint: sha256:5d58608fdb59d3d39101a620a11ae854561091564142322987457e9d52f209d5
+  - doc: reference/spec-docs/analyze/baseline-and-diff.mdx
+    section: diff-analysis
+    fingerprint: sha256:7cc77a195f14d0c09912572aa32d548a9921173dd9bb21c73323aef554e43b75
+setup:
+  files:
+    package.json: |
+      {
+        "name": "hooked-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed hooked sample
+normalize: []
+steps:
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        contains: not installed
+      files:
+        .truecourse/hooks.yaml:
+          absent: true
+    note: The "before" state for both the hook and the policy file.
+  - run:
+      - hooks
+      - install
+    stdin:
+      - marker: 'Install the pre-commit hook?'
+        answer: 'y'
+    tty: true
+    expect:
+      exit: 0
+      stdout:
+        matches: TrueCourse pre-commit hook installed
+      files:
+        .truecourse/hooks.yaml:
+          contains: "block-on:\n    - critical\n    - high"
+    note: 'One command, four contracts: the hook is installed, the policy file is seeded by THIS command (it was absent one step ago), and the starter policy blocks on critical and high. The confirmation is answered yes; the decline path is its own flow. The assertion carries the VALUE (block-on = critical, high) in the block style the seeder writes; git-hooks.mdx renders the same mapping in flow style (`block-on: [critical, high]`), which is the same YAML data and not something to assert on. The rendered form is cross-checked semantically by the next step''s `Block on severities: critical, high`.'
+    milestone:
+      - hooks-install-installs-precommit-hook
+      - hooks-install-seeds-hooks-yaml
+      - hooks-yaml-created-by-hooks-install
+      - hooks-yaml-default-block-on
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        matches: '^(?=[\s\S]*pre-commit hook: installed)(?=[\s\S]*Block on severities: critical, high)(?=[\s\S]*LLM rules on commit: disabled)[\s\S]*$'
+      files:
+        .truecourse/hooks.yaml:
+          contains: 'llm: false'
+    note: 'Status is the state PLUS the effective policy. The seeded `llm: false` is asserted in the file and in the rendered status, which is as close to "no tokens per commit" as the promised surfaces get.'
+    milestone:
+      - hooks-status-shows-status-and-config
+      - hooks-yaml-default-llm-false
+  - write:
+      src/notes.js: |
+        export function notes(rows) {
+          console.log('notes', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/notes.js:
+          exists: true
+  - git:
+      - add
+      - src/notes.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add notes
+    expect:
+      exit: 1
+      stderr:
+        contains: No baseline analysis yet
+  - git:
+      - commit
+      - '--no-verify'
+      - '-m'
+      - add notes
+    expect:
+      exit: 0
+      stderr:
+        matches: ^(?![\s\S]*TrueCourse pre-commit check)[\s\S]*$
+    note: The identical commit that the hook refused one step earlier goes through, with no hook output at all. This is also how a developer recovers from the no-baseline state, which is why the two steps sit together.
+    milestone:
+      - no-verify-bypasses-the-hook
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - git:
+      - add
+      - .truecourse/LATEST.json
+      - .truecourse/hooks.yaml
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '--no-verify'
+      - '-m'
+      - add truecourse baseline
+    expect:
+      exit: 0
+  - write:
+      src/util.js: |
+        export function util(rows) {
+          console.log('util', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/util.js:
+          exists: true
+  - git:
+      - add
+      - src/util.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add util
+    expect:
+      exit: 0
+      stderr:
+        matches: ^(?=[\s\S]*TrueCourse pre-commit check)(?=[\s\S]*passed)[\s\S]*$
+    note: 'The change introduces a low-severity violation — a real new finding that does not match `block-on: [critical, high]` — so the diff check runs on this commit AND lets it through. Without this step the flow would only prove the hook blocks everything.'
+    milestone:
+      - hook-runs-analyze-diff-on-every-commit
+      - hook-allows-commit-without-matching-violation
+  - write:
+      src/unsafe.js: |
+        export function runRule(source) {
+          return eval(source)
+        }
+    expect:
+      files:
+        src/unsafe.js:
+          exists: true
+  - git:
+      - add
+      - src/unsafe.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add unsafe
+    expect:
+      exit: 1
+      stderr:
+        matches: ^(?=[\s\S]*BLOCKED)(?=[\s\S]*Dynamic code evaluation)(?=[\s\S]*Commit blocked)[\s\S]*$
+    note: 'Same policy, same hook, higher severity: blocked, with the offending violation named. The commit is refused — `git log` still ends at "add util".'
+    milestone:
+      - hook-blocks-commits-introducing-new-violations
+      - hook-blocks-on-configured-block-severities
+  - run:
+      - analyze
+      - '--diff'
+      - '--no-llm'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*NEW ISSUES)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$
+    note: Run by hand, `analyze --diff` reports exactly what the hook just reported. Both read the same committed LATEST.json, which is the sentence three docs state three ways.
+    milestone:
+      - hook-runs-the-same-diff-check
+      - hook-diffs-against-latest-json
+      - latest-json-is-baseline-for-diff-and-hook
+  - run:
+      - hooks
+      - uninstall
+    expect:
+      exit: 0
+      stdout:
+        matches: TrueCourse pre-commit hook removed
+  - git:
+      - commit
+      - '-m'
+      - add unsafe
+    expect:
+      exit: 0
+      stderr:
+        matches: ^(?![\s\S]*TrueCourse pre-commit check)[\s\S]*$
+    note: 'The behavioral proof the claim asks for: the very commit that was blocked two steps ago now completes, with no hook output. Asserting only that a file disappeared would be a weaker test of the same sentence.'
+    milestone:
+      - hooks-uninstall-removes-precommit-hook

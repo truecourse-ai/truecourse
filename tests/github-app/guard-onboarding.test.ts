@@ -114,8 +114,8 @@ function makeGuardResult(over: Partial<GuardGenerateResult> = {}): GuardGenerate
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 3, flows: [] }));
-    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 3\nid: s1\n');
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ flows: [] }));
+    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'id: s1\n');
     writeCloneGuardResult(
       dir,
       buildGuardReport(result, '2026-07-09T12:00:00.000Z', {
@@ -247,8 +247,8 @@ describe('guard onboarding pipeline', () => {
     });
     const generate = vi.fn(async (dir: string) => {
       writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 3, flows: [] }));
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 3\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ flows: [] }));
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'id: s1\n');
       // The birth run wrote its transcript into the checkout (removed after run).
       writeFile(dir, `${evidencePath}/transcript.txt`, 'birth transcript');
       writeFile(dir, `${evidencePath}/diff.txt`, 'expected exit 0, got 1');
@@ -298,7 +298,6 @@ describe('guard onboarding pipeline', () => {
         dir,
         '.truecourse/scenarios/manifest.json',
         JSON.stringify({
-          version: 3,
           flows: [
             {
               flowId: 'f1',
@@ -327,7 +326,7 @@ describe('guard onboarding pipeline', () => {
           ],
         }),
       );
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 3\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'id: s1\n');
       writeFile(dir, `${driftPath}/transcript.txt`, 'committed red test transcript');
       writeFile(dir, `${defectPath}/transcript.txt`, 'withheld defect transcript');
       // The report names ONLY the withheld defect — the committed test's row was

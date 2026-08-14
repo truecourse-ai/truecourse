@@ -294,6 +294,41 @@ describe('executeStep — a process that outlives the step', () => {
   }, 20_000)
 })
 
+describe('executeStep — a held command (`until`)', () => {
+  // Each stream carries its own watch: a stderr chunk landing between two stdout
+  // chunks must not split the marker forever (one shared buffer did exactly that).
+  it('sees a marker split across stdout chunks even when stderr interleaves', async () => {
+    const SPLIT_READY = [
+      "process.stdout.write('listening ')",
+      "setTimeout(() => { process.stderr.write('warn: noisy\\n');" +
+        " setTimeout(() => { process.stdout.write('on port 3000\\n'); setInterval(() => {}, 1000) }, 80) }, 80)",
+    ].join(';')
+
+    const cap = await executeStep({
+      argv: ['node', '-e', SPLIT_READY],
+      cwd,
+      env: baseEnv,
+      until: 'listening on',
+      timeoutMs: 8_000,
+    })
+    expect(cap.endedAtMarker).toBe('listening on')
+    expect(cap.unseenMarker).toBeUndefined()
+    expect(cap.timedOut).toBe(false)
+  })
+
+  it('finds the ready line on stderr too', async () => {
+    const STDERR_READY = "process.stderr.write('listening on 4000\\n'); setInterval(() => {}, 1000)"
+    const cap = await executeStep({
+      argv: ['node', '-e', STDERR_READY],
+      cwd,
+      env: baseEnv,
+      until: 'listening on',
+      timeoutMs: 8_000,
+    })
+    expect(cap.endedAtMarker).toBe('listening on')
+  })
+})
+
 describe('executeStep — abort signal', () => {
   it('a pre-aborted signal short-circuits without spawning the command', async () => {
     const marker = path.join(cwd, 'ran.txt')

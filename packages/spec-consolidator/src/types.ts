@@ -90,6 +90,12 @@ export const ConflictResolutionSchema = z.object({
   resolvedAt: z.string(),
   /** Optional human-readable rationale. */
   note: z.string().optional(),
+  /**
+   * Who recorded the verdict. `auto` = the scan applied a high-confidence
+   * verify-pass recommendation itself; absent/`user` = a human recorded it.
+   * Surfaces badge `auto` entries and they stay undoable like any verdict.
+   */
+  resolvedBy: z.enum(['user', 'auto']).optional(),
 });
 export type ConflictResolution = z.infer<typeof ConflictResolutionSchema>;
 

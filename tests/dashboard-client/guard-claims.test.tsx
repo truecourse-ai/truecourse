@@ -571,7 +571,7 @@ describe('GuardTestView — a claim-tagged step reads its claims inside its reco
       vi.fn(async (url: string | URL) => {
         const u = String(url);
         if (u.includes('/guard/scenario?'))
-          return json({ id: MODEL.id, file: 'tasks.yaml', content: 'guard: 3', steps: CLAIM_STEPS });
+          return json({ id: MODEL.id, file: 'tasks.yaml', content: `id: ${MODEL.id}`, steps: CLAIM_STEPS });
         return json({});
       }),
     );

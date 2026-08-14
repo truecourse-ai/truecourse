@@ -25,7 +25,6 @@ import {
   type SectionInput,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
 
 let repo = ''
 afterEach(() => {
@@ -225,7 +224,6 @@ describe('a side verdict re-keys the losing section', () => {
         recipeFingerprint,
       })
     writeManifest(repo, {
-      version: GUARD_FORMAT_VERSION,
       flows: plan0.sections.map((s) => ({
         flowId: `${s.doc}#${s.anchor}`,
         flowFingerprint: s.fingerprint,

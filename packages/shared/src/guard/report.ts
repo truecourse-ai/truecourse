@@ -524,8 +524,7 @@ export const GuardGenerateErrorSchema = z
      *    authored, nothing executed, and re-running changes NOTHING until the
      *    config does — so a surface must never offer "will retry next generate".
      * Optional: reports written before the discriminator existed carry no kind, and
-     * are read as `authoring` (the retry wording those surfaces already used). NO
-     * format-version bump.
+     * are read as `authoring` (the retry wording those surfaces already used).
      */
     kind: z.enum(['authoring', 'birth', 'refusal']).optional(),
     /**
@@ -539,7 +538,7 @@ export const GuardGenerateErrorSchema = z
      * The surface the errored work was for — authoring is one call per (flow,
      * surface), so a flow can fail on one surface and succeed on another, and a
      * reader that cannot tell them apart attributes the failure to both. Optional:
-     * a run-level refusal has none, and older reports carry none. NO format bump.
+     * a run-level refusal has none, and older reports carry none.
      */
     surface: GuardDriverIdSchema.optional(),
     /**
@@ -548,8 +547,7 @@ export const GuardGenerateErrorSchema = z
      * own stdout/stderr (so `result.json` shows WHY it didn't come up — the diagnosed
      * cal.com health-timeouts left zero server-side evidence); a step-level INFRA error
      * carries the response-body/server-stderr excerpts. Absent for authoring errors (no
-     * process ran). Optional so those and pre-change snapshots keep parsing. NO
-     * format-version bump.
+     * process ran). Optional so those and pre-change snapshots keep parsing.
      */
     ...OutputExcerptsSchema.shape,
   })

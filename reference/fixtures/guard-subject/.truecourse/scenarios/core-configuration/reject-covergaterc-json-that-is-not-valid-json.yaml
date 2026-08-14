@@ -1,0 +1,34 @@
+id: reject-covergaterc-json-that-is-not-valid-json
+title: Invalid configuration JSON is rejected before checking coverage
+promise: The user gets a clear failure when `.covergaterc.json` cannot be parsed as JSON after comments are stripped.
+flow:
+  id: reject-covergaterc-json-that-is-not-valid-json
+  fingerprint: sha256:af48a0a798e8a61d92718d40f0f84a90eca997bfa3804ea53368ff708b0e0db6
+journey:
+  path:
+    - cli/check
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+binds:
+  - doc: docs/configuration.md
+    section: configuration/when-the-file-is-wrong
+    fingerprint: sha256:bc70f6c2258a63caaefbe790ec89d1072730d35b3dcd107ca2d2fc814d90451b
+setup:
+  files:
+    .covergaterc.json: |
+      {
+        "min": 80,
+        invalid
+      }
+    coverage/coverage-summary.json: |
+      {"total":{"lines":{"total":1,"covered":1,"skipped":0,"pct":100},"statements":{"total":1,"covered":1,"skipped":0,"pct":100},"functions":{"total":1,"covered":1,"skipped":0,"pct":100},"branches":{"total":1,"covered":1,"skipped":0,"pct":100}}}
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+    expect:
+      exit: 2
+      stderr:
+        contains: 'covergate: .covergaterc.json is not valid JSON'
+    milestone: 1

@@ -20,7 +20,6 @@ import {
   type GuardBirthFinding,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -69,7 +68,6 @@ function authorKeyOracle(sectionKeys: string[], extra: string[] = []): string {
       [
         GENERATE_API_PROMPT_FINGERPRINT,
         'sha256:recipe',
-        String(GUARD_FORMAT_VERSION),
         'api',
         FLOW.fingerprint,
         [...sectionKeys, ...extra].sort().join('~'),
@@ -171,7 +169,6 @@ describe('planGuardWork — markdown → OpenAPI write-op enrichment', () => {
     // Stamp a manifest as if one flow per section had already generated.
     const plan0 = planGuardWork(r)
     writeManifest(r, {
-      version: GUARD_FORMAT_VERSION,
       flows: plan0.sections.map((s) => ({
         flowId: `${s.doc}#${s.anchor}`,
         flowFingerprint: s.fingerprint,

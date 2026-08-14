@@ -1,0 +1,190 @@
+id: configure-rule-categories-and-llm-rules-per-repository
+title: A developer registers a repository and sets its rule policy
+promise: A developer registers a repository and sets its rule policy
+flow:
+  id: configure-rule-categories-and-llm-rules-per-repository
+  fingerprint: sha256:90fbe2b43c1a92f677c4348f54db83573f074ae5975ca7106a63452e690d0487
+interface:
+  path:
+    - cli/add
+    - cli/rules-categories
+    - cli/rules-llm
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:7c34c13f1388399e8fef9e49a52d4f25d1b4c525cdc32ec1b827007a6be170d6
+    - sha256:23ad6cb2a11da30f8f40226ccd122367e3fe43b2b4cdde3ee7ab696f047cbf78
+binds:
+  - doc: reference/spec-docs/analyze/overview.mdx
+    section: commands
+    fingerprint: sha256:9b82a730b41a72e6e00cc47eaf3a26930b06548e0496be87a19843f7b3c73ede
+  - doc: reference/spec-docs/analyze/rules.mdx
+    section: categories
+    fingerprint: sha256:b080ec80f259542368c63a62117a942a2a582842a524766a50ab1f4ae2b17a3e
+  - doc: reference/spec-docs/analyze/rules.mdx
+    section: rules
+    fingerprint: sha256:e839886eafd05ebdce44454b407f45845dcfcd58c52d49e821cc77f2def8399b
+  - doc: reference/spec-docs/analyze/overview.mdx
+    section: rule-coverage
+    fingerprint: sha256:e2ac33a1d0da9236cf914ab67ae65a25c2702a0b033828a750b416c44d61f89f
+  - doc: reference/spec-docs/analyze/rules.mdx
+    section: llm-powered-rules
+    fingerprint: sha256:301491495084c720f3e0cd60ed343e7522ddb3d7203f98bdb1fd3b6909d6abaf
+  - doc: reference/spec-docs/analyze/baseline-and-diff.mdx
+    section: baselines-diff
+    fingerprint: sha256:e49543c814a36d09ff9ed323a2d12269d7371ebae20ebd392381c9374a5cbd4e
+setup:
+  files:
+    main-repo/package.json: |
+      {
+        "name": "policy-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    main-repo/src/index.js: |
+      export function main(input) {
+        return input
+      }
+    other-repo/package.json: |
+      {
+        "name": "other-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    other-repo/src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: added|already registered
+      files:
+        main-repo/.truecourse:
+          exists: true
+        main-repo/.truecourse/LATEST.json:
+          absent: true
+    note: Registered — the store directory exists — while no analysis snapshot was written.
+    milestone:
+      - add-registers-repo-without-analyzing
+    cwd: main-repo
+  - run:
+      - rules
+      - categories
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*security)(?=[\s\S]*bugs)(?=[\s\S]*architecture)(?=[\s\S]*performance)(?=[\s\S]*reliability)(?=[\s\S]*code-quality)(?=[\s\S]*database)(?=[\s\S]*style[^\n]*enabled)[\s\S]*$
+    note: All eight categories, each with a state — which is what "prints each category with its enabled or disabled status" means.
+    milestone:
+      - rules-categories-shows-enabled-disabled
+    cwd: main-repo
+  - run:
+      - rules
+      - categories
+      - '--disable'
+      - style
+    expect:
+      exit: 0
+      stdout:
+        matches: Disabled style
+      files:
+        main-repo/.truecourse/config.json:
+          contains: '"enabledCategories"'
+    note: >-
+      The deterministic half of "either kind of rule can be toggled per repository":
+      a category is turned off for THIS repository and the override lands in this
+      repository's own `config.json`.
+    milestone:
+      - rules-categories-disable
+      - rule-configuration-stored-in-config-json
+    cwd: main-repo
+  - run:
+      - rules
+      - categories
+      - '--enable'
+      - style
+    expect:
+      exit: 0
+      stdout:
+        matches: Enabled style
+    milestone:
+      - rules-categories-enable
+    cwd: main-repo
+  - run:
+      - rules
+      - categories
+      - '--reset'
+    expect:
+      exit: 0
+      stdout:
+        matches: Reset to global default
+    milestone:
+      - rules-categories-reset
+    cwd: main-repo
+  - run:
+      - rules
+      - llm
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules for[^\n]*(enabled|disabled)
+    milestone:
+      - rules-llm-shows-status
+    cwd: main-repo
+  - run:
+      - rules
+      - llm
+      - '--disable'
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules disabled
+      files:
+        main-repo/.truecourse/config.json:
+          contains: '"enableLlmRules"'
+    note: >-
+      The LLM half of the same sentence, and the second key in the same file:
+      `config.json` now carries both halves the baseline doc names — the category
+      override written three steps ago and the LLM toggle written here. Two kinds of
+      rule, both switched for this repository and nowhere else, which is exactly what
+      `rule-kinds-toggleable-per-repository` asserts.
+    milestone:
+      - rules-llm-disable
+      - config-json-holds-categories-and-llm-toggles
+      - rule-kinds-toggleable-per-repository
+    cwd: main-repo
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+    cwd: other-repo
+  - run:
+      - rules
+      - llm
+    expect:
+      exit: 0
+      stdout:
+        matches: global default[^\n]*enabled
+    cwd: other-repo
+    note: 'The first repository is sitting on an explicit `disabled` override at this exact moment; the second reports the untouched global default. Two repositories, two policies. They are SIBLINGS under the sandbox (`main-repo/` and `other-repo/`), which is the only arrangement in which they are two repositories at all: repo resolution walks UP to the nearest `.truecourse/` ancestor, so a nested second directory would resolve straight back into the first one and read the FIRST repo''s override.'
+    milestone:
+      - rule-configuration-is-per-repository
+  - run:
+      - rules
+      - llm
+      - '--enable'
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules enabled
+    milestone:
+      - rules-llm-enable
+    cwd: main-repo

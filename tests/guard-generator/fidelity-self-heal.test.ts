@@ -76,9 +76,9 @@ describe('fidelity self-heal', () => {
     })
 
     // The replacement committed under the flow's stable id; no finding, no task.
-    expect(res.written).toMatchObject([{ id: 'version.cli.1', title: 'strong', status: 'passing' }])
+    expect(res.written).toMatchObject([{ id: 'version', title: 'strong', status: 'passing' }])
     expect(res.birthFindings).toEqual([])
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
     // Both the discarded candidate and its replacement were reviewed.
     expect(reviews).toBe(2)

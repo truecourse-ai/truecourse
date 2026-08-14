@@ -23,7 +23,7 @@ const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0
 const WEBM_BYTES = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0xff, 0x80, 0x42]);
 
 const LATEST = {
-  run: { runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 3 },
+  run: { runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
     { id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'fail', durationMs: 3, failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: `.truecourse/guard/evidence/${RUN_ID}/a1` },
@@ -32,7 +32,6 @@ const LATEST = {
 };
 
 const MANIFEST = {
-  version: 3,
   flows: [
     {
       flowId: `${DOC}#alpha`,
@@ -66,7 +65,6 @@ const HISTORY = {
 
 const scenarioYaml = (id: string, section: string) =>
   [
-    'guard: 3',
     `id: ${id}`,
     `title: ${section} claim`,
     'binds:',
@@ -309,7 +307,6 @@ describe('Guard routes', () => {
   // The starting world a test declares — read off the same parse as the steps, so
   // the detail never re-reads the file to learn what it began from.
   const SETUP_YAML = [
-    'guard: 3',
     'id: s1',
     'title: seeded world',
     'binds:',
@@ -579,7 +576,6 @@ describe('Guard routes', () => {
 
   /** A three-step committed test — enough for a run that stops at the second one. */
   const THREE_STEP_YAML = [
-    'guard: 3',
     'id: m1',
     'title: three steps',
     'binds:',

@@ -230,7 +230,6 @@ describe('captureDefects — the load-time rules', () => {
 /** A minimal, schema-valid cli scenario around `steps`. */
 function cliScenario(steps: unknown[]): unknown {
   return {
-    guard: 3,
     id: 'x',
     title: 'x',
     binds: [{ doc: 'docs/a.md', section: 'a', fingerprint: 'sha256:1' }],

@@ -41,7 +41,7 @@ describe('loadScenarios', () => {
   it('records a schema-invalid file as a load error (never a crash)', () => {
     const r = repo()
     writeRecipe(r)
-    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ guard: 3, id: 'x' }))
+    writeScenarioFile(r, 'wrong.yaml', JSON.stringify({ id: 'x' }))
 
     const { scenarios, errors } = loadScenarios(r)
     expect(scenarios).toEqual([])
@@ -49,10 +49,9 @@ describe('loadScenarios', () => {
     expect(errors[0].file).toContain('wrong.yaml')
   })
 
-  it('rejects an out-of-date scenario format with one actionable line, not a schema dump', () => {
+  it('reports a file still carrying the retired guard: version key as a load error', () => {
     const r = repo()
     writeRecipe(r)
-    // A v1 file: single-object `binds`, no flow/interface refs.
     writeScenarioFile(
       r,
       'old.yaml',
@@ -60,7 +59,8 @@ describe('loadScenarios', () => {
         guard: 1,
         id: 'old',
         title: 'an older corpus',
-        binds: { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' },
+        binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }],
+        normalize: [],
         steps: [{ run: ['--version'], expect: { exit: 0 } }],
       }),
     )
@@ -69,12 +69,7 @@ describe('loadScenarios', () => {
     expect(scenarios).toEqual([])
     expect(errors).toHaveLength(1)
     expect(errors[0].file).toContain('old.yaml')
-    expect(errors[0].message).toBe(
-      'scenario format v1 is no longer supported (this build reads guard: 3) — re-run `truecourse guard generate` to re-author the corpus in the current format',
-    )
-    // One line, and never the per-field zod noise the version change would produce.
-    expect(errors[0].message.split('\n')).toHaveLength(1)
-    expect(errors[0].message).not.toContain('binds:')
+    expect(errors[0].message).toContain("guard")
   })
 
   it('flags duplicate ids and keeps the first', () => {

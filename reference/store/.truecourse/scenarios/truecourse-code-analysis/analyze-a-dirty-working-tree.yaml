@@ -1,0 +1,125 @@
+id: analyze-a-dirty-working-tree
+title: A developer runs a full analysis with uncommitted changes in the tree
+promise: A developer runs a full analysis with uncommitted changes in the tree
+flow:
+  id: analyze-a-dirty-working-tree
+  fingerprint: sha256:48f58f9207b32fdb8db798662389c1b85f4442d7a2c42ac24012df478b1dc661
+interface:
+  path:
+    - cli/analyze
+    - cli/list
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+binds:
+  - doc: reference/spec-docs/analyze/overview.mdx
+    section: commands
+    fingerprint: sha256:9b82a730b41a72e6e00cc47eaf3a26930b06548e0496be87a19843f7b3c73ede
+  - doc: reference/spec-docs/analyze/baseline-and-diff.mdx
+    section: dirty-working-trees
+    fingerprint: sha256:c275cc18b23c6a71864700e5c9a55e09f3e0ca55dbce6a847ee6b57f63990903
+setup:
+  files:
+    package.json: |
+      {
+        "name": "dirty-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed dirty sample
+normalize: []
+steps:
+  - write:
+      src/dirty.js: |
+        export function dirty(rows) {
+          console.log('dirty', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/dirty.js:
+          exists: true
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    stdin:
+      - marker: 'How should TrueCourse handle them?'
+        answer: "\r"
+    tty: true
+    expect:
+      exit: 0
+      stdout:
+        contains: How should TrueCourse handle them?
+      files:
+        src/dirty.js:
+          exists: true
+    note: 'Both docs state this behavior; one observation carries both claim ids. The scripted answer is keyed to the question, so it is typed only once the select is up: it takes the first option ("Stash and analyze committed state") by pressing Enter, which a terminal sends as CARRIAGE RETURN — hence "\r". The file surviving the run is the stash being popped afterwards — nothing of the developer''s is lost.'
+    milestone:
+      - analyze-prompts-before-stashing-dirty-tree
+      - dirty-tree-prompts-before-stashing
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--stash'
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*How should TrueCourse handle them\?)[\s\S]*$
+      files:
+        src/dirty.js:
+          exists: true
+    note: The pre-approved path — no question asked. Its effect is asserted next.
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*console\.log call)[\s\S]*$
+    note: 'The uncommitted file''s violation is absent: the pending changes really were stashed and the committed state was analyzed. Paired with the previous step, which is where "no prompt appeared" is asserted.'
+    milestone:
+      - analyze-stash-preapproves-stashing
+      - stash-flag-preapproves-stashing
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*How should TrueCourse handle them\?)[\s\S]*$
+      files:
+        src/dirty.js:
+          exists: true
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        contains: console.log call
+    note: 'Same command, opposite flag, opposite result: the working tree as it stands was analyzed, so the uncommitted violation is reported. The two list steps in this scenario differ only in what preceded them, which is precisely the behavior under test.'
+    milestone:
+      - analyze-no-stash-analyzes-tree-as-is
+      - no-stash-flag-analyzes-tree-as-is

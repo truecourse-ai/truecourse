@@ -4,18 +4,12 @@
  * express), and collect malformed files as load errors rather than crashing the
  * run — one bad file must never take the whole suite down. `recipe.json` is not a
  * scenario and is skipped.
- *
- * Only the CURRENT format version parses. A file carrying an older `guard:` version
- * gets one actionable line naming the cutover instead of a schema dump, because
- * every field a re-generation would change (plural `binds`, the `flow`/`interface`
- * refs) would otherwise report as an unrelated validation error.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import {
-  GUARD_FORMAT_VERSION,
   GuardScenarioSchema,
   firstInvalidMatchPattern,
   guardExecutionSteps,
@@ -97,21 +91,6 @@ export function walkScenarioRelFiles(root: string): string[] {
   return out.sort()
 }
 
-/**
- * The `guard:` version a document declares, when it declares one at all — the
- * discriminator that tells an outdated scenario apart from a malformed one.
- */
-function declaredFormatVersion(doc: unknown): number | null {
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return null
-  const value = (doc as Record<string, unknown>).guard
-  return typeof value === 'number' ? value : null
-}
-
-/** The one-line, actionable message an out-of-date scenario file reports. */
-export function outdatedFormatMessage(version: number): string {
-  return `scenario format v${version} is no longer supported (this build reads guard: ${GUARD_FORMAT_VERSION}) — re-run \`truecourse guard generate\` to re-author the corpus in the current format`
-}
-
 export function loadScenarios(repoRoot: string): LoadedScenarios {
   const root = scenariosDir(repoRoot)
   const scenarios: GuardScenario[] = []
@@ -126,11 +105,6 @@ export function loadScenarios(repoRoot: string): LoadedScenarios {
       doc = yaml.load(fs.readFileSync(file, 'utf-8'))
     } catch (e) {
       errors.push({ file: rel, message: `YAML parse error: ${e instanceof Error ? e.message : e}` })
-      continue
-    }
-    const declared = declaredFormatVersion(doc)
-    if (declared !== null && declared !== GUARD_FORMAT_VERSION) {
-      errors.push({ file: rel, message: outdatedFormatMessage(declared) })
       continue
     }
     const parsed = GuardScenarioSchema.safeParse(doc)

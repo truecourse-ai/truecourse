@@ -1,0 +1,112 @@
+id: apply-repository-rule-settings-to-a-dashboard-run
+title: A dashboard analysis obeys the repository's category, LLM and disabled-rule settings
+promise: >-
+  A developer runs analysis from the dashboard and sees that config.json controls the
+  categories, model gate, disabled deterministic rule, and analytics total.
+flow:
+  id: apply-repository-rule-settings-to-a-dashboard-run
+  fingerprint: sha256:501c662631dfde2042c16a5914ccf139fd9dc08687102bcb3dc7047fd46761d3
+interface:
+  path:
+    - cli/add
+    - web/open-an-unanalyzed-repository
+    - web/run-an-analysis-from-the-header
+    - api/get-api-repos-id-violations
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b
+    - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
+    - sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02
+binds:
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: running-an-analysis
+    fingerprint: sha256:a9c2bd895f631408f92f838c08fc2c718a7579063bd7ca19f87101ee67a34085
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: silencing-a-rule
+    fingerprint: sha256:ddcc931b1ee2c4bb7a92f7bf2ec56bd2581387d327883d315380b1cd19e7c5af
+  - doc: reference/spec-docs/dashboard/analytics.mdx
+    section: analytics
+    fingerprint: sha256:595c8359f70db803d2151fb14a20a9458de29543077447a1c77ef5b6f56d2974
+setup:
+  files:
+    sample-app/package.json: |
+      { "name": "sample-app", "version": "1.0.0", "type": "module" }
+    sample-app/src/index.js: |
+      const API_KEY = 'sk_live_reference_secret_123456'
+      const retryCount = 42
+      export function evaluate(source) {
+        return eval(source) + API_KEY.length + retryCount
+      }
+    sample-app/.truecourse/config.json: |
+      {
+        "enabledCategories": ["security"],
+        "enableLlmRules": false,
+        "disabledRules": ["security/deterministic/eval-usage"]
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed findings controlled by three settings
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      visible:
+        role: button
+        name: Analyze
+  - driver: web
+    click:
+      role: button
+      name: Analyze
+      exact: true
+    expect:
+      text:
+        matches: '^(?![\s\S]*Run LLM rules\?)(?![\s\S]*Stash pending changes\?)(?=[\s\S]*(Analyzing\.\.\.|Hardcoded secret))[\s\S]*$'
+    note: >-
+      The run starts without an LLM estimate because `enableLlmRules` is false; the clean
+      committed tree also removes the unrelated stash gate.
+  - driver: web
+    timeoutMs: 180000
+    expect:
+      text:
+        matches: '^(?![\s\S]*Analyzing\.\.\.)(?=[\s\S]*Hardcoded secret)(?![\s\S]*Dynamic code evaluation)(?![\s\S]*Magic number)[\s\S]*$'
+    note: >-
+      The security finding remains, the disabled eval rule does not run, and the
+      code-quality magic-number rule is excluded by the enabled category set. No model
+      dialog appeared. Together these are the three repository settings read by the run.
+    milestone:
+      - dashboard-analyze-honors-enabled-categories-from-config
+      - dashboard-analyze-honors-the-llm-rules-toggle-from-config
+      - dashboard-analyze-honors-disabled-rules-from-config
+      - dashboard-violations-disabled-rule-skipped-on-future-analyses
+  - request:
+      method: GET
+      path: /api/repos/sample-app/violations?limit=200
+    expect:
+      status: 200
+      body:
+        matches: '^(?=[\s\S]*hardcoded-secret)(?![\s\S]*eval-usage)(?![\s\S]*magic-number)[\s\S]*$'
+      json:
+        total:
+          equals: 1
+    note: >-
+      The API behind the list confirms exactly one active finding. Analytics renders that
+      same active set, so the disabled rule contributes neither a card nor a count.
+    milestone:
+      - dashboard-analytics-numbers-exclude-disabled-rules

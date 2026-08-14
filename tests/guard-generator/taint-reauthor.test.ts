@@ -6,7 +6,7 @@
  * taint (the poisoned entry was overwritten), and an authoring error keeps it.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { autoResolutionKey, GUARD_FORMAT_VERSION } from '@truecourse/shared'
+import { autoResolutionKey } from '@truecourse/shared'
 import {
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
@@ -89,7 +89,7 @@ describe('flow taint — the author-cache bypass', () => {
 
     // Taint the flow (as a prior run's rejection would) and make it work again.
     writeGuardAutoResolutions(r, taintedLedger('asserts exit 0 where the claim quotes exact output'))
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
 
     await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
     // The warm cache was BYPASSED: the model was called again, with the evidence.
@@ -102,7 +102,7 @@ describe('flow taint — the author-cache bypass', () => {
     expect(readGuardAutoResolutions(r).tainted[KEY]).toBeUndefined()
 
     // And an untainted re-run is a cache hit again — the fresh result was cached.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
     await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
     expect(calls).toBe(2)
   })

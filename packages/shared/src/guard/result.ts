@@ -12,7 +12,7 @@ import { z } from 'zod'
 import { OutputExcerptsSchema } from './excerpts.js'
 import { GuardVisualAnnotationSchema } from './visual.js'
 import { GuardDependencyNeedSchema } from './dependencies.js'
-import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
+import { GuardBindsSchema } from './scenario.js'
 import { hasMilestone, type GuardStepMilestone } from './step-parts.js'
 
 /**
@@ -81,10 +81,9 @@ export const GuardRunEnvelopeSchema = z
      * decides a later delivery when the corpus the gate would run still matches
      * (a force spec-regen run executes the PR's OWN regenerated corpus, whose
      * ids don't align with the committed set). Optional so CLI runs and
-     * pre-change snapshots keep parsing. NO format-version bump.
+     * pre-change snapshots keep parsing.
      */
     corpusFingerprint: z.string().optional(),
-    scenarioFormat: z.literal(GUARD_FORMAT_VERSION),
   })
   .strict()
 export type GuardRunEnvelope = z.infer<typeof GuardRunEnvelopeSchema>
@@ -100,7 +99,7 @@ export const GuardSummarySchema = z
     /**
      * Scenarios held back on an unregistered supplied dependency. Defaulted rather
      * than required so every snapshot written before the dependency catalog existed
-     * still parses (it had none by construction). NO format-version bump.
+     * still parses (it had none by construction).
      */
     blocked: z.number().int().nonnegative().default(0),
   })
@@ -119,7 +118,7 @@ export const GuardFailureDetailSchema = z
      * attached on EVERY expect-mismatch so the retry/finding sees the usage error
      * the program actually printed. Optional so pre-change snapshots keep parsing,
      * and infra failures (spawn/timeout — no real capture) simply carry neither.
-     * NO format-version bump.
+     *.
      */
     ...OutputExcerptsSchema.shape,
     /**
@@ -129,7 +128,7 @@ export const GuardFailureDetailSchema = z
      * deterministic expectation in `expected`/`actual` did. Kept to a verdict plus
      * a capped one-liner because LATEST is inline-compact; the full rationale is
      * in the evidence transcript. Optional so pre-change snapshots keep parsing.
-     * NO format-version bump.
+     *.
      */
     visual: GuardVisualAnnotationSchema.optional(),
   })
@@ -171,7 +170,7 @@ export const GuardScenarioResultSchema = z
     /**
      * The stage that produced `outcome` (see {@link GuardResultStageSchema}).
      * Optional so every pre-existing snapshot parses; absent reads as `run`
-     * through {@link guardResultStage}. NO format-version bump.
+     * through {@link guardResultStage}.
      */
     stage: GuardResultStageSchema.optional(),
     /**
@@ -185,7 +184,7 @@ export const GuardScenarioResultSchema = z
      * both absent, which reads as the envelope through {@link guardResultRunId} /
      * {@link guardResultRanAt}. Every result written before boards merged is
      * therefore already correct (its run IS the envelope's). Optional, additive —
-     * NO format-version bump.
+     *.
      */
     runId: z.string().optional(),
     ranAt: z.string().optional(),
@@ -204,7 +203,7 @@ export const GuardScenarioResultSchema = z
      * only when a transient first boot failed and was retried once (see the api-boot
      * resilience item). Omitted for the common single-boot case and for cli scenarios,
      * so a retry is never silent yet the field adds no noise to normal results.
-     * Optional so pre-change snapshots keep parsing. NO format-version bump.
+     * Optional so pre-change snapshots keep parsing.
      */
     bootAttempts: z.number().int().positive().optional(),
     /**

@@ -7,8 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  GUARD_FORMAT_VERSION,
-  GuardScenarioSchema,
+    GuardScenarioSchema,
   GuardSandboxStepSchema,
   GuardWebExpectSchema,
   GuardWebLocatorSchema,
@@ -35,7 +34,7 @@ import {
 const binds = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function mixedScenario(steps: unknown[]): unknown {
-  return { guard: GUARD_FORMAT_VERSION, id: 'f.cli.1', title: 't', binds, steps, normalize: [] }
+  return { id: 'f.cli.1', title: 't', binds, steps, normalize: [] }
 }
 
 describe('web step schema', () => {
@@ -285,12 +284,7 @@ describe('a mixed cli + web scenario', () => {
     expect(views[4].expectation).toBe('status “Result” text contains “saved”')
   })
 
-  it('the format version does not move — web steps are additive runner-only vocabulary', () => {
-    // The `patch` precedent, restated: the number gates BACKWARD readability, and
-    // every scenario written before web steps existed parses unchanged under this
-    // build. Bumping would turn away the whole committed corpus over a vocabulary
-    // no committed file uses.
-    expect(GUARD_FORMAT_VERSION).toBe(3)
+  it('web steps are additive runner-only vocabulary — prior scenarios parse unchanged', () => {
     expect(
       GuardScenarioSchema.parse(mixedScenario([{ run: ['version'], expect: { exit: 0 } }])).steps,
     ).toHaveLength(1)

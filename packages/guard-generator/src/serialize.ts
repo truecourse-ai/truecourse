@@ -1,9 +1,9 @@
 /**
- * Turn a model's raw scenario into a committed, engine-owned scenario: assign a
- * collision-safe `<flow-id>.<surface>.<n>` id, OVERWRITE the flow, interface, and
- * section references from the engine's own state (never trust what the model
- * wrote), validate against the strict schema, and serialize to YAML. The file
- * carries no scenario-level driver — the driver is the step's.
+ * Turn a model's raw scenario into a committed, engine-owned scenario: assign the
+ * flow's id as the scenario id (one scenario per flow), OVERWRITE the flow,
+ * interface, and section references from the engine's own state (never trust what
+ * the model wrote), validate against the strict schema, and serialize to YAML. The
+ * file carries no scenario-level driver — the driver is the step's.
  * Ownership is tracked by scenario id so regenerating a flow replaces only ITS
  * prior generated files and never a hand-written one.
  */
@@ -13,7 +13,6 @@ import path from 'node:path'
 import yaml from 'js-yaml'
 import {
   GuardScenarioSchema,
-  GUARD_FORMAT_VERSION,
   isRunnableDriver,
   interfaceFingerprint,
   type GuardDriverId,
@@ -31,11 +30,12 @@ export function anchorLeaf(anchor: string): string {
   return slugifyHeading(segs[segs.length - 1] ?? anchor) || 'section'
 }
 
-/** `<flow-id>.<surface>.<n>`, skipping any id already taken (hand-written or
- *  assigned this run) — the documented id scheme, one scenario per (flow, surface). */
-export function assignScenarioId(flowId: string, surface: GuardDriverId, used: Set<string>): string {
+/** The scenario id IS the flow id — one scenario per flow. The numeric fallback
+ *  only guards a collision with an id already taken (a hand-written file holding
+ *  the name); it is unreachable in ordinary authoring. */
+export function assignScenarioId(flowId: string, _surface: GuardDriverId, used: Set<string>): string {
   for (let n = 1; ; n++) {
-    const id = `${flowId}.${surface}.${n}`
+    const id = n === 1 ? flowId : `${flowId}.${n}`
     if (!used.has(id)) {
       used.add(id)
       return id
@@ -88,7 +88,6 @@ export function buildFlowScenario(opts: {
     throw new Error(`scenario "${id}" has no grounding interface — every generated scenario realizes an interface path`)
   }
   const candidate: unknown = {
-    guard: GUARD_FORMAT_VERSION,
     id,
     title: raw.title,
     // The promise in plain words, denormalized off the flow: a reader of the file

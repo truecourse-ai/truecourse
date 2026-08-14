@@ -67,9 +67,10 @@ function loadCorpusOrExit(repoRoot: string, opts: RunSpecConflictsOptions): Cura
 /** How a conflict is resolved, for the list/show rendering. */
 function resolvedLabel(c: CorpusConflict): string {
   if (c.resolution) {
-    if (c.resolution.verdict === 'dismissed') return 'dismissed (not a real conflict)';
+    const auto = c.resolution.resolvedBy === 'auto' ? 'auto-applied: ' : '';
+    if (c.resolution.verdict === 'dismissed') return `${auto}dismissed (not a real conflict)`;
     const winner = c.resolution.verdict === 'a' ? c.resolution.docA : c.resolution.docB;
-    return `${base(winner)} is right (loser’s claim suppressed at generate)`;
+    return `${auto}${base(winner)} is right (loser’s claim suppressed at generate)`;
   }
   if (c.excludedRef) return `${base(c.excludedRef)} excluded`;
   return 'resolved';
@@ -84,6 +85,8 @@ interface ReviewRecommendation {
   action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss';
   rationale: string;
   fix?: string;
+  /** The judge's grade; `high` actionable recommendations were auto-applied at scan. */
+  confidence?: 'low' | 'medium' | 'high';
 }
 interface OverlapReviewLike {
   explanation: string;
@@ -331,7 +334,10 @@ export async function runSpecConflictsList(opts: RunSpecConflictsOptions = {}): 
     } else {
       p.log.warn(`${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}${c.note ? `   · ${c.note}` : ''}`);
       const rec = reviewForConflict(corpus, c);
-      if (rec) p.log.message(`   recommended: ${recActionLabel(rec.recommendation.action, c)} — ${rec.recommendation.rationale}`);
+      if (rec) {
+        const conf = rec.recommendation.confidence ? ` (${rec.recommendation.confidence} confidence)` : '';
+        p.log.message(`   recommended: ${recActionLabel(rec.recommendation.action, c)}${conf} — ${rec.recommendation.rationale}`);
+      }
       p.log.message(`   inspect: truecourse spec conflicts show ${n}   ·   pick a side: resolve ${n} --right ${c.a}   (or --right ${c.b}, --dismiss)`);
     }
   });
@@ -369,9 +375,10 @@ function renderConflictShow(repoRoot: string, corpus: CuratedCorpus, c: CorpusCo
   p.log.message('');
   printExcerpt(resolveExcerpt(repoRoot, c.b, secOf(c.b)));
   if (review) {
+    const conf = review.recommendation.confidence ? ` (${review.recommendation.confidence} confidence)` : '';
     p.log.message('');
     p.log.message(
-      `  Recommendation: ${recActionLabel(review.recommendation.action, c)} — ${review.recommendation.rationale}`,
+      `  Recommendation: ${recActionLabel(review.recommendation.action, c)}${conf} — ${review.recommendation.rationale}`,
     );
     if (review.recommendation.fix) p.log.message(`  Fix: ${review.recommendation.fix}`);
   }

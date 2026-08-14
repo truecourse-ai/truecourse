@@ -150,8 +150,8 @@ export const stepNote = z.string().min(1).optional()
  * The cap is one hour — long enough for any single command a scenario may
  * legitimately wait on, short enough that a typo cannot hang a run for a day.
  *
- * Additive and optional, so no `GUARD_FORMAT_VERSION` bump: a scenario that
- * declares none parses and runs exactly as it did before.
+ * Additive and optional: a scenario that declares none parses and runs exactly
+ * as it did before.
  */
 export const stepTimeoutMs = z.number().int().positive().max(3_600_000).optional()
 

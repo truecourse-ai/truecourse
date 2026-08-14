@@ -1,0 +1,63 @@
+id: initialize-configuration-and-refuse-to-overwrite-it
+title: Initializing configuration creates the documented file once and later refuses to overwrite it
+promise: The user creates the documented configuration file once and is protected from overwriting it on a later init.
+flow:
+  id: initialize-configuration-and-refuse-to-overwrite-it
+  fingerprint: sha256:bb70c980357c24698b0949c826df98f96c77dbad5969b30e799cbb4a0c721edc
+journey:
+  path:
+    - cli/init
+  fingerprints:
+    - sha256:5ccef841d61a4744cd5214d8bbfb107ee6fce9e994403a8b53dfa8a0a4aca163
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/covergate-init
+    fingerprint: sha256:b5e07db317fe7be83cdb508a15193e777e1e2ca272e652a30d813bed985d6f19
+  - doc: docs/cli-reference.md
+    section: cli-reference/refusing-to-overwrite
+    fingerprint: sha256:ab039c8417514e6c5f5311239ee3551776109f73b0640009bd3a237cfbab74c1
+normalize: []
+driver: cli
+steps:
+  - run:
+      - init
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          covergate: created .covergaterc.json
+      stderr:
+        equals: ''
+      files:
+        .covergaterc.json:
+          equals: |
+            {
+              // Minimum acceptable coverage, in percent.
+              "min": 80,
+              // Which metric the gate reads: lines, statements, functions, or branches.
+              "metric": "lines",
+              // Where the Istanbul json-summary report is written.
+              "summary": "coverage/coverage-summary.json"
+            }
+    milestone: 1
+  - run:
+      - init
+    expect:
+      exit: 2
+      stdout:
+        equals: ''
+      stderr:
+        equals: |
+          covergate: .covergaterc.json already exists
+      files:
+        .covergaterc.json:
+          equals: |
+            {
+              // Minimum acceptable coverage, in percent.
+              "min": 80,
+              // Which metric the gate reads: lines, statements, functions, or branches.
+              "metric": "lines",
+              // Where the Istanbul json-summary report is written.
+              "summary": "coverage/coverage-summary.json"
+            }
+    milestone: 2

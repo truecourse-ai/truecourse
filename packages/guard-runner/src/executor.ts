@@ -17,7 +17,7 @@
 import { spawn } from 'node:child_process'
 import { isPromptKeyedStdin, type GuardTtyAnswer } from '@truecourse/shared'
 import { armChildKill } from './child-kill.js'
-import { markerWatch } from './marker.js'
+import { markerWatch, type MarkerWatch } from './marker.js'
 import { executeTtyStep } from './pty.js'
 
 export const DEFAULT_STEP_TIMEOUT_MS = 30_000
@@ -193,15 +193,20 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
     // A command that never returns is ended by what it PRINTS: the moment the
     // marker appears the group is killed and the step settles on the output so
     // far. The kill is OURS, so `timedOut` stays false and `endedAtMarker` is what
-    // explains the missing exit code downstream.
-    const held = opts.until !== undefined ? markerWatch() : null
+    // explains the missing exit code downstream. Each stream gets its OWN watch:
+    // one shared buffer would let an interleaved chunk from the other stream split
+    // the marker forever (or let it falsely match across the stream seam) — the
+    // reason the pty path's prompt watch is its own instance too.
+    const heldOut = opts.until !== undefined ? markerWatch() : null
+    const heldErr = opts.until !== undefined ? markerWatch() : null
     let endedAtMarker: string | undefined
-    const watchForMarker = (chunk: string): void => {
+    const watchForMarker = (held: MarkerWatch | null, chunk: string): void => {
       if (!held || opts.until === undefined || endedAtMarker !== undefined) return
       held.feed(chunk)
       if (!held.seen(opts.until)) return
       endedAtMarker = opts.until
-      held.done()
+      heldOut?.done()
+      heldErr?.done()
       kill.now()
     }
 
@@ -260,7 +265,7 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
     child.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
       stdout += text
-      watchForMarker(text)
+      watchForMarker(heldOut, text)
     })
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf-8')
@@ -268,7 +273,7 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
       // The ready line is looked for on BOTH channels: which stream a program
       // announces itself on is not something a scenario should have to know, and
       // `expect.output` already refuses to make that guess.
-      watchForMarker(text)
+      watchForMarker(heldErr, text)
     })
 
     child.on('error', (err) => {

@@ -9,8 +9,7 @@ import { describe, it, expect } from 'vitest'
 import { birthValidate, birthRunTimeoutMs, type BirthCandidate } from '@truecourse/guard-generator'
 import type { GuardExecInput, GuardExecReport, Recipe } from '@truecourse/guard-runner'
 import {
-  GUARD_FORMAT_VERSION,
-  type GuardLatest,
+    type GuardLatest,
   type GuardScenario,
   type GuardScenarioResult,
 } from '@truecourse/shared'
@@ -20,7 +19,6 @@ const RECIPE: Recipe = { build: 'true', entry: ['node', 'bin.mjs'] }
 function candidate(id: string): BirthCandidate {
   const binds = { doc: 'docs/cli.md', section: 'version', fingerprint: 'sha256:abc' }
   const scenario: GuardScenario = {
-    guard: GUARD_FORMAT_VERSION,
     id,
     title: id,
     binds,
@@ -74,7 +72,6 @@ function passingExecutor(sink: { input?: GuardExecInput }) {
         branch: null,
         commit: null,
         recipeFingerprint: 'sha256:x',
-        scenarioFormat: GUARD_FORMAT_VERSION,
       },
       summary: { total: scenarios.length, pass: scenarios.length, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios,

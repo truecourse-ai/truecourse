@@ -1,0 +1,47 @@
+id: require-member-token-to-finish-a-book
+title: Finishing a book requires a valid member token
+promise: A user receives an unauthorized error when trying to finish a book without a valid member token.
+flow:
+  id: require-member-token-to-finish-a-book
+  fingerprint: sha256:c343422aef1fd75acf73706f5cb856d73fbdce03cb2603a6d84bca635b336fce
+journey:
+  path:
+    - api/post-books
+    - api/post-books-id-finish
+  fingerprints:
+    - sha256:669ba831388d19c1887828c546e0ef8d3c0c2dbb324a837285d007ec80ba3906
+    - sha256:3462f3a5924acbd0bc7f25e90371a3be89fa11fd3e957d8e9cc18ffe65114b74
+binds:
+  - doc: docs/openapi.yaml
+    section: paths/post-finishbook
+    fingerprint: sha256:d25950d14ed43684f287a2e4f9e5f58b754bbb899fdb7be8f30b58a8dbadf456
+normalize: []
+driver: api
+steps:
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: '9781234567897'
+        title: Guard finish token ${unique}
+        author: Spec Guard
+    capture:
+      bookId: id
+    expect:
+      status: 201
+    milestone: 1
+  - request:
+      method: POST
+      path: /books/${bookId}/finish
+    expect:
+      status: 401
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1

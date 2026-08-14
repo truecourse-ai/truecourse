@@ -1,0 +1,125 @@
+id: print-a-coverage-badge
+title: Badge uses the chosen report and metric to print Markdown with the documented colour
+promise: The user selects a report and metric and gets a Markdown image badge with the documented colour.
+flow:
+  id: print-a-coverage-badge
+  fingerprint: sha256:90743e277964f554b23d2cf3384fa213b70df9ade171ea75b66fdb6101be4459
+journey:
+  path:
+    - cli/badge
+  fingerprints:
+    - sha256:4908ef34443952702a6417f3a24c0a2bfad4399407ffb8a734e76af255b24239
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/covergate-badge
+    fingerprint: sha256:eeeb48ff8164b5f690aa6e27cb6c328544e8944986381c9b82f4f248e97cf516
+  - doc: docs/cli-reference.md
+    section: cli-reference/badge-colours
+    fingerprint: sha256:48eca2daddc0869e569292a72b674dc043b8031413f2bbd0e0c855f5e7a35099
+setup:
+  files:
+    reports/selected-${unique}.json: |
+      {
+        "total": {
+          "lines": { "total": 1000, "covered": 875, "skipped": 0, "pct": 87.5 },
+          "statements": { "total": 1000, "covered": 810, "skipped": 0, "pct": 81 },
+          "functions": { "total": 1000, "covered": 825, "skipped": 0, "pct": 82.5 },
+          "branches": { "total": 1000, "covered": 700, "skipped": 0, "pct": 70 }
+        }
+      }
+    reports/brightgreen-${unique}.json: |
+      {
+        "total": {
+          "lines": { "total": 100, "covered": 90, "skipped": 0, "pct": 90 },
+          "statements": { "total": 100, "covered": 90, "skipped": 0, "pct": 90 },
+          "functions": { "total": 100, "covered": 90, "skipped": 0, "pct": 90 },
+          "branches": { "total": 100, "covered": 90, "skipped": 0, "pct": 90 }
+        }
+      }
+    reports/yellow-${unique}.json: |
+      {
+        "total": {
+          "lines": { "total": 100, "covered": 60, "skipped": 0, "pct": 60 },
+          "statements": { "total": 100, "covered": 60, "skipped": 0, "pct": 60 },
+          "functions": { "total": 100, "covered": 60, "skipped": 0, "pct": 60 },
+          "branches": { "total": 100, "covered": 60, "skipped": 0, "pct": 60 }
+        }
+      }
+    reports/red-${unique}.json: |
+      {
+        "total": {
+          "lines": { "total": 10000, "covered": 5999, "skipped": 0, "pct": 59.99 },
+          "statements": { "total": 10000, "covered": 5999, "skipped": 0, "pct": 59.99 },
+          "functions": { "total": 10000, "covered": 5999, "skipped": 0, "pct": 59.99 },
+          "branches": { "total": 10000, "covered": 5999, "skipped": 0, "pct": 59.99 }
+        }
+      }
+normalize: []
+driver: cli
+steps:
+  - run:
+      - badge
+      - reports/selected-${unique}.json
+      - '--metric'
+      - functions
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          ![functions coverage](https://img.shields.io/badge/functions-82.50%25-green)
+    milestone: 1
+  - run:
+      - badge
+      - reports/selected-${unique}.json
+      - '--metric'
+      - lines
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          ![lines coverage](https://img.shields.io/badge/lines-87.50%25-green)
+    milestone: 2
+  - run:
+      - badge
+      - reports/brightgreen-${unique}.json
+      - '--metric'
+      - lines
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          ![lines coverage](https://img.shields.io/badge/lines-90.00%25-brightgreen)
+    milestone: 3
+  - run:
+      - badge
+      - reports/selected-${unique}.json
+      - '--metric'
+      - lines
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          ![lines coverage](https://img.shields.io/badge/lines-87.50%25-green)
+    milestone: 3
+  - run:
+      - badge
+      - reports/yellow-${unique}.json
+      - '--metric'
+      - lines
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          ![lines coverage](https://img.shields.io/badge/lines-60.00%25-yellow)
+    milestone: 3
+  - run:
+      - badge
+      - reports/red-${unique}.json
+      - '--metric'
+      - lines
+    expect:
+      exit: 0
+      stdout:
+        equals: |
+          ![lines coverage](https://img.shields.io/badge/lines-59.99%25-red)
+    milestone: 3

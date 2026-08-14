@@ -129,7 +129,7 @@ describe('generateGuards — entry pre-flight', () => {
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.errors).toEqual([])
     expect(guardManifestSections(readManifest(r)).find((s) => s.anchor === 'version')!.scenarioIds).toEqual([
-      'version.cli.1',
+      'version',
     ])
   })
 })

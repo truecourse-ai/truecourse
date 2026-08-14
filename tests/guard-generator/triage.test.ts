@@ -209,7 +209,7 @@ describe('triage — in the generate pipeline', () => {
     expect(res.birthFindings).toHaveLength(1)
     expect(res.birthFindings[0].triage).toEqual(CODE_DRIFT)
     // Verdict on the TEST, not the flow — the identity travels with the finding.
-    expect(res.birthFindings[0].scenarioId).toBe('version.cli.1')
+    expect(res.birthFindings[0].scenarioId).toBe('version')
 
     expect(seen).toHaveLength(1)
     expect(seen[0].flow.id).toBe('version')
@@ -246,7 +246,7 @@ describe('triage — in the generate pipeline', () => {
         throw new Error('transport died')
       },
     })
-    expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    expect(res.written).toMatchObject([{ id: 'version', status: 'failing' }])
     expect(res.birthFindings[0].triage).toBeUndefined()
   })
 
@@ -261,7 +261,7 @@ describe('triage — in the generate pipeline', () => {
 
     // Committed red drift: the test is written, the manifest scenario carries the
     // diagnosis (with the verdict), and the flow SETTLES.
-    expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    expect(res.written).toMatchObject([{ id: 'version', status: 'failing' }])
     const manifest = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
     expect(manifest.scenarios[0].diagnosis).toMatchObject({
       title: 'always broken',
@@ -313,7 +313,7 @@ describe('triage — in the generate pipeline', () => {
       triageRunner: async () => ({ nonsense: true }),
       onTriageProgress: (done, total) => onTriage.push([done, total]),
     })
-    expect(res.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    expect(res.written).toMatchObject([{ id: 'version', status: 'failing' }])
     expect(res.birthFindings[0].triage).toBeUndefined()
     // Progress announced the denominator up front, then settled it.
     expect(onTriage[0]).toEqual([0, 1])

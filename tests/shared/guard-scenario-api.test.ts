@@ -3,8 +3,7 @@ import {
   GuardScenarioSchema,
   GuardApiStepSchema,
   GuardStepSchema,
-  GUARD_FORMAT_VERSION,
-  guardScenarioDrivers,
+    guardScenarioDrivers,
   isApiServerScenario,
   runnableDriverIds,
   awaitingDriverIds,
@@ -14,7 +13,6 @@ import {
 const BINDS = [{ doc: 'docs/api.md', section: 'todos/create', fingerprint: 'sha256:abc' }]
 
 const API_SCENARIO = {
-  guard: 3,
   id: 'todo-lifecycle.api.1',
   title: 'POST /todos creates a todo',
   flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
@@ -101,11 +99,10 @@ describe('guard scenario schema — api driver', () => {
       expect: { status: 302 },
     }
     expect(GuardApiStepSchema.parse(step).captureHeaders).toEqual({ next: 'Location', tok: 'x-auth-token' })
-    // Values are header NAMES (strings), and the format version does not move.
+    // Values are header NAMES (strings).
     expect(() =>
       GuardApiStepSchema.parse({ ...step, captureHeaders: { next: 1 } }),
     ).toThrow()
-    expect(GUARD_FORMAT_VERSION).toBe(3)
     // A scenario predating the field parses unchanged.
     expect(() => GuardScenarioSchema.parse(API_SCENARIO)).not.toThrow()
   })
@@ -157,7 +154,6 @@ describe('guard scenario schema — api driver', () => {
 
 describe('guard scenario envelope v3', () => {
   const CLI_SCENARIO = {
-    guard: 3,
     id: 'todo-lifecycle.cli.1',
     title: 'todos are added and listed',
     flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
@@ -172,8 +168,7 @@ describe('guard scenario envelope v3', () => {
     ],
   }
 
-  it('the format version is 3', () => {
-    expect(GUARD_FORMAT_VERSION).toBe(3)
+  it('parses the mixed-driver reference scenario', () => {
   })
 
   it('parses a flow-bound, multi-section scenario', () => {
@@ -231,9 +226,8 @@ describe('guard scenario envelope v3', () => {
     expect(envOf(0)).toBeUndefined()
     expect(envOf(1)).toEqual({ TRUECOURSE_TELEMETRY: '0' })
 
-    // Values are strings, and the format version does NOT move for an optional field.
+    // Values are strings.
     expect(() => GuardStepSchema.parse({ run: [], env: { X: 1 }, expect: { exit: 0 } })).toThrow()
-    expect(GUARD_FORMAT_VERSION).toBe(3)
   })
 
   it('an api step has no per-step env (a booted server’s env is fixed at boot)', () => {

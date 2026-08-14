@@ -248,15 +248,20 @@ export function SpecOverlapDetail({
           // Resolved by a section verdict — render in place with an Undo.
           <div data-testid="conflict-verdict" className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             {resolution.verdict === 'dismissed' ? (
-              <span className="text-emerald-600 dark:text-emerald-400">Dismissed — not a real conflict</span>
+              <span className="text-emerald-600 dark:text-emerald-400">
+                {resolution.resolvedBy === 'auto' ? 'Auto-dismissed — not a real conflict' : 'Dismissed — not a real conflict'}
+              </span>
             ) : (
               <span className="flex flex-wrap items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                Resolved —
+                {resolution.resolvedBy === 'auto' ? 'Auto-resolved —' : 'Resolved —'}
                 <HoverPopover content={titleOf(winnerOf(resolution))}>
                   <span className="max-w-[22rem] truncate font-medium">{titleOf(winnerOf(resolution))}</span>
                 </HoverPopover>
                 is right
               </span>
+            )}
+            {resolution.resolvedBy === 'auto' && (
+              <ConfidenceBar confidence="high" testId="auto-applied-badge" />
             )}
             <HoverPopover content={decisionsDisabled ? PR_GATE_HINT : null}>
               <button
@@ -380,7 +385,7 @@ function ConflictAssessment({
   applying: boolean;
   onApply: () => void;
 }) {
-  const { action, rationale, fix } = review.recommendation;
+  const { action, rationale, fix, confidence } = review.recommendation;
   // A pick-a-side or a dismissal is a ruling the reader can take right here; a
   // fix-doc is homework, so only the former earns the accent.
   const actionable = action !== 'fix-doc';
@@ -395,6 +400,7 @@ function ConflictAssessment({
             <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
               {recActionLabel(action, winner)}
             </span>
+            {confidence && <ConfidenceBar confidence={confidence} />}
             {canApply && (
               <HoverPopover content={applyDisabledReason} side="top">
                 <Button size="sm" disabled={applyDisabled} onClick={onApply}>
@@ -409,6 +415,37 @@ function ConflictAssessment({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The judge's confidence grade on its recommendation, as a signal-strength bar:
+ * 1 of 3 segments filled = low, 2 = medium, 3 = high, toned like the coverage
+ * palette. Hover names the grade ("High confidence"), nothing more.
+ */
+function ConfidenceBar({
+  confidence,
+  testId = 'confidence-chip',
+}: {
+  confidence: 'low' | 'medium' | 'high';
+  testId?: string;
+}) {
+  const filled = confidence === 'high' ? 3 : confidence === 'medium' ? 2 : 1;
+  const tone =
+    confidence === 'high' ? 'bg-emerald-500' : confidence === 'medium' ? 'bg-amber-500' : 'bg-rose-500';
+  const label = `${confidence[0].toUpperCase()}${confidence.slice(1)} confidence`;
+  const heights = ['h-1.5', 'h-2', 'h-2.5'];
+  return (
+    <HoverPopover content={label}>
+      <span data-testid={testId} aria-label={label} className="flex items-end gap-0.5">
+        {heights.map((h, i) => (
+          <span
+            key={h}
+            className={`w-1 rounded-sm ${h} ${i < filled ? tone : 'bg-muted-foreground/25'}`}
+          />
+        ))}
+      </span>
+    </HoverPopover>
   );
 }
 

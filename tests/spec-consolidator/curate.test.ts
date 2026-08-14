@@ -626,3 +626,129 @@ describe('curate — orphaned conflict-verdict prune', () => {
     expect(fs.readFileSync(decisionsFile(), 'utf-8')).toBe(before);
   });
 });
+
+/**
+ * HIGH-confidence recommendation auto-apply: a judge-confirmed conflict whose
+ * brief grades its actionable recommendation `high` is resolved BY THE SCAN as a
+ * `resolvedBy: 'auto'` conflict resolution — visible, undoable, suppressing like
+ * a user verdict. Lower grades and `fix-doc` stay advisory, an existing verdict
+ * always wins, and nothing is written on a dry (skipCorpusWrite) run.
+ */
+describe('curate — high-confidence recommendation auto-apply', () => {
+  const specsDir = () => path.join(repo, '.truecourse', 'specs');
+  const decisionsFile = () => path.join(specsDir(), 'decisions.json');
+  const readStored = () => JSON.parse(fs.readFileSync(decisionsFile(), 'utf-8'));
+
+  const isPair = (overlap: { docs: readonly [string, string] }, a: string, b: string): boolean =>
+    (overlap.docs[0] === a && overlap.docs[1] === b) || (overlap.docs[0] === b && overlap.docs[1] === a);
+
+  /** Confirms every flag; attaches the given brief to the users-v1 ↔ users-v2 pair only. */
+  const verifyWith = (recommendation: {
+    action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss';
+    rationale: string;
+    fix?: string;
+    confidence?: 'low' | 'medium' | 'high';
+  }): VerifyOverlapRunner => async ({ overlap }) => {
+    if (!isPair(overlap, 'docs/users-v1.md', 'docs/users-v2.md')) return { verdict: 'confirmed' };
+    return {
+      verdict: 'confirmed',
+      review: { explanation: 'the two users docs disagree on the same field', recommendation },
+    };
+  };
+
+  const runFromDisk = (extra: Parameters<typeof curate>[1] = {}) => run({ decisions: undefined, ...extra });
+
+  it('applies a high-confidence pick verdict as a resolvedBy:auto resolution', async () => {
+    const result = await runFromDisk({
+      verifyOverlapRunner: verifyWith({ action: 'pick-b', rationale: 'users-v2 is the newer doc', confidence: 'high' }),
+    });
+
+    const stored = readStored().conflictResolutions;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      verdict: 'b',
+      resolvedBy: 'auto',
+      note: 'users-v2 is the newer doc',
+    });
+    // The pair, in the flagged overlap's own docs order (pick-b = docs[1] wins).
+    expect([stored[0].docA, stored[0].docB].sort()).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+    // The run reports what it decided, and the returned decisions carry it.
+    expect(result.stats.autoResolvedConflicts).toHaveLength(1);
+    expect(result.stats.autoResolvedConflicts[0].verdict).toBe('b');
+    expect(result.decisions.conflictResolutions).toHaveLength(1);
+  });
+
+  it('a high-confidence dismissal auto-applies as a dismissed verdict', async () => {
+    const result = await runFromDisk({
+      verifyOverlapRunner: verifyWith({ action: 'dismiss', rationale: 'the two coexist', confidence: 'high' }),
+    });
+    expect(readStored().conflictResolutions[0]).toMatchObject({ verdict: 'dismissed', resolvedBy: 'auto' });
+    expect(result.stats.autoResolvedConflicts).toEqual([
+      expect.objectContaining({ verdict: 'dismissed' }),
+    ]);
+  });
+
+  it('medium confidence stays advisory — nothing is written', async () => {
+    const result = await runFromDisk({
+      verifyOverlapRunner: verifyWith({ action: 'pick-b', rationale: 'probably v2', confidence: 'medium' }),
+    });
+    expect(fs.existsSync(decisionsFile())).toBe(false);
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
+  });
+
+  it('a high-confidence fix-doc never auto-applies (a doc edit is not a verdict)', async () => {
+    const result = await runFromDisk({
+      verifyOverlapRunner: verifyWith({
+        action: 'fix-doc',
+        rationale: 'users-v1 needs a correction',
+        fix: 'update the field default in users-v1',
+        confidence: 'high',
+      }),
+    });
+    expect(fs.existsSync(decisionsFile())).toBe(false);
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
+  });
+
+  it('an existing resolution always wins — auto-apply never touches a resolved dispute', async () => {
+    fs.mkdirSync(specsDir(), { recursive: true });
+    fs.writeFileSync(
+      decisionsFile(),
+      JSON.stringify({
+        version: 1,
+        manualIncludes: [],
+        manualExcludes: [],
+        manualAreas: [],
+        conflictResolutions: [
+          {
+            docA: 'docs/users-v1.md',
+            anchorA: null,
+            docB: 'docs/users-v2.md',
+            anchorB: null,
+            verdict: 'a',
+            resolvedAt: '2026-07-20T00:00:00Z',
+          },
+        ],
+      }),
+    );
+
+    const result = await runFromDisk({
+      verifyOverlapRunner: verifyWith({ action: 'pick-b', rationale: 'v2 is newer', confidence: 'high' }),
+    });
+
+    // The user's 'a' verdict stands; no auto entry joins it.
+    const stored = readStored().conflictResolutions;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ verdict: 'a' });
+    expect(stored[0].resolvedBy).toBeUndefined();
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
+  });
+
+  it('writes nothing on a dry (skipCorpusWrite) run', async () => {
+    const result = await runFromDisk({
+      skipCorpusWrite: true,
+      verifyOverlapRunner: verifyWith({ action: 'pick-b', rationale: 'v2 is newer', confidence: 'high' }),
+    });
+    expect(fs.existsSync(decisionsFile())).toBe(false);
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
+  });
+});

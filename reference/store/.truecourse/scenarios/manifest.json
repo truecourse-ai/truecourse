@@ -1,5 +1,4 @@
 {
-  "version": 3,
   "flows": [
     {
       "flowId": "analyze-a-dirty-tree-with-the-documented-stash-flags",
@@ -13,7 +12,7 @@
       ],
       "scenarios": [
         {
-          "id": "analyze-a-dirty-tree-with-the-documented-stash-flags.cli.1",
+          "id": "analyze-a-dirty-tree-with-the-documented-stash-flags",
           "drivers": [
             "cli"
           ],
@@ -49,7 +48,7 @@
       ],
       "scenarios": [
         {
-          "id": "analyze-a-dirty-working-tree.cli.1",
+          "id": "analyze-a-dirty-working-tree",
           "drivers": [
             "cli"
           ],
@@ -105,7 +104,7 @@
       ],
       "scenarios": [
         {
-          "id": "analyze-a-repository-for-the-first-time.cli.1",
+          "id": "analyze-a-repository-for-the-first-time",
           "drivers": [
             "cli"
           ],
@@ -136,7 +135,7 @@
       ],
       "scenarios": [
         {
-          "id": "analyze-csharp-without-the-roslyn-host.cli.1",
+          "id": "analyze-csharp-without-the-roslyn-host",
           "drivers": [
             "cli"
           ],
@@ -166,7 +165,7 @@
       ],
       "scenarios": [
         {
-          "id": "answer-the-first-run-llm-transport-question.cli.1",
+          "id": "answer-the-first-run-llm-transport-question",
           "drivers": [
             "cli"
           ],
@@ -196,7 +195,7 @@
       ],
       "scenarios": [
         {
-          "id": "browse-and-filter-the-rule-catalogue.cli.1",
+          "id": "browse-and-filter-the-rule-catalogue",
           "drivers": [
             "cli"
           ],
@@ -228,7 +227,7 @@
       ],
       "scenarios": [
         {
-          "id": "choose-and-flip-the-llm-transport.cli.1",
+          "id": "choose-and-flip-the-llm-transport",
           "drivers": [
             "cli"
           ],
@@ -265,7 +264,7 @@
       ],
       "scenarios": [
         {
-          "id": "commit-a-baseline-and-refresh-it.cli.1",
+          "id": "commit-a-baseline-and-refresh-it",
           "drivers": [
             "cli"
           ],
@@ -320,7 +319,7 @@
       ],
       "scenarios": [
         {
-          "id": "configure-rule-categories-and-llm-rules-per-repository.cli.1",
+          "id": "configure-rule-categories-and-llm-rules-per-repository",
           "drivers": [
             "cli"
           ],
@@ -352,7 +351,7 @@
       ],
       "scenarios": [
         {
-          "id": "decline-the-pre-commit-hook-installation.cli.1",
+          "id": "decline-the-pre-commit-hook-installation",
           "drivers": [
             "cli"
           ],
@@ -393,7 +392,7 @@
       ],
       "scenarios": [
         {
-          "id": "diff-uncommitted-changes-against-the-baseline.cli.1",
+          "id": "diff-uncommitted-changes-against-the-baseline",
           "drivers": [
             "cli"
           ],
@@ -429,7 +428,7 @@
       ],
       "scenarios": [
         {
-          "id": "exclude-generated-and-ignored-files-from-analysis.cli.1",
+          "id": "exclude-generated-and-ignored-files-from-analysis",
           "drivers": [
             "cli"
           ],
@@ -460,7 +459,7 @@
       ],
       "scenarios": [
         {
-          "id": "filter-the-violation-list-and-mistype-a-flag.cli.1",
+          "id": "filter-the-violation-list-and-mistype-a-flag",
           "drivers": [
             "cli"
           ],
@@ -511,7 +510,7 @@
       ],
       "scenarios": [
         {
-          "id": "install-the-pre-commit-hook-and-enforce-it.cli.1",
+          "id": "install-the-pre-commit-hook-and-enforce-it",
           "drivers": [
             "cli"
           ],
@@ -544,7 +543,7 @@
       ],
       "scenarios": [
         {
-          "id": "list-violations-before-any-analysis-has-run.cli.1",
+          "id": "list-violations-before-any-analysis-has-run",
           "drivers": [
             "cli"
           ],
@@ -575,7 +574,7 @@
       ],
       "scenarios": [
         {
-          "id": "manage-the-pre-commit-hook-through-the-documented-subcommands.cli.1",
+          "id": "manage-the-pre-commit-hook-through-the-documented-subcommands",
           "drivers": [
             "cli"
           ],
@@ -609,7 +608,7 @@
       ],
       "scenarios": [
         {
-          "id": "mistype-a-rules-argument.cli.1",
+          "id": "mistype-a-rules-argument",
           "drivers": [
             "cli"
           ],
@@ -641,7 +640,7 @@
       ],
       "scenarios": [
         {
-          "id": "override-rule-categories-from-the-cli-reference.cli.1",
+          "id": "override-rule-categories-from-the-cli-reference",
           "drivers": [
             "cli"
           ],
@@ -677,7 +676,7 @@
       ],
       "scenarios": [
         {
-          "id": "page-and-filter-the-violation-list-from-the-cli-reference.cli.1",
+          "id": "page-and-filter-the-violation-list-from-the-cli-reference",
           "drivers": [
             "cli"
           ],
@@ -708,7 +707,7 @@
       ],
       "scenarios": [
         {
-          "id": "read-the-cli-version-and-help.cli.1",
+          "id": "read-the-cli-version-and-help",
           "drivers": [
             "cli"
           ],
@@ -743,7 +742,7 @@
       ],
       "scenarios": [
         {
-          "id": "read-the-diff-check-through-list-diff.cli.1",
+          "id": "read-the-diff-check-through-list-diff",
           "drivers": [
             "cli"
           ],
@@ -774,7 +773,7 @@
       ],
       "scenarios": [
         {
-          "id": "register-a-repository-without-analyzing-it.cli.1",
+          "id": "register-a-repository-without-analyzing-it",
           "drivers": [
             "cli"
           ],
@@ -804,7 +803,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-a-severity-value-the-cli-does-not-define.cli.1",
+          "id": "reject-a-severity-value-the-cli-does-not-define",
           "drivers": [
             "cli"
           ],
@@ -835,7 +834,7 @@
       ],
       "scenarios": [
         {
-          "id": "retune-the-hook-policy-in-hooks-yaml.cli.1",
+          "id": "retune-the-hook-policy-in-hooks-yaml",
           "drivers": [
             "cli"
           ],
@@ -867,7 +866,7 @@
       ],
       "scenarios": [
         {
-          "id": "run-llm-rules-on-every-commit.cli.1",
+          "id": "run-llm-rules-on-every-commit",
           "drivers": [
             "cli"
           ],
@@ -904,7 +903,7 @@
       ],
       "scenarios": [
         {
-          "id": "run-llm-rules-through-the-claude-code-transport.cli.1",
+          "id": "run-llm-rules-through-the-claude-code-transport",
           "drivers": [
             "cli"
           ],
@@ -934,7 +933,7 @@
       ],
       "scenarios": [
         {
-          "id": "run-llm-rules-through-the-provider-api-transport.cli.1",
+          "id": "run-llm-rules-through-the-provider-api-transport",
           "drivers": [
             "cli"
           ],
@@ -967,7 +966,7 @@
       ],
       "scenarios": [
         {
-          "id": "run-the-first-truecourse-command-without-a-terminal.cli.1",
+          "id": "run-the-first-truecourse-command-without-a-terminal",
           "drivers": [
             "cli"
           ],
@@ -998,7 +997,7 @@
       ],
       "scenarios": [
         {
-          "id": "silence-and-restore-an-individual-rule.cli.1",
+          "id": "silence-and-restore-an-individual-rule",
           "drivers": [
             "cli"
           ],
@@ -1033,7 +1032,7 @@
       ],
       "scenarios": [
         {
-          "id": "survive-a-file-that-exceeds-the-per-file-budget.cli.1",
+          "id": "survive-a-file-that-exceeds-the-per-file-budget",
           "drivers": [
             "cli"
           ],
@@ -1063,7 +1062,7 @@
       ],
       "scenarios": [
         {
-          "id": "toggle-and-reset-individual-rules-from-the-cli-reference.cli.1",
+          "id": "toggle-and-reset-individual-rules-from-the-cli-reference",
           "drivers": [
             "cli"
           ],
@@ -1097,7 +1096,7 @@
       ],
       "scenarios": [
         {
-          "id": "turn-llm-rules-on-and-off-from-the-cli-reference.cli.1",
+          "id": "turn-llm-rules-on-and-off-from-the-cli-reference",
           "drivers": [
             "cli"
           ],
@@ -1133,7 +1132,7 @@
       ],
       "scenarios": [
         {
-          "id": "work-from-a-fresh-worktree-and-clone.cli.1",
+          "id": "work-from-a-fresh-worktree-and-clone",
           "drivers": [
             "cli"
           ],
@@ -1169,7 +1168,7 @@
       ],
       "scenarios": [
         {
-          "id": "review-a-repository-analysis-in-the-dashboard.cli.1",
+          "id": "review-a-repository-analysis-in-the-dashboard",
           "drivers": [
             "cli",
             "api",
@@ -1230,7 +1229,7 @@
       ],
       "scenarios": [
         {
-          "id": "open-the-dashboard-and-find-your-way-around.cli.1",
+          "id": "open-the-dashboard-and-find-your-way-around",
           "drivers": [
             "cli",
             "web"
@@ -1270,7 +1269,7 @@
       ],
       "scenarios": [
         {
-          "id": "run-the-dashboard-as-a-background-service.cli.1",
+          "id": "run-the-dashboard-as-a-background-service",
           "drivers": [
             "cli"
           ],
@@ -1315,7 +1314,7 @@
       ],
       "scenarios": [
         {
-          "id": "open-a-repository-before-its-first-analysis.cli.1",
+          "id": "open-a-repository-before-its-first-analysis",
           "drivers": [
             "cli",
             "web"
@@ -1363,7 +1362,7 @@
       ],
       "scenarios": [
         {
-          "id": "add-a-repository-by-path-and-read-its-first-analysis.cli.1",
+          "id": "add-a-repository-by-path-and-read-its-first-analysis",
           "drivers": [
             "cli",
             "web"
@@ -1407,7 +1406,7 @@
       ],
       "scenarios": [
         {
-          "id": "open-a-non-git-repository.cli.1",
+          "id": "open-a-non-git-repository",
           "drivers": [
             "cli",
             "web"
@@ -1448,7 +1447,7 @@
       ],
       "scenarios": [
         {
-          "id": "apply-repository-rule-settings-to-a-dashboard-run.cli.1",
+          "id": "apply-repository-rule-settings-to-a-dashboard-run",
           "drivers": [
             "cli",
             "api",
@@ -1493,7 +1492,7 @@
       ],
       "scenarios": [
         {
-          "id": "inspect-and-filter-the-rules-panel.cli.1",
+          "id": "inspect-and-filter-the-rules-panel",
           "drivers": [
             "cli",
             "api",
@@ -1547,7 +1546,7 @@
       ],
       "scenarios": [
         {
-          "id": "analyze-committed-state-from-the-dashboard.cli.1",
+          "id": "analyze-committed-state-from-the-dashboard",
           "drivers": [
             "cli",
             "api",
@@ -1593,7 +1592,7 @@
       ],
       "scenarios": [
         {
-          "id": "analyze-a-clean-repository-from-the-dashboard.cli.1",
+          "id": "analyze-a-clean-repository-from-the-dashboard",
           "drivers": [
             "cli",
             "api",
@@ -1638,7 +1637,7 @@
       ],
       "scenarios": [
         {
-          "id": "skip-llm-rules-from-the-dashboard.cli.1",
+          "id": "skip-llm-rules-from-the-dashboard",
           "drivers": [
             "cli",
             "api",
@@ -1705,7 +1704,7 @@
       ],
       "scenarios": [
         {
-          "id": "run-an-analysis-from-the-dashboard.cli.1",
+          "id": "run-an-analysis-from-the-dashboard",
           "drivers": [
             "cli",
             "api",
@@ -1765,7 +1764,7 @@
       ],
       "scenarios": [
         {
-          "id": "filter-the-violation-list.cli.1",
+          "id": "filter-the-violation-list",
           "drivers": [
             "cli",
             "api",
@@ -1828,7 +1827,7 @@
       ],
       "scenarios": [
         {
-          "id": "read-a-violation-card-and-silence-its-rule.cli.1",
+          "id": "read-a-violation-card-and-silence-its-rule",
           "drivers": [
             "cli",
             "api",
@@ -1902,7 +1901,7 @@
       ],
       "scenarios": [
         {
-          "id": "read-the-analytics-of-a-run.cli.1",
+          "id": "read-the-analytics-of-a-run",
           "drivers": [
             "cli",
             "api",
@@ -1973,7 +1972,7 @@
       ],
       "scenarios": [
         {
-          "id": "explore-the-architecture-graph.cli.1",
+          "id": "explore-the-architecture-graph",
           "drivers": [
             "cli",
             "web"
@@ -2055,7 +2054,7 @@
       ],
       "scenarios": [
         {
-          "id": "walk-files-flows-and-databases.cli.1",
+          "id": "walk-files-flows-and-databases",
           "drivers": [
             "cli",
             "web"
@@ -2147,7 +2146,7 @@
       ],
       "scenarios": [
         {
-          "id": "review-run-history-and-enter-diff-mode.cli.1",
+          "id": "review-run-history-and-enter-diff-mode",
           "drivers": [
             "cli",
             "web"

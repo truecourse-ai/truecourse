@@ -307,7 +307,6 @@ describe('mergeGuardBoard — the merge itself', () => {
     branch: 'main',
     commit: 'abc123',
     recipeFingerprint: 'sha256:deadbeef',
-    scenarioFormat: 3,
   })
   const row = (id: string, outcome: 'pass' | 'fail'): GuardLatest['scenarios'][number] => ({
     id,

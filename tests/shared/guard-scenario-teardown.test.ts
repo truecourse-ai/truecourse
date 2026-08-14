@@ -14,7 +14,6 @@ import {
 } from '@truecourse/shared'
 
 const base: GuardSandboxScenario = {
-  guard: 3,
   id: 'svc.cli.1',
   title: 'installs and removes a service',
   binds: [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }],
@@ -58,7 +57,6 @@ describe('guardExecutionSteps', () => {
     const { teardown: _teardown, ...bare } = base
     expect(guardExecutionSteps(bare)).toHaveLength(2)
     const api: GuardApiScenario = {
-      guard: 3,
       id: 'api.1',
       title: 'an api scenario',
       binds: base.binds,

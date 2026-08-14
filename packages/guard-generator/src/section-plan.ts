@@ -24,7 +24,7 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
+import { guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
 import {
   parseOpenApiSpec,
   isOpenApiDoc,
@@ -211,7 +211,6 @@ export function flowGenerationInputsHash(input: {
     [...input.sectionKeys].sort().join(''),
     [...input.interfaceFingerprints].sort().join(''),
     input.recipeFingerprint,
-    String(GUARD_FORMAT_VERSION),
     EXTRACT_PROMPT_FINGERPRINT,
     FLOWS_PROMPT_FINGERPRINT,
     FLOWS_EPIC_PROMPT_FINGERPRINT,

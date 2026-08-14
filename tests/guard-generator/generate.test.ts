@@ -29,8 +29,7 @@ import {
 import {
   GuardManifestSchema,
   GuardGenerateReportSchema,
-  GUARD_FORMAT_VERSION,
-  guardManifestSections,
+    guardManifestSections,
   isCompositionFinding,
   unaccountedSurfaces,
   violatesSettleInvariant,
@@ -132,7 +131,7 @@ describe('generateGuards — extraction honesty + gaps', () => {
     const manifest = manifestSections(r)
     expect(manifest.find((s) => s.anchor === 'background')).toBeUndefined()
     const ver = manifest.find((s) => s.anchor === 'version')!
-    expect(ver.scenarioIds).toEqual(['version.cli.1'])
+    expect(ver.scenarioIds).toEqual(['version'])
     expect(ver.flowIds).toEqual(['version'])
   })
 
@@ -449,7 +448,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     })
 
     // Reset the manifest so the flow is work again; authoring is a cache HIT.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
     let authorCalls = 0
     const res2 = await runGenerate({
       repoRoot: r,
@@ -489,7 +488,7 @@ describe('generateGuards — change detection', () => {
     expect([extractCalls, flowCalls, matchCalls, authorCalls]).toEqual([0, 0, 0, 0])
     // The flow is skipped, not re-settled: its committed scenario stands.
     expect(res2.flows).toMatchObject({ total: 1, skipped: 1, settled: 1, unsettled: 0 })
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
   })
 
   it('re-authors from the cache without a second authoring call', async () => {
@@ -503,7 +502,7 @@ describe('generateGuards — change detection', () => {
 
     // Force the whole pipeline to re-run (fresh manifest) with the same doc:
     // synthesis + matching + authoring are all cache HITS.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
     let authorCalls = 0
     const res2 = await runGenerate({
       repoRoot: r,
@@ -574,7 +573,7 @@ describe('generateGuards — the committed scenario', () => {
     const { scenarios, errors } = loadScenarios(r)
     expect(errors).toEqual([])
     const written = scenarios[0]
-    expect(written.id).toBe('a-user-checks-the-version-then-the-help.cli.1')
+    expect(written.id).toBe('a-user-checks-the-version-then-the-help')
 
     // Plural binds — one per bound section, in milestone order, pinned to the LIVE
     // index (the model's own binding is overwritten, never trusted).
@@ -623,19 +622,18 @@ describe('generateGuards — the committed scenario', () => {
     expect(res.errors[0].message).toContain('milestone(s) unrealized')
   })
 
-  it('assigns `<flow-id>.<surface>.<n>` ids and never reuses a hand-written one', async () => {
+  it('assigns the flow id, and never reuses a hand-written one', async () => {
     const r = seed()
 
     const handWritten: GuardScenario = {
-      guard: GUARD_FORMAT_VERSION,
-      id: 'version.cli.1',
+      id: 'version',
       title: 'hand-written',
       binds: bindsFor(r, DOC, 'version'),
       driver: 'cli',
       steps: [{ run: ['--version'], expect: { exit: 0 } }],
       normalize: [],
     }
-    writeScenarioFile(r, 'manual/version.cli.1.yaml', handWritten)
+    writeScenarioFile(r, 'manual/version.yaml', handWritten)
 
     const res = await runGenerate({
       repoRoot: r,
@@ -643,10 +641,10 @@ describe('generateGuards — the committed scenario', () => {
       generateRunner: authorBy({ version: raw('generated', PASSING_STEPS) }),
     })
 
-    // The generated id skips the taken `.1`.
-    expect(res.written.map((w) => w.id)).toEqual(['version.cli.2'])
+    // The flow id is taken, so the collision fallback appends a counter.
+    expect(res.written.map((w) => w.id)).toEqual(['version.2'])
     // The hand-written file is untouched.
-    expect(fs.existsSync(path.join(scenariosDir(r), 'manual', 'version.cli.1.yaml'))).toBe(true)
+    expect(fs.existsSync(path.join(scenariosDir(r), 'manual', 'version.yaml'))).toBe(true)
   })
 })
 
@@ -661,7 +659,7 @@ describe('generateGuards — birth validation', () => {
     })
     expect(res.written).toHaveLength(1)
     expect(res.birthFindings).toEqual([])
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
     expect(res.flows).toMatchObject({ total: 1, settled: 1, unsettled: 0 })
   })
 
@@ -786,10 +784,10 @@ describe('generateGuards — birth validation', () => {
 
     // The test is written like any other, with the status its birth run gave it.
     expect(res.written).toMatchObject([
-      { id: 'version.cli.1', flowId: 'version', surface: 'cli', status: 'failing' },
+      { id: 'version', flowId: 'version', surface: 'cli', status: 'failing' },
     ])
     expect(fs.existsSync(path.join(r, res.written[0].file))).toBe(true)
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
 
     // Its birth result is recorded exactly as a finding was, now naming the test.
     expect(res.birthFindings).toHaveLength(1)
@@ -800,7 +798,7 @@ describe('generateGuards — birth validation', () => {
     expect(result.title).toBe('always broken')
     expect(result.actual).toContain('exit')
     expect(result.evidencePath).toMatch(/guard\/evidence/)
-    expect(result.scenarioId).toBe('version.cli.1')
+    expect(result.scenarioId).toBe('version')
     expect(result.committed).toBe(true)
     expect(result.file).toBe(res.written[0].file)
 
@@ -809,7 +807,7 @@ describe('generateGuards — birth validation', () => {
     // DIAGNOSIS it commits with, the durable record the report's committed
     // finding row re-derives from.
     const committed = flowEntry(r, 'version')!.scenarios
-    expect(committed).toMatchObject([{ id: 'version.cli.1', drivers: ['cli'], status: 'failing' }])
+    expect(committed).toMatchObject([{ id: 'version', drivers: ['cli'], status: 'failing' }])
     expect(committed[0].diagnosis).toMatchObject({
       doc: DOC,
       anchor: 'version',
@@ -840,9 +838,9 @@ describe('generateGuards — birth validation', () => {
     expect(second.noChanges).toBe(true)
     expect(second.flows.skipped).toBe(1)
     // The committed red test — its status AND its diagnosis — stand.
-    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
     expect(flowEntry(r, 'version')?.scenarios).toMatchObject([
-      { id: 'version.cli.1', drivers: ['cli'], status: 'failing', diagnosis: { title: 'always broken' } },
+      { id: 'version', drivers: ['cli'], status: 'failing', diagnosis: { title: 'always broken' } },
     ])
   })
 
@@ -866,7 +864,7 @@ describe('generateGuards — birth validation', () => {
       ['help', 'failing'],
       ['version', 'passing'],
     ])
-    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['help.cli.1', 'version.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['help', 'version'])
     expect(res.birthFindings.map((f) => f.flowId)).toEqual(['help'])
     expect(res.flows).toMatchObject({ settled: 2, unsettled: 0 })
     expect(flowEntry(r, 'version')?.generationInputsHash).not.toBeNull()
@@ -1046,7 +1044,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
 
     // The disagreement is committed as a red test — the user's decision surface.
     const first = await run()
-    expect(first.written).toMatchObject([{ id: 'version.cli.1', status: 'failing' }])
+    expect(first.written).toMatchObject([{ id: 'version', status: 'failing' }])
     const file = path.join(r, first.written[0].file)
     expect(fs.existsSync(file)).toBe(true)
 
@@ -1230,7 +1228,7 @@ describe('generateGuards — capability/materialization-error retry routing', ()
 
     // Reset the manifest so the flow is work again; BOTH the round-1 authoring and
     // the capability-error retry are cache hits — the runner is not called.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
     round1Calls = 0
     retryCalls = 0
     const res2 = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
@@ -1327,7 +1325,7 @@ describe('generateGuards — authoring robustness', () => {
     expect(res.written.map((w) => w.flowId)).toEqual(['help'])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
-    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help.cli.1', drivers: ['cli'], status: 'passing' }])
+    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help', drivers: ['cli'], status: 'passing' }])
   })
 
   // A `matches` the schema accepts but `new RegExp` rejects would throw or never
@@ -1397,13 +1395,12 @@ describe('generateGuards — manifest + orphans', () => {
 
     // A prior flow whose sections no longer exist on disk.
     writeManifest(r, {
-      version: GUARD_FORMAT_VERSION,
       flows: [
         {
           flowId: 'a-removed-flow',
           flowFingerprint: 'sha256:old',
           bindings: [{ doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old' }],
-          scenarios: [{ id: 'orphan.cli.1', drivers: ['cli'], status: 'passing' }],
+          scenarios: [{ id: 'orphan', drivers: ['cli'], status: 'passing' }],
           generationInputsHash: 'sha256:x',
           gaps: [],
         },
@@ -1418,10 +1415,10 @@ describe('generateGuards — manifest + orphans', () => {
 
     // Reported, never deleted: the next `guard run` surfaces those scenarios as
     // orphaned drift instead of coverage silently disappearing.
-    expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan.cli.1'] }])
+    expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan'] }])
     expect(() => GuardManifestSchema.parse(readManifest(r)!)).not.toThrow()
     expect(flowEntry(r, 'a-removed-flow')?.scenarios).toEqual([
-      { id: 'orphan.cli.1', drivers: ['cli'], status: 'passing' },
+      { id: 'orphan', drivers: ['cli'], status: 'passing' },
     ])
     // MARKED: nothing derives it any more, so every reader can say why it has no
     // goal and no milestones instead of rendering a hollow flow.
@@ -1429,7 +1426,7 @@ describe('generateGuards — manifest + orphans', () => {
     // A flow synthesis still produces is never marked.
     expect(flowEntry(r, 'version')?.orphaned).toBeUndefined()
     expect(flowEntry(r, 'version')?.scenarios).toEqual([
-      { id: 'version.cli.1', drivers: ['cli'], status: 'passing' },
+      { id: 'version', drivers: ['cli'], status: 'passing' },
     ])
   })
 
@@ -1457,7 +1454,6 @@ describe('generateGuards — manifest + orphans', () => {
       ...extra,
     })
     writeManifest(r, {
-      version: GUARD_FORMAT_VERSION,
       flows: [settled, ghost('carried-before-the-mark', {}), ghost('carried-after-the-mark', { orphaned: true })],
     })
 
@@ -1518,9 +1514,8 @@ describe('generateGuards — universe + recipe discovery', () => {
   it('the corpus is the only doc authority — committed scenarios do not create a universe', async () => {
     const r = repo()
     writeDoc(r, DOC, DOC_CONTENT)
-    writeScenarioFile(r, 'manual/version.cli.1.yaml', {
-      guard: GUARD_FORMAT_VERSION,
-      id: 'version.cli.1',
+    writeScenarioFile(r, 'manual/version.yaml', {
+      id: 'version',
       title: 'hand-written',
       binds: bindsFor(r, DOC, 'version'),
       driver: 'cli',
@@ -1634,7 +1629,6 @@ function candidate(repoRoot: string, id: string, steps: GuardScenario['steps']):
     synthesisInputsHash: 'sha256:inputs',
   }
   const scenario: GuardScenario = {
-    guard: GUARD_FORMAT_VERSION,
     id,
     title: id,
     flow: { id: flow.id, fingerprint: flow.fingerprint },
@@ -1670,7 +1664,7 @@ describe('birthValidate — progress forwarding', () => {
     const r = seed()
 
     const candidates = [
-      candidate(r, 'version.cli.1', PASSING_STEPS),
+      candidate(r, 'version', PASSING_STEPS),
       candidate(r, 'version.cli.2', PASSING_STEPS),
       candidate(r, 'version.cli.3', PASSING_STEPS),
     ]
@@ -1942,7 +1936,7 @@ describe('generateGuards — grounded authoring', () => {
 
     // Reset the manifest so the flow is work again; authoring is a cache HIT → no
     // authoring call and therefore no grounding.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
+    writeManifest(r, { flows: [] })
     let groundCalls = 0
     await runGenerate({ repoRoot: r, ...runners, onGroundProgress: () => groundCalls++ })
     expect(groundCalls).toBe(0)
@@ -1964,10 +1958,10 @@ describe('generateGuards — the per-flow pipeline', () => {
     })
 
     expect(res.written.map((w) => w.flowId).sort()).toEqual(['alpha', 'beta'])
-    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha.cli.1', drivers: ['cli'], status: 'passing' }])
-    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta.cli.1', drivers: ['cli'], status: 'passing' }])
-    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.cli.1', 'beta.cli.1'])
-    expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.cli.1.yaml'))).toBe(true)
+    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha', drivers: ['cli'], status: 'passing' }])
+    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta', drivers: ['cli'], status: 'passing' }])
+    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha', 'beta'])
+    expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.yaml'))).toBe(true)
   })
 
   it('kicks the recipe build at run start, parallel with authoring', async () => {
@@ -2006,12 +2000,11 @@ describe('generateGuards — the per-flow pipeline', () => {
 
     const first = await runGenerate({ repoRoot: r, concurrency: 4, extractRunner: extractBy({}) })
     const ids = first.written.map((w) => w.id).sort()
-    expect(ids).toEqual(['limits-2.cli.1', 'limits.cli.1'])
+    expect(ids).toEqual(['limits', 'limits-2'])
 
     // Re-run against a STALE manifest: both flows re-author and must land on the
     // SAME ids (each frees its own before assigning), never colliding.
     writeManifest(r, {
-      version: GUARD_FORMAT_VERSION,
       flows: readManifest(r)!.flows.map((f) => ({ ...f, generationInputsHash: 'sha256:stale' })),
     })
     const second = await runGenerate({ repoRoot: r, concurrency: 4, extractRunner: extractBy({}) })
@@ -2100,7 +2093,7 @@ describe('generateGuards — the committed flow corpus', () => {
     const flows = JSON.parse(fs.readFileSync(path.join(scenariosDir(r), 'flows.json'), 'utf-8'))
     expect(flows.flows.map((f: { id: string }) => f.id)).toEqual(['version'])
     const scenario = yaml.load(
-      fs.readFileSync(path.join(scenariosDir(r), 'cli', 'version.cli.1.yaml'), 'utf-8'),
+      fs.readFileSync(path.join(scenariosDir(r), 'cli', 'version.yaml'), 'utf-8'),
     ) as GuardScenario
     expect(scenario.flow!.id).toBe('version')
     expect(scenario.flow!.fingerprint).toBe(flows.flows[0].fingerprint)

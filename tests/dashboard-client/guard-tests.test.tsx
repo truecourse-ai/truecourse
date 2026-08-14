@@ -299,7 +299,7 @@ const INTERFACES: GuardInterfaceRow[] = [
   },
 ];
 
-const YAML = ["guard: 3", `id: ${PASSING_ID}`, "driver: cli"].join("\n");
+const YAML = [`id: ${PASSING_ID}`, "driver: cli"].join("\n");
 /**
  * The parsed step list the server ships alongside the source. A preparation step
  * annotated with NO milestone leads it, then two steps realizing milestone 1 and
@@ -1437,7 +1437,7 @@ describe("the test, read inside its flow", () => {
     // the CONTENT, never for the element.
     await waitFor(() =>
       expect(screen.getByLabelText("test source")).toHaveTextContent(
-        "guard: 3",
+        "driver: cli",
       ),
     );
     expect(screen.queryByLabelText("test steps")).not.toBeInTheDocument();

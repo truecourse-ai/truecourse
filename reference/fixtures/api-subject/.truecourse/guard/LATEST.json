@@ -4,8 +4,7 @@
     "ranAt": "2026-08-10T05:11:23.668Z",
     "branch": "main",
     "commit": "215a3f1bad9a777bda2e36498ef4e4dbbbf281ea",
-    "recipeFingerprint": "sha256:c4c586fe256a983495fc05222df37b0a9539c4a08a0a50626943ddc7d0c809e1",
-    "scenarioFormat": 3
+    "recipeFingerprint": "sha256:c4c586fe256a983495fc05222df37b0a9539c4a08a0a50626943ddc7d0c809e1"
   },
   "summary": {
     "total": 14,
@@ -18,7 +17,7 @@
   },
   "scenarios": [
     {
-      "id": "add-a-duplicate-isbn.api.1",
+      "id": "add-a-duplicate-isbn",
       "title": "Adding the same ISBN twice reports that the book is already on the shelf",
       "binds": {
         "doc": "docs/openapi.yaml",
@@ -31,7 +30,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/add-a-duplicate-isbn.api.1"
     },
     {
-      "id": "check-service-health.api.1",
+      "id": "check-service-health",
       "title": "Health check reports the bookclub service is up",
       "binds": {
         "doc": "docs/openapi.yaml",
@@ -44,7 +43,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/check-service-health.api.1"
     },
     {
-      "id": "convert-a-valid-isbn.cli.1",
+      "id": "convert-a-valid-isbn",
       "title": "Converting valid ISBN-10 and ISBN-13 values normalizes them to thirteen digits",
       "binds": {
         "doc": "docs/cli.md",
@@ -57,7 +56,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/convert-a-valid-isbn.cli.1"
     },
     {
-      "id": "handle-finishing-an-unknown-book.api.1",
+      "id": "handle-finishing-an-unknown-book",
       "title": "Finishing an unknown book reports that no book has that id",
       "binds": {
         "doc": "docs/openapi.yaml",
@@ -70,7 +69,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/handle-finishing-an-unknown-book.api.1"
     },
     {
-      "id": "handle-missing-book-details.api.1",
+      "id": "handle-missing-book-details",
       "title": "Requesting details for a missing book reports that no book has that id",
       "binds": {
         "doc": "docs/openapi.yaml",
@@ -83,7 +82,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/handle-missing-book-details.api.1"
     },
     {
-      "id": "print-configuration-with-a-redacted-database-password.cli.1",
+      "id": "print-configuration-with-a-redacted-database-password",
       "title": "Inspecting configuration redacts the database password",
       "binds": {
         "doc": "docs/cli.md",
@@ -96,7 +95,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/print-configuration-with-a-redacted-database-password.cli.1"
     },
     {
-      "id": "refuse-an-invalid-isbn.cli.1",
+      "id": "refuse-an-invalid-isbn",
       "title": "Refusing an invalid ISBN reports a clear validation error",
       "binds": {
         "doc": "docs/cli.md",
@@ -109,7 +108,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/refuse-an-invalid-isbn.cli.1"
     },
     {
-      "id": "reject-an-invalid-isbn.api.1",
+      "id": "reject-an-invalid-isbn",
       "title": "Invalid ISBN values are refused when a member adds a book",
       "binds": {
         "doc": "docs/shelf-rules.md",
@@ -122,7 +121,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-an-invalid-isbn.api.1"
     },
     {
-      "id": "reject-an-unsupported-database-scheme.cli.1",
+      "id": "reject-an-unsupported-database-scheme",
       "title": "Unsupported database schemes are rejected with a clear configuration error",
       "binds": {
         "doc": "docs/cli.md",
@@ -135,7 +134,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-an-unsupported-database-scheme.cli.1"
     },
     {
-      "id": "reject-shelf-changes-without-a-valid-member-token.api.1",
+      "id": "reject-shelf-changes-without-a-valid-member-token",
       "title": "Unauthorized callers cannot add or finish books or change shelf state",
       "binds": {
         "doc": "docs/shelf-rules.md",
@@ -148,7 +147,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-shelf-changes-without-a-valid-member-token.api.1"
     },
     {
-      "id": "reject-unusable-book-details.api.1",
+      "id": "reject-unusable-book-details",
       "title": "Members receive validation errors for missing or unusable book details",
       "binds": {
         "doc": "docs/openapi.yaml",
@@ -161,7 +160,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-unusable-book-details.api.1"
     },
     {
-      "id": "require-an-isbn-value.cli.1",
+      "id": "require-an-isbn-value",
       "title": "Calling the ISBN command without a value reports a clear error",
       "binds": {
         "doc": "docs/cli.md",
@@ -174,7 +173,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/require-an-isbn-value.cli.1"
     },
     {
-      "id": "require-member-token-to-add-a-book.api.1",
+      "id": "require-member-token-to-add-a-book",
       "title": "Adding a book without a valid member token is rejected as unauthorized",
       "binds": {
         "doc": "docs/openapi.yaml",
@@ -187,7 +186,7 @@
       "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/require-member-token-to-add-a-book.api.1"
     },
     {
-      "id": "require-member-token-to-finish-a-book.api.1",
+      "id": "require-member-token-to-finish-a-book",
       "title": "Finishing a book requires a valid member token",
       "binds": {
         "doc": "docs/openapi.yaml",
@@ -206,8 +205,8 @@
       "section": "the-bookclub-cli/bookclub-config",
       "status": "pass",
       "scenarioIds": [
-        "print-configuration-with-a-redacted-database-password.cli.1",
-        "reject-an-unsupported-database-scheme.cli.1"
+        "print-configuration-with-a-redacted-database-password",
+        "reject-an-unsupported-database-scheme"
       ]
     },
     {
@@ -215,9 +214,9 @@
       "section": "the-bookclub-cli/bookclub-isbn-value",
       "status": "pass",
       "scenarioIds": [
-        "convert-a-valid-isbn.cli.1",
-        "refuse-an-invalid-isbn.cli.1",
-        "require-an-isbn-value.cli.1"
+        "convert-a-valid-isbn",
+        "refuse-an-invalid-isbn",
+        "require-an-isbn-value"
       ]
     },
     {
@@ -225,7 +224,7 @@
       "section": "paths/get-getbook",
       "status": "pass",
       "scenarioIds": [
-        "handle-missing-book-details.api.1"
+        "handle-missing-book-details"
       ]
     },
     {
@@ -233,7 +232,7 @@
       "section": "paths/get-health",
       "status": "pass",
       "scenarioIds": [
-        "check-service-health.api.1"
+        "check-service-health"
       ]
     },
     {
@@ -241,9 +240,9 @@
       "section": "paths/post-addbook",
       "status": "pass",
       "scenarioIds": [
-        "add-a-duplicate-isbn.api.1",
-        "reject-unusable-book-details.api.1",
-        "require-member-token-to-add-a-book.api.1"
+        "add-a-duplicate-isbn",
+        "reject-unusable-book-details",
+        "require-member-token-to-add-a-book"
       ]
     },
     {
@@ -251,8 +250,8 @@
       "section": "paths/post-finishbook",
       "status": "pass",
       "scenarioIds": [
-        "handle-finishing-an-unknown-book.api.1",
-        "require-member-token-to-finish-a-book.api.1"
+        "handle-finishing-an-unknown-book",
+        "require-member-token-to-finish-a-book"
       ]
     },
     {
@@ -260,7 +259,7 @@
       "section": "shelf-rules/isbns-are-stored-as-thirteen-digits",
       "status": "pass",
       "scenarioIds": [
-        "reject-an-invalid-isbn.api.1"
+        "reject-an-invalid-isbn"
       ]
     },
     {
@@ -268,7 +267,7 @@
       "section": "shelf-rules/who-may-change-the-shelf",
       "status": "pass",
       "scenarioIds": [
-        "reject-shelf-changes-without-a-valid-member-token.api.1"
+        "reject-shelf-changes-without-a-valid-member-token"
       ]
     }
   ]

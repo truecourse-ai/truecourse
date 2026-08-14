@@ -1,0 +1,140 @@
+id: run-llm-rules-on-every-commit
+title: A team turns on LLM rules for the pre-commit hook
+promise: A team turns on LLM rules for the pre-commit hook
+flow:
+  id: run-llm-rules-on-every-commit
+  fingerprint: sha256:190a5394a0af8e176e46af8842c4ef7896eaf07f3bcb3147ca46954be4c654d6
+interface:
+  path:
+    - cli/analyze
+    - cli/hooks-install
+    - cli/hooks-status
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:1038639e4b6df928f00ecbcf7f8ddcecf6a249c62ae109d2838192aa506ac539
+    - sha256:cc07593d0bfb9c5bbe9fb290c2fe3ad39979bb48946f7dc2034429b66a7b00da
+binds:
+  - doc: reference/spec-docs/analyze/git-hooks.mdx
+    section: configuration
+    fingerprint: sha256:560774079eb1236364f9892d479911372db98763bc7e668ef8fc97361ee8ee5d
+setup:
+  files:
+    package.json: |
+      {
+        "name": "llm-hook-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+        message: seed llm hook sample
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - hooks
+      - install
+    stdin:
+      - marker: 'Install the pre-commit hook?'
+        answer: 'y'
+    tty: true
+    expect:
+      exit: 0
+    note: The transport is pinned in `setup.env` for the same reason every other hook flow pins it — without it this TTY step is intercepted by the first-run transport wizard, whose select prompt the scripted `y` cannot answer, and the step dies on the step timeout instead of reaching `hooks install` at all (observed 2026-08-07).
+  - git:
+      - add
+      - .truecourse/LATEST.json
+      - .truecourse/hooks.yaml
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '--no-verify'
+      - '-m'
+      - add truecourse baseline
+    expect:
+      exit: 0
+  - write:
+      .truecourse/hooks.yaml: |
+        pre-commit:
+          block-on: [critical, high]
+          llm: true
+    expect:
+      files:
+        .truecourse/hooks.yaml:
+          contains: 'llm: true'
+  - run:
+      - hooks
+      - status
+    expect:
+      exit: 0
+      stdout:
+        contains: 'LLM rules on commit: enabled (tokens per commit)'
+    note: The policy is read and reported — including the token-cost warning the status line carries for exactly this setting.
+  - write:
+      src/notes.js: |
+        export function notes(rows) {
+          console.log('notes', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/notes.js:
+          exists: true
+  - git:
+      - add
+      - src/notes.js
+    expect:
+      exit: 0
+  - git:
+      - commit
+      - '-m'
+      - add notes
+    env:
+      CLAUDE_CODE_BINARY: ${sandbox}/no-claude-binary
+    expect:
+      exit: 1
+      output:
+        matches: ^(?![\s\S]*passed \([0-9]+ new violations)[\s\S]*$
+    note: >-
+      The falsifiable form of "the policy is EXECUTED, not merely stored". The
+      transport is made unusable ON THIS INVOCATION and nowhere else:
+      `CLAUDE_CODE_BINARY` (documented in the CLI reference's environment table) is
+      pointed at a path that does not exist, so `claude-code` — the transport this
+      scenario pins — cannot resolve a binary. A gate that really runs the LLM rules
+      on every commit cannot reach a verdict here, so it must refuse rather than hand
+      back the deterministic-only pass. THIS STEP IS RED ON A PRODUCT FINDING,
+      verified 2026-08-08 by reproducing the exact state outside the harness: with
+      `llm: true` and a broken transport the gate prints `TrueCourse pre-commit
+      check... running analysis... ✔ passed (2 new violations, none at or above
+      critical/high)` and exits 0 — BYTE-IDENTICAL to the same commit under
+      `llm: false`, which was run back to back against the same staged change. The
+      hook run writes no analyze log either, so the LLM stage's failure is invisible
+      on every surface a user has: an `llm: true` policy is unobservable and, when
+      the transport is broken, silently unenforced. The earlier version of this step
+      asserted the same exit 1 but attributed it to an "unusable-LLM-configuration
+      exit" the program does not have — a guess, never reached, because this flow is
+      red four steps earlier. Weakening the assertion to `hooks status` (which does
+      report the policy) would turn a silent-degradation bug into a green about a
+      line of YAML.
+    milestone:
+      - hooks-yaml-llm-true-runs-llm-rules

@@ -303,7 +303,7 @@ specifics on top of it.
 - **The dashboard gets everything, live.** The loop's transcript events
   (system, turn, reply, tool result, re-ask, outcome,
   budget-exhaustion) append to a gitignored jsonl artifact per work
-  item as they happen; the dashboard server's existing store watcher
+  item in the sessions store (§3.9) as they happen; the dashboard server's existing store watcher
   tails the files and forwards appended lines over the existing
   sockets. The CLI knows nothing about the dashboard — if it is up you
   watch live, if not the same files replay later. One append-only file,
@@ -319,6 +319,177 @@ specifics on top of it.
   separate progress panel for streaming commands. `guard run` keeps its
   bounded progress panel as today — a run is bounded execution, not a
   stream to follow.
+
+### 3.7 Interactive sessions (decision 2026-08-13)
+
+A session can converse with the user while it runs, the Claude Code
+model: the user watches the live transcript and interjects; the
+session ingests the message and revises course. Two loop capabilities
+carry it, both built once in `runAgentLoop`:
+
+- **User interjection.** A user message enters a running session as
+  its next observation, delivered at a turn boundary. It is the same
+  message shape §3.3's resume-with-observation consumes; interjection
+  and resume are one mechanism arriving at different times.
+- **Sub-session dispatch.** A session may run other sessions as tools
+  (the orchestrator pattern): the child runs on its own budget with
+  its own transcript artifact, and its structured outcome returns to
+  the parent as a tool result. A child's failure is a tool result
+  naming the failure, never the parent's failure.
+
+The chat surface is the DASHBOARD, never the CLI. §3.6 stands
+unchanged: the CLI shows its moving counters and prints the deep
+link; the user follows the URL to see the session and chat there. The
+live transcript view gains a chat input for an active session.
+Inbound delivery is the session API of §3.9: the run process serves
+it locally, the dashboard server discovers the endpoint through the
+run record and POSTs the user's message, and the message enters the
+transcript at the moment the session ingests it, so the record stays
+faithful to what the model saw when. Outbound stays §3.6's tailed
+transcript files, which keep working after the process exits. The
+decoupling holds in both directions: the agent knows nothing about
+the dashboard (it only listens), and the dashboard finds the agent
+through the store.
+
+Interactivity is optional everywhere. In a non-interactive run (CI, a
+PR gate, cron) a session never blocks on a question: it proceeds on
+the persisted decisions it has, and a question it cannot settle ends
+in the structured outcome as a pending question, reported loudly,
+exactly like every other structured gap. In an interactive run a
+session may wait on input; an abandoned wait parks the session
+through §3.3's persistence and resumes when the answer arrives, never
+a silent hang.
+
+### 3.8 Versioned store state and the branch/PR model (decision 2026-08-13)
+
+Field driver (the first enterprise evaluation, 2026-08-13): corpus and
+flows are tied to a branch today, a PR run has nowhere to store its
+state, and a corpus change that re-runs generate destroys the previous
+flow set instead of versioning it. One convention answers all three,
+common to every store this plan touches; §6 and §8 instantiate it.
+
+- **Version records with parent pointers.** Every scan writes a corpus
+  VERSION and every generate writes a GENERATION: a record carrying
+  its parent version id, the git ref/sha it was produced on, and its
+  input fingerprints. History is the chain of records.
+- **Pointers, never copies.** A version stores content-addressed
+  pointers (a doc's content hash and its curation outcome; a flow id
+  and its scenario/outcome object), so an unchanged item is a shared
+  pointer into the previous version, stored once. Nothing unchanged is
+  re-generated (the content-keyed caches and per-flow input hashes
+  already decide skip) and nothing unchanged is re-stored.
+- **Diffs are derived, never stored.** The dashboard's
+  version-by-version view (back/forward navigation, each version
+  diffed against its parent: docs kept/dropped/re-tagged, flows
+  added/changed/removed) computes from adjacent records' pointers.
+- **Main owns committed baselines.** The existing convention is
+  unchanged: materialized current-state files commit only after
+  merging to main. Version records are local and gitignored,
+  mirroring the analyze store's snapshot files.
+- **A branch or PR run derives a DELTA version**: local, gitignored,
+  parented on the committed baseline. The PR's spec and code changes
+  re-process only what they invalidate; results report as a diff
+  against the baseline. Nothing is committed from branches; after
+  merge, the run on main reproduces the same result through cache
+  hits and becomes the next committed baseline.
+- **PR run scope is the user's choice**: impacted-only is the default
+  (the flows whose claims, journeys, or recipe fingerprints the
+  change touched), `--all` runs the full board; runs on main default
+  to the full board. An impacted-only verdict is reported as what it
+  is, "nothing the change touched broke", never dressed up as a green
+  board.
+- **Commercial is the same model.** Versions become rows keyed
+  (repo, ref, parent) instead of files; the parent-pointer chain is
+  what makes the model portable between the file store and a
+  database, and connected-tool sources (Confluence, Jira) version
+  identically: the source snapshot's content hashes are the pointers.
+
+### 3.9 The sessions store and the session API (decision 2026-08-13)
+
+Conversation history is a data class of its own, never mixed into
+domain stores. There is ONE record per session, its transcript: user
+messages, model turns, tool results, and outcomes are all events in
+one ordered file, because an agent session is one flow whose
+observations happen to come from tools or from the user.
+
+**The sessions store** (OSS):
+`.truecourse/sessions/<command>/<runId>/`, gitignored entirely. The
+command segment (`spec-scan`, `guard-setup`, `guard-generate`) says
+what every run is without opening a file.
+
+- `run.json` — the run record: command, git ref, started/finished,
+  status, the live session-API endpoint while the process runs, and
+  the session index (per session: kind, the work item it served,
+  status, provider session id, budget spent). The dashboard lists
+  sessions from here, never by parsing transcripts; resume finds
+  parked sessions here.
+- `<sessionId>.jsonl` — the transcript, appended by the run process
+  as events happen (§3.6). Events carry full message content, never
+  summaries: api-mode resume rebuilds the exact message history from
+  the transcript, so completeness is correctness, not verbosity.
+- Domain stores never embed conversation data; they REFERENCE session
+  ids (a generation record names the worker sessions that authored
+  it, a corpus version names its orchestrator session), resolved
+  through the index. This supersedes §8.12's transcript location
+  (`guard/authoring/<runId>/…`); the event shape and the writing
+  mechanics are unchanged.
+
+**The session API.** The process running the sessions serves a small
+HTTP interface while it runs (127.0.0.1, random port, a token,
+advertised in `run.json`): send a user message, and later control
+verbs (cancel, resume, answer a pending question). Inbound only:
+transcripts stream outbound as files, which is what keeps replay and
+post-mortem reading independent of any live process. A message to a
+dead endpoint fails loudly in the chat UI ("session not running");
+resume starts a fresh process that advertises a fresh endpoint. There
+is deliberately NO persistent daemon: the run process is the agent
+server for its own run, and nothing outlives it.
+
+**Built as a library.** The session API (route shape, schemas, and
+handlers over the loop's sessions) is a host-agnostic module in
+`packages/core`, its types in `packages/shared`. The OSS run process
+is one host; EE's hosted runner is the other, serving the SAME shape,
+so the dashboard client speaks one protocol in both worlds. In EE the
+store side maps onto the database behind the storage adapter: a
+runs/sessions table and an append-only transcript-events table keyed
+(workspace, repo, run, session), domain rows carrying session-id
+references only, with retention policy possible there.
+
+**The EE port (locked 2026-08-13).** Four contained steps on top of
+the OSS vertical, with no client work among them:
+
+- **Client ports as-is.** The Activity surface, transcript
+  renderers, cards, and chat input are shared dashboard-client
+  components; EE enables them by adding `activity` to its curated
+  guard tab order and role-gating the chat route (chatting is a
+  write). The client reads through one protocol (list runs, get a
+  run with its session index, page a transcript, subscribe to live
+  events, post a message) served by dashboard-server routes in BOTH
+  editions; only the server's backend differs.
+- **Store maps table for table.** `run.json` becomes a runs row;
+  each transcript jsonl becomes rows in the transcript-events table.
+  The loop's SINK is the seam: the OSS sink appends lines, the EE
+  sink inserts rows (the EE trace store is the home or the
+  template). Retention policy is an EE store concern.
+- **The runner hosts the same API.** The hosted job-queue worker
+  executing the command hosts the session-API library and advertises
+  its service endpoint in the runs row: the identical discovery
+  pattern, file to row, localhost port to service URL. The web tier
+  proxies chat to it exactly as the OSS dashboard server does. EE
+  adds workspace authorization and attribution on top, never a
+  different protocol.
+- **Sequencing.** OSS lands the whole vertical first (loop, sessions
+  store, session API library, Activity on real data); then EE: the
+  two-table migration, the DB sink adapter, the runner hosting the
+  API library, and tab order plus authorization.
+
+Three schema decisions bake in from day one so EE never migrates for
+them: `user-message` events carry an optional ACTOR identity (empty
+in OSS, the workspace user in EE, so "who answered" is auditable);
+every event carries a per-session MONOTONIC SEQUENCE number, so DB
+paging and file tailing agree on ordering and resume; and the run
+record's endpoint field is a URL plus auth token, never a bare port,
+so the EE runner's service endpoint fits the same field.
 
 ## 4. The reference corpus (the benchmark)
 
@@ -495,6 +666,12 @@ reports the sections it opened, a skim detector the review's own budget
 arguments cannot supply (§6.2). Budgets are settled against a real corpus
 for the first time (§6.4).
 
+AMENDED 2026-08-13 (Mushegh, from the first enterprise field
+evaluation): the scan gains an interactive scoping orchestrator and
+user instructions (§6.3), a new known problem recording why (§6.2),
+and corpus versioning per §3.8; §§6.3–6.5 carry the amendments
+inline.
+
 **Boundary.** This workstream owns everything from doc acquisition to
 `specs/corpus.json`, and nothing after it. Acquisition is in scope
 because §4 settles the spec source as the published documentation site,
@@ -512,7 +689,9 @@ relevance-dropped docs with their reasons — consumed by §8's planning
 layer as its doc universe. `specs/decisions.json`, the user's curated
 resolutions over that corpus, is this workstream's user-decision surface
 and stays here; its verdicts are section-scoped (`conflictResolutions`,
-alongside the manual include/exclude/area overrides). Doc-to-doc
+alongside the manual include/exclude/area overrides, and, per the
+2026-08-13 amendment, the scope verdicts and instructions of §6.3).
+Doc-to-doc
 relations are NOT part of the contract: they existed in an earlier
 version, nothing consumes them now, and a legacy `relations` array is
 dropped on parse — so the scope sentence above names no chains.
@@ -657,6 +836,17 @@ into a per-doc session; its disposition is settled in §6.3.
   from a clean one". A bounded scan has exactly that problem and no such
   field. Carrying completeness in the corpus file is a schema addition
   this workstream owns.
+- **An enterprise corpus cannot be scoped upfront, and unscoped
+  ingestion is unaffordable** (field evidence 2026-08-13, the first
+  enterprise evaluation: a decade of Confluence, abandoned and
+  contradictory docs throughout). Pointing the scan at everything
+  spends flagship tokens on material nobody wants curated, and the
+  user cannot author an exclude list in advance: on a connected tool
+  they do not know what is there. Pattern/glob excludes were
+  considered and REJECTED (2026-08-13, Mushegh): the engine proposes,
+  the user decides. The answer is the scoping conversation of §6.3:
+  survey cheaply, propose the scope, let the user keep or exclude in
+  chat, and spend curation only on the kept scope.
 
 ### 6.3 Sessions
 
@@ -695,7 +885,35 @@ other two sessions use tools for the same reason at smaller stakes: a
 doc that defers to another doc is judged by opening it, and two labels
 are merged by looking at how their docs actually use them.
 
-Three sessions, in order; each consumes the one before it.
+**The scan orchestrator session** (interactive, per §3.7; decision
+2026-08-13) fronts the three worker sessions below. `spec scan`
+starts it; the CLI prints the dashboard deep link (§3.6) and the user
+chats from the live session view. Its phases:
+
+- **Survey** (cheap): reads the deterministic universe walk plus
+  titles, paths, outlines, and source structure (a repo's doc tree, a
+  connected source's space/page tree), never full doc contents.
+- **Propose**: groups the universe into candidate product areas /
+  scope groups and presents them with counts and reasons.
+- **Converse**: the user keeps or excludes groups, corrects the
+  grouping, and steers ("everything under /archive is historical");
+  the orchestrator asks when unsure. Verdicts and the distilled
+  steering persist to `specs/decisions.json` as SCOPE VERDICTS and
+  INSTRUCTIONS (both committable), so a re-run never re-asks what is
+  already answered; the conversation reopens only for universe growth
+  the persisted verdicts do not cover (a new space, a new top-level
+  tree).
+- **Dispatch**: runs the worker sessions below (as §3.7 sub-sessions)
+  over the KEPT scope only.
+
+Instructions ride every scan session's prompt and enter its cache
+key: editing them re-scans, which is correct and which the estimate
+states (§6.4). In a non-interactive run the orchestrator never blocks
+(§3.7): it applies persisted verdicts and ends with unanswerable
+questions as pending-questions output.
+
+Three worker sessions, in order; each consumes the one before it, and
+all run over the orchestrator's kept scope.
 
 - **Doc curation session** (one per doc, turn budget 5). Prompt: a spec
   curator deciding whether this doc describes user-facing behavior worth
@@ -783,7 +1001,15 @@ Three sessions, in order; each consumes the one before it.
   confirmed overlap carries its RESOLUTION BRIEF (what exactly
   disagrees, and the recommended action), and ruling is FAIL-OPEN — only
   an explicit refutation drops a flag, so an overlap the session could
-  not rule on stays flagged rather than vanishing. This session
+  not rule on stays flagged rather than vanishing. The brief also
+  carries a CONFIDENCE grade (decision 2026-08-14, LANDED in the
+  current engine — preserve it): low / medium / high, graded knowing
+  the stakes; a high-confidence pick-a-side or dismissal is
+  AUTO-APPLIED by the scan as a `resolvedBy: 'auto'` conflict
+  resolution (reported loudly, badged on every surface, undoable like
+  any verdict, suppressing the loser exactly like a user verdict),
+  lower grades stay advisory and surfaces show the grade, and a
+  fix-doc recommendation never auto-applies regardless of grade. This session
   is also the answer to §6.2's scaling problem: the engine stops
   enumerating and judging candidate PAIRS — it still computes area
   membership, widening included, deterministically — and the session
@@ -816,7 +1042,14 @@ and areas — and only the ones whose cached input changed; per changed
 item, its session count × the session type's [min, max] turn range, at
 the one model's prices:
 
-- **doc curation** — 1 × [1, 5] per PROSE doc whose content is not
+- **orchestrator** — the survey is deterministic and estimates as
+  free. The scoping conversation is user-paced, so the estimate names
+  it as one interactive session without a turn range: pretending a
+  number would be the dressed-up average §3.5 forbids. Scope shrinks
+  the subject line honestly ("N of M docs in scope, K changed"), and
+  an instructions edit invalidates every scan cache: the estimate
+  shows that full re-scan, never hides it.
+- **doc curation** — 1 × [1, 5] per in-scope PROSE doc whose content is not
   already in the curation cache. Structural docs (OpenAPI) are admitted
   deterministically and skip every prose stage, so they cost nothing
   here, exactly as the estimate excludes them today. Exact, and simpler
@@ -993,6 +1226,13 @@ Phase A does not wait on it.
   count areas.
 - Retire `CurateModels`' five per-stage model slots (relevance, areaTag,
   vocab, overlap, verifyOverlap) per §3.4; `fallback` stays.
+- Corpus versioning per §3.8: per-scan version records with parent
+  pointers and content-addressed doc outcomes (records gitignored,
+  `corpus.json` stays the committable materialized state, the analyze
+  store's convention), and the dashboard's version-by-version view
+  with derived diffs.
+- `specs/decisions.json` grows scope verdicts and instructions
+  (§6.3); the corpus records the scope it was curated under.
 - Rewrite the scan estimate per §6.4.
 
 **Phase B — the sessions.** Blocked on the shared loop landing, and now on
@@ -1000,7 +1240,10 @@ one loop capability specifically: automatic resume (§3.3), without which
 the overlap session's bound cannot scale and a full scan becomes a
 hand-driven sequence of re-runs.
 
-- The three sessions of §6.3, in order, each consuming the previous: doc
+- The scan orchestrator session (§6.3), additionally blocked on the
+  loop's interjection and sub-session dispatch (§3.7) and the
+  dashboard's chat input on the live session view.
+- The three worker sessions of §6.3, in order, each consuming the previous: doc
   curation, then area settling, then overlap. Area settling closes
   §6.2's product-axis gap — the `core` verdict becomes a session outcome
   instead of a prompt sentence — and owns subdivision, the only place an
@@ -1502,20 +1745,16 @@ guard-generate plan, for the owner to refine.
 
 ### 8.2 Known problems the design must solve
 
-- **The scenario id still carries a surface and a counter.** Ids are
-  `<flow-id>.<surface>.<n>` (`review-a-repository-analysis.cli.1`), and
-  both suffixes are now dead. `<n>` can never legitimately reach `2`:
-  §2 binds ONE scenario per flow, and partial coverage stays
-  milestone-scoped inside it. `<surface>` predates the step-level driver
-  decision — a flow spanning web and api is ONE mixed test today, so the
-  segment records only the surface it happened to be authored as (the
-  reference PoC reads `.cli.1` while its steps drive cli, web and api),
-  which is the same lie the deleted scenario-level `driver` field told
-  one level up. Generate OWNS the id, so the fix lands here: the id
-  becomes the flow id alone. Nothing reads the shape (it is a name, not
-  a key), so the work is the write path plus a rename of the committed
-  corpora; do it with the authoring rewrite rather than as a standalone
-  churn of every file.
+- **The scenario id still carries a surface and a counter.** DONE
+  (2026-08-13, ahead of the rewrite): the id is the flow id alone. The
+  suffixes were dead — `<n>` could never legitimately reach `2` (§2
+  binds ONE scenario per flow, and partial coverage stays
+  milestone-scoped inside it), and `<surface>` predated the step-level
+  driver decision (a flow spanning web and api is ONE mixed test, so the
+  segment recorded only the surface it happened to be authored as — the
+  same lie the deleted scenario-level `driver` field told one level up).
+  The write path (`assignScenarioId`) and every committed corpus were
+  renamed together; nothing reads the shape (it is a name, not a key).
 - **Generate duplicates journey generation.** Today generate derives
   journeys itself, duplicating setup's job. After the split, journeys are
   a setup output only: generate consumes them, and when the sandbox
@@ -1782,9 +2021,10 @@ agentic command; what follows is generate's own display specifics.
 - **Dashboard — the full stream.** Everything the run produces streams to
   the dashboard live: every session's transcript turn by turn, tool
   results, judge verdicts, outcomes, and settle events. The transcript
-  artifact IS the live feed: workers APPEND each turn to
-  `guard/authoring/<runId>/<flowId>.<surface>.jsonl` (gitignored, like
-  evidence) as it happens; the dashboard server's existing store watcher
+  artifact IS the live feed: workers APPEND each turn to their
+  transcript in the sessions store
+  (`sessions/guard-generate/<runId>/<sessionId>.jsonl`, §3.9;
+  gitignored, like evidence) as it happens; the dashboard server's existing store watcher
   tails the file and forwards appended lines over the existing sockets
   into the flow detail. The CLI knows nothing about the dashboard — if
   it's up you watch live, if not the same file replays later, and the
@@ -1815,6 +2055,17 @@ agentic command; what follows is generate's own display specifics.
   failed session per §3.3; the ledger caps attempts across runs, so a
   budget-exhausted worker is ledgered like any failed attempt, and past
   the cap the flow retires with its transcript — loud, in-run.
+- **Generation history per §3.8** (decision 2026-08-13): every
+  generate run appends a GENERATION record: the corpus version it
+  consumed plus per-flow pointers to content-addressed
+  scenario/outcome objects. An unchanged flow shares the previous
+  generation's pointer, never a copy and never a re-author (the
+  inputs hash above already decides skip). Back/forward navigation
+  and per-version diffs (flows added/changed/removed, each changed
+  flow against its predecessor) derive from adjacent records; the
+  dashboard renders them. PR runs follow §3.8: a delta generation
+  parented on main's committed baseline, impacted-only by default,
+  `--all` for the full board.
 
 ### 8.9 Implementation plan (seed record)
 
@@ -1949,11 +2200,14 @@ system-prompt fingerprint replacing the one-shot's; value = the worker
 outcome (scenario/blocked/diagnosis). A hit re-validates exactly as today
 and skips the session entirely. Transcripts are never cached.
 
-**Transcript artifact.** Loop events append to
-`guard/authoring/<runId>/<flowId>.<surface>.jsonl` (runId minted per
-generate run and recorded on the report), via store helpers next to the
-evidence writers; `guard/authoring/` joins GITIGNORE_CONTENTS. The dashboard
-tail comes with the display cutover; the files land with the workers.
+**Transcript artifact.** Location superseded 2026-08-13 by the
+unified sessions store (§3.9): worker transcripts live at
+`sessions/guard-generate/<runId>/<sessionId>.jsonl` (runId minted per
+generate run and recorded on the report), with `run.json` indexing
+each session's flow; `guard/authoring/` is never created, and
+`sessions/` joins GITIGNORE_CONTENTS. The event shape and the
+store-helper mechanics are unchanged. The dashboard tail comes with
+the display cutover; the files land with the workers.
 
 **Stage accounting.** Worker turns account under `guard.generate` (calls =
 turns). `guard.retry`/`guard.triage` leave the usage stages with their

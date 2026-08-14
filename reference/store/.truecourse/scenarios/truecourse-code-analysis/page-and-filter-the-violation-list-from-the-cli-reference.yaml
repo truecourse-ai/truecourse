@@ -1,0 +1,124 @@
+id: page-and-filter-the-violation-list-from-the-cli-reference
+title: A developer analyzes a repository and pages, windows and filters the violation list
+promise: A developer analyzes a repository and pages, windows and filters the violation list
+flow:
+  id: page-and-filter-the-violation-list-from-the-cli-reference
+  fingerprint: sha256:5dd990547e853427bc447578a8cdb043a8ae85b3cddcd361896bb1411feb315e
+interface:
+  path:
+    - cli/analyze
+    - cli/list
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: analyze
+    fingerprint: sha256:432df8a8c3e5e2bff86bf632f5a0f699b70cecc843f54766e1f5256b08875708
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: list
+    fingerprint: sha256:4aa9067c6033329743f1f286961709f254df2d92e7d8ca87fb05be31f0154755
+needs:
+  - analysis-target
+setup:
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: .tc-supplied/analysis-target
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*LLM will analyze)(?=[\s\S]*violations \()[\s\S]*$
+      files:
+        .tc-supplied/analysis-target/.truecourse/LATEST.json:
+          exists: true
+    note: >-
+      Two claims on one run against the REGISTERED project. That the current
+      repository was analyzed is the snapshot the run wrote; that `--no-llm` skipped
+      the LLM rules is the absence of the LLM stage from the run's own report — an
+      `--llm` run announces how many files and rules it will send, and this one says
+      nothing about the LLM at all.
+    milestone:
+      - cli-ref-analyze-analyzes-the-current-repository
+      - cli-ref-analyze-no-llm-skips-llm-rules-for-this-run
+  - run:
+      - list
+    cwd: .tc-supplied/analysis-target
+    expect:
+      exit: 0
+      stdout:
+        matches: Showing 1.20 of [0-9]+ violations
+    note: >-
+      The listing renders the analysis, and its window is twenty wide with no flag
+      passed — the default the doc states. The footer states the window in numbers,
+      which is the meaning; the rendered rows are the rendering. The `.` in `1.20`
+      stands in for the en dash the renderer prints.
+    milestone:
+      - cli-ref-list-lists-violations-from-the-latest-analysis
+      - cli-ref-list-pagination-defaults-to-20
+  - run:
+      - list
+      - '--limit'
+      - '2'
+    cwd: .tc-supplied/analysis-target
+    expect:
+      exit: 0
+      stdout:
+        matches: Showing 1.2 of [0-9]+ violations
+    note: The same set, a two-wide window starting at the first violation.
+    milestone:
+      - cli-ref-list-limit-sets-the-page-size
+  - run:
+      - list
+      - '--limit'
+      - '2'
+      - '--offset'
+      - '2'
+    cwd: .tc-supplied/analysis-target
+    expect:
+      exit: 0
+      stdout:
+        matches: Showing 3.4 of [0-9]+ violations
+    note: >-
+      The same two-wide window, moved past the first two violations — which is what
+      "skips the first n" means, and it is only observable against the previous step.
+    milestone:
+      - cli-ref-list-offset-skips-earlier-violations
+  - run:
+      - list
+      - '--all'
+    cwd: .tc-supplied/analysis-target
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*Showing )(?![\s\S]*Next page)(?=[\s\S]*[0-9]+ violations \()[\s\S]*$
+    note: >-
+      No window and no next-page pointer, but still a violation count: the footer
+      switches to its whole-set form, which is how the renderer says "this is all of
+      them".
+    milestone:
+      - cli-ref-list-all-shows-every-violation
+  - run:
+      - list
+      - '--severity'
+      - high,critical
+    cwd: .tc-supplied/analysis-target
+    expect:
+      exit: 0
+      stdout:
+        matches: '[0-9]+ violations \((?![^)]*(?:medium|low|info))[^)]*(?:critical|high)[^)]*\)'
+    note: >-
+      The footer's parenthetical is the renderer's own per-severity tally of what it
+      just printed, so it is the exact place the filter is falsifiable: it names a
+      requested severity and names none of the three that were not requested. Reading
+      the tally rather than the rows keeps the assertion independent of which findings
+      the bound project happens to have and of where the page boundary falls.
+    milestone:
+      - cli-ref-list-severity-filters-by-a-comma-separated-list
