@@ -9,6 +9,7 @@ import {
   capturedTokenRefs,
   capturingGroupCount,
   captureDefects,
+  describeComparison,
   describeGuardScenarioSteps,
   stepCaptureNames,
   type GuardApiStep,
@@ -87,6 +88,19 @@ describe('GuardComparisonSchema — the numeric half of the vocabulary', () => {
     // Still closed: a matcher with nothing in it is still rejected.
     expect(GuardStreamMatcherSchema.safeParse({}).success).toBe(false)
     expect(GuardJsonMatcherSchema.safeParse({}).success).toBe(false)
+  })
+
+  it('carries an `offset` — the DELTA claim, where the comparand is one side of a difference', () => {
+    expect(GuardComparisonSchema.safeParse({ equals: '${captured:seatsBefore}', offset: -1 }).success).toBe(
+      true,
+    )
+    expect(GuardComparisonSchema.safeParse({ atLeast: 3, offset: 2 }).success).toBe(true)
+    // An offset with nothing to offset is still nothing asserted.
+    expect(GuardComparisonSchema.safeParse({ offset: -1 }).success).toBe(false)
+    expect(describeComparison({ equals: '${captured:seatsBefore}', offset: -1 })).toContain(
+      'equals ${captured:seatsBefore} − 1',
+    )
+    expect(describeComparison({ atMost: 5, offset: 2 })).toContain('at most 5 + 2')
   })
 
   it('renders in the step view instead of a broken `matches /undefined/`', () => {

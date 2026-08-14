@@ -699,8 +699,14 @@ describe('guard-generator prompts', () => {
     // authored schema no longer carries it (the driver is the step's), so the
     // rendered schema and the sentence that explained the field both shrank. A
     // deletion, not vocabulary growth — nothing new is authorable.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('aeb52a932671fa68')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('aeb52a932671fa68')
+    // ROLLED 2026-08-14 by the DELTA half of the comparison: `compare.offset`
+    // shifts the comparand, so "the count after is one less than the count before"
+    // is authorable for the first time. Vocabulary growth in the shared matcher, so
+    // both drivers' prompts move together — and re-authoring is the point: a claim
+    // about a CHANGE could previously only be written as an absolute number, which
+    // tests the fixture rather than the promise.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('07ba2c83da82d869')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('07ba2c83da82d869')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -935,8 +941,12 @@ describe('guard-generator prompts', () => {
     // RE-PINNED 2026-08-12 with its cli sibling, by the scenario-level `driver`
     // field's REMOVAL: the authored schema no longer carries it, so the rendered
     // schema and the sentence that explained it both shrank. A deletion.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('560041f67fb5edfc')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('560041f67fb5edfc')
+    // ROLLED 2026-08-14 with its cli sibling, by `compare.offset` — the DELTA half
+    // of the comparison. Every text and json matcher's `compare` can now shift its
+    // comparand, which is what makes "one fewer seat than before" a verdict instead
+    // of an absolute number that only tests the fixture.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('70755b107ca66f2a')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('70755b107ca66f2a')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {

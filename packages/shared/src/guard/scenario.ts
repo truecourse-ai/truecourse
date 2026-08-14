@@ -78,6 +78,7 @@ import {
   describeWebCommand,
   describeWebExpect,
   isWebStep,
+  webStepCaptureNames,
   webStepPatterns,
   type GuardWebStep,
 } from './web-steps.js'
@@ -769,9 +770,7 @@ export function firstInvalidMatchPattern(
  * from a header) share one namespace, so one name has exactly one source.
  */
 export function stepCaptureNames(step: GuardScenarioStep): string[] {
-  // A web step READS captured values (in a path, a name, a typed value) and
-  // produces none: what a page shows is the assertion, not a value to carry on.
-  if (isWebStep(step)) return []
+  if (isWebStep(step)) return webStepCaptureNames(step)
   if (isApiStep(step)) return apiStepCaptureNames(step)
   return cliStepCaptureNames(step as GuardCliStep)
 }

@@ -11,6 +11,7 @@ import {
   GUARD_WEB_FILE_TYPES,
   GuardScenarioSchema,
   GuardSandboxStepSchema,
+  GuardWebCaptureSchema,
   GuardWebExpectSchema,
   GuardWebFileSchema,
   GuardWebLocatorSchema,
@@ -537,10 +538,122 @@ describe('the cross-step passes see web steps', () => {
     expect(ordered).toEqual([])
   })
 
-  it('a web step captures nothing', () => {
+  it('a web step with no capture block declares nothing', () => {
     expect(stepCaptureNames({ driver: 'web', navigate: '/' } as GuardWebStep)).toEqual([])
   })
 
+  it('a web step’s captures join the ONE scenario-wide namespace', () => {
+    expect(
+      stepCaptureNames({
+        driver: 'web',
+        expect: { text: { contains: 'seats' } },
+        capture: { seatsBefore: { from: { text: 'seats left: 3' }, number: 'seats left: (\\d+)' } },
+      } as GuardWebStep),
+    ).toEqual(['seatsBefore'])
+
+    // A cli step and a web step cannot both own one name.
+    const clash = captureDefects([
+      { run: ['show'], capture: { id: { pattern: '(\\d+)' } }, expect: {} },
+      { driver: 'web', expect: { text: { contains: 'x' } }, capture: { id: { from: { text: 'x' } } } },
+    ] as GuardSandboxStep[])
+    expect(clash).toHaveLength(1)
+    expect(clash[0].message).toContain('already captured')
+
+    // …and a web step cannot read what it captures itself.
+    const self = captureDefects([
+      {
+        driver: 'web',
+        expect: { text: { contains: '${captured:seats}' } },
+        capture: { seats: { from: { text: 'seats' } } },
+      },
+    ] as GuardSandboxStep[])
+    expect(self).toHaveLength(1)
+    expect(self[0].message).toContain('captures itself')
+
+    // A web capture read by a LATER web step is the whole point, and is silent.
+    expect(
+      captureDefects([
+        { driver: 'web', expect: { text: { contains: 'x' } }, capture: { seats: { from: { text: 'seats' } } } },
+        { driver: 'web', expect: { text: { compare: { equals: '${captured:seats}', offset: -1 } } } },
+      ] as GuardSandboxStep[]),
+    ).toEqual([])
+  })
+})
+
+describe('the web capture vocabulary', () => {
+  const captureStep = (capture: unknown): unknown => ({
+    driver: 'web',
+    expect: { text: { contains: 'seats' } },
+    capture,
+  })
+
+  it('reads one value off one located element, with `text` the default getter', () => {
+    const parsed = GuardWebStepSchema.parse(captureStep({ seats: { from: { text: 'seats left: 3' } } }))
+    expect((parsed as { capture: Record<string, { get?: unknown }> }).capture.seats.get).toBeUndefined()
+    expect(GuardWebCaptureSchema.parse({ from: { label: 'Note' }, get: 'text' }).get).toBe('text')
+    expect(GuardWebCaptureSchema.parse({ from: { label: 'Note' }, get: 'value' }).get).toBe('value')
+    expect(GuardWebCaptureSchema.parse({ from: { role: 'listitem', name: 'a' }, get: 'count' }).get).toBe('count')
+    expect(GuardWebCaptureSchema.parse({ from: { text: 'Alerts' }, get: { state: 'checked' } })).toBeTruthy()
+    expect(GuardWebCaptureSchema.parse({ from: { text: 'Permalink' }, get: { attribute: 'href' } })).toBeTruthy()
+  })
+
+  it('is closed — an invented getter, a second source, or no source at all is refused', () => {
+    expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, get: 'html' })).toThrow()
+    expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, get: { property: 'value' } })).toThrow()
+    expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, get: { state: 'focused' } })).toThrow()
+    expect(() => GuardWebCaptureSchema.parse({ get: 'text' })).toThrow()
+    expect(() => GuardWebCaptureSchema.parse({ from: { css: '#seats' }, get: 'text' })).toThrow()
+  })
+
+  it('slices a number out of the read value with the ONE-capturing-group rule', () => {
+    expect(
+      GuardWebCaptureSchema.parse({ from: { text: 'seats' }, number: 'seats left: (\\d+)' }).number,
+    ).toBe('seats left: (\\d+)')
+    expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, number: 'seats left: \\d+' })).toThrow()
+    expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, number: '(\\w+) (\\d+)' })).toThrow()
+    // A count is already a number and a state is not text: neither has a slicer.
+    expect(() => GuardWebCaptureSchema.parse({ from: { text: 'x' }, get: 'count', number: '(\\d+)' })).toThrow()
+    expect(() =>
+      GuardWebCaptureSchema.parse({ from: { text: 'x' }, get: { state: 'checked' }, number: '(\\d+)' }),
+    ).toThrow()
+    // …but the three TEXT-shaped getters all carry one.
+    expect(
+      GuardWebCaptureSchema.parse({ from: { label: 'Note' }, get: 'value', number: 'draft-(\\d+)' }),
+    ).toBeTruthy()
+    expect(
+      GuardWebCaptureSchema.parse({ from: { text: 'P' }, get: { attribute: 'href' }, number: 'id=(\\d+)' }),
+    ).toBeTruthy()
+  })
+
+  it('rides EVERY web verb, the assert-only step included', () => {
+    const capture = { seats: { from: { text: 'seats left: 3' } } }
+    expect(GuardWebStepSchema.parse({ driver: 'web', navigate: '/x', capture })).toBeTruthy()
+    expect(GuardWebStepSchema.parse({ driver: 'web', click: { text: 'Book' }, capture })).toBeTruthy()
+    expect(
+      GuardWebStepSchema.parse({ driver: 'web', fill: { label: 'Note' }, value: 'x', capture }),
+    ).toBeTruthy()
+    expect(GuardWebStepSchema.parse({ driver: 'web', history: 'back', capture })).toBeTruthy()
+    expect(
+      GuardWebStepSchema.parse({ driver: 'web', expect: { text: { contains: 'x' } }, capture }),
+    ).toBeTruthy()
+  })
+
+  it('a capture name is an identifier — nothing else could ever be referenced', () => {
+    expect(() =>
+      GuardWebStepSchema.parse(captureStep({ 'seats-before': { from: { text: 'x' } } })),
+    ).toThrow()
+  })
+
+  it('the regex pass sees a web capture’s slicer before a browser is paid for', () => {
+    const bad = firstInvalidMatchPattern([
+      { driver: 'web', navigate: '/', capture: { seats: { from: { text: 'x' }, number: '(\\d' } } },
+    ] as GuardSandboxStep[])
+    expect(bad?.step).toBe(1)
+    expect(bad?.where).toBe('capture.seats.number')
+  })
+})
+
+describe('the cross-step regex pass', () => {
   it('an uncompilable regex in a web expectation is caught before a browser is paid for', () => {
     const bad = firstInvalidMatchPattern([
       { run: ['version'], expect: {} },

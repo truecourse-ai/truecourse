@@ -8,14 +8,17 @@
  * There is no model anywhere in it: navigate, click, fill, upload, assert —
  * declarative, deterministic, and waiting only on observable state.
  *
- * Four decisions are load-bearing here, and each is documented at its schema:
- *   - the LOCATOR is role + accessible name, closed ({@link GuardWebLocatorSchema});
+ * Five decisions are load-bearing here, and each is documented at its schema:
+ *   - the LOCATOR is closed to the handles a USER perceives ({@link GuardWebLocatorSchema});
  *   - the step declares its own DRIVER ({@link webDriver});
  *   - the address is asserted ORIGIN-STRIPPED ({@link GuardWebExpectSchema});
- *   - the verb set is CLOSED at six ({@link GuardWebStepSchema}).
+ *   - the verb set is CLOSED at six ({@link GuardWebStepSchema});
+ *   - a step may CAPTURE what the page shows ({@link GuardWebCaptureSchema}), into
+ *     the same scenario-wide namespace a cli or api step captures into.
  */
 
 import { z } from 'zod'
+import { GuardCaptureNameSchema, oneCapturingGroup } from './capture.js'
 import {
   GuardStreamMatcherSchema,
   describeStreamMatcher,
@@ -395,6 +398,89 @@ export function webVisibleTargets(
   return Array.isArray(visible) ? visible : [visible]
 }
 
+// --- What a web step CAPTURES ----------------------------------------
+
+/**
+ * WHAT is read off the located element. Closed at the five things a page actually
+ * holds a value in, and each of them is a value a USER can see or a screen reader
+ * can be told:
+ *
+ *  - `text` — the element's rendered text, the default and the one a reader means;
+ *  - `value` — an input's CURRENT value, which is a DOM property and appears in no
+ *    page text at all: before this getter, "the field is prefilled with the name you
+ *    signed up under" could not be carried forward by anything;
+ *  - `count` — how many elements the locator matches, and the ONE getter exempt from
+ *    the single-match rule (counting is the question "how many", so several matches
+ *    are the answer, not an ambiguity);
+ *  - `{ state }` — one ARIA state, as `"true"` / `"false"`, the same three-valued
+ *    reading the `state` expectation makes (a state nothing exposes is a failure,
+ *    never a quiet `"false"`);
+ *  - `{ attribute }` — one attribute's raw value, for what a page keeps outside its
+ *    text (an `href`, a `data-` fact).
+ */
+export const GuardWebGetterSchema = z.union([
+  z.enum(['text', 'value', 'count']),
+  z.object({ state: z.enum(GUARD_WEB_STATES) }).strict(),
+  z.object({ attribute: z.string().min(1) }).strict(),
+])
+export type GuardWebGetter = z.infer<typeof GuardWebGetterSchema>
+
+/** True when the getter reads TEXT — the three a `number` slicer can cut a value out of. */
+export function webGetterIsTextual(get: GuardWebGetter | undefined): boolean {
+  return get === undefined || get === 'text' || get === 'value' || (typeof get === 'object' && 'attribute' in get)
+}
+
+/**
+ * ONE value a web step takes off the page for the steps after it — the web half of
+ * the capture vocabulary `capture.ts` documents, in the web driver's own terms: an
+ * ELEMENT (any locator member) and WHAT to read off it.
+ *
+ * The failure discipline is that module's, verbatim: a locator that resolves to
+ * nothing — or a `number` that does not match what was read — is THAT STEP FAILING
+ * with the page as evidence, never an empty value flowing on into a later
+ * assertion that then passes for the wrong reason.
+ *
+ * `number` is the same one-capturing-group rule a cli capture's `pattern` follows,
+ * and it exists because a page writes its numbers in sentences ("seats left: 3"):
+ * the value a delta claim compares is the 3, not the sentence. It belongs only to
+ * the getters that read TEXT — a `count` is already a number, and a state is not one.
+ */
+export const GuardWebCaptureSchema = z
+  .object({
+    /** The element to read. Any locator member — see {@link GuardWebLocatorSchema}. */
+    from: GuardWebLocatorSchema,
+    /** What to read off it. Omitted ⇒ `text`, the way a cli capture defaults to `stdout`. */
+    get: GuardWebGetterSchema.optional(),
+    /** Regex source with EXACTLY ONE capturing group: the number inside the read text. */
+    number: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine((c, ctx) => {
+    if (c.number === undefined) return
+    if (!webGetterIsTextual(c.get)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['number'],
+        message:
+          '`number` slices a value out of TEXT — it belongs to the `text`, `value` and ' +
+          '`attribute` getters. A `count` is already a number and a state is not one.',
+      })
+      return
+    }
+    oneCapturingGroup(c.number, ctx, ['number'])
+  })
+
+/**
+ * A web step's whole capture block: name → what to take off the page. The names are
+ * the SCENARIO's, not the driver's — a cli step, an api step and a web step all
+ * assign into one namespace, single-assignment, checked at load (`captureDefects`),
+ * which is what lets a browser hand a value to an HTTP request and back again.
+ */
+export const GuardWebCapturesSchema = z.record(GuardCaptureNameSchema, GuardWebCaptureSchema)
+
+/** The capture block as every web verb declares it — additive and optional. */
+const capture = GuardWebCapturesSchema.optional()
+
 /**
  * THE STEP-LEVEL DRIVER, made explicit. A step says how it acts; the scenario does
  * not say it for them (§2, 2026-08-09). The cli verbs (`run`, `git`, `write`,
@@ -425,6 +511,7 @@ export const GuardWebNavigateStepSchema = z
     /** Surface-relative path, `/`-rooted. `${…}` tokens interpolate. */
     navigate: z.string().regex(/^\//, 'a navigate path must start with / (it is surface-relative)'),
     expect: GuardWebExpectSchema.optional(),
+    capture,
     timeoutMs,
     note,
     milestone,
@@ -437,6 +524,7 @@ export const GuardWebClickStepSchema = z
     driver: webDriver,
     click: GuardWebLocatorSchema,
     expect: GuardWebExpectSchema.optional(),
+    capture,
     timeoutMs,
     note,
     milestone,
@@ -457,6 +545,7 @@ export const GuardWebFillStepSchema = z
     /** The text typed into it; may be empty (clearing a field is an action too). */
     value: z.string(),
     expect: GuardWebExpectSchema.optional(),
+    capture,
     timeoutMs,
     note,
     milestone,
@@ -602,6 +691,7 @@ export const GuardWebUploadStepSchema = z
     /** The bytes handed to the chooser, and the name they arrive under. */
     file: GuardWebFileSchema,
     expect: GuardWebExpectSchema.optional(),
+    capture,
     timeoutMs,
     note,
     milestone,
@@ -629,6 +719,7 @@ export const GuardWebHistoryStepSchema = z
     /** Which button: the browser's Back, or its Forward. */
     history: z.enum(['back', 'forward']),
     expect: GuardWebExpectSchema.optional(),
+    capture,
     timeoutMs,
     note,
     milestone,
@@ -645,6 +736,7 @@ export const GuardWebExpectStepSchema = z
   .object({
     driver: webDriver,
     expect: GuardWebExpectSchema,
+    capture,
     timeoutMs,
     note,
     milestone,
@@ -674,6 +766,8 @@ export const GuardWebStepSchema = z.union([
 
 export type GuardWebRole = (typeof GUARD_WEB_ROLES)[number]
 export type GuardWebLocator = z.infer<typeof GuardWebLocatorSchema>
+export type GuardWebCapture = z.infer<typeof GuardWebCaptureSchema>
+export type GuardWebCaptures = z.infer<typeof GuardWebCapturesSchema>
 export type GuardWebStateExpect = z.infer<typeof GuardWebStateSchema>
 export type GuardWebAttributeExpect = z.infer<typeof GuardWebAttributeSchema>
 export type GuardWebClassExpect = z.infer<typeof GuardWebClassSchema>
@@ -747,7 +841,17 @@ export function webStepPatterns(step: GuardWebStep): Array<{ where: string; patt
     ...(step.expect?.attribute?.value
       ? matcherPatterns('expect.attribute.value', step.expect.attribute.value)
       : []),
+    // A capture's slicer is a regex the browser step would otherwise discover was
+    // uncompilable only after a sandbox, a build and a browser had been paid for.
+    ...Object.entries(step.capture ?? {}).flatMap(([name, spec]) =>
+      spec.number !== undefined ? [{ where: `capture.${name}.number`, pattern: spec.number }] : [],
+    ),
   ]
+}
+
+/** The capture names ONE web step assigns, in declaration order. */
+export function webStepCaptureNames(step: GuardWebStep): string[] {
+  return Object.keys(step.capture ?? {})
 }
 
 // --- Presentation: the words a step list and a failure both use --------

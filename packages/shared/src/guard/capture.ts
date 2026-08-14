@@ -74,8 +74,16 @@ export function capturingGroupCount(source: string): number | null {
  * groups captures nothing; two leaves which one is meant to an implicit rule
  * nobody would guess the same way twice. A source that does not compile is left
  * to the loader's regex check, which reports it with the compile error.
+ *
+ * Exported so every driver's own capture schema states the identical rule in the
+ * identical words — the web driver's `number` slicer is the same promise the cli
+ * driver's `pattern` makes, and two copies of it could only drift.
  */
-function oneCapturingGroup(source: string, ctx: z.RefinementCtx, path: (string | number)[]): void {
+export function oneCapturingGroup(
+  source: string,
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+): void {
   const groups = capturingGroupCount(source)
   if (groups === null || groups === 1) return
   ctx.addIssue({
@@ -211,6 +219,12 @@ export const GuardComparandSchema = z.union([z.number(), z.string().min(1)])
  * `capture` rule); omit it when the subject IS the number — a json path holding
  * `12`, or a stream whose whole text is one. Every operator present must hold.
  *
+ * `offset` shifts the COMPARAND, which is what makes a DELTA sayable: capture the
+ * seat count before the booking, then assert the count after it `equals
+ * "${captured:seatsBefore}"` with `offset: -1`. The claim "booking a seat takes one
+ * seat away" is otherwise unstateable — the absolute numbers are whatever the world
+ * happened to hold, and asserting one of them tests the fixture, not the promise.
+ *
  * Numeric by design and only numeric: `equals`/`contains`/`matches` already say
  * everything there is to say about text, and an ordering on text is a comparison
  * nobody means.
@@ -225,6 +239,11 @@ export const GuardComparisonSchema = z
     atMost: GuardComparandSchema.optional(),
     /** The subject's number must be ≥ this. */
     atLeast: GuardComparandSchema.optional(),
+    /**
+     * Added to EVERY comparand before the operator runs — the delta claim. See the
+     * note above; `-1` means "one less than what the earlier step captured".
+     */
+    offset: z.number().optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -240,12 +259,22 @@ export const GuardComparisonSchema = z
 export type GuardComparand = z.infer<typeof GuardComparandSchema>
 export type GuardComparison = z.infer<typeof GuardComparisonSchema>
 
+/**
+ * The offset as a reader says it — ` − 1` / ` + 2`, appended to the comparand it
+ * shifts, so `equals ${captured:seatsBefore} − 1` reads as the sentence it is.
+ */
+export function describeOffset(offset: number | undefined): string {
+  if (offset === undefined || offset === 0) return ''
+  return offset < 0 ? ` − ${Math.abs(offset)}` : ` + ${offset}`
+}
+
 /** `at most 0.42` / `at least 3 · equals 7` — one comparison, in a reader's words. */
 export function describeComparison(c: GuardComparison): string {
   const parts: string[] = []
-  if (c.equals !== undefined) parts.push(`equals ${c.equals}`)
-  if (c.atMost !== undefined) parts.push(`at most ${c.atMost}`)
-  if (c.atLeast !== undefined) parts.push(`at least ${c.atLeast}`)
+  const shift = describeOffset(c.offset)
+  if (c.equals !== undefined) parts.push(`equals ${c.equals}${shift}`)
+  if (c.atMost !== undefined) parts.push(`at most ${c.atMost}${shift}`)
+  if (c.atLeast !== undefined) parts.push(`at least ${c.atLeast}${shift}`)
   const where = c.number !== undefined ? ` (the number matching /${c.number}/)` : ''
   return `${parts.join(' · ')}${where}`
 }
