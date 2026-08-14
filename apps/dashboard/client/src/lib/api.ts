@@ -742,6 +742,8 @@ export interface SpecConflictResolution {
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
+  /** `auto` = the scan applied a high-confidence recommendation itself; absent/`user` = a human verdict. */
+  resolvedBy?: 'user' | 'auto';
 }
 
 /**
@@ -757,6 +759,8 @@ export interface SpecOverlapReview {
     rationale: string;
     /** For `fix-doc`: the suggested doc edit the user applies themselves. */
     fix?: string;
+    /** The judge's grade; `high` actionable recommendations are auto-applied at scan. */
+    confidence?: 'low' | 'medium' | 'high';
   };
 }
 

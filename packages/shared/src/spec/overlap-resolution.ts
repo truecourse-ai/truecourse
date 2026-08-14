@@ -88,6 +88,8 @@ export interface ConflictResolutionLike {
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
+  /** `auto` = the scan applied a high-confidence recommendation; absent/`user` = a human verdict. */
+  resolvedBy?: 'user' | 'auto';
 }
 
 /** The minimal decisions shape — the force-excludes and conflict verdicts. */

@@ -309,16 +309,21 @@ NAME THE DOCUMENTS. Every reference to a document in "explanation", "rationale" 
   The A/B letters are wire orientation for THIS FIELD ONLY: they bind to the two sides EXACTLY as labeled in the message above (doc A is the first side shown, doc B the second). They never appear in your prose.
 - "recommendation.rationale": ONE sentence on why that side wins or that fix applies (e.g. which document is newer, authoritative, or internally consistent), naming the documents it talks about.
 - "recommendation.fix": include ONLY when the action is "fix-doc" — name the document to edit and what to change. Omit it for the other three actions.
+- "recommendation.confidence": EXACTLY ONE of "low" | "medium" | "high" — how sure you are the recommended action is the CORRECT resolution (this is separate from the verdict: the conflict can be certain while the right way to resolve it is not).
+    "high"   — the evidence is unambiguous and a careful human would make the same call: the disagreement is a single stated value and one side is clearly authoritative (newer, the canonical reference, internally consistent). A "high" pick-a/pick-b/dismiss is APPLIED AUTOMATICALLY with no human review, so grade "high" only when you would be comfortable acting on it unsupervised.
+    "medium" — a solid case with real judgment involved; a human should glance at it before applying.
+    "low"    — a lean, not a ruling; the evidence underdetermines which side is right.
+  When in doubt between two grades, give the LOWER one. A "fix-doc" recommendation is never auto-applied regardless of grade, but still carries its confidence.
 
 Worked confirmed example — the two sides are "docs/api/pagination.md" (labeled doc A) and "docs/guides/listing.md" (labeled doc B), disagreeing on a list endpoint's default page size. The prose names them; only the action field uses the letters:
 
   { "verdict": "confirmed",
     "explanation": "Both documents give the default page size for the same list endpoint, but to different values: docs/api/pagination.md says \\"the default page size is 20\\" while docs/guides/listing.md says \\"results default to 50 per page\\". A caller reading one is promised a different default than the other, so the two cannot both hold.",
-    "recommendation": { "action": "pick-a", "rationale": "docs/api/pagination.md is the current API reference and docs/guides/listing.md predates the last pagination change" } }
+    "recommendation": { "action": "pick-a", "rationale": "docs/api/pagination.md is the current API reference and docs/guides/listing.md predates the last pagination change", "confidence": "high" } }
 
 Output ONLY a JSON object, no prose, no code fences:
 
-  { "verdict": "confirmed", "explanation": "...", "recommendation": { "action": "pick-b", "rationale": "..." } }
+  { "verdict": "confirmed", "explanation": "...", "recommendation": { "action": "pick-b", "rationale": "...", "confidence": "medium" } }
   { "verdict": "refuted", "reason": "the two sections describe different services, so both statements hold (rule a)" }
 
 The refuted "reason" is one sentence, shown to the user.`;

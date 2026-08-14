@@ -233,6 +233,29 @@ describe('verifyFlaggedOverlaps — default runner over the transport seam', () 
     });
   });
 
+  it("the brief's confidence grade survives the parse", async () => {
+    const raw = JSON.stringify({
+      verdict: 'confirmed',
+      explanation: 'a.md says "5 retries" but b.md says "3 retries" for the same client, so both cannot hold.',
+      recommendation: { action: 'pick-b', rationale: 'b.md is the newer runbook', confidence: 'high' },
+    });
+    const transport = async (): Promise<string> => raw;
+    const { overlaps } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs(), { transport });
+    expect(overlaps.get('core/x')![0].review?.recommendation.confidence).toBe('high');
+  });
+
+  it('an invalid confidence grade fails the brief parse — flag kept bare (fail-open)', async () => {
+    const raw = JSON.stringify({
+      verdict: 'confirmed',
+      explanation: 'the two docs disagree on the retry count',
+      recommendation: { action: 'pick-b', rationale: 'x', confidence: 'certain' },
+    });
+    const transport = async (): Promise<string> => raw;
+    const { overlaps, refuted } = await verifyFlaggedOverlaps(repo, areaMap(overlap('a.md', 'b.md')), docs(), { transport });
+    expect(refuted).toBe(0);
+    expect(overlaps.get('core/x')![0].review).toBeUndefined();
+  });
+
   it('fail-open on enrichment: a malformed brief (bad action) keeps the flag with no review', async () => {
     const raw = JSON.stringify({
       verdict: 'confirmed',
@@ -359,5 +382,21 @@ describe('VERIFY_OVERLAP_SYSTEM_PROMPT', () => {
     expect(p).toContain('HEDGED');
     expect(p).toContain('COMPLEMENTARY DETAIL');
     expect(p).toContain('When you genuinely cannot tell whether two STATED values are incompatible, CONFIRM');
+  });
+
+  // The confidence contract: three grades, high means unsupervised auto-apply
+  // (so the judge grades knowing the stakes), doubt rounds DOWN, and a fix-doc
+  // is never auto-applied. The worked example and output shapes model the field.
+  it('specifies the confidence grade and its auto-apply stakes', () => {
+    const p = VERIFY_OVERLAP_SYSTEM_PROMPT;
+    expect(p).toContain('"recommendation.confidence"');
+    expect(p).toContain('"low" | "medium" | "high"');
+    expect(p).toContain('APPLIED AUTOMATICALLY with no human review');
+    expect(p).toContain('comfortable acting on it unsupervised');
+    expect(p).toContain('When in doubt between two grades, give the LOWER one');
+    expect(p).toContain('A "fix-doc" recommendation is never auto-applied regardless of grade');
+    // Both the worked example and the output shape model the field.
+    expect(p).toContain('"confidence": "high"');
+    expect(p).toContain('"confidence": "medium"');
   });
 });

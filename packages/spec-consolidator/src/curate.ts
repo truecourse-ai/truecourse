@@ -13,7 +13,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { auditTransport, cliTransport, type LlmTransport, type StageTransportTally } from '@truecourse/shared/llm';
-import { loadSpecScope, orphanedConflictResolutions } from '@truecourse/shared';
+import {
+  buildCorpusConflicts,
+  loadSpecScope,
+  orphanedConflictResolutions,
+  type CorpusConflict,
+} from '@truecourse/shared';
 import { discoverDocs, isStructuralSpecDoc, type DocCandidate } from './discovery.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import {
@@ -28,8 +33,8 @@ import { flagOverlaps, type OverlapRunner } from './overlap-detector.js';
 import { verifyFlaggedOverlaps, type VerifyOverlapRunner } from './overlap-verifier.js';
 import { writeCorpus } from './corpus-store.js';
 import { writeDecisions } from './orchestrator.js';
-import { DecisionsFileSchema, type DecisionsFile } from './types.js';
-import { type Area, type CuratedCorpus } from './corpus-types.js';
+import { DecisionsFileSchema, type ConflictResolution, type DecisionsFile } from './types.js';
+import { type Area, type CuratedCorpus, type Overlap } from './corpus-types.js';
 
 /** Per-stage model overrides for the curate pipeline. */
 export interface CurateModels {
@@ -89,6 +94,12 @@ export interface CurateStats {
   overlapFlags: number;
   /** Flagged overlaps the verify pass pruned as detector false positives (never reach the corpus). */
   overlapRefuted: number;
+  /**
+   * Conflicts the scan resolved ITSELF by applying a high-confidence verify-pass
+   * recommendation (`resolvedBy: 'auto'` in decisions.json — visible, undoable).
+   * Surfaced per conflict so the summary can say what was decided, not just count.
+   */
+  autoResolvedConflicts: Array<{ area: string; a: string; b: string; verdict: 'a' | 'b' | 'dismissed' }>;
   /** Flagged overlaps — refs only; passages + resolved state derived at display. */
   openOverlaps: Array<{ area: string; a: string; b: string }>;
   skippedDocs: Array<{ path: string; reason: string; category?: string }>;
@@ -298,6 +309,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
     skippedDocs: skippedDocs.map((s) => ({ ref: s.path, reason: s.reason, category: s.category })),
   };
   let effectiveDecisions = decisions;
+  let autoResolvedConflicts: CurateStats['autoResolvedConflicts'] = [];
   if (!opts.skipCorpusWrite) {
     // Pass the corpus's own generatedAt so the persisted file equals the returned object.
     writeCorpus(repoRoot, {
@@ -307,6 +319,9 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
       generatedAt: corpus.generatedAt,
     });
     effectiveDecisions = pruneOrphanedConflictResolutions(repoRoot, corpus, decisions);
+    const auto = autoApplyHighConfidenceRecommendations(repoRoot, corpus, effectiveDecisions);
+    effectiveDecisions = auto.decisions;
+    autoResolvedConflicts = auto.applied;
   }
 
   const openOverlaps = areas.flatMap((a) =>
@@ -322,6 +337,7 @@ export async function curate(repoRoot: string, opts: CurateOptions = {}): Promis
       relevance.reinstated.length,
     thirdPartyRestored: relevance.reinstated.length,
     classifyFailed: relevance.classifyFailed,
+    autoResolvedConflicts,
     openOverlaps,
     skippedDocs,
     scopeGlobs,
@@ -366,6 +382,93 @@ function pruneOrphanedConflictResolutions(
   };
   writeDecisions(repoRoot, pruned);
   return pruned;
+}
+
+/**
+ * Apply the verify judge's HIGH-confidence recommendations as conflict
+ * resolutions, in the same write cycle the corpus rides — so a scan whose judge
+ * is sure of a verdict doesn't leave it as homework. Rules:
+ *
+ *   - only an OPEN conflict (a stored verdict, a dismissal, or a covering
+ *     exclude always wins — auto-apply never touches a resolved dispute);
+ *   - only `confidence: 'high'` (the judge grades knowing high means unsupervised
+ *     application); lower grades stay advisory and surfaces show the grade;
+ *   - only an actionable recommendation — pick-a / pick-b / dismiss. A `fix-doc`
+ *     is a doc edit only a human can make, so it never auto-applies.
+ *
+ * Applied entries are ordinary `conflictResolutions[]` rows marked
+ * `resolvedBy: 'auto'`, so the gate, extraction suppression, and every surface
+ * treat them exactly like a user verdict, and the user can undo or overrule one
+ * like any other. An undone auto verdict re-applies on the next scan (the judge's
+ * verdict is cached and unchanged) — to make a disagreement stick, record the
+ * opposite verdict or dismiss instead of leaving the conflict open.
+ */
+function autoApplyHighConfidenceRecommendations(
+  repoRoot: string,
+  corpus: CuratedCorpus,
+  decisions: DecisionsFile,
+): { decisions: DecisionsFile; applied: CurateStats['autoResolvedConflicts'] } {
+  const open = buildCorpusConflicts(corpus, decisions).filter((c) => !c.resolved);
+  const applied: CurateStats['autoResolvedConflicts'] = [];
+  const added: ConflictResolution[] = [];
+
+  for (const c of open) {
+    const review = reviewForConflict(corpus, c);
+    const rec = review?.recommendation;
+    if (!rec || rec.confidence !== 'high' || rec.action === 'fix-doc') continue;
+    const verdict: 'a' | 'b' | 'dismissed' =
+      rec.action === 'pick-a' ? 'a' : rec.action === 'pick-b' ? 'b' : 'dismissed';
+    const secOf = (doc: string) => (c.sections ?? []).find((s) => s.doc === doc);
+    added.push({
+      docA: c.a,
+      anchorA: secOf(c.a)?.heading ?? null,
+      quoteA: secOf(c.a)?.quote,
+      docB: c.b,
+      anchorB: secOf(c.b)?.heading ?? null,
+      quoteB: secOf(c.b)?.quote,
+      verdict,
+      resolvedAt: new Date().toISOString(),
+      note: rec.rationale,
+      resolvedBy: 'auto',
+    });
+    applied.push({ area: c.area, a: c.a, b: c.b, verdict });
+  }
+
+  if (added.length === 0) return { decisions, applied };
+  const next: DecisionsFile = {
+    ...decisions,
+    conflictResolutions: [...(decisions.conflictResolutions ?? []), ...added],
+  };
+  writeDecisions(repoRoot, next);
+  return { decisions: next, applied };
+}
+
+/**
+ * The verify-pass review for a conflict, resolved from its REPRESENTATIVE
+ * overlap — the record whose docs order is exactly `[c.a, c.b]` and whose section
+ * pointers match — so a `pick-a`/`pick-b` recommendation orients exactly as
+ * `c.a`/`c.b`. Mirrors the CLI's lookup (`spec-conflicts.ts`); the merged
+ * conflict record deliberately does not carry the review itself.
+ */
+function reviewForConflict(corpus: CuratedCorpus, c: CorpusConflict): Overlap['review'] {
+  const sectionKeys = (
+    sections: readonly { doc: string; heading: string | null }[] | undefined,
+  ): string[] =>
+    (sections ?? [])
+      .map((s) => `${s.doc}\x00${s.heading === null || s.heading === undefined ? '\x00lead' : s.heading}`)
+      .sort();
+  const want = sectionKeys(c.sections);
+  const areaIds = [c.area, ...c.areas.filter((a) => a !== c.area)];
+  for (const areaId of areaIds) {
+    const area = corpus.areas.find((a) => a.id === areaId);
+    if (!area) continue;
+    for (const ov of area.overlaps) {
+      if (ov.docs[0] !== c.a || ov.docs[1] !== c.b) continue;
+      const have = sectionKeys(ov.sections);
+      if (have.length === want.length && have.every((k, i) => k === want[i]) && ov.review) return ov.review;
+    }
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

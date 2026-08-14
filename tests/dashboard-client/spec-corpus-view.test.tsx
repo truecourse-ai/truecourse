@@ -879,6 +879,79 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
     // The plain-text detector note still renders exactly as before.
     expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument();
   });
+
+  it("renders the judge's confidence grade as a bar in the assessment card, named on hover", () => {
+    renderDetail(
+      withReview({
+        explanation: 'They disagree on the window.',
+        recommendation: { action: 'pick-a', rationale: 'v1 wins.', confidence: 'medium' },
+      }),
+    );
+    const card = screen.getByTestId('conflict-assessment');
+    // The bar carries the grade as its accessible name; the hover tooltip says
+    // exactly the grade and nothing more (no static explainer prose), and the
+    // bar itself renders no text label.
+    const bar = within(card).getByTestId('confidence-chip');
+    expect(bar).toHaveAttribute('aria-label', 'Medium confidence');
+    expect(bar).toHaveTextContent('');
+    expect(within(card).getByRole('tooltip')).toHaveTextContent(/^Medium confidence$/);
+  });
+
+  it('a graded recommendation without confidence renders no chip (legacy corpora)', () => {
+    renderDetail(
+      withReview({
+        explanation: 'They disagree on the window.',
+        recommendation: { action: 'pick-a', rationale: 'v1 wins.' },
+      }),
+    );
+    expect(screen.queryByTestId('confidence-chip')).not.toBeInTheDocument();
+  });
+
+  it('an auto-applied resolution renders Auto-resolved with the high-confidence badge, Undo intact', () => {
+    const data = withReview({
+      explanation: 'They disagree.',
+      recommendation: { action: 'pick-b', rationale: 'v2 wins.', confidence: 'high' },
+    });
+    const resolved: SpecCorpusResponse = {
+      ...data,
+      conflictResolutions: [
+        {
+          docA: 'docs/v1.md',
+          anchorA: 'Cancellation',
+          docB: 'docs/v2.md',
+          anchorB: 'Cancellation policy',
+          verdict: 'b',
+          resolvedBy: 'auto',
+        },
+      ],
+    };
+    renderDetail(resolved);
+    const banner = screen.getByTestId('conflict-verdict');
+    expect(within(banner).getByText(/Auto-resolved —/)).toBeInTheDocument();
+    expect(within(banner).getByTestId('auto-applied-badge')).toHaveAttribute('aria-label', 'High confidence');
+    // An auto verdict stays undoable like any other.
+    expect(within(banner).getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+  });
+
+  it('an auto-applied dismissal reads Auto-dismissed', () => {
+    const resolved: SpecCorpusResponse = {
+      ...RESP,
+      conflictResolutions: [
+        {
+          docA: 'docs/v1.md',
+          anchorA: 'Cancellation',
+          docB: 'docs/v2.md',
+          anchorB: 'Cancellation policy',
+          verdict: 'dismissed',
+          resolvedBy: 'auto',
+        },
+      ],
+    };
+    renderDetail(resolved);
+    const banner = screen.getByTestId('conflict-verdict');
+    expect(within(banner).getByText('Auto-dismissed — not a real conflict')).toBeInTheDocument();
+    expect(within(banner).getByTestId('auto-applied-badge')).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

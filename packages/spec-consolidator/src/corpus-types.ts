@@ -283,6 +283,14 @@ export const OverlapReviewSchema = z.object({
     rationale: z.string(),
     /** Only for `fix-doc`: which doc and what to change. */
     fix: z.string().optional(),
+    /**
+     * The judge's confidence in the recommended action. `high` on an actionable
+     * recommendation (pick-a-side / dismiss, never `fix-doc`) is AUTO-APPLIED at
+     * scan as a `resolvedBy: 'auto'` conflict resolution; lower grades stay
+     * advisory and surfaces show the grade. Optional so pre-confidence corpora
+     * and cached verdicts still parse (absent = never auto-applied).
+     */
+    confidence: z.enum(['low', 'medium', 'high']).optional(),
   }),
 });
 export type OverlapReview = z.infer<typeof OverlapReviewSchema>;

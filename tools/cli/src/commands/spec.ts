@@ -128,6 +128,20 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   }
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
+  // Conflicts the scan resolved itself off a high-confidence judge
+  // recommendation — said loudly (with the verdict), never a silent decision.
+  // Defensive read: the stats cross a package boundary and an older engine
+  // (or a partial stub) may not carry the field.
+  const autoResolved = s.autoResolvedConflicts ?? [];
+  if (autoResolved.length > 0) {
+    const n = autoResolved.length;
+    p.log.step(`auto-resolved ${n} conflict${n === 1 ? "" : "s"} (high-confidence recommendation — undo via \`spec conflicts\`):`);
+    for (const r of autoResolved) {
+      const label =
+        r.verdict === "dismissed" ? "dismissed" : `${(r.verdict === "a" ? r.a : r.b).split("/").pop()} is right`;
+      p.log.message(`  • ${r.area}:  ${r.a}  ↔  ${r.b}  — ${label}`);
+    }
+  }
   printLlmFailures(s.llmFailures);
   if (s.outOfScopeManualIncludes.length > 0) {
     p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
