@@ -76,10 +76,13 @@ function surfaceLabel(surface: string): string {
  * An entry the derivation left ungrouped belongs to no family and is not invented
  * one — it sits at its surface's top under no header at all.
  *
- * A row that carries a LOCATION (`at` — the resource its task acts on) families
- * under that PLACE instead of its `group`: the resource is the envelope the
- * catalog reads by (a medium number of places, each holding its tasks), and the
- * registry's own title labels the header where the catalog defines one.
+ * A row that names a PLACE families under it instead of under its `group`: the
+ * resource is the envelope the catalog reads by (a medium number of places, each
+ * holding its interactions), and the registry's own title labels the header where
+ * the catalog defines one. Two fields name one: `at` — the resource a web task
+ * ACTS ON — and `resource` — the place that OWNS a cli command or an api
+ * operation. A row carries at most one of them, so the fallback chain is the
+ * whole rule, and `group` remains the answer for a catalog that names no places.
  *
  * The two levels never wear the same chrome: the surface keeps the full-weight
  * sticky header, the family is `subordinate` — quieter and indented — and its rows
@@ -96,9 +99,9 @@ function bySurface(
       count: rows.length,
     };
     const titles = new Map((resources?.[surface] ?? []).map((r) => [r.id, r.title]));
-    const families = bucket(rows, (j) => j.at ?? j.group);
+    const families = bucket(rows, (j) => j.at ?? j.resource ?? j.group);
     if (families.size === 0) return { ...group, items: rows };
-    const loose = rows.filter((j) => !j.at && !j.group);
+    const loose = rows.filter((j) => !j.at && !j.resource && !j.group);
     return {
       ...group,
       groups: [

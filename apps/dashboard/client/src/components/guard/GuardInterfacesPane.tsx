@@ -165,7 +165,6 @@ export function GuardInterfacesPane({
   loading,
   error,
   tabs,
-  commandTabs,
   recipe = null,
   recipeSurface = null,
   onCloseRecipe,
@@ -178,8 +177,6 @@ export function GuardInterfacesPane({
   loading: boolean;
   error: string | null;
   tabs: GuardTabsState;
-  /** The contract's command nav — `?gcmd=`, the same tab model as `tabs`. */
-  commandTabs: GuardTabsState;
   /** The preparation every test on these surfaces runs against; null = no recipe. */
   recipe?: GuardRecipeCardData | null;
   /** The surface whose recipe is the pane's subject right now, instead of an interface. */
@@ -348,11 +345,11 @@ export function GuardInterfacesPane({
           <GuardInterfaceDiagram iface={active} label={active.id} />
         </div>
 
-        {/* The contract: the full grammar and each command's input/output — what a
-            scenario author (and a reader) needs after knowing WHICH command runs.
-            The sequence above already showed the steps; a typed list of the same
-            steps underneath it is the same reading twice. */}
-        <GuardInterfaceContract iface={active} tabs={commandTabs} />
+        {/* The contract, in the surface's OWN vocabulary — what a scenario author
+            (and a reader) needs after knowing WHICH thing is invoked. The sequence
+            above already showed the steps; a typed list of the same steps
+            underneath it is the same reading twice. */}
+        <GuardInterfaceContract iface={active} />
 
         <div className="mt-4">
           <div className={LABEL}>Used by flows</div>

@@ -3,10 +3,11 @@
  * bound to `?ginterface=<interfaceId>` (single-click previews, double-click pins), so
  * the catalog list and the sequence-diagram detail share ONE addressable model.
  *
- * The interface DETAIL has a second nav of the same shape: a command tree carries
- * one contract per command, and the reader picks which one to read. It binds
- * `?gcmd=<argv>` through the same reducer rather than a second implementation, so
- * a command selection is addressable exactly like an interface selection.
+ * The detail once carried a SECOND nav of the same shape, bound to `?gcmd=<argv>`:
+ * a cli contract used to hold a whole command tree, and the reader picked which
+ * command to read. One entry is one invocable thing (2026-08-10) and the contract
+ * union made that structural (2026-08-14), so there is exactly one command to
+ * read and the nav is gone.
  */
 
 import { useGuardTabs, type GuardTabsParam, type GuardTabsState } from './useGuardTabs';
@@ -28,8 +29,4 @@ const INTERFACE_PARAM: GuardTabsParam = {
 
 export function useGuardInterfaceTabs(repoId: string | undefined): GuardTabsState {
   return useGuardTabs(INTERFACE_PARAM, repoId);
-}
-
-export function useGuardCommandTabs(repoId: string | undefined): GuardTabsState {
-  return useGuardTabs('gcmd', repoId);
 }

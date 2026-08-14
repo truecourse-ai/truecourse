@@ -228,7 +228,7 @@ const LATEST = {
 };
 
 const INTERFACES = {
-  version: 1,
+  version: 2,
   generatedAt: '2026-07-24T13:39:00.000Z',
   recipeFingerprint: 'sha256:r',
   interfaces: [

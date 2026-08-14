@@ -25,7 +25,7 @@ import type { GuardDriverId, GuardInterfacesView, GuardRecipeCard } from '@truec
 import { GuardInterfacesPanel } from '@/components/guard/GuardInterfacesPanel';
 import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
-import { useGuardCommandTabs, useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
+import { useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -287,15 +287,16 @@ const ALL_SURFACES: GuardInterfacesView = {
 };
 
 /**
- * An interface carrying the FULL contract — a two-command tree, io as structured
- * FACTS (markers, exit statuses, writes, prompts, env reads), an `unknown` exit
- * status and an authored empty list ("none", established). There is no prose
- * anywhere in it: the tab renders the CALLING INTERFACE and nothing else.
+ * An interface carrying the FULL cli contract — ONE command (the union's cli
+ * member is singular: one entry is one invocable thing), io as structured FACTS
+ * (markers, exit statuses, writes, prompts, env reads), an `unknown` exit status
+ * and an authored empty list ("none", established). There is no prose anywhere in
+ * it: the tab renders the CALLING INTERFACE and nothing else.
  */
 const CONTRACT: NonNullable<GuardInterfacesView['interfaces'][number]['contract']> = {
+  surface: 'cli',
   summary: '`tasks add` and its `--json` mode.',
-  commands: [
-    {
+  command: {
       path: ['tasks', 'add'],
       description: 'Add a task.',
       options: [
@@ -363,15 +364,50 @@ const CONTRACT: NonNullable<GuardInterfacesView['interfaces'][number]['contract'
           writes: [],
         },
       },
+  },
+};
+
+/** A second cli entry, carrying no io at all — there is no panel to fill for it. */
+const PURGE_CONTRACT: NonNullable<GuardInterfacesView['interfaces'][number]['contract']> = {
+  surface: 'cli',
+  command: {
+    path: ['tasks', 'purge'],
+    description: 'Delete every completed task.',
+    options: [{ flag: '--force', takesValue: false, valueRequired: false, scope: 'command' }],
+    positionals: [],
+  },
+};
+
+/** The purge entry with its READ side established as NONE — "none", out loud. */
+const PURGE_READS_NOTHING: NonNullable<GuardInterfacesView['interfaces'][number]['contract']> = {
+  surface: 'cli',
+  command: { ...PURGE_CONTRACT.command, io: { consumes: { reads: [] } } },
+};
+
+/** The api member: an operation in HTTP's own vocabulary, no argv costume. */
+const OPERATION: NonNullable<GuardInterfacesView['interfaces'][number]['contract']> = {
+  surface: 'api',
+  summary: 'Create a todo.',
+  operation: {
+    description: 'Appends the todo and answers the created row.',
+    request: {
+      params: [{ name: 'id', required: true, description: 'The list id.' }],
+      query: [{ name: 'dryRun', required: false, choices: ['1'], default: '0' }],
+      body: [
+        { name: 'title', required: true, hint: 'one line' },
+        { name: 'notes', required: 'unknown' },
+      ],
     },
-    {
-      // Carries no io at all — there is no panel to fill for it.
-      path: ['tasks', 'purge'],
-      description: 'Delete every completed task.',
-      options: [{ flag: '--force', takesValue: false, valueRequired: false, scope: 'command' }],
-      positionals: [],
+    consumes: { env: [{ var: 'TODO_HOME' }], reads: [{ path: 'db.sqlite' }] },
+    produces: {
+      statuses: [
+        { status: '201', when: 'the todo was created' },
+        { status: 'unknown', when: 'the store is unwritable and no path is declared' },
+      ],
+      body: [{ marker: '"id"' }, { marker: '"error"', when: 'the title is missing' }],
+      writes: [],
     },
-  ],
+  },
 };
 
 /**
@@ -386,26 +422,23 @@ const WITH_READS: GuardInterfacesView = {
     {
       ...MAPPED.interfaces[0],
       contract: {
-        ...CONTRACT,
-        commands: [
-          {
-            ...CONTRACT.commands[0],
-            io: {
-              ...CONTRACT.commands[0].io,
-              consumes: {
-                ...CONTRACT.commands[0].io!.consumes,
-                reads: [
-                  { path: '~/.tasks.json', when: 'the store the listing renders' },
-                  { path: '<repo>/.tasks/config.json' },
-                ],
-              },
+        surface: 'cli',
+        command: {
+          ...CONTRACT.command,
+          io: {
+            ...CONTRACT.command.io,
+            consumes: {
+              ...CONTRACT.command.io!.consumes,
+              reads: [
+                { path: '~/.tasks.json', when: 'the store the listing renders' },
+                { path: '<repo>/.tasks/config.json' },
+              ],
             },
           },
-          { ...CONTRACT.commands[1], io: { consumes: { reads: [] } } },
-        ],
+        },
       },
     },
-    MAPPED.interfaces[1],
+    { ...MAPPED.interfaces[1], id: 'cli/tasks-purge', title: 'tasks purge', contract: PURGE_READS_NOTHING },
   ],
 };
 
@@ -413,9 +446,16 @@ const WITH_CONTRACT: GuardInterfacesView = {
   ...MAPPED,
   interfaces: [
     { ...MAPPED.interfaces[0], contract: CONTRACT },
-    // The shape the mapper writes today: the command tree, no contract at all.
+    // The shape a degraded derivation writes: the surface's shape, no contract.
     MAPPED.interfaces[1],
+    { ...MAPPED.interfaces[1], id: 'cli/tasks-purge', title: 'tasks purge', contract: PURGE_CONTRACT },
   ],
+};
+
+/** An api entry carrying the union's other member — the pane must dispatch. */
+const WITH_OPERATION: GuardInterfacesView = {
+  ...API_MAPPED,
+  interfaces: [{ ...API_MAPPED.interfaces[0], contract: OPERATION }, API_MAPPED.interfaces[1]],
 };
 
 const UNMAPPED: GuardInterfacesView = {
@@ -444,7 +484,6 @@ function InterfacesHarness({
 }) {
   const interfaces = useGuardInterfaces('r', true);
   const tabs = useGuardInterfaceTabs('r');
-  const commandTabs = useGuardCommandTabs('r');
   const loc = useLocation();
   const [surfaces, setSurfaces] = useState<string[]>([]);
   const [recipeSurface, setRecipeSurface] = useState<GuardDriverId | null>(null);
@@ -473,7 +512,6 @@ function InterfacesHarness({
         loading={interfaces.loading}
         error={interfaces.error}
         tabs={tabs}
-        commandTabs={commandTabs}
         recipe={recipe}
         recipeSurface={recipeSurface}
         onCloseRecipe={() => setRecipeSurface(null)}
@@ -497,7 +535,6 @@ const renderTab = (
 /** The pane alone on a fixed view — for states the fetch fixtures don't carry. */
 function PaneHarness({ view }: { view: GuardInterfacesView }) {
   const tabs = useGuardInterfaceTabs('r');
-  const commandTabs = useGuardCommandTabs('r');
   const loc = useLocation();
   return (
     <>
@@ -507,7 +544,6 @@ function PaneHarness({ view }: { view: GuardInterfacesView }) {
         loading={false}
         error={null}
         tabs={tabs}
-        commandTabs={commandTabs}
         onOpenFlow={() => {}}
       />
     </>
@@ -1342,21 +1378,18 @@ describe('Interfaces tab — the contract', () => {
   });
 
   it('renders no Row shapes block for a command whose listing shape was never established', async () => {
-    const command = WITH_CONTRACT.interfaces[0].contract!.commands[0];
+    const command = CONTRACT.command;
     const noRows = {
       ...WITH_CONTRACT,
       interfaces: [
         {
           ...WITH_CONTRACT.interfaces[0],
           contract: {
-            ...WITH_CONTRACT.interfaces[0].contract!,
-            commands: [
-              { ...command, io: { ...command.io, produces: { output: command.io!.produces!.output } } },
-              WITH_CONTRACT.interfaces[0].contract!.commands[1],
-            ],
+            surface: 'cli' as const,
+            command: { ...command, io: { ...command.io, produces: { output: command.io!.produces!.output } } },
           },
         },
-        WITH_CONTRACT.interfaces[1],
+        ...WITH_CONTRACT.interfaces.slice(1),
       ],
     };
     renderPane(noRows, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add');
@@ -1403,7 +1436,7 @@ describe('Interfaces tab — the contract', () => {
   });
 
   it('says "none" for a command established as reading nothing', async () => {
-    renderPane(WITH_READS, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add&gcmd=tasks+purge');
+    renderPane(WITH_READS, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-purge');
     expect(await screen.findByText('Delete every completed task.')).toBeInTheDocument();
     const reads = within(screen.getByText('Reads').parentElement as HTMLElement);
     expect(reads.getByText('none')).toBeInTheDocument();
@@ -1425,7 +1458,7 @@ describe('Interfaces tab — the contract', () => {
   });
 
   it('gives a command with no io no panel at all', async () => {
-    renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add&gcmd=tasks+purge');
+    renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-purge');
     expect(await screen.findByText('Delete every completed task.')).toBeInTheDocument();
     expect(screen.queryByText('Input and output')).not.toBeInTheDocument();
     expect(screen.queryByText('Where should tasks live?')).not.toBeInTheDocument();
@@ -1457,57 +1490,70 @@ describe('Interfaces tab — the contract', () => {
     expect(screen.queryByText(/Re-running with the same title/)).not.toBeInTheDocument();
   });
 
-  it('prints the command path only where it names one command of a TREE', async () => {
-    // A one-command interface: its path IS the interface title the reader just
-    // passed, so the contract adds no occurrence of it anywhere on the page.
-    const oneCommand: GuardInterfacesView = {
-      ...MAPPED,
+  it('never prints the command path, and offers no command nav — one entry, one command', async () => {
+    // The cli member is singular now: the path IS the interface title the reader
+    // just passed, so the contract adds no occurrence of it anywhere on the page,
+    // and there is nothing left for a nav to choose between.
+    openAdd();
+    expect(await screen.findByText('Grammar')).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Commands' })).toBeNull();
+    const withContract = screen.getAllByText(/^tasks add$/).length;
+
+    // The SAME entry with no contract at all: the count does not move, so every
+    // occurrence on the page comes from the pane header, none from the contract.
+    cleanup();
+    const noContract: GuardInterfacesView = {
+      ...WITH_CONTRACT,
       interfaces: [
-        { ...MAPPED.interfaces[0], contract: { ...CONTRACT, commands: [CONTRACT.commands[0]] } },
-        MAPPED.interfaces[1],
+        { ...WITH_CONTRACT.interfaces[0], contract: undefined },
+        ...WITH_CONTRACT.interfaces.slice(1),
       ],
     };
-    renderPane(oneCommand, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add');
-    expect(await screen.findByText('Grammar')).toBeInTheDocument();
-    // No command nav either — there is nothing to choose between.
-    expect(screen.queryByRole('list', { name: 'Commands' })).toBeNull();
-    const alone = screen.getAllByText(/^tasks add$/).length;
-
-    // The same interface as a TREE: the path now appears twice more — once in the
-    // nav row, once as the heading of the command on screen.
-    cleanup();
-    openAdd();
-    expect(await screen.findByRole('list', { name: 'Commands' })).toBeInTheDocument();
-    expect(screen.getAllByText(/^tasks add$/)).toHaveLength(alone + 2);
+    renderPane(noContract, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add');
+    expect(await screen.findByText('No contract derived')).toBeInTheDocument();
+    expect(screen.getAllByText(/^tasks add$/)).toHaveLength(withContract);
   });
 
-  it('previews a command on single click and pins it on double click — the same tab model as the interface rows', async () => {
-    const user = userEvent.setup();
-    openAdd();
-
-    const commands = await screen.findByRole('list', { name: 'Commands' });
-    // The first command is the one on screen until another is picked.
-    expect(screen.getByText('Add a task.')).toBeInTheDocument();
-
-    // Single click previews — and, like every guard selection, it is addressable.
-    await user.click(within(commands).getByText('tasks purge'));
-    expect(screen.getByText('Delete every completed task.')).toBeInTheDocument();
-    expect(screen.queryByText('Add a task.')).not.toBeInTheDocument();
-    expect(search()).toContain('gcmd=tasks+purge');
-    expect(screen.queryByLabelText('tasks purge pinned')).not.toBeInTheDocument();
-
-    // Double click pins it — the row says so, and the URL still names it.
-    await user.dblClick(within(commands).getByText('tasks purge'));
-    expect(screen.getByLabelText('tasks purge pinned')).toBeInTheDocument();
-    expect(search()).toContain('gcmd=tasks+purge');
-  });
-
-  it('opens on the pinned command from a deep link', async () => {
-    renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add&gcmd=tasks+purge');
+  it('opens the sibling command as its own interface — the tree is siblings, not a nav', async () => {
+    renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-purge');
     expect(await screen.findByText('Delete every completed task.')).toBeInTheDocument();
     // `tasks purge` declares no positionals at all — established as none.
     const positionals = screen.getByText('Positional arguments').parentElement as HTMLElement;
     expect(within(positionals).getByText('none')).toBeInTheDocument();
+  });
+
+  it('renders an api entry as an OPERATION — request by location, statuses, body markers', async () => {
+    renderPane(WITH_OPERATION, '/repos/r?tab=interfaces&ginterface=api%2Fget-todos-id');
+    expect(await screen.findByText('Request')).toBeInTheDocument();
+
+    // The three request regions, each named for where the caller puts it — no
+    // "Flag" column, no positionals, no argv anywhere.
+    expect(screen.getByText('Path parameters')).toBeInTheDocument();
+    expect(screen.getByText('Query parameters')).toBeInTheDocument();
+    expect(screen.getByText('Body fields')).toBeInTheDocument();
+    expect(screen.queryByText('Grammar')).not.toBeInTheDocument();
+    expect(screen.queryByText('Positional arguments')).not.toBeInTheDocument();
+    const body = screen.getByText('Body fields').parentElement as HTMLElement;
+    const title = within(body).getByText('title').closest('tr')!;
+    expect(within(title).getByText('required')).toBeInTheDocument();
+    expect(within(title).getByText('<one line>')).toBeInTheDocument();
+    // A field the source reads without stating its requiredness says so.
+    const notes = within(body).getByText('notes').closest('tr')!;
+    expect(within(notes).getByText('unknown')).toBeInTheDocument();
+
+    // The response side speaks HTTP: statuses, not exit codes; a body, not stdout.
+    expect(screen.getByText('Response statuses')).toBeInTheDocument();
+    expect(screen.getByText('Response body')).toBeInTheDocument();
+    expect(screen.queryByText('Exit codes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Output')).not.toBeInTheDocument();
+    expect(screen.queryByText('stdout')).not.toBeInTheDocument();
+    const statuses = screen.getByText('Response statuses').parentElement as HTMLElement;
+    expect(within(statuses).getByText('201')).toBeInTheDocument();
+    // `unknown` stays first-class on this member too.
+    expect(within(statuses).getByText('unknown')).toBeInTheDocument();
+    // An authored EMPTY list is still a fact said out loud.
+    const writes = screen.getByText('Writes').parentElement as HTMLElement;
+    expect(within(writes).getByText('none')).toBeInTheDocument();
   });
 
   it('says so plainly when the catalog carries no contract — nothing is filled in', async () => {
@@ -1550,8 +1596,8 @@ describe('Interfaces tab — the question sequence', () => {
       {
         ...MAPPED.interfaces[0],
         contract: {
-          ...CONTRACT,
-          commands: [{ ...CONTRACT.commands[0], sequence }, CONTRACT.commands[1]],
+          surface: 'cli',
+          command: { ...CONTRACT.command, sequence },
         } as NonNullable<GuardInterfacesView['interfaces'][number]['contract']>,
       },
       MAPPED.interfaces[1],

@@ -1600,6 +1600,8 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
     // resolve in travels once, on the view below.
     ...(j.at ? { at: j.at } : {}),
     ...(j.to ? { to: j.to } : {}),
+    // The owning place travels the same way, and resolves in the same registry.
+    ...(j.resource ? { resource: j.resource } : {}),
     fingerprint: j.fingerprint,
     flows: flowRefs.get(j.id) ?? [],
     scenarioIds: scenarioIdsByInterface.get(j.id) ?? [],

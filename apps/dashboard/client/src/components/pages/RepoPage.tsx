@@ -72,7 +72,7 @@ import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { guardTestBinds } from '@/lib/guard-tests';
 import type { GuardFlowFilter } from '@/lib/guard-flow-status';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
-import { useGuardCommandTabs, useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
+import { useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
 import { useGuardClaims } from '@/hooks/useGuardClaims';
 import { guardUntestableEntries } from '@/lib/guard-claims';
 import { useGraph } from '@/hooks/useGraph';
@@ -417,7 +417,6 @@ function RepoPageInner() {
   const guardFlowTabs = useGuardFlowTabs(repoId);
   const guardInterfaceTabs = useGuardInterfaceTabs(repoId);
   // The interface detail's second nav: which COMMAND of the tree is being read.
-  const guardCommandTabs = useGuardCommandTabs(repoId);
   // The list narrowings live HERE, above the panels that own them, so they survive
   // a main-pane navigation (open a flow, come back, the list is still where it
   // was): the Tests list's status and driver chips, and the Interfaces catalog's
@@ -1426,7 +1425,6 @@ function RepoPageInner() {
                 loading={guardInterfaces.loading}
                 error={guardInterfaces.error}
                 tabs={guardInterfaceTabs}
-                commandTabs={guardCommandTabs}
                 recipe={guardFlows.view?.recipe ?? null}
                 recipeSurface={guardRecipeSurface}
                 onCloseRecipe={() => setGuardRecipeSurface(null)}

@@ -2,20 +2,26 @@
  * An interface's CONTRACT — the CALLING INTERFACE, and only that.
  *
  * SCOPE RULE: this view carries what someone driving the system needs in order to
- * call it — the full grammar of every command in the tree and each command's
- * input/output — and nothing else. The io is STRUCTURED FACTS, and a fact is ONE
- * LINE: the thing itself (a marker, a row template, an exit status, a path, a
- * question, a variable) and, after a `·`, the one condition it holds under. No table, no
- * column headers, no box — a fact list is not tabular data, it is a list of
- * sentences with the prose already removed, so it reads top to bottom at a
- * glance. A fact with no condition simply ends.
+ * call it — the invocable's full grammar and its input/output — and nothing else.
+ * The io is STRUCTURED FACTS, and a fact is ONE LINE: the thing itself (a marker,
+ * a row template, a status, a path, a question, a variable) and, after a `·`, the
+ * one condition it holds under. No table, no column headers, no box — a fact list
+ * is not tabular data, it is a list of sentences with the prose already removed,
+ * so it reads top to bottom at a glance. A fact with no condition simply ends.
+ *
+ * It renders the CONTRACT UNION, dispatching on the surface the contract itself
+ * declares. A cli entry gets the command grammar, its positionals and (where it is
+ * interactive) its question sequence. An api entry gets HTTP: its request split by
+ * where the caller puts it, its response statuses, its response-body markers. That
+ * dispatch is the point of the union — before it, an operation was rendered as a
+ * command whose argv was `["GET", "/x"]`, its query parameters sat under a column
+ * headed "Flag" and its 404 under a heading reading "Exit codes", and every one of
+ * those was a decoding step the reader had to perform.
  *
  * The page reads ONCE, top to bottom: the pane's name and entry, the step
- * diagram, then here the grammar, the positionals, the question sequence (for an
- * interactive command) and the input/output facts. Nothing
- * repeats what the reader has already passed — the command path is
- * printed only where it says WHICH command of a tree is open, never as an echo of
- * the interface title.
+ * diagram, then here the grammar and the input/output facts. Nothing repeats what
+ * the reader has already passed — an entry's own identity is the title above, so
+ * it is never echoed here.
  *
  * Two rules the whole block obeys:
  *
@@ -29,27 +35,31 @@
  *    carries; it never feeds a fingerprint, so it can grow without moving an
  *    interface or re-authoring a scenario.
  *
- * The command list is the tab's second nav, and it runs on the SAME tab model the
- * interface rows do ({@link useGuardCommandTabs} over `?gcmd=`): single-click
- * previews, double-click pins, and either way the selection is addressable — a
- * deep link lands on the command it names. The URL binding arrives as a prop, so
- * this component (like the pane around it) stays pure.
+ * There is no second nav here any more. One entry is one invocable thing
+ * (2026-08-10), so a cli contract carries exactly ONE command — the tree lives in
+ * the catalog as sibling entries sharing a group and a resource — and the command
+ * list had been a nav onto a list of one ever since.
  */
 
-import { FileQuestion, Pin } from 'lucide-react';
+import { FileQuestion } from 'lucide-react';
 import {
   INTERFACE_UNKNOWN,
   type GuardInterfaceRow,
+  type InterfaceApiBodyFact,
+  type InterfaceApiRowFact,
+  type InterfaceApiStatusFact,
   type InterfaceCommandContract,
   type InterfaceConsumes,
   type InterfaceEnvFact,
   type InterfaceExitFact,
+  type InterfaceOperationContract,
   type InterfaceOption,
   type InterfaceOutputFact,
   type InterfaceProduces,
   type InterfacePromptFact,
   type InterfacePromptSubmit,
   type InterfaceReadFact,
+  type InterfaceRequestField,
   type InterfaceRowFact,
   type InterfaceRowSlot,
   type InterfaceSequence,
@@ -58,9 +68,7 @@ import {
   type InterfaceWriteFact,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
-import { EntityList } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import type { GuardTabsState } from '@/hooks/useGuardTabs';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 const SUBLABEL = 'text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -248,7 +256,7 @@ function slotHelp(slot: InterfaceRowSlot): string {
  * half stands alone — a template without its slots is a line no run ever prints,
  * and a vocabulary away from its template has nothing to fill.
  */
-function Template({ fact }: { fact: InterfaceRowFact }) {
+function Template({ fact }: { fact: { template: string; slots: InterfaceRowSlot[] } }) {
   const slots = new Map(fact.slots.map((slot) => [slot.name, slot]));
   return (
     <span className={FACT}>
@@ -577,60 +585,203 @@ function CommandContract({ command, showPath }: { command: InterfaceCommandContr
   );
 }
 
-/**
- * The command nav: single-click previews, double-click pins — both addressable.
- * The shared {@link EntityList} embedded in the contract card, so this nav reads
- * and behaves exactly like every other list in the product.
- */
-function CommandNav({
-  commands,
-  activeKey,
-  tabs,
-}: {
-  commands: InterfaceCommandContract[];
-  activeKey: string;
-  tabs: GuardTabsState;
-}) {
+// ---------------------------------------------------------------------------
+// The API OPERATION — the union's other member, in HTTP's own words. Before the
+// SOM restructure an operation was rendered as a command: its identity read
+// `GET /api/repos` under a "Commands" nav, its query parameters sat in a table
+// headed "Flag", and its response statuses wore the "Exit codes" heading. Every
+// one of those was a decoding step the reader had to do.
+// ---------------------------------------------------------------------------
+
+/** One request region — path, query or body — as a fact list, not a flag table. */
+function RequestFields({ fields }: { fields: InterfaceRequestField[] }) {
   return (
-    <EntityList<InterfaceCommandContract>
-      variant="embedded"
-      label="Commands"
-      items={commands}
-      itemId={(command) => command.path.join(' ')}
-      activeId={activeKey}
-      onOpen={(id, pinned) => tabs.open(id, pinned)}
-      renderRow={(command) => {
-        const key = command.path.join(' ');
-        const pinned = tabs.openTabs.some((tab) => tab.id === key && tab.pinned);
-        return (
-          <div className="flex w-full items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{key}</span>
-            {pinned ? (
-              <HoverPopover
-                portal
-                width="narrow"
-                content="Pinned — the command rides in the URL, so a reload or a shared link lands back here."
-              >
-                <Pin aria-label={`${key} pinned`} className="h-3 w-3 shrink-0 text-muted-foreground" />
-              </HoverPopover>
-            ) : null}
-            <span className="shrink-0 text-[10px] text-muted-foreground">{command.options?.length ?? 0} flags</span>
-          </div>
-        );
-      }}
-    />
+    <Scroller>
+      <table className="w-full border-collapse">
+        <thead className="border-b border-border bg-muted/30">
+          <tr>
+            <th className={HEAD}>Field</th>
+            <th className={HEAD}>Required</th>
+            <th className={HEAD}>Values</th>
+            <th className={HEAD}>Default</th>
+            <th className={HEAD}>What it is</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fields.map((field) => (
+            <tr key={field.name} className="border-b border-border/60 last:border-0">
+              <td className={`${CELL} whitespace-nowrap font-mono`}>
+                {field.name}
+                {field.hint ? <span className="text-muted-foreground"> &lt;{field.hint}&gt;</span> : null}
+              </td>
+              <td className={`${CELL} whitespace-nowrap text-muted-foreground`}>
+                {field.required === INTERFACE_UNKNOWN ? (
+                  <HoverPopover
+                    portal
+                    width="narrow"
+                    content="The field is read, and nothing in the source says whether it may be absent. Recorded as unknown rather than guessed."
+                  >
+                    <span className={CHIP}>{INTERFACE_UNKNOWN}</span>
+                  </HoverPopover>
+                ) : field.required ? (
+                  'required'
+                ) : (
+                  'optional'
+                )}
+              </td>
+              <td className={CELL}>
+                {field.choices?.length ? (
+                  <span className="font-mono text-[10px] text-foreground">{field.choices.join(' | ')}</span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </td>
+              <td className={`${CELL} whitespace-nowrap font-mono`}>
+                {field.default === undefined ? (
+                  <span className="font-sans text-muted-foreground">—</span>
+                ) : (
+                  String(field.default)
+                )}
+              </td>
+              <td className={`${CELL} text-muted-foreground`}>{field.description ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Scroller>
   );
 }
 
-export function GuardInterfaceContract({ iface, tabs }: { iface: GuardInterfaceRow; tabs: GuardTabsState }) {
-  const commands = iface.contract?.commands ?? [];
-  const keys = commands.map((command) => command.path.join(' '));
-  // The selected command, or the first one. A `?gcmd` naming another interface's
-  // command simply doesn't match here — no empty pane, no cross-interface bleed.
-  const activeKey = (tabs.activeId && keys.includes(tabs.activeId) ? tabs.activeId : keys[0]) ?? '';
-  const active = commands.find((command) => command.path.join(' ') === activeKey) ?? null;
+/** The response statuses — the api analog of the exit codes, `unknown` included. */
+function StatusFacts({ facts }: { facts: InterfaceApiStatusFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          {fact.status === INTERFACE_UNKNOWN ? (
+            <HoverPopover
+              portal
+              width="narrow"
+              content="Neither the extraction nor a probe established this status. Recorded as unknown rather than guessed — a scenario must not assert it."
+            >
+              <span className="rounded border border-slate-400/60 px-1 py-px font-mono text-[10px] text-muted-foreground">
+                {INTERFACE_UNKNOWN}
+              </span>
+            </HoverPopover>
+          ) : (
+            <span className="rounded bg-muted px-1 py-px font-mono text-[10px] text-foreground">{fact.status}</span>
+          )}
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
 
-  if (!iface.contract) {
+/** Response-body markers. No stream chip: a response has one body. */
+function BodyFacts({ facts }: { facts: InterfaceApiBodyFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <span className={FACT}>{fact.marker}</span>
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+/** The response's repeated-item shape — the row grammar, stream dropped. */
+function ApiRowFacts({ facts }: { facts: InterfaceApiRowFact[] }) {
+  return (
+    <FactList>
+      {facts.map((fact, i) => (
+        <li key={i} className={ROW}>
+          <HoverPopover portal width="narrow" content={ROLE_HELP[fact.role]}>
+            <span className={CHIP}>{fact.role}</span>
+          </HoverPopover>
+          <Template fact={fact} />
+          <When when={fact.when} />
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+function OperationContract({ operation }: { operation: InterfaceOperationContract }) {
+  const { request, consumes, produces } = operation;
+  return (
+    <div>
+      {operation.description ? (
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{operation.description}</p>
+      ) : null}
+
+      {request ? (
+        <Section title="Request">
+          <div className="flex flex-col gap-3">
+            {(
+              [
+                ['Path parameters', request.params],
+                ['Query parameters', request.query],
+                ['Body fields', request.body],
+              ] as const
+            ).map(([title, fields]) => (
+              <Block key={title} title={title} list={fields as InterfaceRequestField[] | undefined}>
+                {(list) => <RequestFields fields={list} />}
+              </Block>
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      {consumes || produces ? (
+        <Section title="Input and output">
+          <div className="grid gap-x-6 gap-y-3 lg:grid-cols-2">
+            {consumes ? (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold text-foreground">Consumes</div>
+                <Block title="Environment" list={consumes.env}>
+                  {(env) => <EnvFacts facts={env} />}
+                </Block>
+                <Block title="Reads" list={consumes.reads}>
+                  {(reads) => <ReadFacts facts={reads} />}
+                </Block>
+              </div>
+            ) : null}
+            {produces ? (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold text-foreground">Produces</div>
+                <Block title="Response statuses" list={produces.statuses}>
+                  {(statuses) => <StatusFacts facts={statuses} />}
+                </Block>
+                <Block title="Response body" list={produces.body}>
+                  {(body) => <BodyFacts facts={body} />}
+                </Block>
+                <Block title="Item shapes" list={produces.rows}>
+                  {(rows) => <ApiRowFacts facts={rows} />}
+                </Block>
+                <Block title="Writes" list={produces.writes}>
+                  {(writes) => <WriteFacts facts={writes} />}
+                </Block>
+              </div>
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The contract, dispatched on the surface it declares. There is no command NAV
+ * any more: one entry is one invocable thing (2026-08-10), so a cli contract
+ * carries exactly one command and a list of one was a nav onto itself.
+ */
+export function GuardInterfaceContract({ iface }: { iface: GuardInterfaceRow }) {
+  const contract = iface.contract;
+
+  if (!contract) {
     return (
       <Section title="Contract">
         <div className="rounded border border-border py-6">
@@ -644,23 +795,15 @@ export function GuardInterfaceContract({ iface, tabs }: { iface: GuardInterfaceR
     );
   }
 
-  const isTree = commands.length > 1;
-
+  // The SUMMARY is deliberately not rendered: the pane header above already says
+  // what this entry is, and the page reads once.
   return (
     <div>
-      {isTree ? (
-        <Section title="Commands">
-          <div className="rounded border border-border">
-            <CommandNav commands={commands} activeKey={activeKey} tabs={tabs} />
-          </div>
-        </Section>
-      ) : null}
-
-      {active ? (
-        <div className={isTree ? 'mt-3' : ''}>
-          <CommandContract command={active} showPath={isTree} />
-        </div>
-      ) : null}
+      {contract.surface === 'cli' ? (
+        <CommandContract command={contract.command} showPath={false} />
+      ) : (
+        <OperationContract operation={contract.operation} />
+      )}
     </div>
   );
 }

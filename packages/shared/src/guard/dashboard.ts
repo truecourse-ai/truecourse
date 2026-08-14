@@ -1095,6 +1095,10 @@ export const GuardInterfaceRowSchema = z
     at: z.string().optional(),
     /** The resource the task leaves the user at, when it moves them — verbatim. */
     to: z.string().optional(),
+    /** The place that OWNS this invocable — the command group it is registered
+     *  in, the REST noun its path names — verbatim, resolving in the same
+     *  registry `at`/`to` do. Absent where the catalog established no places. */
+    resource: z.string().optional(),
     fingerprint: z.string(),
     /**
      * Flows that use this interface — realized (a scenario grounds on it) or merely
@@ -1109,10 +1113,11 @@ export const GuardInterfaceRowSchema = z
     /** Declared in an OpenAPI doc, but no route registration serves it. */
     specOnly: z.literal(true).optional(),
     /**
-     * The full public contract — the command tree with its grammar and each
-     * command's input/output. Passed through from the catalog verbatim; absent
-     * where the derivation established the command tree only, which is exactly
-     * what the view renders as "no contract derived yet".
+     * The full public contract, in this entry's OWN surface vocabulary — a cli
+     * command's grammar and io, or an api operation's request/consumes/produces.
+     * Passed through from the catalog verbatim; absent where the derivation
+     * established the surface's shape only, which is exactly what the view
+     * renders as "no contract derived yet".
      */
     contract: InterfaceContractSchema.optional(),
   })

@@ -31,9 +31,9 @@ const CONTRACT_INTERFACE = {
   steps: [{ kind: 'invoke', command: ['tasks', 'add'], flags: ['--json', '--priority'] }],
   fingerprint: 'sha256:j1',
   contract: {
+    surface: 'cli',
     summary: '`tasks add` and its `--json` mode.',
-    commands: [
-      {
+    command: {
         path: ['tasks', 'add'],
         description: 'Add a task.',
         options: [
@@ -65,8 +65,38 @@ const CONTRACT_INTERFACE = {
             writes: [],
           },
         },
+    },
+  },
+};
+
+/** An api entry carrying the union's OTHER member — HTTP, in its own words. */
+const OPERATION_INTERFACE = {
+  id: 'api/post-tasks',
+  type: 'api',
+  title: 'POST /tasks',
+  group: 'tasks',
+  entry: { method: 'POST', path: '/tasks' },
+  steps: [{ kind: 'request', method: 'POST', path: '/tasks' }],
+  resource: 'tasks',
+  fingerprint: 'sha256:j4',
+  contract: {
+    surface: 'api',
+    operation: {
+      request: {
+        body: [
+          { name: 'title', required: true },
+          { name: 'priority', required: false, choices: ['low', 'high'], default: 'low' },
+        ],
       },
-    ],
+      produces: {
+        statuses: [
+          { status: '201', when: 'the task was created' },
+          { status: 'unknown', when: 'the store is unwritable and no path is declared' },
+        ],
+        body: [{ marker: '"id"' }],
+        writes: [],
+      },
+    },
   },
 };
 
@@ -94,6 +124,7 @@ const PLACED_INTERFACE = {
 
 /** The places those ids resolve in, readables included — the registry the view carries. */
 const RESOURCES = {
+  api: [{ id: 'tasks', kind: 'rest-noun', title: '/tasks' }],
   web: [
     { id: 'repo-report', kind: 'screen', title: 'the repository report' },
     {
@@ -119,10 +150,10 @@ const RESOURCES = {
 };
 
 const CATALOG = {
-  version: 1,
+  version: 2,
   generatedAt: '2026-08-06T13:39:00.000Z',
   recipeFingerprint: 'sha256:r',
-  interfaces: [CONTRACT_INTERFACE, BARE_INTERFACE, PLACED_INTERFACE],
+  interfaces: [CONTRACT_INTERFACE, BARE_INTERFACE, PLACED_INTERFACE, OPERATION_INTERFACE],
   resources: RESOURCES,
   source: { cli: 'tree' },
 };
@@ -156,7 +187,7 @@ describe('Guard interfaces — the contract passthrough', () => {
 
   it('keeps `unknown` and "established as none" intact across the wire', async () => {
     const res = await request(app).get(url('interfaces')).expect(200);
-    const io = res.body.interfaces.find((j: { id: string }) => j.id === 'cli/tasks-add').contract.commands[0].io;
+    const io = res.body.interfaces.find((j: { id: string }) => j.id === 'cli/tasks-add').contract.command.io;
     const produces = io.produces;
     // The read side travels with the write side — a scenario seeds what it reads.
     expect(io.consumes.reads).toEqual([{ path: '~/.tasks.json', when: 'the store the new task is appended to' }]);
@@ -186,6 +217,24 @@ describe('Guard interfaces — the contract passthrough', () => {
     expect('to' in bare).toBe(false);
     // The registry travels ONCE, on the view, readables intact.
     expect(res.body.resources).toEqual(RESOURCES);
+    // The OWNING place rides the same wire, and follows the same absence rule.
+    const created = res.body.interfaces.find((j: { id: string }) => j.id === 'api/post-tasks');
+    expect(created.resource).toBe('tasks');
+    expect('resource' in bare).toBe(false);
+  });
+
+  it('serves the api member natively — no argv costume, no exit codes', async () => {
+    const res = await request(app).get(url('interfaces')).expect(200);
+    expect(() => GuardInterfacesViewSchema.parse(res.body)).not.toThrow();
+    const created = res.body.interfaces.find((j: { id: string }) => j.id === 'api/post-tasks');
+    expect(created.contract).toEqual(OPERATION_INTERFACE.contract);
+    expect(created.contract.surface).toBe('api');
+    // `unknown` and "established as none" survive on this member too.
+    expect(created.contract.operation.produces.statuses.map((s: { status: string }) => s.status)).toEqual([
+      '201',
+      'unknown',
+    ]);
+    expect(created.contract.operation.produces.writes).toEqual([]);
   });
 
   it('an interface with no contract grows no empty one — absence survives the compose', async () => {
