@@ -992,9 +992,15 @@ export interface AuthorUserContext {
  * same rendering a step list and a failure use, so the model reads the vocabulary
  * it must write). A `when` renders as a trailing condition; a readable kind the
  * place doesn't carry renders nothing.
+ *
+ * A readable that carries an `id` renders it. The id is the NAME of one fact on
+ * this place, and naming it is what lets the capture note below point at a
+ * specific readable ("take the count off `violations-rows`") instead of at prose;
+ * a readable without one renders exactly as it always did.
  */
 function resourceLines(place: InterfaceResource): string[] {
   const cond = (when?: string) => (when ? `  [${when}]` : '')
+  const named = (id?: string) => (id ? ` \`${id}\`` : '')
   const lines = [
     `- ${place.title} (${place.kind} \`${place.id}\`${place.of ? `, ${place.kind === 'dialog' ? 'over' : 'on'} \`${place.of}\`` : ''})${
       place.description ? `: ${place.description}` : ''
@@ -1003,13 +1009,17 @@ function resourceLines(place: InterfaceResource): string[] {
   const r = place.readables
   if (!r) return lines
   for (const m of r.markers ?? []) {
-    lines.push(`    shows “${m.marker}”${m.within ? ` within ${describeWebLocator(m.within)}` : ''}${cond(m.when)}`)
+    lines.push(
+      `    shows${named(m.id)} “${m.marker}”${m.within ? ` within ${describeWebLocator(m.within)}` : ''}${cond(m.when)}`,
+    )
   }
   for (const e of r.elements ?? []) {
-    lines.push(`    renders ${describeWebLocator(e.element)}${cond(e.when)}`)
+    lines.push(`    renders${named(e.id)} ${describeWebLocator(e.element)}${cond(e.when)}`)
   }
   for (const c of r.controls ?? []) {
-    lines.push(`    control ${describeWebLocator(c.control)} exposes ${c.states.join(', ')}${cond(c.when)}`)
+    lines.push(
+      `    control${named(c.id)} ${describeWebLocator(c.control)} exposes ${c.states.join(', ')}${cond(c.when)}`,
+    )
   }
   for (const row of r.rows ?? []) {
     const enums = row.slots
@@ -1017,7 +1027,7 @@ function resourceLines(place: InterfaceResource): string[] {
       .map((s) => `${s.name} ∈ ${(s.values ?? []).join(' | ')}`)
       .join('; ')
     lines.push(
-      `    rows: one ${row.item} per item${row.within ? ` within ${describeWebLocator(row.within)}` : ''}, text \`${row.template}\`${
+      `    rows${named(row.id)}: one ${row.item} per item${row.within ? ` within ${describeWebLocator(row.within)}` : ''}, text \`${row.template}\`${
         enums ? ` (${enums})` : ''
       }${cond(row.when)}`,
     )
@@ -1254,6 +1264,25 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'repeated item so you never assert a rendered value as if it were stable.',
     )
     for (const place of ctx.resources) lines.push(...resourceLines(place))
+    // The capture note. Placed HERE and not in the system prompt on purpose: what
+    // makes a capture safe is being grounded in a listed readable, so the vocabulary
+    // is taught next to the facts it may point at.
+    lines.push(
+      '',
+      'CAPTURE — a web step may take a value OFF one of these readables and use it in a',
+      'later step, which is the only way to state a claim about a CHANGE. Write it on the',
+      'step as `capture: { <name>: { from: <locator>, get: … } }`, where `from` is a',
+      'locator listed above and `get` is one of: `text` (the default), `value` (an',
+      "input's current value), `count` (how many elements match — several matches are",
+      'the answer here, not an ambiguity), `{ state: <aria state> }`, or',
+      '`{ attribute: <name> }`. Add `number: "<regex with ONE group>"` to slice the',
+      'number out of a sentence the page writes it in ("seats left: 3").',
+      'Later steps read it as `${captured:<name>}` in any authored string, and assert a',
+      'DELTA with `compare: { equals: "${captured:<name>}", offset: -1 }` — "one fewer',
+      'than there were". Prefer that to asserting an absolute number, which only tests',
+      'the state the world happened to be in. A capture whose element or pattern finds',
+      'nothing FAILS its step, so capture only what these places really show.',
+    )
   }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and

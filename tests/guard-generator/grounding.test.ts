@@ -451,4 +451,37 @@ describe('buildResourceHints + the PLACES block', () => {
     const { resources: _dropped, ...bare } = ctx;
     expect(buildAuthorUserPrompt(bare)).not.toContain('PLACES THIS FLOW ACTS ON');
   });
+
+  it('names a readable that has an id, and teaches the CAPTURE form beside it', () => {
+    const registry = {
+      web: [
+        {
+          id: 'violations-list',
+          kind: 'panel' as const,
+          title: 'the violation list',
+          readables: {
+            markers: [{ id: 'filter-banner', marker: 'Filtered by:' }],
+            elements: [{ element: { role: 'heading' as const, name: 'Violations' } }],
+          },
+        },
+      ],
+    };
+    const prompt = buildAuthorUserPrompt({
+      flow: { id: 'f', title: 'T', goal: 'G' },
+      milestones: [],
+      interfacePath: ['web/a'],
+      resources: buildResourceHints([webTask('web/a', 'violations-list')], registry),
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      probes: [],
+    });
+    // The readable's NAME rides its line — it is what a capture points at.
+    expect(prompt).toContain('`filter-banner`');
+    // A readable without one renders exactly as it did before.
+    expect(prompt).toContain('renders heading “Violations”');
+    // …and the block says how to take a value off one of these places.
+    expect(prompt).toContain('CAPTURE');
+    expect(prompt).toContain('${captured:');
+  });
 });
