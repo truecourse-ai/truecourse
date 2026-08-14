@@ -404,6 +404,11 @@ function renderTranscript(params: WriteEvidenceParams): string {
         lines.push(`   · expected: ${s.web.expectation}`)
         lines.push(`     actual:   not evaluated — the step did not get past its action`)
       }
+      // What the browser handed the steps after it — the same line a cli and an api
+      // step's record carries, so one reader habit covers all three surfaces.
+      if (s.captured && Object.keys(s.captured).length > 0) {
+        lines.push(`   capture:  ${JSON.stringify(s.captured)}`)
+      }
       lines.push(`   page text:`)
       lines.push(indent(s.web.visibleText))
       lines.push('')

@@ -902,6 +902,170 @@ describe('the web driver', () => {
     TEST_TIMEOUT_MS,
   )
 
+  it(
+    'captures what the page shows — every getter, and each value carried into a later step',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/capture',
+            capture: {
+              // TEXT, with the number sliced out of the sentence the page writes it in.
+              seatsBefore: { from: { text: 'seats left: 3' }, number: 'seats left: (\\d+)' },
+              // A DOM PROPERTY no page text carries.
+              draft: { from: { label: 'Note' }, get: 'value' },
+              // How MANY — the one getter several matches are the answer to.
+              rows: { from: { role: 'listitem', name: 'entry' }, get: 'count' },
+              // What the page keeps OUTSIDE its text.
+              permalink: { from: { text: 'Permalink' }, get: { attribute: 'href' } },
+              alerts: { from: { text: 'Email alerts' }, get: { state: 'checked' } },
+            },
+            expect: { text: { contains: 'seats left: 3' } },
+          },
+          // The DELTA claim: one seat fewer than there were, without either
+          // absolute number appearing in the scenario.
+          {
+            driver: 'web',
+            click: { text: 'Book a seat' },
+            expect: {
+              text: {
+                compare: {
+                  number: 'seats left: (\\d+)',
+                  equals: '${captured:seatsBefore}',
+                  offset: -1,
+                },
+              },
+            },
+          },
+          // …and every other captured value reads back as itself.
+          {
+            driver: 'web',
+            expect: {
+              text: { compare: { number: 'seats left: (\\d+)', atMost: '${captured:rows}' } },
+            },
+          },
+          // …and a captured value reads back into any authored web string.
+          {
+            driver: 'web',
+            navigate: '/notes?title=${captured:draft}',
+            expect: { url: { equals: '/notes?title=draft-42' }, text: { contains: 'title: draft-42' } },
+          },
+        ],
+        'web.capture.cli.1',
+      )
+      expect(result.failure).toBeUndefined()
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.capture.cli.1')
+      // The step's record shows what it took off the page, beside what it asserted.
+      expect(text).toContain('"seatsBefore":"3"')
+      expect(text).toContain('"draft":"draft-42"')
+      expect(text).toContain('"rows":"3"')
+      expect(text).toContain('"alerts":"true"')
+      expect(text).toContain('"permalink":"/notes?id=7"')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a capture whose element is not on the page FAILS the step — never an empty value flowing on',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/capture',
+            capture: { seats: { from: { text: 'seats remaining' } } },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.capture-miss.cli.1',
+      )
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('seats')
+      expect(result.failure?.actual).toContain('nothing on the page matches text “seats remaining”')
+      // The page's own picture and words ride the failure like any other web step's.
+      expect(fs.existsSync(path.join(evidenceDir(repo, 'web.capture-miss.cli.1'), 'step-1.png'))).toBe(true)
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a capture whose slicer matches nothing FAILS the step, quoting what it read',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/capture',
+            capture: { seats: { from: { text: 'seats left: 3' }, number: 'seats free: (\\d+)' } },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.capture-slice.cli.1',
+      )
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('seats free: (\\d+)')
+      expect(result.failure?.actual).toContain('seats left: 3')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a state nothing exposes cannot be captured — the capture fails as loudly as the assertion does',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/controls',
+            capture: { mode: { from: { role: 'button', name: 'Detection mode' }, get: { state: 'pressed' } } },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.capture-state.cli.1',
+      )
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.actual).toContain('exposes no aria-pressed state')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'a delta that does not hold fails naming the comparand, the offset and both numbers',
+    async () => {
+      const result = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/capture',
+            capture: { seatsBefore: { from: { text: 'seats left: 3' }, number: 'seats left: (\\d+)' } },
+          },
+          {
+            driver: 'web',
+            // Nothing was booked, so the count did NOT go down.
+            expect: {
+              text: {
+                compare: { number: 'seats left: (\\d+)', equals: '${captured:seatsBefore}', offset: -1 },
+              },
+            },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.capture-delta.cli.1',
+      )
+      expect(result.outcome).toBe('fail')
+      expect(result.failure?.expected).toContain('equals 3 − 1')
+      expect(result.failure?.actual).toContain('3')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
   it('leaves no chromium behind across the whole suite', () => {
     expect(playwrightBrowserPids().filter((pid) => !pidsBefore.includes(pid))).toEqual([])
   })

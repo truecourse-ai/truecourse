@@ -32,6 +32,8 @@ import {
   isWebUploadStep,
   webStateAssertions,
   webVisibleTargets,
+  type GuardWebCapture,
+  type GuardWebCaptures,
   type GuardWebExpect,
   type GuardWebLocator,
   type GuardWebState,
@@ -96,6 +98,12 @@ export interface WebStepResult {
    * failed first) — the record tells those apart by whether the step declared one.
    */
   checks: readonly WebCheck[]
+  /**
+   * What this step took off the page for the steps after it — present only when it
+   * declared captures AND every one of them was read. A step that failed publishes
+   * nothing, which is what keeps a captured value a fact rather than a guess.
+   */
+  captured?: Record<string, string>
   /** The unmet expectation, when the step failed. */
   mismatch?: ExpectMismatch
   /** The infrastructure reason, when the step could not be taken at all. */
@@ -629,6 +637,136 @@ async function awaitWebExpect(
   }
 }
 
+// --- Capture: what the step takes off the page for the steps after it ------
+
+/**
+ * Read ONE capture off the page. Every getter answers with a STRING, because that
+ * is what `${captured:…}` substitutes and what the captured-value store holds — a
+ * count is its decimal form, an ARIA state is `"true"` / `"false"`.
+ *
+ * The locator waits exactly as an action's does (`awaitTarget`, same budget, same
+ * strictness), with ONE exception: `count`. Counting is the question "how many",
+ * so several matches are the answer rather than an ambiguity — and there is no
+ * predicate to wait for either, since zero is a legitimate count. It reads at a
+ * glance, after the step's own expectation has already done the waiting.
+ */
+async function readOneCapture(
+  page: Page,
+  name: string,
+  spec: GuardWebCapture,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<{ value: string } | { mismatch: ExpectMismatch }> {
+  const get = spec.get ?? 'text'
+  const what = `to capture “${name}” from`
+
+  if (get === 'count') {
+    const found = await webLocator(page, spec.from).count().catch(() => 0)
+    return { value: String(found) }
+  }
+
+  const target = await awaitTarget(page, spec.from, what, deadline, signal)
+  if ('mismatch' in target) return target
+  const { locator } = target
+  const subject = describeWebLocator(spec.from)
+
+  /** One capture that could not be read — the step's failure, with the page attached. */
+  const miss = async (expected: string, actual: string): Promise<{ mismatch: ExpectMismatch }> => ({
+    mismatch: {
+      subject: 'capture',
+      expected,
+      actual,
+      detail: [expected, actual, '--- visible page text ---', await readVisibleText(page)],
+    },
+  })
+
+  let read: string | null
+  if (get === 'text') {
+    read = await locator.innerText().catch(() => null)
+  } else if (get === 'value') {
+    // The input's CURRENT value is a DOM PROPERTY: it is not in the element's
+    // text, not in its `value` ATTRIBUTE once a user has typed, and reading either
+    // of those is the quiet wrong answer this getter exists to stop.
+    read = await locator
+      .evaluate((node) => {
+        const value = (node as unknown as { value?: unknown }).value
+        return typeof value === 'string' ? value : null
+      })
+      .catch(() => null)
+    if (read === null) {
+      return await miss(
+        `capture “${name}” to read the value of ${subject}`,
+        `${subject} has no value property — it is not an input, a textarea or a select`,
+      )
+    }
+  } else if ('state' in get) {
+    const readings = await readElementStates(locator, spec.from).catch(() => null)
+    const reading = readings?.[get.state]
+    if (!reading || reading.value === null) {
+      return await miss(
+        `capture “${name}” to read the ${get.state} state of ${subject}`,
+        reading?.actual ?? `${subject} could not be read`,
+      )
+    }
+    read = String(reading.value)
+  } else {
+    read = await locator.getAttribute(get.attribute).catch(() => null)
+    if (read === null) {
+      return await miss(
+        `capture “${name}” to read the ${get.attribute} attribute of ${subject}`,
+        `${subject} has no ${get.attribute} attribute`,
+      )
+    }
+  }
+
+  if (read === null) {
+    return await miss(`capture “${name}” to read the text of ${subject}`, `${subject} could not be read`)
+  }
+  if (spec.number === undefined) return { value: read }
+
+  // The slicer: a page writes its numbers in sentences, and the value a later step
+  // compares is the number, not the sentence. A pattern that does not match is the
+  // step failing with what it read — never an empty value flowing on.
+  let found: RegExpExecArray | null = null
+  let reError = ''
+  try {
+    found = new RegExp(spec.number).exec(read)
+  } catch (e) {
+    // The loader and birth validation both reject a source `new RegExp` refuses, so
+    // nothing that got here can land in this branch — and a mid-run throw would
+    // report an authoring defect as a crashed run.
+    reError = e instanceof Error ? e.message : String(e)
+  }
+  if (!found || found[1] === undefined) {
+    return await miss(
+      `capture “${name}” to match /${spec.number}/ in ${subject}${reError ? ` (invalid regex: ${reError})` : ''}`,
+      `it read ${JSON.stringify(truncate(read, WEB_TEXT_LIMIT))}, which carries no match for it`,
+    )
+  }
+  return { value: found[1] }
+}
+
+/**
+ * Every capture the step declares, in declaration order — or the FIRST that could
+ * not be read, which is the step's failure. Run after the action and after the
+ * expectation has held, exactly as a cli step's captures are: a failed step never
+ * publishes a value, so the ordering is the mechanism, not a detail.
+ */
+async function readWebCaptures(
+  page: Page,
+  captures: GuardWebCaptures,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<{ values: Record<string, string> } | { mismatch: ExpectMismatch }> {
+  const values: Record<string, string> = {}
+  for (const [name, spec] of Object.entries(captures)) {
+    const read = await readOneCapture(page, name, spec, deadline, signal)
+    if ('mismatch' in read) return read
+    values[name] = read.value
+  }
+  return { values }
+}
+
 /** Take this step's screenshot; a screenshot that cannot be taken is not fatal. */
 async function screenshot(page: Page, dir: string, stepIndex: number): Promise<string | undefined> {
   const file = webScreenshotFile(stepIndex)
@@ -738,6 +876,16 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
     mismatch = observed.mismatch
   }
 
+  // The captures resolve LAST: after the action, and after the expectation has
+  // held. A step whose assertion missed never publishes a value — the order is the
+  // same one the cli driver follows, for the same reason.
+  let captured: Record<string, string> | undefined
+  if (!mismatch && !infra && step.capture) {
+    const read = await readWebCaptures(page, step.capture, deadline, opts.signal)
+    if ('mismatch' in read) mismatch = read.mismatch
+    else captured = read.values
+  }
+
   const shot = await screenshot(page, opts.evidenceDir, opts.stepIndex)
   return {
     url: pageAddress(page),
@@ -745,6 +893,7 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
     ...(shot ? { screenshot: shot } : {}),
     durationMs: Date.now() - started,
     checks,
+    ...(captured ? { captured } : {}),
     ...(mismatch ? { mismatch } : {}),
     ...(infra ? { infra } : {}),
   }

@@ -121,19 +121,52 @@ function resolveFile(file: GuardWebFile, tok: Tok): GuardWebFile {
 }
 
 /**
+ * A capture block with the ELEMENT each capture reads resolved — a step can capture
+ * off the row an earlier step created.
+ *
+ * The `number` slicer is deliberately NOT interpolated, exactly as a cli capture's
+ * `pattern` is not: it is a regex, and substituting run-generated text into one
+ * would turn a captured value's own punctuation into pattern syntax.
+ */
+function resolveCaptures(
+  captures: NonNullable<GuardWebStep['capture']>,
+  tok: Tok,
+): NonNullable<GuardWebStep['capture']> {
+  return Object.fromEntries(
+    Object.entries(captures).map(([name, spec]) => [
+      name,
+      {
+        ...spec,
+        from: resolveLocator(spec.from, tok),
+        ...(typeof spec.get === 'object' && 'attribute' in spec.get
+          ? { get: { attribute: tok(spec.get.attribute) } }
+          : {}),
+      },
+    ]),
+  )
+}
+
+/**
  * The step the browser actually takes: every authored string with its tokens
  * substituted, so the action, the assertion, the transcript and the failure message
  * all quote the RESOLVED text a reader can act on.
  */
 export function resolveWebStep(step: GuardWebStep, tok: Tok): GuardWebStep {
   const expect = step.expect ? { expect: resolveExpect(step.expect, tok) } : {}
-  if (isWebNavigateStep(step)) return { ...step, navigate: tok(step.navigate), ...expect }
-  if (isWebClickStep(step)) return { ...step, click: resolveLocator(step.click, tok), ...expect }
+  const capture = step.capture ? { capture: resolveCaptures(step.capture, tok) } : {}
+  if (isWebNavigateStep(step)) return { ...step, navigate: tok(step.navigate), ...expect, ...capture }
+  if (isWebClickStep(step)) return { ...step, click: resolveLocator(step.click, tok), ...expect, ...capture }
   if (isWebFillStep(step)) {
-    return { ...step, fill: resolveLocator(step.fill, tok), value: tok(step.value), ...expect }
+    return { ...step, fill: resolveLocator(step.fill, tok), value: tok(step.value), ...expect, ...capture }
   }
   if (isWebUploadStep(step)) {
-    return { ...step, upload: resolveLocator(step.upload, tok), file: resolveFile(step.file, tok), ...expect }
+    return {
+      ...step,
+      upload: resolveLocator(step.upload, tok),
+      file: resolveFile(step.file, tok),
+      ...expect,
+      ...capture,
+    }
   }
-  return { ...step, ...(step.expect ? { expect: resolveExpect(step.expect, tok) } : {}) }
+  return { ...step, ...expect, ...capture }
 }

@@ -53,7 +53,8 @@
  *                       DOM property no page text ever shows);
  *                     - paragraph "seats left: 3", which button "Book a seat"
  *                       decrements — the delta claim's subject;
- *                     - three listitems inside a list (the count getter);
+ *                     - three listitems whose accessible names all contain
+ *                       "entry" (the count getter's several-matches answer);
  *                     - link "Permalink" whose `href` is `/notes?id=7`;
  *                     - switch "Email alerts", `aria-checked="true"`;
  *                     - image with alt text "Company logo";
@@ -201,9 +202,9 @@ const CAPTURE = page(
 <input id="note" placeholder="Search notes" value="draft-42">
 <p>row two of three</p>
 <ul>
-  <li>alpha</li>
-  <li>beta</li>
-  <li>gamma</li>
+  <li aria-label="entry alpha">alpha</li>
+  <li aria-label="entry beta">beta</li>
+  <li aria-label="entry gamma">gamma</li>
 </ul>
 <p><a id="perma" href="/notes?id=7">Permalink</a></p>
 <button type="button" role="switch" id="alerts" aria-checked="true">Email alerts</button>

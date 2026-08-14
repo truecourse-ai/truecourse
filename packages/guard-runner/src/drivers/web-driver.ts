@@ -125,6 +125,10 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
           session.consoleLines().slice(consoleBefore),
         ),
       ]
+      // What the page gave the steps after this one. Published only on a step that
+      // held: the executor returns values only when every capture was read, so a
+      // failed browser step can never hand a later one a value it never saw.
+      if (result.captured) ctx.publishCaptures(result.captured)
       if (result.infra) {
         return { status: 'error', records, expected: STEP_TO_RUN, message: result.infra }
       }
@@ -173,6 +177,7 @@ function webStepRecord(
   result: Pick<WebStepResult, 'url' | 'visibleText' | 'durationMs' | 'checks'> & {
     screenshot?: string
     file?: WebFilePayload
+    captured?: Record<string, string>
   },
   consoleLines: readonly string[] = [],
 ): EvidenceStep {
@@ -180,6 +185,9 @@ function webStepRecord(
     index,
     kind: 'web',
     argv: [],
+    // The same field a cli step's record carries, so the transcript prints what a
+    // browser step took off the page in the one place a reader already looks.
+    ...(result.captured && Object.keys(result.captured).length > 0 ? { captured: result.captured } : {}),
     web: {
       command: describeWebCommand(step),
       expectation: describeWebExpect(step.expect),

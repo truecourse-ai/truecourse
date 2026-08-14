@@ -14,6 +14,7 @@ import type {
   GuardStreamMatcher,
   GuardFileMatcher,
 } from '@truecourse/shared'
+import { describeOffset } from '@truecourse/shared'
 
 export interface ExpectMismatch {
   /**
@@ -132,9 +133,10 @@ export function describeTextMatcher(label: string, matcher: GuardStreamMatcher):
 function describeComparison(compare: GuardComparison): string {
   const parts: string[] = []
   if (compare.number !== undefined) parts.push(`carries a number matching /${compare.number}/`)
+  const shift = describeOffset(compare.offset)
   for (const { key, phrase } of COMPARATORS) {
     const operand = compare[key]
-    if (operand !== undefined) parts.push(`is ${phrase} ${String(operand)}`)
+    if (operand !== undefined) parts.push(`is ${phrase} ${String(operand)}${shift}`)
   }
   return parts.join(' and ')
 }
@@ -328,14 +330,19 @@ export function matchComparison(
     }
   }
 
+  // The DELTA: the offset shifts the comparand, never the subject, so every
+  // message quotes the captured value AND what was added to it — "equals 3 − 1"
+  // reads as the claim ("one fewer than there were"), where a bare "equals 2"
+  // would hide which half of the sentence the run actually disagreed with.
+  const shift = describeOffset(compare.offset)
   for (const { key, phrase, holds } of COMPARATORS) {
     const operand: GuardComparand | undefined = compare[key]
     if (operand === undefined) continue
     const rawOperand = String(operand)
-    const expected = toNumber(rawOperand)
-    if (expected === null) {
+    const comparand = toNumber(rawOperand)
+    if (comparand === null) {
       return {
-        expected: `${where} ${phrase} ${rawOperand}`,
+        expected: `${where} ${phrase} ${rawOperand}${shift}`,
         actual: `the comparison value ${JSON.stringify(rawOperand)} is not a number (${where} was ${raw})`,
         detail: [
           `expected ${where} ${phrase} ${JSON.stringify(rawOperand)}, which is not a number`,
@@ -344,12 +351,13 @@ export function matchComparison(
         ],
       }
     }
+    const expected = comparand + (compare.offset ?? 0)
     if (holds(actual, expected)) continue
     return {
-      expected: `${where} ${phrase} ${rawOperand}`,
+      expected: `${where} ${phrase} ${rawOperand}${shift}`,
       actual: `${where} was ${raw}`,
       detail: [
-        `expected ${where} ${phrase} ${expected}, got ${actual}`,
+        `expected ${where} ${phrase} ${expected}${shift ? ` (${rawOperand}${shift})` : ''}, got ${actual}`,
         `--- actual ${label} ---`,
         text,
       ],
