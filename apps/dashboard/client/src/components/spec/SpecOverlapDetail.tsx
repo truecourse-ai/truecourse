@@ -17,10 +17,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Loader2 } from 'lucide-react';
-import { buildCorpusConflicts, type ConflictResolutionLike } from '@truecourse/shared';
+import type { ConflictResolutionLike, CorpusConflict } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlapReview } from '@/lib/api';
+import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverlapReview } from '@/lib/api';
 import { webDocLabel } from '@/lib/spec-web-source';
 import { SpecDocViewer } from './SpecDocViewer';
 import { WorkspaceBadge } from './WorkspaceBadge';
@@ -32,15 +32,12 @@ const PR_GATE_HINT = 'Available after the PR gate runs.';
 /** Caption above a detail card — the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
-/** Same set as the shared derivation: is this the same unordered doc pair? */
-const samePair = (a1: string, b1: string, a2: string, b2: string): boolean =>
-  (a1 === a2 && b1 === b2) || (a1 === b2 && b1 === a2);
-
 export function SpecOverlapDetail({
   repoId,
   area,
   docA,
   docB,
+  conflict,
   data,
   prNumber = null,
   prRef,
@@ -52,6 +49,14 @@ export function SpecOverlapDetail({
   area: string;
   docA: string;
   docB: string;
+  /**
+   * The dispute this pane is showing, already resolved from the URL's conflict id
+   * by the page. Passed in rather than re-found here: a doc PAIR can carry several
+   * genuine disputes (disjoint sections), so any lookup by pair lands on the first
+   * one and this pane would read — and WRITE a verdict against — the wrong dispute.
+   * `undefined` when the id addresses nothing in the current corpus (a stale link).
+   */
+  conflict: CorpusConflict<SpecOverlap> | undefined;
   data: SpecCorpusResponse;
   /** EE PR view: scope the resolution to this PR. Repo view when null/undefined. */
   prNumber?: number | null;
@@ -89,22 +94,11 @@ export function SpecOverlapDetail({
   // side stays unbadged). Inert on OSS / repo-local corpora.
   const isWorkspace = (ref: string): boolean => docMeta.get(ref)?.layer === 'workspace';
 
-  const overlap = data.corpus.areas
-    .find((ar) => ar.id === area)
-    ?.overlaps.find(
-      (o) => (o.docs[0] === docA && o.docs[1] === docB) || (o.docs[0] === docB && o.docs[1] === docA),
-    );
-
-  // The ONE shared derivation: classify this pair as open/resolved, carrying HOW
-  // (a section verdict or an exclude). Reused so this pane never disagrees with
-  // the sidebar or the gate about resolution.
-  const conflict = useMemo(() => {
-    const conflicts = buildCorpusConflicts(data.corpus, {
-      manualExcludes: data.manualExcludes ?? [],
-      conflictResolutions: data.conflictResolutions ?? [],
-    });
-    return conflicts.find((c) => samePair(c.a, c.b, docA, docB) && (c.area === area || c.areas.includes(area)));
-  }, [data, docA, docB, area]);
+  // The representative overlap of THIS dispute — carried by the conflict the
+  // shared derivation produced, so the note, the review and the section pointers
+  // all belong to the dispute the reader clicked rather than to whichever one
+  // happens to be listed first on the pair.
+  const overlap = conflict?.overlap;
 
   const derivedResolution = conflict?.resolution;
   const resolution = override !== undefined ? override : derivedResolution;
@@ -134,8 +128,11 @@ export function SpecOverlapDetail({
   const preambleFor = (d: string): boolean =>
     (overlap?.sections ?? []).some((s) => s.doc === d && s.heading === null);
 
-  // On open (or when the overlap changes), scroll each pane to its first
-  // conflicting section, and drop any stale optimistic verdict from a prior pair.
+  // On open (or when the dispute changes), scroll each pane to its first
+  // conflicting section, and drop any stale optimistic verdict from a prior one.
+  // Keyed on the conflict ID, not the doc pair: two disputes on the SAME pair are
+  // distinct panes, and keying on the pair would leave the second showing the
+  // first's scroll position and optimistic verdict.
   useEffect(() => {
     setOverride(undefined);
     const a = sectionsFor(docA)[0];
@@ -143,7 +140,7 @@ export function SpecOverlapDetail({
     if (a) setScrollA({ heading: a, nonce: 1 });
     if (b) setScrollB({ heading: b, nonce: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docA, docB, area]);
+  }, [conflict?.id, docA, docB, area]);
 
   const lastTouched = new Map(data.corpus.docs.map((d) => [d.ref, d.lastTouched] as const));
   const newerDoc = (lastTouched.get(docB) ?? '') >= (lastTouched.get(docA) ?? '') ? docB : docA;

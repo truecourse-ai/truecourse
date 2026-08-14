@@ -21,7 +21,8 @@ import type {
   GuardSectionCoverageStatus,
   GuardStaleness,
 } from '@truecourse/shared';
-import { SpecCorpusView, overlapKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
+import { conflictId } from '@truecourse/shared';
+import { SpecCorpusView, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
@@ -193,7 +194,17 @@ const CORPUS = {
 
 // A two-doc corpus with a within-area overlap — the sidebar shows two doc rows
 // plus one conflict row, so preview/pin and conflict tabs are all exercisable.
-const OVERLAP_KEY = overlapKey('core/auth', 'docs/SPEC.md', 'docs/OTHER.md');
+const OVERLAP = {
+  docs: ['docs/SPEC.md', 'docs/OTHER.md'] as [string, string],
+  note: 'they disagree on rate limits',
+  sections: [
+    { doc: 'docs/SPEC.md', heading: 'Failing bit' },
+    { doc: 'docs/OTHER.md', heading: 'Failing bit' },
+  ],
+};
+// The row/tab id is the one `buildCorpusConflicts` stamps — never rebuilt from the
+// pair, which cannot tell two disputes on the same two docs apart.
+const OVERLAP_KEY = conflictId('core/auth', 'docs/SPEC.md', 'docs/OTHER.md', OVERLAP);
 const CORPUS2 = {
   ...CORPUS,
   data: {
@@ -210,16 +221,7 @@ const CORPUS2 = {
           product: 'core',
           concern: 'auth',
           docRefs: ['docs/SPEC.md', 'docs/OTHER.md'],
-          overlaps: [
-            {
-              docs: ['docs/SPEC.md', 'docs/OTHER.md'],
-              note: 'they disagree on rate limits',
-              sections: [
-                { doc: 'docs/SPEC.md', heading: 'Failing bit' },
-                { doc: 'docs/OTHER.md', heading: 'Failing bit' },
-              ],
-            },
-          ],
+          overlaps: [OVERLAP],
         },
       ],
     },

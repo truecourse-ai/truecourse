@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type {
@@ -27,11 +27,8 @@ import type {
   GuardSectionCoverageStatus,
   GuardStaleness,
 } from '@truecourse/shared';
-import {
-  SpecCorpusView,
-  overlapKey,
-  type SpecCorpusState,
-} from '@/components/spec/SpecCorpusView';
+import { conflictId } from '@truecourse/shared';
+import { SpecCorpusView, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import type { SpecCorpusResponse } from '@/lib/api';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
@@ -39,7 +36,17 @@ import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-const OVERLAP_KEY = overlapKey('core/auth', 'docs/SPEC.md', 'docs/OTHER.md');
+const OVERLAP = {
+  docs: ['docs/SPEC.md', 'docs/OTHER.md'] as [string, string],
+  note: 'they disagree on rate limits',
+  sections: [
+    { doc: 'docs/SPEC.md', heading: 'Failing bit' },
+    { doc: 'docs/OTHER.md', heading: 'Failing bit' },
+  ],
+};
+const OVERLAP_KEY = conflictId('core/auth', 'docs/SPEC.md', 'docs/OTHER.md', OVERLAP);
+/** A `?gconf=` link minted before conflict ids carried a section discriminator. */
+const LEGACY_OVERLAP_KEY = 'overlap::core/auth::docs/SPEC.md::docs/OTHER.md';
 
 const CORPUS_RESP: SpecCorpusResponse = {
   corpus: {
@@ -55,16 +62,7 @@ const CORPUS_RESP: SpecCorpusResponse = {
         product: 'core',
         concern: 'auth',
         docRefs: ['docs/SPEC.md', 'docs/OTHER.md'],
-        overlaps: [
-          {
-            docs: ['docs/SPEC.md', 'docs/OTHER.md'],
-            note: 'they disagree on rate limits',
-            sections: [
-              { doc: 'docs/SPEC.md', heading: 'Failing bit' },
-              { doc: 'docs/OTHER.md', heading: 'Failing bit' },
-            ],
-          },
-        ],
+        overlaps: [OVERLAP],
       },
     ],
     skippedDocs: [{ ref: 'docs/DROPPED.md', reason: 'low relevance' }],
@@ -276,6 +274,49 @@ describe('Guard coverage — conflict resolution in the detail pane', () => {
     for (const label of ['Use newer only', 'Prefer newer', 'Keep both']) {
       expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument();
     }
+    expect(screen.getByText('they disagree on rate limits')).toBeInTheDocument();
+  });
+
+  // Two GENUINE disputes on the same doc pair in the same area, flagged on
+  // disjoint sections — the derivation deliberately keeps both. Each must be
+  // openable on its own; keying the rows on the pair collapsed them onto one id
+  // and left the second unreachable (issue #873).
+  const SECOND_OVERLAP = {
+    docs: ['docs/SPEC.md', 'docs/OTHER.md'] as [string, string],
+    note: 'they disagree on the retry budget',
+    sections: [
+      { doc: 'docs/SPEC.md', heading: 'Retries' },
+      { doc: 'docs/OTHER.md', heading: 'Retries' },
+    ],
+  };
+  const twoDisputes = (): SpecCorpusState =>
+    corpusState({
+      data: {
+        ...CORPUS_RESP,
+        corpus: {
+          ...CORPUS_RESP.corpus,
+          areas: CORPUS_RESP.corpus.areas.map((ar) => ({ ...ar, overlaps: [OVERLAP, SECOND_OVERLAP] })),
+        },
+      },
+    });
+
+  it('two disputes on the SAME doc pair each open their own resolution pane', async () => {
+    const secondKey = conflictId('core/auth', 'docs/SPEC.md', 'docs/OTHER.md', SECOND_OVERLAP);
+    expect(secondKey).not.toBe(OVERLAP_KEY);
+
+    renderCoverage(twoDisputes(), `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(OVERLAP_KEY)}`);
+    expect(await screen.findByText('they disagree on rate limits')).toBeInTheDocument();
+    expect(screen.queryByText('they disagree on the retry budget')).not.toBeInTheDocument();
+
+    cleanup();
+    renderCoverage(twoDisputes(), `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(secondKey)}`);
+    expect(await screen.findByText('they disagree on the retry budget')).toBeInTheDocument();
+    expect(screen.queryByText('they disagree on rate limits')).not.toBeInTheDocument();
+  });
+
+  it('a LEGACY ?gconf deep link (area + pair, no discriminator) still opens its conflict', async () => {
+    renderCoverage(corpusState(), `/repos/r?section=guard&tab=coverage&gconf=${encodeURIComponent(LEGACY_OVERLAP_KEY)}`);
+    expect(await screen.findByRole('button', { name: 'docs/SPEC.md is right' })).toBeInTheDocument();
     expect(screen.getByText('they disagree on rate limits')).toBeInTheDocument();
   });
 

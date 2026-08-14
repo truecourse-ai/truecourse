@@ -13,6 +13,8 @@ import {
   orphanedConflictResolutions,
   suppressedClaims,
   normalizeQuote,
+  resolveConflictId,
+  isConflictId,
   type ConflictResolutionLike,
 } from '../../packages/shared/src/spec/overlap-resolution.js';
 
@@ -308,5 +310,88 @@ describe('section-scoped conflict resolutions — dispute matching, verdicts, cl
 
   it('normalizeQuote folds markdown markers + whitespace', () => {
     expect(normalizeQuote('  `rm`  Deletes\nthe  task. ')).toBe('rm deletes the task.');
+  });
+});
+
+describe('conflict identity — the addressable id the surfaces key rows on', () => {
+  /** Two genuine disputes on the SAME pair in the SAME area, on disjoint sections. */
+  const samePairTwoSections = () => ({
+    areas: [
+      {
+        id: 'core/affiliate-channels',
+        overlaps: [
+          {
+            docs: ['knowledge/708837377.md', 'knowledge/894959617.md'] as [string, string],
+            note: 'two endpoints both documented as "retrieve the list of source channels"',
+            sections: [
+              { doc: 'knowledge/708837377.md', heading: '3. API Description' },
+              { doc: 'knowledge/894959617.md', heading: '3. API Description' },
+            ],
+          },
+          {
+            docs: ['knowledge/708837377.md', 'knowledge/894959617.md'] as [string, string],
+            note: 'channel key named affiliateChannelKey vs ChannelKey',
+            sections: [
+              { doc: 'knowledge/708837377.md', heading: '**3.2. RESPONSE**' },
+              { doc: 'knowledge/894959617.md', heading: '**3.2. RESPONSE**' },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  it('gives two same-pair/same-area disputes on disjoint sections DISTINCT ids', () => {
+    const conflicts = buildCorpusConflicts(samePairTwoSections(), {});
+    expect(conflicts).toHaveLength(2);
+    expect(conflicts[0].id).not.toBe(conflicts[1].id);
+  });
+
+  it('gives two SECTIONLESS same-pair/same-area disputes distinct ids', () => {
+    const sectionless = {
+      areas: [
+        {
+          id: 'core/auth',
+          overlaps: [
+            { docs: ['README.md', 'docs/SPEC.md'] as [string, string], note: 'token TTL' },
+            { docs: ['README.md', 'docs/SPEC.md'] as [string, string], note: 'refresh rotation' },
+          ],
+        },
+      ],
+    };
+    const conflicts = buildCorpusConflicts(sectionless, {});
+    expect(conflicts).toHaveLength(2);
+    expect(conflicts[0].id).not.toBe(conflicts[1].id);
+  });
+
+  it('keys the id on the same section identity the dedup merges on — stable across re-derivation', () => {
+    const first = buildCorpusConflicts(samePairTwoSections(), {}).map((c) => c.id);
+    const again = buildCorpusConflicts(samePairTwoSections(), {}).map((c) => c.id);
+    expect(first.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
+    expect(again).toEqual(first);
+  });
+
+  it('carries the representative overlap so a surface never re-finds it', () => {
+    const conflicts = buildCorpusConflicts(samePairTwoSections(), {});
+    const byNote = conflicts.map((c) => c.overlap.note);
+    expect(byNote).toContain('channel key named affiliateChannelKey vs ChannelKey');
+  });
+
+  it('resolveConflictId returns the conflict the id addresses, not the first on the pair', () => {
+    const conflicts = buildCorpusConflicts(samePairTwoSections(), {});
+    const second = conflicts[1];
+    expect(resolveConflictId(conflicts, second.id)).toBe(second);
+  });
+
+  it('resolveConflictId still resolves a LEGACY area+pair key (no discriminator)', () => {
+    const conflicts = buildCorpusConflicts(samePairTwoSections(), {});
+    const legacy = 'overlap::core/affiliate-channels::knowledge/708837377.md::knowledge/894959617.md';
+    expect(resolveConflictId(conflicts, legacy)).toBe(conflicts[0]);
+  });
+
+  it('isConflictId separates a conflict id from a plain doc ref', () => {
+    const conflicts = buildCorpusConflicts(samePairTwoSections(), {});
+    expect(isConflictId(conflicts[0].id)).toBe(true);
+    expect(isConflictId('docs/SPEC.md')).toBe(false);
   });
 });

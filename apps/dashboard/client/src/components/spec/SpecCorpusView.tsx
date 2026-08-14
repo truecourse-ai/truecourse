@@ -26,7 +26,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { EntityList, type EntityListGroup } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { useCapability } from '@/contexts/CapabilityContext';
-import { buildCorpusConflicts } from '@truecourse/shared';
+import { buildCorpusConflicts, isConflictId } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
 import { webDocLabel } from '@/lib/spec-web-source';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from './spec-source';
@@ -36,17 +36,20 @@ import { WorkspaceBadge } from './WorkspaceBadge';
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
 const PR_GATE_HINT = 'Available after the PR gate runs.';
 
-// Docs are listed once (keyed by their plain ref). An overlap is keyed by its
-// area + doc pair so the resolution detail is addressable + URL-stable.
-export const overlapKey = (area: string, a: string, b: string): string => `overlap::${area}::${a}::${b}`;
+// Docs are listed once (keyed by their plain ref). A conflict is keyed by the id
+// `buildCorpusConflicts` stamps on it — NEVER rebuilt here, because the pair alone
+// cannot tell two disputes on the same two docs apart (see `conflictId`).
 
 export type SpecKey =
   | { kind: 'doc'; ref: string }
   | { kind: 'overlap'; area: string; a: string; b: string };
 
-/** Parse a `?spec=` value into the corpus item it addresses. */
+/** Parse a `?spec=` value into the corpus item it addresses. A conflict id's
+ *  trailing discriminator is not needed to LABEL it, so the first four segments
+ *  are read and any discriminator ignored — {@link resolveConflictId} is what
+ *  turns the id back into the record. */
 export function parseSpecKey(key: string): SpecKey {
-  if (key.startsWith('overlap::')) {
+  if (isConflictId(key)) {
     const [, area, a, b] = key.split('::');
     return { kind: 'overlap', area: area ?? '', a: a ?? '', b: b ?? '' };
   }
@@ -437,6 +440,7 @@ export function SpecCorpusView({
   const conflictResolutions = data.conflictResolutions ?? [];
   const decisions = { manualExcludes, conflictResolutions };
   const conflicts = buildCorpusConflicts(c, decisions).map((cf) => ({
+    id: cf.id,
     area: cf.area,
     a: cf.a,
     b: cf.b,
@@ -460,15 +464,15 @@ export function SpecCorpusView({
   // an out-of-panel action, and silently overriding a manual collapse would be
   // more surprising than letting the highlight appear on expand.
   const activeInSkipped = skippedDocs.some((d) => activeKey === d.ref);
-  const activeInConflicts = conflicts.some((cf) => activeKey === overlapKey(cf.area, cf.a, cf.b));
+  const activeInConflicts = conflicts.some((cf) => activeKey === cf.id);
 
   // Every row of the sidebar, in ONE list: the shared EntityList narrows them by
   // the area chips and the search, then groups them back into the sections the
   // reader knows. A row is a doc, a conflict, or one of the three decision lists.
   const items: CorpusRow[] = [
-    ...visibleConflicts.map(({ area, a, b, resolved }) => ({
+    ...visibleConflicts.map(({ id, area, a, b, resolved }) => ({
       kind: 'conflict' as const,
-      id: overlapKey(area, a, b),
+      id,
       label: `${labelOf(a)} \u2194 ${labelOf(b)}`,
       area: fmtArea(area),
       resolved,

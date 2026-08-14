@@ -34,11 +34,8 @@ import {
   PlayCircle,
 } from 'lucide-react';
 import type { GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
-import {
-  overlapKey,
-  parseSpecKey,
-  type SpecCorpusState,
-} from '@/components/spec/SpecCorpusView';
+import { buildCorpusConflicts, isConflictId, resolveConflictId } from '@truecourse/shared';
+import { parseSpecKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { SpecScanButton } from '@/components/spec/SpecScanButton';
@@ -59,9 +56,6 @@ import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
 import { GuardTotalsStrip } from './GuardTotalsStrip';
 
 const FILTER_MODE_KEY = 'truecourse:guardFilterMode';
-
-/** Conflict tab ids are overlap keys; doc tab ids are plain refs. */
-const isOverlapId = (id: string): boolean => id.startsWith('overlap::');
 
 function Centered({ children }: { children: React.ReactNode }) {
   return <div className="flex h-full w-full items-center justify-center">{children}</div>;
@@ -101,7 +95,7 @@ export function GuardCoveragePage({
 }) {
   const { activeId, openTabs, open, close, section, selectSection, claim, selectClaim, focusClaim } = tabs;
   // The active tab is a conflict (its overlap key) or a doc (its ref); null = nothing open.
-  const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
+  const activeConflict = activeId && isConflictId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
 
   // A section's flow row jumps into the Tests tab (`?gflow=`), and a claim's
@@ -157,6 +151,27 @@ export function GuardCoveragePage({
   }, [activeConflict]);
   const showConflict = overlapSel != null && corpus.data != null;
 
+  // The shared derivation over the whole corpus — the ONE conflict list this page
+  // addresses by id, for both the resolution pane and the in-doc heading markers.
+  const conflicts = useMemo(
+    () =>
+      corpus.data
+        ? buildCorpusConflicts(corpus.data.corpus, {
+            manualExcludes: corpus.data.manualExcludes ?? [],
+            conflictResolutions: corpus.data.conflictResolutions ?? [],
+          })
+        : [],
+    [corpus.data],
+  );
+  // The dispute the URL names. A doc PAIR can carry several genuine disputes, so
+  // this must resolve the ID — a lookup by pair would always land on the first.
+  // Legacy `?gconf=` links (minted before ids carried a section discriminator)
+  // still resolve, to the first dispute of their pair: the row they always opened.
+  const activeConflictRecord = useMemo(
+    () => (activeConflict ? resolveConflictId(conflicts, activeConflict) : undefined),
+    [conflicts, activeConflict],
+  );
+
   // The corpus's web-source pages, by ref: a page fetched from a registered
   // llms.txt site reads as `<site> / <page>` wherever its raw snapshot ref would
   // otherwise show, and links out to the page it was fetched from.
@@ -188,7 +203,7 @@ export function GuardCoveragePage({
   const tabItems = useMemo<GuardTabStripItem[]>(
     () =>
       openTabs.map((t) => {
-        if (isOverlapId(t.id)) {
+        if (isConflictId(t.id)) {
           const k = parseSpecKey(t.id);
           const label = k.kind === 'overlap' ? `${docLabel(k.a)} ↔ ${docLabel(k.b)}` : t.id;
           return { ...t, label, title: label, icon: GitMerge };
@@ -262,18 +277,15 @@ export function GuardCoveragePage({
   // marks (normalized heading text → overlap key).
   const conflictHeadings = useMemo(() => {
     const map = new Map<string, string>();
-    if (!doc || !corpus.data) return map;
-    for (const area of corpus.data.corpus.areas) {
-      for (const ov of area.overlaps) {
-        const key = overlapKey(area.id, ov.docs[0], ov.docs[1]);
-        for (const s of ov.sections ?? []) {
-          // A preamble pointer (null heading) has no heading row to tag — skip it.
-          if (s.doc === doc && s.heading !== null) map.set(headingMatchKey(s.heading), key);
-        }
+    if (!doc) return map;
+    for (const cf of conflicts) {
+      for (const s of cf.sections ?? []) {
+        // A preamble pointer (null heading) has no heading row to tag — skip it.
+        if (s.doc === doc && s.heading !== null) map.set(headingMatchKey(s.heading), cf.id);
       }
     }
     return map;
-  }, [doc, corpus.data]);
+  }, [doc, conflicts]);
 
   // --- The pane for the active tab (or the Overview) --------------------------
   const pane = (() => {
@@ -283,9 +295,10 @@ export function GuardCoveragePage({
       return (
         <SpecOverlapDetail
           repoId={repoId}
-          area={overlapSel!.area}
-          docA={overlapSel!.a}
-          docB={overlapSel!.b}
+          area={activeConflictRecord?.area ?? overlapSel!.area}
+          docA={activeConflictRecord?.a ?? overlapSel!.a}
+          docB={activeConflictRecord?.b ?? overlapSel!.b}
+          conflict={activeConflictRecord}
           data={corpus.data!}
           prNumber={prNumber}
           prRef={prRef}

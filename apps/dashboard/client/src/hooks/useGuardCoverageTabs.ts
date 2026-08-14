@@ -15,10 +15,8 @@
 
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { isConflictId } from '@truecourse/shared';
 import { useGuardTabs, type GuardTabsParam, type GuardTabsState } from './useGuardTabs';
-
-/** Conflict tab ids are overlap keys (`overlap::…`); doc tab ids are plain refs. */
-const isOverlap = (id: string): boolean => id.startsWith('overlap::');
 
 const COVERAGE_TABS: GuardTabsParam = {
   read: (p) => p.get('gconf') ?? p.get('guard'),
@@ -31,7 +29,7 @@ const COVERAGE_TABS: GuardTabsParam = {
       next.delete('gclaim');
       return;
     }
-    if (isOverlap(id)) next.set('gconf', id);
+    if (isConflictId(id)) next.set('gconf', id);
     else next.set('guard', id);
     // A different tab takes over — its within-doc selections don't carry.
     if (id !== current) {

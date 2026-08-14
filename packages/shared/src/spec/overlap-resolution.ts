@@ -60,14 +60,14 @@ export interface OverlapLike {
 }
 
 /** The minimal area shape — its id and the within-area overlaps it flags. */
-export interface AreaLike {
+export interface AreaLike<O extends OverlapLike = OverlapLike> {
   id: string;
-  overlaps: readonly OverlapLike[];
+  overlaps: readonly O[];
 }
 
 /** The minimal corpus shape — the areas with the overlaps they flag. */
-export interface CorpusLike {
-  areas: readonly AreaLike[];
+export interface CorpusLike<O extends OverlapLike = OverlapLike> {
+  areas: readonly AreaLike<O>[];
 }
 
 /**
@@ -104,7 +104,22 @@ export interface DecisionsLike {
  * resolved so a surface can render the right badge (the verdict, or the
  * excluded doc) without re-deriving.
  */
-export interface CorpusConflict {
+export interface CorpusConflict<O extends OverlapLike = OverlapLike> {
+  /**
+   * The dispute's ADDRESSABLE identity — stable, unique per record, and safe in a
+   * URL. Built by {@link conflictId} from the SAME section identity the dedup
+   * merges on, so a surface keying rows on it can never collide two records the
+   * derivation deliberately kept apart. Resolve one back with
+   * {@link resolveConflictId}; never rebuild it in a consumer.
+   */
+  id: string;
+  /**
+   * The representative overlap this record stands for — the one the merge chose.
+   * Carried so a surface reads the dispute's note / sections / review (and any
+   * field the corpus's own overlap type adds) WITHOUT re-finding it by doc pair,
+   * which is exactly the search that cannot tell two same-pair disputes apart.
+   */
+  overlap: O;
   /** The representative area the record surfaces under. */
   area: string;
   /**
@@ -164,6 +179,68 @@ const sectionPointerKeys = (ov: OverlapLike): string[] =>
   (ov.sections ?? []).map((s) => `${s.doc}${NUL}${s.heading ?? PREAMBLE_PTR}`);
 const preambleCount = (ov: OverlapLike): number =>
   (ov.sections ?? []).filter((s) => s.heading === null || s.heading === undefined).length;
+
+/**
+ * The canonical identity of ONE dispute, folded to a single string: the SAME
+ * section identity {@link dedupeCrossAreaOverlaps} merges on. Sorted section
+ * pointers when the overlap flags any; the normalized note otherwise — a
+ * SECTIONLESS overlap shares no pointer with anything, so it never merges, and
+ * without the fallback two of them on one pair would be indistinguishable.
+ *
+ * The dedup and {@link conflictId} both read THIS, which is what keeps "what
+ * makes two disputes the same" from being answered twice and drifting.
+ */
+const overlapIdentity = (ov: OverlapLike): string => {
+  const ptrs = sectionPointerKeys(ov);
+  return ptrs.length > 0 ? [...ptrs].sort().join(NUL) : `note${NUL}${normalizeQuote(ov.note ?? '')}`;
+};
+
+/** FNV-1a 32-bit as hex — short, dependency-free, identical in node and the
+ *  browser. NOT cryptographic: it only has to separate the handful of disputes
+ *  that share one area + doc pair. */
+const shortHash = (s: string): string => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+};
+
+/** Every conflict id starts with this — the marker a URL/tab layer routes on. */
+const CONFLICT_ID_PREFIX = 'overlap::';
+
+/**
+ * The addressable id of one dispute: `overlap::<area>::<a>::<b>::<discriminator>`.
+ * The trailing discriminator is what the pre-existing area+pair key lacked, so
+ * two disputes the dedup deliberately kept apart (disjoint sections on the same
+ * pair) get distinct, URL-stable ids instead of colliding on one.
+ */
+export function conflictId(area: string, a: string, b: string, overlap: OverlapLike): string {
+  return `${CONFLICT_ID_PREFIX}${area}::${a}::${b}::${shortHash(overlapIdentity(overlap))}`;
+}
+
+/** Is this a conflict id (rather than a plain doc ref)? The tab/URL layers route on it. */
+export const isConflictId = (id: string): boolean => id.startsWith(CONFLICT_ID_PREFIX);
+
+/**
+ * The conflict an id addresses, or `undefined`. An exact id resolves to exactly
+ * one record. A LEGACY key minted before the discriminator existed
+ * (`overlap::<area>::<a>::<b>`) names only the pair, so it cannot tell siblings
+ * apart: it lands on the first — the row it always landed on — rather than 404ing.
+ */
+export function resolveConflictId<O extends OverlapLike>(
+  conflicts: readonly CorpusConflict<O>[],
+  id: string,
+): CorpusConflict<O> | undefined {
+  const exact = conflicts.find((c) => c.id === id);
+  if (exact || !isConflictId(id)) return exact;
+  const [, area, a, b, discriminator] = id.split('::');
+  if (discriminator !== undefined) return undefined;
+  return conflicts.find(
+    (c) => c.area === area && ((c.a === a && c.b === b) || (c.a === b && c.b === a)),
+  );
+}
 
 /**
  * Collapse the SAME disagreement flagged across shared areas into ONE record.
@@ -314,18 +391,21 @@ function matchResolution(
  * the gate's unresolved subset. A conflict is resolved only by a matching
  * verdict/dismissal or a covering exclude.
  */
-export function buildCorpusConflicts(corpus: CorpusLike, decisions: DecisionsLike): CorpusConflict[] {
+export function buildCorpusConflicts<O extends OverlapLike>(
+  corpus: CorpusLike<O>,
+  decisions: DecisionsLike,
+): CorpusConflict<O>[] {
   const excludes = new Set(decisions.manualExcludes ?? []);
 
   // Collapse the same dispute flagged across shared areas into ONE record, so a
   // pair co-occurring in several areas is one conflict — the same deterministic
   // rule a fresh scan applies at assembly, re-applied here so older corpora that
   // persisted the per-area duplicates still surface (and count) once.
-  const entries: AreaOverlap<OverlapLike>[] = [];
+  const entries: AreaOverlap<O>[] = [];
   for (const area of corpus.areas) for (const ov of area.overlaps) entries.push({ area: area.id, overlap: ov });
   const mergedOverlaps = dedupeCrossAreaOverlaps(entries);
 
-  const flagged: CorpusConflict[] = [];
+  const flagged: CorpusConflict<O>[] = [];
   for (const m of mergedOverlaps) {
     const [a, b] = m.overlap.docs;
     const sections = m.overlap.sections ? [...m.overlap.sections] : undefined;
@@ -333,6 +413,8 @@ export function buildCorpusConflicts(corpus: CorpusLike, decisions: DecisionsLik
     // A section-scoped verdict (pick-a-side OR dismissal) resolves the dispute.
     const resolution = matchResolution(decisions, a, b, sections);
     flagged.push({
+      id: conflictId(m.area, a, b, m.overlap),
+      overlap: m.overlap,
       area: m.area,
       areas: m.areas,
       a,
@@ -352,7 +434,10 @@ export function buildCorpusConflicts(corpus: CorpusLike, decisions: DecisionsLik
  * both sides of one of these births a red finding that is really the unresolved
  * dispute, so generate must fail until they are resolved.
  */
-export function openConflicts(corpus: CorpusLike, decisions: DecisionsLike): CorpusConflict[] {
+export function openConflicts<O extends OverlapLike>(
+  corpus: CorpusLike<O>,
+  decisions: DecisionsLike,
+): CorpusConflict<O>[] {
   return buildCorpusConflicts(corpus, decisions).filter((c) => !c.resolved);
 }
 

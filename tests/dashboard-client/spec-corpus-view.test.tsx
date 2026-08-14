@@ -12,12 +12,24 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
 import { render, screen, waitFor, renderHook, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SpecCorpusView, useSpecCorpus, overlapKey, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
+import { buildCorpusConflicts } from '@truecourse/shared';
+import { SpecCorpusView, useSpecCorpus, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
 import { SpecScanButton } from '../../apps/dashboard/client/src/components/spec/SpecScanButton';
 import { SpecDocViewer } from '../../apps/dashboard/client/src/components/spec/SpecDocViewer';
 import { SpecOverlapDetail } from '../../apps/dashboard/client/src/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '../../apps/dashboard/client/src/components/spec/DocMarkdown';
 import type { SpecCorpusResponse, SpecOverlapReview } from '../../apps/dashboard/client/src/lib/api';
+
+/**
+ * The dispute the PAGE resolves and hands the pane. SpecOverlapDetail no longer
+ * re-finds it by doc pair (a pair can carry several disputes, and any pair lookup
+ * lands on the first), so a test supplies it exactly the way GuardCoveragePage does.
+ */
+const conflictFor = (data: SpecCorpusResponse, docA = 'docs/v1.md', docB = 'docs/v2.md') =>
+  buildCorpusConflicts(data.corpus, {
+    manualExcludes: data.manualExcludes ?? [],
+    conflictResolutions: data.conflictResolutions ?? [],
+  }).find((c) => (c.a === docA && c.b === docB) || (c.a === docB && c.b === docA));
 
 const RESP: SpecCorpusResponse = {
   corpus: {
@@ -154,7 +166,7 @@ describe('SpecCorpusView (left nav)', () => {
     const user = userEvent.setup();
     render(<SpecCorpusView corpus={state()} activeKey={null} onOpen={onOpen} />);
     await user.click(screen.getByText('docs/v1.md ↔ docs/v2.md'));
-    expect(onOpen).toHaveBeenCalledWith(overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md'), false);
+    expect(onOpen).toHaveBeenCalledWith(conflictFor(RESP)!.id, false);
   });
 
   // Auto-resolve settles the high-confidence conflicts, so a corpus can carry
@@ -423,7 +435,7 @@ describe('SpecCorpusView — section default collapse states', () => {
       <SpecCorpusView
         repoId="r1"
         corpus={state({ data: ALL_RESOLVED })}
-        activeKey={overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md')}
+        activeKey={conflictFor(ALL_RESOLVED)!.id}
         onOpen={vi.fn()}
       />,
     );
@@ -676,18 +688,23 @@ describe('SpecOverlapDetail (right pane) — section verdicts', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  const renderDetail = (props: Partial<ComponentProps<typeof SpecOverlapDetail>> = {}) =>
-    render(
+  // `conflict` is derived from the FINAL data (after any override), mirroring the
+  // page: the record the pane renders and the corpus it renders it against are one.
+  const renderDetail = (props: Partial<ComponentProps<typeof SpecOverlapDetail>> = {}) => {
+    const data = props.data ?? RESP;
+    return render(
       <SpecOverlapDetail
         repoId="r1"
         area="booking/appointments"
         docA="docs/v1.md"
         docB="docs/v2.md"
-        data={RESP}
         onResolved={vi.fn()}
         {...props}
+        data={data}
+        conflict={props.conflict ?? conflictFor(data)}
       />,
     );
+  };
 
   it('renders the three verdicts — "<docA> is right" / "<docB> is right" / dismiss — and NO relation buttons', () => {
     renderDetail();
@@ -803,6 +820,7 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
         data={data}
         onResolved={vi.fn()}
         {...props}
+        conflict={props.conflict ?? conflictFor(data)}
       />,
     );
 
@@ -1149,7 +1167,7 @@ describe('SpecOverlapDetail (PR-scoped verdict)', () => {
     const onResolved = vi.fn();
     const user = userEvent.setup();
     render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef="head-1" onResolved={onResolved} />,
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" conflict={conflictFor(RESP)} data={RESP} prNumber={4} prRef="head-1" onResolved={onResolved} />,
     );
     await user.click(screen.getByRole('button', { name: 'docs/v1.md is right' }));
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
@@ -1168,6 +1186,7 @@ describe('SpecOverlapDetail (PR-scoped verdict)', () => {
         area="booking/appointments"
         docA="docs/v1.md"
         docB="docs/v2.md"
+        conflict={conflictFor(RESP)}
         data={RESP}
         onResolved={onResolved}
         onConflictChange={onConflictChange}
@@ -1182,7 +1201,7 @@ describe('SpecOverlapDetail (PR-scoped verdict)', () => {
 
   it('disables the verdict actions (with a hint) before the PR gate runs', () => {
     render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef={undefined} onResolved={vi.fn()} />,
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" conflict={conflictFor(RESP)} data={RESP} prNumber={4} prRef={undefined} onResolved={vi.fn()} />,
     );
     expect(screen.getByRole('button', { name: 'docs/v1.md is right' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeDisabled();
