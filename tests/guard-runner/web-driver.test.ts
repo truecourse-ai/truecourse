@@ -753,6 +753,52 @@ describe('the web driver', () => {
   )
 
   it(
+    'refuses an undeclared ambiguity, and `pick: first` declares it away',
+    async () => {
+      // "Zoom" matches both icon buttons — a bare locator must fail saying so.
+      const bare = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/controls',
+            expect: { visible: { role: 'button', name: 'Zoom' } },
+            timeoutMs: 1_500,
+          },
+        ],
+        'web.ambiguous.cli.1',
+      )
+      expect(bare.outcome).toBe('fail')
+      expect(bare.failure?.actual).toContain('2 elements match button “Zoom”')
+      expect(bare.failure?.actual).toContain('a target must be unambiguous')
+
+      // The same grid with the ambiguity DECLARED: the first match answers, for a
+      // visibility check and for a click alike, and the transcript says "first".
+      const picked = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/controls',
+            expect: { visible: { role: 'button', name: 'Zoom', pick: 'first' } },
+          },
+          {
+            driver: 'web',
+            click: { role: 'button', name: 'Zoom', pick: 'first' },
+            expect: { url: { contains: '/controls' } },
+          },
+        ],
+        'web.picked.cli.1',
+      )
+      expect(picked.outcome).toBe('pass')
+      expect(transcript(repo, 'web.picked.cli.1')).toContain(
+        '✓ expected: first button “Zoom” is visible',
+      )
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
     'moves through the history — Back and Forward, as a user presses them',
     async () => {
       const result = await run(

@@ -75,6 +75,13 @@ describe('web step schema', () => {
     expect(() => GuardWebLocatorSchema.parse({ role: 'button' })).toThrow()
   })
 
+  it('`pick: first` is the one declared-ambiguity escape — and only `first`', () => {
+    expect(GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick: 'first' }).pick).toBe('first')
+    expect(GuardWebLocatorSchema.parse({ role: 'button', name: 'Save' }).pick).toBeUndefined()
+    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick: 'last' })).toThrow()
+    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: ':00', pick: 2 })).toThrow()
+  })
+
   it('a web expectation needs something to assert, and `within` needs text', () => {
     expect(() => GuardWebExpectSchema.parse({})).toThrow()
     expect(() => GuardWebExpectSchema.parse({ within: { role: 'main', name: 'Report' } })).toThrow()
@@ -331,6 +338,7 @@ describe('web rendering helpers', () => {
   it('describe a locator, a command and an expectation the way a failure quotes them', () => {
     expect(describeWebLocator({ role: 'button', name: 'Save' })).toBe('button “Save”')
     expect(describeWebLocator({ role: 'button', name: 'Save', exact: true })).toBe('button “Save” (exact)')
+    expect(describeWebLocator({ role: 'button', name: ':00', pick: 'first' })).toBe('first button “:00”')
     expect(describeWebCommand({ driver: 'web', navigate: '/a' } as GuardWebStep)).toBe('navigate /a')
     expect(describeWebExpect(undefined)).toBe('')
     expect(

@@ -134,6 +134,12 @@ export const GUARD_WEB_ROLES = [
  * The locator is STRICT: it must resolve to exactly one element. Two elements with
  * the same role and name is a genuine ambiguity — the step fails saying how many it
  * found, rather than silently acting on the first and passing for the wrong reason.
+ *
+ * `pick: first` is the one authored exception: a page can legitimately show many
+ * controls that read the same (a grid of slot buttons, a list of identical rows)
+ * where ANY of them serves the flow. Declaring it says "many matches are expected;
+ * act on the first" — the intent is on the page, not guessed by the driver, so an
+ * UNDECLARED ambiguity still fails as loudly as ever.
  */
 export const GuardWebLocatorSchema = z
   .object({
@@ -142,6 +148,8 @@ export const GuardWebLocatorSchema = z
     name: z.string().min(1),
     /** Demand the WHOLE accessible name rather than a case-insensitive substring. */
     exact: z.boolean().optional(),
+    /** Act on the FIRST of several legitimate matches. See the strictness note above. */
+    pick: z.literal('first').optional(),
   })
   .strict()
 
@@ -516,9 +524,9 @@ export function webStepPatterns(step: GuardWebStep): Array<{ where: string; patt
 
 // --- Presentation: the words a step list and a failure both use --------
 
-/** `button “Save”` — one locator, in the words a reader (and a failure) uses. */
+/** `button “Save”` / `first button “:00”` — one locator, in a reader's words. */
 export function describeWebLocator(locator: GuardWebLocator): string {
-  return `${locator.role} “${locator.name}”${locator.exact ? ' (exact)' : ''}`
+  return `${locator.pick === 'first' ? 'first ' : ''}${locator.role} “${locator.name}”${locator.exact ? ' (exact)' : ''}`
 }
 
 /**

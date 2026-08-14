@@ -137,9 +137,14 @@ async function readVisibleText(page: Page): Promise<string> {
   }
 }
 
-/** The locator for one authored target — role plus accessible name, nothing else. */
+/**
+ * The locator for one authored target — role plus accessible name, nothing else.
+ * An authored `pick: first` narrows to the first match, so downstream counting sees
+ * 0 or 1 and the strict must-be-unambiguous check never fires for declared grids.
+ */
 export function webLocator(page: Page, target: GuardWebLocator): Locator {
-  return page.getByRole(target.role, { name: target.name, exact: target.exact ?? false })
+  const base = page.getByRole(target.role, { name: target.name, exact: target.exact ?? false })
+  return target.pick === 'first' ? base.first() : base
 }
 
 /**
