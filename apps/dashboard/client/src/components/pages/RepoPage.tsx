@@ -55,6 +55,7 @@ import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
 import { GuardInterfacesPanel } from '@/components/guard/GuardInterfacesPanel';
 import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
+import { SessionsActivityView } from '@/components/sessions/SessionsActivityView';
 import { GuardDependenciesPane } from '@/components/guard/GuardDependenciesPane';
 import { GuardSectionActions } from '@/components/guard/GuardSectionActions';
 import { LlmEstimateModal } from '@/components/spec/LlmEstimateModal';
@@ -1451,6 +1452,10 @@ function RepoPageInner() {
               reloadKey={guardReloadKey}
               onOpenFlow={openGuardFlow}
             />
+          ) : leftTab === 'activity' ? (
+            // Agentic runs + sessions + live transcripts/chat (plan §3.6–§3.9).
+            // UI MOCK: hand-written data, no server reads.
+            <SessionsActivityView />
           ) : leftTab === 'guarddrifts' ? (
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardDriftsView

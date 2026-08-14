@@ -23,6 +23,7 @@
  */
 
 import {
+  Activity,
   Home,
   Network,
   Workflow,
@@ -187,6 +188,10 @@ export const SECTIONS: SectionDescriptor[] = [
       // panel. Shares BL Drift's Runs idiom (ClipboardList) — the two live in
       // different sections, so a shared icon never crowds one rail.
       { id: 'guarddrifts', label: 'Runs', icon: ClipboardList, noPanel: true },
+      // Every agentic run (scan, setup, generate) with its sessions, live
+      // transcripts and chat — AGENTIC_PIPELINE_PLAN §3.6–§3.9. UI MOCK for
+      // now: renders hand-written data, no server reads.
+      { id: 'activity', label: 'Activity', icon: Activity, noPanel: true },
     ],
   },
 ];
