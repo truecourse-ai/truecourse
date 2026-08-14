@@ -27,7 +27,7 @@ function iface(id: string, command: string[], flags: string[] = []): Interface {
 
 function writeCatalog(root: string, interfaces: Interface[]): InterfacesFile {
   const file: InterfacesFile = {
-    version: 1,
+    version: 2,
     generatedAt: new Date().toISOString(),
     recipeFingerprint: 'sha256:recipe',
     interfaces,
@@ -42,7 +42,7 @@ const WHOAMI = iface('cli/whoami', ['relkit', 'whoami'])
 
 describe('isInterfaceDrifted', () => {
   const catalog: InterfacesFile = {
-    version: 1,
+    version: 2,
     generatedAt: 'now',
     recipeFingerprint: 'sha256:recipe',
     interfaces: [VERSION, WHOAMI],

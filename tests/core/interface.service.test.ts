@@ -85,7 +85,7 @@ describe('mapInterfaces', () => {
     const result = await mapInterfaces(repo, { probeExec: null });
 
     expect(result.snapshotPath).toBe(path.join(repo, '.truecourse/guard/interfaces.json'));
-    expect(result.catalog.version).toBe(1);
+    expect(result.catalog.version).toBe(2);
     expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree' });
     expect(result.catalog.interfaces.map((j) => j.id)).toEqual([
       'cli/config',
@@ -234,6 +234,88 @@ describe('mapInterfaces', () => {
       'api/get-health',
     ]);
     expect(Object.keys(result.fingerprints).sort()).toEqual(['api', 'cli']);
+  });
+
+  it('forms both surfaces’ PLACES and points every interface at its own', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit', bin: { shipit: 'dist/cli.js' } }),
+      'src/cli.ts': COMMANDER_CLI,
+      'src/server.ts': `
+        import express from 'express'
+        const app = express()
+        app.get('/deploys', listDeploys)
+        app.get('/deploys/:id', getDeploy)
+        app.post('/deploys/:id/rollback', rollbackDeploy)
+        app.listen(3000)
+      `,
+    });
+
+    const result = await mapInterfaces(repo, { probeExec: null });
+
+    // The cli tree: the program's own root group, plus one per parent command.
+    // The root is named from `package.json`'s bin key — nothing else knows it.
+    expect(result.catalog.resources!.cli).toEqual([
+      { id: 'shipit', kind: 'command-group', title: 'shipit' },
+      { id: 'config', kind: 'command-group', title: 'shipit config', of: 'shipit' },
+    ]);
+    // The api tree, with the RPC tail folded into the noun it is issued to.
+    expect(result.catalog.resources!.api).toEqual([
+      { id: 'deploys', kind: 'rest-noun', title: '/deploys' },
+    ]);
+    const owner = (id: string) => result.catalog.interfaces.find((j) => j.id === id)!.resource;
+    expect(owner('cli/deploy')).toBe('shipit');
+    expect(owner('cli/config-get')).toBe('config');
+    expect(owner('api/post-deploys-id-rollback')).toBe('deploys');
+    expect(owner('api/get-deploys-id')).toBe('deploys');
+
+    // The registry is written to disk with everything else, and re-reads valid.
+    expect(readSnapshot().resources).toEqual(result.catalog.resources);
+  });
+
+  it('writes the request contract ONTO the operation it belongs to', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'src/server.ts': `
+        import express from 'express'
+        const app = express()
+        app.get('/deploys', (req, res) => {
+          const { status, limit } = req.query
+          res.json([])
+        })
+        app.post('/deploys', (req, res) => {
+          const { service } = req.body
+          if (!req.body.service) return res.status(400).json({ error: 'service required' })
+          res.status(201).json({})
+        })
+        app.listen(3000)
+      `,
+    });
+
+    const result = await mapInterfaces(repo, { probeExec: null });
+    const contractOf = (id: string) => result.catalog.interfaces.find((j) => j.id === id)!.contract;
+
+    // The api member, natively — not a command wearing an argv of ["POST", "/x"].
+    const post = contractOf('api/post-deploys')!;
+    expect(post.surface).toBe('api');
+    if (post.surface !== 'api') throw new Error('not an api contract');
+    expect(post.operation.request!.body!.map((f) => f.name)).toEqual(['service']);
+    const get = contractOf('api/get-deploys')!;
+    if (get.surface !== 'api') throw new Error('not an api contract');
+    expect(get.operation.request!.query!.map((f) => f.name)).toEqual(['status', 'limit']);
+    expect(get.operation.request!.body).toBeUndefined();
+
+    // The same facts still travel on the result for callers that took them there;
+    // the catalog is now their HOME, not a second copy of a separate product.
+    expect(result.requestContracts.map((c) => `${c.method} ${c.path}`).sort()).toEqual([
+      'GET /deploys',
+      'POST /deploys',
+    ]);
+
+    // Nothing else is invented: no statuses, no body markers, no path params —
+    // the derivation establishes none of them, and omitted is the honest answer.
+    expect(post.operation.produces).toBeUndefined();
+    expect(post.operation.consumes).toBeUndefined();
+    expect(post.operation.request!.params).toBeUndefined();
   });
 
   it('unions the corpus-kept OpenAPI doc into the api catalog and marks unrouted operations specOnly', async () => {

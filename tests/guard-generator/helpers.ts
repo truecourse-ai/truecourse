@@ -150,7 +150,7 @@ export function writeInterfaceSnapshot(repo: string, interfaces: Interface[]): v
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(
     target,
-    JSON.stringify({ version: 1, generatedAt: '2026-01-01T00:00:00Z', recipeFingerprint: '', interfaces }, null, 2),
+    JSON.stringify({ version: 2, generatedAt: '2026-01-01T00:00:00Z', recipeFingerprint: '', interfaces }, null, 2),
   )
 }
 

@@ -28,7 +28,7 @@ const TODOS: Interface = (() => {
 
 function writeCatalog(root: string, interfaces: Interface[]): void {
   const file: InterfacesFile = {
-    version: 1,
+    version: 2,
     generatedAt: new Date().toISOString(),
     recipeFingerprint: 'sha256:recipe',
     interfaces,

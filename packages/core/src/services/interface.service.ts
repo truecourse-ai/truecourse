@@ -43,6 +43,8 @@ import {
   createSandboxProbeExec,
   deriveApiInterfacesFromTree,
   deriveCliInterfaces,
+  formApiResources,
+  formCliResources,
   type ApiSpecOperation,
   type CliProbeExec,
 } from '@truecourse/interface-mapper';
@@ -56,6 +58,7 @@ import type {
   FileAnalysis,
   Interface,
   InterfaceCatalogSource,
+  InterfaceResource,
   InterfacesFile,
 } from '@truecourse/shared';
 import { log } from '../lib/logger.js';
@@ -123,12 +126,14 @@ export async function mapInterfaces(
   opts: MapInterfacesOptions = {},
 ): Promise<MapInterfacesResult> {
   const interfaces = await deriveInterfaces(repoPath, opts);
+  const placed = placeInterfaces(interfaces.interfaces, programName(repoPath));
 
   const catalog: InterfacesFile = {
-    version: 1,
+    version: 2,
     generatedAt: new Date().toISOString(),
     recipeFingerprint: readRecipeFingerprint(repoPath),
-    interfaces: interfaces.interfaces,
+    interfaces: placed.interfaces,
+    ...(Object.keys(placed.resources).length > 0 ? { resources: placed.resources } : {}),
     source: interfaces.source,
   };
 
@@ -145,6 +150,41 @@ export async function mapInterfaces(
     requestContracts: interfaces.requestContracts,
     outboundRequests: interfaces.outboundRequests,
   };
+}
+
+/**
+ * THE PLACES, and each interface's owner — the SOM envelope (plan item 98)
+ * formed over the interfaces the surface derivations just produced. Pure and
+ * deterministic; the formation rules themselves live in the mapper
+ * (`formCliResources` / `formApiResources`) so the reference-catalog migration
+ * uses the identical ones.
+ *
+ * Degrades like every other derivation here: a formation that throws costs the
+ * catalog its registry and its `resource` refs, never the catalog. An interface
+ * the formation could not place keeps none — omitted, never guessed.
+ */
+function placeInterfaces(
+  interfaces: readonly Interface[],
+  programName: string | undefined,
+): { interfaces: Interface[]; resources: Record<string, InterfaceResource[]> } {
+  try {
+    const cli = formCliResources(interfaces, { ...(programName ? { programName } : {}) });
+    const api = formApiResources(interfaces);
+    const owners = new Map([...cli.owners, ...api.owners]);
+    return {
+      interfaces: interfaces.map((iface) => {
+        const owner = owners.get(iface.id);
+        return owner ? { ...iface, resource: owner } : iface;
+      }),
+      resources: {
+        ...(cli.resources.length > 0 ? { cli: cli.resources } : {}),
+        ...(api.resources.length > 0 ? { api: api.resources } : {}),
+      },
+    };
+  } catch (error) {
+    log.warn(`interface mapping: resource formation failed, the catalog names no places (${errorText(error)})`);
+    return { interfaces: [...interfaces], resources: {} };
+  }
 }
 
 /**
@@ -217,8 +257,15 @@ async function deriveInterfaces(
     log.warn(`interface mapping: cli derivation failed, cli catalog is empty (${errorText(error)})`);
   }
 
+  // The two authoring-grounding products, derived before the api catalog is
+  // assembled: the request contract is no longer a product BESIDE the catalog,
+  // it is the api contract's `request` region (plan item 98), so it has to exist
+  // by the time the api interfaces are built.
+  const requestContracts = safely('request contracts', () => collectApiRequestContracts(fileAnalyses));
+
   try {
-    interfaces.push(...deriveApiInterfacesFromTree(fileAnalyses, readOpenApiOperations(repoPath)));
+    const api = deriveApiInterfacesFromTree(fileAnalyses, readOpenApiOperations(repoPath));
+    interfaces.push(...withApiContracts(api, requestContracts));
     source.api = 'tree';
   } catch (error) {
     log.warn(`interface mapping: api derivation failed, api catalog is empty (${errorText(error)})`);
@@ -232,11 +279,49 @@ async function deriveInterfaces(
     }),
     database: detectDatabaseContext(repoPath, fileAnalyses),
     datastoreUrls: collectDatastoreUrls(fileAnalyses),
-    // The two authoring-grounding products. Degrade like every other derivation here:
-    // a collector that throws costs authoring its grounding, never the run.
-    requestContracts: safely('request contracts', () => collectApiRequestContracts(fileAnalyses)),
+    requestContracts,
+    // Degrades like every other derivation here: a collector that throws costs
+    // authoring its grounding, never the run.
     outboundRequests: safely('outbound requests', () => collectOutboundRequests(fileAnalyses)),
   };
+}
+
+/**
+ * THE ONE HOME for the api request contract (plan item 98): what each handler
+ * reads off the request, written ONTO the operation it belongs to instead of
+ * travelling beside the catalog as a second product joined at prompt time.
+ *
+ * Only what the derivation established goes in. `params` are not written: the
+ * path template already names them on the entry, and nothing in the extraction
+ * says more about them than the path does — omitted is the honest answer, and
+ * inventing them here would be the derivation claiming a fact it never made.
+ * An operation whose handler reads nothing statically visible gets no contract
+ * at all, for the same reason.
+ */
+function withApiContracts(
+  interfaces: readonly Interface[],
+  contracts: readonly ApiRequestContract[],
+): Interface[] {
+  if (contracts.length === 0) return [...interfaces];
+  const byOperation = new Map(contracts.map((c) => [`${c.method.toUpperCase()} ${c.path}`, c]));
+  return interfaces.map((iface) => {
+    const entry = iface.entry as { method?: string; path?: string };
+    if (iface.type !== 'api' || !entry.method || !entry.path) return iface;
+    const contract = byOperation.get(`${entry.method.toUpperCase()} ${entry.path}`);
+    if (!contract) return iface;
+    return {
+      ...iface,
+      contract: {
+        surface: 'api' as const,
+        operation: {
+          request: {
+            ...(contract.queryFields ? { query: contract.queryFields.map((f) => ({ ...f })) } : {}),
+            ...(contract.bodyFields ? { body: contract.bodyFields.map((f) => ({ ...f })) } : {}),
+          },
+        },
+      },
+    };
+  });
 }
 
 /**
