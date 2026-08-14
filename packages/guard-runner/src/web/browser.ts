@@ -156,6 +156,11 @@ export async function launchWebBrowser(
     context = await browser.newContext({
       viewport: { ...WEB_VIEWPORT },
       deviceScaleFactor: 1,
+      // The page must render the same on every machine: scenarios assert rendered
+      // clock labels, so the browser's timezone and locale are pinned to the same
+      // UTC/C-locale world the CLI driver's child env pins (child-env.ts).
+      timezoneId: 'UTC',
+      locale: 'en-US',
       recordVideo: { dir: opts.videoDir, size: { ...WEB_VIEWPORT } },
     })
     page = await context.newPage()
