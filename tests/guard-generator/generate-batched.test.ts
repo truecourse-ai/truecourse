@@ -173,16 +173,16 @@ describe('generateGuards — batched birth validation (layer a)', () => {
       flowId: 'beta',
       surface: 'cli',
       title: 'b-bad',
-      scenarioId: 'beta.cli.1',
+      scenarioId: 'beta',
       committed: true,
     })
-    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.cli.1', 'beta.cli.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha', 'beta'])
     const flows = new Map(readManifest(r)!.flows.map((f) => [f.flowId, f]))
-    expect(flows.get('alpha')!.scenarios).toEqual([{ id: 'alpha.cli.1', drivers: ['cli'], status: 'passing' }])
+    expect(flows.get('alpha')!.scenarios).toEqual([{ id: 'alpha', drivers: ['cli'], status: 'passing' }])
     expect(flows.get('alpha')!.generationInputsHash).toBeTruthy()
     // beta's test is committed with its failing status, so its flow SETTLED too.
     expect(flows.get('beta')!.scenarios).toMatchObject([
-      { id: 'beta.cli.1', drivers: ['cli'], status: 'failing', diagnosis: { title: 'b-bad' } },
+      { id: 'beta', drivers: ['cli'], status: 'failing', diagnosis: { title: 'b-bad' } },
     ])
     expect(flows.get('beta')!.generationInputsHash).toBeTruthy()
     expect(res.flows).toMatchObject({ settled: 2, unsettled: 0 })
@@ -221,7 +221,7 @@ describe('generateGuards — isolated re-confirmation of birth findings (layer d
     expect(res.birthFindings[0].actual).toBe('ISOLATED-FAIL')
     // round-1 (2) + retry (2) + one isolation per round-2 failure (flipA, flipB).
     expect(isolationCalls(calls)).toHaveLength(2)
-    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha.api.1', 'beta.api.1'])
+    expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha', 'beta'])
   }, 60_000)
 
   it('caps isolated re-confirmations; beyond the cap findings carry the batch evidence', async () => {

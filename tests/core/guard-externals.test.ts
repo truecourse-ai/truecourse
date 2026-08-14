@@ -19,7 +19,7 @@ import {
   writeGuardExternals,
   GuardExternalsWriteError,
 } from '../../packages/core/src/commands/guard-externals';
-import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths';
+import { GITIGNORE_CONTENTS, ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
 import { computeRecipeFingerprint } from '../../packages/guard-runner/src/index';
 import { deriveNeedsSetup } from '../../packages/shared/src/index';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
@@ -626,6 +626,65 @@ describe('external services without an api block (the dependency catalog)', () =
   });
 
   /**
+   * A matched entry KEEPS its identity: its name (which scenarios' `needs` and the
+   * overlay's row key both reference) and every var it already declares. Saving a
+   * base URL for the service it stands for must layer onto it, never replace it.
+   */
+  it('updates a matched single-service entry in place — name, vars and secrets survive', () => {
+    const r = repo();
+    writeJson(recipeFile(r), { build: 'true', entry: ['node', 'bin.mjs'] });
+    writeJson(catalogFile(r), {
+      dependencies: [
+        {
+          name: 'claude-login',
+          class: 'supplied',
+          services: ['claude'],
+          summary: 'an authenticated Claude Code installation',
+          condition: {
+            predicates: [{ kind: 'config-value', key: 'llm.transport', value: 'claude-code' }],
+            sentence: 'only when the LLM transport is `claude-code`',
+          },
+          registration: {
+            kind: 'env',
+            vars: [{ name: 'CLAUDE_CODE_OAUTH_TOKEN', description: 'a long-lived token', secret: true }],
+          },
+          needs: [{ flowId: 'f1', need: 'a token that answers a non-interactive prompt' }],
+        },
+      ],
+    });
+    writeJson(catalogLocalFile(r), { 'claude-login': { env: { CLAUDE_CODE_OAUTH_TOKEN: 'sk-real' } } });
+
+    writeGuardExternals(r, {
+      externals: { claude: { baseUrlEnv: 'ANTHROPIC_BASE_URL', baseUrl: 'https://proxy.test' } },
+    });
+
+    const catalog = JSON.parse(fs.readFileSync(catalogFile(r), 'utf-8'));
+    expect(catalog.dependencies).toHaveLength(1);
+    // The entry is still `claude-login` — scenarios naming it in `needs` still bind.
+    expect(catalog.dependencies[0]).toMatchObject({
+      name: 'claude-login',
+      services: ['claude'],
+      summary: 'an authenticated Claude Code installation',
+    });
+    expect(catalog.dependencies[0].condition.sentence).toContain('claude-code');
+    // Both vars declared: the prior one survives, the base URL joins it.
+    expect(
+      catalog.dependencies[0].registration.vars.map((v: { name: string }) => v.name).sort(),
+    ).toEqual(['ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN']);
+    // The registered secret stays under the ENTRY's row, joined by the new value.
+    expect(JSON.parse(fs.readFileSync(catalogLocalFile(r), 'utf-8'))).toEqual({
+      'claude-login': {
+        env: { CLAUDE_CODE_OAUTH_TOKEN: 'sk-real', ANTHROPIC_BASE_URL: 'https://proxy.test' },
+      },
+    });
+
+    // Removing the service removes the ENTRY and its overlay row, not a phantom key.
+    writeGuardExternals(r, { externals: { claude: null } });
+    expect(fs.existsSync(catalogFile(r))).toBe(false);
+    expect(fs.existsSync(catalogLocalFile(r))).toBe(false);
+  });
+
+  /**
    * An entry standing for SEVERAL services is one class of starting state, not one
    * account: rewriting it as a single external would rename it and throw away the
    * registration the other three are provided through. It is refused, and the file
@@ -669,5 +728,25 @@ describe('the .truecourse/.gitignore template', () => {
     // The declarations themselves stay committable.
     expect(GITIGNORE_CONTENTS).not.toContain('scenarios/recipe.json');
     expect(GITIGNORE_CONTENTS.split('\n')).not.toContain('scenarios/dependencies.json');
+  });
+
+  // The template grows secret-bearing entries over time; a repo initialized before
+  // one existed must be upgraded in place, or `git add` can stage a registered key.
+  it('appends missing template lines to an EXISTING .gitignore, keeping user lines', () => {
+    const r = repo();
+    const gitignore = path.join(r, '.truecourse', '.gitignore');
+    fs.mkdirSync(path.dirname(gitignore), { recursive: true });
+    fs.writeFileSync(gitignore, 'analyses/\nmy-own-entry/\n');
+
+    ensureRepoTruecourseDir(r);
+    const lines = fs.readFileSync(gitignore, 'utf-8').split('\n');
+    expect(lines).toContain('my-own-entry/');
+    expect(lines).toContain('scenarios/dependencies.local.json');
+    expect(lines.filter((l) => l === 'analyses/')).toHaveLength(1);
+
+    // Idempotent: a second ensure rewrites nothing.
+    const upgraded = fs.readFileSync(gitignore, 'utf-8');
+    ensureRepoTruecourseDir(r);
+    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(upgraded);
   });
 });

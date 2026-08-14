@@ -11,8 +11,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  GUARD_FORMAT_VERSION,
-  GuardScenarioSchema,
+    GuardScenarioSchema,
   GuardCliStepSchema,
   GuardPatchStepSchema,
   describeGuardScenarioSteps,
@@ -29,7 +28,6 @@ const BINDS = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 /** A scenario whose one step patches a file the program itself created. */
 const PATCH_SCENARIO = {
-  guard: GUARD_FORMAT_VERSION,
   id: 'break-the-build.cli.1',
   title: 'A broken build command is reported, not run',
   binds: BINDS,

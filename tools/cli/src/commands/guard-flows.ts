@@ -380,7 +380,7 @@ function bindLines(flow: GuardFlow): string[] {
   return [...byDoc.entries()].map(([doc, anchors]) => `${doc}  ${anchors.map((a) => `§${a}`).join(" · ")}`);
 }
 
-/** `api → task-lifecycle.api.1 (pass ✓)` — the run state when there is one, else birth. */
+/** `api → task-lifecycle (pass ✓)` — the run state when there is one, else birth. */
 function surfaceLines(
   entry: GuardManifestFlow | undefined,
   resultsByScenario: Map<string, GuardScenarioResult>,

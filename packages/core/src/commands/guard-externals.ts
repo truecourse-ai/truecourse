@@ -757,60 +757,79 @@ function writeCatalogExternals(
     // is not a declaration this writer owns: rewriting it into a single-service
     // external would rename the entry and throw away the registration every other
     // service it covers is registered through. It is edited where it lives.
-    const umbrella = index === -1 ? undefined : catalog.dependencies[index];
-    if (umbrella && (umbrella.services?.length ?? 0) > 1) {
+    const prior = index === -1 ? undefined : catalog.dependencies[index];
+    if (prior && (prior.services?.length ?? 0) > 1) {
       throw new GuardExternalsWriteError(
-        `"${service}" is one of the services the "${umbrella.name}" dependency stands for — register it there, not as an external of its own.`,
+        `"${service}" is one of the services the "${prior.name}" dependency stands for — register it there, not as an external of its own.`,
       );
     }
+    // A MATCHED entry keeps its identity: its name (which scenarios' `needs` and the
+    // overlay's row key both reference) and every var it already declares. The patch
+    // only ever layers over it — replacing the entry wholesale would rename it,
+    // orphan its registered secrets, and drop declared vars the patch never named.
+    const entryName = prior?.name ?? service;
     if (entry === null) {
       if (index !== -1) catalog.dependencies.splice(index, 1);
-      delete local[service];
+      delete local[entryName];
       continue;
     }
-    const vars: GuardDependencyEnvVar[] = [
-      {
+    const priorVars: GuardDependencyEnvVar[] =
+      prior?.registration?.kind === 'env' ? prior.registration.vars : [];
+    const removed = new Set(
+      Object.entries(entry.env ?? {})
+        .filter(([, source]) => source === null)
+        .map(([name]) => name),
+    );
+    const vars: GuardDependencyEnvVar[] = priorVars.filter((v) => !removed.has(v.name));
+    if (!vars.some((v) => v.name === entry.baseUrlEnv)) {
+      vars.unshift({
         name: entry.baseUrlEnv,
         description: `the base URL the program reads ${service} from`,
         secret: false,
-      },
-    ];
-    const values: Record<string, string> = { ...(local[service]?.env ?? {}) };
+      });
+    }
+    const values: Record<string, string> = { ...(local[entryName]?.env ?? {}) };
     if (entry.baseUrl !== undefined) values[entry.baseUrlEnv] = entry.baseUrl;
     for (const [name, source] of Object.entries(entry.env ?? {})) {
       if (source === null) {
         delete values[name];
         continue;
       }
-      vars.push({ name, description: `the ${service} credential the program reads`, secret: true });
+      if (!vars.some((v) => v.name === name)) {
+        vars.push({ name, description: `the ${service} credential the program reads`, secret: true });
+      }
       // `valueFromEnv` has no catalog analogue on purpose: the overlay IS the value
       // store (it is gitignored), so a value is stored, not pointed at.
       values[name] = 'value' in source ? source.value : (process.env[source.valueFromEnv] ?? '');
     }
     const declaration: GuardDependencyEntry = {
-      name: service,
+      name: entryName,
       class: 'supplied',
-      services: [service],
-      summary: entry.description ?? `an account for the ${service} API this repo calls`,
-      registration: { kind: 'env', vars },
-      needs: index === -1 ? [] : catalog.dependencies[index].needs,
-      ...(index !== -1 && catalog.dependencies[index].condition
-        ? { condition: catalog.dependencies[index].condition }
-        : {}),
+      services: prior?.services ?? [service],
+      summary: entry.description ?? prior?.summary ?? `an account for the ${service} API this repo calls`,
+      // A path/config-dir registration stays what it is — the overlay row carries
+      // the transport values either way, and rewriting the shape would orphan the
+      // registered instance.
+      registration:
+        prior?.registration && prior.registration.kind !== 'env'
+          ? prior.registration
+          : { kind: 'env', vars },
+      needs: prior?.needs ?? [],
+      ...(prior?.condition ? { condition: prior.condition } : {}),
     };
     if (index === -1) catalog.dependencies.push(declaration);
     else catalog.dependencies[index] = declaration;
 
     // The transport half rides in the same overlay row, merged per field — the
     // recipe path's rule, one file over.
-    const headers: Record<string, string> = { ...(local[service]?.headers ?? {}) };
+    const headers: Record<string, string> = { ...(local[entryName]?.headers ?? {}) };
     for (const [name, value] of Object.entries(entry.headers ?? {})) {
       if (value === null || value.trim() === '') delete headers[name];
       else headers[name] = value;
     }
     const token =
       entry.token === undefined
-        ? local[service]?.token
+        ? local[entryName]?.token
         : entry.token === null || entry.token.trim() === ''
           ? undefined
           : entry.token;
@@ -820,8 +839,8 @@ function writeCatalogExternals(
       ...(token !== undefined ? { token } : {}),
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
-    if (Object.keys(row).length > 0) local[service] = row;
-    else delete local[service];
+    if (Object.keys(row).length > 0) local[entryName] = row;
+    else delete local[entryName];
   }
 
   catalog.dependencies.sort((a, b) => a.name.localeCompare(b.name));

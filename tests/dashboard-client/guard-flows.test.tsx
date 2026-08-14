@@ -602,7 +602,7 @@ const CONFLICTS_DETAIL: GuardFlowDetailData = {
   errors: [],
 };
 
-const SCENARIO_YAML = ["guard: 3", `id: ${SCENARIO_ID}`, "driver: cli"].join(
+const SCENARIO_YAML = [`id: ${SCENARIO_ID}`, "driver: cli"].join(
   "\n",
 );
 const TRANSCRIPT = "$ tasks done 1\nunknown command `done`";

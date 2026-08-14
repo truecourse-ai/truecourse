@@ -69,7 +69,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.errors).toEqual([])
     expect(res.birthFindings).toEqual([])
     expect(res.written).toHaveLength(1)
-    expect(res.written[0]).toMatchObject({ anchor: 'list', flowId: 'list', surface: 'api', id: 'list.api.1' })
+    expect(res.written[0]).toMatchObject({ anchor: 'list', flowId: 'list', surface: 'api', id: 'list' })
 
     // The committed YAML is a valid api scenario, bound to the flow's section — and
     // it declares NO scenario-level driver: the surface is read off its steps.
@@ -86,9 +86,9 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(committed.binds).toEqual([expect.objectContaining({ doc: DOC, section: 'list' })])
 
     const section = guardManifestSections(readManifest(r)).find((s) => s.anchor === 'list')!
-    expect(section.scenarioIds).toEqual(['list.api.1'])
+    expect(section.scenarioIds).toEqual(['list'])
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toEqual([
-      { id: 'list.api.1', drivers: ['api'], status: 'passing' },
+      { id: 'list', drivers: ['api'], status: 'passing' },
     ])
   }, 60_000)
 
@@ -156,13 +156,13 @@ describe('generateGuards — api surface authoring + birth', () => {
     })
 
     expect(res.status).toBe('ok')
-    expect(res.written).toMatchObject([{ id: 'list.api.1', surface: 'api', status: 'failing' }])
+    expect(res.written).toMatchObject([{ id: 'list', surface: 'api', status: 'failing' }])
     expect(res.birthFindings).toHaveLength(1)
     expect(res.birthFindings[0]).toMatchObject({
       anchor: 'list',
       flowId: 'list',
       surface: 'api',
-      scenarioId: 'list.api.1',
+      scenarioId: 'list',
       committed: true,
       expected: 'status 200',
       actual: 'status 500',
@@ -173,7 +173,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     // so the next generate leaves it alone until an input moves.
     const entry = readManifest(r)!.flows.find((f) => f.flowId === 'list')!
     expect(entry.scenarios).toMatchObject([
-      { id: 'list.api.1', drivers: ['api'], status: 'failing', diagnosis: { actual: 'status 500' } },
+      { id: 'list', drivers: ['api'], status: 'failing', diagnosis: { actual: 'status 500' } },
     ])
     expect(entry.generationInputsHash).not.toBeNull()
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
@@ -221,11 +221,12 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     // Both surfaces persist as their own scenario under the one flow.
     expect(res.written.map((w) => w.surface).sort()).toEqual(['api', 'cli'])
-    expect(res.written.map((w) => w.id).sort()).toEqual(['list.api.1', 'list.cli.1'])
-    expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toEqual([
-      { id: 'list.api.1', drivers: ['api'], status: 'passing' },
-      { id: 'list.cli.1', drivers: ['cli'], status: 'passing' },
-    ])
+    expect(res.written.map((w) => w.id).sort()).toEqual(['list', 'list.2'])
+    const persisted = readManifest(r)!
+      .flows.find((f) => f.flowId === 'list')!
+      .scenarios.map((s) => ({ id: s.id, drivers: s.drivers }))
+    expect(persisted.map((s) => s.id).sort()).toEqual(['list', 'list.2'])
+    expect(persisted.map((s) => s.drivers).sort()).toEqual([['api'], ['cli']])
   }, 60_000)
 
   it('a runnable surface with an EMPTY interface catalog settles as a no-interface gap', async () => {

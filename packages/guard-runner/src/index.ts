@@ -50,7 +50,7 @@ export type {
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
 
-export { loadScenarios, walkScenarioRelFiles, outdatedFormatMessage } from './scenario-loader.js'
+export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
 export { crossCheckClaimRefs } from './claim-refs.js'
 export type { ClaimRefSources } from './claim-refs.js'

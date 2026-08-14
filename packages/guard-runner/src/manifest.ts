@@ -9,7 +9,6 @@
 import fs from 'node:fs'
 import {
   GuardManifestSchema,
-  GUARD_FORMAT_VERSION,
   flowFingerprint,
   guardScenarioDrivers,
   type GuardDriverId,
@@ -129,5 +128,5 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
     }))
     .sort((a, b) => a.flowId.localeCompare(b.flowId))
 
-  return { version: GUARD_FORMAT_VERSION, flows }
+  return { flows }
 }

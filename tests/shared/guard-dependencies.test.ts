@@ -265,7 +265,42 @@ describe('the ${supplied:…} token', () => {
     ).toEqual(['creds', 'target'])
   })
 
+  // A `setup.files` / `expect.files` KEY is a path the runner interpolates, so a
+  // token there is a real binding — missing it would bypass the blocked gate and
+  // let the literal token reach resolution mid-run.
+  it('finds a reference that only appears in an object KEY', () => {
+    expect(
+      suppliedNamesIn({
+        setup: { files: { '${supplied:proj.path}/config.yaml': 'strict: true' } },
+      }),
+    ).toEqual(['proj'])
+    expect(
+      suppliedNamesIn({
+        steps: [{ run: ['ls'], expect: { files: { '${supplied:proj.path}/out.txt': { exists: true } } } }],
+      }),
+    ).toEqual(['proj'])
+  })
+
   it('does not mistake a sandbox or unique token for a supplied one', () => {
     expect(suppliedNamesIn({ a: '${sandbox}/x', b: 'name-${unique}' })).toEqual([])
+  })
+})
+
+describe('a config-dir homePath', () => {
+  const configDir = (homePath: string): unknown =>
+    supplied({ registration: { kind: 'config-dir', homePath, description: 'a login dir' } })
+
+  it('accepts a HOME-relative destination', () => {
+    expect(GuardDependencyEntrySchema.safeParse(configDir('.claude')).success).toBe(true)
+    expect(GuardDependencyEntrySchema.safeParse(configDir('.config/app/deep')).success).toBe(true)
+  })
+
+  // The catalog is committed, so homePath is repo-supplied input to every machine
+  // that runs it — a traversal would aim the recursive copy at the developer's
+  // real filesystem.
+  it('refuses an absolute path or a traversal out of HOME', () => {
+    for (const bad of ['/etc', '../../../.ssh', '.claude/../../escape', 'C:\\Users']) {
+      expect(GuardDependencyEntrySchema.safeParse(configDir(bad)).success).toBe(false)
+    }
   })
 })

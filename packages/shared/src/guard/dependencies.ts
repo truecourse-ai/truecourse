@@ -122,6 +122,18 @@ export type GuardDependencyEnvVar = z.infer<typeof GuardDependencyEnvVarSchema>
  *                  `homePath` — the authenticated-state case. Copy-in, never a
  *                  symlink or a passthrough.
  */
+/**
+ * A `config-dir` destination that stays INSIDE the sandbox HOME: relative, with no
+ * `..` segment. The catalog is committed, so a homePath is repo-supplied input to
+ * every machine that runs it — an absolute path or a traversal would direct the
+ * recursive copy onto the developer's real filesystem, which is exactly what the
+ * copy-in sandbox exists to prevent.
+ */
+export function isHomeRelativePath(value: string): boolean {
+  if (/^([A-Za-z]:)?[\\/]/.test(value)) return false
+  return value.split(/[\\/]/).every((seg) => seg !== '..')
+}
+
 export const GuardDependencyRegistrationSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('env'), vars: z.array(GuardDependencyEnvVarSchema).min(1) })
@@ -133,7 +145,10 @@ export const GuardDependencyRegistrationSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('config-dir'),
       /** Destination inside the sandbox HOME (`.claude`), always HOME-relative. */
-      homePath: z.string().min(1),
+      homePath: z
+        .string()
+        .min(1)
+        .refine(isHomeRelativePath, 'a config-dir homePath is HOME-relative and never traverses out (no leading slash, no `..`)'),
       description: z.string().min(1),
     })
     .strict(),
@@ -392,20 +407,28 @@ export function suppliedTokenRefs(value: string): { name: string; field: string 
   return out
 }
 
-/** Every dependency name referenced anywhere in `value` (sorted, deduped). */
+/**
+ * Every dependency name referenced anywhere in `value` (sorted, deduped). Object
+ * KEYS are walked too, exactly as `capturedNamesIn` walks them: a `setup.files` or
+ * `expect.files` key is a path the runner interpolates, so a token there is a real
+ * binding and must gate the run like any other.
+ */
 export function suppliedNamesIn(value: unknown): string[] {
   const names = new Set<string>()
+  const addFrom = (text: string): void => {
+    for (const ref of suppliedTokenRefs(text)) names.add(ref.name)
+  }
   const walk = (node: unknown): void => {
-    if (typeof node === 'string') {
-      for (const ref of suppliedTokenRefs(node)) names.add(ref.name)
-      return
-    }
+    if (typeof node === 'string') return addFrom(node)
     if (Array.isArray(node)) {
       for (const item of node) walk(item)
       return
     }
     if (node && typeof node === 'object') {
-      for (const item of Object.values(node)) walk(item)
+      for (const [key, item] of Object.entries(node)) {
+        addFrom(key)
+        walk(item)
+      }
     }
   }
   walk(value)

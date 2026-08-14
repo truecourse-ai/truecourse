@@ -273,6 +273,30 @@ describe('per-step cwd', () => {
     const result = await run(r, 'cwdescape')
     expect(result.outcome).toBe('error')
     expect(result.failure?.actual).toContain('escapes the sandbox')
+    // An escape before anything ran has nothing to transcribe — no bundle.
+    expect(result.evidencePath).toBeUndefined()
+  })
+
+  it('a mid-scenario escape still writes the transcript of the steps that DID run', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'late-escape.yaml',
+      scenario({
+        id: 'late-escape',
+        steps: [
+          { run: ['version'], expect: { exit: 0, stdout: { contains: '2.4.1' } } },
+          { run: ['where'], cwd: '../..', expect: { exit: 0 } },
+        ],
+      }),
+    )
+    const result = await run(r, 'late-escape')
+    expect(result.outcome).toBe('error')
+    expect(result.failure?.step).toBe(2)
+    expect(result.evidencePath).toBeDefined()
+    const text = fs.readFileSync(path.join(r, result.evidencePath!, 'transcript.txt'), 'utf-8')
+    expect(text).toContain('2.4.1')
   })
 })
 

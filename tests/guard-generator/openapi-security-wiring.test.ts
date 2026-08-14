@@ -17,7 +17,6 @@ import {
   type GenerateRunner,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -96,7 +95,6 @@ describe('planGuardWork — securityFingerprint stamping', () => {
     const r = setupRepo(openapi(), API_KEY)
     const plan0 = planGuardWork(r)
     writeManifest(r, {
-      version: GUARD_FORMAT_VERSION,
       flows: plan0.sections.map((s) => ({
         flowId: `${s.doc}#${s.anchor}`,
         flowFingerprint: s.fingerprint,

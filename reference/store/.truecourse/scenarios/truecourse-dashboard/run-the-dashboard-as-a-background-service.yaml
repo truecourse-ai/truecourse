@@ -1,0 +1,202 @@
+id: run-the-dashboard-as-a-background-service
+title: A developer runs the dashboard as a background service and manages it from the shell
+promise: >-
+  A developer runs the dashboard as a background service and manages it from the shell:
+  status, logs, re-prompt, stop and uninstall.
+flow:
+  id: run-the-dashboard-as-a-background-service
+  fingerprint: sha256:49e33e62197115869f457a097879b8ddf5249320d00ea90689cb5fba127ef594
+interface:
+  path:
+    - cli/analyze
+    - cli/dashboard
+    - cli/dashboard-status
+    - cli/dashboard-logs
+    - cli/dashboard-stop
+    - cli/dashboard-uninstall
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:d4d213322f7fb40cfada963f76850fd2e1f5be558cf43546dbe742fe1015b989
+    - sha256:13ace0c17b9a1826abe01edbe4ea388c96ce0dbe2aaee63f2a822b844ed87290
+    - sha256:9cd01ac3dbbb1955f4e2ddea8636c7ef9ee7e1fa435131bdb06b93b46e5032b8
+    - sha256:e9457c56b986b22c6ec6b741d91bc716d136c7831bc1cb78b3dc3fa9c2a661c0
+    - sha256:f1d9df9cef83032cb9cf8b1ed5fa562fe5118f046581cf3805f9d12901dbe977
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: starting-and-stopping
+    fingerprint: sha256:36db114b36152f2a4b2a916a40d68c61991646e449de6bdb048dab23f6c0b2a2
+needs:
+  - host-service-session
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    sample-app/src/index.js: |
+      export function main(input) {
+        console.log('starting')
+        return input
+      }
+    sample-app/src/unsafe.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+          - src/unsafe.js
+        message: seed the sample app
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      files:
+        sample-app/.truecourse/LATEST.json:
+          exists: true
+    note: >-
+      Gives the service a repository to open — the store and the registry entry the URL
+      below resolves against. It proves nothing: this flow is about the dashboard's
+      lifecycle, not about analysis. The scenario-global `TRUECOURSE_LLM_TRANSPORT` keeps
+      the first-run transport wizard from writing `~/.truecourse/config.json`, which is
+      the file the dashboard reads as "a mode was already chosen" — without that, the
+      next step's claim that `--service` SKIPS the mode question could not fail even if
+      the flag did nothing.
+  - run:
+      - dashboard
+      - '--service'
+    cwd: sample-app
+    tty: true
+    timeoutMs: 120000
+    expect:
+      exit: 0
+      output:
+        matches: '^(?![\s\S]*How would you like to run the dashboard)(?=[\s\S]*background service)(?=[\s\S]*Dashboard open at http://localhost:3001/repos/sample-app)(?=[\s\S]*Stop the dashboard with: truecourse dashboard stop)[\s\S]*$'
+    note: >-
+      One invocation, three promises, and a terminal to make the first one mean
+      something: the sandbox home has no saved mode, so a run WITHOUT the flag would be
+      asked the console-vs-service question here — the negative lookahead is that
+      question's absence, and it is only falsifiable on a tty. The command then RETURNS
+      (exit 0) with the service installed and serving, which is what "runs as a
+      background service" comes to on the shell side. And the URL it reports is the
+      repository page for the directory it ran in, which is the both-modes claim's
+      service half; its console half is the sibling flow's landing milestone.
+    milestone:
+      - dashboard-overview-service-skips-the-mode-prompt
+      - dashboard-overview-service-runs-as-a-background-service
+      - dashboard-overview-opens-the-repo-page-in-either-mode
+  - run:
+      - dashboard
+      - status
+    cwd: sample-app
+    expect:
+      exit: 0
+      output:
+        matches: '^(?=[\s\S]*Dashboard service is running)(?=[\s\S]*Server is healthy at http://localhost:3001)[\s\S]*$'
+    note: >-
+      Asked from a shell that is not the one which started it — the starting process
+      exited when the step above returned, so "keeps running after you close the
+      terminal" is exactly the world this step is standing in, and the service still
+      answers. The same output is the status command's own promise: it reports RUNNING
+      here, which is the state the dashboard is really in; the stopped wording is the
+      other side of the same sentence and belongs to the steps after `stop`.
+    milestone:
+      - dashboard-overview-background-service-outlives-the-terminal
+      - dashboard-overview-status-shows-dashboard-status
+  - run:
+      - dashboard
+      - logs
+    cwd: sample-app
+    timeoutMs: 60000
+    expect:
+      output:
+        matches: '^(?![\s\S]*console mode)(?=[\s\S]*-----)(?=[\s\S]*\.log \(last \d+ lines\))[\s\S]*$'
+    note: >-
+      The service's log, tailed. The assertion is the dump header the command prints per
+      live log file — the file name and how many lines of it — and the negative is the
+      console-mode refusal the doc reserves for the other mode, which must not appear
+      while a service is what is running. HONESTY, and a gap: `logs` FOLLOWS the file
+      until it is interrupted, so this step has no exit of its own to assert and will
+      consume its whole budget before the runner kills it, which is reported as an
+      infrastructure error rather than a verdict. The api driver already has the verb
+      this needs (`logs`, with a matcher that ends the wait), and the sandbox step union
+      deliberately excludes the lifecycle verbs — that exclusion is what this step runs
+      into. The `--reconfigure` step below therefore depends on the runner reaching it;
+      the service's removal does not — `stop` and `uninstall` are teardown steps, which
+      run on every exit (plan item 94).
+    milestone:
+      - dashboard-overview-logs-tails-dashboard-logs-in-service-mode
+  - run:
+      - dashboard
+      - '--reconfigure'
+    cwd: sample-app
+    tty: true
+    stdin:
+      - marker: How would you like to run the dashboard?
+        answer: "\x1b"
+    expect:
+      exit: 0
+      output:
+        matches: '^(?=[\s\S]*How would you like to run the dashboard)(?=[\s\S]*Cancelled)[\s\S]*$'
+    note: >-
+      Re-asking is only meaningful now that a mode HAS been saved — the `--service` run
+      above saved it — so the question appearing here is the flag doing its one job. The
+      answer is ESCAPE: cancelling ends the command without starting anything, which
+      leaves the running service and the saved mode exactly as they were for the
+      teardown steps. Answering it for real would either re-enter service mode (proving
+      nothing new) or hand the terminal to console mode and never return.
+    milestone:
+      - dashboard-overview-reconfigure-reprompts-for-run-mode
+teardown:
+  - run:
+      - dashboard
+      - stop
+    cwd: sample-app
+    expect:
+      exit: 0
+      output:
+        matches: '^(?=[\s\S]*Stopping dashboard service)(?=[\s\S]*Dashboard service stopped)[\s\S]*$'
+    note: >-
+      Stopping what the second step started. The command's own report is the assertion;
+      the deeper observation — that the URL no longer answers — belongs to the
+      uninstall step below, which is asked for the state of the machine afterwards.
+      TEARDOWN, because the service is HOST state the sandbox cannot undo: on a green
+      run this step proves its claim exactly as a trailing step did, and after any
+      earlier failure (the `logs` gap above included) it still runs, best-effort, so no
+      run leaves a service behind.
+    milestone:
+      - dashboard-overview-stop-stops-the-dashboard
+  - run:
+      - dashboard
+      - uninstall
+    cwd: sample-app
+    expect:
+      exit: 0
+      output:
+        matches: '^(?=[\s\S]*Removing background service)(?=[\s\S]*Service removed. Dashboard will run in console mode next time)[\s\S]*$'
+    note: >-
+      Last by necessity — every milestone above needs the service installed. The
+      assertion is the removal itself and the mode it leaves behind: the saved mode
+      returns to console, which is the doc's "removes the background service" in the
+      words the command uses. A run that found nothing installed would print a different
+      sentence and fail this step.
+    milestone:
+      - dashboard-overview-uninstall-removes-the-background-service

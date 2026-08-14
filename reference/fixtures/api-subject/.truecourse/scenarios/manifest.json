@@ -1,5 +1,4 @@
 {
-  "version": 3,
   "flows": [
     {
       "flowId": "add-a-duplicate-isbn",
@@ -13,7 +12,7 @@
       ],
       "scenarios": [
         {
-          "id": "add-a-duplicate-isbn.api.1",
+          "id": "add-a-duplicate-isbn",
           "surface": "api",
           "status": "passing"
         }
@@ -47,7 +46,7 @@
       ],
       "scenarios": [
         {
-          "id": "book-jackets-when-the-cover-service-is-unavailable.api.1",
+          "id": "book-jackets-when-the-cover-service-is-unavailable",
           "surface": "api",
           "status": "passing"
         }
@@ -82,7 +81,7 @@
       ],
       "scenarios": [
         {
-          "id": "book-jackets-with-no-jacket.api.1",
+          "id": "book-jackets-with-no-jacket",
           "surface": "api",
           "status": "passing"
         }
@@ -156,7 +155,7 @@
       ],
       "scenarios": [
         {
-          "id": "check-service-health.api.1",
+          "id": "check-service-health",
           "surface": "api",
           "status": "passing"
         }
@@ -190,7 +189,7 @@
       ],
       "scenarios": [
         {
-          "id": "convert-a-valid-isbn.cli.1",
+          "id": "convert-a-valid-isbn",
           "surface": "cli",
           "status": "passing"
         }
@@ -257,7 +256,7 @@
       ],
       "scenarios": [
         {
-          "id": "handle-finishing-an-unknown-book.api.1",
+          "id": "handle-finishing-an-unknown-book",
           "surface": "api",
           "status": "passing"
         }
@@ -291,7 +290,7 @@
       ],
       "scenarios": [
         {
-          "id": "handle-missing-book-cover.api.1",
+          "id": "handle-missing-book-cover",
           "surface": "api",
           "status": "passing"
         }
@@ -326,7 +325,7 @@
       ],
       "scenarios": [
         {
-          "id": "handle-missing-book-details.api.1",
+          "id": "handle-missing-book-details",
           "surface": "api",
           "status": "passing"
         }
@@ -360,7 +359,7 @@
       ],
       "scenarios": [
         {
-          "id": "handle-unreachable-cover-service.api.1",
+          "id": "handle-unreachable-cover-service",
           "surface": "api",
           "status": "passing"
         }
@@ -395,7 +394,7 @@
       ],
       "scenarios": [
         {
-          "id": "member-token-after-service-restarts.api.1",
+          "id": "member-token-after-service-restarts",
           "surface": "api",
           "status": "passing"
         }
@@ -430,7 +429,7 @@
       ],
       "scenarios": [
         {
-          "id": "print-configuration-with-a-redacted-database-password.cli.1",
+          "id": "print-configuration-with-a-redacted-database-password",
           "surface": "cli",
           "status": "passing"
         }
@@ -464,7 +463,7 @@
       ],
       "scenarios": [
         {
-          "id": "refuse-an-invalid-isbn.cli.1",
+          "id": "refuse-an-invalid-isbn",
           "surface": "cli",
           "status": "passing"
         }
@@ -498,7 +497,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-an-invalid-isbn.api.1",
+          "id": "reject-an-invalid-isbn",
           "surface": "api",
           "status": "passing"
         }
@@ -558,7 +557,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-an-unsupported-database-scheme.cli.1",
+          "id": "reject-an-unsupported-database-scheme",
           "surface": "cli",
           "status": "passing"
         }
@@ -592,7 +591,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-duplicate-isbn-on-the-shelf.api.1",
+          "id": "reject-duplicate-isbn-on-the-shelf",
           "surface": "api",
           "status": "passing"
         }
@@ -627,7 +626,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-shelf-changes-without-a-valid-member-token.api.1",
+          "id": "reject-shelf-changes-without-a-valid-member-token",
           "surface": "api",
           "status": "passing"
         }
@@ -663,7 +662,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-unusable-book-details.api.1",
+          "id": "reject-unusable-book-details",
           "surface": "api",
           "status": "passing"
         }
@@ -697,7 +696,7 @@
       ],
       "scenarios": [
         {
-          "id": "require-an-isbn-value.cli.1",
+          "id": "require-an-isbn-value",
           "surface": "cli",
           "status": "passing"
         }
@@ -731,7 +730,7 @@
       ],
       "scenarios": [
         {
-          "id": "require-authentication-to-change-the-shelf.api.1",
+          "id": "require-authentication-to-change-the-shelf",
           "surface": "api",
           "status": "passing"
         }
@@ -768,7 +767,7 @@
       ],
       "scenarios": [
         {
-          "id": "require-member-token-to-add-a-book.api.1",
+          "id": "require-member-token-to-add-a-book",
           "surface": "api",
           "status": "passing"
         }
@@ -802,7 +801,7 @@
       ],
       "scenarios": [
         {
-          "id": "require-member-token-to-finish-a-book.api.1",
+          "id": "require-member-token-to-finish-a-book",
           "surface": "api",
           "status": "passing"
         }

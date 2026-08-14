@@ -110,7 +110,6 @@ const FLOWS_FILE = {
 };
 
 const MANIFEST = {
-  version: 3,
   flows: [
     {
       flowId: FLOW_ID,
@@ -202,7 +201,6 @@ const LATEST = {
     branch: 'main',
     commit: 'c0ffee',
     recipeFingerprint: 'sha256:r',
-    scenarioFormat: 3,
   },
   summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
@@ -271,7 +269,6 @@ const INTERFACES = {
 };
 
 const SCENARIO_YAML = [
-  'guard: 3',
   `id: ${SCENARIO_ID}`,
   'title: Tasks are created, listed newest-first, completed and filterable',
   `flow: { id: ${FLOW_ID}, fingerprint: "sha256:41ac" }`,
@@ -300,7 +297,6 @@ const SCENARIO_YAML = [
 ].join('\n');
 
 const MANUAL_YAML = [
-  'guard: 3',
   `id: ${MANUAL_ID}`,
   'title: "`tasks --help` prints usage"',
   'binds:',
@@ -944,7 +940,6 @@ describe('Guard flow read surfaces', () => {
     const ORPHAN_SCENARIO = `${ORPHAN_ID}.cli.1`;
     const ORPHAN_FILE = path.join('.truecourse', 'scenarios', 'tasks', `${ORPHAN_SCENARIO}.yaml`);
     const ORPHAN_YAML = [
-      'guard: 3',
       `id: ${ORPHAN_SCENARIO}`,
       'title: Purged tasks leave the list',
       `flow: { id: ${ORPHAN_ID}, fingerprint: "sha256:purge" }`,
@@ -1197,7 +1192,6 @@ describe('Guard flow read surfaces', () => {
         noFlowClaims: [],
       });
       writeJson('.truecourse/scenarios/manifest.json', {
-        version: 3,
         flows: [
           {
             flowId: RED_FLOW,
@@ -1213,7 +1207,6 @@ describe('Guard flow read surfaces', () => {
       write(
         RED_FILE,
         [
-          'guard: 3',
           `id: ${RED_SCENARIO}`,
           'title: Analyze survives a pathological file',
           `flow: { id: ${RED_FLOW}, fingerprint: "sha256:red" }`,
@@ -1383,7 +1376,6 @@ describe('Guard flow read surfaces', () => {
           branch: 'main',
           commit: 'c0ffee',
           recipeFingerprint: 'sha256:r',
-          scenarioFormat: 3,
         },
         summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
         scenarios: [
@@ -1450,7 +1442,6 @@ describe('Guard flow read surfaces', () => {
             branch: 'main',
             commit: 'c0ffee',
             recipeFingerprint: 'sha256:r',
-            scenarioFormat: 3,
           },
           summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
           scenarios: [

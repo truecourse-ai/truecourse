@@ -27,7 +27,6 @@
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
-  GUARD_FORMAT_VERSION,
   interfaceEntryLabel,
   interfaceFingerprint,
   type GuardDriverId,
@@ -174,7 +173,6 @@ export function matchCacheKey(
     .update(
       [
         MATCH_PROMPT_FINGERPRINT,
-        String(GUARD_FORMAT_VERSION),
         catalog.surface,
         catalog.fingerprint,
         flow.fingerprint,

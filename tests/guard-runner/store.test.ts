@@ -42,7 +42,6 @@ function makeLatest(runId: string): GuardLatest {
       branch: 'main',
       commit: 'abc123',
       recipeFingerprint: 'sha256:deadbeef',
-      scenarioFormat: 3,
     },
     summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
     scenarios: [],

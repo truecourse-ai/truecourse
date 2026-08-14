@@ -34,7 +34,6 @@ const LATEST: GuardLatest = {
     branch: 'main',
     commit: 'abcdef1234567890',
     recipeFingerprint: 'sha256:9f2caabbccdd',
-    scenarioFormat: 3,
   },
   summary: { total: 5, pass: 1, fail: 1, stale: 1, orphaned: 1, error: 1 },
   scenarios: [
@@ -109,7 +108,7 @@ function stubFetch(opts: { latest?: GuardLatest | null } = {}) {
       if (u.includes('/guard/latest')) return latest ? json(latest) : notFound();
       if (u.includes('/guard/history')) return json(HISTORY);
       if (u.includes('/guard/evidence')) return new Response('EVIDENCE-TRANSCRIPT-XYZ', { status: 200 });
-      if (u.includes('/guard/scenario')) return json({ id: 's-fail', file: 's-fail.yaml', content: 'guard: 3\nid: s-fail' });
+      if (u.includes('/guard/scenario')) return json({ id: 's-fail', file: 's-fail.yaml', content: 'id: s-fail' });
       if (u.includes('/guard/runs/')) return json(LATEST);
       return json({});
     }),
@@ -375,7 +374,7 @@ describe('GuardDriftsView — passed group', () => {
     // binding sits in the footer where the reader can jump into the spec. The
     // container is stable — it renders "Loading steps…" from the first paint —
     // so the wait is for the CONTENT the scenario fetch brings, not the element.
-    await waitFor(() => expect(screen.getByLabelText('test steps')).toHaveTextContent('guard: 3'));
+    await waitFor(() => expect(screen.getByLabelText('test steps')).toHaveTextContent('id: s-fail'));
     expect(screen.getByText('§ auth/ok')).toBeInTheDocument();
     // No source view anywhere on the page — the steps ARE the content, and the
     // footer's File row is how a developer opens the real file.
@@ -648,7 +647,7 @@ describe('GuardDriftsView — bug 1: evidence state resets across selections', (
           const sid = new URL(u, 'http://x').searchParams.get('scenarioId');
           return new Response(`EVIDENCE-FOR-${sid}`, { status: 200 });
         }
-        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'guard: 3' });
+        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'id: s' });
         if (u.includes('/guard/runs/')) return json(LATEST);
         return json({});
       }),
@@ -816,7 +815,7 @@ describe('GuardDriftsView — run-switch tab re-resolution', () => {
         if (u.includes('/guard/history')) return json(HISTORY);
         if (u.includes('/guard/runs/')) return json(RUN0);
         if (u.includes('/guard/evidence')) return new Response('E', { status: 200 });
-        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'guard: 3' });
+        if (u.includes('/guard/scenario')) return json({ id: 's', file: 's.yaml', content: 'id: s' });
         return json({});
       }),
     );

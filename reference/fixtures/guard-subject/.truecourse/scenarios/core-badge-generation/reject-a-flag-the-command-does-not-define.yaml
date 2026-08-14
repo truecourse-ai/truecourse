@@ -1,0 +1,27 @@
+id: reject-a-flag-the-command-does-not-define
+title: Unsupported command-specific flags are rejected with the documented error
+promise: The user receives the documented error when using an unsupported flag for a command.
+flow:
+  id: reject-a-flag-the-command-does-not-define
+  fingerprint: sha256:a61cc15a1c1b46132627c051f6db801e8acaef75e440374a0f7c8549037b5d7a
+journey:
+  path:
+    - cli/check
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/flag-syntax
+    fingerprint: sha256:028f3cbd47b5970c61aed604a854cdff3c087bbac11ff6b0a6a0c59e7ac7b85e
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+      - '--unknown'
+      - value
+    expect:
+      exit: 2
+      stderr:
+        contains: 'covergate: check does not accept --unknown'
+    milestone: 1

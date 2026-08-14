@@ -83,7 +83,6 @@ import {
   type EntryPreflightResult,
 } from '@truecourse/guard-runner'
 import {
-  GUARD_FORMAT_VERSION,
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
   autoResolutionKey,
   composeBlockedOnReason,
@@ -633,7 +632,6 @@ export function authorCacheKey(
   const parts = [
     authorPromptFingerprint(surface),
     recipeFingerprint,
-    String(GUARD_FORMAT_VERSION),
     surface,
     flow.fingerprint,
     [...sectionKeys].sort().join('~'),
@@ -2292,7 +2290,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const settleTotal = changedWorks.length
   const writeWorkingManifest = (): void => {
     const flows = [...workingManifest.values()].sort((a, b) => a.flowId.localeCompare(b.flowId))
-    writeManifest(repoRoot, { version: GUARD_FORMAT_VERSION, flows })
+    writeManifest(repoRoot, { flows })
   }
 
   // THE SETTLE INVARIANT, enforced at the one place a flow settles: an entry may
@@ -3713,7 +3711,6 @@ function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork): string {
     .update(
       [
         FIDELITY_PROMPT_FINGERPRINT,
-        String(GUARD_FORMAT_VERSION),
         work.flow.fingerprint,
         [...work.sectionKeys].sort().join('~'),
         scenarioBehaviorKey,

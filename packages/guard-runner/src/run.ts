@@ -9,7 +9,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import {
-  GUARD_FORMAT_VERSION,
   guardExecutionSteps,
   guardScenarioDrivers,
   isApiRequestStep,
@@ -621,11 +620,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // The WEB surface's own build, and ONLY when this run has steps that reach it.
       // Compiling a client is minutes on a real app; a cli-only run must not pay
       // for it, which is the whole reason the web block carries its own command.
+      // It builds with the SURFACE's env (`recipe.env` ⊕ `web.env`) — the same env
+      // the serve process gets, so a variable the client is compiled against
+      // (`VITE_*`) reaches the build too.
       if (webSurface?.build && servedExec.length > 0) {
         const webBuild = await runBuild(
           repoRoot,
           webSurface.build,
-          loaded.recipe.env,
+          webSurface.env,
           opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
           cancel.signal,
         )
@@ -1106,34 +1108,50 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return result
     }
 
-    // TWO POOLS, run concurrently — split by the same steps-derived path. An
+    // THREE POOLS, run concurrently — split by what a scenario keeps RESIDENT. An
     // api-server scenario boots a whole target server that lives for the scenario's
-    // duration, so a shared pool at the sandbox width lets heavyweight servers pile up
-    // (the diagnosed cal.com starvation). The api pool caps parallel scenarios at
-    // `apiBootConcurrency` — which bounds RESIDENT servers, not just boot-starts.
-    // `orderReadBeforeWrite` still runs read-only api scenarios ahead of mutating ones
-    // WITHIN the api pool (its ordering only ever mattered for the api set — sandboxes
-    // are isolated).
+    // duration, and a sandbox scenario with web/request steps boots its own served
+    // surface PLUS a browser — both are heavyweight, so each heavy pool caps
+    // parallel scenarios at `apiBootConcurrency` (which bounds resident servers,
+    // not just boot-starts — the diagnosed cal.com starvation). The plain cli pool
+    // takes the rest of the budget. `orderReadBeforeWrite` still runs read-only api
+    // scenarios ahead of mutating ones WITHIN the api pool (its ordering only ever
+    // mattered for the api set — sandboxes are isolated).
     const apiRunnable = orderReadBeforeWrite(
       runnable.filter((x) => isApiServerScenario(x.scenario) && !externalBlockedIds.has(x.scenario.id)),
     )
+    const servedIds = new Set(servedExec.map((p) => p.scenario.id))
     const sandboxRunnable = runnable.filter((x) => !isApiServerScenario(x.scenario))
-    // The two pools share ONE budget so their combined in-flight count never exceeds
-    // `concurrency` — the host-load knob whose violation caused the incident. When both
-    // run, the api pool draws from that budget (capped so it can't starve the sandbox
-    // pool of its floor of 1) and the sandbox pool takes the remainder; a single-path
-    // run is unchanged (api-only ≤ apiCap, sandbox-only = full width). See
+    const servedRunnable = sandboxRunnable.filter((x) => servedIds.has(x.scenario.id))
+    const plainRunnable = sandboxRunnable.filter((x) => !servedIds.has(x.scenario.id))
+    // The pools share ONE budget so their combined in-flight count never exceeds
+    // `concurrency` — the host-load knob whose violation caused the incident. Each
+    // present pool keeps a floor of 1 so none can be starved outright; allocation
+    // runs heavy-first and the plain pool takes the remainder. A single-path run is
+    // unchanged (api-only ≤ apiCap, plain-sandbox-only = full width). See
     // `TRUECOURSE_MAX_API_CONCURRENCY`.
-    const bothDrivers = apiRunnable.length > 0 && sandboxRunnable.length > 0
-    const apiWidth = bothDrivers
-      ? Math.min(apiBootConcurrency(concurrency), Math.max(1, concurrency - 1))
-      : apiBootConcurrency(concurrency)
-    const sandboxWidth = bothDrivers ? Math.max(1, concurrency - apiWidth) : concurrency
-    const [apiResults, sandboxResults] = await Promise.all([
+    const heavyCap = apiBootConcurrency(concurrency)
+    const laterPools = (...counts: number[]): number => counts.filter((n) => n > 0).length
+    let remaining = concurrency
+    const apiWidth =
+      apiRunnable.length > 0
+        ? Math.min(heavyCap, Math.max(1, remaining - laterPools(servedRunnable.length, plainRunnable.length)))
+        : 0
+    remaining -= apiWidth
+    const servedWidth =
+      servedRunnable.length > 0
+        ? Math.min(heavyCap, Math.max(1, remaining - laterPools(plainRunnable.length)))
+        : 0
+    remaining -= servedWidth
+    const plainWidth = plainRunnable.length > 0 ? Math.max(1, remaining) : 0
+    const [apiResults, servedResults, plainResults] = await Promise.all([
       mapWithConcurrency(apiRunnable, apiWidth, runOne),
-      mapWithConcurrency(sandboxRunnable, sandboxWidth, runOne),
+      mapWithConcurrency(servedRunnable, servedWidth, runOne),
+      mapWithConcurrency(plainRunnable, plainWidth, runOne),
     ])
-    const executed = [...apiResults, ...sandboxResults].filter((r): r is GuardScenarioResult => r !== null)
+    const executed = [...apiResults, ...servedResults, ...plainResults].filter(
+      (r): r is GuardScenarioResult => r !== null,
+    )
     const stop = cancelled('run')
     if (stop) return stop
     results.push(...executed)
@@ -1146,7 +1164,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         branch: opts.branch ?? null,
         commit: opts.commit ?? null,
         recipeFingerprint: loaded.fingerprint,
-        scenarioFormat: GUARD_FORMAT_VERSION,
       },
       summary: summarizeResults(results),
       scenarios: results,

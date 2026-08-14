@@ -84,8 +84,8 @@ export const GuardFileExpectSchema = z
  * {@link GuardCliCapturesSchema}; the rules that span steps (single assignment,
  * no forward or self reference) are {@link captureDefects}, checked at load.
  *
- * Additive and optional, so no `GUARD_FORMAT_VERSION` bump (the `timeoutMs`
- * precedent): a scenario that captures nothing parses and runs exactly as it did.
+ * Additive and optional (the `timeoutMs` precedent): a scenario that captures
+ * nothing parses and runs exactly as it did.
  */
 const capture = GuardCliCapturesSchema.optional()
 
@@ -187,9 +187,8 @@ export const GuardTtyAnswerSchema = z
  * terminal, so keying answers to questions a piped step can never be asked would
  * be a scenario that cannot mean what it says.
  *
- * Additive, so no `GUARD_FORMAT_VERSION` bump (the `timeoutMs` precedent): every
- * committed scenario that scripted a string still parses and still runs the way
- * it did.
+ * Additive (the `timeoutMs` precedent): every committed scenario that scripted
+ * a string still parses and still runs the way it did.
  */
 export const GuardStepStdinSchema = z.union([z.string(), z.array(GuardTtyAnswerSchema).min(1)])
 

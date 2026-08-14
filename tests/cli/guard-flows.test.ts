@@ -13,8 +13,7 @@ import { flowsPath } from '@truecourse/guard-generator'
 import { writeManifest, writeGuardLatest } from '@truecourse/guard-runner'
 import {
   flowFingerprint,
-  GUARD_FORMAT_VERSION,
-  type GuardFlow,
+    type GuardFlow,
   type GuardFlowMilestone,
   type GuardLatest,
   type GuardManifest,
@@ -111,7 +110,7 @@ function manifestFlow(over: Partial<GuardManifestFlow> & Pick<GuardManifestFlow,
 }
 
 function manifest(flows: GuardManifestFlow[]): GuardManifest {
-  return { version: GUARD_FORMAT_VERSION, flows }
+  return { flows }
 }
 
 function result(over: Partial<GuardScenarioResult> & Pick<GuardScenarioResult, 'id' | 'outcome'>): GuardScenarioResult {
@@ -133,7 +132,6 @@ function latest(scenarios: GuardScenarioResult[]): GuardLatest {
       branch: 'main',
       commit: 'deadbeefcafef00d',
       recipeFingerprint: 'sha256:r',
-      scenarioFormat: GUARD_FORMAT_VERSION,
     },
     summary,
     scenarios,

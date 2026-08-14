@@ -414,7 +414,7 @@ function stubFetch() {
     'fetch',
     vi.fn(async (url: string | URL) =>
       String(url).includes('/guard/scenario?')
-        ? new Response(JSON.stringify({ id: PASSING_ID, file: 'a.yaml', content: 'guard: 3' }), {
+        ? new Response(JSON.stringify({ id: PASSING_ID, file: 'a.yaml', content: `id: ${PASSING_ID}` }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           })
@@ -884,7 +884,7 @@ describe('guard hover popovers — none of them can clip', () => {
               JSON.stringify({
                 id: BIRTH_ID,
                 file: 'a.yaml',
-                content: 'guard: 3',
+                content: 'id: s',
                 driver: 'cli',
                 steps: [
                   { n: 1, command: 'tasks init', expectation: 'exit 0' },

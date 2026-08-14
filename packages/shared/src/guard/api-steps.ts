@@ -114,7 +114,7 @@ export const GuardApiExpectSchema = z
      * the schema from the bound operation at run time (freshness comes from the stale
      * gate). Requires the scenario to bind to an OpenAPI operation that declares a JSON
      * response schema for the asserted status, else the scenario errors (never a silent
-     * pass). Additive — no GUARD_FORMAT_VERSION bump; old scenarios parse unchanged.
+     * pass). Additive — old scenarios parse unchanged.
      */
     schema: z.boolean().optional(),
   })
@@ -149,7 +149,7 @@ export const GuardApiRequestStepSchema = z
      * The same field a cli or web step carries ({@link note}), and a request step
      * needs it for the same reason: in a mixed scenario it is the step that says what
      * the UI could not prove about itself, and a reader has to be told why.
-     * Additive and optional, so no format bump.
+     * Additive and optional.
      */
     note,
     /** The flow milestone this step realizes. See {@link milestone}. */
@@ -282,9 +282,8 @@ export const GuardApiLogsStepSchema = z
  * ONE api step — one action. A `request` drives the server over HTTP; `boot`,
  * `signal` and `logs` drive and observe the server PROCESS, which is what makes
  * startup, configuration, shutdown, logging and restart-persistence claims
- * testable on this surface. All three are additive and optional: no
- * `GUARD_FORMAT_VERSION` bump, and a scenario made only of `request` steps parses
- * and runs exactly as it did before.
+ * testable on this surface. All three are additive and optional: a scenario
+ * made only of `request` steps parses and runs exactly as it did before.
  */
 export const GuardApiStepSchema = z.union([
   GuardApiRequestStepSchema,

@@ -1,0 +1,54 @@
+id: report-a-badge-even-when-coverage-fails-the-gate
+title: A failed coverage gate still allows reporting a coverage badge
+promise: The user sees that a failed coverage gate does not prevent badge reporting.
+flow:
+  id: report-a-badge-even-when-coverage-fails-the-gate
+  fingerprint: sha256:cb0ab6302f2c939ffaf56e0854d3e7f5df4be04129c97c1c0a23e7c65c7e6766
+journey:
+  path:
+    - cli/check
+    - cli/badge
+  fingerprints:
+    - sha256:8d2acf397b010a40adda2f619efbfb0d4a3f779f96eb95fb8826eb82c90c83d4
+    - sha256:4908ef34443952702a6417f3a24c0a2bfad4399407ffb8a734e76af255b24239
+binds:
+  - doc: docs/cli-reference.md
+    section: cli-reference/covergate-check
+    fingerprint: sha256:a1697b3bbf51ebca257bb95d37aba61c3ffee457c0a755a683795641b6dbcdc8
+  - doc: docs/cli-reference.md
+    section: cli-reference/badge-is-a-reporter-not-a-gate
+    fingerprint: sha256:04f97d6353d6b3f957000d6d6818685676cc4e9cf281f63d619ee18ffe794a6f
+setup:
+  files:
+    coverage/coverage-summary.json: |
+      {
+        "total": {
+          "lines": { "total": 100, "covered": 75, "skipped": 0, "pct": 75 },
+          "statements": { "total": 100, "covered": 75, "skipped": 0, "pct": 75 },
+          "functions": { "total": 20, "covered": 15, "skipped": 0, "pct": 75 },
+          "branches": { "total": 40, "covered": 30, "skipped": 0, "pct": 75 }
+        }
+      }
+normalize: []
+driver: cli
+steps:
+  - run:
+      - check
+      - '--metric'
+      - functions
+      - '--min'
+      - '90'
+    expect:
+      exit: 1
+      stdout:
+        contains: FAIL functions 75.00% (minimum 90.00%)
+    milestone: 1
+  - run:
+      - badge
+      - '--metric'
+      - functions
+    expect:
+      exit: 0
+      stdout:
+        matches: ^!\[[^\]]+\]\(https://img\.shields\.io/badge/[^)]*75(\.00)?%25[^)]*\)\s*$
+    milestone: 2

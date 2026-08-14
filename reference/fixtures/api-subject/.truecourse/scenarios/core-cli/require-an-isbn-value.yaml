@@ -1,0 +1,25 @@
+id: require-an-isbn-value
+title: Calling the ISBN command without a value reports a clear error
+promise: The user gets a clear error when invoking the ISBN command without a value.
+flow:
+  id: require-an-isbn-value
+  fingerprint: sha256:a30717f39d39c2972ef55fefda1596d8c8b561757c38ea5ec2b31ad4e1da3fe9
+journey:
+  path:
+    - cli/isbn
+  fingerprints:
+    - sha256:17ca2f92980ee13282f5068024a485cfc2b3fc93db7ce85ffa5be8dc15afa31c
+binds:
+  - doc: docs/cli.md
+    section: the-bookclub-cli/bookclub-isbn-value
+    fingerprint: sha256:f30c071a7ecc6cdb9f046009a859c5b2d8a000ce293544bde6dac188dfd48922
+normalize: []
+driver: cli
+steps:
+  - run:
+      - isbn
+    expect:
+      exit: 2
+      stderr:
+        contains: 'error: isbn needs a value'
+    milestone: 1

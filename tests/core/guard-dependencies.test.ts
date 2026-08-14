@@ -141,7 +141,6 @@ function writeScenario(r: string, id: string, flowId: string, needs: string[]): 
   fs.writeFileSync(
     file,
     yaml.dump({
-      guard: 3,
       id,
       title: `${id} runs`,
       flow: { id: flowId, fingerprint: 'sha256:aa' },

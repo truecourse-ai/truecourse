@@ -32,7 +32,13 @@ import {
   mapExpectStrings,
 } from './sandbox-token.js'
 import { applyCaptured, applyCapturedEnv, CapturedValueError } from './captured.js'
-import { applySupplied, applySuppliedExpect, type SuppliedInstance } from './dependencies.js'
+import {
+  applySupplied,
+  applySuppliedEnv,
+  applySuppliedExpect,
+  DependencyCatalogError,
+  type SuppliedInstance,
+} from './dependencies.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
 import { startExternalProxies } from './capabilities/external-proxy.js'
 import type { StepObservation } from './step-stats.js'
@@ -302,7 +308,10 @@ export async function runScenario(
       )
     /** The same four passes across an env overlay's VALUES (the names are literal). */
     const resolveEnv = (env: Record<string, string>): Record<string, string> =>
-      applyCapturedEnv(applySandboxEnv(applyUniqueEnv(env, ctx.unique), sandbox.cwd), captured)
+      applyCapturedEnv(
+        applySandboxEnv(applySuppliedEnv(applyUniqueEnv(env, ctx.unique), sandbox.supplied), sandbox.cwd),
+        captured,
+      )
 
     /**
      * The context ONE step executes under. `cancellable: false` is the best-effort
@@ -430,15 +439,19 @@ export async function runScenario(
       const claim = stepClaim(step)
       const judgment =
         failed?.visual && ctx.visualJudge && !ctx.signal?.aborted
-          ? await judgeVisually(ctx.visualJudge, {
-              screenshotPath: failed.visual.screenshotPath,
-              ...(claim !== undefined ? { claim } : {}),
-              expectation: failed.visual.expectation,
-              expected: failed.mismatch.expected,
-              actual: failed.mismatch.actual,
-              stepIndex,
-              scenarioId: scenario.id,
-            })
+          ? await judgeVisually(
+              ctx.visualJudge,
+              {
+                screenshotPath: failed.visual.screenshotPath,
+                ...(claim !== undefined ? { claim } : {}),
+                expectation: failed.visual.expectation,
+                expected: failed.mismatch.expected,
+                actual: failed.mismatch.actual,
+                stepIndex,
+                scenarioId: scenario.id,
+              },
+              ctx.signal,
+            )
           : null
 
       // The teardown steps not yet reached run NOW, best-effort, before the
@@ -451,7 +464,7 @@ export async function runScenario(
       // setup escape, with no bundle, exactly as it always has.
       const writable = outcome.records.length > 0 || records.length > 0
       const evidencePath =
-        writable && outcome.status === 'error' && outcome.expected === SANDBOX_SETUP_EXPECTED
+        !writable && outcome.status === 'error' && outcome.expected === SANDBOX_SETUP_EXPECTED
           ? undefined
           : writeEvidence({
               repoRoot: ctx.repoRoot,
@@ -568,10 +581,45 @@ export async function runScenario(
     // one in birth validation: an author-fixable defect, reported as a `fail`
     // naming the reference (the api driver's `UnknownVariableError` rule), never a
     // literal token handed to a child process.
-    if (!(e instanceof CapturedValueError)) throw e
+    //
+    // A `${supplied:…}` naming a field its registration does not declare throws the
+    // same way mid-step (the name-level gate ran, the field-level miss can only
+    // surface at resolution). It settles THIS scenario as an `error` naming the
+    // reference — one scenario's defect must never reject the whole run.
+    if (!(e instanceof CapturedValueError) && !(e instanceof DependencyCatalogError)) throw e
     // The thrower is skipped (re-resolving it would throw identically); the
     // teardown steps after it still run, best-effort, before evidence is written.
     const teardownComplete = await finishTeardown(stepInFlight)
+    if (e instanceof DependencyCatalogError) {
+      const evidencePath =
+        records.length > 0
+          ? writeEvidence({
+              repoRoot: ctx.repoRoot,
+              runId: ctx.runId,
+              scenarioId: scenario.id,
+              title: scenario.title,
+              ...evidenceRefs,
+              outcome: 'error',
+              steps: records,
+              failingStep: stepInFlight,
+              infraMessage: e.message,
+              sandboxCwd: sandbox.cwd,
+              envPins: ENV_PINS,
+            })
+          : undefined
+      return {
+        ...base,
+        outcome: 'error',
+        durationMs: Date.now() - start,
+        ...(teardownComplete ? {} : { teardownIncomplete: true }),
+        failure: {
+          step: stepInFlight,
+          expected: 'every `${supplied:…}` reference to name a declared registration field',
+          actual: e.message,
+        },
+        ...(evidencePath ? { evidencePath } : {}),
+      }
+    }
     const mismatch: ExpectMismatch = {
       subject: 'capture',
       expected: `\${captured:${e.variable}} to be captured by an earlier step`,
@@ -628,13 +676,28 @@ function stepClaim(step: GuardSandboxScenario['steps'][number]): string | undefi
  * Ask the judge, and never let it matter that it failed. A judge is an optional
  * annotator over an ALREADY-DECIDED verdict: a thrown call (no transport, a dead
  * network, a timeout) must leave the run bit-identical to one that had no judge.
+ * The run's cancel signal settles it to `null` IMMEDIATELY — an advisory
+ * annotation must never keep a cancelled run waiting on a vision call.
  */
 async function judgeVisually(
   judge: GuardVisualJudge,
   input: Parameters<GuardVisualJudge>[0],
+  signal?: AbortSignal,
 ): Promise<GuardVisualJudgment | null> {
   try {
-    return await judge(input)
+    const call = judge(input)
+    if (!signal) return await call
+    return await Promise.race([
+      call,
+      new Promise<null>((resolve) => {
+        const onAbort = (): void => resolve(null)
+        if (signal.aborted) return onAbort()
+        signal.addEventListener('abort', onAbort, { once: true })
+        // The judge settling first unhooks the listener; its own catch below still
+        // owns every failure path.
+        void call.finally(() => signal.removeEventListener('abort', onAbort)).catch(() => {})
+      }),
+    ])
   } catch {
     return null
   }

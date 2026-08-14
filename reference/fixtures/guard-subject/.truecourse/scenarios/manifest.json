@@ -1,5 +1,4 @@
 {
-  "version": 3,
   "flows": [
     {
       "flowId": "check-a-selected-report-successfully",
@@ -23,7 +22,7 @@
       ],
       "scenarios": [
         {
-          "id": "check-a-selected-report-successfully.cli.1",
+          "id": "check-a-selected-report-successfully",
           "surface": "cli",
           "status": "passing"
         }
@@ -51,7 +50,7 @@
       ],
       "scenarios": [
         {
-          "id": "get-consistently-formatted-errors.cli.1",
+          "id": "get-consistently-formatted-errors",
           "surface": "cli",
           "status": "passing"
         }
@@ -86,7 +85,7 @@
       ],
       "scenarios": [
         {
-          "id": "initialize-configuration-and-refuse-to-overwrite-it.cli.1",
+          "id": "initialize-configuration-and-refuse-to-overwrite-it",
           "surface": "cli",
           "status": "passing"
         }
@@ -119,7 +118,7 @@
       ],
       "scenarios": [
         {
-          "id": "print-a-coverage-badge.cli.1",
+          "id": "print-a-coverage-badge",
           "surface": "cli",
           "status": "passing"
         }
@@ -147,7 +146,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-a-flag-the-command-does-not-define.cli.1",
+          "id": "reject-a-flag-the-command-does-not-define",
           "surface": "cli",
           "status": "passing"
         }
@@ -175,7 +174,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-a-flag-with-no-value.cli.1",
+          "id": "reject-a-flag-with-no-value",
           "surface": "cli",
           "status": "passing"
         }
@@ -203,7 +202,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-an-invalid-minimum.cli.1",
+          "id": "reject-an-invalid-minimum",
           "surface": "cli",
           "status": "passing"
         }
@@ -252,7 +251,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-an-unknown-metric.cli.1",
+          "id": "reject-an-unknown-metric",
           "surface": "cli",
           "status": "passing"
         }
@@ -280,7 +279,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-covergaterc-json-that-is-not-an-object.cli.1",
+          "id": "reject-covergaterc-json-that-is-not-an-object",
           "surface": "cli",
           "status": "passing"
         }
@@ -308,7 +307,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-covergaterc-json-that-is-not-valid-json.cli.1",
+          "id": "reject-covergaterc-json-that-is-not-valid-json",
           "surface": "cli",
           "status": "passing"
         }
@@ -336,7 +335,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-extra-check-summary-paths.cli.1",
+          "id": "reject-extra-check-summary-paths",
           "surface": "cli",
           "status": "passing"
         }
@@ -364,7 +363,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-init-arguments.cli.1",
+          "id": "reject-init-arguments",
           "surface": "cli",
           "status": "passing"
         }
@@ -392,7 +391,7 @@
       ],
       "scenarios": [
         {
-          "id": "reject-unreadable-reports.cli.1",
+          "id": "reject-unreadable-reports",
           "surface": "cli",
           "status": "passing"
         }
@@ -426,7 +425,7 @@
       ],
       "scenarios": [
         {
-          "id": "report-a-badge-even-when-coverage-fails-the-gate.cli.1",
+          "id": "report-a-badge-even-when-coverage-fails-the-gate",
           "surface": "cli",
           "status": "passing"
         }
@@ -455,7 +454,7 @@
       ],
       "scenarios": [
         {
-          "id": "run-the-quick-start-check-and-badge.cli.1",
+          "id": "run-the-quick-start-check-and-badge",
           "surface": "cli",
           "status": "passing"
         }
@@ -494,7 +493,7 @@
       ],
       "scenarios": [
         {
-          "id": "use-covergaterc-json-settings-when-gating-coverage.cli.1",
+          "id": "use-covergaterc-json-settings-when-gating-coverage",
           "surface": "cli",
           "status": "passing"
         }
@@ -527,7 +526,7 @@
       ],
       "scenarios": [
         {
-          "id": "view-usage-command-help-and-version.cli.1",
+          "id": "view-usage-command-help-and-version",
           "surface": "cli",
           "status": "passing"
         }
@@ -557,7 +556,7 @@
       ],
       "scenarios": [
         {
-          "id": "write-the-badge-to-a-file.cli.1",
+          "id": "write-the-badge-to-a-file",
           "surface": "cli",
           "status": "passing"
         }

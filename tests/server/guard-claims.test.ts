@@ -98,7 +98,6 @@ const MANIFEST = {
 };
 
 const SCENARIO = {
-  guard: 3,
   id: 'add-then-list.cli.1',
   title: 'A developer adds a task and lists it',
   driver: 'cli',

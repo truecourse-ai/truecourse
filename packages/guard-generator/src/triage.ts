@@ -29,7 +29,6 @@
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
-  GUARD_FORMAT_VERSION,
   GuardTriageSchema,
   type GuardBirthFinding,
   type GuardDriverId,
@@ -243,7 +242,6 @@ export function triageCacheKey(finding: GuardBirthFinding): string {
     .update(
       [
         TRIAGE_PROMPT_FINGERPRINT,
-        String(GUARD_FORMAT_VERSION),
         finding.flowId ?? '',
         finding.surface ?? '',
         finding.doc,

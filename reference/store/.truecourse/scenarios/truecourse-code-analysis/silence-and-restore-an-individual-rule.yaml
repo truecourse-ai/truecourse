@@ -1,0 +1,258 @@
+id: silence-and-restore-an-individual-rule
+title: A developer silences one noisy rule, then puts it back
+promise: A developer silences one noisy rule, then puts it back
+flow:
+  id: silence-and-restore-an-individual-rule
+  fingerprint: sha256:dcdfc709a4a9102d9c1b0514fd7db808a1ba155202dfd8c2d5d847982c99c32f
+interface:
+  path:
+    - cli/analyze
+    - cli/list
+    - cli/rules-list
+    - cli/rules-disable
+    - cli/rules-enable
+    - cli/rules-reset
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+    - sha256:a78a30d5a44c112fb60d3104f8b1fa6556c740d8676a7750c706406e276cd282
+    - sha256:9473e87965b8ca6a84302cc600b2776e92e066b2ee4f940555b4a98fb71c9c3b
+    - sha256:2977512e713caaeaeb76cd62699ef08da750393f9aa81d585b5d43064a179f1c
+    - sha256:65e2b3f80e755827e08d5b637759f29fe8153bdb229eca369208772a751beb1d
+binds:
+  - doc: reference/spec-docs/analyze/rules.mdx
+    section: individual-rules
+    fingerprint: sha256:63ed2c715dab23022d9cea81043abda2b6a14e02da95a6b033520c544407c26d
+setup:
+  files:
+    package.json: |
+      {
+        "name": "noisy-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        console.log('starting')
+        return input
+      }
+    src/unsafe.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+          - src/unsafe.js
+        message: seed noisy sample
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-skills'
+    expect:
+      exit: 0
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*console\.log call)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$
+    note: The "before" state both hiding claims are measured against.
+  - run:
+      - rules
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*Rules for[^\n]*shown)(?=[\s\S]*code-quality/deterministic/console-log[^\n]*enabled)[\s\S]*$
+    note: Header plus a per-rule status. This step is also where the key used by every later step comes from — the program's own output, not its source.
+    milestone:
+      - rules-list-shows-on-off-status
+  - run:
+      - rules
+      - list
+      - '--domain'
+      - security
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*code-quality/deterministic/console-log)(?=[\s\S]*security/deterministic/sql-injection)[\s\S]*$
+    note: A security rule is listed and a code-quality rule is not — both halves of "only the rules in the named domain".
+    milestone:
+      - rules-list-domain-filter
+  - run:
+      - rules
+      - list
+      - '--search'
+      - sql
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*code-quality/deterministic/console-log)(?=[\s\S]*security/deterministic/sql-injection)[\s\S]*$
+    note: '`sql-injection` matches on the key; `console-log` matches the term in none of key, name or description and is therefore absent.'
+    milestone:
+      - rules-list-search-filter
+  - run:
+      - rules
+      - list
+      - '--language'
+      - python
+    expect:
+      exit: 0
+      stdout:
+        matches: 'python: [0-9]+ supported'
+    milestone:
+      - rules-list-language-support-status
+  - run:
+      - rules
+      - disable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+      stdout:
+        matches: Disabled rule 'code-quality/deterministic/console-log'
+      files:
+        .truecourse/config.json:
+          contains: '"code-quality/deterministic/console-log"'
+    milestone:
+      - rules-disable-single-rule
+      - disabled-rule-keys-in-config-disabledrules
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*security/deterministic/eval-usage)(?=[\s\S]*code-quality/deterministic/console-log)[\s\S]*$
+    milestone:
+      - rules-list-disabled-filter
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*console\.log call)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$
+    note: 'No analysis ran between the disable and this listing: the existing violations are hidden from the report while every other finding stays.'
+    milestone:
+      - disabled-rule-violations-hidden-from-list
+  - run:
+      - rules
+      - enable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+      stdout:
+        matches: Enabled rule 'code-quality/deterministic/console-log'
+    milestone:
+      - rules-enable-single-rule
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        contains: console.log call
+    note: Hidden, not deleted — the same snapshot renders them again.
+    milestone:
+      - re-enabling-restores-hidden-violations
+  - run:
+      - rules
+      - disable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+  - write:
+      src/report.js: |
+        export function report(rows) {
+          console.log('rows', rows.length)
+          return rows
+        }
+    expect:
+      files:
+        src/report.js:
+          exists: true
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    expect:
+      exit: 0
+    note: 'The file under test was written by the previous step and is uncommitted, so the tree is dirty and a non-interactive analyze refuses to guess the stash decision (exit 1, per the analyze interface''s stdin contract). `--no-stash` is the answer this claim needs: the point is that a LATER analysis skips the disabled rule over the NEW file, which only exists in the working tree.'
+  - run:
+      - rules
+      - enable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+  - run:
+      - list
+      - '--limit'
+      - '200'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?![\s\S]*console\.log call)(?=[\s\S]*violations \()[\s\S]*$
+    note: 'The distinguishing observation: the rule is ENABLED again, and the newly written file''s `console.log` still produces nothing. Detection never ran while it was off, so there is no violation to un-hide — which is exactly what "skipped at analyze time" means and what filtering alone could not produce.'
+    milestone:
+      - disabled-rules-skipped-at-analyze-time
+  - run:
+      - rules
+      - disable
+      - security/deterministic/eval-usage
+    expect:
+      exit: 0
+  - run:
+      - rules
+      - disable
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+  - run:
+      - rules
+      - reset
+      - code-quality/deterministic/console-log
+    expect:
+      exit: 0
+      stdout:
+        matches: Re-enabled 'code-quality/deterministic/console-log'
+      files:
+        .truecourse/config.json:
+          contains: '"security/deterministic/eval-usage"'
+    note: One override cleared; the other rule's override is still recorded — "that one rule" and no more.
+    milestone:
+      - rules-reset-one-rule
+  - run:
+      - rules
+      - reset
+    expect:
+      exit: 0
+      stdout:
+        matches: Cleared per-rule overrides
+  - run:
+      - rules
+      - list
+      - '--disabled'
+    expect:
+      exit: 0
+      stdout:
+        contains: No rules match the given filters.
+    note: With no key, every per-rule override is gone — the disabled set is empty.
+    milestone:
+      - rules-reset-all-rules

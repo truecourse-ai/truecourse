@@ -175,7 +175,6 @@ describe('useGuardRuns — ref switch resets the run selection and cache', () =>
     branch: 'main',
     commit,
     recipeFingerprint: 'sha256:9f2caabbccdd',
-    scenarioFormat: 3,
   });
   const summary = { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 };
   const BASELINE_LATEST: GuardLatest = {
@@ -295,7 +294,6 @@ describe('PR guard view — the RepoPage wiring never reads baseline data under 
       branch: 'main',
       commit: 'base1111',
       recipeFingerprint: 'sha256:9f2caabbccdd',
-      scenarioFormat: 3,
     },
     summary,
     scenarios: [

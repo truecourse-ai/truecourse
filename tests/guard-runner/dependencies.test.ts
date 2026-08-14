@@ -406,6 +406,132 @@ describe('applySupplied', () => {
     )
     expect(applySupplied('at ${supplied:target.path}', { target: { path: '/tmp/x' } })).toBe('at /tmp/x')
   })
+
+  it('settles ONE scenario as an error on an undeclared field — the sibling still runs', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TARGET])
+    const fixture = path.join(r, 'fixture-project')
+    fs.mkdirSync(fixture, { recursive: true })
+    writeLocal(r, { 'analysis-target': { path: fixture } })
+    // `pth` is a typo for `path`: the NAME gate passes (the dependency is
+    // registered), so the miss can only surface at token resolution — which must
+    // fail this scenario alone, never reject the whole run.
+    writeScenario(
+      r,
+      'cli/typo.yaml',
+      scenario({
+        id: 'typo-field',
+        binds: specBinds('cli/version'),
+        steps: [{ run: ['show', '${supplied:analysis-target.pth}'], expect: { exit: 0 } }],
+      }),
+    )
+    writeScenario(
+      r,
+      'cli/free.yaml',
+      scenario({
+        id: 'free-one',
+        binds: specBinds('cli/whoami'),
+        steps: [{ run: ['version'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const byId = Object.fromEntries(res.latest.scenarios.map((s) => [s.id, s]))
+    expect(byId['typo-field'].outcome).toBe('error')
+    expect(byId['typo-field'].failure?.actual).toContain('declares no')
+    expect(byId['free-one'].outcome).toBe('pass')
+  })
+
+  it('resolves ${supplied:…} in a step env overlay, exactly like argv', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TARGET])
+    const fixture = path.join(r, 'fixture-project')
+    fs.mkdirSync(fixture, { recursive: true })
+    fs.writeFileSync(path.join(fixture, 'README.md'), 'env-resolved content\n')
+    writeLocal(r, { 'analysis-target': { path: fixture } })
+    writeScenario(
+      r,
+      'cli/env.yaml',
+      scenario({
+        id: 'env-supplied',
+        binds: specBinds('cli/version'),
+        needs: ['analysis-target'],
+        // `env NAME` echoes the variable as the child sees it; a literal
+        // `${supplied:…}` reaching the child would fail the assertion.
+        steps: [
+          {
+            run: ['env', 'TARGET_FILE'],
+            env: { TARGET_FILE: '${supplied:analysis-target.path}/README.md' },
+            expect: {
+              exit: 0,
+              stdout: { contains: '.tc-supplied/analysis-target/README.md' },
+            },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  })
+})
+
+describe('materializeSupplied — the copy is self-contained', () => {
+  function sandboxDirs(r: string): { cwd: string; home: string } {
+    const cwd = path.join(r, 'sb', 'work')
+    const home = path.join(r, 'sb', 'home')
+    fs.mkdirSync(cwd, { recursive: true })
+    fs.mkdirSync(home, { recursive: true })
+    return { cwd, home }
+  }
+
+  it('keeps an inside-instance relative link and MATERIALIZES one that points out', () => {
+    const r = repo()
+    const host = path.join(r, 'host-project')
+    fs.mkdirSync(path.join(host, 'pkg'), { recursive: true })
+    fs.writeFileSync(path.join(host, 'pkg', 'index.js'), 'inside\n')
+    fs.symlinkSync(path.join('pkg', 'index.js'), path.join(host, 'inside-link'))
+    const outside = path.join(r, 'outside-secret')
+    fs.writeFileSync(outside, 'host-secret\n')
+    fs.symlinkSync(outside, path.join(host, 'outside-link'))
+    fs.symlinkSync(path.join(r, 'never-existed'), path.join(host, 'dangling-link'))
+
+    const { values } = materializeSupplied(
+      [{ name: 'proj', kind: 'path', hostPath: host }],
+      sandboxDirs(r),
+    )
+    const dest = values['proj'].path
+    // The pnpm-style in-tree link survives as a link, resolving inside the copy.
+    expect(fs.lstatSync(path.join(dest, 'inside-link')).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(path.join(dest, 'inside-link'), 'utf-8')).toBe('inside\n')
+    // The escaping link became a real file: writing through the copy can never
+    // reach the host original.
+    const copied = path.join(dest, 'outside-link')
+    expect(fs.lstatSync(copied).isSymbolicLink()).toBe(false)
+    expect(fs.readFileSync(copied, 'utf-8')).toBe('host-secret\n')
+    fs.writeFileSync(copied, 'changed in sandbox\n')
+    expect(fs.readFileSync(outside, 'utf-8')).toBe('host-secret\n')
+    // A dangling link has nothing to copy and is skipped, never a crash.
+    expect(fs.existsSync(path.join(dest, 'dangling-link'))).toBe(false)
+  })
+
+  it('refuses a config-dir destination that escapes the sandbox HOME', () => {
+    const r = repo()
+    const host = path.join(r, 'host-config')
+    fs.mkdirSync(host, { recursive: true })
+    expect(() =>
+      materializeSupplied(
+        [{ name: 'evil', kind: 'config-dir', hostPath: host, homePath: '../../outside' }],
+        sandboxDirs(r),
+      ),
+    ).toThrow(DependencyCatalogError)
+  })
 })
 
 describe('a config-dir instance', () => {
