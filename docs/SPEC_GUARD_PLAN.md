@@ -5620,3 +5620,94 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `{ base64 | text | path, as?, type? }`, as the value of a multipart part, so ONE
     file declaration serves both surfaces and the same seeded document travels the
     api and the web path (which is what makes the two findings comparable).
+
+101. **Web value capture, and the locator family widened to what a user perceives
+    (2026-08-14).** STATUS: BUILT. Capture existed on cli (a regex whose one group
+    is the value, over the streams) and on api (a JSON path, or a header, over the
+    response); the browser had none. So no claim of the form "take what the page
+    showed and use it" was reachable through a UI, and no claim about a CHANGE was
+    reachable at all — a delta needs two observations and a way to carry the first
+    one forward.
+    - **The locator family** (`packages/shared/src/guard/web-steps.ts`). Was one
+      member: role + accessible name. Now a union of six, each compiled 1:1 to the
+      browser's own query (`getByRole` / `getByPlaceholder` / `getByLabel` /
+      `getByText` / `getByTitle` / `getByAltText`), each carrying the same `exact`
+      and `pick: first` escapes, each member exclusive (strict objects, so two
+      handles at once is a parse error). The MEMBERSHIP RULE is now sayable and is
+      the whole rationale: a handle a person can point at on the screen. The
+      exclusions stand and are the point — no CSS, no XPath, no test ids: those are
+      names the implementation gave itself, invisible to every user, and a scenario
+      written in them passes for markup nobody can operate while breaking on a
+      refactor that changed nothing a user sees. `webLocatorValueKey` /
+      `webLocatorHandle` are the single source for which field a member carries, so
+      describing, interpolating and compiling a locator can never disagree; a state
+      expectation is a locator member with the ARIA fields added (`stateMember`),
+      because a union cannot be `.extend`ed. A missed non-role target reports
+      "nothing on the page matches …" with the page's own text; the role inventory
+      ("the button elements on the page are: …") stays only where it means
+      something, since "every element with this placeholder" IS the query that just
+      found nothing.
+    - **The capture anatomy is REUSED, not re-invented**: the name schema, the
+      `${captured:…}` token, `capturedNamesIn`, the one-capturing-group rule (now
+      exported from `capture.ts`) and `captureDefects` are the same ones cli and api
+      use. Web capture names join the ONE scenario-wide namespace, so single
+      assignment, defined-before-use, no self-reference and nothing-in-setup are
+      enforced at LOAD for cli, api and web together — a browser can hand a value to
+      an HTTP request and back.
+    - **The getters** (`GuardWebCaptureSchema`: `from` + `get` + optional `number`):
+      `text` (the default, matching the cli capture's `from: stdout` precedent),
+      `value` — the DOM PROPERTY, which is in no page text and not in the `value`
+      attribute once a user has typed (the input-value gap the reference corpora
+      kept filing) —, `count` (the one getter exempt from single-match strictness:
+      counting IS the question, and it reads at a glance since zero is a legitimate
+      answer and there is no predicate to wait on), `{ state }` (as `"true"` /
+      `"false"`, through the same three-valued reading the assertion makes, so a
+      state nothing exposes fails the capture as loudly as it fails an expectation),
+      and `{ attribute }`. `number` slices the value out of the sentence a page
+      writes it in ("seats left: 3") and belongs only to the three TEXT-shaped
+      getters — a count is already a number, a state is not one.
+    - **Failure discipline, verbatim from `capture.ts`**: a locator resolving
+      nothing (or ambiguously), an element with no value property, an absent
+      attribute, an unexposed state, a slicer that does not match — each is THAT
+      STEP failing with the page's text and its screenshot as evidence. Never an
+      empty value flowing on into a later assertion that then passes for the wrong
+      reason. Captures resolve after the action AND after the expectation has held,
+      so a failed step publishes nothing.
+    - **`compare.offset`** (`GuardComparisonSchema`, shared by every text and json
+      matcher): the comparand is shifted before the operator runs, which is what
+      makes the delta a verdict — `equals: "${captured:seatsBefore}", offset: -1`.
+      Messages quote the captured value AND the shift ("equals 3 − 1"), so a failed
+      delta says which half of the sentence the run disagreed with. It lands in the
+      SHARED matcher, so cli and api gain it too and both authoring prompts rolled
+      their fingerprint (`GENERATE_PROMPT_FINGERPRINT` → `07ba2c83da82d869`,
+      `GENERATE_API_PROMPT_FINGERPRINT` → `70755b107ca66f2a`) — deliberately: a
+      re-author is the cost of a claim about a change being writable at all, where
+      before it could only be written as an absolute number that tests the fixture.
+    - **Comparison on web subjects needed no new wiring** — `GuardStreamMatcher`
+      already carried `compare`, and the web `text` / `url` / `attribute.value`
+      subjects already use it; only the offset's evaluation was added.
+    - **Generator grounding (Tier 1)**: `resourceLines` renders a readable's `id`
+      when it has one — the name reserved by item 96 and rendered nowhere until now
+      — and the PLACES block gained a CAPTURE note documenting the primitive form.
+      The note lives in the USER prompt beside the facts a capture may point at,
+      because that adjacency IS the grounding.
+    - **As built**: `packages/shared/src/guard/{web-steps,capture,scenario}.ts`,
+      `packages/guard-runner/src/web/{executor,tokens}.ts`,
+      `packages/guard-runner/src/{expect,evidence}.ts`,
+      `packages/guard-runner/src/drivers/web-driver.ts`,
+      `packages/guard-generator/src/prompts.ts`. Tests:
+      `tests/shared/{guard-web-steps,guard-capture}.test.ts`,
+      `tests/guard-runner/web-driver.test.ts` (every getter against a real browser,
+      each failure mode, the delta), `tests/guard-generator/grounding.test.ts`. The
+      fixture gained `/capture` (`tests/fixtures/guard-fixture-web/server.mjs`).
+    - **Deliberately deferred**: (a) a `read: <resource>.<readable>` scenario
+      SHORTHAND — the reserved readable id is now rendered, so the seam is open, but
+      the generator authors the primitive until a corpus shows the shorthand earning
+      its second way to say one thing. (b) A `rows` READER (take the third row's
+      title) — rows are still only "a row containing X exists"; a row-scoped
+      locator is the missing piece and is the same work item as item 96's
+      per-card-ambiguity note. (c) POM emission — nothing generates page objects
+      from the registry. (d) css/testid locators, permanently: see the membership
+      rule above. (e) A `count` ASSERTION (`expect` counting elements) — capture
+      can now read a count and `compare` it, which covers the claims seen so far;
+      an expectation member would be a second way to say it.
