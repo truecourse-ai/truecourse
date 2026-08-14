@@ -39,3 +39,6 @@ export { collectApiRequestContracts } from './api-contracts.js'
 
 export { buildApiInterfaces } from './api-interfaces.js'
 export type { ApiInterfaceSeed } from './api-interfaces.js'
+
+export { formCliResources, formApiResources } from './resources.js'
+export type { ResourceFormation } from './resources.js'

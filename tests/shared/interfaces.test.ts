@@ -7,6 +7,7 @@ import {
   InterfaceControlReadableSchema,
   InterfaceMarkerReadableSchema,
   InterfaceOptionSchema,
+  InterfaceResourceKindSchema,
   InterfaceResourceSchema,
   InterfaceRowsReadableSchema,
   InterfacePromptFactSchema,
@@ -28,6 +29,7 @@ import {
   guardDriverIds,
   type Interface,
   type InterfaceCommandContract,
+  type InterfaceOperationContract,
   type InterfaceContract,
   type InterfaceSequenceNode,
   type InterfaceStep,
@@ -126,7 +128,7 @@ describe('interface schemas', () => {
         ...over,
       })
     const file = (over: Record<string, unknown>) => ({
-      version: 1 as const,
+      version: 2 as const,
       generatedAt: '2026-08-11T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
       interfaces: [web({ startingState: 'repo-report-open', endState: 'rule-silenced' })],
@@ -174,7 +176,7 @@ describe('interface schemas', () => {
     // Additive: a catalog that names no states at all parses unchanged.
     expect(
       InterfacesFileSchema.parse({
-        version: 1 as const,
+        version: 2 as const,
         generatedAt: '2026-08-11T12:00:00.000Z',
         recipeFingerprint: 'sha256:recipe',
         interfaces: [iface([INVOKE])],
@@ -184,7 +186,7 @@ describe('interface schemas', () => {
 
   it('round-trips an interfaces file through JSON', () => {
     const file = {
-      version: 1 as const,
+      version: 2 as const,
       generatedAt: '2026-07-24T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
       interfaces: [iface([INVOKE]), iface([REQUEST], { id: 'api/create-task', type: 'api', entry: { method: 'POST', path: '/tasks' } })],
@@ -211,7 +213,7 @@ describe('interface schemas', () => {
 
   it('records per-surface how the catalog was derived, and tolerates its absence', () => {
     const base = {
-      version: 1 as const,
+      version: 2 as const,
       generatedAt: '2026-07-24T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
       interfaces: [iface([INVOKE])],
@@ -341,8 +343,8 @@ describe('interfaceFingerprint', () => {
 
 const CONTRACT: InterfaceContract = {
   summary: '`tasks add` and its `--json` mode.',
-  commands: [
-    {
+  surface: 'cli',
+  command: {
       path: ['tasks', 'add'],
       description: 'Add a task.',
       options: [
@@ -420,7 +422,6 @@ const CONTRACT: InterfaceContract = {
         },
       },
     },
-  ],
 }
 
 describe('the interface contract', () => {
@@ -433,7 +434,7 @@ describe('the interface contract', () => {
   it('a catalog that carries only the command tree still parses — the growth is additive', () => {
     // Byte-for-byte the shape the mapper writes today: no contract.
     const engineWritten = {
-      version: 1 as const,
+      version: 2 as const,
       generatedAt: '2026-08-06T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
       interfaces: [iface([INVOKE])],
@@ -446,7 +447,7 @@ describe('the interface contract', () => {
 
   it('round-trips a contract-bearing catalog through JSON unchanged', () => {
     const file = {
-      version: 1 as const,
+      version: 2 as const,
       generatedAt: '2026-08-06T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
       interfaces: [{ ...iface([INVOKE]), contract: CONTRACT }],
@@ -457,23 +458,23 @@ describe('the interface contract', () => {
 
   it('keeps "established as none" and "never established" apart', () => {
     const none = InterfaceContractSchema.parse({
-      commands: [{ path: ['tasks'], subcommands: [], io: { consumes: { prompts: [] }, produces: { writes: [] } } }],
+      surface: 'cli', command: { path: ['tasks'], subcommands: [], io: { consumes: { prompts: [] }, produces: { writes: [] } } },
     })
     // Authored empty lists survive as empty lists — they say "none", out loud.
-    expect(none.commands[0].io?.consumes?.prompts).toEqual([])
-    expect(none.commands[0].io?.produces?.writes).toEqual([])
-    expect(none.commands[0].subcommands).toEqual([])
+    expect(none.command.io?.consumes?.prompts).toEqual([])
+    expect(none.command.io?.produces?.writes).toEqual([])
+    expect(none.command.subcommands).toEqual([])
     // A field nobody established stays absent — never coerced into an empty "none".
-    const bare = InterfaceContractSchema.parse({ commands: [{ path: ['tasks'] }] })
-    expect(bare.commands[0].options).toBeUndefined()
-    expect(bare.commands[0].positionals).toBeUndefined()
-    expect(bare.commands[0].io).toBeUndefined()
+    const bare = InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'] } })
+    expect(bare.command.options).toBeUndefined()
+    expect(bare.command.positionals).toBeUndefined()
+    expect(bare.command.io).toBeUndefined()
   })
 
   it('carries what a command READS as the mirror of what it writes', () => {
     // An author seeds a file because the command reads it — so the read side is
     // the same fact shape as the write side: a path, and at most one condition.
-    expect(CONTRACT.commands[0].io?.consumes?.reads).toEqual([
+    expect(CONTRACT.command.io?.consumes?.reads).toEqual([
       { path: '~/.tasks.json', when: 'the store the listing renders' },
       { path: '<repo>/.tasks/config.json' },
     ])
@@ -482,14 +483,14 @@ describe('the interface contract', () => {
     expect(() => InterfaceReadFactSchema.parse({ path: '~/.tasks.json', when: '' })).toThrow()
 
     // "Reads nothing" and "nobody established what it reads" stay different reads.
-    const none = InterfaceContractSchema.parse({ commands: [{ path: ['tasks'], io: { consumes: { reads: [] } } }] })
-    expect(none.commands[0].io?.consumes?.reads).toEqual([])
-    const bare = InterfaceContractSchema.parse({ commands: [{ path: ['tasks'], io: { consumes: { prompts: [] } } }] })
-    expect(bare.commands[0].io?.consumes?.reads).toBeUndefined()
+    const none = InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'], io: { consumes: { reads: [] } } } })
+    expect(none.command.io?.consumes?.reads).toEqual([])
+    const bare = InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'], io: { consumes: { prompts: [] } } } })
+    expect(bare.command.io?.consumes?.reads).toBeUndefined()
   })
 
   it('records an unestablished exit status as `unknown` rather than a plausible number', () => {
-    const exits = CONTRACT.commands[0].io?.produces?.exits ?? []
+    const exits = CONTRACT.command.io?.produces?.exits ?? []
     expect(exits.map((e) => e.exit)).toContain(INTERFACE_UNKNOWN)
     expect(INTERFACE_UNKNOWN).toBe('unknown')
   })
@@ -514,7 +515,8 @@ describe('the interface contract', () => {
     expect(() => InterfaceOptionSchema.parse({ flag: '--x', takesValue: true })).toThrow()
     expect(() => InterfaceOptionSchema.parse({ flag: '--x', takesValue: true, valueRequired: false, scope: 'shell' })).toThrow()
     expect(() => InterfaceOptionSchema.parse({ flag: '--x', takesValue: true, valueRequired: false, required: true })).toThrow()
-    expect(() => InterfaceContractSchema.parse({ commands: [] })).toThrow()
+    // A cli contract without its one command is a contract for nothing.
+    expect(() => InterfaceContractSchema.parse({ surface: 'cli' })).toThrow()
   })
 
   // -------------------------------------------------------------------------
@@ -605,7 +607,7 @@ describe('the interface contract', () => {
   })
 
   it('the io vocabulary is facts only — every free-prose shape is rejected', () => {
-    const io = (value: unknown) => () => InterfaceContractSchema.parse({ commands: [{ path: ['tasks'], io: value }] })
+    const io = (value: unknown) => () => InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'], io: value } })
     // A marker on a stream nobody has; a prompt whose kind is not answerable.
     expect(io({ produces: { output: [{ stream: 'syslog', marker: 'x' }] } })).toThrow()
     expect(io({ consumes: { prompts: [{ kind: 'wizard', marker: 'x' }] } })).toThrow()
@@ -626,13 +628,13 @@ describe('the interface contract', () => {
 
   it('takes no prose about behavior — the artifact is 100% structured facts', () => {
     const command = (value: Record<string, unknown>) =>
-      InterfaceContractSchema.parse({ commands: [{ path: ['tasks'], ...value }] })
+      InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'], ...value } })
     // A sentence no fact kind carries is not stored anywhere, under any name:
     // it is either expressible as an exit/output/read/write/prompt fact, or gone.
     expect(() => command({ notes: ['Re-running creates a second task.'] })).toThrow()
     expect(() => command({ notes: [] })).toThrow()
     expect(() => command({ behavior: ['Re-running creates a second task.'] })).toThrow()
-    expect(() => InterfaceContractSchema.parse({ commands: [{ path: ['tasks'] }], notes: ['tree-wide'] })).toThrow()
+    expect(() => InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'] }, notes: ['tree-wide'] })).toThrow()
     // What the note used to say lives on as a fact, or not at all.
     expect(() =>
       command({ io: { produces: { writes: [{ path: '~/.tasks.json', when: 're-running appends' }] } } }),
@@ -641,14 +643,14 @@ describe('the interface contract', () => {
 
   it('carries the calling interface and nothing about itself', () => {
     const contract = (value: Record<string, unknown>) =>
-      InterfaceContractSchema.parse({ commands: [{ path: ['tasks'] }], ...value })
+      InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'] }, ...value })
     // Provenance, authored decisions, doc-versus-code findings and the shared
     // block are not calling interface — they have no home in the artifact.
     expect(() => contract({ derivedFrom: ['src/cli.ts'] })).toThrow()
     expect(() => contract({ decisions: [{ id: 'x', decision: 'y' }] })).toThrow()
     expect(() => contract({ shared: { stdin: [] } })).toThrow()
     expect(() =>
-      InterfaceContractSchema.parse({ commands: [{ path: ['tasks'], inheritsShared: [{ block: 'stdin' }] }] }),
+      InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'], inheritsShared: [{ block: 'stdin' }] } }),
     ).toThrow()
     expect(() =>
       InterfaceSchema.parse({ ...iface([INVOKE]), diagnostics: [{ kind: 'k', subject: 's', detail: 'd' }] }),
@@ -667,12 +669,11 @@ describe('the interface contract', () => {
       ...enriched,
       contract: {
         ...CONTRACT,
-        commands: [
-          {
-            ...CONTRACT.commands[0],
+        surface: 'cli',
+        command: {
+            ...CONTRACT.command,
             options: [{ flag: '--json', takesValue: true, valueRequired: true, choices: ['pretty', 'raw'] }],
           },
-        ],
       },
     }
     expect(interfaceFingerprint(relearned)).toBe(bare.fingerprint)
@@ -680,6 +681,203 @@ describe('the interface contract', () => {
     expect(interfaceFingerprint({ ...bare, steps: [{ ...INVOKE, flags: ['--json', '--quiet'] }] })).not.toBe(
       bare.fingerprint,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The CONTRACT UNION — one member per surface, discriminated on `surface`
+// (2026-08-14). The api member is the one that changed shape: it used to wear a
+// cli costume (`path: ["GET", "/x"]`, response markers as `stream: "stdout"`,
+// statuses as exit codes) and now speaks HTTP.
+// ---------------------------------------------------------------------------
+
+const OPERATION: InterfaceContract = {
+  surface: 'api',
+  summary: 'Register a repository.',
+  operation: {
+    description: 'Adds the directory to the registry and answers the created row.',
+    request: {
+      params: [{ name: 'id', required: true, description: 'The registry slug.' }],
+      query: [{ name: 'ref', required: false, choices: ['working-tree'], default: 'head' }],
+      body: [
+        { name: 'path', required: true, hint: 'absolute path' },
+        { name: 'skipGit', required: 'unknown' },
+      ],
+    },
+    consumes: {
+      env: [{ var: 'TRUECOURSE_HOME' }],
+      reads: [{ path: '~/.truecourse/registry.json' }],
+    },
+    produces: {
+      statuses: [
+        { status: '201', when: 'the directory was registered' },
+        { status: '400', when: 'the path is not a directory' },
+        { status: INTERFACE_UNKNOWN, when: 'the registry cannot be written — no path is declared' },
+      ],
+      body: [{ marker: '"slug"' }, { marker: '"error"', when: 'the path is refused' }],
+      rows: [
+        {
+          role: 'row',
+          template: '<slug> — <violations> violations',
+          slots: [
+            { name: 'slug', kind: 'text' },
+            { name: 'violations', kind: 'count' },
+          ],
+        },
+      ],
+      writes: [{ path: '~/.truecourse/registry.json' }],
+    },
+  },
+}
+
+describe('the contract union', () => {
+  it('is discriminated on `surface`, and a contract with no surface is not a contract', () => {
+    expect(InterfaceContractSchema.parse(CONTRACT)).toEqual(CONTRACT)
+    expect(InterfaceContractSchema.parse(OPERATION)).toEqual(OPERATION)
+    expect(() => InterfaceContractSchema.parse({ command: { path: ['tasks'] } })).toThrow()
+    expect(() => InterfaceContractSchema.parse({ surface: 'web', task: {} })).toThrow()
+    // Each member carries ITS OWN half and nothing of the other's.
+    expect(() =>
+      InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'] }, operation: {} }),
+    ).toThrow()
+    expect(() =>
+      InterfaceContractSchema.parse({ surface: 'api', operation: {}, command: { path: ['tasks'] } }),
+    ).toThrow()
+  })
+
+  it('the cli member carries ONE command, singular — the vestigial array is gone', () => {
+    expect(() => InterfaceContractSchema.parse({ surface: 'cli', command: [{ path: ['tasks'] }] })).toThrow()
+    expect(() => InterfaceContractSchema.parse({ surface: 'cli', commands: [{ path: ['tasks'] }] })).toThrow()
+  })
+
+  it('the api member says what an operation TAKES, split by where the caller puts it', () => {
+    const request = (value: unknown) => () =>
+      InterfaceContractSchema.parse({ surface: 'api', operation: { request: value } })
+    expect(request({ params: [], query: [], body: [] })).not.toThrow()
+    // A derived field is `{ name, required }` and nothing more — the mapper's own
+    // product parses here unchanged, which is what "one home" means.
+    expect(request({ body: [{ name: 'path', required: 'unknown' }] })).not.toThrow()
+    expect(request({ body: [{ name: 'path' }] })).toThrow()
+    expect(request({ body: [{ name: 'path', required: 'maybe' }] })).toThrow()
+    // …and an authored one may widen it, but only with the declared vocabulary.
+    expect(
+      request({ query: [{ name: 'level', required: false, choices: ['a'], default: 'a', hint: 'n' }] }),
+    ).not.toThrow()
+    expect(request({ query: [{ name: 'level', required: false, in: 'query' }] })).toThrow()
+    expect(request({ headers: [{ name: 'authorization', required: true }] })).toThrow()
+
+    // Omitted and empty stay two different reads, per region.
+    const bare = InterfaceContractSchema.parse({ surface: 'api', operation: {} })
+    expect(bare.surface === 'api' && bare.operation.request).toBeUndefined()
+  })
+
+  it('a status is a status and a response body has no stream — the costume is gone', () => {
+    const produces = (value: unknown) => () =>
+      InterfaceContractSchema.parse({ surface: 'api', operation: { produces: value } })
+    expect(produces({ statuses: [{ status: '404', when: 'no such repo' }] })).not.toThrow()
+    expect(produces({ statuses: [{ status: INTERFACE_UNKNOWN }] })).not.toThrow()
+    // The two shapes the costume used: an exit code, and a marker on a stream.
+    expect(produces({ exits: [{ exit: '404' }] })).toThrow()
+    expect(produces({ output: [{ stream: 'stdout', marker: '"error"' }] })).toThrow()
+    expect(produces({ body: [{ stream: 'stdout', marker: '"error"' }] })).toThrow()
+    expect(produces({ body: [{ marker: '"error"' }] })).not.toThrow()
+    // The row grammar is the SHARED one, stream dropped — same agreement rule.
+    expect(
+      produces({ rows: [{ role: 'row', template: '<slug>', slots: [{ name: 'slug', kind: 'text' }] }] }),
+    ).not.toThrow()
+    expect(
+      produces({
+        rows: [{ role: 'row', stream: 'stdout', template: '<slug>', slots: [{ name: 'slug', kind: 'text' }] }],
+      }),
+    ).toThrow()
+    expect(
+      produces({ rows: [{ role: 'row', template: '<slug>', slots: [{ name: 'other', kind: 'text' }] }] }),
+    ).toThrow(/no slot declares/)
+  })
+
+  it('an operation asks nobody anything — there are no prompts on the server side', () => {
+    const consumes = (value: unknown) => () =>
+      InterfaceContractSchema.parse({ surface: 'api', operation: { consumes: value } })
+    expect(consumes({ env: [{ var: 'PORT' }], reads: [{ path: 'db.sqlite' }] })).not.toThrow()
+    expect(consumes({ prompts: [{ kind: 'confirm', marker: 'Sure?' }] })).toThrow()
+  })
+
+  it('the operation contract copies no identity — method and path live on the entry', () => {
+    const operation = (value: Record<string, unknown>) => () =>
+      InterfaceContractSchema.parse({ surface: 'api', operation: { ...value } })
+    expect(operation({ method: 'GET' })).toThrow()
+    expect(operation({ path: '/api/repos' })).toThrow()
+    // …and the cli costume's own identity field is likewise refused here.
+    expect(operation({ path: ['GET', '/api/repos'] })).toThrow()
+  })
+
+  it('a contract describes THIS entry’s surface — the file refuses a mismatch', () => {
+    const catalog = (over: Record<string, unknown>) => ({
+      version: 2 as const,
+      generatedAt: '2026-08-14T12:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [],
+      ...over,
+    })
+    const apiIface = iface([REQUEST], {
+      id: 'api/create-task',
+      type: 'api',
+      entry: { method: 'POST', path: '/tasks' },
+    })
+    expect(() =>
+      InterfacesFileSchema.parse(catalog({ interfaces: [{ ...apiIface, contract: OPERATION }] })),
+    ).not.toThrow()
+    expect(() =>
+      InterfacesFileSchema.parse(catalog({ interfaces: [{ ...apiIface, contract: CONTRACT }] })),
+    ).toThrow(/this contract is `cli`, and the interface is `api`/)
+    expect(() =>
+      InterfacesFileSchema.parse(catalog({ interfaces: [{ ...iface([INVOKE]), contract: OPERATION }] })),
+    ).toThrow(/this contract is `api`, and the interface is `cli`/)
+  })
+
+  it('the api contract never moves an interface identity either', () => {
+    const bare = iface([REQUEST], {
+      id: 'api/create-task',
+      type: 'api',
+      entry: { method: 'POST', path: '/tasks' },
+    })
+    expect(interfaceFingerprint({ ...bare, contract: OPERATION })).toBe(bare.fingerprint)
+  })
+
+  it('round-trips an api-contract-bearing catalog through JSON unchanged', () => {
+    const file = {
+      version: 2 as const,
+      generatedAt: '2026-08-14T12:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [
+        {
+          ...iface([REQUEST], {
+            id: 'api/create-task',
+            type: 'api',
+            entry: { method: 'POST', path: '/tasks' },
+          }),
+          contract: OPERATION,
+        },
+      ],
+      source: { api: 'tree' as const },
+    }
+    expect(InterfacesFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file)
+  })
+})
+
+describe('the catalog version', () => {
+  const base = {
+    generatedAt: '2026-08-14T12:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [iface([INVOKE])],
+  }
+
+  it('is 2, and a v1 file is refused rather than half-read', () => {
+    expect(InterfacesFileSchema.parse({ ...base, version: 2 }).version).toBe(2)
+    // The designed recovery: the snapshot is gitignored and derived, so a v1 file
+    // fails parse, reads as "no catalog", and the next map re-derives it.
+    expect(() => InterfacesFileSchema.parse({ ...base, version: 1 })).toThrow()
+    expect(() => InterfacesFileSchema.parse({ ...base, version: 3 })).toThrow()
   })
 })
 
@@ -713,11 +911,11 @@ describe('the question sequence', () => {
     ...over,
   })
   const parse = (over: Record<string, unknown> = {}) =>
-    InterfaceContractSchema.parse({ commands: [command(over)] })
+    InterfaceContractSchema.parse({ surface: 'cli', command: command(over) })
 
   it('orders an interactive command’s questions, each with the kind that answers it', () => {
     const parsed = parse()
-    expect(parsed.commands[0].sequence).toEqual(WIZARD_SEQUENCE)
+    expect(parsed.command.sequence).toEqual(WIZARD_SEQUENCE)
     // A linear run needs no conditions at all — the array order IS the dialogue.
     const linear = parse({
       io: { consumes: { prompts: [WIZARD_PROMPTS[0], WIZARD_PROMPTS[2]] } },
@@ -726,11 +924,11 @@ describe('the question sequence', () => {
         { prompt: 'Set an advanced option', kind: 'confirm' },
       ],
     })
-    expect(linear.commands[0].sequence).toHaveLength(2)
+    expect(linear.command.sequence).toHaveLength(2)
   })
 
   it('names the earlier question and the answer class that reveals a conditional one', () => {
-    const sequence = parse().commands[0].sequence as InterfaceSequenceNode[]
+    const sequence = parse().command.sequence as InterfaceSequenceNode[]
     expect(sequence[3].after).toEqual({ prompt: 'Set an advanced option', answer: 'yes' })
     // The branch is what makes an interactive command scriptable from the interface:
     // the follow-up is asked only down one answer, and the answer is named.
@@ -745,7 +943,7 @@ describe('the question sequence', () => {
         { ...WIZARD_SEQUENCE[3], repeats: 'once per gateway the account is reached through' },
       ],
     })
-    expect((looped.commands[0].sequence as InterfaceSequenceNode[])[3].repeats).toBe(
+    expect((looped.command.sequence as InterfaceSequenceNode[])[3].repeats).toBe(
       'once per gateway the account is reached through',
     )
     // The same question twice is ambiguous — a branch resolves BY MARKER.
@@ -755,7 +953,7 @@ describe('the question sequence', () => {
 
   it('`unknown` is a first-class value — the sequence the mapper still owes', () => {
     const owed = parse({ sequence: INTERFACE_UNKNOWN })
-    expect(owed.commands[0].sequence).toBe(INTERFACE_UNKNOWN)
+    expect(owed.command.sequence).toBe(INTERFACE_UNKNOWN)
     expect(InterfaceSequenceSchema.parse(INTERFACE_UNKNOWN)).toBe('unknown')
     // …and it is the ONLY word that says so: no near-synonym slips through.
     expect(() => parse({ sequence: 'unestablished' })).toThrow()
@@ -824,13 +1022,13 @@ describe('the question sequence', () => {
 
   it('needs the questions it orders — and a command that asks nothing has no dialogue', () => {
     // Prompts nobody established: there is no dialogue to put in order yet.
-    expect(() => InterfaceContractSchema.parse({ commands: [{ path: ['tasks'], sequence: WIZARD_SEQUENCE }] })).toThrow()
+    expect(() => InterfaceContractSchema.parse({ surface: 'cli', command: { path: ['tasks'], sequence: WIZARD_SEQUENCE } })).toThrow()
     // Prompts established as NONE: the command is not interactive, so a sequence
     // (`unknown` included) would claim a dialogue that provably does not exist.
     const silent = { path: ['tasks'], io: { consumes: { prompts: [] } } }
-    expect(() => InterfaceContractSchema.parse({ commands: [{ ...silent, sequence: WIZARD_SEQUENCE }] })).toThrow()
-    expect(() => InterfaceContractSchema.parse({ commands: [{ ...silent, sequence: INTERFACE_UNKNOWN }] })).toThrow()
-    expect(InterfaceContractSchema.parse({ commands: [silent] }).commands[0].sequence).toBeUndefined()
+    expect(() => InterfaceContractSchema.parse({ surface: 'cli', command: { ...silent, sequence: WIZARD_SEQUENCE } })).toThrow()
+    expect(() => InterfaceContractSchema.parse({ surface: 'cli', command: { ...silent, sequence: INTERFACE_UNKNOWN } })).toThrow()
+    expect(InterfaceContractSchema.parse({ surface: 'cli', command: silent }).command.sequence).toBeUndefined()
   })
 
   it('is a contract REGION of its own, not an io fact', () => {
@@ -839,12 +1037,12 @@ describe('the question sequence', () => {
     // inside `io` would count every question twice and break the facts-only rule.
     expect(() =>
       InterfaceContractSchema.parse({
-        commands: [{ path: ['tasks'], io: { consumes: { prompts: WIZARD_PROMPTS }, sequence: WIZARD_SEQUENCE } }],
+        surface: 'cli', command: { path: ['tasks'], io: { consumes: { prompts: WIZARD_PROMPTS }, sequence: WIZARD_SEQUENCE } },
       }),
     ).toThrow()
     expect(() =>
       InterfaceContractSchema.parse({
-        commands: [{ path: ['tasks'], io: { consumes: { prompts: WIZARD_PROMPTS, sequence: WIZARD_SEQUENCE } } }],
+        surface: 'cli', command: { path: ['tasks'], io: { consumes: { prompts: WIZARD_PROMPTS, sequence: WIZARD_SEQUENCE } } },
       }),
     ).toThrow()
   })
@@ -886,9 +1084,8 @@ describe('the question sequence', () => {
     const withSequence = {
       ...bare,
       contract: {
-        commands: [
-          { path: ['tasks', 'setup'], io: { consumes: { prompts: WIZARD_PROMPTS } }, sequence: WIZARD_SEQUENCE },
-        ],
+        surface: 'cli',
+        command: { path: ['tasks', 'setup'], io: { consumes: { prompts: WIZARD_PROMPTS } }, sequence: WIZARD_SEQUENCE },
       },
     }
     expect(interfaceFingerprint(withSequence)).toBe(bare.fingerprint)
@@ -896,12 +1093,11 @@ describe('the question sequence', () => {
     const relearned = {
       ...withSequence,
       contract: {
-        commands: [
-          {
-            ...withSequence.contract.commands[0],
+        surface: 'cli',
+        command: {
+            ...withSequence.contract.command,
             sequence: INTERFACE_UNKNOWN,
           },
-        ],
       },
     }
     expect(interfaceFingerprint(relearned)).toBe(bare.fingerprint)
@@ -920,23 +1116,46 @@ describe('the question sequence', () => {
 describe('the reference catalog', () => {
   const file = path.resolve(__dirname, '../../reference/store/.truecourse/guard/interfaces.json')
   const catalog = InterfacesFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8')))
-  // Three surfaces live here now: the cli trees and the api operations carry
-  // the command contract (`contracted`); the web task interfaces carry a state
-  // contract instead (steps + starting/end state, no command grammar).
+  // Three surfaces live here now, and each speaks its OWN contract member
+  // (2026-08-14): a cli entry carries `contract.command`, an api entry carries
+  // `contract.operation` in HTTP's vocabulary, and the web task interfaces carry
+  // a state contract instead (steps + starting/end state, no grammar at all).
   const cli = catalog.interfaces.filter((j) => j.type === 'cli')
   const web = catalog.interfaces.filter((j) => j.type === 'web')
   const contracted = catalog.interfaces.filter((j) => j.type !== 'web')
-  const commands = (id: string) => catalog.interfaces.find((j) => j.id === id)!.contract!.commands
+  /** One cli entry's ONE command — the union member, unwrapped. */
+  const commandOf = (j: Interface): InterfaceCommandContract => {
+    const contract = j.contract!
+    if (contract.surface !== 'cli') throw new Error(`${j.id} carries no cli contract`)
+    return contract.command
+  }
+  /** One api entry's operation — the union's other member. */
+  const operationOf = (j: Interface): InterfaceOperationContract => {
+    const contract = j.contract!
+    if (contract.surface !== 'api') throw new Error(`${j.id} carries no api contract`)
+    return contract.operation
+  }
+  const cliCommands = cli.map(commandOf)
   // One entry per invocable thing (2026-08-10), so a command is reached by the
   // argv a user types, and a FAMILY by its `group` — never by walking one entry's
-  // command list, which is now exactly one command long.
-  const byArgv = new Map(
-    contracted.flatMap((j) => j.contract!.commands.map((c) => [c.path.join(' '), c] as const)),
-  )
+  // command list, which the union has now collapsed to a single command.
+  const byArgv = new Map(cliCommands.map((c) => [c.path.join(' '), c] as const))
   const command = (argv: string) => byArgv.get(argv)!
-  const family = (group: string) =>
-    cli.filter((j) => j.group === group).flatMap((j) => j.contract!.commands)
+  const family = (group: string) => cli.filter((j) => j.group === group).map(commandOf)
   const reads = (commandPath: string) => command(commandPath).io!.consumes!.reads!
+  /** Every io FACT in the catalog, both members, counted the same way. */
+  const referenceFactCount = (): number => {
+    const sides: Record<string, unknown[] | undefined>[] = []
+    for (const command of cliCommands) sides.push(command.io?.consumes ?? {}, command.io?.produces ?? {})
+    for (const iface of catalog.interfaces.filter((j) => j.type === 'api')) {
+      const operation = operationOf(iface)
+      sides.push(operation.consumes ?? {}, operation.produces ?? {})
+    }
+    return sides.reduce(
+      (n, side) => n + Object.values(side).reduce((m, list) => m + (list?.length ?? 0), 0),
+      0,
+    )
+  }
 
   it('loads green, every contract included', () => {
     // The dashboard server's HTTP API joined the catalog as a REALIZATION surface
@@ -1072,14 +1291,18 @@ describe('the reference catalog', () => {
       'web/open-a-changed-file-from-diff',
       'web/toggle-a-file-tree-folder',
     ])
-    // Every command answers "what do I read?" — none is silent. 27 cli commands
-    // (one per entry since the split) + the api surface's 32 operations = 59.
-    const all = contracted.flatMap((j) => j.contract!.commands)
-    expect(all).toHaveLength(59)
-    expect(all.every((c) => c.io?.consumes?.reads !== undefined)).toBe(true)
+    // Every invocable answers "what do I read?" — none is silent. 27 cli commands
+    // (one per entry since the split) + the api surface's 32 operations = 59, and
+    // each surface says it in its own member's `consumes.reads`.
+    const readLists = [
+      ...cliCommands.map((c) => c.io?.consumes?.reads),
+      ...catalog.interfaces.filter((j) => j.type === 'api').map((j) => operationOf(j).consumes?.reads),
+    ]
+    expect(readLists).toHaveLength(59)
+    expect(readLists.every((reads) => reads !== undefined)).toBe(true)
     // 97 cli reads + 105 api reads (the registry lookup, store files, git objects
     // and rule catalogue each operation consults) = 202.
-    expect(all.reduce((n, c) => n + c.io!.consumes!.reads!.length, 0)).toBe(202)
+    expect(readLists.reduce((n, reads) => n + reads!.length, 0)).toBe(202)
   })
 
   it('the web task interfaces carry their state contract, one task each', () => {
@@ -1303,8 +1526,11 @@ describe('the reference catalog', () => {
         cursor = byId.get(cursor.of)!
       }
     }
-    // Only the web area names places today, exactly like the states registry.
-    expect(Object.keys(catalog.resources!)).toEqual(['web'])
+    // Every area names its places now (2026-08-14) — the cli command groups and
+    // the api REST nouns joined the web screens/dialogs/panels. STATES stay
+    // web-only: a world a task assumes is a thing only a stateful UI has.
+    expect(Object.keys(catalog.resources!)).toEqual(['cli', 'api', 'web'])
+    expect(Object.keys(catalog.states!)).toEqual(['web'])
     // The readables carry the shape discipline everywhere they appear: a rows
     // readable's template and slots agree by schema; spot-check the two the
     // generator leans on hardest.
@@ -1328,6 +1554,47 @@ describe('the reference catalog', () => {
    * points at real entries of THIS catalog and that its two absences stay
    * distinguishable, because a relation nobody can resolve is worse than none.
    */
+  it('the cli and api areas name their places too, and every entry points at one', () => {
+    // The SOM restructure (2026-08-14): the same envelope the web surface got in
+    // 2026-08-12, formed for the other two by `@truecourse/interface-mapper`'s
+    // own rules — so the hand-authored catalog's places are exactly the ones a
+    // derived catalog would get.
+    const groups = catalog.resources!.cli!
+    expect(groups.map((r) => [r.id, r.of])).toEqual([
+      ['truecourse', undefined],
+      ['config', 'truecourse'],
+      ['dashboard', 'truecourse'],
+      ['hooks', 'truecourse'],
+      ['rules', 'truecourse'],
+      ['config-llm', 'config'],
+    ])
+    expect(groups.every((r) => r.kind === 'command-group')).toBe(true)
+    // A cli/api place carries no READABLES: those are DOM facts, and omitting
+    // them is the absence rule, not a gap.
+    expect(groups.every((r) => r.readables === undefined)).toBe(true)
+
+    const nouns = catalog.resources!.api!
+    expect(nouns.every((r) => r.kind === 'rest-noun')).toBe(true)
+    // The verb/noun rule at work on the real surface: 22 nouns over 32
+    // operations, and not one RPC tail among them.
+    expect(nouns).toHaveLength(22)
+    for (const tail of ['cancel', 'enrich']) {
+      expect(nouns.map((r) => r.id).some((id) => id.endsWith(`-${tail}`))).toBe(false)
+    }
+    const owner = (id: string) => catalog.interfaces.find((j) => j.id === id)!.resource
+    expect(owner('api/post-api-repos-id-analyses-cancel')).toBe('api-repos-analyses')
+    expect(owner('api/post-api-repos-id-flows-flowid-enrich')).toBe('api-repos-flows')
+    // …while a GET-rooted sub-path IS a place of its own.
+    expect(owner('api/get-api-repos-id-analyses-diff')).toBe('api-repos-analyses-diff')
+    expect(owner('cli/config-llm-setup')).toBe('config-llm')
+    expect(owner('cli/analyze')).toBe('truecourse')
+
+    // Every cli and api entry is placed; the web entries keep their own `at`/`to`
+    // location contract and carry no owner (`resource` is not `at`).
+    expect(contracted.every((j) => j.resource !== undefined)).toBe(true)
+    expect(web.every((j) => j.resource === undefined)).toBe(true)
+  })
+
   it('every web task states which api operations it reaches, by catalog id', () => {
     const apiIds = new Set(catalog.interfaces.filter((j) => j.type === 'api').map((j) => j.id))
     for (const j of web) {
@@ -1354,22 +1621,18 @@ describe('the reference catalog', () => {
     ).toBeUndefined()
   })
 
-  it('is 100% structured facts — no command carries a sentence about behavior', () => {
-    const all = contracted.flatMap((j) => j.contract!.commands)
-    for (const command of all) {
+  it('is 100% structured facts — no invocable carries a sentence about behavior', () => {
+    for (const command of cliCommands) {
       expect(Object.keys(command)).not.toContain('notes')
     }
-    // The count the schema now guarantees: every io entry is one of the seven
-    // fact kinds. 1530 while cli/spec and cli/guard were in the catalog
-    // (2026-08-09); 443 with the analyze-only corpus (2026-08-10); 997 once the
-    // api surface joined the same day (554 of them on its 32 operations); 1135
-    // after the dashboard CLI family and full Code Analysis interface wave.
-    const facts = all.reduce((n, c) => {
-      const io = c.io ?? {}
-      const sides = [io.consumes ?? {}, io.produces ?? {}]
-      return n + sides.reduce((m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0), 0)
-    }, 0)
-    expect(facts).toBe(1135)
+    // The count the schema now guarantees: every io entry is one of the fact
+    // kinds. 1530 while cli/spec and cli/guard were in the catalog (2026-08-09);
+    // 443 with the analyze-only corpus (2026-08-10); 997 once the api surface
+    // joined the same day (554 of them on its 32 operations); 1135 after the
+    // dashboard CLI family and full Code Analysis interface wave — and 1135 still
+    // after the api half moved into its own member (2026-08-14): the facts were
+    // RE-HOMED, not re-counted, which is the whole claim of that migration.
+    expect(referenceFactCount()).toBe(1135)
   })
 
   it('carries the row grammar of every enumerated listing the CLI prints', () => {
@@ -1378,10 +1641,16 @@ describe('the reference catalog', () => {
     // 89 with the spec and guard trees' listings (2026-08-09); back to the
     // 25 shapes of the 7-interface catalog with those trees gone (2026-08-10),
     // then 31 when the dashboard CLI family joined. The api and web surfaces add
-    // none: a row grammar is the shape
-    // of a PRINTED line, and a JSON response has no such thing.
-    const all = contracted.flatMap((j) => j.contract!.commands)
+    // none: the api member HAS a row grammar (the same one, stream dropped), and
+    // no operation in this corpus establishes one — a response's item shape was
+    // never extracted, and omitted is the honest answer.
+    const all = cliCommands
     expect(all.reduce((n, c) => n + (c.io?.produces?.rows?.length ?? 0), 0)).toBe(31)
+    expect(
+      catalog.interfaces
+        .filter((j) => j.type === 'api')
+        .every((j) => operationOf(j).produces?.rows === undefined),
+    ).toBe(true)
     expect(rowsOf('truecourse analyze')).toHaveLength(3)
     expect(rowsOf('truecourse list')).toHaveLength(9)
     expect(rowsOf('truecourse rules categories')).toHaveLength(2)
@@ -1424,10 +1693,9 @@ describe('the reference catalog', () => {
 
   it('says how every prompt is answered — select and text on Enter, a confirm on a keypress', () => {
     // 46 after the dashboard CLI family joined; api and web operations ask
-    // nothing on stdin, so their contracts carry no prompt list.
-    const prompts = contracted
-      .flatMap((j) => j.contract!.commands)
-      .flatMap((c) => c.io?.consumes?.prompts ?? [])
+    // nothing on stdin — the api member has no `prompts` field at all now, which
+    // is the schema stating what the corpus already showed.
+    const prompts = cliCommands.flatMap((c) => c.io?.consumes?.prompts ?? [])
     expect(prompts).toHaveLength(46)
     expect(prompts.every((p) => p.submit !== undefined)).toBe(true)
     // The two delivery classes the runner's terminal layer has, and which prompt
@@ -1560,7 +1828,7 @@ describe('the reference catalog', () => {
   })
 
   it('every INTERACTIVE command carries its question sequence, and no other command does', () => {
-    const all = cli.flatMap((j) => j.contract!.commands)
+    const all = cliCommands
     const interactive = all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) > 0)
     // 18 over the Code Analysis corpus after the dashboard CLI family joined.
     expect(interactive).toHaveLength(18)
@@ -1569,7 +1837,6 @@ describe('the reference catalog', () => {
     }
     // A command established as asking nothing has no dialogue to order — and the
     // catalog states that by carrying no sequence, not by carrying an empty one.
-    // The api operations are in this set too (2026-08-10): no prompts, no sequence.
     for (const command of all.filter((c) => (c.io?.consumes?.prompts?.length ?? 0) === 0)) {
       expect(command.sequence, command.path.join(' ')).toBeUndefined()
     }
@@ -1589,17 +1856,11 @@ describe('the reference catalog', () => {
     // The decision the pins above encode: a sequence entry is the ORDER over
     // questions the prompt facts already carry, so counting it would count every
     // question twice. 1135 io facts with sequences, 1135 without.
-    const all = contracted.flatMap((j) => j.contract!.commands)
-    const facts = (command: InterfaceCommandContract) => {
-      const io = command.io ?? {}
-      return [io.consumes ?? {}, io.produces ?? {}].reduce(
-        (m, side) => m + Object.values(side).reduce((k, list) => k + list.length, 0),
-        0,
-      )
-    }
-    expect(all.reduce((n, c) => n + facts(c), 0)).toBe(1135)
+    expect(referenceFactCount()).toBe(1135)
     // …and the sequences really are there to have been excluded.
-    expect(all.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0)).toBe(46)
+    expect(
+      cliCommands.reduce((n, c) => n + (Array.isArray(c.sequence) ? c.sequence.length : 0), 0),
+    ).toBe(46)
   })
 
   it('branches the first-run wizard exactly as the CLI asks it', () => {
@@ -1631,10 +1892,8 @@ describe('the reference catalog', () => {
   it('puts the first-run question first on every command that can be asked it', () => {
     // It is asked in the program's `preAction` hook, so it precedes the command's
     // own work — every sequence that carries it opens with it.
-    const asked = cli
-      .flatMap((j) => j.contract!.commands)
-      // `?? []` because a contract may carry no prompt list at all — the api
-      // operations do not, having no stdin to ask on (2026-08-10).
+    const asked = cliCommands
+      // `?? []` because a contract may carry no prompt list at all.
       .filter((c) => (c.io?.consumes?.prompts ?? []).some((p) => p.marker.startsWith('How should TrueCourse run')))
     // Every interactive command in the catalog can be asked it — 18 across the
     // Code Analysis CLI surface; it was >30 with the spec and guard trees.
@@ -1713,8 +1972,8 @@ describe('the reference catalog', () => {
       if (!('command' in entry)) throw new Error(`${iface.id} is not command-rooted`)
       expect(iface.steps, iface.id).toHaveLength(1)
       expect(iface.steps[0]).toMatchObject({ kind: 'invoke', command: entry.command })
-      expect(iface.contract!.commands, iface.id).toHaveLength(1)
-      const argv = iface.contract!.commands[0].path
+      expect(iface.contract!.surface, iface.id).toBe('cli')
+      const argv = commandOf(iface).path
       expect(argv.slice(-entry.command.length), iface.id).toEqual(entry.command)
     }
     // The families the split left behind — the group is the only thing that says
@@ -1765,7 +2024,9 @@ describe('the reference catalog', () => {
   describe('the api surface', () => {
     const api = catalog.interfaces.filter((j) => j.type === 'api')
     const operation = (id: string) => api.find((j) => j.id === id)!
-    const contractOf = (id: string) => operation(id).contract!.commands[0]
+    const contractOf = (id: string) => operationOf(operation(id))
+    const requestOf = (id: string) => contractOf(id).request!
+    const producesOf = (id: string) => contractOf(id).produces!
 
     it('is 32 operations, each rooted at its own method + path', () => {
       expect(api).toHaveLength(32)
@@ -1778,10 +2039,11 @@ describe('the reference catalog', () => {
         // so the catalog's per-command steps have nothing to enumerate here.
         expect(iface.steps, iface.id).toHaveLength(1)
         expect(iface.steps[0]).toEqual({ kind: 'request', method: entry.method, path: entry.path })
-        // …and exactly one contract entry, keyed the same way.
-        const commands = iface.contract!.commands
-        expect(commands, iface.id).toHaveLength(1)
-        expect(commands[0].path.join(' '), iface.id).toBe(iface.title)
+        // …and its contract is the api MEMBER, which copies no identity at all:
+        // the operation's method and path live on the entry, once (2026-08-14).
+        expect(iface.contract!.surface, iface.id).toBe('api')
+        expect(Object.keys(operationOf(iface)), iface.id).not.toContain('path')
+        expect(Object.keys(operationOf(iface)), iface.id).not.toContain('method')
       }
     })
 
@@ -1800,25 +2062,31 @@ describe('the reference catalog', () => {
       })
     })
 
-    it('carries a path parameter as a positional and a query or body field as an option', () => {
-      // 33 positionals over 32 operations: `{id}` on all 29 repo-scoped ones, plus
+    it('splits the request by WHERE the caller puts it — path, query, body', () => {
+      // The costume this replaced (2026-08-14) had one grammar list for all
+      // three: path parameters rode `positionals`, query and body fields rode
+      // `options` and were told apart only by a sentence the author opened each
+      // description with. That was `reference/transform-gaps.md` G65, and it is
+      // closed — each region is now its own array.
+      //
+      // 33 path params over 32 operations: `{id}` on all 29 repo-scoped ones, plus
       // the five second params (`analysisId` twice, `dbId`, `flowId`, `ruleKey`),
       // and none at all on `/api/capabilities` and `/api/rules`.
-      expect(api.reduce((n, j) => n + j.contract!.commands[0].positionals!.length, 0)).toBe(33)
-      expect(contractOf('api/get-api-rules').positionals).toEqual([])
-      expect(contractOf('api/patch-api-repos-id-rules-rulekey').positionals!.map((p) => p.name)).toEqual([
+      expect(api.reduce((n, j) => n + operationOf(j).request!.params!.length, 0)).toBe(33)
+      expect(requestOf('api/get-api-rules').params).toEqual([])
+      expect(requestOf('api/patch-api-repos-id-rules-rulekey').params!.map((p) => p.name)).toEqual([
         'id',
         'ruleKey',
       ])
-      expect(contractOf('api/get-api-capabilities').positionals).toEqual([])
+      expect(requestOf('api/get-api-capabilities').params).toEqual([])
       expect(
-        contractOf('api/get-api-repos-id-analyses-analysisid-usage').positionals!.map((p) => p.name),
+        requestOf('api/get-api-repos-id-analyses-analysisid-usage').params!.map((p) => p.name),
       ).toEqual(['id', 'analysisId'])
 
       // The grammar of the busiest read surface, complete: its five filters and
       // the two paging parameters, with the value sets the code really enforces.
-      const violations = contractOf('api/get-api-repos-id-violations')
-      expect(violations.options!.map((o) => o.flag)).toEqual([
+      const violations = requestOf('api/get-api-repos-id-violations')
+      expect(violations.query!.map((f) => f.name)).toEqual([
         'analysisId',
         'file',
         'status',
@@ -1826,13 +2094,15 @@ describe('the reference catalog', () => {
         'limit',
         'offset',
       ])
-      expect(violations.options!.find((o) => o.flag === 'status')!.choices).toEqual([
+      // A pure read takes no body — established as NONE, not left unestablished.
+      expect(violations.body).toEqual([])
+      expect(violations.query!.find((f) => f.name === 'status')!.choices).toEqual([
         'active',
         'resolved',
         'all',
       ])
-      expect(violations.options!.find((o) => o.flag === 'status')!.default).toBe('active')
-      expect(violations.options!.find((o) => o.flag === 'severity')!.choices).toEqual([
+      expect(violations.query!.find((f) => f.name === 'status')!.default).toBe('active')
+      expect(violations.query!.find((f) => f.name === 'severity')!.choices).toEqual([
         'critical',
         'high',
         'medium',
@@ -1840,30 +2110,41 @@ describe('the reference catalog', () => {
         'info',
       ])
 
-      // A request BODY has no region of its own in the schema, so its fields ride
-      // the grammar with their location stated in the description — the one place
-      // the transform is lossy, recorded as G65 in `reference/transform-gaps.md`.
-      const analyze = contractOf('api/post-api-repos-id-analyses')
-      expect(analyze.options!.map((o) => o.flag)).toEqual(['mode', 'skipGit'])
-      expect(analyze.options!.find((o) => o.flag === 'mode')!.choices).toEqual(['full', 'diff'])
-      expect(analyze.options!.every((o) => o.description!.startsWith('JSON body field.'))).toBe(true)
+      // A request BODY is its own region now, so a body field is simply IN it —
+      // no location sentence, and no query field mixed in with it.
+      const analyze = requestOf('api/post-api-repos-id-analyses')
+      expect(analyze.body!.map((f) => f.name)).toEqual(['mode', 'skipGit'])
+      expect(analyze.query).toEqual([])
+      expect(analyze.body!.find((f) => f.name === 'mode')!.choices).toEqual(['full', 'diff'])
+      expect(analyze.body!.find((f) => f.name === 'mode')!.required).toBe(true)
+      expect(analyze.body!.find((f) => f.name === 'skipGit')!.required).toBe(false)
+      expect(analyze.body!.every((f) => !/^JSON body field\./.test(f.description ?? ''))).toBe(true)
       expect(
-        contractOf('api/get-api-repos-id-violations').options!.every((o) =>
-          o.description!.startsWith('Query parameter.'),
+        requestOf('api/get-api-repos-id-violations').query!.every(
+          (f) => !/^Query parameter\./.test(f.description ?? ''),
         ),
+      ).toBe(true)
+      // `analysisId` is READ but never demanded — the one place the mechanical
+      // `valueRequired` → `required` mapping would have overstated the surface,
+      // corrected by hand at the migration (every route that takes it).
+      expect(
+        api
+          .flatMap((j) => operationOf(j).request!.query ?? [])
+          .filter((f) => f.name === 'analysisId')
+          .every((f) => f.required === false),
       ).toBe(true)
     })
 
     it('records the two defaults that differ between the graph routes', () => {
       // The trap a scenario author walks into: `level` is `services` everywhere
       // except the collapsed PUT, where it is `modules`.
-      const level = (id: string) => contractOf(id).options!.find((o) => o.flag === 'level')!.default
+      const level = (id: string) => requestOf(id).query!.find((f) => f.name === 'level')!.default
       expect(level('api/get-api-repos-id-graph')).toBe('services')
       expect(level('api/put-api-repos-id-graph-positions')).toBe('services')
       expect(level('api/delete-api-repos-id-graph-positions')).toBe('services')
       expect(level('api/put-api-repos-id-graph-collapsed')).toBe('modules')
       // And the one graph route that reads `branch` at all.
-      const hasBranch = (id: string) => contractOf(id).options!.some((o) => o.flag === 'branch')
+      const hasBranch = (id: string) => requestOf(id).query!.some((f) => f.name === 'branch')
       expect(hasBranch('api/delete-api-repos-id-graph-positions')).toBe(true)
       expect(hasBranch('api/get-api-repos-id-graph')).toBe(false)
       expect(hasBranch('api/put-api-repos-id-graph-positions')).toBe(false)
@@ -1880,20 +2161,19 @@ describe('the reference catalog', () => {
       }
     })
 
-    it('states a response status as an exit fact, one per condition', () => {
-      // 112 statuses over 32 operations. An operation's HTTP status has no fact kind
-      // of its own; it rides `exits`, whose field is deliberately a STRING (G66).
-      expect(api.reduce((n, j) => n + j.contract!.commands[0].io!.produces!.exits!.length, 0)).toBe(112)
-      const exits = (id: string) =>
-        contractOf(id).io!.produces!.exits!.map((e) => e.exit)
+    it('states a response status as a STATUS, one per condition', () => {
+      // 112 statuses over 32 operations. They used to ride `exits` — a process's
+      // exit code wearing an HTTP status (`transform-gaps.md` G66); the api member
+      // states them as statuses now, and the field stays a STRING for the same
+      // reason an exit is one: `unknown` has to be sayable.
+      expect(api.reduce((n, j) => n + operationOf(j).produces!.statuses!.length, 0)).toBe(112)
+      const exits = (id: string) => producesOf(id).statuses!.map((e) => e.status)
       expect(exits('api/post-api-repos')).toEqual(['201', '400', '401', '500'])
       expect(exits('api/delete-api-repos-id')).toEqual(['204', '404', '401', '500'])
       expect(exits('api/post-api-repos-id-analyses')).toEqual(['202', '400', '404', '401', '500'])
       expect(exits('api/get-api-repos-browse')).toEqual(['200', '400', '403', '404', '401', '500'])
       // The gate above every `/api` route — and the one route mounted above IT.
-      const gated = api.filter((j) =>
-        j.contract!.commands[0].io!.produces!.exits!.some((e) => e.exit === '401'),
-      )
+      const gated = api.filter((j) => operationOf(j).produces!.statuses!.some((e) => e.status === '401'))
       expect(gated).toHaveLength(31)
       expect(exits('api/get-api-capabilities')).toEqual(['200'])
       // `/api/rules` takes no project, so its only other answer is the gate's.
@@ -1908,27 +2188,25 @@ describe('the reference catalog', () => {
       // ones mounted under `projectResolver`; the eight on the repos router,
       // `/api/capabilities` and `/api/rules` are mounted without it.
       const touching = api.filter((j) =>
-        j.contract!.commands[0].io!.produces!.writes!.some(
+        operationOf(j).produces!.writes!.some(
           (w) => w.path === '~/.truecourse/registry.json' && w.when!.includes('lastOpened'),
         ),
       )
       expect(touching).toHaveLength(23)
-      expect(
-        contractOf('api/get-api-repos-id-violations').io!.consumes!.reads!.map((r) => r.path),
-      ).toEqual([
+      expect(contractOf('api/get-api-repos-id-violations').consumes!.reads!.map((r) => r.path)).toEqual([
         '~/.truecourse/registry.json',
         '<repo>/.truecourse/LATEST.json',
         '<repo>/.truecourse/analyses/<iso>_<short-uuid>.json',
         '<repo>/.truecourse/config.json',
       ])
       // The trigger is the one Code Analysis route that writes the analyze store.
-      const analyze = contractOf('api/post-api-repos-id-analyses').io!.produces!.writes!.map((w) => w.path)
+      const analyze = producesOf('api/post-api-repos-id-analyses').writes!.map((w) => w.path)
       expect(analyze).toContain('<repo>/.truecourse/.analyze.lock')
       expect(analyze).toContain('<repo>/.truecourse/LATEST.json')
       expect(analyze).toContain('<repo>/.truecourse/history.json')
       expect(analyze).toContain('git stash')
       // Reading is not writing: a read route's only write is the resolver's touch.
-      expect(contractOf('api/get-api-repos-id-graph').io!.produces!.writes!).toHaveLength(1)
+      expect(producesOf('api/get-api-repos-id-graph').writes!).toHaveLength(1)
       // …and the four read routes mounted WITHOUT the resolver write nothing at
       // all (the other two unscoped ones, the create and the delete, write on
       // purpose).
@@ -1940,11 +2218,11 @@ describe('the reference catalog', () => {
         'api/get-api-repos-id-rules',
         'api/get-api-rules',
       ]) {
-        expect(contractOf(id).io!.produces!.writes!, id).toEqual([])
+        expect(producesOf(id).writes!, id).toEqual([])
       }
       // The rule toggle is the one mapped write that never leaves the project's
       // own config — no store file, no registry entry.
-      expect(contractOf('api/patch-api-repos-id-rules-rulekey').io!.produces!.writes!).toEqual([
+      expect(producesOf('api/patch-api-repos-id-rules-rulekey').writes!).toEqual([
         {
           path: '<repo>/.truecourse/config.json',
           when: '`disabledRules`, re-sorted on every write',
@@ -1953,8 +2231,7 @@ describe('the reference catalog', () => {
     })
 
     it('carries the response shape as markers, never a schema', () => {
-      const markers = (id: string) =>
-        contractOf(id).io!.produces!.output!.map((o) => o.marker)
+      const markers = (id: string) => producesOf(id).body!.map((o) => o.marker)
       expect(markers('api/get-api-capabilities')).toContain('"edition"')
       expect(markers('api/get-api-repos-id-violations-summary')).toEqual([
         '"total"',
@@ -1965,22 +2242,20 @@ describe('the reference catalog', () => {
         '"error"',
       ])
       // The one envelope every failing route answers with.
-      const envelope = api.filter((j) =>
-        j.contract!.commands[0].io!.produces!.output!.some((o) => o.marker === '"error"'),
-      )
+      const envelope = api.filter((j) => operationOf(j).produces!.body!.some((o) => o.marker === '"error"'))
       expect(envelope).toHaveLength(31)
       // The two rule routes answer the same rows and differ in ONE promise, which
       // is the only reason both exist — so both say it, on the field it is about.
       const enabledWhen = (id: string) =>
-        contractOf(id).io!.produces!.output!.find((o) => o.marker === '"enabled"')!.when!
+        producesOf(id).body!.find((o) => o.marker === '"enabled"')!.when!
       expect(enabledWhen('api/get-api-repos-id-rules')).toContain('disabledRules')
       expect(enabledWhen('api/get-api-rules')).toContain('SHIPPED default')
-      // A response body is not a stream; the runner already carries an api response
-      // as the cli `stdout` analog, and the contract follows it (G67).
-      const streams = new Set(
-        api.flatMap((j) => j.contract!.commands[0].io!.produces!.output!.map((o) => o.stream)),
-      )
-      expect([...streams]).toEqual(['stdout'])
+      // A response body is not a stream, and now it does not claim to be one:
+      // these markers used to wear `stream: "stdout"` (`transform-gaps.md` G67),
+      // which the api member's schema no longer has a field for.
+      for (const fact of api.flatMap((j) => operationOf(j).produces!.body!)) {
+        expect(Object.keys(fact)).not.toContain('stream')
+      }
     })
 
     it('has an identity per operation, derived exactly as a cli interface’s is', () => {
@@ -2104,7 +2379,7 @@ describe('the resource registry', () => {
   })
 
   const file = (over: Record<string, unknown> = {}) => ({
-    version: 1 as const,
+    version: 2 as const,
     generatedAt: '2026-08-12T12:00:00.000Z',
     recipeFingerprint: 'sha256:recipe',
     interfaces: [webIface({ at: 'rules-dialog' })],
@@ -2112,15 +2387,89 @@ describe('the resource registry', () => {
     ...over,
   })
 
-  it('a resource is a place: id, kind, title — and the kind set is closed at three', () => {
+  it('a resource is a place: id, kind, title — and the kind set is closed at five', () => {
     expect(() => InterfaceResourceSchema.parse(rulesDialog())).not.toThrow()
-    for (const kind of ['screen', 'dialog', 'panel']) {
+    // Three web kinds, plus the cli and api places the SOM restructure added.
+    expect(InterfaceResourceKindSchema.options).toEqual([
+      'screen',
+      'dialog',
+      'panel',
+      'command-group',
+      'rest-noun',
+    ])
+    for (const kind of InterfaceResourceKindSchema.options) {
       expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind }))).not.toThrow()
     }
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'modal' }))).toThrow()
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ kind: 'dropdown' }))).toThrow()
     // Ids are kebab-case, exactly like state ids and for the same reason.
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ id: 'The Rules Dialog' }))).toThrow()
+  })
+
+  it('a command group and a REST noun nest through the same `of`; a root of either carries none', () => {
+    const spec = { id: 'spec', kind: 'command-group' as const, title: 'spec' }
+    const specDocs = { id: 'spec-docs', kind: 'command-group' as const, title: 'spec docs', of: 'spec' }
+    const repos = { id: 'api-repos', kind: 'rest-noun' as const, title: '/api/repos' }
+    const analyses = {
+      id: 'api-repos-analyses',
+      kind: 'rest-noun' as const,
+      title: '/api/repos/{id}/analyses',
+      of: 'api-repos',
+    }
+    expect(() =>
+      InterfacesFileSchema.parse({
+        version: 2 as const,
+        generatedAt: '2026-08-14T12:00:00.000Z',
+        recipeFingerprint: 'sha256:recipe',
+        interfaces: [iface([INVOKE], { resource: 'spec-docs' })],
+        resources: { cli: [spec, specDocs], api: [repos, analyses] },
+      }),
+    ).not.toThrow()
+    // The nesting rule is the registry's, not the kind's: `of` must resolve.
+    expect(() =>
+      InterfacesFileSchema.parse({
+        version: 2 as const,
+        generatedAt: '2026-08-14T12:00:00.000Z',
+        recipeFingerprint: 'sha256:recipe',
+        interfaces: [],
+        resources: { cli: [{ ...specDocs, of: 'contracts' }] },
+      }),
+    ).toThrow(/`contracts` is not a resource the `cli` registry defines/)
+    // The "a screen sits on nothing" rule stays WEB-scoped — it is about screens.
+    expect(() => InterfaceResourceSchema.parse({ ...spec, of: 'truecourse' })).not.toThrow()
+    // A cli/api place carries no readables: they are DOM facts, and the absence
+    // rule says an omitted array establishes nothing rather than claiming none.
+    expect(InterfaceResourceSchema.parse(spec).readables).toBeUndefined()
+  })
+
+  it('the OWNING resource is a reference into the interface’s own area registry', () => {
+    const specDocs = { id: 'spec-docs', kind: 'command-group' as const, title: 'spec docs' }
+    const catalog = (over: Record<string, unknown> = {}) => ({
+      version: 2 as const,
+      generatedAt: '2026-08-14T12:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [iface([INVOKE], { resource: 'spec-docs' })],
+      resources: { cli: [specDocs] },
+      ...over,
+    })
+    expect(InterfacesFileSchema.parse(catalog()).interfaces[0].resource).toBe('spec-docs')
+    // Resolved exactly as `at`/`to` are: same registry, same area scoping.
+    expect(() =>
+      InterfacesFileSchema.parse(catalog({ interfaces: [iface([INVOKE], { resource: 'spec-source' })] })),
+    ).toThrow(/`spec-source` is not a resource the `cli` registry defines/)
+    expect(() => InterfacesFileSchema.parse(catalog({ resources: { api: [specDocs] } }))).toThrow(
+      /the `cli` registry/,
+    )
+    // Additive: an entry that names no owner parses unchanged.
+    expect(InterfacesFileSchema.parse(catalog({ interfaces: [iface([INVOKE])] })).interfaces[0].resource).toBeUndefined()
+  })
+
+  it('ownership never moves an interface identity — the flat-list rule’s whole premise', () => {
+    const bare = iface([INVOKE])
+    const owned = { ...bare, resource: 'spec-docs' }
+    expect(interfaceFingerprint(owned)).toBe(bare.fingerprint)
+    // …and re-parenting it (a regrouped command tree) leaves it exactly where it was.
+    expect(interfaceFingerprint({ ...owned, resource: 'spec' })).toBe(bare.fingerprint)
   })
 
   it('an interface’s location contract must resolve in its area’s registry', () => {
@@ -2173,7 +2522,7 @@ describe('the resource registry', () => {
 
   it('additive: a catalog naming no resources parses unchanged', () => {
     const parsed = InterfacesFileSchema.parse({
-      version: 1 as const,
+      version: 2 as const,
       generatedAt: '2026-08-12T12:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
       interfaces: [iface([INVOKE])],

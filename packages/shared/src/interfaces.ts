@@ -692,26 +692,218 @@ export const InterfaceCommandContractSchema = z
   })
 export type InterfaceCommandContract = z.infer<typeof InterfaceCommandContractSchema>
 
+// ---------------------------------------------------------------------------
+// THE API OPERATION CONTRACT — the api surface's own half of the union below,
+// written in HTTP's vocabulary (2026-08-14, the SOM restructure). Before it, an
+// api interface's contract wore a cli COSTUME: the operation's identity rode in
+// a command `path` of `["GET", "/x"]`, response-body markers were `stream:
+// "stdout"` output facts, and HTTP statuses were `exit` codes. Nothing read it
+// back as HTTP, and the request half (the body/query fields the handler reads)
+// could not live here at all — it travelled beside the catalog as a separate
+// analysis product, joined at prompt time.
+//
+// The fact KINDS are reused wholesale, because they were never cli-specific: an
+// env var, a read path, a written path and the row grammar say the same thing on
+// a server that they say in a terminal. What changes is the three that were
+// costume — a status is a status, a response-body marker has no stream, and what
+// a handler reads off the request is a first-class region.
+// ---------------------------------------------------------------------------
+
 /**
- * The interface's public contract: its OWN command's grammar, its io and (where
- * the command is interactive) its question sequence, and NOTHING about the
- * contract itself. One entry is one invocable thing, so a cli entry carries
- * exactly ONE command here — the tree lives in the catalog as sibling entries
- * sharing a {@link InterfaceSchema.group}, never as a list folded into one
- * entry's contract. There is no shared block (a fact every command inherits is
- * carried by each command that has it, so one command's contract is the whole
+ * One field an operation reads off the request — the shape of
+ * `RequestField` (the analyzer's product, which is exactly what the mapper
+ * merges in) WIDENED by the descriptive fields a hand-authored contract can
+ * establish and a static derivation cannot: the placeholder a value takes, the
+ * closed set it is drawn from, what applies when it is absent, and the one line
+ * that says what it is. Every widening is OPTIONAL, so a derived
+ * `{ name, required }` is a valid field here and the mapper writes exactly what
+ * it read — the widening never asks the derivation for something it does not
+ * have.
+ *
+ * `required: 'unknown'` keeps its meaning verbatim: the field is read, and
+ * nothing established whether it may be absent. That is not `false`.
+ */
+export const InterfaceRequestFieldSchema = z
+  .object({
+    name: z.string().min(1),
+    required: z.union([z.boolean(), z.literal('unknown')]),
+    /** The value placeholder, when the surface names one — `uuid`, `absolute path`. */
+    hint: z.string().min(1).optional(),
+    /** The closed value set, when the surface declares one. */
+    choices: z.array(z.string()).optional(),
+    /** What applies when the field is absent, as the surface declares it. */
+    default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    description: z.string().optional(),
+  })
+  .strict()
+export type InterfaceRequestField = z.infer<typeof InterfaceRequestFieldSchema>
+
+/**
+ * What an operation takes IN, split by where the caller puts it: `params` in the
+ * path template, `query` in the query string, `body` in the request body. Three
+ * arrays rather than one list with a `in:` tag, because the three are addressed
+ * differently by every caller and a scenario has to know which is which.
+ *
+ * The absence rule of the contract region applies per array: OMITTED means the
+ * extraction established nothing there, EMPTY means it established "none".
+ */
+export const InterfaceApiRequestSchema = z
+  .object({
+    /** Path-template parameters — the `{name}`s of the entry's own path. */
+    params: z.array(InterfaceRequestFieldSchema).optional(),
+    query: z.array(InterfaceRequestFieldSchema).optional(),
+    body: z.array(InterfaceRequestFieldSchema).optional(),
+  })
+  .strict()
+export type InterfaceApiRequest = z.infer<typeof InterfaceApiRequestSchema>
+
+/**
+ * What an operation's SERVER SIDE consumes — the same two fact kinds a command
+ * consumes, and for the same reason: an author seeds a file (or exports a
+ * variable) precisely because the handler reads it. There are no `prompts`: an
+ * HTTP handler asks nobody anything, and a field that could never be filled
+ * would be a region claiming a dialogue exists.
+ */
+export const InterfaceApiConsumesSchema = z
+  .object({
+    env: z.array(InterfaceEnvFactSchema).optional(),
+    reads: z.array(InterfaceReadFactSchema).optional(),
+  })
+  .strict()
+export type InterfaceApiConsumes = z.infer<typeof InterfaceApiConsumesSchema>
+
+/**
+ * One RESPONSE STATUS the operation answers with. A STRING for the same reason
+ * an exit status is one — {@link INTERFACE_UNKNOWN} has to be sayable — and one
+ * fact per CONDITION, because a 404 reached two ways is two facts a scenario
+ * asserts one at a time.
+ */
+export const InterfaceApiStatusFactSchema = z
+  .object({
+    /** The HTTP status as a string (`"200"`, `"404"`), or {@link INTERFACE_UNKNOWN}. */
+    status: z.string().min(1),
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+export type InterfaceApiStatusFact = z.infer<typeof InterfaceApiStatusFactSchema>
+
+/**
+ * One RESPONSE-BODY marker: a stable substring of what the operation writes back
+ * (a JSON key, an error code, a literal the body always carries). The cli output
+ * fact minus its `stream`, which is the only cli-specific thing about it — a
+ * response has one body, so naming a stream said nothing.
+ */
+export const InterfaceApiBodyFactSchema = z
+  .object({
+    /** The stable substring, as the response really carries it. */
+    marker: z.string().min(1),
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+export type InterfaceApiBodyFact = z.infer<typeof InterfaceApiBodyFactSchema>
+
+/**
+ * One ROW-GRAMMAR fact of a response — {@link InterfaceRowFactSchema} with the
+ * stream dropped, sharing the identical template↔slots agreement rule. A
+ * collection endpoint's item shape is the same claim a listing command's row
+ * shape is, so it is the same grammar and not a second one.
+ */
+export const InterfaceApiRowFactSchema = z
+  .object({
+    role: InterfaceRowRoleSchema,
+    /** The item as rendered, varying parts written `<name>`. */
+    template: z.string().min(1),
+    slots: z.array(InterfaceRowSlotSchema).min(1),
+    when: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine(rowGrammarIssues)
+export type InterfaceApiRowFact = z.infer<typeof InterfaceApiRowFactSchema>
+
+/** What an operation puts out — the assertion targets, in HTTP's own words. */
+export const InterfaceApiProducesSchema = z
+  .object({
+    statuses: z.array(InterfaceApiStatusFactSchema).optional(),
+    body: z.array(InterfaceApiBodyFactSchema).optional(),
+    /** The shape of the response's repeated items — see {@link InterfaceApiRowFactSchema}. */
+    rows: z.array(InterfaceApiRowFactSchema).optional(),
+    /** Paths the handler writes — the same fact a command's writes are. */
+    writes: z.array(InterfaceWriteFactSchema).optional(),
+  })
+  .strict()
+export type InterfaceApiProduces = z.infer<typeof InterfaceApiProducesSchema>
+
+/**
+ * ONE HTTP operation's contract. It carries NO method and NO path: the
+ * interface's own {@link InterfaceSchema.entry} is the operation's identity, and
+ * a second copy here could only drift from it — the references-not-copies rule
+ * the whole file runs on. (The cli member's `command.path` is the one deliberate
+ * exception, kept because it predates the rule and moving it would re-author
+ * nothing while churning every catalog.)
+ */
+export const InterfaceOperationContractSchema = z
+  .object({
+    description: z.string().optional(),
+    request: InterfaceApiRequestSchema.optional(),
+    consumes: InterfaceApiConsumesSchema.optional(),
+    produces: InterfaceApiProducesSchema.optional(),
+  })
+  .strict()
+export type InterfaceOperationContract = z.infer<typeof InterfaceOperationContractSchema>
+
+/**
+ * The interface's public contract: the full calling grammar of the ONE invocable
+ * thing this entry is, in the vocabulary of ITS OWN SURFACE — and NOTHING about
+ * the contract itself. There is no shared block (a fact every command inherits
+ * is carried by each command that has it, so one entry's contract is the whole
  * answer), no provenance, no behavior prose (a sentence a fact kind cannot carry
  * is not stored at all), and no doc-versus-code diagnostics — discrepancies the
  * mapper finds are run reporting, never stored interface data. Every field here
  * is a field the derivation must be able to produce.
+ *
+ * A DISCRIMINATED UNION on `surface` (2026-08-14), which is the whole point: an
+ * api operation used to be described as a command whose argv was
+ * `["GET", "/x"]`, so a reader — and a prompt, and the dashboard — had to decode
+ * a costume before it could say anything true about HTTP. Each surface now says
+ * what it is in its own words, the union stays closed, and a `web` member lands
+ * ADDITIVELY when there is a claim readables cannot carry (deliberately absent
+ * today: a web task's contract IS its resource's readables plus the capture
+ * vocabulary, and a member invented ahead of a claim would be a shape nothing
+ * fills).
+ *
+ * `surface` must equal the interface's own `type` — cross-checked in
+ * {@link InterfacesFileSchema}, because a contract describing another surface's
+ * grammar is not a contract for this entry at all.
+ *
+ * The cli member carries exactly ONE command, singular: one entry is one
+ * invocable thing (2026-08-10), so the array this field used to be has been
+ * exactly one element long ever since, and the tree lives in the catalog as
+ * sibling entries sharing a {@link InterfaceSchema.group} and a
+ * {@link InterfaceSchema.resource}.
  */
-export const InterfaceContractSchema = z
+export const InterfaceCliContractSchema = z
   .object({
+    surface: z.literal('cli'),
     /** One line on what this interface covers. */
     summary: z.string().optional(),
-    commands: z.array(InterfaceCommandContractSchema).min(1),
+    command: InterfaceCommandContractSchema,
   })
   .strict()
+export type InterfaceCliContract = z.infer<typeof InterfaceCliContractSchema>
+
+export const InterfaceApiContractSchema = z
+  .object({
+    surface: z.literal('api'),
+    summary: z.string().optional(),
+    operation: InterfaceOperationContractSchema,
+  })
+  .strict()
+export type InterfaceApiContract = z.infer<typeof InterfaceApiContractSchema>
+
+export const InterfaceContractSchema = z.discriminatedUnion('surface', [
+  InterfaceCliContractSchema,
+  InterfaceApiContractSchema,
+])
 export type InterfaceContract = z.infer<typeof InterfaceContractSchema>
 
 // ---------------------------------------------------------------------------
@@ -755,13 +947,36 @@ export const InterfaceResourceIdSchema = z
 export type InterfaceResourceId = z.infer<typeof InterfaceResourceIdSchema>
 
 /**
- * What KIND of place it is: a `screen` owns an address (a navigate step reaches
- * it), a `dialog` opens over one and blocks it, a `panel` is a region of one
- * that swaps in without leaving it. Closed at three — the vocabulary of places
- * a web surface has, not of widgets it contains (a dropdown is a control of its
- * resource, never a resource).
+ * What KIND of place it is, per surface — the vocabulary of places a surface
+ * HAS, never of the widgets one contains (a dropdown is a control of its
+ * resource, never a resource):
+ *
+ *  - web: a `screen` owns an address (a navigate step reaches it), a `dialog`
+ *    opens over one and blocks it, a `panel` is a region of one that swaps in
+ *    without leaving it.
+ *  - cli: a `command-group` is a node of the command tree — the `spec` family,
+ *    the `spec docs` family under it. Its actions are the commands registered in
+ *    it; its `of` is the group it is registered under.
+ *  - api: a `rest-noun` is the thing a path names — `/api/repos`, and
+ *    `/api/repos/{id}/analyses` under it. Its actions are the operations rooted
+ *    at it (its own, and those of its instances); its `of` is the enclosing noun.
+ *
+ * Extended from three to five 2026-08-14: resources were introduced for the web
+ * surface, where "where does this happen" had nowhere else to live, but the
+ * envelope was never web-specific — a command tree and a REST path are the same
+ * "a medium number of medium-sized places, each holding its interactions", and
+ * the cli/api surfaces were reading as flat lists of 60-odd entries for want of
+ * one. READABLES stay web vocabulary: they are DOM facts, so a cli or api
+ * resource simply carries none (omitted, per the absence rule) rather than
+ * pretending at an analog.
  */
-export const InterfaceResourceKindSchema = z.enum(['screen', 'dialog', 'panel'])
+export const InterfaceResourceKindSchema = z.enum([
+  'screen',
+  'dialog',
+  'panel',
+  'command-group',
+  'rest-noun',
+])
 export type InterfaceResourceKind = z.infer<typeof InterfaceResourceKindSchema>
 
 /**
@@ -907,7 +1122,11 @@ export const InterfaceResourceSchema = z
      * across nesting: a task that arrives `to: repo-report` hands off to one
      * acting `at: violations-list` because the panel's `of` chain reaches the
      * screen — without it the handoff is two ids nothing relates. A screen
-     * carries none: it is the thing everything else is `of`.
+     * carries none: it is the thing everything else is `of`. The other surfaces
+     * nest the same way and for the same reason: `spec-docs` is `of` `spec`,
+     * `/api/repos/{id}/analyses` is `of` `/api/repos` — and a ROOT of either
+     * (the program's own group, a path's first noun) carries none, exactly as a
+     * screen does.
      */
     of: InterfaceResourceIdSchema.optional(),
     /** One line on what the place is for. */
@@ -996,6 +1215,34 @@ export const InterfaceSchema = z
      */
     at: InterfaceResourceIdSchema.optional(),
     /**
+     * THE OWNING RESOURCE: the place this invocable thing BELONGS TO — the
+     * command group it is registered in, the REST noun its path names — as a
+     * resource id resolved in its own area's registry, the same area-scoped
+     * resolution `at`/`to` use.
+     *
+     * Why ownership is a REFERENCE and `interfaces[]` stays FLAT (2026-08-14):
+     * the unit of identity does not move. An interface is still one invocable
+     * thing with its own fingerprint over `type` + `entry` + `steps`, and every
+     * consumer that iterates the catalog — the fingerprint set, the drift diff,
+     * the scenario grounding — keeps iterating one flat list. Nesting the
+     * entries under their resources would have re-shaped all of those to buy a
+     * rendering, and a surface whose resource formation degrades (a cli whose
+     * tree nobody could read) would have had nowhere to put its interfaces at
+     * all. As a reference it is additive: a catalog that establishes no
+     * resources carries none, and per-surface degradation stays clean.
+     *
+     * DISTINCT from `at`, which is the WEB location contract: `at` says where a
+     * task is performed and can differ from where the task lives; `resource`
+     * says which place OWNS the invocable. Distinct from
+     * {@link InterfaceSchema.group} too, which stays exactly what it was — a
+     * cosmetic family label, unvalidated and unstructured; `resource` is the
+     * structural reference, validated against the registry.
+     *
+     * Never fingerprinted, by the same rule the rest of this region lives by:
+     * which place owns a command is not WHICH command it is.
+     */
+    resource: InterfaceResourceIdSchema.optional(),
+    /**
      * Half two: the resource the task LEAVES THE USER AT, when — and only when —
      * it moves them (`open-repo-report` is at `dashboard-home`, to
      * `repo-report`; closing a dialog is at the dialog, to what it covered).
@@ -1041,8 +1288,9 @@ export const InterfaceSchema = z
      *  code-side extraction couldn't find. Provenance, never fingerprinted — a spec-only
      *  interface that fails birth IS the documented-but-unimplemented drift signal. */
     specOnly: z.literal(true).optional(),
-    /** The full public contract (grammar + io). Absent where the derivation
-     *  established the command tree only. Never fingerprinted. */
+    /** The full public contract, in this entry's OWN surface vocabulary — see
+     *  {@link InterfaceContractSchema}. Absent where the derivation established
+     *  the surface's shape only. Never fingerprinted. */
     contract: InterfaceContractSchema.optional(),
   })
   .strict()
@@ -1059,22 +1307,25 @@ export type InterfaceCatalogSource = z.infer<typeof InterfaceCatalogSourceSchema
 /**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).
  *
- * `version` stays 1 as the contract fields land: they are additive and optional,
- * so a catalog written before them parses unchanged and a catalog written with
- * them parses in a reader that ignores them. The number is reserved for a change
- * that BREAKS one of those two directions.
+ * **version 2 (2026-08-14)** — the SOM restructure, and THE break the number was
+ * reserved for. `version` stayed 1 through every additive growth: the contract
+ * fields (a catalog written before them parses unchanged, a catalog written with
+ * them parses in a reader that ignores them), and the state contract's move from
+ * prose to named ids (2026-08-11), which reached hand-authored web entries only —
+ * no extractor had ever written one.
  *
- * It did NOT move when the state contract went from prose to named ids
- * (2026-08-11), and the exception is narrow enough to state exactly: the prose
- * fields existed for one day, on hand-authored web entries only — no extractor
- * has ever written one, so the only catalogs carrying them were this repo's own
- * two copies, migrated with the change. Every catalog a mapping has produced
- * (cli and api entries, no states, no step handoff) parses unchanged. A removal
- * that reached data a mapper had shipped WOULD move the number.
+ * This one is different in exactly the way the reserved number describes: the
+ * contract became a discriminated union on `surface` (`commands: []` collapsed to
+ * a singular `command`; the api member reshaped from the cli costume into HTTP's
+ * own vocabulary), and that reaches DATA MAPPERS HAVE SHIPPED — every
+ * `interfaces.json` an api mapping ever wrote. Both directions break, so the
+ * number moves and the reader accepts 2 alone. The recovery is the designed one
+ * and costs nothing: the file is gitignored and derived, so a v1 file fails
+ * parse, reads as "no catalog", and the next map re-derives it.
  */
 export const InterfacesFileSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     /** ISO timestamp of the mapping run that wrote the file. */
     generatedAt: z.string(),
     /** The recipe fingerprint the mapping ran against. */
@@ -1175,7 +1426,10 @@ export const InterfacesFileSchema = z
         }
       }
       const knownPlaces = places.get(iface.type)
-      for (const field of ['at', 'to'] as const) {
+      // `resource` (the OWNING place) resolves exactly as the location contract
+      // does — same registry, same area scoping, same "an id is only a name if
+      // something defines it" rule.
+      for (const field of ['at', 'to', 'resource'] as const) {
         const id = iface[field]
         if (id && !knownPlaces?.has(id)) {
           ctx.addIssue({
@@ -1184,6 +1438,16 @@ export const InterfacesFileSchema = z
             message: `\`${id}\` is not a resource the \`${iface.type}\` registry defines`,
           })
         }
+      }
+      // A contract describes THIS entry's surface or it describes nothing: an
+      // api operation's grammar attached to a cli command is not a contract for
+      // that command, it is a decoding error waiting to be read as truth.
+      if (iface.contract && iface.contract.surface !== iface.type) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['interfaces', i, 'contract', 'surface'],
+          message: `this contract is \`${iface.contract.surface}\`, and the interface is \`${iface.type}\` — a contract describes its own surface`,
+        })
       }
     })
   })
@@ -1264,7 +1528,11 @@ function stepIdentity(step: InterfaceStep): string {
  * states (2026-08-11) left all 60 reference fingerprints byte-identical. The
  * LOCATION CONTRACT (`at`/`to`) and the resource registry follow the identical
  * rule (2026-08-12): where a task happens is not which task it is, so making
- * places first-class moved no fingerprint either.
+ * places first-class moved no fingerprint either. {@link InterfaceSchema.resource}
+ * — the place that OWNS the invocable — is excluded by the same rule and was the
+ * whole reason ownership landed as a reference on a flat list (2026-08-14): the
+ * SOM restructure reshaped every api contract and left all 114 reference
+ * fingerprints byte-identical.
  */
 export function interfaceFingerprint(
   iface: Pick<Interface, 'type' | 'entry' | 'steps'>,

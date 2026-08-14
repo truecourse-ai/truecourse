@@ -3739,6 +3739,7 @@ flat object (none of these are, today) or the content type it is sent under.
 **Owner:** Guard Setup (an `in` member on `JourneyOptionSchema`, defaulting to the
 surface's natural location — `command` for cli, `query` for api — so no cli option
 moves; a nested body shape needs more than that and can wait for a case).
+**RESOLVED 2026-08-15 (plan item 98, the SOM restructure).** The api contract is its own union member: `operation.request` is `{ params, query, body }`, three arrays, so a body field IS in the body and no description sentence carries the location.
 
 ### G66. An HTTP status has no fact kind of its own, so it rides `exits`
 **What:** `JourneyExitFactSchema` is `{exit, when?}` and its doc calls `exit` "the
@@ -3753,6 +3754,7 @@ cannot tell a process status from a response status without looking at the
 journey's `type`.
 **Owner:** Guard Setup (either a surface-aware LABEL for the same fact kind, or a
 `status` sibling; the fact SHAPE is already right, so this is naming, not structure).
+**RESOLVED 2026-08-15 (plan item 98).** `operation.produces.statuses` is `{ status, when? }` — its own fact kind, still a STRING so `unknown` stays sayable, and the dashboard renders it as "Response statuses".
 
 ### G67. A response body is not a stream, and its shape can only be said as markers
 **What:** `JourneyOutputFactSchema` requires a `stream`, and `JourneyStreamSchema` is
@@ -3773,6 +3775,7 @@ array" is not a schema.
 **Owner:** Guard Setup (a `response` member on the stream vocabulary, and a `kind`
 on an output fact — `substring` today, `json-path` for a body field — so a consumer
 knows whether to reach for `expect.body` or `expect.json`).
+**RESOLVED 2026-08-15 (plan item 98), the stream half.** `operation.produces.body` is `{ marker, when? }` with no stream field at all. The SHAPE half stands: a body marker is still a substring, and `operation.produces.rows` (the row grammar, stream dropped) is the reserved home for an item shape nothing extracts yet.
 
 ### G68. The contract's `path` is argv-shaped, so an operation states its identity twice
 **What:** `JourneyCommandContractSchema.path` is "the argv a user types, program name
@@ -3789,6 +3792,7 @@ until the web surface arrives with a third shape.
 **Owner:** Guard Setup (surface-aware labels in `GuardJourneyContract`, or a rename
 of `commands` to something that covers a command AND an operation; the DATA is right
 either way).
+**RESOLVED 2026-08-15 (plan item 98).** The api member copies no identity: method and path live on the interface's `entry`, once. The cli member's `command.path` stays, being a real argv.
 
 ### G69. Nothing records a header, on either side of the exchange
 **What:** there is no header fact kind. Three real facts of this surface have
@@ -3837,6 +3841,7 @@ special-case the surface rather than the fact.
 play, or the smaller fix: let the derivation record `prompts: []`/`rows: []` as an
 established none, and say in the schema that a surface without the concept states it
 as none).
+**RESOLVED 2026-08-15 (plan item 98) for the api surface.** A fact kind that cannot apply is now ABSENT FROM THE SCHEMA rather than omitted from the data: the api member has no `prompts` field, so "could never exist" and "not established" are told apart by the type, not by a convention.
 
 ### G72. There is no UI-to-API relation, so a realization surface cannot say what it realizes
 **What:** plan §2 requires a realization surface's journeys to record "the UI-to-API
