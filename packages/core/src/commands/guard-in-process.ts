@@ -64,7 +64,7 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
-import { createGuardVisualJudge } from '../services/llm/guard-visual-judge.js';
+import { createGuardVisualJudge, guardVisualJudgeEnabled } from '../services/llm/guard-visual-judge.js';
 import type { GuardVisualJudge } from '@truecourse/guard-runner';
 import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
@@ -711,9 +711,11 @@ export interface GuardRunInProcessOptions {
   /** Fires with each scenario's result as it settles — the CLI streams non-pass lines from it. */
   onScenarioResult?: (result: GuardScenarioResult) => void;
   /**
-   * Override the visual judge for a failing web step. Production leaves it unset
-   * and gets {@link createGuardVisualJudge}; a test that must never reach a model
-   * passes its own (or a judge that returns `null`).
+   * Override the visual judge for a failing web step. An injected judge always
+   * wins (a test that must never reach a model passes its own, or one that
+   * returns `null`). Unset, production gets {@link createGuardVisualJudge} — but
+   * only when {@link guardVisualJudgeEnabled} says so: the judge is parked
+   * (off by default) until its cost/value is settled.
    */
   visualJudge?: GuardVisualJudge;
 }
@@ -726,8 +728,9 @@ export interface GuardRunInProcessOptions {
  * popup show the same stream. Returns the runner's discriminated result untouched
  * — the caller decides how to present each status.
  *
- * Deterministic, with ONE annotation: a failing WEB step's screenshot is shown to
- * a vision model, whose verdict is recorded beside the failure (see
+ * Deterministic, with ONE opt-in annotation: when {@link guardVisualJudgeEnabled}
+ * (off by default — the judge is parked), a failing WEB step's screenshot is shown
+ * to a vision model, whose verdict is recorded beside the failure (see
  * {@link createGuardVisualJudge}). It cannot move an outcome and it never fires on
  * a green run, so a passing run is exactly as LLM-free as it always was. THIS is
  * the boundary the judge is wired at — the guard-runner takes it as an optional
@@ -750,6 +753,11 @@ export async function guardRunInProcess(
   if ('early' in sourced) return sourced.early;
   const { loaded, selected, corpusIds, loadErrors } = sourced;
 
+  // Failure-only, fail-soft, and unable to change a verdict — see the doc above.
+  // An injected judge always wins; the built one is gated on the opt-in flag.
+  const visualJudge =
+    options.visualJudge ?? (guardVisualJudgeEnabled() ? createGuardVisualJudge(repoRoot) : undefined);
+
   const result = mergeLoadErrors(
     await getGuardExecutor()({
       checkoutDir: repoRoot,
@@ -762,8 +770,7 @@ export async function guardRunInProcess(
       branch,
       commit,
       persist: true,
-      // Failure-only, fail-soft, and unable to change a verdict — see the doc above.
-      visualJudge: options.visualJudge ?? createGuardVisualJudge(repoRoot),
+      ...(visualJudge ? { visualJudge } : {}),
       onPhase: (phase, total) => {
         if (phase === 'build') tracker?.start('build');
         else {
