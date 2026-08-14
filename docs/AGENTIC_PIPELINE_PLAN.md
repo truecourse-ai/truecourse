@@ -922,6 +922,38 @@ fewer, so `[2, 45]` is the honest range — with the same presentation
 caveat as doc curation, since quoting anything near the ceiling
 overstates a corpus whose median area costs 6.5 turns.
 
+**`maxResumes` 2 is now proven NOT sufficient — narrowly, 2026-08-14.** The
+same corpus was re-scanned with its Jira export folded in: 3,694 docs
+(766 Confluence + 2,928 tickets), 235 areas, largest area 299 docs — 4.8×
+the corpus and 7× the largest area of the run above. Evidence:
+`platai/platai-scan/CALIBRATION.md`.
+
+- **1 of 159 areas exhausted the 45-turn hard limit**: `core/funding`
+  (218 docs) spent 43 turns across three budgets, opened 108 sections,
+  returned 22 overlaps and still named **110 docs it never reached**. That
+  is the first area in either run to exhaust `maxResumes`.
+- **7 areas (4.4%) needed a resume; 6 of the 7 closed.** Including
+  `core/manual-review` at **299 docs**, which finished inside the limit at
+  42 turns. Size does not predict exhaustion: a 299-doc area completed
+  where a 218-doc area failed, because cost tracks how many suspicions
+  need drilling into, not how many docs exist.
+- Do NOT raise `maxResumes` globally on this: six of seven areas would gain
+  nothing, and the hard limit is what stops runaway spend. The targeted fix
+  is a third budget granted CONDITIONALLY — to an area still returning new
+  overlaps when its last budget expires. `funding` was: 22 overlaps, second-
+  densest in the corpus, still producing when it stopped.
+- **Doc curation's degenerate distribution is now certain.** All 2,928 Jira
+  sessions used exactly one turn — not one needed a second. Against budget
+  5 that is a fivefold overstatement if the estimate quotes its ceiling, and
+  on a 3,694-doc corpus that is the difference between ~3,700 and ~18,500
+  turns. The bound stays 5; the PRESENTATION must say ~1.
+- **Subdivision reproduced its signature result at scale**: 17 candidates,
+  5 divided, 38 sub-labels, and every sub-label was a concern that already
+  existed — creating zero new areas, exactly as in the run above. It did not
+  cap the largest area this time, because the 299-doc area was judged genuine
+  and then GREW as two divided labels routed mass into it. That is intended:
+  subdivision moves docs toward real subjects, it does not bound area size.
+
 ### 6.5 Implementation plan
 
 Prerequisites, external to this workstream: the shared agent loop (§3),
