@@ -157,6 +157,56 @@ describe('SpecCorpusView (left nav)', () => {
     expect(onOpen).toHaveBeenCalledWith(overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md'), false);
   });
 
+  // Auto-resolve settles the high-confidence conflicts, so a corpus can carry
+  // hundreds of rows of which only a handful still need a human. A lone total
+  // ("757") cannot say that; the header tallies OPEN of TOTAL.
+  const TWO_CONFLICTS: SpecCorpusResponse = {
+    ...RESP,
+    corpus: {
+      ...RESP.corpus,
+      areas: RESP.corpus.areas.map((ar) =>
+        ar.id === 'booking/appointments'
+          ? {
+              ...ar,
+              docRefs: [...ar.docRefs, 'docs/auth.md'],
+              overlaps: [
+                ...ar.overlaps,
+                {
+                  docs: ['docs/v2.md', 'docs/auth.md'] as [string, string],
+                  note: 'session length disagreement',
+                  sections: [
+                    { doc: 'docs/v2.md', heading: 'Sessions' },
+                    { doc: 'docs/auth.md', heading: 'Sessions' },
+                  ],
+                },
+              ],
+            }
+          : ar,
+      ),
+    },
+    // Resolves the cancellation dispute only — the session one stays open.
+    conflictResolutions: [
+      { docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md', anchorB: 'Cancellation policy', verdict: 'a' },
+    ],
+  };
+
+  it('tallies Conflicts as OPEN of TOTAL, while the other sections keep a plain count', () => {
+    render(<SpecCorpusView corpus={state({ data: TWO_CONFLICTS })} activeKey={null} onOpen={vi.fn()} />);
+    const conflicts = screen.getByText('Conflicts').closest('button, div') as HTMLElement;
+    expect(within(conflicts).getByText('1/2')).toBeInTheDocument();
+    // Documents is a plain tally — it has no open/resolved axis.
+    const documents = screen.getByText('Documents').closest('button, div') as HTMLElement;
+    expect(within(documents).getByText('3')).toBeInTheDocument();
+  });
+
+  it('narrows the Conflicts tally with the area filter, so both numbers describe the same rows', async () => {
+    const user = userEvent.setup();
+    render(<SpecCorpusView corpus={state({ data: TWO_CONFLICTS })} activeKey={null} onOpen={vi.fn()} />);
+    expect(within(screen.getByText('Conflicts').closest('button, div') as HTMLElement).getByText('1/2')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'auth 1' }));
+    expect(screen.queryByText('Conflicts')).not.toBeInTheDocument();
+  });
+
   it('shows the empty state when there is no corpus', () => {
     render(<SpecCorpusView corpus={state({ data: null })} activeKey={null} onOpen={vi.fn()} />);
     expect(screen.getByText('No corpus yet')).toBeInTheDocument();

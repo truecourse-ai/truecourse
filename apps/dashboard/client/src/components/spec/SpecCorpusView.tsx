@@ -506,7 +506,10 @@ export function SpecCorpusView({
   ];
 
   const groupRows = (rows: CorpusRow[]): EntityListGroup<CorpusRow>[] => {
-    const of = (kind: CorpusRow['kind']): CorpusRow[] => rows.filter((r) => r.kind === kind);
+    // Narrows to the picked variant, so a group can read the fields only ITS rows
+    // carry (a conflict's `resolved`) without a cast.
+    const of = <K extends CorpusRow['kind']>(kind: K): Extract<CorpusRow, { kind: K }>[] =>
+      rows.filter((r): r is Extract<CorpusRow, { kind: K }> => r.kind === kind);
     const groups: EntityListGroup<CorpusRow>[] = [];
     const conflictRows = of('conflict');
     if (conflictRows.length > 0) {
@@ -515,6 +518,12 @@ export function SpecCorpusView({
         label: 'Conflicts',
         icon: GitMerge,
         count: conflictRows.length,
+        // OPEN of TOTAL, never the total alone: auto-resolve settles the
+        // high-confidence disputes, so most of a large corpus's conflicts need no
+        // human and a lone "757" reads as 757 things to do. Both numbers describe
+        // the SAME rows — the area filter narrows them together — and "open" is
+        // the row badge's own `resolved`, so header and rows cannot disagree.
+        countLabel: `${conflictRows.filter((r) => !r.resolved).length}/${conflictRows.length}`,
         collapsible: true,
         defaultOpen: hasOpenConflicts || activeInConflicts,
         items: conflictRows,

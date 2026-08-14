@@ -82,6 +82,13 @@ export interface EntityListGroup<T> {
   name?: string;
   /** Shown at the header's right edge. Omit for a header with no tally. */
   count?: number;
+  /**
+   * What the header's tally READS as, when the plain row count would understate
+   * the group — "12/757" for a group whose rows split into open and settled.
+   * Display only: {@link count} still carries the number the nesting sums and the
+   * shape memo keys on, so a group that sets this must set `count` too.
+   */
+  countLabel?: string;
   /** Hover explainer on the header label. */
   help?: ReactNode;
   /** A muted line under the header — why these rows are here. */
@@ -291,7 +298,7 @@ function GroupHeader<T>({ group, depth, open, onToggle }: {
           <span className="min-w-0 truncate">{group.label}</span>
         )}
       </span>
-      {count != null && <span className="shrink-0 pl-2">{count}</span>}
+      {count != null && <span className="shrink-0 pl-2">{group.countLabel ?? count}</span>}
     </>
   );
   const className = `${sticky} flex w-full items-center gap-1.5 border-b px-3 py-1 text-[10px] uppercase tracking-wider ${level} ${tone}`;
