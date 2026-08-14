@@ -102,7 +102,6 @@ import {
   type GuardBirthFinding,
   type GuardFlowTaint,
   type OutputExcerpts,
-  type ApiRequestContract,
   type DatastoreUrlRef,
   type DetectedExternalService,
   type OutboundRequest,
@@ -498,13 +497,6 @@ export type InterfaceProvider = () => Promise<{
    * it depends on plus the ways to supply one.
    */
   datastoreUrls?: DatastoreUrlRef[]
-  /**
-   * What each api operation's handler reads off the request, off the same pass
-   * again — the exact paths + required body fields the authoring prompt shows
-   * per interface. Omitted (an older provider, the snapshot fallback) ⇒ the prompt
-   * renders no contract block, exactly as it did before this grounding existed.
-   */
-  requestContracts?: ApiRequestContract[]
   /**
    * How the app constructs its OUTBOUND requests and which response fields it reads
    * back. What a `setup.http` stub must satisfy to be accepted by the app
@@ -1053,10 +1045,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // capability regardless of how the dependency is reached.
   const providedExternals = resolveProvidedExternals(repoRoot, recipe)
   const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals)
-  // The code-truth grounding, off the SAME mapping pass. The inbound half is
-  // joined per flow (the operations its plan walks); the outbound half is repo-level
-  // and capped here, once.
-  const requestContracts = mapped.requestContracts
+  // The code-truth grounding. The inbound half needs no plumbing at all: what a
+  // handler reads off the request lives ON its operation in the catalog (plan
+  // item 98), so it is read per flow from the interfaces the plan walks. The
+  // outbound half is repo-level and capped here, once.
   const outboundRequestHints = buildOutboundRequestHints(mapped.outboundRequests, externalServices)
   const outboundRequestsOverflow = outboundOverflow(mapped.outboundRequests)
   const catalogs = buildSurfaceCatalogs(catalog)
@@ -1540,7 +1532,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             docText,
             ground: groundClaims,
             externalServices: externalServiceHints,
-            requestContracts,
             apiInterfaces,
             outboundRequests: outboundRequestHints,
             outboundRequestsOverflow,
@@ -1799,7 +1790,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                     docText,
                     ground: groundClaims,
                     externalServices: externalServiceHints,
-                    requestContracts,
                     apiInterfaces,
                     outboundRequests: outboundRequestHints,
                     outboundRequestsOverflow,
@@ -2024,7 +2014,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 docText,
                 ground: groundClaims,
                 externalServices: externalServiceHints,
-                requestContracts,
                 apiInterfaces,
                 outboundRequests: outboundRequestHints,
                 outboundRequestsOverflow,
@@ -2189,7 +2178,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const plan = taskByKey.get(candidate.ref)?.plan
             const interfaceContracts =
               candidate.surface === 'api' && plan
-                ? buildInterfaceContractHints(plan.interfaces, requestContracts)
+                ? buildInterfaceContractHints(plan.interfaces)
                 : []
             const triage = await runTriage(
               repoRoot,
@@ -2701,8 +2690,6 @@ interface MappedSurface {
    *  {@link InterfaceProvider}. Rides both the provider and snapshot paths. */
   resources?: Record<string, InterfaceResource[]>
   externalServices: DetectedExternalService[]
-  /** Per-operation inbound request contracts — the per-interface authoring grounding. */
-  requestContracts: ApiRequestContract[]
   /** The app's own outbound request construction — the stub-fidelity grounding. */
   outboundRequests: OutboundRequest[]
   /** The detected datastore + its parsed schema — the seed draft's whole grounding. */
@@ -2727,7 +2714,6 @@ async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvide
         externalServices: mapped.externalServices ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
-        requestContracts: mapped.requestContracts ?? [],
         outboundRequests: mapped.outboundRequests ?? [],
       }
     } catch {
@@ -2744,7 +2730,6 @@ async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvide
     externalServices: [],
     database: null,
     datastoreUrls: [],
-    requestContracts: [],
     outboundRequests: [],
   }
 }
@@ -2944,8 +2929,6 @@ async function authorFlowScenario(opts: {
   /** The third parties this repo imports — canonical name + base-URL env var when
    *  one was detected (a `setup.http` stub's precondition). Api prompts only. */
   externalServices: ExternalServiceHint[]
-  /** Per-operation inbound contracts, joined to THIS flow's interfaces below. */
-  requestContracts: ApiRequestContract[]
   /**
    * The WHOLE api interface catalog, so the prompt can offer the operations
    * this flow does NOT walk as setup material (signing up before signing in). Empty
@@ -3031,7 +3014,7 @@ async function authorFlowScenario(opts: {
   // Probes ground CLI commands against the built entry — api scenarios are authored
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
-  const interfaceContracts = buildInterfaceContractHints(plan.interfaces, opts.requestContracts)
+  const interfaceContracts = buildInterfaceContractHints(plan.interfaces)
   // The setup catalog is the BOUND server's own surface. An operation the
   // route manifest positively attributes to ANOTHER app is unreachable from this
   // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
@@ -3042,7 +3025,7 @@ async function authorFlowScenario(opts: {
   const reachableInterfaces = boundApp
     ? opts.apiInterfaces.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, interfaceEntryPath(j)))
     : opts.apiInterfaces
-  const other = buildOtherOperationHints(reachableInterfaces, opts.requestContracts, interfaceContracts)
+  const other = buildOtherOperationHints(reachableInterfaces, interfaceContracts)
   const base: AuthorUserContext = {
     ...buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
       interfaceContracts,

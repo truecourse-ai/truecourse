@@ -102,13 +102,6 @@ export interface MapInterfacesResult {
    */
   datastoreUrls: DatastoreUrlRef[];
   /**
-   * What each api operation's handler reads off the request, off the same
-   * `FileAnalysis[]` — the grounding scenario authoring needs to send a body the app
-   * will accept. Like the fields above it is a fact about the working tree, never
-   * snapshotted.
-   */
-  requestContracts: ApiRequestContract[];
-  /**
    * How the app CONSTRUCTS its outbound requests and which response fields it reads
    * back — the grounding a `setup.http` stub needs to be accepted by the
    * app it is stubbing for. Same pass, same non-snapshot rule.
@@ -147,7 +140,6 @@ export async function mapInterfaces(
     externalServices: interfaces.externalServices,
     database: interfaces.database,
     datastoreUrls: interfaces.datastoreUrls,
-    requestContracts: interfaces.requestContracts,
     outboundRequests: interfaces.outboundRequests,
   };
 }
@@ -216,7 +208,6 @@ interface DerivedCatalog {
   externalServices: DetectedExternalService[];
   database: SeedDraftDatabase | null;
   datastoreUrls: DatastoreUrlRef[];
-  requestContracts: ApiRequestContract[];
   outboundRequests: OutboundRequest[];
 }
 
@@ -235,7 +226,6 @@ async function deriveInterfaces(
       externalServices: [],
       database: null,
       datastoreUrls: [],
-      requestContracts: [],
       outboundRequests: [],
     };
   }
@@ -279,7 +269,6 @@ async function deriveInterfaces(
     }),
     database: detectDatabaseContext(repoPath, fileAnalyses),
     datastoreUrls: collectDatastoreUrls(fileAnalyses),
-    requestContracts,
     // Degrades like every other derivation here: a collector that throws costs
     // authoring its grounding, never the run.
     outboundRequests: safely('outbound requests', () => collectOutboundRequests(fileAnalyses)),

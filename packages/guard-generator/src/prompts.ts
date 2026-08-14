@@ -1002,11 +1002,14 @@ function resourceLines(place: InterfaceResource): string[] {
   const cond = (when?: string) => (when ? `  [${when}]` : '')
   const named = (id?: string) => (id ? ` \`${id}\`` : '')
   const lines = [
-    `- ${place.title} (${place.kind} \`${place.id}\`${place.of ? `, ${place.kind === 'dialog' ? 'over' : 'on'} \`${place.of}\`` : ''})${
+    `- ${place.title} (${place.kind} \`${place.id}\`${place.of ? `, ${nesting(place.kind)} \`${place.of}\`` : ''})${
       place.description ? `: ${place.description}` : ''
     }`,
   ]
   const r = place.readables
+  // A cli command group and an api noun carry NO readables — those are DOM
+  // facts (plan item 98) — so such a place renders its identity line and stops,
+  // exactly as an unfleshed web place does.
   if (!r) return lines
   for (const m of r.markers ?? []) {
     lines.push(
@@ -1033,6 +1036,19 @@ function resourceLines(place: InterfaceResource): string[] {
     )
   }
   return lines
+}
+
+/**
+ * How a place sits on the one it is `of`, in that surface's own words: a dialog
+ * opens OVER a screen, a panel sits ON one, a command lives IN its group and a
+ * REST noun UNDER the noun that encloses it. The three web kinds keep the words
+ * they had, so a web PLACES block renders byte-identically.
+ */
+function nesting(kind: InterfaceResource['kind']): string {
+  if (kind === 'dialog') return 'over'
+  if (kind === 'command-group') return 'in'
+  if (kind === 'rest-noun') return 'under'
+  return 'on'
 }
 
 function contractSummary(hint: InterfaceContractHint): string {

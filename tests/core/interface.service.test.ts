@@ -304,12 +304,9 @@ describe('mapInterfaces', () => {
     expect(get.operation.request!.query!.map((f) => f.name)).toEqual(['status', 'limit']);
     expect(get.operation.request!.body).toBeUndefined();
 
-    // The same facts still travel on the result for callers that took them there;
-    // the catalog is now their HOME, not a second copy of a separate product.
-    expect(result.requestContracts.map((c) => `${c.method} ${c.path}`).sort()).toEqual([
-      'GET /deploys',
-      'POST /deploys',
-    ]);
+    // …and the catalog is their ONE home: the mapping result no longer carries a
+    // second copy for the generator to join by method+path.
+    expect('requestContracts' in result).toBe(false);
 
     // Nothing else is invented: no statuses, no body markers, no path params —
     // the derivation establishes none of them, and omitted is the honest answer.

@@ -81,52 +81,68 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
   };
 }
 
-describe('buildInterfaceContractHints', () => {
-  const contracts: ApiRequestContract[] = [
-    {
-      method: 'POST',
-      path: '/v1/auth/signup',
-      bodyFields: [
-        { name: 'email', required: true },
-        { name: 'name', required: true },
-        { name: 'referrer', required: false },
-      ],
-    },
-  ];
+/** An api interface carrying its own request contract — the catalog shape the
+ *  mapper writes since the contract found its one home (plan item 98). */
+function contracted(
+  method: string,
+  path: string,
+  request: { query?: { name: string; required: boolean | 'unknown' }[]; body?: { name: string; required: boolean | 'unknown' }[] },
+): Interface {
+  return { ...apiInterface(method, path), contract: { surface: 'api', operation: { request } } };
+}
 
-  it('carries the contract onto the operation the plan walks', () => {
-    const [hint] = buildInterfaceContractHints([apiInterface('POST', '/v1/auth/signup')], contracts);
-    expect(hint.bodyFields).toEqual(contracts[0].bodyFields);
+const SIGNUP = contracted('POST', '/v1/auth/signup', {
+  body: [
+    { name: 'email', required: true },
+    { name: 'name', required: true },
+    { name: 'referrer', required: false },
+  ],
+});
+
+describe('buildInterfaceContractHints', () => {
+  it('reads the contract off the operation itself — there is nothing left to join', () => {
+    const [hint] = buildInterfaceContractHints([SIGNUP]);
+    expect(hint.bodyFields).toEqual([
+      { name: 'email', required: true },
+      { name: 'name', required: true },
+      { name: 'referrer', required: false },
+    ]);
+  });
+
+  it('renders only what the contract carries — the widened fields stay out of the prompt', () => {
+    // A hand-authored contract may say more about a field (its choices, its
+    // default, a sentence); the hint is the two facts the prompt has always
+    // shown, so enriching a catalog cannot silently re-author a scenario.
+    const rich = contracted('GET', '/v1/favorites', {
+      query: [{ name: 'limit', required: false, hint: 'n', choices: ['10', '20'], description: 'Page size.' } as never],
+    });
+    expect(buildInterfaceContractHints([rich])).toEqual([
+      { method: 'GET', path: '/v1/favorites', queryFields: [{ name: 'limit', required: false }] },
+    ]);
   });
 
   it('still lists an operation with NO contract — the exact path is itself the grounding', () => {
-    const hints = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')], contracts);
+    const hints = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')]);
     expect(hints).toEqual([{ method: 'GET', path: '/v1/favorites' }]);
   });
 
   it('ignores non-api interfaces and collapses a repeated operation', () => {
     const cli = { ...apiInterface('GET', '/x'), type: 'cli', entry: { command: ['x'] } } as unknown as Interface;
-    const hints = buildInterfaceContractHints(
-      [apiInterface('POST', '/v1/auth/signup'), apiInterface('POST', '/v1/auth/signup'), cli],
-      contracts,
-    );
+    const hints = buildInterfaceContractHints([SIGNUP, SIGNUP, cli]);
     expect(hints).toHaveLength(1);
   });
 });
 
 describe('buildOtherOperationHints — the setup surface', () => {
-  const contracts: ApiRequestContract[] = [
-    { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
-  ];
   const catalog = [
-    apiInterface('POST', '/v1/auth/signup'),
+    contracted('POST', '/v1/auth/signup', { body: [{ name: 'email', required: true }] }),
     apiInterface('POST', '/v1/auth/signin'),
     apiInterface('GET', '/v1/favorites'),
   ];
 
   it('offers the rest of the surface, with contracts, minus what the flow walks', () => {
-    const own = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')], contracts);
-    const { operations, overflow } = buildOtherOperationHints(catalog, contracts, own);
+    const own = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')]);
+    const { operations, overflow } = buildOtherOperationHints(catalog, own);
     expect(operations).toEqual([
       { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
       { method: 'POST', path: '/v1/auth/signin' },
@@ -135,13 +151,13 @@ describe('buildOtherOperationHints — the setup surface', () => {
   });
 
   it('is empty when the flow already walks the whole surface', () => {
-    const own = buildInterfaceContractHints(catalog, contracts);
-    expect(buildOtherOperationHints(catalog, contracts, own).operations).toEqual([]);
+    const own = buildInterfaceContractHints(catalog);
+    expect(buildOtherOperationHints(catalog, own).operations).toEqual([]);
   });
 
   it('caps the list and counts what it dropped', () => {
     const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiInterface('GET', `/v1/r${i}`));
-    const { operations, overflow } = buildOtherOperationHints(many, [], []);
+    const { operations, overflow } = buildOtherOperationHints(many, []);
     expect(operations).toHaveLength(MAX_OTHER_OPERATIONS);
     expect(overflow).toBe(4);
   });

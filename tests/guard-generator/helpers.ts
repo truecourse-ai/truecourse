@@ -194,7 +194,38 @@ export function withCodeTruth(
   provider: InterfaceProvider,
   grounding: { requestContracts?: ApiRequestContract[]; outboundRequests?: OutboundRequest[] },
 ): InterfaceProvider {
-  return async () => ({ ...(await provider()), ...grounding })
+  return async () => {
+    const mapped = await provider()
+    // The inbound contract has ONE home now (plan item 98): the operation it
+    // belongs to. The helper keeps its `ApiRequestContract[]` ergonomics and
+    // writes them onto the catalog exactly as `mapInterfaces` does.
+    const byOperation = new Map(
+      (grounding.requestContracts ?? []).map((c) => [`${c.method.toUpperCase()} ${c.path}`, c] as const),
+    )
+    const interfaces = mapped.interfaces.map((iface) => {
+      const entry = iface.entry as { method?: string; path?: string }
+      if (iface.type !== 'api' || !entry.method || !entry.path) return iface
+      const contract = byOperation.get(`${entry.method.toUpperCase()} ${entry.path}`)
+      if (!contract) return iface
+      return {
+        ...iface,
+        contract: {
+          surface: 'api' as const,
+          operation: {
+            request: {
+              ...(contract.queryFields ? { query: contract.queryFields.map((f) => ({ ...f })) } : {}),
+              ...(contract.bodyFields ? { body: contract.bodyFields.map((f) => ({ ...f })) } : {}),
+            },
+          },
+        },
+      }
+    })
+    return {
+      ...mapped,
+      interfaces,
+      ...(grounding.outboundRequests ? { outboundRequests: grounding.outboundRequests } : {}),
+    }
+  }
 }
 
 /**
