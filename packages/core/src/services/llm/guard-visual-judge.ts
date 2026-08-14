@@ -11,8 +11,11 @@
  * deterministic mismatch to a vision model and records what it saw.
  *
  * THE RULES, all of which follow from the runner's determinism rule:
- *  - FAILURE-ONLY. A green run makes zero calls, so the feature is free until
- *    something breaks. There is no flag because there is nothing to turn off.
+ *  - OPT-IN, off by default. The judge is PARKED (2026-08-14): fully implemented
+ *    and tested, but its vision call slows every red run, so day-to-day runs skip
+ *    it until its cost/value is settled. `TRUECOURSE_GUARD_VISUAL_JUDGE=1` turns
+ *    it back on — see {@link guardVisualJudgeEnabled}.
+ *  - FAILURE-ONLY. A green run makes zero calls even when enabled.
  *  - ANNOTATION-ONLY. The verdict never moves an outcome. Its most useful answer
  *    is `yes` — the expected result IS on screen though the assertion missed,
  *    which is the signature of a brittle locator, i.e. the TEST being wrong. That
@@ -336,6 +339,18 @@ function quoteInvalidOutput(raw: unknown): string {
 export function resolveVisualJudgeTransport(): LlmTransport | undefined {
   installConfiguredLlmTransport();
   return getDefaultTransport();
+}
+
+/**
+ * Whether `guard run` should wire the judge in at all. Off by default: the judge
+ * is parked, not deleted — every red web step would otherwise wait on a vision
+ * call, and that cost is not currently buying its keep. `TRUECOURSE_GUARD_VISUAL_JUDGE=1`
+ * (or `true`) opts a run back in; everything downstream (cache, schema, CLI and
+ * dashboard rendering) is unchanged and springs back to life with the flag.
+ */
+export function guardVisualJudgeEnabled(): boolean {
+  const value = process.env.TRUECOURSE_GUARD_VISUAL_JUDGE?.trim().toLowerCase();
+  return value === '1' || value === 'true';
 }
 
 /**

@@ -903,8 +903,12 @@ describe("the test, read inside its flow", () => {
     expect(screen.getByText("looks present")).toBeInTheDocument();
 
     // The failing step starts open; its record carries the reading under its
-    // own "on screen" label…
+    // own "on screen" label, AFTER the picture it is a reading of…
     const body = stepBody(2);
+    const labels = within(body)
+      .getAllByText(/^(expected|actual|at|page text|screen|on screen)$/)
+      .map((el) => el.textContent);
+    expect(labels.indexOf("on screen")).toBeGreaterThan(labels.indexOf("screen"));
     expect(within(body).getByText("on screen")).toBeInTheDocument();
     expect(
       within(body).getByText(/The Security filter is applied/),
@@ -2297,5 +2301,30 @@ describe("SETUP as step 0 — the world the steps start in", () => {
     expect(screen.getByLabelText("test setup")).toBeInTheDocument();
     await user.click(stepToggle(steps, "setup"));
     expect(screen.queryByLabelText("test setup")).toBeNull();
+  });
+});
+
+/**
+ * A step's authoring `note` is prose an LLM wrote about code, so it arrives
+ * with backticked identifiers and the occasional **emphasis**. The page renders
+ * those two marks and nothing else — a note is a sentence, not a document.
+ */
+describe("a step note renders its inline markup", () => {
+  it("renders backticks as code and ** as bold, leaving the rest literal", async () => {
+    const user = userEvent.setup();
+    servedSteps = [
+      {
+        ...STEPS[0],
+        note: "Set `TRUECOURSE_ROSLYN_HOST` and the **Delete document** button — 5 * 3 stays literal.",
+      },
+    ];
+    renderTest(PASSING_ID);
+    const steps = await findSteps();
+    const body = await openStep(user, steps, 1);
+
+    expect(within(body).getByText("TRUECOURSE_ROSLYN_HOST").tagName).toBe("CODE");
+    expect(within(body).getByText("Delete document").tagName).toBe("STRONG");
+    // An unpaired marker is text, never the start of a span that eats the line.
+    expect(within(body).getByText(/5 \* 3 stays literal/)).toBeInTheDocument();
   });
 });

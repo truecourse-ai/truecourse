@@ -5258,7 +5258,15 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     similarity key; or cap collapse at direct (non-transitive) pairs.
 
 93. **The visual judge — an LLM annotation on failing web steps (2026-08-12).**
-    STATUS: IMPLEMENTED. A web step asserts on the DOM: a role, an accessible name,
+    STATUS: IMPLEMENTED — PARKED (2026-08-14): off by default, opt back in with
+    `TRUECOURSE_GUARD_VISUAL_JUDGE=1`. The vision call slows every red web step
+    and the annotation is not currently buying its keep day-to-day, so
+    `guardRunInProcess` wires the built judge only under the flag (an injected
+    judge still always wins). Nothing else was removed — cache, schema, transports,
+    CLI close line and dashboard rendering all spring back with the flag — pending
+    a decision on the feature's future.
+
+    A web step asserts on the DOM: a role, an accessible name,
     a substring of the page's text. When one misses, the transcript can say the
     words were not found and the run leaves a full-page PNG behind — but the first
     question a human has ("so what WAS on the screen?") is answerable only by
@@ -5269,8 +5277,9 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `{ expectedVisible: yes | no | unclear, screenSummary, rationale }`.
 
     **The rules, all downstream of §10.2's determinism rule.**
-    (a) FAILURE-ONLY: a green run makes zero calls, so the feature is free until
-    something breaks — which is why it is always on and has no flag. (b)
+    (a) FAILURE-ONLY: a green run makes zero calls even when the judge is enabled
+    (it was originally always-on and flagless for this reason; the PARKED status
+    above added the opt-in flag). (b)
     ANNOTATION-ONLY: the verdict never moves an outcome, in either direction. Its
     most valuable answer is `yes` — the expected result IS on screen though the
     assertion missed, the signature of a brittle locator or matcher, i.e. the TEST

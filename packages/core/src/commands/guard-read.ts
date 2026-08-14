@@ -2045,6 +2045,15 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
     ? {
         serve: [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])],
         ...(servers.length > 1 ? { servers } : {}),
+        // The single-server shape's own preparation, verbatim from the block —
+        // same rule as the web surface above. In the multi-server shape these
+        // fields live per server (the schema refuses them at the api level), so
+        // there is nothing api-level to report; `env` is the shared layer and
+        // is legal in both shapes.
+        ...(recipe.api.cwd ? { cwd: recipe.api.cwd } : {}),
+        ...(recipe.api.healthPath ? { healthPath: recipe.api.healthPath } : {}),
+        ...(recipe.api.readyTimeoutMs != null ? { readyTimeoutMs: recipe.api.readyTimeoutMs } : {}),
+        ...(recipe.api.env ? { env: { ...recipe.api.env } } : {}),
         ...(recipe.api.services
           ? {
               services: {

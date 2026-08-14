@@ -108,9 +108,10 @@ describe('guardRunInProcess through the executor seam', () => {
 
   // The visual judge is wired at THIS boundary and nowhere else — that is what
   // keeps every other caller of the runner (birth validation, a hosted executor,
-  // the whole test suite) free of a model it never asked for. An injected judge
-  // must win over the built one, so a test can guarantee nothing is ever spawned.
-  it('hands the executor a visual judge, and an injected one wins', async () => {
+  // the whole test suite) free of a model it never asked for. The judge is
+  // PARKED: the built one is wired only under the opt-in flag, an injected judge
+  // always wins, and the day-to-day default is no judge at all.
+  it('wires the built visual judge only under the opt-in flag, and an injected one wins', async () => {
     const r = repo()
     writeRecipe(r)
     writeVersionScenario(r, 'ver')
@@ -122,7 +123,15 @@ describe('guardRunInProcess through the executor seam', () => {
     })
 
     await guardRunInProcess(r)
-    expect(typeof seen!.visualJudge).toBe('function')
+    expect(seen!.visualJudge).toBeUndefined()
+
+    process.env.TRUECOURSE_GUARD_VISUAL_JUDGE = '1'
+    try {
+      await guardRunInProcess(r)
+      expect(typeof seen!.visualJudge).toBe('function')
+    } finally {
+      delete process.env.TRUECOURSE_GUARD_VISUAL_JUDGE
+    }
 
     const injected: GuardVisualJudge = async () => null
     await guardRunInProcess(r, { visualJudge: injected })
