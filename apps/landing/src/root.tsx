@@ -6,7 +6,7 @@ import { initPostHog } from '@/lib/posthog';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
-  { rel: 'icon', href: '/logo.svg' },
+  { rel: 'icon', href: '/truecourse-mark-twin-light.svg' },
   { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
   { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
   {
