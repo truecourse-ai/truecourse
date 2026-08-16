@@ -15,7 +15,7 @@ describe('EeSectionSwitch', () => {
   it('offers exactly Code Quality and Spec Guard', () => {
     render(<EeSectionSwitch section="codequality" onSectionChange={() => {}} />);
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['Code Quality', 'Spec Guard']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['Spec Guard', 'Code Quality']);
   });
 
   it('clicking Guard fires onSectionChange("guard")', async () => {
