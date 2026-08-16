@@ -42,7 +42,7 @@ export function BlogTeaser() {
             </div>
           </div>
           <div className="pcf-side" aria-hidden="true">
-            <img className="pcf-chart" src="/blog/chart_merge_teaser_dark.png" alt="" />
+            <img className="pcf-chart" src={post.teaserImage} alt="" />
           </div>
         </Link>
 

@@ -14,6 +14,7 @@ export const meta: PostMeta = {
   date: 'Jul 22, 2026',
   dateISO: '2026-07-22',
   readMinutes: 8,
+  teaserImage: '/blog/chart_merge_teaser_dark.png',
 };
 
 const GITHUB_URL = 'https://github.com/truecourse-ai/truecourse';
