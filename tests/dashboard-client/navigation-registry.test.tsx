@@ -44,8 +44,8 @@ describe('navigation registry — pure lookups', () => {
     expect(ids).toContain('guard');
     // The BL-Drift `verification` section is retired in favor of Guard.
     expect(ids).not.toContain('verification');
-    // Guard is registered right after Code Analysis.
-    expect(ids.indexOf('guard')).toBe(ids.indexOf('codequality') + 1);
+    // Guard leads the registry — Spec Guard is the primary lens.
+    expect(ids.indexOf('codequality')).toBe(ids.indexOf('guard') + 1);
   });
 
   it('getSection returns descriptor or undefined', () => {
@@ -209,7 +209,7 @@ describe('navigation registry — capability gating', () => {
     );
     // Guard is OSS (ungated) so it shows alongside analysis; the
     // capability-gated `governance` section stays hidden.
-    expect(screen.getByTestId('sections')).toHaveTextContent(/^codequality,guard$/);
+    expect(screen.getByTestId('sections')).toHaveTextContent(/^guard,codequality$/);
   });
 
   it('enterprise edition with the capability shows the gated section', () => {
@@ -222,7 +222,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('sections')).toHaveTextContent(
-      /^codequality,guard,governance$/,
+      /^guard,codequality,governance$/,
     );
   });
 

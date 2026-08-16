@@ -106,9 +106,10 @@ function resolveSection(searchParams: URLSearchParams | null): DashboardSection 
   if (explicit === 'guard' || explicit === 'codequality') {
     return explicit;
   }
-  // No explicit section: infer it from whichever tab the URL implies.
+  // No explicit section: infer it from whichever tab the URL implies. A bare
+  // repo URL lands on Spec Guard — the product's primary lens.
   const tab = tabFromParams(searchParams);
-  return (tab && sectionForTab(tab)) || 'codequality';
+  return (tab && sectionForTab(tab)) || 'guard';
 }
 
 /**
@@ -168,13 +169,17 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
     (tab: LeftTab | null) => {
       setLeftTabState(tab);
       const url = new URL(window.location.href);
-      if (tab && tab !== 'home') {
+      if (tab && tab !== 'home' && tab !== 'coverage') {
         url.searchParams.set('tab', tab);
       } else {
-        // Home is the default landing; strip tab-scoped params so the
-        // URL shortens to /repos/:id. `view=diff` is page-level and is
+        // The two landing tabs reset their section to a clean slate: strip the
+        // tab-scoped params (a stale `?file` must not leak into Home). Coverage
+        // is the bare-URL landing (Spec Guard's default) so it strips `tab`
+        // too; Home still needs its address written, since a bare /repos/:id
+        // means guard/coverage now. `view=diff` is page-level and is
         // intentionally preserved.
         for (const key of TAB_SCOPED_PARAMS) url.searchParams.delete(key);
+        if (tab === 'home') url.searchParams.set('tab', 'home');
       }
       navigate(url.pathname + url.search);
     },

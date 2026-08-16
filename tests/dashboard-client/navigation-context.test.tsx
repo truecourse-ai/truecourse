@@ -36,6 +36,7 @@ function Probe() {
       <button onClick={() => setSection('codequality')}>to-analysis</button>
       <button onClick={() => setLeftTab('files')}>tab-files</button>
       <button onClick={() => setLeftTab('home')}>tab-home</button>
+      <button onClick={() => setLeftTab('coverage')}>tab-coverage</button>
     </div>
   );
 }
@@ -51,10 +52,10 @@ function renderAt(initialUrl: string) {
 }
 
 describe('NavigationContext — initial state from URL', () => {
-  it('defaults to codequality/home with no params', () => {
+  it('defaults to guard/coverage with no params — Spec Guard is the landing lens', () => {
     renderAt('/repos/abc');
-    expect(screen.getByTestId('section')).toHaveTextContent('codequality');
-    expect(screen.getByTestId('tab')).toHaveTextContent('home');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
   });
 
   it('reads an explicit ?tab', () => {
@@ -125,7 +126,9 @@ describe('NavigationContext — guard section routing', () => {
   for (const url of ['?gtest=task-lifecycle.cli.1', '?gscn=a1', '?tab=tests']) {
     it(`the retired ${url} implies no guard tab at all`, () => {
       renderAt(`/repos/abc${url}`);
-      expect(screen.getByTestId('section')).toHaveTextContent('codequality');
+      // The retired params resolve nothing, so the URL falls through to the
+      // bare-repo default (guard/coverage) rather than any specific guard tab.
+      expect(screen.getByTestId('section')).toHaveTextContent('guard');
       expect(screen.getByTestId('tab')).not.toHaveTextContent('guardflows');
     });
   }
@@ -238,12 +241,21 @@ describe('NavigationContext — setters write the URL', () => {
     expect(screen.getByTestId('search').textContent ?? '').toContain('tab=files');
   });
 
-  it('setLeftTab(home) strips the ?tab param', async () => {
+  it('setLeftTab(home) writes ?tab=home — the bare URL means guard/coverage now', async () => {
     const user = userEvent.setup();
     renderAt('/repos/abc?tab=files');
     await user.click(screen.getByText('tab-home'));
 
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
+    expect(screen.getByTestId('search').textContent ?? '').toContain('tab=home');
+  });
+
+  it('setLeftTab(coverage) strips the ?tab param — coverage IS the bare landing', async () => {
+    const user = userEvent.setup();
+    renderAt('/repos/abc?tab=guardflows');
+    await user.click(screen.getByText('tab-coverage'));
+
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
     expect(screen.getByTestId('search').textContent ?? '').not.toContain('tab=');
   });
 });

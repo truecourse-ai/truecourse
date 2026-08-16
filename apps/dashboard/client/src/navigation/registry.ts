@@ -31,7 +31,7 @@ import {
   Database,
   ClipboardList,
   FlaskConical,
-  Globe,
+  BookOpen,
   Braces,
   Settings,
   Plug,
@@ -89,40 +89,6 @@ export interface SectionDescriptor {
  */
 export const SECTIONS: SectionDescriptor[] = [
   {
-    id: 'codequality',
-    label: 'Code Analysis',
-    description: 'Architecture graphs, files, flows, databases',
-    icon: Network,
-    defaultTab: 'home',
-    tabs: [
-      { id: 'home', label: 'Home', icon: Home, noPanel: true },
-      { id: 'graphs', label: 'Graphs', icon: Network, noPanel: true },
-      // Flows / Files / Databases need the repo on local disk — OSS-only (gated on
-      // the `local-filesystem` capability the hosted edition omits).
-      { id: 'flows', label: 'Flows', icon: Workflow, requiredCapability: 'local-filesystem' },
-      { id: 'files', label: 'Files', icon: FolderTree, requiredCapability: 'local-filesystem' },
-      { id: 'databases', label: 'Databases', icon: Database, requiredCapability: 'local-filesystem' },
-      { id: 'analyses', label: 'Analyses', icon: ClipboardList, noPanel: true },
-      // Hosted-only: the EE Code Quality decomposition splits the OSS combined
-      // `home` into separate Analytics / Violations tabs. Gated on `workspace`
-      // (always advertised by the EE plugin, never by OSS), so OSS keeps its
-      // combined `home` view and these never appear there. The EE repo view curates
-      // them via `EE_ANALYSIS_TAB_ORDER`.
-      { id: 'analytics', label: 'Analytics', icon: BarChart3, noPanel: true, requiredCapability: 'workspace' },
-      { id: 'violations', label: 'Violations', icon: TriangleAlert, noPanel: true, requiredCapability: 'workspace' },
-      // EE-only: per-repo gate settings (notify emails, blocking, notification
-      // toggles). Rendered as a tab in the EE Code Quality bar (via
-      // `EE_ANALYSIS_TAB_ORDER`); OSS filters it out (github-gate capability).
-      {
-        id: 'settings',
-        label: 'Settings',
-        icon: Settings,
-        noPanel: true,
-        requiredCapability: 'github-gate',
-      },
-    ],
-  },
-  {
     // Spec-section scenario coverage as a top-level module (OSS — never gated).
     id: 'guard',
     label: 'Spec Guard',
@@ -147,7 +113,7 @@ export const SECTIONS: SectionDescriptor[] = [
       {
         id: 'sources',
         label: 'Sources',
-        icon: Globe,
+        icon: BookOpen,
         noPanel: true,
         requiredCapability: 'local-filesystem',
       },
@@ -192,6 +158,40 @@ export const SECTIONS: SectionDescriptor[] = [
       // transcripts and chat — AGENTIC_PIPELINE_PLAN §3.6–§3.9. UI MOCK for
       // now: renders hand-written data, no server reads.
       { id: 'activity', label: 'Activity', icon: Activity, noPanel: true },
+    ],
+  },
+  {
+    id: 'codequality',
+    label: 'Code Analysis',
+    description: 'Architecture graphs, files, flows, databases',
+    icon: Network,
+    defaultTab: 'home',
+    tabs: [
+      { id: 'home', label: 'Home', icon: Home, noPanel: true },
+      { id: 'graphs', label: 'Graphs', icon: Network, noPanel: true },
+      // Flows / Files / Databases need the repo on local disk — OSS-only (gated on
+      // the `local-filesystem` capability the hosted edition omits).
+      { id: 'flows', label: 'Flows', icon: Workflow, requiredCapability: 'local-filesystem' },
+      { id: 'files', label: 'Files', icon: FolderTree, requiredCapability: 'local-filesystem' },
+      { id: 'databases', label: 'Databases', icon: Database, requiredCapability: 'local-filesystem' },
+      { id: 'analyses', label: 'Analyses', icon: ClipboardList, noPanel: true },
+      // Hosted-only: the EE Code Quality decomposition splits the OSS combined
+      // `home` into separate Analytics / Violations tabs. Gated on `workspace`
+      // (always advertised by the EE plugin, never by OSS), so OSS keeps its
+      // combined `home` view and these never appear there. The EE repo view curates
+      // them via `EE_ANALYSIS_TAB_ORDER`.
+      { id: 'analytics', label: 'Analytics', icon: BarChart3, noPanel: true, requiredCapability: 'workspace' },
+      { id: 'violations', label: 'Violations', icon: TriangleAlert, noPanel: true, requiredCapability: 'workspace' },
+      // EE-only: per-repo gate settings (notify emails, blocking, notification
+      // toggles). Rendered as a tab in the EE Code Quality bar (via
+      // `EE_ANALYSIS_TAB_ORDER`); OSS filters it out (github-gate capability).
+      {
+        id: 'settings',
+        label: 'Settings',
+        icon: Settings,
+        noPanel: true,
+        requiredCapability: 'github-gate',
+      },
     ],
   },
 ];
