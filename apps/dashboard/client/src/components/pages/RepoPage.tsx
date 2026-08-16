@@ -1439,7 +1439,7 @@ function RepoPageInner() {
             // `local-filesystem`-gated), so no PR scope gate — a PR has no
             // scoped reading of a machine's own snapshot. The reload key carries
             // the `spec:complete { kind: 'sources' }` refresh.
-            <SpecSourcesPage repoId={repoId} reloadKey={specSourcesReloadKey} />
+            <SpecSourcesPage repoId={repoId} reloadKey={specSourcesReloadKey} progress={specProgress?.kind === 'sources' ? specProgress : null} />
           ) : leftTab === 'externals' ? (
             // Dependencies: every class of starting state the program needs — a
             // supplied project, a seeded database, a third-party account — joined
@@ -1813,7 +1813,8 @@ function RepoPageInner() {
           )}
         </div>
       )}
-      {specProgress && (
+      {/* Source fetches render inline on the Sources page; scans keep the popup. */}
+      {specProgress && specProgress.kind !== 'sources' && (
         <SpecProgressPopup progress={specProgress} onDismiss={clearSpecProgress} />
       )}
     </div>

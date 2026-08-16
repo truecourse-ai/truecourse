@@ -254,13 +254,17 @@ export function createSocketSpecEstimateHandler(
 export function createSocketSpecTracker(
   repoId: string,
   stepDefs: { key: string; label: string }[],
+  kind?: string,
 ): StepTracker {
-  return new StepTracker((payload) => emitSpecProgress(repoId, payload), stepDefs);
+  return new StepTracker(
+    (payload) => emitSpecProgress(repoId, kind ? { ...payload, kind } : payload),
+    stepDefs,
+  );
 }
 
 export function emitSpecProgress(
   repoId: string,
-  progress: AnalysisProgressPayload,
+  progress: AnalysisProgressPayload & { kind?: string },
 ): void {
   if (progress.step === 'error') {
     activeSpec.delete(repoId);

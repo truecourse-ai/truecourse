@@ -225,19 +225,23 @@ afterEach(() => {
 });
 
 describe('the Sources page — the registered sites', () => {
-  it('renders one row per site with its llms.txt, what the fetch produced, and when', async () => {
+  it('lists one row per site; the llms.txt and the site actions live in the detail', async () => {
     stubFetch(registry([STRAPI]));
     renderPage();
 
+    // The LIST row: the name, what the fetch produced, and when — nothing else.
     expect(await screen.findByText('Strapi Docs')).toBeInTheDocument();
     expect(screen.getByText('2 pages kept')).toBeInTheDocument();
     expect(screen.getByText('2 skipped')).toBeInTheDocument();
     expect(screen.getByText(/fetched/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /llms\.txt/ })).toHaveAttribute(
+    expect(screen.queryByRole('button', { name: /Refresh/ })).not.toBeInTheDocument();
+
+    // Selecting opens the DETAIL pane: the llms.txt link + the site actions.
+    await userEvent.click(screen.getByText('Strapi Docs'));
+    expect(await screen.findByRole('link', { name: /llms\.txt/ })).toHaveAttribute(
       'href',
       'https://docs.strapi.io/llms.txt',
     );
-    // Both site-level actions are on the row itself.
     expect(screen.getByRole('button', { name: /Refresh/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Remove/ })).toBeInTheDocument();
   });
@@ -256,8 +260,8 @@ describe('the Sources page — the registered sites', () => {
     await waitFor(() => expect(screen.getByTestId('search').textContent).toContain(`gsrc=${SOURCE_ID}`));
 
     // Stats, the pages themselves, and the links no page was written for.
-    expect(await screen.findByText('Pages (2)')).toBeInTheDocument();
-    expect(screen.getByText('Skipped (2)')).toBeInTheDocument();
+    expect(await screen.findByText('Pages')).toBeInTheDocument();
+    expect(screen.getByText('Skipped')).toBeInTheDocument();
     expect(screen.getByText('Installation')).toBeInTheDocument();
     expect(screen.getByText('cms/installation.md')).toBeInTheDocument();
     expect(screen.getByText(/links off this site/)).toBeInTheDocument();
@@ -275,16 +279,16 @@ describe('the Sources page — the registered sites', () => {
     expect(await screen.findByText('Installation')).toBeInTheDocument();
   });
 
-  it('closes the detail when the open row is clicked again', async () => {
+  it('keeps the selection when the active row is clicked again — the list idiom', async () => {
     stubFetch(registry([STRAPI]));
     renderPage();
 
     await userEvent.click(await screen.findByText('Strapi Docs'));
     expect(await screen.findByText('Installation')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText('Strapi Docs'));
-    await waitFor(() => expect(screen.queryByText('Installation')).not.toBeInTheDocument());
-    expect(screen.getByTestId('search').textContent).not.toContain('gsrc=');
+    await userEvent.click(screen.getAllByText('Strapi Docs')[0]!);
+    expect(screen.getByText('Installation')).toBeInTheDocument();
+    expect(screen.getByTestId('search').textContent).toContain('gsrc=');
   });
 
   it('refreshes a site from its row and re-reads both the row and its detail', async () => {
@@ -297,7 +301,7 @@ describe('the Sources page — the registered sites', () => {
     renderPage();
 
     await userEvent.click(await screen.findByText('Strapi Docs'));
-    await screen.findByText('Pages (2)');
+    await screen.findByText('Pages');
     await userEvent.click(screen.getByRole('button', { name: /Refresh/ }));
 
     const refresh = calls.find((c) => c.url.endsWith(`/spec/sources/${SOURCE_ID}/refresh`));
@@ -319,7 +323,7 @@ describe('the Sources page — the registered sites', () => {
     renderPage();
 
     await userEvent.click(await screen.findByText('Strapi Docs'));
-    await screen.findByText('Pages (2)');
+    await screen.findByText('Pages');
     await userEvent.click(screen.getByRole('button', { name: /Remove/ }));
 
     await waitFor(() =>
@@ -332,7 +336,7 @@ describe('the Sources page — the registered sites', () => {
     expect(await screen.findByText('No documentation sites')).toBeInTheDocument();
   });
 
-  it('reports a failed action on the row instead of silently leaving it stale', async () => {
+  it('reports a failed action in the detail instead of silently leaving it stale', async () => {
     stubFetch((call) => {
       if (call.url.includes('/refresh')) {
         return json({ error: 'could not read https://docs.strapi.io/llms.txt: HTTP 503' }, 400);
@@ -341,10 +345,11 @@ describe('the Sources page — the registered sites', () => {
     });
     renderPage();
 
+    await userEvent.click(await screen.findByText('Strapi Docs'));
     await userEvent.click(await screen.findByRole('button', { name: /Refresh/ }));
 
     expect(await screen.findByText(/HTTP 503/)).toBeInTheDocument();
-    expect(screen.getByText('Strapi Docs')).toBeInTheDocument();
+    expect(screen.getAllByText('Strapi Docs').length).toBeGreaterThan(0);
   });
 });
 
@@ -372,7 +377,7 @@ describe('previewing a fetched page', () => {
       'https://docs.strapi.io/cms/installation.md',
     );
     // The row list is still beside it, and the URL never moved.
-    expect(screen.getByText('Pages (2)')).toBeInTheDocument();
+    expect(screen.getByText('Pages')).toBeInTheDocument();
     expect(search()).toContain('tab=sources');
     expect(search()).toContain(`gsrc=${SOURCE_ID}`);
     expect(search()).not.toContain('guard=');
@@ -418,7 +423,7 @@ describe('previewing a fetched page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Close preview' }));
 
     expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
-    expect(screen.getByText('Pages (2)')).toBeInTheDocument();
+    expect(screen.getByText('Pages')).toBeInTheDocument();
     expect(screen.getByText('Installation')).toBeInTheDocument();
   });
 
@@ -427,7 +432,7 @@ describe('previewing a fetched page', () => {
     renderPage();
 
     await userEvent.click(await screen.findByText('Strapi Docs'));
-    await screen.findByText('Pages (2)');
+    await screen.findByText('Pages');
     expect(calls.some(isCorpus)).toBe(false);
 
     await userEvent.click(screen.getByText('Installation'));
@@ -479,7 +484,7 @@ describe('the add flow', () => {
 
     // The new site's row appears, selected, with its detail open.
     await waitFor(() => expect(screen.getByTestId('search').textContent).toContain(`gsrc=${SOURCE_ID}`));
-    expect(await screen.findByText('Pages (2)')).toBeInTheDocument();
+    expect(await screen.findByText('Pages')).toBeInTheDocument();
     expect(screen.getByText('Cal.com Docs')).toBeInTheDocument();
     expect(calls.find((c) => c.url.endsWith('/spec/sources/preview'))?.body).toEqual({
       url: 'https://docs.strapi.io/llms.txt',
