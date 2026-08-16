@@ -20,6 +20,8 @@ export type PostMeta = {
   dateISO: string;
   /** Reading time in minutes. */
   readMinutes: number;
+  /** Image shown beside the post on the home-page card (path under /public). */
+  teaserImage: string;
 };
 
 export type BlogPost = PostMeta & {
