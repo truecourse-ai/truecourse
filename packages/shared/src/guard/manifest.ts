@@ -162,11 +162,23 @@ export const GuardManifestFlowSchema = z
   .strict()
 export type GuardManifestFlow = z.infer<typeof GuardManifestFlowSchema>
 
-export const GuardManifestSchema = z
-  .object({
-    flows: z.array(GuardManifestFlowSchema),
-  })
-  .strict()
+/** Drop the retired top-level `version` marker (pre-2026-08-13 writers stamp it)
+ *  before the strict body sees it, so mixed-version stores keep loading. */
+function dropLegacyVersion(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  if (!('version' in value)) return value
+  const { version: _legacy, ...rest } = value as Record<string, unknown>
+  return rest
+}
+
+export const GuardManifestSchema = z.preprocess(
+  dropLegacyVersion,
+  z
+    .object({
+      flows: z.array(GuardManifestFlowSchema),
+    })
+    .strict(),
+)
 export type GuardManifest = z.infer<typeof GuardManifestSchema>
 
 /**

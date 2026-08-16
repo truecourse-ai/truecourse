@@ -49,7 +49,7 @@ describe('loadScenarios', () => {
     expect(errors[0].file).toContain('wrong.yaml')
   })
 
-  it('reports a file still carrying the retired guard: version key as a load error', () => {
+  it('accepts and drops the retired guard: version key, so pre-cut corpora keep loading', () => {
     const r = repo()
     writeRecipe(r)
     writeScenarioFile(
@@ -66,10 +66,10 @@ describe('loadScenarios', () => {
     )
 
     const { scenarios, errors } = loadScenarios(r)
-    expect(scenarios).toEqual([])
-    expect(errors).toHaveLength(1)
-    expect(errors[0].file).toContain('old.yaml')
-    expect(errors[0].message).toContain("guard")
+    expect(errors).toEqual([])
+    expect(scenarios).toHaveLength(1)
+    expect(scenarios[0].id).toBe('old')
+    expect(scenarios[0]).not.toHaveProperty('guard')
   })
 
   it('flags duplicate ids and keeps the first', () => {

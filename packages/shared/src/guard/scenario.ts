@@ -586,15 +586,16 @@ const GuardScenarioBodySchema = z
   })
 
 /**
- * Drop a LEGACY scenario-level `driver` key. The field was retired on 2026-08-12
- * (the driver belongs to the STEP), but committed corpora in other repos still
- * carry it and must keep loading — so it is accepted and thrown away here, before
- * the `.strict()` body ever sees it. Nothing writes it again.
+ * Drop the LEGACY scenario-level keys retired by later format cuts — `driver`
+ * (2026-08-12: the driver belongs to the STEP) and `guard` (the format-version
+ * marker, retired 2026-08-13). Corpora written before a cut still carry them and
+ * must keep loading, so they are accepted and thrown away here, before the
+ * `.strict()` body ever sees them. Nothing writes them again.
  */
 function dropLegacyDriverKey(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  if (!('driver' in value)) return value
-  const { driver: _legacyDriver, ...rest } = value as Record<string, unknown>
+  if (!('driver' in value) && !('guard' in value)) return value
+  const { driver: _legacyDriver, guard: _legacyFormat, ...rest } = value as Record<string, unknown>
   return rest
 }
 

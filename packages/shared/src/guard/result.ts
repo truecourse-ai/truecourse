@@ -65,9 +65,20 @@ export type GuardResultStage = z.infer<typeof GuardResultStageSchema>
 export const GuardTestStatusSchema = z.enum(['passing', 'failing', 'never-run'])
 export type GuardTestStatus = z.infer<typeof GuardTestStatusSchema>
 
+/** Drop the retired `scenarioFormat` marker (pre-2026-08-13 writers stamp it)
+ *  before the strict body sees it, so mixed-version stores keep loading. */
+function dropLegacyScenarioFormat(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  if (!('scenarioFormat' in value)) return value
+  const { scenarioFormat: _legacy, ...rest } = value as Record<string, unknown>
+  return rest
+}
+
 /** Run envelope — provenance for the whole run. */
-export const GuardRunEnvelopeSchema = z
-  .object({
+export const GuardRunEnvelopeSchema = z.preprocess(
+  dropLegacyScenarioFormat,
+  z
+    .object({
     runId: z.string(),
     ranAt: z.string(),
     branch: z.string().nullable(),
@@ -83,9 +94,10 @@ export const GuardRunEnvelopeSchema = z
      * ids don't align with the committed set). Optional so CLI runs and
      * pre-change snapshots keep parsing.
      */
-    corpusFingerprint: z.string().optional(),
-  })
-  .strict()
+      corpusFingerprint: z.string().optional(),
+    })
+    .strict(),
+)
 export type GuardRunEnvelope = z.infer<typeof GuardRunEnvelopeSchema>
 
 export const GuardSummarySchema = z
