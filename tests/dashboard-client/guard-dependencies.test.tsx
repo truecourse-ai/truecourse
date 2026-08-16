@@ -425,7 +425,7 @@ describe('GuardDependenciesPane — the list', () => {
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent('anthropic');
     expect(rows[0]).toHaveTextContent('API service');
-    expect(rows[0]).toHaveTextContent('incomplete');
+    expect(rows[0]).toHaveTextContent('Incomplete');
     // A kind with nothing to register wears NO state — there is nothing to do —
     // and no type either: it is not a thing anybody registers.
     expect(rows[1].textContent).not.toMatch(/provided|incomplete/);
@@ -446,9 +446,9 @@ describe('GuardDependenciesPane — the list', () => {
 
     const rows = within(await screen.findByRole('list', { name: 'Dependencies' })).getAllByRole('listitem');
     expect(rows[0]).toHaveTextContent('API service');
-    expect(rows[1]).toHaveTextContent('binary');
-    expect(rows[2]).toHaveTextContent('login');
-    expect(rows[3]).toHaveTextContent('project');
+    expect(rows[1]).toHaveTextContent('Binary');
+    expect(rows[2]).toHaveTextContent('Login');
+    expect(rows[3]).toHaveTextContent('Project');
     // Nothing to register, so nothing to call it.
     expect(rows[4].textContent).not.toMatch(/API service|binary|login|project|credentials/);
 
@@ -464,7 +464,7 @@ describe('GuardDependenciesPane — the list', () => {
     });
     render(<GuardDependenciesPane repoId="r" />);
     const rows = within(await screen.findByRole('list', { name: 'Dependencies' })).getAllByRole('listitem');
-    expect(rows[0]).toHaveTextContent('credentials');
+    expect(rows[0]).toHaveTextContent('Credentials');
   });
 
   /**
@@ -479,13 +479,13 @@ describe('GuardDependenciesPane — the list', () => {
     render(<GuardDependenciesPane repoId="r" />);
 
     const rows = within(await screen.findByRole('list', { name: 'Dependencies' })).getAllByRole('listitem');
-    const chip = within(rows[0]).getByText('used 2');
+    const chip = within(rows[0]).getByText('Used 2');
     expect(chip.className).toMatch(/muted/);
     expect(chip.className).not.toMatch(/sky|amber|orange|red|emerald/);
 
     // A provided dependency is relied on exactly as much as it was: the chip stays.
-    expect(within(rows[1]).getByText('provided')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('used 3')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Provided')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Used 3')).toBeInTheDocument();
 
     // Nothing relies on it, so it says nothing — and the old blocks chip is gone.
     expect(within(rows[2]).queryByText(/^used/)).toBeNull();
@@ -497,12 +497,13 @@ describe('GuardDependenciesPane — the list', () => {
     render(<GuardDependenciesPane repoId="r" />);
 
     await screen.findByText('anthropic');
-    const chips = ['incomplete', 'unprovided'].map((word) => screen.getByText(word));
+    const chips = ['Incomplete', 'Unprovided'].map((word) => screen.getByText(word));
     for (const chip of chips) {
-      expect(chip.className).toMatch(/sky/);
-      expect(chip.className).not.toMatch(/amber|orange/);
+      const dot = chip.querySelector('span');
+      expect(dot?.className).toMatch(/sky/);
+      expect(chip.className + dot?.className).not.toMatch(/amber|orange/);
     }
-    expect(screen.getByText('provided').className).toMatch(/emerald/);
+    expect(screen.getByText('Provided').querySelector('span')?.className).toMatch(/emerald/);
   });
 
   it('lands on the row a needs-setup CTA deep-linked to, by name or by service', async () => {
@@ -656,8 +657,8 @@ describe('GuardDependenciesPane — the detail', () => {
     // The detail's own header: the type sits where the class chip used to, beside
     // the state, above the name.
     const header = (await screen.findByRole('heading', { level: 2 })).parentElement!;
-    expect(within(header).getByText('login')).toBeInTheDocument();
-    expect(within(header).getByText('provided')).toBeInTheDocument();
+    expect(within(header).getByText('Login')).toBeInTheDocument();
+    expect(within(header).getByText('Provided')).toBeInTheDocument();
     expect(screen.queryByText('supplied')).toBeNull();
   });
 
@@ -814,7 +815,7 @@ describe('GuardDependenciesPane — the registration form', () => {
     expect(screen.queryByText(/no value registered/)).toBeNull();
 
     // Blank, and the entry still reads provided — the optional half never gates.
-    expect(screen.getAllByText('provided').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Provided').length).toBeGreaterThan(0);
   });
 
   it('saves with an optional variable left empty, and sends it like any other when filled', async () => {

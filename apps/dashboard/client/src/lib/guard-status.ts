@@ -196,6 +196,11 @@ export function guardFlowStatusBadge(status: GuardFlowPlainStatus): string {
   return GUARD_STATUS_META[BADGE_SOURCE[status]].badge;
 }
 
+/** Dot colour for a plain status — the status idiom's carrier (dot + plain word). */
+export function guardFlowStatusDot(status: GuardFlowPlainStatus): string {
+  return GUARD_STATUS_META[BADGE_SOURCE[status]].dot;
+}
+
 /** The `border-l-4 …` wrapper classes for a section's band. */
 export function guardBandClasses(status: GuardSectionCoverageStatus): string {
   return `border-l-4 ${GUARD_STATUS_META[status].band}`;

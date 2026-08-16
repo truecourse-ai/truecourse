@@ -103,7 +103,7 @@ function FilterChips({ label, options, selected, onChange, multi, ariaLabel }: R
             className={`${CHIP} ${
               on
                 ? 'bg-primary text-primary-foreground ring-1 ring-inset ring-current'
-                : 'bg-muted text-muted-foreground hover:text-foreground'
+                : 'bg-muted text-foreground'
             }`}
           >
             {o.label}

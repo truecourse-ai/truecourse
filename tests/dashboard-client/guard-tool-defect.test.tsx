@@ -53,7 +53,9 @@ describe('a withheld defect is never drift', () => {
   it('rides as a muted marker, never as a status colour', () => {
     render(<GuardToolDefectChip />);
     const chip = screen.getByText(GUARD_TOOL_DEFECT_LABEL);
-    expect(chip.className).toContain('text-muted-foreground');
+    // Muted BACKGROUND, full-contrast text — a marker, never a status colour.
+    expect(chip.className).toContain('bg-muted');
+    expect(chip.className).toContain('text-foreground');
     expect(chip.className).not.toMatch(/red|amber|orange/);
   });
 

@@ -20,6 +20,7 @@
 import { useMemo } from 'react';
 import { AlertTriangle, Plug, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { CollapsibleAside } from '@/components/ui/collapsible-aside';
 import { EntityList } from '@/components/ui/entity-list';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { useGuardDependencies } from '@/hooks/useGuardDependencies';
@@ -34,6 +35,8 @@ import { GuardDependencyDetail } from './GuardDependencyDetail';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
 
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
+const STATUS = 'inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground';
+const DOT = 'h-2 w-2 shrink-0 rounded-full';
 
 export interface GuardDependenciesPaneProps {
   repoId: string;
@@ -88,7 +91,7 @@ export function GuardDependenciesPane({ repoId, reloadKey = 0, onOpenFlow }: Gua
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      <div className="w-[320px] shrink-0 overflow-hidden border-r border-border">
+      <CollapsibleAside label="Dependencies" defaultWidth={320}>
         <EntityList<GuardDependencyRow>
           label="Dependencies"
           items={rows}
@@ -109,7 +112,7 @@ export function GuardDependenciesPane({ repoId, reloadKey = 0, onOpenFlow }: Gua
               : 'Nothing has looked yet. Run `truecourse guard setup` to detect what this repo depends on.'
           }
         />
-      </div>
+      </CollapsibleAside>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* No Overview chip: with no dependency open this pane IS its no-selection
@@ -160,19 +163,22 @@ export function GuardDependencyListRow({ dependency }: { dependency: GuardDepend
             width="narrow"
             content={`${used} flow${used === 1 ? '' : 's'} rely on this — ${used === 1 ? 'it' : 'they'} contributed what it must provide, or ${used === 1 ? 'its' : 'their'} committed tests bind it.`}
           >
-            <span className={`${CHIP} bg-muted text-muted-foreground`}>used {used}</span>
+            <span className={`${CHIP} bg-muted text-foreground`}>Used {used}</span>
           </HoverPopover>
         )}
         {state && (
           <HoverPopover portal width="narrow" content={state.hint}>
-            <span className={`${CHIP} ${state.chip}`}>{state.label}</span>
+            <span className={STATUS}>
+              <span aria-hidden className={`${DOT} ${state.dot}`} />
+              {state.label}
+            </span>
           </HoverPopover>
         )}
       </div>
       <div className="flex w-full items-center gap-2">
         {type && (
           <HoverPopover portal width="wide" content={type.hint}>
-            <span className={`${CHIP} bg-muted text-muted-foreground`}>{type.label}</span>
+            <span className={`${CHIP} bg-muted text-foreground`}>{type.label}</span>
           </HoverPopover>
         )}
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">

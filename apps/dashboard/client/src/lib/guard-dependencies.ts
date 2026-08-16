@@ -18,7 +18,8 @@ import type { GuardDependencyRow, GuardDependencyState } from '@/types/guard-dep
 
 export interface GuardDependencyPaint {
   label: string;
-  chip: string;
+  /** Dot colour for a STATE (the dot + word idiom); empty for a type label. */
+  dot: string;
   hint: string;
 }
 
@@ -41,35 +42,35 @@ export function guardDependencyType(dependency: GuardDependencyRow): GuardDepend
   // a different demand from "hold an account" even when the vendor is the same.
   if (dependency.service?.detectedVia === 'binary') {
     return {
-      label: 'binary',
-      chip: '',
+      label: 'Binary',
+      dot: '',
       hint: 'The program spawns this as a subprocess, so the machine that runs the tests must already have it installed.',
     };
   }
   if (dependency.service) {
     return {
       label: 'API service',
-      chip: '',
+      dot: '',
       hint: 'A third-party API the repo calls. Register the account guard should reach it with — the base URL, the token, and any headers it needs.',
     };
   }
   switch (dependency.registration?.kind) {
     case 'config-dir':
       return {
-        label: 'login',
-        chip: '',
+        label: 'Login',
+        dot: '',
         hint: 'An authenticated state on this machine — a logged-in config directory. Guard copies it into the sandbox; it is never used in place.',
       };
     case 'path':
       return {
-        label: 'project',
-        chip: '',
+        label: 'Project',
+        dot: '',
         hint: 'A real checkout the program operates on. Guard copies it into the sandbox, so a run can never mutate your working copy.',
       };
     case 'env':
       return {
-        label: 'credentials',
-        chip: '',
+        label: 'Credentials',
+        dot: '',
         hint: 'The variables the program reads a credential from. Values are stored on this machine only and never committed.',
       };
     default:
@@ -80,18 +81,18 @@ export function guardDependencyType(dependency: GuardDependencyRow): GuardDepend
 /** Whether a supplied dependency can be bound on this machine, right now. */
 export const GUARD_DEPENDENCY_STATE: Record<GuardDependencyState, GuardDependencyPaint> = {
   provided: {
-    label: 'provided',
-    chip: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+    label: 'Provided',
+    dot: 'bg-emerald-500',
     hint: 'An instance is registered and present — the flows that bind it run against it.',
   },
   incomplete: {
-    label: 'incomplete',
-    chip: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+    label: 'Incomplete',
+    dot: 'bg-sky-500',
     hint: 'Part of the registration is missing, so a run stops rather than test against half a world.',
   },
   unprovided: {
-    label: 'unprovided',
-    chip: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+    label: 'Unprovided',
+    dot: 'bg-sky-500',
     hint: 'Nothing is registered yet — the flows that bind it stay blocked until something is.',
   },
 };

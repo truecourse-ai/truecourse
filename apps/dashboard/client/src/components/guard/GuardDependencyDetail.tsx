@@ -49,6 +49,8 @@ import type {
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
+const STATUS = 'inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground';
+const DOT = 'h-2 w-2 shrink-0 rounded-full';
 const FIELD_LABEL = 'mb-1 block text-[11px] font-medium text-foreground';
 const REF_BTN =
   'inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
@@ -130,12 +132,15 @@ export function GuardDependencyDetail({
         <div className="flex flex-wrap items-center gap-2">
           {type && (
             <HoverPopover portal width="wide" content={type.hint}>
-              <span className={`${CHIP} bg-muted text-muted-foreground`}>{type.label}</span>
+              <span className={`${CHIP} bg-muted text-foreground`}>{type.label}</span>
             </HoverPopover>
           )}
           {state && (
             <HoverPopover portal width="narrow" content={state.hint}>
-              <span className={`${CHIP} ${state.chip}`}>{state.label}</span>
+              <span className={STATUS}>
+                <span aria-hidden className={`${DOT} ${state.dot}`} />
+                {state.label}
+              </span>
             </HoverPopover>
           )}
           {dependency.inCatalog && (

@@ -23,14 +23,18 @@ import {
   guardStatusWord,
   type GuardFlowPlainStatus,
 } from '@/lib/guard-flow-status';
-import { guardFlowStatusBadge, guardStatusMeta } from '@/lib/guard-status';
+import { guardFlowStatusDot, guardStatusMeta } from '@/lib/guard-status';
 
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
 
+/** The status idiom: colored dot + full-contrast word. Capsules are for markers. */
+const STATUS = 'inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground';
+const DOT = 'h-2 w-2 shrink-0 rounded-full';
+
 /**
- * A SECTION's coverage status — one of the five words, in the colour its precise
- * wire status paints. Which state produced the word is the detail's job (the
- * reason line under this badge, and the per-flow / per-claim rows below it).
+ * A SECTION's coverage status — one of the five words, its precise wire status
+ * carried by the dot's colour. Which state produced the word is the detail's job
+ * (the reason line under this badge, and the per-flow / per-claim rows below it).
  */
 export function GuardStatusBadge({
   status,
@@ -41,10 +45,8 @@ export function GuardStatusBadge({
 }) {
   const meta = guardStatusMeta(status);
   return (
-    <span
-      title={meta.hint}
-      className={`${CHIP} uppercase tracking-wider ${meta.badge} ${className}`}
-    >
+    <span title={meta.hint} className={`${STATUS} uppercase tracking-wider ${className}`}>
+      <span aria-hidden className={`${DOT} ${meta.dot}`} />
       {guardStatusWord(status)}
     </span>
   );
@@ -66,7 +68,8 @@ export function GuardFlowStatusChip({
   className?: string;
 }) {
   return (
-    <span className={`${CHIP} ${guardFlowStatusBadge(status)} ${className}`}>
+    <span className={`${STATUS} ${className}`}>
+      <span aria-hidden className={`${DOT} ${guardFlowStatusDot(status)}`} />
       {word ?? GUARD_FLOW_STATUS_WORD[status]}
     </span>
   );
@@ -80,7 +83,7 @@ export function GuardFlowStatusChip({
  */
 export function GuardNotInSpecsChip({ className = '' }: { className?: string }) {
   return (
-    <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_NOT_IN_SPECS_LABEL}</span>
+    <span className={`${CHIP} bg-muted text-foreground ${className}`}>{GUARD_NOT_IN_SPECS_LABEL}</span>
   );
 }
 
@@ -92,7 +95,7 @@ export function GuardNotInSpecsChip({ className = '' }: { className?: string }) 
  */
 export function GuardDismissedChip({ className = '' }: { className?: string }) {
   return (
-    <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_DISMISSED_LABEL}</span>
+    <span className={`${CHIP} bg-muted text-foreground ${className}`}>{GUARD_DISMISSED_LABEL}</span>
   );
 }
 
@@ -106,7 +109,7 @@ export function GuardDismissedChip({ className = '' }: { className?: string }) {
 export function GuardToolDefectChip({ className = '' }: { className?: string }) {
   return (
     <HoverPopover portal width="wide" content={GUARD_TOOL_DEFECT_HINT}>
-      <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>
+      <span className={`${CHIP} bg-muted text-foreground ${className}`}>
         {GUARD_TOOL_DEFECT_LABEL}
       </span>
     </HoverPopover>

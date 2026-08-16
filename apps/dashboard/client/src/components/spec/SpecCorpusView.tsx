@@ -734,17 +734,17 @@ function DocRowContent({
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate text-foreground">{label ?? doc.title ?? doc.ref}</span>
           {workspace && <WorkspaceBadge />}
-          {label && <WebSourceBadge />}
         </span>
-        {tags.length > 0 && (
+        {(tags.length > 0 || label) && (
           <span className="flex flex-wrap gap-1">
+            {label && <WebSourceBadge />}
             {tags.slice(0, 2).map((t) => (
-              <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground">
                 {t}
               </span>
             ))}
             {tags.length > 2 && (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground">
                 +{tags.length - 2} more
               </span>
             )}
@@ -978,10 +978,11 @@ function OverlapRowContent({
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-foreground">{label}</span>
         <span className="flex flex-wrap items-center gap-1">
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{area}</span>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground">{area}</span>
           {workspace && <WorkspaceBadge />}
           {resolved && (
-            <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground">
+              <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
               Resolved
             </span>
           )}

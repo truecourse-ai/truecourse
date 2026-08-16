@@ -51,7 +51,7 @@ export function GuardTestListRow({ row }: { row: GuardTestListRowData }) {
         <GuardFlowStatusChip status={row.status.plain} word={row.status.word} />
         {row.handWritten && (
           <HoverPopover portal width="narrow" content="Hand-written — no generate authored it.">
-            <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground">
               <PenLine className="h-3 w-3" />
               hand-written
             </span>

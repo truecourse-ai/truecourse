@@ -128,10 +128,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   }
   p.log.step(`areas       ${s.areaCount}`);
   p.log.step(`overlaps    ${s.overlapFlags}`);
-  // Conflicts the scan resolved itself off a high-confidence judge
-  // recommendation — said loudly (with the verdict), never a silent decision.
-  // Defensive read: the stats cross a package boundary and an older engine
-  // (or a partial stub) may not carry the field.
+  // The stats cross a package boundary; an older engine may not carry the field.
   const autoResolved = s.autoResolvedConflicts ?? [];
   if (autoResolved.length > 0) {
     const n = autoResolved.length;

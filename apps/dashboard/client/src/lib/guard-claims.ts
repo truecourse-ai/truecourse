@@ -62,7 +62,7 @@ export function findGuardClaimSelection(
  * the list's ORDER and nothing else — a claim row states no status, so this never
  * becomes a paint.
  */
-export const GUARD_CLAIM_COVERAGE_ORDER: GuardClaimCoverage[] = ['unplanned', 'gapped', 'planned', 'proven'];
+export const GUARD_CLAIM_COVERAGE_ORDER: GuardClaimCoverage[] = ['failing', 'unplanned', 'gapped', 'planned', 'proven'];
 
 /**
  * What one doc SECTION states, as the rows its detail lists. Three sources, one
