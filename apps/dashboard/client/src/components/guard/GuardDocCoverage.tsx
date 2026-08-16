@@ -37,10 +37,49 @@ import { guardStatusWord } from '@/lib/guard-flow-status';
 /** How a status filter treats the non-matching sections. */
 export type CoverageFilterMode = 'blur' | 'hide';
 
-/** A section's hover: its one coverage WORD, then the reason behind it. */
-function reasonText(status: GuardSectionCoverageStatus, reason: string | undefined): string {
+/** The red/green split of a MIXED section — some flows failing, some passing. */
+interface SectionMix {
+  failed: number;
+  succeeded: number;
+  total: number;
+}
+
+/** A section with both failing and succeeding flows, from its per-flow statuses. */
+function sectionMix(flows: readonly { status: GuardSectionCoverageStatus }[] | undefined): SectionMix | null {
+  if (!flows || flows.length < 2) return null;
+  let failed = 0;
+  let succeeded = 0;
+  for (const f of flows) {
+    const plain = guardCoveragePlainStatus(f.status);
+    if (plain === 'failed') failed++;
+    else if (plain === 'succeeded') succeeded++;
+  }
+  return failed > 0 && succeeded > 0 ? { failed, succeeded, total: flows.length } : null;
+}
+
+/** A section's hover: its coverage word, then the reason (a mix: the composition). */
+function reasonText(
+  status: GuardSectionCoverageStatus,
+  reason: string | undefined,
+  mix: SectionMix | null,
+): string {
   const word = guardStatusWord(status);
-  return reason ? `${word} — ${reason}` : word;
+  if (mix) return `${word}: ${mix.failed} of ${mix.total} flows failing, ${mix.succeeded} passing`;
+  return reason ? `${word}: ${reason}` : word;
+}
+
+/** A mixed section's corner indicator — replaces the dot; sized by real proportions. */
+function MixBar({ mix }: { mix: SectionMix }) {
+  const pct = Math.round((mix.failed / (mix.failed + mix.succeeded)) * 100);
+  return (
+    <span
+      data-testid="section-mix"
+      className="flex h-2.5 w-10 overflow-hidden rounded-full ring-2 ring-background"
+    >
+      <span className="bg-red-500" style={{ width: `${pct}%` }} />
+      <span className="flex-1 bg-emerald-500" />
+    </span>
+  );
 }
 
 import { headingMatchKey as norm } from '@/lib/heading-match';
@@ -70,6 +109,8 @@ interface CoverageBlockProps {
   anchor: string | undefined;
   status: GuardSectionCoverageStatus | undefined;
   reason: string | undefined;
+  /** Present when the section mixes failing and passing flows. */
+  mix: SectionMix | null;
   /** The overlap key of a conflict flagging this heading, if any. */
   conflictKey: string | undefined;
   selected: boolean;
@@ -91,6 +132,7 @@ const CoverageBlock = memo(function CoverageBlock({
   anchor,
   status,
   reason,
+  mix,
   conflictKey,
   selected,
   dimmed,
@@ -141,8 +183,12 @@ const CoverageBlock = memo(function CoverageBlock({
       <span className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
         {conflictKey && onOpenConflict && <ConflictTag onClick={() => onOpenConflict(conflictKey)} />}
         {meta && (
-          <HoverPopover portal width="narrow" align="end" content={reasonText(status!, reason)}>
-            <span className={`block h-2.5 w-2.5 rounded-full ring-2 ring-background ${meta.dot}`} />
+          <HoverPopover portal width="narrow" align="end" content={reasonText(status!, reason, mix)}>
+            {mix ? (
+              <MixBar mix={mix} />
+            ) : (
+              <span className={`block h-2.5 w-2.5 rounded-full ring-2 ring-background ${meta.dot}`} />
+            )}
           </HoverPopover>
         )}
       </span>
@@ -269,6 +315,7 @@ export function GuardDocCoverage({
             anchor={section?.anchor}
             status={status}
             reason={section?.reason}
+            mix={sectionMix(section?.flows)}
             conflictKey={conflictKey}
             selected={selected}
             dimmed={dimmed}

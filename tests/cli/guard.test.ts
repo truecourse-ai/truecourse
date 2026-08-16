@@ -991,7 +991,7 @@ function report(over: Partial<GuardGenerateReport> = {}): GuardGenerateReport {
 describe('composeGuardStatus', () => {
   it('returns all-null when every store file is absent', () => {
     const s = composeGuardStatus(null, null, null)
-    expect(s).toEqual({ coverage: null, lastRun: null, lastGenerate: null })
+    expect(s).toEqual({ coverage: null, sections: null, lastRun: null, lastGenerate: null })
   })
 
   it('summarizes coverage: bound sections + the ones owning scenarios', () => {

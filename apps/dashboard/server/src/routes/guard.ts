@@ -39,6 +39,7 @@ import { composeGuardStatus, GUARD_VISUAL_CONTENT_TYPE } from '@truecourse/share
 import {
   readManifestForView,
   readGuardRunForView,
+  readGuardSectionTotals,
   readGuardHistory,
   readGuardResultForView,
   readGuardReport,
@@ -90,6 +91,7 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
         await readManifestForView(repo.path, ref),
         await readGuardRunForView(repo.path, ref),
         await readGuardResultForView(repo.path, ref),
+        await readGuardSectionTotals(repo.path, ref),
       ),
     );
   } catch (e) {

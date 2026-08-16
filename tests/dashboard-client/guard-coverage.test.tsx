@@ -700,14 +700,21 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     expect(screen.queryByRole('tab')).toBeNull();
   });
 
-  it('carries NO Overview chip — nothing selected IS the pane', async () => {
+  it('the strip leads with a pinned Overview tab that deselects without closing', async () => {
     const user = userEvent.setup();
     renderHarness(ALL_TRUE);
     await within(sidebar()).findByText('docs/SPEC.md');
     await user.click(within(sidebar()).getByText('docs/SPEC.md'));
-    // The strip is up (a doc tab is open) and it holds the doc alone.
+    // The strip is up: the pinned Overview tab first, then the doc tab.
     expect(closeBtn('docs/SPEC.md')).toBeInTheDocument();
-    expect(screen.queryByText('Overview')).toBeNull();
+    expect(screen.getByText('Overview')).toBeInTheDocument();
+    // Overview is uncloseable — it lives and dies with the strip.
+    expect(screen.queryByLabelText('Close Overview')).toBeNull();
+    // Clicking it shows the overview pane while the doc tab stays open.
+    await user.click(screen.getByText('Overview'));
+    expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
+    expect(closeBtn('docs/SPEC.md')).toBeInTheDocument();
+    expect(search()).not.toContain('guard=');
   });
 
   it('closing the last tab hides the strip and returns to the no-selection pane', async () => {

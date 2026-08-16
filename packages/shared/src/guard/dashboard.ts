@@ -1196,18 +1196,27 @@ export const GuardClaimScenarioRefSchema = z
     title: z.string(),
     /** 1-based step numbers whose `milestone` names this claim. */
     steps: z.array(z.number().int().positive()),
+    /**
+     * The scenario's verdict in the latest run, when one ran it — what makes the
+     * claim ledger run-aware. Absent when the scenario has never executed (or
+     * the view was built with no run store).
+     */
+    outcome: GuardOutcomeSchema.optional(),
   })
   .strict()
 export type GuardClaimScenarioRef = z.infer<typeof GuardClaimScenarioRefSchema>
 
 /**
- * Where a claim stands in coverage accounting. Claim-keyed, so it always exists:
- * `proven` (a scenario step proves it), `planned` (a flow carries it, no scenario
- * step names it yet), `gapped` (accounted for as a `noFlowClaim`, with a reason),
+ * Where a claim stands in coverage accounting. Claim-keyed, so it always exists,
+ * and RUN-AWARE — "proven" is earned by a green run, never by authorship alone:
+ * `proven` (a proof step PASSED in the latest run), `failing` (proof steps exist
+ * and the latest run failed them — none passing), `planned` (a flow carries it,
+ * and any proof step has no verdict yet — unwritten, never run, stale, or
+ * blocked), `gapped` (accounted for as a `noFlowClaim`, with a reason),
  * `unplanned` (no flow, no gap record — the honest hole synthesis owes an answer
  * for).
  */
-export const GuardClaimCoverageSchema = z.enum(['proven', 'planned', 'gapped', 'unplanned'])
+export const GuardClaimCoverageSchema = z.enum(['proven', 'failing', 'planned', 'gapped', 'unplanned'])
 export type GuardClaimCoverage = z.infer<typeof GuardClaimCoverageSchema>
 
 /** One claim as the Claims tab lists it: the store row plus its two traces. */
@@ -1264,6 +1273,8 @@ export const GuardClaimsViewSchema = z
       .object({
         claims: z.number().int().nonnegative(),
         proven: z.number().int().nonnegative(),
+        /** Claims whose proof steps the latest run failed (none passing). */
+        failing: z.number().int().nonnegative(),
         planned: z.number().int().nonnegative(),
         gapped: z.number().int().nonnegative(),
         unplanned: z.number().int().nonnegative(),

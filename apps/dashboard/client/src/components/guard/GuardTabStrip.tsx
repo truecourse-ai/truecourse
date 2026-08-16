@@ -7,10 +7,8 @@
  * renders ONLY while at least one item tab is open. Presentation only; the reducer
  * lives in {@link useGuardTabs}.
  *
- * There is no "Overview" chip, on any pane. A pane's no-selection state is the
- * pane at rest ("pick a flow", "pick a document"), never a second thing to read:
- * the LIST beside each of them already carries the corpus and its tallies, and a
- * chip for it invited a reader to think otherwise.
+ * `home` (optional): a pinned, uncloseable first tab that deselects back to the
+ * pane's at-rest content; it renders only while the strip does.
  *
  * The visible label is the HUMAN text (a scenario/finding title) — truncated
  * within a max width so a long slug id can never stretch the strip — with the
@@ -18,7 +16,7 @@
  * leading glyph (findings pass a distinct one); scenarios default to the flask.
  */
 
-import { FlaskConical, X, type LucideIcon } from 'lucide-react';
+import { FlaskConical, LayoutDashboard, X, type LucideIcon } from 'lucide-react';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import type { GuardTab } from '@/hooks/useGuardTabs';
 
@@ -31,21 +29,44 @@ export interface GuardTabStripItem extends GuardTab {
   icon?: LucideIcon;
 }
 
+/** The pinned, uncloseable first tab back to the pane's at-rest content. */
+export interface GuardTabStripHome {
+  label: string;
+  onSelect: () => void;
+  icon?: LucideIcon;
+}
+
 export function GuardTabStrip({
   tabs,
   activeId,
   onSelect,
   onClose,
+  home,
 }: {
   tabs: GuardTabStripItem[];
   activeId: string | null;
   onSelect: (tab: GuardTab) => void;
   onClose: (id: string) => void;
+  home?: GuardTabStripHome;
 }) {
   // No item tabs → no strip: the pane's own content already fills it.
   if (tabs.length === 0) return null;
+  const HomeIcon = home?.icon ?? LayoutDashboard;
   return (
     <div className="flex shrink-0 items-center overflow-x-auto border-b border-border bg-card text-xs">
+      {home && (
+        <div
+          onClick={home.onSelect}
+          className={`group flex shrink-0 cursor-pointer items-center gap-1 border-r border-border px-3 py-1.5 transition-colors ${
+            activeId == null
+              ? 'bg-background text-foreground'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+          }`}
+        >
+          <HomeIcon className="h-3 w-3 shrink-0" />
+          <span className="block font-medium">{home.label}</span>
+        </div>
+      )}
       {tabs.map((t) => {
         const isActive = activeId === t.id;
         const Icon = t.icon ?? FlaskConical;

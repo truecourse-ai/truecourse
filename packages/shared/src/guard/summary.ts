@@ -165,8 +165,25 @@ export interface GuardLastGenerateSummary {
   usage?: GuardGenerateUsage
 }
 
+/**
+ * The ALL-sections tally: every section of every kept spec doc, counted under
+ * the five coverage words through the SAME per-section derivation the doc view
+ * renders (`composeDocCoverage`) — so the overview bar and the doc detail can
+ * never disagree, and it always sums to the real section count. This is the
+ * whole-corpus truth the manifest-scoped `GuardCoverageSummary.byStatus` is not:
+ * that one counts only flow-bound sections, so Blocked/Not-testable sections
+ * (no flows to bind them) are invisible to it by construction.
+ */
+export interface GuardSectionTotals {
+  /** Every section across the kept docs — the bar's denominator. */
+  total: number
+  byStatus: Record<GuardCoveragePlainStatus, number>
+}
+
 export interface GuardStatusSummary {
   coverage: GuardCoverageSummary | null
+  /** Null when the caller could not derive it (no corpus / doc reads unavailable). */
+  sections: GuardSectionTotals | null
   lastRun: GuardLastRunSummary | null
   lastGenerate: GuardLastGenerateSummary | null
 }
@@ -176,9 +193,11 @@ export function composeGuardStatus(
   manifest: GuardManifest | null,
   latest: GuardLatest | null,
   result: GuardGenerateReport | null,
+  sections: GuardSectionTotals | null = null,
 ): GuardStatusSummary {
   return {
     coverage: manifest ? summarizeCoverage(manifest, latest) : null,
+    sections,
     lastRun: latest
       ? { ranAt: latest.run.ranAt, branch: latest.run.branch, commit: latest.run.commit, summary: latest.summary }
       : null,

@@ -14,6 +14,7 @@ import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
+import { readGuardSectionTotals } from "@truecourse/core/commands/guard-read";
 import { readGuardSetup } from "@truecourse/core/commands/guard-setup";
 import {
   guardNeedsSetupServices,
@@ -869,6 +870,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     await readManifest(repoRoot),
     latest,
     await readGuardResult(repoRoot),
+    await readGuardSectionTotals(repoRoot),
   );
 
   // Setup — the FIRST row, because it is the first stage and the gate for
@@ -883,10 +885,10 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   } else {
     const c = summary.coverage;
     const via = ` (via ${c.flows.total} flow${c.flows.total === 1 ? "" : "s"})`;
-    // The coverage line is the five words and nothing else, so the terminal and
-    // the dashboard's totals strip say the same thing about the same sections.
+    // The manifest summary stands in when the all-sections tally is underivable.
+    const sec = summary.sections ?? { total: c.totalSections, byStatus: c.byStatus };
     p.log.step(
-      `coverage    ${c.totalSections} section${c.totalSections === 1 ? "" : "s"}${via} · ${statusTally(c.byStatus)}`,
+      `coverage    ${sec.total} section${sec.total === 1 ? "" : "s"}${via} · ${statusTally(sec.byStatus)}`,
     );
     const cl = c.classification;
     const parts = [...guardDriverIds.map((d) => `${d} ${cl[d]}`), `not testable ${cl.untestable}`];

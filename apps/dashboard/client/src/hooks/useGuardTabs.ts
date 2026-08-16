@@ -8,9 +8,8 @@
  * passes a {@link GuardTabsParam} codec that binds TWO params (`?guard` docs +
  * `?gconf` conflicts) to one heterogeneous tab set.
  *
- * There is no Overview pseudo-tab in the model: NO pane has a no-selection
- * DESTINATION any more — with nothing open a pane is at rest ("pick a flow",
- * "pick a document"), because the list beside it already carries the corpus.
+ * `deselect` clears the selection while the open tabs stay — what the strip's
+ * pinned home tab calls.
  * Owned by Guard so no state is
  * shared with BL Drift's DriftViewContext (the no-bleed rule). Writes merge into
  * the existing query so sibling params (`?gsec` and the other tab set's param)
@@ -48,6 +47,8 @@ export interface GuardTabsState {
   /** Single-click = transient preview (replaces the unpinned tab); double-click = pin. */
   open: (id: string, pinned: boolean) => void;
   close: (id: string) => void;
+  /** Clear the selection, keeping the open tabs — the strip's home tab. */
+  deselect: () => void;
 }
 
 export function useGuardTabs(param: string | GuardTabsParam, repoId: string | undefined): GuardTabsState {
@@ -123,5 +124,7 @@ export function useGuardTabs(param: string | GuardTabsParam, repoId: string | un
     setActive(null);
   }, [repoId, setActive]);
 
-  return { activeId, openTabs, open, close };
+  const deselect = useCallback(() => setActive(null), [setActive]);
+
+  return { activeId, openTabs, open, close, deselect };
 }

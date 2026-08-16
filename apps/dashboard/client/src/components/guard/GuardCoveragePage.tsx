@@ -93,7 +93,7 @@ export function GuardCoveragePage({
   /** Fired after a verdict is recorded, so the page can refresh the spec Rescan dot. */
   onDecision?: () => void;
 }) {
-  const { activeId, openTabs, open, close, section, selectSection, claim, selectClaim, focusClaim } = tabs;
+  const { activeId, openTabs, open, close, deselect, section, selectSection, claim, selectClaim, focusClaim } = tabs;
   // The active tab is a conflict (its overlap key) or a doc (its ref); null = nothing open.
   const activeConflict = activeId && isConflictId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
@@ -233,11 +233,12 @@ export function GuardCoveragePage({
   }, [repoId, doc]);
 
   // With a run present and a single doc, land straight on its coverage — unless a
-  // tab is already active (auto-opening would fight a deep link). Pinned so the
+  // tab is already active (auto-opening would fight a deep link) or open (a
+  // deliberate Overview deselect must not bounce back to the doc). Pinned so the
   // lone doc's tab is stable.
   useEffect(() => {
-    if (!activeId && hasRun && docs.length === 1) open(docs[0].ref, true);
-  }, [activeId, hasRun, docs, open]);
+    if (!activeId && openTabs.length === 0 && hasRun && docs.length === 1) open(docs[0].ref, true);
+  }, [activeId, openTabs, hasRun, docs, open]);
 
   const selectedSection = useMemo(
     () => (section && coverage ? coverage.sections.find((s) => s.anchor === section) ?? null : null),
@@ -312,16 +313,9 @@ export function GuardCoveragePage({
       );
     }
 
-    // Initial hydration: nothing determined yet.
-    if (!staleLoaded && !coverage) {
-      return (
-        <Centered>
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </Centered>
-      );
-    }
-
     // No doc tab active: the pane is AT REST on the corpus-wide Overview —
+    // mounted immediately (it owns its loading state), so its status fetch
+    // starts in the first request wave instead of after hydration.
     // read-only numbers, nothing clickable (the sidebar is where a doc opens).
     // A selected doc ALWAYS falls through to the render path below — including
     // before the first scan, where a doc opened by hand (a page of a registered
@@ -336,6 +330,15 @@ export function GuardCoveragePage({
           reloadKey={reloadKey}
           {...(prRef ? { prRef } : {})}
         />
+      );
+    }
+
+    // Initial hydration of a doc path: nothing determined yet.
+    if (!staleLoaded && !coverage) {
+      return (
+        <Centered>
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </Centered>
       );
     }
 
@@ -482,13 +485,12 @@ export function GuardCoveragePage({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* No Overview chip: with no doc open this pane IS its no-selection state
-          (the stage CTA / "select a document"), not a second place to go. */}
       <GuardTabStrip
         tabs={tabItems}
         activeId={activeId}
         onSelect={(t) => open(t.id, t.pinned)}
         onClose={close}
+        home={{ label: 'Overview', onSelect: deselect }}
       />
       <div className="min-h-0 flex-1 overflow-hidden">{pane}</div>
     </div>

@@ -114,6 +114,37 @@ const SCENARIO = {
   normalize: [],
 };
 
+/** A minimal run store marking the one scenario with `outcome` — the ledger is
+ *  RUN-AWARE, so "proven" needs a green run behind it, not just an authored step. */
+const latestWith = (outcome: 'pass' | 'fail') => ({
+  run: {
+    runId: '2026-08-14T00-00-00Z_test',
+    ranAt: '2026-08-14T00:00:00.000Z',
+    branch: 'main',
+    commit: null,
+    recipeFingerprint: 'sha256:r',
+  },
+  summary: {
+    total: 1,
+    pass: outcome === 'pass' ? 1 : 0,
+    fail: outcome === 'fail' ? 1 : 0,
+    stale: 0,
+    orphaned: 0,
+    error: 0,
+    blocked: 0,
+  },
+  scenarios: [
+    {
+      id: SCENARIO.id,
+      title: SCENARIO.title,
+      binds: { doc: DOC, section: 'tasks', fingerprint: 'sha256:s1' },
+      outcome,
+      durationMs: 5,
+    },
+  ],
+  sections: [],
+});
+
 describe('GET /guard/claims', () => {
   let fixture: TestFixture;
   let root: string;
@@ -182,15 +213,38 @@ describe('GET /guard/claims', () => {
 
   it('traces a claim to the flow that carries it and the steps that prove it', async () => {
     seed();
+    writeJson('.truecourse/guard/LATEST.json', latestWith('pass'));
     const res = await request(app).get(url('claims')).expect(200);
     const add = res.body.claims.find((c: { id: string }) => c.id === ADD.id);
     expect(add.flows).toEqual([
       { flowId: 'add-then-list', title: FLOWS.flows[0].title, milestoneOrder: 1, note: 'the create half' },
     ]);
     expect(add.scenarios).toEqual([
-      { scenarioId: 'add-then-list.cli.1', title: SCENARIO.title, steps: [1] },
+      { scenarioId: 'add-then-list.cli.1', title: SCENARIO.title, steps: [1], outcome: 'pass' },
     ]);
     expect(add.coverage).toBe('proven');
+  });
+
+  it('RUN-AWARE: an authored proof with no run yet is planned, never proven', async () => {
+    seed();
+    const res = await request(app).get(url('claims')).expect(200);
+    const add = res.body.claims.find((c: { id: string }) => c.id === ADD.id);
+    // The proof step exists (the trace is intact) but nothing has executed it.
+    expect(add.scenarios).toEqual([
+      { scenarioId: 'add-then-list.cli.1', title: SCENARIO.title, steps: [1] },
+    ]);
+    expect(add.coverage).toBe('planned');
+  });
+
+  it('RUN-AWARE: a proof the latest run failed reads failing, never proven', async () => {
+    seed();
+    writeJson('.truecourse/guard/LATEST.json', latestWith('fail'));
+    const res = await request(app).get(url('claims')).expect(200);
+    const add = res.body.claims.find((c: { id: string }) => c.id === ADD.id);
+    expect(add.coverage).toBe('failing');
+    expect(add.scenarios[0].outcome).toBe('fail');
+    expect(res.body.totals.failing).toBe(2);
+    expect(res.body.totals.proven).toBe(0);
   });
 
   it('keys coverage on the claim, so a gapped claim carries its reason', async () => {
@@ -222,10 +276,12 @@ describe('GET /guard/claims', () => {
 
   it('totals every coverage state, so the denominator is always visible', async () => {
     seed();
+    writeJson('.truecourse/guard/LATEST.json', latestWith('pass'));
     const res = await request(app).get(url('claims')).expect(200);
     expect(res.body.totals).toEqual({
       claims: 3,
       proven: 2,
+      failing: 0,
       planned: 0,
       gapped: 1,
       unplanned: 0,

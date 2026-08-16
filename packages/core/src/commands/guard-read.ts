@@ -35,11 +35,15 @@ import {
   type DocSection,
   type DocSectionIndex,
 } from '@truecourse/guard-runner'
-import { corpusFilePath } from '@truecourse/spec-consolidator'
+import { corpusFilePath, readCorpus } from '@truecourse/spec-consolidator'
 import {
+  GUARD_COVERAGE_PLAIN_ORDER,
   GUARD_COVERAGE_STATUS_PRECEDENCE,
   GUARD_DRIVERS,
   type GuardDriverDef,
+  guardCoveragePlainStatus,
+  type GuardCoveragePlainStatus,
+  type GuardSectionTotals,
   GuardClaimsFileSchema,
   GuardFlowsFileSchema,
   GuardOutcomeSchema,
@@ -339,6 +343,53 @@ export function composeDocCoverage(
     ranAt: latest?.run.ranAt ?? null,
     generatedAt: result?.generatedAt ?? null,
   }
+}
+
+/**
+ * Every kept doc's sections counted under the five coverage words, through the
+ * same per-section derivation the doc view renders ({@link composeDocCoverage})
+ * — the constraint: no summary may classify a section differently than the doc
+ * view does. The doc universe is the curated corpus; without one it falls back
+ * to the docs the guard stores name, and null means nothing to count.
+ */
+export async function readGuardSectionTotals(
+  repoKey: string,
+  ref?: string,
+): Promise<GuardSectionTotals | null> {
+  const sources: GuardCoverageSources = {
+    manifest: await readManifestForView(repoKey, ref),
+    latest: await readGuardRunForView(repoKey, ref),
+    result: await readGuardReport(repoKey, ref),
+    flows: await readGuardFlowsForView(repoKey, ref),
+    claims: await readGuardClaimsForView(repoKey, ref),
+    externals: guardExternalSetupIndexForView(repoKey),
+  }
+
+  const corpusDocs = readCorpus(repoKey)?.docs.map((d) => d.ref)
+  const docs =
+    corpusDocs && corpusDocs.length > 0
+      ? corpusDocs
+      : [
+          ...(sources.claims?.claims.map((c) => c.doc) ?? []),
+          ...(sources.claims?.untestable.map((u) => u.doc) ?? []),
+          ...(sources.flows?.flows.flatMap((f) => f.milestones.map((m) => m.doc)) ?? []),
+          ...guardManifestSections(sources.manifest).map((m) => m.doc),
+        ]
+  if (docs.length === 0) return null
+
+  const byStatus = Object.fromEntries(
+    GUARD_COVERAGE_PLAIN_ORDER.map((s) => [s, 0]),
+  ) as Record<GuardCoveragePlainStatus, number>
+  let total = 0
+  for (const doc of new Set(docs)) {
+    const content = await readRepoDoc(repoKey, doc, ref ? { commit: ref } : undefined)
+    if (content == null) continue
+    for (const sec of composeDocCoverage(doc, content, sources).sections) {
+      total++
+      byStatus[guardCoveragePlainStatus(sec.status)]++
+    }
+  }
+  return total === 0 ? null : { total, byStatus }
 }
 
 /** Everything the flow join reads: the coverage sources plus (where the caller
@@ -1618,6 +1669,7 @@ const EMPTY_CLAIMS_VIEW: GuardClaimsView = {
   totals: {
     claims: 0,
     proven: 0,
+    failing: 0,
     planned: 0,
     gapped: 0,
     unplanned: 0,
@@ -1638,20 +1690,25 @@ const EMPTY_CLAIMS_VIEW: GuardClaimsView = {
  * its anchor still resolves come from the live doc, so a claim whose section was
  * removed says so instead of pointing at nothing.
  *
- * Coverage is claim-keyed and therefore always defined: a claim a scenario step
- * proves is `proven`, one only a flow carries is `planned`, one the corpus
- * accounts for as a `noFlowClaim` is `gapped` (with its reason), and one nothing
- * mentions is `unplanned` — the honest hole, never a mute blank.
+ * Coverage is claim-keyed and therefore always defined, and RUN-AWARE: a claim
+ * is `proven` only when a proof step PASSED in the latest run, `failing` when
+ * its proof steps ran and only failed, `planned` when it is carried or has a
+ * proof with no verdict yet, `gapped` when the corpus accounts for it as a
+ * `noFlowClaim` (with its reason), and `unplanned` when nothing mentions it —
+ * the honest hole, never a mute blank.
  */
 export async function readGuardClaims(repoKey: string, ref?: string): Promise<GuardClaimsView> {
   const corpus = await loadGuardCorpusForView(repoKey, ref)
   const commit = corpus?.commit
-  const [claimsFile, flowsFile, decisions] = await Promise.all([
+  const [claimsFile, flowsFile, decisions, latest] = await Promise.all([
     readGuardClaimsFile(repoKey, commit),
     readGuardFlowsFile(repoKey, commit),
     getGuardDecisions(repoKey),
+    readGuardRunForView(repoKey, ref),
   ])
   if (!claimsFile) return EMPTY_CLAIMS_VIEW
+
+  const outcomeByScenarioId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s.outcome]))
 
   const scenarios = corpus?.scenarios ?? []
   const sections = await headingTextIndex(
@@ -1698,10 +1755,22 @@ export async function readGuardClaims(repoKey: string, ref?: string): Promise<Gu
   const claims: GuardClaimRow[] = claimsFile.claims.map((c) => {
     const identity = guardClaimKey(c)
     const flows = flowsByIdentity.get(identity) ?? []
-    const proofs = [...(scenariosById.get(c.id)?.values() ?? [])]
+    const proofs = [...(scenariosById.get(c.id)?.values() ?? [])].map((p) => {
+      const outcome = outcomeByScenarioId.get(p.scenarioId)
+      return outcome ? { ...p, outcome } : p
+    })
     const gapReason = gapByIdentity.get(identity)
-    const coverage: GuardClaimCoverage =
-      proofs.length > 0 ? 'proven' : flows.length > 0 ? 'planned' : gapReason ? 'gapped' : 'unplanned'
+    const anyPass = proofs.some((p) => p.outcome === 'pass')
+    const anyFail = proofs.some((p) => p.outcome === 'fail' || p.outcome === 'error')
+    const coverage: GuardClaimCoverage = anyPass
+      ? 'proven'
+      : anyFail
+        ? 'failing'
+        : proofs.length > 0 || flows.length > 0
+          ? 'planned'
+          : gapReason
+            ? 'gapped'
+            : 'unplanned'
     const headingText = sections.get(`${c.doc}\0${c.anchor}`)
     return {
       id: c.id,
@@ -1733,7 +1802,9 @@ export async function readGuardClaims(repoKey: string, ref?: string): Promise<Gu
     }
   })
 
-  const count = (state: GuardClaimCoverage): number => claims.filter((c) => c.coverage === state).length
+  // Dismissed claims count under `dismissed` alone, so the totals sum to `claims`.
+  const count = (state: GuardClaimCoverage): number =>
+    claims.filter((c) => !c.dismissed && c.coverage === state).length
   return {
     extracted: true,
     generatedAt: claimsFile.generatedAt,
@@ -1742,6 +1813,7 @@ export async function readGuardClaims(repoKey: string, ref?: string): Promise<Gu
     totals: {
       claims: claims.length,
       proven: count('proven'),
+      failing: count('failing'),
       planned: count('planned'),
       gapped: count('gapped'),
       unplanned: count('unplanned'),

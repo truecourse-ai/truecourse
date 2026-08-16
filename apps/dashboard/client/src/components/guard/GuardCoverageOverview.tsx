@@ -45,6 +45,10 @@ import * as api from '@/lib/api';
 
 const LABEL = 'text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
+// Last-known summaries per repo+ref, so a remount never blanks the bars.
+const statusCache = new Map<string, GuardStatusSummary>();
+const flowsCache = new Map<string, GuardFlowsView>();
+
 /** One bucket of a composition bar: its word, its count, its fill class. */
 interface Segment {
   word: string;
@@ -146,52 +150,65 @@ export function GuardCoverageOverview({
   /** EE PR scope. */
   prRef?: string;
 }) {
-  const [status, setStatus] = useState<GuardStatusSummary | null>(null);
-  const [flowsView, setFlowsView] = useState<GuardFlowsView | null>(null);
+  // Tab switches remount this pane; the last summary is kept module-side so a
+  // revisit paints the bars instantly and the fetch revalidates behind them.
+  const cacheKey = `${repoId}|${prRef ?? ''}`;
+  const [status, setStatus] = useState<GuardStatusSummary | null>(
+    () => statusCache.get(cacheKey) ?? null,
+  );
+  const [flowsView, setFlowsView] = useState<GuardFlowsView | null>(
+    () => flowsCache.get(cacheKey) ?? null,
+  );
+  const [loaded, setLoaded] = useState(() => statusCache.has(cacheKey));
   useEffect(() => {
     let cancelled = false;
     api
       .getGuardStatus(repoId, prRef)
-      .then((s) => !cancelled && setStatus(s))
-      .catch(() => !cancelled && setStatus(null));
+      .then((s) => {
+        statusCache.set(cacheKey, s);
+        if (cancelled) return;
+        setStatus(s);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setStatus(null);
+        setLoaded(true);
+      });
     api
       .getGuardFlows(repoId, prRef)
-      .then((v) => !cancelled && setFlowsView(v))
+      .then((v) => {
+        flowsCache.set(cacheKey, v);
+        if (!cancelled) setFlowsView(v);
+      })
       .catch(() => !cancelled && setFlowsView(null));
     return () => {
       cancelled = true;
     };
-  }, [repoId, prRef, reloadKey]);
+  }, [repoId, prRef, reloadKey, cacheKey]);
 
   const coverage = status?.coverage ?? null;
+  const sections = status?.sections ?? null;
   const lastGenerate = status?.lastGenerate ?? null;
   const lastRun = status?.lastRun ?? null;
   const claimTotals = claims?.extracted ? claims.totals : null;
 
-  // The claim ledger, worst-first: the accounting hole leads, the ruled-out
-  // tail closes. `untestable` counts refused STATEMENTS (not claims), so it
-  // rides as a sentence under the bar, never as a segment of it.
+  // The statement ledger, worst-first: red leads, the ruled-out grey tail closes.
   const claimSegments: Segment[] = claimTotals
     ? [
-        { word: 'Unplanned', count: claimTotals.unplanned, fill: 'bg-red-500' },
+        { word: 'Failing', count: claimTotals.failing ?? 0, fill: 'bg-red-500' },
+        { word: 'Unplanned', count: claimTotals.unplanned, fill: 'bg-red-400' },
         { word: 'Gapped', count: claimTotals.gapped, fill: 'bg-sky-400' },
         { word: 'Planned', count: claimTotals.planned, fill: 'bg-sky-600' },
         { word: 'Proven', count: claimTotals.proven, fill: 'bg-emerald-500' },
-        { word: 'Dismissed', count: claimTotals.dismissed, fill: 'bg-slate-400' },
+        { word: 'Dismissed', count: claimTotals.dismissed, fill: 'bg-slate-300' },
+        { word: 'Untestable', count: claimTotals.untestable, fill: 'bg-slate-400' },
       ]
     : [];
-  const claimNotes = claimTotals
-    ? [
-        claimTotals.untestable > 0
-          ? `${claimTotals.untestable} statement${claimTotals.untestable === 1 ? '' : 's'} refused as untestable`
-          : null,
-        claimTotals.orphanedAnchors > 0
-          ? `${claimTotals.orphanedAnchors} claim anchor${claimTotals.orphanedAnchors === 1 ? '' : 's'} no longer resolve in the live docs`
-          : null,
-      ]
-        .filter((line): line is string => line != null)
-        .join(' · ')
-    : '';
+  const claimNotes =
+    claimTotals && claimTotals.orphanedAnchors > 0
+      ? `${claimTotals.orphanedAnchors} claim anchor${claimTotals.orphanedAnchors === 1 ? '' : 's'} no longer resolve in the live docs`
+      : '';
 
   // The tests' CURRENT state: the last run's outcomes when one exists (the
   // committed-at statuses go stale the moment a run records real verdicts);
@@ -235,18 +252,22 @@ export function GuardCoverageOverview({
           <h2 className="text-sm font-semibold text-foreground">Coverage overview</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             {docsCount} document{docsCount === 1 ? '' : 's'}
-            {coverage
-              ? ` · ${coverage.totalSections} sections bound by flows · ${coverage.withScenarios} with tests`
-              : ''}
-            {' — select a document on the left to read its sections.'}
+            {sections ? ` · ${sections.total} section${sections.total === 1 ? '' : 's'}` : ''}
+            {coverage ? ` · ${coverage.withScenarios} with tests` : ''}
+            {''}
           </p>
         </div>
 
         {coverage ? (
           <>
-            <CompositionBar label="Sections" segments={fiveWordSegments(coverage.byStatus)} />
+            {/* The flow-bound summary stands in on servers without the tally. */}
             <CompositionBar
-              label="Claims"
+              label="Sections"
+              segments={fiveWordSegments(sections?.byStatus ?? coverage.byStatus)}
+            />
+            {/* Carries dismissed + untestable too, so it sums to every statement. */}
+            <CompositionBar
+              label="Statements"
               segments={claimSegments}
               {...(claimNotes ? { note: claimNotes } : {})}
             />
@@ -259,11 +280,11 @@ export function GuardCoverageOverview({
               totalLabel={`${flowRows.length} tests`}
             />
           </>
-        ) : (
+        ) : loaded ? (
           <p className="text-[11px] text-muted-foreground">
-            Nothing generated yet — coverage appears after the first generate.
+            Nothing generated yet. Coverage appears after the first generate.
           </p>
-        )}
+        ) : null}
 
         {(lastGenerate || lastRun) && (
           <section aria-label="Freshness" className="min-w-0 space-y-0.5">

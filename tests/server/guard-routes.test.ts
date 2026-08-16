@@ -702,7 +702,7 @@ describe('Guard routes', () => {
 
   it('status is 200 with all-null on a fresh repo', async () => {
     const res = await request(app).get(url('status')).expect(200);
-    expect(res.body).toEqual({ coverage: null, lastRun: null, lastGenerate: null });
+    expect(res.body).toEqual({ coverage: null, sections: null, lastRun: null, lastGenerate: null });
   });
 
   it('history is 200 with an empty list on a fresh repo', async () => {
