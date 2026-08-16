@@ -17,6 +17,7 @@
 
 import { useMemo } from 'react';
 import { FlaskConical, GitMerge, Loader2, PlayCircle } from 'lucide-react';
+import { CollapsibleAside } from '@/components/ui/collapsible-aside';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useGuardRuns } from '@/hooks/useGuardRuns';
 import { useGuardView } from '@/hooks/useGuardView';
@@ -155,12 +156,14 @@ export function GuardDriftsView({
     <div className="flex h-full w-full overflow-hidden">
       {/* LEFT — THE run: its envelope, its tallies, and the history that switches
           between runs. The right pane never repeats any of it. */}
-      <aside className="w-72 shrink-0 overflow-hidden border-r border-border bg-card">
-        <GuardRunSummary run={run} history={history} selectedRunId={selectedRunId} onSelectRun={selectRun} />
-      </aside>
+      <CollapsibleAside label="Run" defaultWidth={288}>
+        <div className="h-full min-h-0 overflow-hidden bg-card">
+          <GuardRunSummary run={run} history={history} selectedRunId={selectedRunId} onSelectRun={selectRun} />
+        </div>
+      </CollapsibleAside>
 
       {/* MIDDLE — full results: severity-led drifts, then the passed group */}
-      <div className="w-[360px] shrink-0 overflow-hidden border-r border-border">
+      <CollapsibleAside label="Results" defaultWidth={360}>
         <GuardDriftList
           key={run.run.runId}
           drifts={drifts}
@@ -169,7 +172,7 @@ export function GuardDriftsView({
           onPreview={(id) => open(id, false)}
           onPin={(id) => open(id, true)}
         />
-      </div>
+      </CollapsibleAside>
 
       {/* RIGHT — the tab strip over each opened result's run-scoped detail. No
           Overview chip: with nothing open this pane is at rest, because the run
