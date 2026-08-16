@@ -972,6 +972,7 @@ footer.site { padding-block: 64px 40px; }
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 1px 6px;
+  overflow-wrap: anywhere;
 }
 .post-body a code {
   color: var(--accent);
