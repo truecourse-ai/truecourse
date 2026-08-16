@@ -71,7 +71,7 @@ export function Header({
             <ArrowLeft className="h-5 w-5" />
           </Link>
         )}
-        <Link to="/" className="flex items-center gap-2 text-lg font-bold text-foreground">
+        <Link to="/" className="brand-wordmark flex items-center gap-2 text-lg text-foreground">
           <img src="/logo.svg" alt="TrueCourse" className="h-7 w-7" />
           TrueCourse
         </Link>

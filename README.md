@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="TrueCourse" width="300" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/truecourse-logo-horizontal.svg" />
+    <img src="assets/truecourse-logo-horizontal-light.svg" alt="TrueCourse" width="300" />
+  </picture>
 </p>
 
 <p align="center">

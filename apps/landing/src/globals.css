@@ -194,10 +194,8 @@ header.site.scrolled {
 }
 .brand { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-weight: 700; font-size: 17px; letter-spacing: 0.01em; }
 .brand .mark {
-  width: 26px; height: 24px; flex: 0 0 auto;
-  background: var(--fg);
-  -webkit-mask: url("/truecourse-mark.svg") center / contain no-repeat;
-  mask: url("/truecourse-mark.svg") center / contain no-repeat;
+  width: 26px; height: 26px; flex: 0 0 auto;
+  background: url("/truecourse-mark-twin.svg") center / contain no-repeat;
 }
 .nav-links { display: flex; align-items: center; gap: 4px; }
 .nav-links a {
