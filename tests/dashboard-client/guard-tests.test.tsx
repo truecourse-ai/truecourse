@@ -1174,7 +1174,8 @@ describe("the test, read inside its flow", () => {
     // …and the page tells it exactly once.
     expect(screen.getAllByLabelText("expected value")).toHaveLength(1);
     expect(screen.getAllByLabelText("actual value")).toHaveLength(1);
-    // Same wide-content rule as the transcript: no wrapping, sideways scroll.
+    // Same wide-content rule as the transcript: long values WRAP in place —
+    // never a one-line box behind a horizontal scrollbar.
     for (const label of [
       "expected value",
       "actual value",
@@ -1182,9 +1183,8 @@ describe("the test, read inside its flow", () => {
       "step error output",
     ]) {
       const block = within(failing).getByLabelText(label);
-      expect(block.className).toContain("whitespace-pre");
-      expect(block.className).not.toContain("whitespace-pre-wrap");
-      expect(block.className).toContain("overflow-x-auto");
+      expect(block.className).toContain("whitespace-pre-wrap");
+      expect(block.className).not.toContain("overflow-x-auto");
     }
   });
 
@@ -1473,11 +1473,10 @@ describe("the test, read inside its flow", () => {
     );
     const block = screen.getByLabelText("evidence transcript");
     expect(block.textContent?.split("\n")).toHaveLength(GUARD_CLAMP_LINES);
-    // A transcript line is never re-wrapped — it keeps its shape and the block
-    // scrolls SIDEWAYS for the width the pane cannot give it.
-    expect(block.className).toContain("whitespace-pre");
-    expect(block.className).not.toContain("whitespace-pre-wrap");
-    expect(block.className).toContain("overflow-x-auto");
+    // A long transcript line WRAPS in place — width never hides behind a
+    // horizontal scrollbar.
+    expect(block.className).toContain("whitespace-pre-wrap");
+    expect(block.className).not.toContain("overflow-x-auto");
     // Height is the PANE's job — the block never grows its own scrollbar.
     expect(block.className).not.toMatch(/overflow-y|max-h-/);
     // Nothing between the block and its pane scrolls: a pane is the only scroll
@@ -1500,9 +1499,9 @@ describe("the test, read inside its flow", () => {
   });
 
   // jsdom lays nothing out, so the rule is pinned as STRUCTURE: a wide line can
-  // only scroll the block it is in if every box above that block is allowed to
+  // only wrap inside its block if every box above that block is allowed to
   // shrink (min-w-0) and none of them scrolls sideways itself.
-  it("confines sideways scroll to the data blocks — the pane never scrolls sideways", async () => {
+  it("wraps wide data inside its block — nothing on the page scrolls sideways", async () => {
     const user = userEvent.setup();
     renderTest(BIRTH_FAILED_ID);
     await findSteps();
@@ -1514,8 +1513,10 @@ describe("the test, read inside its flow", () => {
       "evidence transcript",
     ]) {
       const block = await screen.findByLabelText(label);
-      // The block scrolls itself, and can never out-grow the column it sits in.
-      expect(block.className, label).toContain("overflow-x-auto");
+      // The block wraps its own width, and can never out-grow the column it
+      // sits in.
+      expect(block.className, label).toContain("whitespace-pre-wrap");
+      expect(block.className, label).toContain("break-words");
       expect(block.className, label).toContain("max-w-full");
       for (
         let el = block.parentElement;

@@ -66,13 +66,15 @@
  * only ever restated the same word on every row and every header. When a second
  * surface exists it returns as a plain label beside the title — not a chip.
  *
- * NOTHING SCROLLS SIDEWAYS. Wide data (a command line, a JSON body, a transcript)
- * is never re-wrapped — it scrolls INSIDE its own block ({@link PRE}), and that is
- * the only horizontal scroll on the screen. Structurally that costs one thing
- * everywhere: every flex box between the hosting pane (`data-pane`) and such a
- * block carries `min-w-0`, so a wide child shrinks its column instead of
- * stretching the page, and every truncating span is width-bound rather than free
- * to grow. Vertically, the hosting pane is the only scroll context.
+ * NOTHING SCROLLS SIDEWAYS. Wide DATA (an expected value, an output, a
+ * transcript) WRAPS in place ({@link GuardLongText}) so it reads without a
+ * horizontal scrollbar; only the indentation-sensitive raw source keeps an
+ * unwrapped block ({@link PRE}), the one horizontal scroll on the screen.
+ * Structurally that costs one thing everywhere: every flex box between the
+ * hosting pane (`data-pane`) and such a block carries `min-w-0`, so a wide child
+ * shrinks its column instead of stretching the page, and every truncating span
+ * is width-bound rather than free to grow. Vertically, the hosting pane is the
+ * only scroll context.
  */
 
 import {
@@ -87,13 +89,10 @@ import {
   ArrowDown,
   ArrowUpRight,
   Braces,
-  Check,
   ChevronRight,
   Copy,
-  Minus,
   ScrollText,
   Wrench,
-  X,
 } from "lucide-react";
 import type {
   GuardEvidenceVisual,
@@ -218,32 +217,49 @@ export interface GuardTestViewModel {
 /** The pseudo-step the `setup:` block reads as — the world step 1 starts in. */
 const SETUP_STEP = 0;
 
-/** Per-step paint from the viewed result: pass up to the failure, fail at it, not-reached after. */
-function stepGlyph(
+type StepOutcome = "passed" | "failed" | "skipped";
+
+/** Per-step outcome from the viewed result: pass up to the failure, fail at it, not-reached after. */
+function stepOutcome(
   n: number,
   failedStep: number | undefined,
   passed: boolean,
-): { glyph: string; label: string } {
+): { outcome: StepOutcome; label: string } {
   if (failedStep != null) {
-    if (n < failedStep) return { glyph: "✓", label: "passed" };
-    if (n === failedStep) return { glyph: "✗", label: "failed" };
-    return { glyph: "·", label: "not reached" };
+    if (n < failedStep) return { outcome: "passed", label: "passed" };
+    if (n === failedStep) return { outcome: "failed", label: "failed" };
+    return { outcome: "skipped", label: "not reached" };
   }
   return passed
-    ? { glyph: "✓", label: "passed" }
-    : { glyph: "·", label: "not run" };
+    ? { outcome: "passed", label: "passed" }
+    : { outcome: "skipped", label: "not run" };
 }
 
-/** The one mark a step wears, in the one colour its outcome earns. */
-function StepMark({ glyph, className }: { glyph: string; className: string }) {
-  const Icon = glyph === "✗" ? X : glyph === "✓" ? Check : Minus;
-  const tone =
-    glyph === "✗"
-      ? "text-red-600 dark:text-red-400"
-      : glyph === "✓"
-        ? "text-emerald-600 dark:text-emerald-400"
-        : "text-muted-foreground";
-  return <Icon aria-hidden className={`${className} shrink-0 ${tone}`} />;
+const STEP_DOT: Record<StepOutcome, string> = {
+  passed: "bg-emerald-500",
+  failed: "bg-red-500",
+  skipped: "bg-slate-400",
+};
+
+/**
+ * The left strip a step row wears — coloured only where a verdict landed.
+ * Painted as an inset shadow, not a border: two borders on one box miter into
+ * each other with a diagonal seam, and the strip's ends must stay square.
+ */
+const STEP_BAND: Record<StepOutcome, string> = {
+  passed: "shadow-[inset_2px_0_0_0_#10b981]",
+  failed: "shadow-[inset_2px_0_0_0_#ef4444]",
+  skipped: "",
+};
+
+/** The one mark a step wears — the product-wide status dot, in its outcome's colour. */
+function StepMark({ outcome }: { outcome: StepOutcome }) {
+  return (
+    <span
+      aria-hidden
+      className={`h-2 w-2 shrink-0 rounded-full ${STEP_DOT[outcome]}`}
+    />
+  );
 }
 
 /**
@@ -303,15 +319,12 @@ function CheckRows({
             label="expected"
             mark={
               <span
+                role="img"
                 aria-label={check.ok ? "met" : "not met"}
-                className={`text-[11px] ${
-                  check.ok
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-red-600 dark:text-red-400"
+                className={`h-2 w-2 shrink-0 self-center rounded-full ${
+                  check.ok ? "bg-emerald-500" : "bg-red-500"
                 }`}
-              >
-                {check.ok ? "✓" : "✗"}
-              </span>
+              />
             }
           >
             <GuardLongText text={check.expected} label="expected value" />
@@ -571,17 +584,14 @@ function StepRow({
   /** The expanded record; rendered only while open. */
   children?: ReactNode;
 }) {
-  const { glyph, label } = stepGlyph(step.n, failedStep, passed);
-  const failed = glyph === "✗";
+  const { outcome, label } = stepOutcome(step.n, failedStep, passed);
   const duration = step.actual?.durationMs;
 
   return (
     <li
       ref={rowRef}
       aria-label={`Step ${step.n}: ${step.command} — ${label}`}
-      className={`border-b border-border/50 last:border-b-0 ${
-        failed ? "bg-red-500/[0.05]" : ""
-      }`}
+      className={`border-b border-border/50 last:border-b-0 ${STEP_BAND[outcome]}`}
     >
       <button
         type="button"
@@ -593,7 +603,7 @@ function StepRow({
         className={STEP_ROW}
       >
         <RowChevron open={open} />
-        <StepMark glyph={glyph} className="h-3 w-3" />
+        <StepMark outcome={outcome} />
         <span className="w-4 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
           {step.n}
         </span>
@@ -695,8 +705,7 @@ function StepBody({
   /** The step's picture, when the run's evidence bundle holds one for it. */
   picture?: ReactNode;
 }) {
-  const { glyph } = stepGlyph(step.n, failedStep, passed);
-  const failed = glyph === "✗";
+  const failed = stepOutcome(step.n, failedStep, passed).outcome === "failed";
   const panel = stepPanelProps(step, failedStep, failure);
   return (
     <div className="space-y-1 border-t border-border/50 px-2.5 py-2">
@@ -844,14 +853,14 @@ function RecordedFailureRow({
 }) {
   return (
     <div className="border-b border-border">
-      <div className="bg-red-500/[0.05] px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         Recorded run · earlier test revision
       </div>
       <ol>
         <li
           ref={rowRef}
           aria-label={`Step ${failure.step}: recorded run failure — failed`}
-          className="bg-red-500/[0.05]"
+          className={STEP_BAND.failed}
         >
           <button
             type="button"
@@ -863,7 +872,7 @@ function RecordedFailureRow({
             className={STEP_ROW}
           >
             <RowChevron open={open} />
-            <StepMark glyph="✗" className="h-3 w-3" />
+            <StepMark outcome="failed" />
             <span className="w-4 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
               {failure.step}
             </span>
@@ -1028,42 +1037,22 @@ function CollapsibleSection({
 }
 
 /**
- * The verdict's OWN paint, at full strength — the one place a status reads at
- * display size instead of chip size. Same four-colour vocabulary as every guard
- * chip (`lib/guard-status.ts`): red is a verdict someone must act on, green is
+ * The verdict's paint — the product-wide status dot at display size, echoed by
+ * the card's border. Same four-colour vocabulary as every guard chip
+ * (`lib/guard-status.ts`): red is a verdict someone must act on, green is
  * proven, blue is "no verdict yet, and someone can move it", grey is nobody's
- * to-do. The card wears a wash of the same hue so the eye lands on the ruling
- * before it reads anything.
+ * to-do. The dot and border carry the colour and the word says the fact; the
+ * card's background stays unwashed.
  */
 const VERDICT_TONE: Record<
   GuardTestStatusView["plain"],
-  { card: string; word: string; Icon: typeof X }
+  { dot: string; border: string }
 > = {
-  failed: {
-    card: "border-red-500/35 bg-red-500/[0.04]",
-    word: "text-red-600 dark:text-red-400",
-    Icon: X,
-  },
-  succeeded: {
-    card: "border-emerald-500/35 bg-emerald-500/[0.04]",
-    word: "text-emerald-600 dark:text-emerald-400",
-    Icon: Check,
-  },
-  blocked: {
-    card: "border-sky-500/35 bg-sky-500/[0.04]",
-    word: "text-sky-600 dark:text-sky-400",
-    Icon: Minus,
-  },
-  "never-run": {
-    card: "border-sky-500/35 bg-sky-500/[0.04]",
-    word: "text-sky-600 dark:text-sky-400",
-    Icon: Minus,
-  },
-  "not-testable": {
-    card: "border-border bg-card",
-    word: "text-muted-foreground",
-    Icon: Minus,
-  },
+  failed: { dot: "bg-red-500", border: "border-red-500/35" },
+  succeeded: { dot: "bg-emerald-500", border: "border-emerald-500/35" },
+  blocked: { dot: "bg-sky-500", border: "border-sky-500/35" },
+  "never-run": { dot: "bg-sky-500", border: "border-sky-500/35" },
+  "not-testable": { dot: "bg-slate-400", border: "border-border" },
 };
 
 /**
@@ -1318,17 +1307,15 @@ export function GuardScenarioBody({
       <section aria-label="Test verdict" className="min-w-0 shrink-0">
         <div className={LABEL}>Verdict</div>
         <div
-          className={`w-fit min-w-0 max-w-full rounded border px-3 py-2.5 ${verdictTone.card}`}
+          className={`w-fit min-w-0 max-w-full rounded border bg-card px-3 py-2.5 ${verdictTone.border}`}
         >
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <span className="inline-flex shrink-0 items-center gap-1">
-            <verdictTone.Icon
-              aria-hidden
-              className={`h-3.5 w-3.5 shrink-0 ${verdictTone.word}`}
-            />
+          <span className="inline-flex shrink-0 items-center gap-1.5">
             <span
-              className={`text-[12px] font-semibold leading-none ${verdictTone.word}`}
-            >
+              aria-hidden
+              className={`h-2.5 w-2.5 shrink-0 rounded-full ${verdictTone.dot}`}
+            />
+            <span className="text-[12px] leading-none text-foreground">
               {verdictHeadline}
             </span>
           </span>
@@ -1391,7 +1378,7 @@ export function GuardScenarioBody({
             <button
               type="button"
               onClick={() => revealStep(test.failure!.step)}
-              className="group inline-flex cursor-pointer items-center gap-1 rounded font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="group inline-flex cursor-pointer items-center gap-1 rounded text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               {recordedFailureMissingFromSource
                 ? "Recorded failure at"
@@ -1457,7 +1444,7 @@ export function GuardScenarioBody({
           own. */}
       <section aria-label="test steps" className="min-w-0 shrink-0">
         <div className={LABEL}>Steps</div>
-        <div className="min-w-0 rounded border border-border bg-card">
+        <div className="min-w-0 overflow-hidden rounded border border-border bg-card">
           {source != null && source.steps.length > 0 ? (
             <div key={resultKey} className="min-w-0">
               {recordedFailureMissingFromSource && test.failure && (
