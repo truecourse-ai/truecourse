@@ -7,34 +7,30 @@
  * sessions-store reads when §3.9 lands; the composition is the keeper.
  */
 
-import { useMemo, useState } from 'react';
-import { CircleDot, HelpCircle, Radio } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import { CircleDot, Radio } from 'lucide-react';
+import { CollapsibleAside } from '@/components/ui/collapsible-aside';
 import { EntityList, type EntityListGroup } from '@/components/ui/entity-list';
 import { MOCK_RUNS, type MockRun, type MockSession, type SessionStatus } from './mock';
 import { SessionTranscript } from './SessionTranscript';
 
+const STATUS = 'inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground';
+const DOT = 'h-2 w-2 shrink-0 rounded-full';
+
 const RUN_STATUS_META = {
-  running: { word: 'running', cls: 'text-sky-500' },
-  finished: { word: 'finished', cls: 'text-emerald-500' },
-  failed: { word: 'failed', cls: 'text-red-500' },
+  running: { word: 'Running', cls: 'text-sky-500' },
+  finished: { word: 'Finished', cls: 'text-emerald-500' },
+  failed: { word: 'Failed', cls: 'text-red-500' },
 } as const;
 
-const SESSION_STATUS_META: Record<SessionStatus, { word: string; cls: string }> = {
-  active: { word: 'active', cls: 'border-sky-500/50 bg-sky-500/10 text-sky-600 dark:text-sky-400' },
-  'awaiting-input': { word: 'needs you', cls: 'border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  queued: { word: 'queued', cls: 'border-border text-muted-foreground' },
-  done: { word: 'done', cls: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' },
-  failed: { word: 'failed', cls: 'border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400' },
-  blocked: { word: 'blocked', cls: 'border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+const SESSION_STATUS_META: Record<SessionStatus, { word: string; dot: string }> = {
+  active: { word: 'Active', dot: 'bg-sky-500' },
+  'awaiting-input': { word: 'Needs you', dot: 'bg-sky-500' },
+  queued: { word: 'Queued', dot: 'bg-slate-400' },
+  done: { word: 'Done', dot: 'bg-emerald-500' },
+  failed: { word: 'Failed', dot: 'bg-red-500' },
+  blocked: { word: 'Blocked', dot: 'bg-sky-500' },
 };
-
-const COUNTER_TONE = {
-  ok: 'text-emerald-500',
-  warn: 'text-amber-500',
-  fail: 'text-red-500',
-  muted: 'text-muted-foreground',
-  active: 'text-sky-500',
-} as const;
 
 function RunRow({ run }: { run: MockRun }) {
   const meta = RUN_STATUS_META[run.status];
@@ -48,9 +44,8 @@ function RunRow({ run }: { run: MockRun }) {
         )}
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{run.command}</span>
         {run.questions > 0 && (
-          <span className="flex shrink-0 items-center gap-0.5 rounded border border-amber-500/50 bg-amber-500/10 px-1 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
-            <HelpCircle className="h-2.5 w-2.5" />
-            {run.questions}
+          <span className="shrink-0 text-[10px] font-medium text-sky-600 dark:text-sky-400">
+            {run.questions} question{run.questions === 1 ? '' : 's'}
           </span>
         )}
       </div>
@@ -62,32 +57,16 @@ function RunRow({ run }: { run: MockRun }) {
   );
 }
 
-/** The §3.6 counter line — the partition that always sums, no bars. */
-function CounterLine({ run }: { run: MockRun }) {
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 font-mono text-[11px]">
-      {run.counters.map((c, i) => (
-        <span key={c.word} className="flex items-baseline gap-1">
-          {i > 0 && <span className="text-muted-foreground/50">·</span>}
-          <span className={`font-semibold ${COUNTER_TONE[c.tone]}`}>{c.count}</span>
-          <span className="text-muted-foreground">{c.word}</span>
-        </span>
-      ))}
-      <span className="text-muted-foreground/50">—</span>
-      <span className="text-muted-foreground">
-        of {run.total} {run.totalNoun}
-      </span>
-    </div>
-  );
-}
-
 function SessionRow({ session }: { session: MockSession }) {
   const meta = SESSION_STATUS_META[session.status];
   return (
     <>
       <div className="flex w-full items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{session.workItem}</span>
-        <span className={`shrink-0 rounded border px-1 py-0.5 text-[10px] leading-none ${meta.cls}`}>{meta.word}</span>
+        <span className={STATUS}>
+          <span aria-hidden className={`${DOT} ${meta.dot}`} />
+          {meta.word}
+        </span>
       </div>
       {session.turns > 0 && (
         <div className="text-[10px] text-muted-foreground">
@@ -109,24 +88,37 @@ export function SessionsActivityView() {
 
   // One group per session kind, orchestrator first — registry order is the
   // authoring order (orchestrator → workers), which the mock data already has.
-  const sessionGroups = useMemo<EntityListGroup<MockSession>[]>(() => {
+  const groupSessions = useCallback((items: MockSession[]): EntityListGroup<MockSession>[] => {
     const byKind = new Map<string, MockSession[]>();
-    for (const s of sessions) {
+    for (const s of items) {
       const list = byKind.get(s.kind) ?? [];
       list.push(s);
       byKind.set(s.kind, list);
     }
-    return [...byKind.entries()].map(([kind, items]) => ({
+    return [...byKind.entries()].map(([kind, rows]) => ({
       key: kind,
       label: kind,
-      count: items.length,
-      items,
+      count: rows.length,
+      items: rows,
     }));
-  }, [sessions]);
+  }, []);
+
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const statusOptions = useMemo(
+    () =>
+      (Object.keys(SESSION_STATUS_META) as SessionStatus[])
+        .map((key) => ({
+          key,
+          label: SESSION_STATUS_META[key].word,
+          count: sessions.filter((s) => s.status === key).length,
+        }))
+        .filter((o) => o.count > 0),
+    [sessions],
+  );
 
   return (
     <div className="flex h-full min-h-0 min-w-0">
-      <aside className="w-60 shrink-0 border-r border-border">
+      <CollapsibleAside label="Runs" defaultWidth={240}>
         <EntityList<MockRun>
           label="Agentic runs"
           items={MOCK_RUNS}
@@ -135,12 +127,12 @@ export function SessionsActivityView() {
           activeId={run?.id ?? null}
           onOpen={(id) => setRunId(id)}
           noun={{ one: 'run', many: 'runs' }}
-          emptyText="No agentic runs yet — spec scan, guard setup and guard generate report here."
+          emptyText="No agentic runs yet."
         />
-      </aside>
+      </CollapsibleAside>
 
       {run && (
-        <aside className="flex w-80 shrink-0 flex-col border-r border-border">
+        <CollapsibleAside label="Sessions" defaultWidth={320}>
           <div className="shrink-0 space-y-1.5 border-b border-border px-3 py-2.5">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-foreground">{run.command}</span>
@@ -152,10 +144,8 @@ export function SessionsActivityView() {
               <span className="font-mono">{run.gitRef}</span>
               <span className="ml-auto">{run.started}</span>
             </div>
-            <CounterLine run={run} />
             {run.questions > 0 && (
-              <div className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
-                <HelpCircle className="h-3 w-3" />
+              <div className="text-[11px] text-sky-600 dark:text-sky-400">
                 {run.questions} question{run.questions === 1 ? '' : 's'} need{run.questions === 1 ? 's' : ''} you
               </div>
             )}
@@ -163,15 +153,25 @@ export function SessionsActivityView() {
           <div className="min-h-0 flex-1">
             <EntityList<MockSession>
               label="Run sessions"
-              groups={sessionGroups}
+              items={sessions}
+              group={groupSessions}
               itemId={(s) => s.id}
               renderRow={(s) => <SessionRow session={s} />}
               activeId={session?.id ?? null}
               onOpen={(id) => setSessionByRun((prev) => ({ ...prev, [run.id]: id }))}
+              filter={{
+                label: 'Status',
+                ariaLabel: 'Filter sessions by status',
+                options: statusOptions,
+                selected: statusFilter,
+                onChange: setStatusFilter,
+                match: (s, key) => s.status === key,
+                multi: true,
+              }}
               emptyText="No sessions in this run."
             />
           </div>
-        </aside>
+        </CollapsibleAside>
       )}
 
       {run && session ? (

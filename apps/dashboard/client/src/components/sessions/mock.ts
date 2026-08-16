@@ -1,5 +1,5 @@
 /**
- * UI MOCK — hand-written stand-in data for the Activity surface (agentic runs,
+ * UI MOCK: hand-written stand-in data for the Activity surface (agentic runs,
  * sessions, transcripts, chat) of AGENTIC_PIPELINE_PLAN §3.6–§3.9. Nothing here
  * reads the server or the store; delete this file when the real sessions store
  * lands and the view swaps to live data.
@@ -35,9 +35,9 @@ export type TranscriptEvent =
 
 export interface MockSession {
   id: string;
-  /** Session kind — groups the rail ("Doc curation", "Flow workers"). */
+  /** Session kind: groups the rail ("Doc curation", "Flow workers"). */
   kind: string;
-  /** The work item the session served — a doc path, a flow id, a step. */
+  /** The work item the session served: a doc path, a flow id, a step. */
   workItem: string;
   status: SessionStatus;
   turns: number;
@@ -60,7 +60,7 @@ export interface MockRun {
 }
 
 const SCAN_SYSTEM = `You are the spec scan orchestrator. Survey the doc universe cheaply
-(titles, paths, outlines, source structure — never full contents), propose
+(titles, paths, outlines, source structure: never full contents), propose
 product-area scope groups, and settle scope with the user before dispatching
 curation. Persist every verdict and instruction to specs/decisions.json.
 End with a structured outcome; never end without one.`;
@@ -82,10 +82,10 @@ const scanOrchestrator: MockSession = {
     {
       id: 'e3',
       kind: 'proposal',
-      title: 'Scope proposal — keep or exclude each group',
+      title: 'Scope proposal: keep or exclude each group',
       applied: true,
       groups: [
-        { id: 'g1', name: 'core/code-analysis', docs: 14, reason: 'Analyzer, rules, and report docs — user-facing behavior throughout.', verdict: 'keep' },
+        { id: 'g1', name: 'core/code-analysis', docs: 14, reason: 'Analyzer, rules, and report docs: user-facing behavior throughout.', verdict: 'keep' },
         { id: 'g2', name: 'core/spec-guard', docs: 9, reason: 'Scan, generate, and run guides; the guard pipeline surface.', verdict: 'keep' },
         { id: 'g3', name: 'core/dashboard', docs: 7, reason: 'The dashboard doc set; promised UI behavior.', verdict: 'keep' },
         { id: 'g4', name: 'core/cli', docs: 8, reason: 'Command reference pages with grammar and examples.', verdict: 'keep' },
@@ -101,7 +101,7 @@ const scanOrchestrator: MockSession = {
     {
       id: 'e5',
       kind: 'reply',
-      text: 'Excluded docs/legacy-plans (12 docs) and recorded the scope verdict plus an instruction: "docs/legacy-plans are superseded plan docs — never spec material." Kept scope is 38 docs. Dispatching doc curation.',
+      text: 'Excluded docs/legacy-plans (12 docs) and recorded the scope verdict plus an instruction: "docs/legacy-plans are superseded plan docs: never spec material." Kept scope is 38 docs. Dispatching doc curation.',
     },
     { id: 'e6', kind: 'tool', label: 'doc-curation · docs/cli/analyze.md', ok: true, duration: '41s', detail: 'kept · core/cli\nclaims-worthy sections: 7\ncache: miss → written' },
     { id: 'e7', kind: 'tool', label: 'doc-curation · docs/spec-guard/limits.md', ok: true, duration: '38s', detail: 'kept · core/spec-guard\nclaims-worthy sections: 4\ncache: miss → written' },
@@ -110,7 +110,7 @@ const scanOrchestrator: MockSession = {
       id: 'e9',
       kind: 'question',
       text: 'docs/spec-guard/limits.md says the per-file analyze budget is 500KB; docs/cli/analyze.md says 1MB. Both sections are current-tense promises. Which is the current behavior?',
-      options: ['500KB is current', '1MB is current', 'Neither — flag both as a conflict'],
+      options: ['500KB is current', '1MB is current', 'Neither, flag both as a conflict'],
     },
   ],
 };
@@ -145,9 +145,9 @@ const scanRun: MockRun = {
   started: 'today 14:32',
   status: 'running',
   counters: [
-    { word: 'curated', count: 31, tone: 'ok' },
-    { word: 'active', count: 1, tone: 'active' },
-    { word: 'queued', count: 6, tone: 'muted' },
+    { word: 'Curated', count: 31, tone: 'ok' },
+    { word: 'Active', count: 1, tone: 'active' },
+    { word: 'Queued', count: 6, tone: 'muted' },
   ],
   total: 38,
   totalNoun: 'docs',
@@ -160,7 +160,7 @@ const scanRun: MockRun = {
     scanCuration('ses-cur-4', 'docs/cli/rules.md', 'done', 1),
     scanCuration('ses-cur-5', 'docs/spec-guard/recipes.md', 'active', 2, [
       { id: 'c5-s', kind: 'system', text: 'You are a spec curator deciding whether this doc describes user-facing behavior worth verifying, and which areas it belongs to.' },
-      { id: 'c5-r', kind: 'reply', text: 'Reading docs/spec-guard/recipes.md. The doc defers to docs/spec-guard/setup.md for the boot contract — opening that section to settle the area.' },
+      { id: 'c5-r', kind: 'reply', text: 'Reading docs/spec-guard/recipes.md. The doc defers to docs/spec-guard/setup.md for the boot contract: opening that section to settle the area.' },
       { id: 'c5-t', kind: 'tool', label: 'read-doc · docs/spec-guard/setup.md#boot', ok: true, duration: '1s', detail: '"guard setup verifies the recipe by booting the program in a fresh sandbox…"' },
     ]),
     {
@@ -186,7 +186,7 @@ const scanRun: MockRun = {
 
 const WORKER_SYSTEM = `You are a flow worker. Author ONE scenario proving this flow's claims
 through its bound interfaces. Draft, run, observe, revise. Your only tool is
-run_scenario. End with a structured outcome — settled, blocked, or
+run_scenario. End with a structured outcome: settled, blocked, or
 journey-defect; you cannot end without one.`;
 
 const generateRun: MockRun = {
@@ -196,9 +196,9 @@ const generateRun: MockRun = {
   started: 'today 11:05',
   status: 'finished',
   counters: [
-    { word: 'settled', count: 17, tone: 'ok' },
-    { word: 'blocked', count: 2, tone: 'warn' },
-    { word: 'retired', count: 1, tone: 'fail' },
+    { word: 'Settled', count: 17, tone: 'ok' },
+    { word: 'Blocked', count: 2, tone: 'warn' },
+    { word: 'Retired', count: 1, tone: 'fail' },
   ],
   total: 20,
   totalNoun: 'flows',
@@ -217,7 +217,7 @@ const generateRun: MockRun = {
         { id: 'w1-t1', kind: 'tool', label: 'run_scenario · 6 steps', ok: false, duration: '2.3s', detail: 'step 3 failed: expected stdout to match /Analyzed \\d+ files/\ngot: "Analyzing 42 files…\\nAnalysis complete: 42 files, 3 findings"\nexit: 0' },
         { id: 'w1-r2', kind: 'reply', text: 'The journey promises the summary on the completion line, not a progress line. Tightening the matcher to the completion line and re-running.' },
         { id: 'w1-t2', kind: 'tool', label: 'run_scenario · 6 steps', ok: true, duration: '2.1s', detail: 'all steps passed · milestones covered: 4/4' },
-        { id: 'w1-o', kind: 'outcome', tone: 'ok', title: 'Settled — passing', lines: ['4 milestones covered, 0 blocked', 'fidelity judge: faithful (fresh context)', 'confirmed in a fresh sandbox (birth)'] },
+        { id: 'w1-o', kind: 'outcome', tone: 'ok', title: 'Settled: passing', lines: ['4 milestones covered, 0 blocked', 'fidelity judge: faithful (fresh context)', 'confirmed in a fresh sandbox (birth)'] },
       ],
     },
     {
@@ -233,7 +233,7 @@ const generateRun: MockRun = {
         { id: 'w2-t1', kind: 'tool', label: 'run_scenario · 9 steps', ok: false, duration: '11.4s', detail: 'step 7 failed: locator role=button name="Browse Rules" not found\naccessible tree excerpt attached' },
         { id: 'w2-r2', kind: 'reply', text: 'The docs promise a "Shield icon" entry point; the client renders "Browse Rules". Asserting the DOC\'s promise and recording the contradiction as a finding, per the doc-vs-journey policy.' },
         { id: 'w2-t2', kind: 'tool', label: 'run_scenario · 9 steps', ok: false, duration: '11.1s', detail: 'step 7 failed: locator role=button name="Shield" not found' },
-        { id: 'w2-o', kind: 'outcome', tone: 'warn', title: 'Settled — failing, with diagnosis', lines: ['committed failing: the documented entry point does not exist in the client', 'diagnosis: doc-vs-code drift (the docs\' "Shield icon" vs the client\'s "Browse Rules")', 'finding recorded; scenario asserts the doc\'s promise'] },
+        { id: 'w2-o', kind: 'outcome', tone: 'fail', title: 'Settled: failing, with diagnosis', lines: ['committed failing: the documented entry point does not exist in the client', 'diagnosis: doc-vs-code drift (the docs\' "Shield icon" vs the client\'s "Browse Rules")', 'finding recorded; scenario asserts the doc\'s promise'] },
       ],
     },
     {
@@ -246,7 +246,7 @@ const generateRun: MockRun = {
       events: [
         { id: 'w3-s', kind: 'system', text: WORKER_SYSTEM },
         { id: 'w3-r1', kind: 'reply', text: 'This flow exercises the api transport configuration path. The dependency catalog marks the provider key as a supplied dependency with no registered instance.' },
-        { id: 'w3-o', kind: 'outcome', tone: 'warn', title: 'Blocked — missing supplied dependency', lines: ['needs: an API provider key (supplied, unregistered)', 'register an instance on the Dependencies page to unblock', 'the claude-transport variant of this flow settled separately'] },
+        { id: 'w3-o', kind: 'outcome', tone: 'warn', title: 'Blocked: missing supplied dependency', lines: ['needs: an API provider key (supplied, unregistered)', 'register an instance on the Dependencies page to unblock', 'the claude-transport variant of this flow settled separately'] },
       ],
     },
     {
@@ -260,7 +260,7 @@ const generateRun: MockRun = {
         { id: 'w4-s', kind: 'system', text: WORKER_SYSTEM },
         { id: 'w4-r1', kind: 'reply', text: 'Drafting the filter matrix scenario (enabled/disabled × severity).' },
         { id: 'w4-t1', kind: 'tool', label: 'run_scenario · 11 steps', ok: false, duration: '4.9s', detail: 'step 5 failed: expected 14 rows, got 16' },
-        { id: 'w4-re', kind: 're-ask', note: 'turn 5 reply had no action block — re-asked once, recovered' },
+        { id: 'w4-re', kind: 're-ask', note: 'turn 5 reply had no action block: re-asked once, recovered' },
         { id: 'w4-o', kind: 'outcome', tone: 'fail', title: 'Budget exhausted at 8/8 turns', lines: ['did not reach: a green run of the severity half of the matrix', 'ledgered as a failed attempt (2 of 3 for this flow)', 'resume continues from turn 8 with a fresh budget'] },
       ],
     },
@@ -286,9 +286,9 @@ const setupRun: MockRun = {
   started: 'yesterday 18:12',
   status: 'failed',
   counters: [
-    { word: 'settled', count: 2, tone: 'ok' },
-    { word: 'failed', count: 1, tone: 'fail' },
-    { word: 'blocked', count: 2, tone: 'warn' },
+    { word: 'Settled', count: 2, tone: 'ok' },
+    { word: 'Failed', count: 1, tone: 'fail' },
+    { word: 'Blocked', count: 2, tone: 'warn' },
   ],
   total: 5,
   totalNoun: 'steps',
@@ -325,7 +325,7 @@ export const MOCK_RUNS: MockRun[] = [scanRun, generateRun, setupRun];
 
 /** The canned agent reply the mock chat appends after a user message. */
 export const MOCK_CHAT_REPLY =
-  'Noted — recorded as an instruction and applied to the remaining sessions. (UI mock: no model behind this reply.)';
+  'Noted: recorded as an instruction and applied to the remaining sessions. (UI mock: no model behind this reply.)';
 
 /** The canned reply after answering the pending question. */
 export const MOCK_ANSWER_REPLY =

@@ -9,18 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  Bot,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  HelpCircle,
-  ListChecks,
-  Send,
-  Wrench,
-  XCircle,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, ListChecks, Send, Wrench } from 'lucide-react';
 import { PRE } from '@/components/guard/detail-styles';
 import {
   MOCK_ANSWER_REPLY,
@@ -52,22 +41,19 @@ function Collapsible({ label, icon, ok, duration, children }: {
         {icon}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {duration && <span className="shrink-0 text-muted-foreground/70">{duration}</span>}
-        {ok != null &&
-          (ok ? (
-            <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-500" />
-          ) : (
-            <XCircle className="h-3 w-3 shrink-0 text-red-500" />
-          ))}
+        {ok != null && (
+          <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${ok ? 'bg-emerald-500' : 'bg-red-500'}`} />
+        )}
       </button>
       {open && <div className={`${PRE} border-t border-border/70 px-2 py-1.5`}>{children}</div>}
     </div>
   );
 }
 
-const OUTCOME_TONE = {
-  ok: 'border-emerald-500/40 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400',
-  warn: 'border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400',
-  fail: 'border-red-500/40 bg-red-500/5 text-red-600 dark:text-red-400',
+const OUTCOME_DOT = {
+  ok: 'bg-emerald-500',
+  warn: 'bg-sky-500',
+  fail: 'bg-red-500',
 } as const;
 
 function EventBlock({ event, live, onAction }: {
@@ -81,16 +67,13 @@ function EventBlock({ event, live, onAction }: {
       return <Collapsible label="system prompt">{event.text}</Collapsible>;
     case 'reply':
       return (
-        <div className="flex max-w-[88%] items-start gap-2">
-          <Bot className="mt-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-          <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
-            {event.text}
-          </div>
+        <div className="max-w-[88%] rounded-lg border border-border bg-card px-3 py-2 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+          {event.text}
         </div>
       );
     case 'user-message':
       return (
-        <div className="ml-auto max-w-[88%] rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+        <div className="ml-auto max-w-[88%] rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-foreground whitespace-pre-wrap">
           {event.text}
         </div>
       );
@@ -115,7 +98,12 @@ function EventBlock({ event, live, onAction }: {
           <div className="flex items-center gap-1.5 border-b border-border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             <ListChecks className="h-3 w-3" />
             {event.title}
-            {event.applied && <span className="ml-auto normal-case font-normal tracking-normal text-emerald-500">Applied — verdicts recorded</span>}
+            {event.applied && (
+              <span className="ml-auto inline-flex items-center gap-1.5 normal-case font-normal tracking-normal text-foreground">
+                <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                Applied
+              </span>
+            )}
           </div>
           <div>
             {event.groups.map((g) => (
@@ -127,26 +115,13 @@ function EventBlock({ event, live, onAction }: {
                   </div>
                   <p className="text-[11px] leading-snug text-muted-foreground">{g.reason}</p>
                 </div>
-                <div className="flex shrink-0 gap-1 pt-0.5">
+                <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5 text-[10px] font-medium text-foreground">
                   <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] ${
-                      g.verdict === 'keep'
-                        ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                        : 'border-border text-muted-foreground/50'
-                    }`}
-                  >
-                    Keep
-                  </span>
-                  <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] ${
-                      g.verdict === 'exclude'
-                        ? 'border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400'
-                        : 'border-border text-muted-foreground/50'
-                    }`}
-                  >
-                    Exclude
-                  </span>
-                </div>
+                    aria-hidden
+                    className={`h-2 w-2 shrink-0 rounded-full ${g.verdict === 'keep' ? 'bg-emerald-500' : 'bg-red-500'}`}
+                  />
+                  {g.verdict === 'keep' ? 'Keep' : 'Exclude'}
+                </span>
               </div>
             ))}
           </div>
@@ -154,18 +129,18 @@ function EventBlock({ event, live, onAction }: {
       );
     case 'question':
       return (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5">
-          <div className="flex items-center gap-1.5 border-b border-amber-500/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-            <HelpCircle className="h-3 w-3" />
-            {event.answer ? 'Question — answered' : 'Question — needs you'}
+        <div className="rounded-lg border border-border bg-card">
+          <div className="flex items-center gap-1.5 border-b border-border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${event.answer ? 'bg-emerald-500' : 'bg-sky-500'}`} />
+            {event.answer ? 'Question · answered' : 'Question · needs you'}
           </div>
           <p className="px-3 py-2 text-xs leading-relaxed text-foreground">{event.text}</p>
           {event.answer ? (
-            <div className="border-t border-amber-500/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+            <div className="border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
               Answered: <span className="text-foreground">{event.answer}</span>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-1.5 border-t border-amber-500/30 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-3 py-2">
               {event.options.map((opt) => (
                 <button
                   key={opt}
@@ -202,7 +177,7 @@ function EventBlock({ event, live, onAction }: {
               </form>
               {!live && (
                 <span className="w-full text-[10px] text-muted-foreground">
-                  Session ended — an answer persists as a decision and applies on the next run.
+                  Session ended. Answers apply on the next run.
                 </span>
               )}
             </div>
@@ -211,15 +186,9 @@ function EventBlock({ event, live, onAction }: {
       );
     case 'outcome':
       return (
-        <div className={`rounded-lg border px-3 py-2 ${OUTCOME_TONE[event.tone]}`}>
-          <div className="flex items-center gap-1.5 text-xs font-semibold">
-            {event.tone === 'ok' ? (
-              <CheckCircle2 className="h-3.5 w-3.5" />
-            ) : event.tone === 'warn' ? (
-              <AlertTriangle className="h-3.5 w-3.5" />
-            ) : (
-              <XCircle className="h-3.5 w-3.5" />
-            )}
+        <div className="rounded-lg border border-border bg-card px-3 py-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+            <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${OUTCOME_DOT[event.tone]}`} />
             {event.title}
           </div>
           <ul className="mt-1 space-y-0.5 text-[11px] leading-snug text-muted-foreground">
@@ -275,16 +244,13 @@ export function SessionTranscript({ session, runLive }: { session: MockSession; 
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
         {events.length === 0 ? (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            Queued — this session has not started; its transcript appears here live.
+            Queued. The transcript appears once the session starts.
           </p>
         ) : (
           events.map((event) => <EventBlock key={event.id} event={event} live={live} onAction={post} />)
         )}
         {waiting && (
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Bot className="h-3.5 w-3.5" />
-            <span className="animate-pulse">thinking…</span>
-          </div>
+          <div className="animate-pulse text-[11px] text-muted-foreground">thinking…</div>
         )}
       </div>
 
@@ -304,10 +270,10 @@ export function SessionTranscript({ session, runLive }: { session: MockSession; 
           disabled={!live}
           placeholder={
             live
-              ? 'Steer the session — instructions land in the transcript and persist as decisions…'
+              ? 'Send an instruction to this session…'
               : runLive
                 ? 'This session is not interactive right now.'
-                : 'Session ended — resume the run to continue the conversation.'
+                : 'Session ended. Resume the run to continue.'
           }
           aria-label="Chat with the session"
           className="w-full flex-1 rounded border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
