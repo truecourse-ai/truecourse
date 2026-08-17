@@ -2,6 +2,8 @@ import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import type { RouteRegistration, RouterMount, SupportedLanguage } from '@truecourse/shared'
 import { extractPythonRoutes } from './routes/python.js'
 import { extractCSharpRoutes } from './routes/csharp.js'
+import { extractNestControllerRoutes } from './routes/nest-decorators.js'
+import { extractStrapiRouteTables } from './routes/strapi-tables.js'
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all'])
 
@@ -114,12 +116,25 @@ export function extractRouteRegistrations(
   }
 }
 
+/**
+ * The JavaScript/TypeScript side is not one idiom but three, so it dispatches
+ * again — by IDIOM this time, each reader in its own module beside the
+ * per-language ones:
+ *
+ *  - routes CALLED on a router (`router.get('/x', h)`) — below, the original;
+ *  - routes DECLARED as decorators (NestJS) — `routes/nest-decorators.js`;
+ *  - routes DECLARED as data (Strapi route tables) — `routes/strapi-tables.js`.
+ *
+ * A file is normally written in exactly one of them, and each reader carries its
+ * own gate, so running all three costs one extra walk and no cross-talk.
+ */
 function extractJsRoutes(
   tree: Tree,
   filePath: string,
 ): { routes: RouteRegistration[]; mounts: RouterMount[] } {
-  const routes: RouteRegistration[] = []
-  const mounts: RouterMount[] = []
+  const strapi = extractStrapiRouteTables(tree, filePath)
+  const routes: RouteRegistration[] = [...extractNestControllerRoutes(tree, filePath), ...strapi.routes]
+  const mounts: RouterMount[] = [...strapi.mounts]
 
   const evidence = collectReceiverEvidence(tree)
   const cursor = tree.walk()
