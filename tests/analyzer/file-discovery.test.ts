@@ -178,6 +178,70 @@ describe('discoverFiles with gitignore patterns', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('skips tests/ and test/ directories at any depth', () => {
+    // Measured on strapi: 92 of 107 derived API "endpoints" came from MSW
+    // handler modules living in `<pkg>/tests/`, e.g. admin/admin/tests/server.ts
+    // and upload/admin/tests/handlers.ts. Neither `**/*.test.*` nor
+    // `**/__tests__/` matches those, so the whole directory has to go.
+    const dir = mkdtempSync(join(tmpdir(), 'truecourse-testdirs-'));
+
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    mkdirSync(join(dir, 'tests'), { recursive: true });
+    mkdirSync(join(dir, 'packages', 'admin', 'tests'), { recursive: true });
+    mkdirSync(join(dir, 'packages', 'upload', 'test'), { recursive: true });
+    // Near-misses that must survive: a directory whose name merely CONTAINS
+    // "test", and a source file whose name merely contains it.
+    mkdirSync(join(dir, 'src', 'testing'), { recursive: true });
+    mkdirSync(join(dir, 'src', 'latest'), { recursive: true });
+
+    writeFileSync(join(dir, 'src', 'app.ts'), 'export const x = 1;');
+    writeFileSync(join(dir, 'tests', 'server.ts'), 'export const s = 1;');
+    writeFileSync(join(dir, 'packages', 'admin', 'tests', 'server.ts'), 'export const a = 1;');
+    writeFileSync(join(dir, 'packages', 'upload', 'test', 'handlers.js'), 'module.exports = {};');
+    writeFileSync(join(dir, 'src', 'testing', 'harness.ts'), 'export const h = 1;');
+    writeFileSync(join(dir, 'src', 'latest', 'index.ts'), 'export const l = 1;');
+    writeFileSync(join(dir, 'src', 'test-utils.ts'), 'export const t = 1;');
+
+    const files = discoverFiles(dir);
+    const rel = files.map((f) => f.slice(dir.length + 1));
+
+    expect(rel).toContain('src/app.ts');
+    expect(rel).toContain('src/testing/harness.ts');
+    expect(rel).toContain('src/latest/index.ts');
+    expect(rel).toContain('src/test-utils.ts');
+
+    expect(rel).not.toContain('tests/server.ts');
+    expect(rel).not.toContain('packages/admin/tests/server.ts');
+    expect(rel).not.toContain('packages/upload/test/handlers.js');
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('skips tests/ and test/ directories for every language, not just JS/TS', () => {
+    // getAllTestPatterns() flatMaps across every language config and the result
+    // is one path filter, so the directory exclusion is global by construction.
+    // Pinned because a per-language reading of it would be wrong.
+    const dir = mkdtempSync(join(tmpdir(), 'truecourse-testdirs-lang-'));
+
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    mkdirSync(join(dir, 'test'), { recursive: true });
+
+    writeFileSync(join(dir, 'src', 'Service.cs'), 'public class Service {}');
+    writeFileSync(join(dir, 'src', 'service.py'), 'def f(): pass');
+    writeFileSync(join(dir, 'test', 'SeedDataFixture.cs'), 'public class SeedDataFixture {}');
+    writeFileSync(join(dir, 'test', 'helpers.py'), 'def h(): pass');
+
+    const files = discoverFiles(dir);
+    const rel = files.map((f) => f.slice(dir.length + 1));
+
+    expect(rel).toContain('src/Service.cs');
+    expect(rel).toContain('src/service.py');
+    expect(rel).not.toContain('test/SeedDataFixture.cs');
+    expect(rel).not.toContain('test/helpers.py');
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('does not treat large hand-written source as minified', () => {
     // Guard against false negatives - a 200KB hand-written JS file with
     // normal line lengths should still be discovered. The heuristic must

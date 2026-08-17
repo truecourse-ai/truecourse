@@ -40,7 +40,13 @@ export interface LanguageConfig {
   // Ignore patterns for file discovery
   ignorePatterns: string[]
 
-  // Test file patterns (excluded from analysis)
+  // Test file patterns (excluded from analysis).
+  //
+  // NOTE: these are aggregated across every language by `getAllTestPatterns()`
+  // and applied as ONE path filter (see file-discovery.ts), so a directory
+  // pattern added here excludes that directory for every language, not just
+  // this one. Keep file-NAME patterns language-specific; directory patterns
+  // only need to be declared once.
   testPatterns: string[]
 
   // Bootstrap entry point patterns
@@ -116,7 +122,15 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
 
   packageIndicatorFiles: ['package.json'],
   ignorePatterns: [],
-  testPatterns: ['**/*.test.*', '**/*.spec.*', '**/__tests__/', '**/__mocks__/'],
+  // `**/tests/` and `**/test/` are the language-agnostic half of this list —
+  // declared here because TS/JS is the first config, but applied to every
+  // language (see the field doc). A test-suite directory is not product
+  // surface, and analyzing it costs more than nothing: measured on strapi,
+  // 92 of 107 derived API "endpoints" were MSW handlers mined out of
+  // `<pkg>/tests/server.ts` and `<pkg>/tests/handlers.ts`, and the only CLI
+  // command found in the whole repo came from `tests/scripts/run-tests.js`.
+  // Neither `**/*.test.*` nor `**/__tests__/` matches any of those.
+  testPatterns: ['**/*.test.*', '**/*.spec.*', '**/__tests__/', '**/__mocks__/', '**/tests/', '**/test/'],
   bootstrap: {
     filePattern: /(?:^|[/\\])(?:app|main|index|server)\.\w+$/,
     functionNames: ['start', 'main', 'bootstrap'],
@@ -216,6 +230,8 @@ export const PYTHON_CONFIG: LanguageConfig = {
 
   packageIndicatorFiles: ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', '__init__.py'],
   ignorePatterns: ['**/__pycache__/', '**/.venv/', '**/venv/', '**/.pytest_cache/', '**/*.egg-info/'],
+  // File-name patterns only — `**/tests/` and `**/test/` are declared once in
+  // TYPESCRIPT_CONFIG and already apply here (see the `testPatterns` field doc).
   testPatterns: ['**/test_*.py', '**/*_test.py', '**/conftest.py'],
   bootstrap: {
     filePattern: /(?:^|[/\\])(?:app|main|wsgi|asgi)\.\w+$/,
@@ -279,6 +295,9 @@ export const CSHARP_CONFIG: LanguageConfig = {
 
   packageIndicatorFiles: ['*.csproj', '*.sln'],
   ignorePatterns: ['**/bin/', '**/obj/', '**/.vs/'],
+  // File-name patterns only — `**/tests/` and `**/test/` are declared once in
+  // TYPESCRIPT_CONFIG and already apply here (see the `testPatterns` field doc),
+  // which is what excludes the conventional `test/<Project>.Tests/` solution layout.
   testPatterns: ['**/*Tests.cs', '**/*Test.cs', '**/*.Tests/'],
   bootstrap: {
     filePattern: /(?:^|[/\\])(?:Program|Startup)\.cs$/,
