@@ -13,7 +13,12 @@ import { describe, it, expect } from 'vitest'
 import { deriveWebPlacesFromTree } from '../../packages/interface-mapper/src/web-tree'
 import type { FileAnalysis } from '../../packages/shared/src/index'
 
-/** A FileAnalysis carrying only what the web readers look at. */
+/**
+ * A FileAnalysis carrying only what the web readers look at. It default-exports
+ * a component, because that is what a route module does — the registry drops one
+ * that renders nothing, so a fixture standing in for a screen has to render.
+ * {@link handler} is the fixture for the module that does not.
+ */
 function file(filePath: string, extra: Partial<FileAnalysis> = {}): FileAnalysis {
   return {
     filePath,
@@ -21,11 +26,16 @@ function file(filePath: string, extra: Partial<FileAnalysis> = {}): FileAnalysis
     functions: [],
     classes: [],
     imports: [],
-    exports: [],
+    exports: [{ name: 'Page', isDefault: true }],
     calls: [],
     httpCalls: [],
     ...extra,
   }
+}
+
+/** A route module that serves a RESPONSE — a `loader`, and no component. */
+function handler(filePath: string): FileAnalysis {
+  return file(filePath, { exports: [{ name: 'loader', isDefault: false }] })
 }
 
 /** The `next.config.js` whose presence claims a Next.js app root. */
@@ -218,5 +228,124 @@ describe('one place per address SHAPE', () => {
       file('/r/packages/examples/base/src/pages/[bookingUid].tsx'),
     ])
     expect(places.map((p) => p.address)).toEqual(['/{user}'])
+  })
+})
+
+/**
+ * A PLACE IS AN ADDRESS WHOSE MODULE RENDERS. The three file-system idioms put
+ * the route and its component in ONE module, so the module's own exports settle
+ * whether an address is somewhere a user can stand or somewhere the server
+ * answers. Measured on the documenso checkout: 15 of the 125 addresses that
+ * passed for screens render nothing — ten `api+/*` handlers, an opengraph image,
+ * and four index routes whose loader redirects.
+ */
+describe('a route module that renders nothing is not a place', () => {
+  it('drops a remix route module that exports a loader and no component', () => {
+    expect(
+      addresses([
+        flatRoutesConfig('/r/apps/remix/app'),
+        file('/r/apps/remix/app/routes/inbox.tsx'),
+        handler('/r/apps/remix/app/routes/api+/health.ts'),
+        handler('/r/apps/remix/app/routes/_share+/share.$slug.opengraph.tsx'),
+      ]),
+    ).toEqual(['/inbox'])
+  })
+
+  it('drops an index route whose loader only redirects', () => {
+    expect(
+      addresses([
+        flatRoutesConfig('/r/apps/remix/app'),
+        handler('/r/apps/remix/app/routes/_authenticated+/settings+/_index.tsx'),
+        file('/r/apps/remix/app/routes/_authenticated+/settings+/profile.tsx'),
+      ]),
+    ).toEqual(['/settings/profile'])
+  })
+
+  it('drops a Next.js page module with no default export, in either router', () => {
+    expect(
+      addresses([
+        nextConfig('/r/apps/web'),
+        file('/r/apps/web/app/bookings/page.tsx'),
+        handler('/r/apps/web/app/health/page.tsx'),
+        handler('/r/apps/web/pages/ping.tsx'),
+      ]),
+    ).toEqual(['/bookings'])
+  })
+
+  /**
+   * The React Router idiom declares its routes in a JSX TABLE, so `filePath` is
+   * the table and the component lives elsewhere. Asking the table for a default
+   * export would refuse every place the idiom produces.
+   */
+  it('asks nothing of a react-router table, whose component is another file', () => {
+    expect(
+      addresses([
+        file('/r/admin/src/router.tsx', {
+          exports: [{ name: 'routes', isDefault: false }],
+          webRoutes: [{ path: '/content-manager', location: loc('/r/admin/src/router.tsx') }],
+        }),
+      ]),
+    ).toEqual(['/content-manager'])
+  })
+
+  /**
+   * The rule reads the module's exports in EVERY form the analyzer records one,
+   * which is the half of this that lives in the analyzer: `export default Page;`
+   * is how 74 of cal.diy's 79 route modules are written, and it was invisible
+   * until `extractExportName` learned the value form.
+   */
+  it('accepts a default export however it is written', () => {
+    const config = nextConfig('/r/apps/web')
+    for (const exported of [
+      { name: 'Page', isDefault: true }, // export default function Page()
+      { name: 'default', isDefault: true }, // export default memo(Page)
+    ]) {
+      expect(
+        addresses([config, file('/r/apps/web/app/inbox/page.tsx', { exports: [exported] })]),
+      ).toEqual(['/inbox'])
+    }
+  })
+})
+
+/**
+ * ONE MONOREPO, SEVERAL ROUTABLE APPS. cal.com's checkout has four Next.js apps,
+ * and the bundled platform demo (`packages/platform/examples/base`) declares
+ * seven addresses `apps/web` never does — `/troubleshooter`, `/calendar-view`,
+ * `/conferencing-apps`, a bare `/bookings`. No fact in the tree says which app is
+ * driven; the recipe does, or nobody does.
+ */
+describe('the app the recipe serves', () => {
+  const monorepo = () => [
+    nextConfig('/r/apps/web'),
+    file('/r/apps/web/app/(main)/bookings/[status]/page.tsx'),
+    file('/r/apps/web/app/event-types/page.tsx'),
+    nextConfig('/r/packages/platform/examples/base'),
+    file('/r/packages/platform/examples/base/src/pages/bookings.tsx'),
+    file('/r/packages/platform/examples/base/src/pages/troubleshooter.tsx'),
+  ]
+
+  it('keeps every app when the recipe names none — no claim drops nothing', () => {
+    expect(addresses(monorepo())).toEqual([
+      '/bookings',
+      '/bookings/{status}',
+      '/event-types',
+      '/troubleshooter',
+    ])
+  })
+
+  it('keeps only the served app’s places when it does', () => {
+    expect(
+      deriveWebPlacesFromTree(monorepo(), { appRoot: '/r/apps/web' }).map((p) => p.address),
+    ).toEqual(['/bookings/{status}', '/event-types'])
+  })
+
+  it('matches on the directory, not on a path prefix', () => {
+    // `/r/apps/web-legacy` is not inside `/r/apps/web`.
+    expect(
+      deriveWebPlacesFromTree(
+        [nextConfig('/r/apps/web-legacy'), file('/r/apps/web-legacy/app/page.tsx')],
+        { appRoot: '/r/apps/web' },
+      ),
+    ).toEqual([])
   })
 })

@@ -375,7 +375,8 @@ async function deriveInterfaces(
   // screens and no tasks is the normal state of this surface, not a failure.
   // `source.web` means what it means everywhere else: which ladder read the area.
   try {
-    webPlaces.push(...deriveWebPlacesFromTree(fileAnalyses));
+    const appRoot = servedWebAppRoot(repoPath);
+    webPlaces.push(...deriveWebPlacesFromTree(fileAnalyses, appRoot ? { appRoot } : {}));
     source.web = 'tree';
   } catch (error) {
     log.warn(`interface mapping: web derivation failed, web catalog is empty (${errorText(error)})`);
@@ -454,6 +455,25 @@ function repoOwnHosts(repoPath: string, fileAnalyses: readonly FileAnalysis[]): 
     ...(recipe.ownHosts ? { declaredHosts: recipe.ownHosts } : {}),
     controlledEnvVars: recipeControlledEnvVars(recipe),
   });
+}
+
+/**
+ * The absolute directory of the app the recipe's web surface serves, or
+ * `undefined` when the recipe declares none (`recipe.web.app`). A monorepo holds
+ * several routable apps and only one is driven; without the declaration every
+ * app's addresses are places, which is how cal.com's bundled platform demo put
+ * seven screens the product never serves into the catalog. An unreadable recipe
+ * is the runner's error to report, not the mapper's — it claims nothing here.
+ */
+function servedWebAppRoot(repoPath: string): string | undefined {
+  let recipe;
+  try {
+    recipe = loadRecipe(repoPath, recipePath(repoPath))?.recipe;
+  } catch {
+    return undefined;
+  }
+  const app = recipe?.web?.app;
+  return app ? path.resolve(repoPath, app) : undefined;
 }
 
 /** Run a pure derivation, degrading to an empty list with a logged reason. */
@@ -623,7 +643,7 @@ function stripScope(name: string): string {
 }
 
 /** Analyze every discovered source file; a file that fails to parse is skipped. */
-async function analyzeWorkingTree(repoPath: string): Promise<FileAnalysis[]> {
+export async function analyzeWorkingTree(repoPath: string): Promise<FileAnalysis[]> {
   await initParsers();
   const analyses: FileAnalysis[] = [];
   for (const file of discoverFiles(repoPath)) {

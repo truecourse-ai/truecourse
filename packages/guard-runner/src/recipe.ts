@@ -549,6 +549,21 @@ export const RecipeWebSchema = z
     readyTimeoutMs: z.number().int().positive().optional(),
     /** Extra env for the web surface process, on top of the recipe-level `env`. */
     env: z.record(z.string(), z.string()).optional(),
+    /**
+     * Repo-relative directory of the workspace app this surface serves
+     * (`apps/web`). The web analog of {@link RecipeApiServerSchema}.app, and the
+     * JOIN KEY for the same reason: a monorepo holds more than one routable app,
+     * and only one of them is under test. cal.com's checkout has four Next.js
+     * apps, and the bundled platform demo declares seven addresses the product
+     * never serves (`/troubleshooter`, `/calendar-view`, a bare `/bookings`) —
+     * places the derivation took at face value and an authoring run paid for.
+     *
+     * No fact in the tree settles which app is served: both are real Next apps
+     * with real routes. The recipe is the only thing that knows, so it says so
+     * here or it says nothing. Optional — absent means the derivation keeps
+     * every app's places, never a silent drop.
+     */
+    app: z.string().min(1).optional(),
   })
   .strict()
 
