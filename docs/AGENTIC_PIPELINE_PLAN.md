@@ -123,18 +123,31 @@ Binding decisions:
 
 The loop — turn budget, tool dispatch, transcript, malformed-turn re-ask,
 streaming — is written **once**, and every workstream builds its sessions
-on it. The provider seam stays where it is today: a single turn.
+on it. The provider seam is the SESSION DRIVER (decision 2026-08-17,
+superseding the single-turn seam): a policy shell owns the semantics —
+budgets, outcomes, transcript, resume — and a driver owns the mechanics
+of running one session against one backend.
 
-### 3.1 One loop, two transport modes
+### 3.1 One loop, two transport modes (revised 2026-08-17)
 
-- `LlmTransport` grows a turn-level call: messages + tool results in, next
-  reply (text or tool call) out.
-- **claude-code mode**: `claude -p` per turn with `--resume <session>` — the
-  session keeps server-side context; our loop keeps client-side control. Same
-  binary, same login, same stream-json parsing.
-- **api / EE mode**: the AI SDK's native tool-calling per turn. EE inherits via
-  `ee-llm` re-exporting `llm-api`, as today.
-- The Claude Agent SDK is **not** used: it is a second loop, and Claude-only.
+- **claude-code mode**: the **Claude Agent SDK in streaming-input mode** —
+  ONE live subprocess per session (the user's installed `claude` binary,
+  the user's own harness login, exactly as today), tools as in-process
+  SDK MCP handlers, the structured outcome via the SDK's native
+  json-schema output format.
+- **api / EE mode**: our own per-turn loop on the AI SDK's native tool
+  calling. EE inherits via `ee-llm` re-exporting `llm-api`, as today.
+- **Decision reversed (2026-08-17): the Agent SDK is now used** — as the
+  claude-code SESSION DRIVER, not as a second loop. The earlier rejection
+  ("a second loop, and Claude-only") predates two spike-verified facts:
+  provider session ids are STABLE across resume hops (context carried,
+  forking clean), and one subprocess serves every turn of a session, with
+  subscription login inherited and no API key. Together those eliminate
+  the per-turn design's two worst risks — the fenced-JSON text-action
+  protocol and the per-turn process spawn. "Claude-only" stands and is
+  priced in: the SDK driver exists in OSS claude-code mode ONLY; EE and
+  api mode run our own loop, and the session-driver contract (§3.3) plus
+  its conformance suite are what keep the two semantically one.
 
 ### 3.2 The only LLM call shape
 
@@ -151,13 +164,143 @@ the CALL SHAPE only: the stage's job and its deterministic parts stay. Each
 workstream section defines its sessions: prompt, inputs, tools, and
 done-condition per task.
 
-### 3.3 Loop implementation decisions (2026-08-05)
+### 3.3 Loop implementation decisions (2026-08-05; driver architecture 2026-08-17)
 
-Decisions made at implementation start; they bind the loop work. Every
-decision below covers BOTH transport modes; only claude-code mode needed a
-spike, because api mode's turn mechanics were already known.
+Decisions made at implementation start; they bind the loop work. The
+driver-architecture block of 2026-08-17 supersedes the per-turn seam;
+the superseded paragraphs are preserved further down as the recorded
+FALLBACK — paper only, built solely if the SDK path fails in the field,
+never maintained alongside.
 
-**claude-code session mechanics (spike result).**
+**The seam is a session driver (2026-08-17).** `runAgentLoop` in
+`packages/shared` is the POLICY SHELL — the only entry workstreams call
+— over a `SessionDriver` contract with two implementations: the api
+driver (our per-turn loop, `packages/llm-api`) and the Agent SDK driver
+(a new `packages/llm-claude-agent`, the only package allowed to import
+the SDK wrapper). The contract:
+
+- `runSession({ def, initialMessages, resume, onEvent, signal })`
+  returns a handle: `done` (a promise that never rejects for semantic
+  failures — those are events plus a structured result), an observable
+  `status` (`running | waiting | parked | completed | failed`),
+  `steer(message)`, and `interrupt()`.
+- Every driver declares a CAPABILITIES struct (steer timing,
+  structured-outcome mechanism, resume-at-message support). Driver
+  divergence is a declared fact the shell reads, never an engine `if`
+  on the driver's name.
+- Turn end is DERIVED from session state transitions, never trusted
+  from a provider turn event alone — provider lifecycle events are
+  hints, and stale or out-of-order ones are dropped, not applied.
+- The shell owns: budget counting, token/context ceilings with
+  pre-emptive interrupt, resume grants, the malformed policy, sequence
+  stamping, and sub-session depth. A CONFORMANCE SUITE runs both
+  drivers through one spec — budget stop, steer ordering, resume,
+  malformed mapping, outcome-less success — and is what keeps two
+  mechanical drivers one semantic loop.
+- Every tool DECLARES its identity — a `kind` plus read-only and
+  destructive hints — and every invocation is bound to the session's
+  identity in the transcript. Tool nature is declared at definition,
+  never inferred from a tool's name downstream. One tool definition
+  compiles to both the api driver's toolset and the SDK driver's
+  in-process MCP server.
+
+**Budget counts assistant messages (2026-08-17).** Every assistant
+message — tool call or text — is one turn against the budget, counted
+by the SHELL from its own events and enforced by `interrupt()` at the
+boundary. The SDK's own turn limit is a distant backstop only, and its
+`num_turns` is never read (spike: it is not on the budget's scale).
+Ceilings enforce between turns and may overshoot by one turn; that is
+recorded honestly, never hidden.
+
+**Text turns are legal in both drivers (2026-08-17).** A text-only
+reply is deliberation, appended and budget-counted, never re-asked.
+Malformed narrows to: an unparseable action, an unknown tool,
+schema-failing arguments, or a session ending without a valid outcome
+(in the SDK driver: structured-output retries exhausted, or a success
+result missing its structured output — both map to `malformed`).
+
+**Resume is a fresh budget grant over an opaque cursor (2026-08-17).**
+The semantics of the 2026-08-11/12 decisions are unchanged — hard
+limit, N automatic grants, `budget-exhausted` on the last. The
+mechanics are per driver: the SDK driver continues its LIVE process on
+an in-run grant, and resumes a parked session by CURSOR (provider
+session id, optionally a resume-at-message point) in a fresh process;
+the api driver rebuilds from the persisted transcript. `resumeCursor`
+is an opaque value owned and interpreted only by the driver, persisted
+in the session index (§3.9). The transcript is audit truth, never
+agent state.
+
+**Failures carry a retryability axis (2026-08-17)**, orthogonal to
+their kind: TRANSIENT (network, timeout — the shell retries the turn
+once, and a retried turn does not count against the budget) versus
+BLOCKED (auth, configuration, permission — the session parks loudly;
+hammering a blocked dependency is forbidden).
+
+**Isolation is invariant (2026-08-17).** The SDK driver always runs
+with: no built-in tools (and deferred tool search disabled — the spike
+showed tool discovery otherwise consuming the first turn), no settings
+sources, no auto-memory, the system prompt fully replaced, the
+subprocess environment spread from the parent's (a replaced
+environment breaks credential lookup), strict MCP config, and
+auto-compaction OFF. No session type may weaken these; a session that
+needs the harness's own tools is a plan amendment, not a configuration
+knob.
+
+**Context exhaustion is a failure; compaction never runs
+(2026-08-17).** Compaction silently rewrites what the model saw — the
+transcript-fidelity hole this plan refuses. The shell tracks
+cumulative context from usage envelopes and interrupts BEFORE the
+wall; the session fails `context-exhausted`, a sibling of
+`budget-exhausted` with the same resume path.
+
+**Sub-sessions are depth 1 (2026-08-17).** Orchestrator → worker is
+the only topology (§3.7's dispatch); a child dispatching its own child
+is a structured error the parent sees as a tool result. The run-level
+cap on live processes reserves child slots, so a full complement of
+parents waiting on children can never deadlock the run.
+
+**Provider session state lives in OUR store (2026-08-17).** The SDK's
+session-store adapter points the harness's own session persistence
+into the run's sessions store (§3.9), so a parked session survives the
+harness's retention window, a machine move, or a wiped harness home.
+
+**Distribution (2026-08-17).** The SDK driver spawns the USER'S
+installed `claude` binary, resolved exactly as the one-shot transport
+resolves it today. The SDK wrapper is version-pinned exactly and
+declared optional, behind a lazy import with a clear install message,
+so the published CLI never drags the SDK's bundled ~300 MB binary into
+every install. A capability preflight on the session-init message
+gates startup with a loud upgrade error — feature detection, never
+version sniffing.
+
+**One-shot stages migrate per workstream (2026-08-17).** Today's
+single-request transport stages keep running beside the loop; each
+workstream retires its own as its sessions land. §3.2's call-shape
+rule is the finish line, not a precondition of the loop's delivery.
+
+**SDK driver rules (spike-verified, binding).** The query iterator
+THROWS after yielding an error-subtype result, so iteration is always
+wrapped. `system/init` fires per TURN — never a process-lifecycle
+signal; the session id is. Message handling is an exhaustive switch:
+a compile-time exhaustiveness check PLUS a runtime warning fallback,
+with an explicit known-and-deliberately-ignored list, so a new SDK
+message type fails the build in development and degrades loudly, not
+silently, in the field.
+
+The paragraphs below are the original per-turn decisions. Only
+claude-code mode needed a spike; api mode's turn mechanics were
+already known.
+
+**FALLBACK RECORD (2026-08-17).** Of the paragraphs below, the
+per-turn claude-code mechanics, the `transport.turn` seam shape, and
+the text-action tool-call protocol describe the superseded per-turn
+design, preserved verbatim as the recorded fallback build. The api
+session mechanics remain binding (they are the api driver's
+internals), and the malformed-turn policy applies as narrowed by the
+driver-architecture block above; everything from "Hard limit + resume"
+onward remains binding as amended.
+
+**claude-code session mechanics (spike result; FALLBACK).**
 `claude -p --resume <session-id>` retains full server-side
 context across print-mode invocations (verified live). Mechanics: the prompt
 goes over **stdin** (the variadic `--tools` flag would swallow a trailing
@@ -172,7 +315,7 @@ SDK's native tool calling. Per-turn prompt caching rides `cache_control`;
 per-turn usage is recorded identically to claude-code mode. EE inherits
 this adapter unchanged.
 
-**Seam shape.** `LlmTransport` stays `(req) => Promise<string>`. The turn
+**Seam shape (FALLBACK).** `LlmTransport` stays `(req) => Promise<string>`. The turn
 call is an **optional property on the transport function**:
 `transport.turn?: LlmTurnFn`. Every existing bare-function transport (and the
 ~30 test fakes) stays valid; a consumer that needs turns checks for the
@@ -184,7 +327,7 @@ per-turn usage. The claude-code adapter sends only the newest message under
 the whole history with AI SDK native tools. Per-turn usage feeds
 `recordStageUsage` exactly as today; `calls` counts turns.
 
-**Tool-call representation.** api mode: native AI SDK tool calling —
+**Tool-call representation (claude-code half FALLBACK).** api mode: native AI SDK tool calling —
 tools declared without `execute`, one step per turn, the SDK returns the tool
 call without running it. claude-code mode: a **text action protocol** — the
 system prompt requires each reply to end with exactly one fenced JSON action,
@@ -245,15 +388,17 @@ session that exhausts the LAST budget fails exactly as this section
 already requires — `budget-exhausted`, naming what it did not reach.
 Resume grants time, never leniency.
 
-**Module placement.** The loop (`runAgentLoop`: turn budget, token ceiling,
-tool dispatch, transcript events, re-ask, session persistence + resume) lives in
-`packages/shared/src/llm/agent-loop.ts` — transport-agnostic, next to the
-seam, exported through `transport.ts` like `guardrail.ts`. The claude-code
-turn adapter lives beside `cliTransport` in `transport.ts`; the api turn
-adapter in `packages/llm-api` (the only OSS package allowed to import `ai`).
-The loop emits transcript events (system, turn, reply, tool result, re-ask,
-outcome, budget-exhaustion) through a sink callback; consumers wire the sink
-to their transcript artifacts.
+**Module placement (revised 2026-08-17).** The policy shell
+(`runAgentLoop`: budgets, ceilings, resume grants, malformed policy,
+transcript events, sub-session depth) lives in
+`packages/shared/src/llm/agent-loop.ts` — driver-agnostic, importing
+neither `ai` nor the Agent SDK, with persistence injected. The api
+driver lives in `packages/llm-api` (the only OSS package allowed to
+import `ai`); the Agent SDK driver in `packages/llm-claude-agent` (the
+only package allowed to import the SDK wrapper). The shell emits
+transcript events through a sink callback; consumers wire the sink to
+the sessions store (§3.9). The driver conformance suite lives in
+`tests/` and runs both drivers through one spec.
 
 **Delivery (decision 2026-08-07).** The loop is shared infrastructure
 built ONCE, BEFORE the workstreams, and shared by §§6–8; no workstream
@@ -327,10 +472,15 @@ model: the user watches the live transcript and interjects; the
 session ingests the message and revises course. Two loop capabilities
 carry it, both built once in `runAgentLoop`:
 
-- **User interjection.** A user message enters a running session as
-  its next observation, delivered at a turn boundary. It is the same
-  message shape §3.3's resume-with-observation consumes; interjection
-  and resume are one mechanism arriving at different times.
+- **User steering (renamed from "interjection", 2026-08-17).** A user
+  message enters a running session as its next observation. WHEN it
+  lands is a driver capability, not a uniform promise: the SDK driver
+  feeds the live loop, so the message joins the running turn (a
+  steer); the api driver delivers at the next turn boundary. Either
+  way the transcript records the message at the moment the session
+  ingests it. It is the same message shape §3.3's
+  resume-with-observation consumes; steering and resume are one
+  mechanism arriving at different times.
 - **Sub-session dispatch.** A session may run other sessions as tools
   (the orchestrator pattern): the child runs on its own budget with
   its own transcript artifact, and its structured outcome returns to
@@ -355,10 +505,18 @@ Interactivity is optional everywhere. In a non-interactive run (CI, a
 PR gate, cron) a session never blocks on a question: it proceeds on
 the persisted decisions it has, and a question it cannot settle ends
 in the structured outcome as a pending question, reported loudly,
-exactly like every other structured gap. In an interactive run a
-session may wait on input; an abandoned wait parks the session
-through §3.3's persistence and resumes when the answer arrives, never
-a silent hang.
+exactly like every other structured gap. Questions are STRUCTURED
+(2026-08-17) — id, header, question text, options with labels and
+descriptions, a multi-select flag — and travel as question-asked /
+question-resolved transcript events under a server-minted correlation
+id, with policy auto-resolving what it can in non-interactive runs; a
+future interactive answer flow is a policy change, never a schema
+change. In an interactive run a session may wait on input; an
+abandoned wait parks the session through §3.3's persistence and
+resumes when the answer arrives, never a silent hang. A waiting or
+parked state that persists is always reconcilable at boot (§3.9's
+sweep) — blocked state must never depend on process memory to be
+resolvable.
 
 ### 3.8 Versioned store state and the branch/PR model (decision 2026-08-13)
 
@@ -490,6 +648,46 @@ every event carries a per-session MONOTONIC SEQUENCE number, so DB
 paging and file tailing agree on ordering and resume; and the run
 record's endpoint field is a URL plus auth token, never a bare port,
 so the EE runner's service endpoint fits the same field.
+
+Further store decisions of 2026-08-17, baked in for the same reason:
+
+- Every event may carry a RAW escape hatch — the driver's native wire
+  payload and its source — so the normalized record never loses the
+  native one and a driver bug is diagnosable from the transcript
+  alone. Streaming deltas never enter the durable transcript; the
+  transcript is turn-granular, and live views stream at that
+  granularity.
+- Error events carry a CLASS (provider, transport, permission,
+  validation, unknown), and failure records carry §3.3's
+  transient/blocked axis, so a reader — human or shell — can tell
+  retry from park without parsing messages.
+- Usage records carry a COST-SOURCE provenance (provider-reported,
+  model-priced, unpriced) and treat reasoning tokens as a SUBSET of
+  output tokens, never an addend.
+- The session index row carries the driver's opaque `resumeCursor`
+  and a status vocabulary that includes `waiting` (blocked on input)
+  and `parked` (§3.7) alongside running/completed/failed.
+- Child-session events repeat their full linkage (child id, kind,
+  work item, usage rollup) on EVERY event, so a reader folding the
+  stream is order-robust — a completion arriving before its start
+  still renders, and retention that drops the start loses nothing.
+- Sending a message is IDEMPOTENT: the POST carries a client-supplied
+  command id checked against a receipts record — a replay returns the
+  original receipt and does no work, so a retried request can never
+  double-deliver into a session.
+- The store BOOTS WITH A RECONCILIATION SWEEP: a run left `running`
+  by a crashed process is marked failed-interrupted, its orphaned
+  session processes are killed, and any persisted waiting state is
+  resolved or re-armed — nothing stays "running" or "waiting" on the
+  strength of a dead process's memory.
+- Transcript reads PAGE BY SEQUENCE CURSOR: a reader passes the last
+  sequence it holds; replay beyond a bounded gap falls back to a
+  fresh snapshot (an unbounded stale-cursor replay is a memory
+  hazard), a SYNCHRONIZED marker separates catch-up from live tail,
+  and the live subscription attaches BEFORE the snapshot read so no
+  event falls between them. This is the read discipline of the
+  dashboard-server routes in both editions; the session API itself
+  stays inbound-only.
 
 ## 4. The reference corpus (the benchmark)
 
