@@ -5868,3 +5868,83 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     the experiment exposed (123 of 137 paths came out bare): a PRE-EXISTING
     product bug that degrades today's grounding independently of the SOM, and the
     cheapest of the three cost centres the report named.
+
+99. **The web surface derives its PLACES (2026-08-17).** STATUS: BUILT (structural
+    half). Item 98's Tier-2 note (d) — "deriving the web registry rather than
+    hand-authoring it". Every web interface that exists across the three benchmark
+    corpora, 126 of them, was typed by an agent reading the target's JSX, because
+    `mapInterfaces` derived `cli` and `api` and nothing else. This item derives the
+    half of the web surface that is structure: the SCREENS, each carrying the
+    `address` a navigate step reaches it by.
+
+    **The split, and why it is the honest one.** A web surface is places plus
+    tasks. A place is stated by the app's routing — a directory, a filename, a JSX
+    element — and costs one command to re-derive. A task is an ordered
+    navigate/activate sequence with a start and an end state: intent, which no
+    tree states. So the places derive and the tasks stay authored, and the two
+    live in the two files they already lived in (`guard/interfaces.json` derived,
+    `guard/interfaces.authored.json` committed).
+
+    **Per-idiom readers, gated on evidence** (`packages/interface-mapper/src/web/`,
+    the shape `analyzer/src/extractors/routes/` took for the api side):
+    `next-app` and `next-pages` read the directory tree (groups `(x)` contribute
+    nothing, `[p]` → `{p}`, `[...p]` → `{...p}`, an optional catch-all addresses
+    its own parent, `_private`/`@slot`/`(.)intercept`/`route.ts` are not screens),
+    gated on a `next.config.*` at the app root; `remix-flat` reads the flat-routes
+    filename grammar (`.` splits, `+` folders nest, a leading `_` is pathless, a
+    trailing `_` opts out of a layout, `[…]` escapes, a bare `$` splat is not a
+    place), gated on a sibling `routes.ts` that IMPORTS `remix-flat-routes`;
+    `react-router` takes the JSX the analyzer read (`extractWebRoutes`), gated on
+    the file importing react-router. The gates are the whole game: `pages/` and
+    `routes/` are two of the most common directory names in a React codebase, and
+    strapi's checkout contains both traps verbatim.
+
+    **Nothing unaddressed**, the api extractor's rule transplanted: a `<Route>`
+    fragment that composes onto no absolute parent is dropped rather than emitted
+    bare. Two addresses differing only in what they NAME a slot are ONE place —
+    a router cannot serve `/[user]` and `/[bookingUid]` at one position, so when
+    both appear they came from two apps in one monorepo.
+
+    **Measured** (recall on the addresses the hand-authored web interfaces
+    actually use — entry paths, then navigate routes): cal.diy 6/6 and 9/10
+    (88 places derived); documenso 5/5 and 3/3 (125 places); strapi 0/4 and 0/2
+    (0 places). strapi is a deliberate zero, not a gap in the readers: its admin
+    panel is react-router `RouteObject` TABLES, every one of them relative to a
+    mount the file does not state, and the panel's own basename comes from
+    `process.env.ADMIN_PATH` read at runtime. Every authored strapi address starts
+    `/admin`, and no file in the checkout says so. That needs a declared web base
+    path (recipe) plus RouteObject mount composition — a slice of its own.
+
+    **Deliberately not built.** (a) Web TASKS — the interfaces. (b) READABLES, the
+    DOM facts a place shows. (c) DIALOGS and PANELS: readable in principle
+    (`DialogContent`, `role="dialog"`), but a dialog's identity is the screen it
+    opens OVER, and that `of` is a component-graph question this pass cannot
+    answer; a registry of hundreds of ownerless dialogs is worth less than none.
+
+    **The fail-loud guard, re-decided.** `assertDerivedSnapshot` refused to
+    overwrite a catalog carrying "a surface no derivation produces", tested as any
+    interface type outside `{cli, api}`. It now keys explicitly on INTERFACES
+    (`DERIVED_INTERFACE_SURFACES`), and `web` stays out of that set although web
+    resources are now derived: the protection exists for the half that cannot be
+    re-derived, and widening it because the other half became derivable would
+    retire it for the work it was built to save. The `version: 1` signal still
+    catches every legacy catalog.
+
+    **A surface with places and no interfaces** is a new state, and the Interfaces
+    banner used to read it as "the derivation found nothing" (`detected` was
+    `interfaces > 0`). `GuardInterfaceSurface` now carries a `resources` count and
+    `detected` is either half. What the dashboard CLIENT does with it is still
+    owed: the pane reaches a place only through an interface's `at`, so derived
+    web places are in the payload and not yet on screen.
+
+    **As built**: `packages/shared/src/types/analysis.ts` (`WebRoute`,
+    `FileAnalysis.webRoutes`), `packages/shared/src/interfaces.ts`
+    (`InterfaceResource.address`, screens only),
+    `packages/shared/src/guard/dashboard.ts`,
+    `packages/analyzer/src/extractors/web-routes.ts`,
+    `packages/interface-mapper/src/{web-tree.ts,web/,resources.ts}`,
+    `packages/core/src/services/interface.service.ts`,
+    `packages/core/src/commands/guard-read.ts`. Tests:
+    `tests/analyzer/web-routes.test.ts`, `tests/interface-mapper/web-tree.test.ts`,
+    `tests/interface-mapper/resources.test.ts`, `tests/shared/interfaces.test.ts`,
+    `tests/core/{interface.service,guard-interfaces-authored}.test.ts`.

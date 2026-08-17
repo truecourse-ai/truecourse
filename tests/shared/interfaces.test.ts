@@ -2416,6 +2416,32 @@ describe('the resource registry', () => {
     expect(() => InterfaceResourceSchema.parse(rulesDialog({ id: 'The Rules Dialog' }))).toThrow()
   })
 
+  it('a screen owns an ADDRESS, and only a screen does', () => {
+    const screen = (over: Record<string, unknown> = {}) => ({
+      id: 'document-editor',
+      kind: 'screen' as const,
+      title: '/t/{teamUrl}/documents/{id}/edit',
+      ...over,
+    })
+    expect(
+      InterfaceResourceSchema.parse(screen({ address: '/t/{teamUrl}/documents/{id}/edit' })).address,
+    ).toBe('/t/{teamUrl}/documents/{id}/edit')
+    // A screen with no derivable address keeps none — the absence rule.
+    expect(InterfaceResourceSchema.parse(screen()).address).toBeUndefined()
+    // A dialog opens OVER a screen; an address on one would navigate elsewhere.
+    expect(() => InterfaceResourceSchema.parse(rulesDialog({ address: '/rules' }))).toThrow(
+      /only a screen owns an address/,
+    )
+    expect(() =>
+      InterfaceResourceSchema.parse({
+        id: 'violations',
+        kind: 'panel',
+        title: 'the violations panel',
+        address: '/repos/1',
+      }),
+    ).toThrow(/only a screen owns an address/)
+  })
+
   it('a command group and a REST noun nest through the same `of`; a root of either carries none', () => {
     const spec = { id: 'spec', kind: 'command-group' as const, title: 'spec' }
     const specDocs = { id: 'spec-docs', kind: 'command-group' as const, title: 'spec docs', of: 'spec' }

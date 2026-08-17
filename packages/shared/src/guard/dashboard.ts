@@ -1151,6 +1151,17 @@ export const GuardInterfaceSurfaceSchema = z
     waitingLabel: z.string().optional(),
     /** Interfaces mapped for this surface. */
     interfaces: z.number().int().nonnegative(),
+    /**
+     * PLACES mapped for this surface — the registry's entries for this area.
+     *
+     * Counted beside the interfaces because since the web derivation landed the
+     * two can disagree: the `web` surface derives its places off the routing tree
+     * and its tasks not at all, so a mapped web app is N places and ZERO
+     * interfaces. Reading the row by its interface count alone would report that
+     * repo as "no web surface found", which is the opposite of what happened.
+     */
+    resources: z.number().int().nonnegative(),
+    /** Did the mapping find this surface AT ALL — either half of it. */
     detected: z.boolean(),
     source: InterfaceCatalogSourceSchema.optional(),
   })

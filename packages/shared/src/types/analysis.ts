@@ -365,6 +365,33 @@ export const RouterMountSchema = z.object({
 export type RouterMount = z.infer<typeof RouterMountSchema>
 
 // ---------------------------------------------------------------------------
+// Web Route
+//
+// The web surface's analog of {@link RouteRegistrationSchema}, and deliberately
+// the SMALL half of it. Two of the three web-routing idioms — Next.js and
+// remix-flat-routes — declare a route by putting a file in a directory, so
+// there is no syntax to read and no per-file fact to carry: their addresses are
+// derived from the file LIST (`interface-mapper/web-tree.ts`), where the
+// framework roots that gate them are visible. Only React Router writes its
+// routes as code, and this is what the reader gets out of it.
+// ---------------------------------------------------------------------------
+
+/**
+ * One route a React Router declaration NAMES. The path is ABSOLUTE — a
+ * relative fragment is composed onto its enclosing `<Route>` before it is
+ * emitted, and one that composes onto nothing is not emitted at all (the api
+ * extractor's rule: an unaddressable route is not a lesser route, it is a place
+ * no navigate step can reach). Parameters are kept as the framework writes them
+ * (`:repoId`) and canonicalized downstream.
+ */
+export const WebRouteSchema = z.object({
+  path: z.string(),
+  location: SourceLocationSchema,
+})
+
+export type WebRoute = z.infer<typeof WebRouteSchema>
+
+// ---------------------------------------------------------------------------
 // CLI Command
 // ---------------------------------------------------------------------------
 
@@ -412,6 +439,8 @@ export const FileAnalysisSchema = z.object({
   httpCalls: z.array(HttpCallSchema),
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
+  /** Routes this file DECLARES as JSX (React Router); absent when none. */
+  webRoutes: z.array(WebRouteSchema).optional(),
   cliCommands: z.array(CliCommandSchema).optional(),
   /** http(s) URL literals naming a third-party host; absent when none. */
   externalHttpRefs: z.array(ExternalHttpRefSchema).optional(),

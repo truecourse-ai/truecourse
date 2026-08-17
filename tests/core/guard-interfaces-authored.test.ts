@@ -1,11 +1,11 @@
 /**
  * THE INTERFACES TAB READS BOTH HALVES of the catalog.
  *
- * `guard/interfaces.json` is derived and holds `cli` + `api` only — the two
- * surfaces anything derives. Every web surface in existence is hand-authored and
- * lives in the committed `guard/interfaces.authored.json`. A view composed from
- * the derived half alone shows a repo that has no web surface at all, which is
- * the visible half of the same loss the split was made to stop.
+ * `guard/interfaces.json` is derived and holds the `cli` + `api` interfaces — plus,
+ * since the web derivation landed, the web PLACES. Every web TASK in existence is
+ * hand-authored and lives in the committed `guard/interfaces.authored.json`. A
+ * view composed from the derived half alone shows a repo that has no web tasks at
+ * all, which is the visible half of the same loss the split was made to stop.
  *
  * The second property here is the one the merge deliberately does NOT solve with
  * `source`: that field says how one AREA was DERIVED (`tree` vs the `probes`
@@ -140,6 +140,42 @@ describe('the Interfaces view over a split catalog', () => {
     });
     expect(view.interfaces.find((j) => j.id === 'web/silence-rule')!.origin).toBe('authored');
     expect('source' in view.interfaces.find((j) => j.id === 'web/silence-rule')!).toBe(false);
+  });
+
+  it('reads a surface that is all PLACES and no tasks as found, not as empty', async () => {
+    // The state the web derivation created: the mapper reads a screen per address
+    // off the routing tree and derives no tasks at all, so the row is `source:
+    // tree` with zero interfaces. Judged on interfaces alone it would read as "the
+    // derivation found nothing" — the exact opposite of what happened.
+    write(
+      guardInterfacesPath(repo),
+      catalog({
+        interfaces: [DERIVED_CLI],
+        source: { cli: 'tree', api: 'tree', web: 'tree' },
+        resources: {
+          web: [
+            { id: 'root', kind: 'screen', title: '/', address: '/' },
+            { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}' },
+          ],
+        },
+      }),
+    );
+
+    const view = await readGuardInterfaces(repo);
+    const surface = (id: string) => view.surfaces.find((s) => s.surface === id)!;
+
+    expect(surface('web')).toMatchObject({
+      interfaces: 0,
+      resources: 2,
+      detected: true,
+      source: 'tree',
+    });
+    expect(view.totals.detectedSurfaces).toBe(2);
+    // The registry itself travels, so the places are readable even with no row
+    // pointing at them.
+    expect(view.resources!.web!.map((r) => r.address)).toEqual(['/', '/repos/{repoId}']);
+    // A surface with neither half is still undetected — the distinction survives.
+    expect(surface('api')).toMatchObject({ interfaces: 0, resources: 0, detected: false });
   });
 
   it('reads an authored-only repo — a catalog can exist before anything was ever mapped', async () => {

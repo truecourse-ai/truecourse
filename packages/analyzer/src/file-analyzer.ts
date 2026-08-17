@@ -5,6 +5,7 @@ import { withParsedTree, type Tree } from './parser.js'
 import { extractCalls, buildFunctionContext } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
+import { extractWebRoutes } from './extractors/web-routes.js'
 import { extractCliCommands } from './extractors/cli-commands.js'
 import { extractExternalHttp } from './extractors/external-http.js'
 import { extractOutboundRequests } from './extractors/outbound-requests.js'
@@ -119,6 +120,7 @@ function buildFileAnalysis(
   const calls = extractCalls(tree, filePath, language, functionContext)
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
   const { routes: rawRoutes, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
+  const webRoutes = extractWebRoutes(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
   const externalHttp = extractExternalHttp(tree, filePath, language)
   const outboundRequests = extractOutboundRequests(tree, filePath, language)
@@ -142,6 +144,7 @@ function buildFileAnalysis(
     httpCalls,
     ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
     ...(routerMounts.length > 0 ? { routerMounts } : {}),
+    ...(webRoutes.length > 0 ? { webRoutes } : {}),
     ...(cliCommands.length > 0 ? { cliCommands } : {}),
     ...(externalHttp.refs.length > 0 ? { externalHttpRefs: externalHttp.refs } : {}),
     ...(externalHttp.urlEnvReads.length > 0 ? { urlEnvReads: externalHttp.urlEnvReads } : {}),

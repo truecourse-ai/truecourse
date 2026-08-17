@@ -6,9 +6,16 @@
  * happen" had nowhere else to live there. The envelope was never web-specific:
  * a command tree and a REST path are both "a medium number of medium-sized
  * places, each holding its interactions", and both surfaces were reading as flat
- * lists of 60-odd sibling entries for want of one. This module is the cli and api
- * halves of that, and it is pure: interfaces in, registry + ownership out, no
- * LLM, no filesystem, no analyzer artifacts beyond what the interfaces carry.
+ * lists of 60-odd sibling entries for want of one. This module is all three
+ * halves of that, and it is pure: places in, registry + ownership out, no LLM and
+ * no filesystem.
+ *
+ * The cli and api formations take INTERFACES, because on those surfaces the
+ * places are a shape over interactions that already exist. The web formation
+ * takes the places THEMSELVES (`web-tree.ts` reads them off the tree), because
+ * on the web the order is reversed: a screen exists whether or not anyone has
+ * written a task that visits it, and web tasks are a later slice. That is also
+ * why it establishes no ownership — there is nothing of type `web` to own.
  *
  * It is used TWICE and must stay one implementation: the mappers call it while
  * deriving a catalog, and the reference-catalog migration calls it so a
@@ -21,6 +28,7 @@
  */
 
 import type { Interface, InterfaceResource, InterfaceResourceId } from '@truecourse/shared'
+import type { WebPlace } from './web-tree.js'
 
 /** What a formation pass establishes for one surface. */
 export interface ResourceFormation {
@@ -129,6 +137,44 @@ export function formCliResources(
   }
 
   return { resources, owners }
+}
+
+// ---------------------------------------------------------------------------
+// WEB — one screen per ADDRESS the app serves
+// ---------------------------------------------------------------------------
+
+/**
+ * The web places: ONE `screen` per address the tree declares, carrying that
+ * address so a navigate step can reach it.
+ *
+ * Flat, and not for want of a hierarchy: a screen sits on nothing — the schema
+ * refuses `of` on one, because a screen is the thing dialogs and panels are `of`.
+ * The path tree LOOKS like nesting (`/documents` above `/documents/{id}`) but it
+ * is not the same relation: `/documents/{id}` is not rendered inside
+ * `/documents`, it REPLACES it. The api noun tree nests because a REST path
+ * genuinely names a thing within a thing; two addresses of a web app are two
+ * places, and saying otherwise would put a false `of` chain in front of every
+ * location check.
+ *
+ * No ownership is established (see the module note): web tasks are a later
+ * slice, so there is nothing to own yet, and `owners` comes back empty rather
+ * than guessed.
+ */
+export function formWebResources(places: readonly WebPlace[]): ResourceFormation {
+  if (places.length === 0) return EMPTY
+
+  const used = new Set<string>()
+  const resources: InterfaceResource[] = []
+  for (const place of places) {
+    // The root address slugifies to nothing, and `/` is a real screen — the one
+    // every app has. It is named for what it is rather than left to the generic
+    // fallback id.
+    const segments = place.address.split('/').filter(Boolean)
+    const id = uniqueId(segments.length === 0 ? 'root' : slug(segments), used)
+    resources.push({ id, kind: place.kind, title: place.address, address: place.address })
+  }
+
+  return { resources, owners: new Map() }
 }
 
 // ---------------------------------------------------------------------------

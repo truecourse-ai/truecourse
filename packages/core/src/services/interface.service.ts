@@ -12,8 +12,11 @@
  * not extend here.
  *
  * The snapshot is HALF the catalog, and this half is the only one that is
- * derived. `cli` and `api` are the only surfaces anything reads off a tree; the
- * rest — every web surface in existence — is hand-authored, lives in the
+ * derived. `cli` and `api` are read off the tree whole — their places AND their
+ * interactions. The `web` surface is derived by HALVES: its PLACES are read off
+ * the routing tree (`deriveWebPlacesFromTree`), its TASKS are not derived at all.
+ * A web task is an ordered navigate/activate sequence with a start and an end
+ * state — intent, which no tree states — so it stays hand-authored, lives in the
  * committed `guard/interfaces.authored.json`, is never written here, and is
  * merged over this file by every reader (`readMergedInterfaceCatalog`). The one
  * place that rule is enforced rather than assumed is
@@ -53,10 +56,13 @@ import {
   createSandboxProbeExec,
   deriveApiInterfacesFromTree,
   deriveCliInterfaces,
+  deriveWebPlacesFromTree,
   formApiResources,
   formCliResources,
+  formWebResources,
   type ApiSpecOperation,
   type CliProbeExec,
+  type WebPlace,
 } from '@truecourse/interface-mapper';
 import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
 import type { SeedDraftDatabase } from '@truecourse/guard-generator';
@@ -132,7 +138,7 @@ export async function mapInterfaces(
   // wrote. Checked first so the refusal costs nothing and touches nothing.
   assertDerivedSnapshot(repoPath);
   const interfaces = await deriveInterfaces(repoPath, opts);
-  const placed = placeInterfaces(interfaces.interfaces, programName(repoPath));
+  const placed = placeInterfaces(interfaces.interfaces, programName(repoPath), interfaces.webPlaces);
 
   const catalog: InterfacesFile = {
     version: 2,
@@ -157,16 +163,28 @@ export async function mapInterfaces(
   };
 }
 
-/** The surfaces a derivation actually produces. Everything else in
- *  `guard/interfaces.json` was typed by a human. */
-const DERIVED_SURFACES = new Set(['cli', 'api']);
+/**
+ * The surfaces whose INTERFACES a derivation produces. Any other type in the
+ * snapshot's interface list was typed by a human.
+ *
+ * The web surface is deliberately NOT in this set although the mapper now
+ * derives web RESOURCES (the places, `formWebResources`). The two halves of a
+ * surface are not equally replaceable: a place is read off the routing tree and
+ * costs one command to re-derive, while a TASK — the ordered navigate/activate
+ * sequence with its start and end states — encodes intent no tree states, and is
+ * exactly the work the refusal below exists to protect. Widening the set to
+ * `web` because half of that surface became derivable would retire the guard for
+ * the half that still cannot be. It narrows when web tasks derive, not before.
+ */
+const DERIVED_INTERFACE_SURFACES = new Set(['cli', 'api']);
 
 /**
- * REFUSE TO OVERWRITE HAND-AUTHORED WORK. The mapper derives `cli` and `api` and
- * nothing else, so a snapshot carrying any other surface — or the pre-SOM v1
- * shape — is somebody's authoring, and rewriting it destroys hours no derivation
- * can reproduce. It has already happened: a 618KB curated catalog, gone in one
- * command, with the run afterwards perfectly green.
+ * REFUSE TO OVERWRITE HAND-AUTHORED WORK. The mapper derives the `cli` and `api`
+ * interfaces and nothing else, so a snapshot carrying any other surface's
+ * interfaces — or the pre-SOM v1 shape — is somebody's authoring, and rewriting
+ * it destroys hours no derivation can reproduce. It has already happened: a
+ * 618KB curated catalog, gone in one command, with the run afterwards perfectly
+ * green.
  *
  * It throws rather than warning, and that is the point. Warning and proceeding
  * means the rest of the pipeline runs without that surface and settles its flows
@@ -213,7 +231,7 @@ function handAuthoredEvidence(raw: unknown): string | null {
   const authored = new Set<string>();
   for (const entry of file.interfaces) {
     const type = (entry as { type?: unknown } | null)?.type;
-    if (typeof type === 'string' && !DERIVED_SURFACES.has(type)) authored.add(type);
+    if (typeof type === 'string' && !DERIVED_INTERFACE_SURFACES.has(type)) authored.add(type);
   }
   if (authored.size === 0) return null;
   const surfaces = [...authored].sort();
@@ -236,10 +254,14 @@ function handAuthoredEvidence(raw: unknown): string | null {
 function placeInterfaces(
   interfaces: readonly Interface[],
   programName: string | undefined,
+  webPlaces: readonly WebPlace[],
 ): { interfaces: Interface[]; resources: Record<string, InterfaceResource[]> } {
   try {
     const cli = formCliResources(interfaces, { ...(programName ? { programName } : {}) });
     const api = formApiResources(interfaces);
+    // The web registry is places WITHOUT interfaces — the one surface where the
+    // places exist first (see `formWebResources`), so it contributes no owners.
+    const web = formWebResources(webPlaces);
     const owners = new Map([...cli.owners, ...api.owners]);
     return {
       interfaces: interfaces.map((iface) => {
@@ -249,6 +271,7 @@ function placeInterfaces(
       resources: {
         ...(cli.resources.length > 0 ? { cli: cli.resources } : {}),
         ...(api.resources.length > 0 ? { api: api.resources } : {}),
+        ...(web.resources.length > 0 ? { web: web.resources } : {}),
       },
     };
   } catch (error) {
@@ -282,6 +305,12 @@ export function interfaceTypeFingerprints(interfaces: readonly Interface[]): Rec
 
 interface DerivedCatalog {
   interfaces: Interface[];
+  /**
+   * The web surface's PLACES — the only half of it a derivation produces. Kept
+   * apart from `interfaces` because that is what they are: a screen exists
+   * whether or not a task visits it, and web tasks are not derived at all.
+   */
+  webPlaces: WebPlace[];
   source: Record<string, InterfaceCatalogSource>;
   externalServices: DetectedExternalService[];
   database: SeedDraftDatabase | null;
@@ -300,6 +329,7 @@ async function deriveInterfaces(
     log.warn(`interface mapping: analysis failed, catalog is empty (${errorText(error)})`);
     return {
       interfaces: [],
+      webPlaces: [],
       source: {},
       externalServices: [],
       database: null,
@@ -312,6 +342,7 @@ async function deriveInterfaces(
   // catalog only — its flows settle as honest `no-interface` gaps while the other
   // surfaces keep grounding.
   const interfaces: Interface[] = [];
+  const webPlaces: WebPlace[] = [];
   const source: Record<string, InterfaceCatalogSource> = {};
 
   try {
@@ -339,8 +370,20 @@ async function deriveInterfaces(
     log.warn(`interface mapping: api derivation failed, api catalog is empty (${errorText(error)})`);
   }
 
+  // The web surface, structural half: the PLACES the routing tree declares. It
+  // derives no interfaces — a web task is intent, not structure — so a repo with
+  // screens and no tasks is the normal state of this surface, not a failure.
+  // `source.web` means what it means everywhere else: which ladder read the area.
+  try {
+    webPlaces.push(...deriveWebPlacesFromTree(fileAnalyses));
+    source.web = 'tree';
+  } catch (error) {
+    log.warn(`interface mapping: web derivation failed, web catalog is empty (${errorText(error)})`);
+  }
+
   return {
     interfaces,
+    webPlaces,
     source,
     externalServices: detectExternalServices(fileAnalyses, {
       ownHosts: repoOwnHosts(repoPath, fileAnalyses),

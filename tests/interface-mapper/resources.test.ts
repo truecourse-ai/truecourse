@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { formApiResources, formCliResources } from '../../packages/interface-mapper/src/resources'
+import { formApiResources, formCliResources, formWebResources } from '../../packages/interface-mapper/src/resources'
 import { interfaceFingerprint, type Interface } from '../../packages/shared/src/interfaces'
 
 function cliIface(command: string[]): Interface {
@@ -192,5 +192,49 @@ describe('formApiResources — the verb/noun rule', () => {
   it('ignores every non-api entry, and an empty surface forms nothing', () => {
     expect(formApiResources([cliIface(['analyze'])]).resources).toEqual([])
     expect(formApiResources([]).resources).toEqual([])
+  })
+})
+
+describe('formWebResources', () => {
+  const place = (address: string) => ({
+    kind: 'screen' as const,
+    address,
+    idiom: 'next-app' as const,
+    filePath: `/r/app${address}/page.tsx`,
+  })
+
+  it('is one screen per address, carrying the address a navigate step reaches it by', () => {
+    const { resources } = formWebResources([
+      place('/'),
+      place('/t/{teamUrl}/documents/{id}/edit'),
+      place('/reschedule/{uid}'),
+    ])
+    expect(resources).toEqual([
+      { id: 'root', kind: 'screen', title: '/', address: '/' },
+      {
+        id: 't-teamurl-documents-id-edit',
+        kind: 'screen',
+        title: '/t/{teamUrl}/documents/{id}/edit',
+        address: '/t/{teamUrl}/documents/{id}/edit',
+      },
+      { id: 'reschedule-uid', kind: 'screen', title: '/reschedule/{uid}', address: '/reschedule/{uid}' },
+    ])
+  })
+
+  it('nests nothing — a screen sits on nothing, which is the schema’s own rule', () => {
+    const { resources } = formWebResources([place('/documents'), place('/documents/{id}')])
+    expect(resources.every((r) => r.of === undefined)).toBe(true)
+  })
+
+  it('keeps ids unique when two addresses slugify alike, and owns no interface', () => {
+    const { resources, owners } = formWebResources([place('/a/b-c'), place('/a/b/c')])
+    expect(new Set(resources.map((r) => r.id)).size).toBe(2)
+    // The tasks are a later slice: this formation places nothing, because there
+    // is nothing of type `web` to place.
+    expect(owners.size).toBe(0)
+  })
+
+  it('forms nothing from an empty tree', () => {
+    expect(formWebResources([]).resources).toEqual([])
   })
 })

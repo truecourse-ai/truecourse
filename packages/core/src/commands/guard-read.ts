@@ -1627,7 +1627,7 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
 
   const countByType = new Map<string, number>()
   for (const j of catalog.interfaces) countByType.set(j.type, (countByType.get(j.type) ?? 0) + 1)
-  const surfaces = interfaceSurfaces(countByType, catalog.source)
+  const surfaces = interfaceSurfaces(countByType, catalog.source, catalog.resources)
 
   return {
     mapped: true,
@@ -1926,21 +1926,31 @@ function interfaceReverseIndex(
  * sourceless with interfaces is a surface a human wrote; sourceless with NONE is a
  * derivation that found nothing. Inside a mixed area the exact answer is per row
  * (`origin`), because one area can hold both.
+ *
+ * A surface is DETECTED when either half of it was found. Since the web
+ * derivation landed, a surface can be all places and no interfaces — a mapped web
+ * app has a screen per address and no tasks at all, because tasks are authored
+ * and places are derived. Judging the row on its interface count alone would have
+ * reported a repo whose every screen was just derived as one where nothing was
+ * found, which is the one thing the banner must never say.
  */
 function interfaceSurfaces(
   countByType: ReadonlyMap<string, number>,
   source: Record<string, 'tree' | 'probes'> | undefined,
+  resourcesByArea: Record<string, readonly unknown[]> | undefined,
 ): GuardInterfaceSurface[] {
   return GUARD_DRIVERS.map((row) => {
     const driver: GuardDriverDef = row
     const interfaces = countByType.get(driver.id) ?? 0
+    const resources = resourcesByArea?.[driver.id]?.length ?? 0
     return {
       surface: driver.id as GuardDriverId,
       label: driver.label,
       runnable: driver.runnable,
       ...(driver.waitingLabel ? { waitingLabel: driver.waitingLabel } : {}),
       interfaces,
-      detected: interfaces > 0,
+      resources,
+      detected: interfaces > 0 || resources > 0,
       ...(source?.[driver.id] ? { source: source[driver.id] } : {}),
     }
   })
@@ -1953,7 +1963,7 @@ function emptyInterfacesView(): GuardInterfacesView {
     generatedAt: null,
     recipeFingerprint: null,
     interfaces: [],
-    surfaces: interfaceSurfaces(new Map(), undefined),
+    surfaces: interfaceSurfaces(new Map(), undefined, undefined),
     totals: { interfaces: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 },
   }
 }

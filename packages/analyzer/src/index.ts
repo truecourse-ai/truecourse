@@ -38,6 +38,7 @@ export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsx
 export { extractCalls, buildFunctionContext } from './extractors/calls.js'
 export { extractHttpCalls } from './extractors/http-calls.js'
 export { extractRouteRegistrations } from './extractors/route-registrations.js'
+export { extractWebRoutes } from './extractors/web-routes.js'
 export { extractCliCommands } from './extractors/cli-commands.js'
 export { extractOutboundRequests } from './extractors/outbound-requests.js'
 export { extractRequestContracts, type RequestContractExtraction } from './extractors/request-contracts.js'

@@ -1158,6 +1158,21 @@ export const InterfaceResourceSchema = z
      * screen does.
      */
     of: InterfaceResourceIdSchema.optional(),
+    /**
+     * WHERE a screen is, as a navigate step writes it — the route template with
+     * `{param}` slots ({@link canonicalRoutePath}'s form, the one the api entries
+     * already use). A `screen` is defined as the place that owns an address, so
+     * this is the field that makes one reachable: without it a derived screen is
+     * a title nothing can navigate to.
+     *
+     * SCREENS ONLY, and enforced below. A dialog opens OVER a screen and a panel
+     * swaps in WITHOUT leaving one — neither has an address of its own, and one
+     * written on either would be a route that navigates somewhere else.
+     * Optional, per the absence rule: a screen a derivation named but could not
+     * address (or a hand-authored place written before this field existed)
+     * carries none rather than a guess.
+     */
+    address: z.string().min(1).optional(),
     /** One line on what the place is for. */
     description: z.string().min(1).optional(),
     readables: InterfaceReadablesSchema.optional(),
@@ -1169,6 +1184,13 @@ export const InterfaceResourceSchema = z
         code: z.ZodIssueCode.custom,
         path: ['of'],
         message: 'a screen sits on nothing — `of` belongs to a panel or a dialog',
+      })
+    }
+    if (resource.kind !== 'screen' && resource.address) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['address'],
+        message: 'only a screen owns an address — a dialog opens over one, a panel sits on one',
       })
     }
     // A readable id is a NAME — one fact per name, across all four kinds, so a

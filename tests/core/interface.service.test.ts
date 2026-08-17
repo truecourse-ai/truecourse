@@ -86,7 +86,7 @@ describe('mapInterfaces', () => {
 
     expect(result.snapshotPath).toBe(path.join(repo, '.truecourse/guard/interfaces.json'));
     expect(result.catalog.version).toBe(2);
-    expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree' });
+    expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree', web: 'tree' });
     expect(result.catalog.interfaces.map((j) => j.id)).toEqual([
       'cli/config',
       'cli/config-get',
@@ -162,7 +162,7 @@ describe('mapInterfaces', () => {
       },
     });
 
-    expect(result.catalog.source).toEqual({ cli: 'probes', api: 'tree' });
+    expect(result.catalog.source).toEqual({ cli: 'probes', api: 'tree', web: 'tree' });
     expect(result.catalog.interfaces.map((j) => j.id)).toEqual(['cli/deploy', 'cli/status']);
     expect(result.catalog.interfaces[0].steps[0]).toMatchObject({ flags: ['--env'] });
     // The entry the recipe declares, resolved to the built artifact.
@@ -224,7 +224,7 @@ describe('mapInterfaces', () => {
     });
 
     const result = await mapInterfaces(repo, { probeExec: null });
-    expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree' });
+    expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree', web: 'tree' });
     expect(result.catalog.interfaces.map((j) => j.id)).toEqual([
       'cli/config',
       'cli/config-get',
@@ -270,6 +270,33 @@ describe('mapInterfaces', () => {
 
     // The registry is written to disk with everything else, and re-reads valid.
     expect(readSnapshot().resources).toEqual(result.catalog.resources);
+  });
+
+  it('derives the web PLACES off the tree — the surface with places and no tasks yet', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'next.config.js': 'module.exports = {}',
+      'app/page.tsx': 'export default function Home() { return <main /> }',
+      'app/(dashboard)/repos/[repoId]/page.tsx': 'export default function Repo() { return <main /> }',
+      'app/api/health/route.ts': 'export function GET() { return Response.json({ ok: true }) }',
+    });
+
+    const result = await mapInterfaces(repo, { probeExec: null });
+
+    expect(result.catalog.resources!.web).toEqual([
+      { id: 'root', kind: 'screen', title: '/', address: '/' },
+      {
+        id: 'repos-repoid',
+        kind: 'screen',
+        title: '/repos/{repoId}',
+        address: '/repos/{repoId}',
+      },
+    ]);
+    // The surface is DERIVED now — `source` says which ladder read it, exactly as
+    // it does for cli and api. The tasks are a later slice, so it has none.
+    expect(result.catalog.source!.web).toBe('tree');
+    expect(result.catalog.interfaces.some((j) => j.type === 'web')).toBe(false);
+    expect(readSnapshot().resources!.web).toEqual(result.catalog.resources!.web);
   });
 
   it('writes the request contract ONTO the operation it belongs to', async () => {
@@ -526,6 +553,24 @@ describe('mapInterfaces refuses to overwrite a hand-authored catalog', () => {
 
     const again = await mapInterfaces(repo, { probeExec: null });
     expect(again.catalog.interfaces.map((j) => j.id)).toContain('cli/deploy');
+    expect(backups()).toEqual([]);
+  });
+
+  it('re-maps its own web PLACES — a derived registry is not authoring', async () => {
+    // The web surface became derivable in its structural half: places are read
+    // off the tree, so a catalog carrying them is the mapper's own output and
+    // re-deriving it costs nothing. What the refusal protects is unchanged —
+    // web INTERFACES, which no derivation writes.
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'next.config.js': 'module.exports = {}',
+      'app/inbox/page.tsx': 'export default function Inbox() { return <main /> }',
+    });
+    const first = await mapInterfaces(repo, { probeExec: null });
+    expect(first.catalog.resources!.web).toHaveLength(1);
+
+    const again = await mapInterfaces(repo, { probeExec: null });
+    expect(again.catalog.resources!.web).toEqual(first.catalog.resources!.web);
     expect(backups()).toEqual([]);
   });
 
