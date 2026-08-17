@@ -765,7 +765,16 @@ describe('the contract union', () => {
       request({ query: [{ name: 'level', required: false, choices: ['a'], default: 'a', hint: 'n' }] }),
     ).not.toThrow()
     expect(request({ query: [{ name: 'level', required: false, in: 'query' }] })).toThrow()
-    expect(request({ headers: [{ name: 'authorization', required: true }] })).toThrow()
+    // A header is the fourth PLACE a caller puts a value, so it is a region of its
+    // own (2026-08-17). `Authorization` is a header here and nothing more — which
+    // secret fills it is the recipe's to say.
+    expect(request({ headers: [{ name: 'Authorization', required: true }] })).not.toThrow()
+    // A field may repeat — a repeated query parameter, a repeatable multipart part.
+    expect(request({ body: [{ name: 'files', required: true, repeatable: true }] })).not.toThrow()
+    // But there is no `multipart` region: the split is by WHERE a value goes, not
+    // how it is encoded, and a part goes in the body. Its `Content-Type` header is
+    // what says the body is multipart.
+    expect(request({ multipart: [{ name: 'files', required: true }] })).toThrow()
 
     // Omitted and empty stay two different reads, per region.
     const bare = InterfaceContractSchema.parse({ surface: 'api', operation: {} })

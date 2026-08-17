@@ -32,10 +32,41 @@ import fs from 'node:fs'
 import { formApiResources, formCliResources } from '../packages/interface-mapper/src/resources.js'
 import { InterfacesFileSchema, type Interface, type InterfaceResource } from '@truecourse/shared'
 
-/** How the reference author opened the description of a body field. */
-const BODY_MARKER = /^JSON body field\./
-/** …and of a query parameter. */
-const QUERY_MARKER = /^Query parameter\./
+/**
+ * The phrase each reference author opened an option's description with, naming
+ * WHERE the value goes. Matched on the phrase alone, because the corpora write it
+ * two ways: as its own sentence (`JSON body field. The slug…`) and as the opening
+ * clause of one (`Query parameter, and it is READ here (unlike the document
+ * download route).`). Anchoring on a following period would silently drop the
+ * second form into "unclassified".
+ *
+ * A multipart part is a BODY field: the four regions split by WHERE a caller puts
+ * a value, and a part goes in the body — that the body is multipart is what its
+ * `Content-Type` header says.
+ *
+ * A path parameter arrives as a v1 `positional` almost always. An OPTION marked
+ * one is the rarer case: a value the app validates as a path param that the route
+ * path never declares. It still belongs in `params`, because that is where the app
+ * says it lives — calling it a query parameter would assert a caller can send it,
+ * which is the very thing such an entry exists to deny.
+ */
+const MARKERS = {
+  params: /^Path parameter\b/,
+  query: /^Query parameter\b/,
+  headers: /^Request header\b/,
+  body: /^(?:JSON body field|Multipart part)\b/,
+} as const
+
+/**
+ * The marker prefix worth REMOVING: only its own-sentence form, and only when
+ * something follows it. The clause form carries meaning past the comma, so
+ * stripping to the first period would delete the whole description.
+ */
+const MARKER_PREFIX =
+  /^(?:Path parameter|Query parameter|Request header|JSON body field|Multipart part)\b[^.]*\.\s+/
+
+/** A multipart part the operation reads more than one of. */
+const REPEATABLE_MARKER = /^Multipart part, repeatable\b/
 
 interface V1Option {
   flag: string
@@ -66,7 +97,8 @@ function requestField(option: V1Option): Json {
     ...(option.valueHint ? { hint: option.valueHint } : {}),
     ...(option.choices ? { choices: option.choices } : {}),
     ...(option.default !== undefined ? { default: option.default } : {}),
-    ...(option.description ? { description: option.description.replace(/^[^.]+\.\s*/, '') } : {}),
+    ...(REPEATABLE_MARKER.test(option.description ?? '') ? { repeatable: true } : {}),
+    ...(option.description ? { description: option.description.replace(MARKER_PREFIX, '') } : {}),
   }
 }
 
@@ -90,18 +122,30 @@ function toOperation(command: Json): Json {
     writes?: unknown[]
   }
 
-  const body = options.filter((o) => BODY_MARKER.test(o.description ?? ''))
-  const query = options.filter((o) => QUERY_MARKER.test(o.description ?? ''))
-  const unclassified = options.filter((o) => !body.includes(o) && !query.includes(o))
+  const body = options.filter((o) => MARKERS.body.test(o.description ?? ''))
+  const query = options.filter((o) => MARKERS.query.test(o.description ?? ''))
+  const headers = options.filter((o) => MARKERS.headers.test(o.description ?? ''))
+  const paramOptions = options.filter((o) => MARKERS.params.test(o.description ?? ''))
+  const unclassified = options.filter(
+    (o) =>
+      !body.includes(o) && !query.includes(o) && !headers.includes(o) && !paramOptions.includes(o),
+  )
   if (unclassified.length > 0) {
     throw new Error(
-      `option(s) ${unclassified.map((o) => o.flag).join(', ')} say neither "Query parameter." nor "JSON body field." — where do they go?`,
+      `option(s) ${unclassified.map((o) => o.flag).join(', ')} open with none of "Path parameter", "Query parameter", "Request header", "JSON body field" or "Multipart part" — where do they go?`,
     )
   }
 
+  const params = [...positionals.map(paramField), ...paramOptions.map(requestField)]
   const request: Json = {
-    ...(command.positionals !== undefined ? { params: positionals.map(paramField) } : {}),
-    ...(command.options !== undefined ? { query: query.map(requestField), body: body.map(requestField) } : {}),
+    ...(command.positionals !== undefined || paramOptions.length > 0 ? { params } : {}),
+    ...(command.options !== undefined
+      ? {
+          query: query.map(requestField),
+          headers: headers.map(requestField),
+          body: body.map(requestField),
+        }
+      : {}),
   }
 
   const operationProduces: Json = {

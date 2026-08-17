@@ -733,6 +733,14 @@ export const InterfaceRequestFieldSchema = z
     choices: z.array(z.string()).optional(),
     /** What applies when the field is absent, as the surface declares it. */
     default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    /**
+     * The field may be given more than once and the operation reads them all —
+     * a repeated query parameter (`?tag=a&tag=b`), a repeatable multipart part.
+     * The api analog of a cli positional's `variadic`: it changes how a caller
+     * WRITES the field, so a scenario that sends one value where the operation
+     * expects a list is wrong in a way no other field property would catch.
+     */
+    repeatable: z.boolean().optional(),
     description: z.string().optional(),
   })
   .strict()
@@ -740,9 +748,28 @@ export type InterfaceRequestField = z.infer<typeof InterfaceRequestFieldSchema>
 
 /**
  * What an operation takes IN, split by where the caller puts it: `params` in the
- * path template, `query` in the query string, `body` in the request body. Three
- * arrays rather than one list with a `in:` tag, because the three are addressed
- * differently by every caller and a scenario has to know which is which.
+ * path template, `query` in the query string, `headers` in the request headers,
+ * `body` in the request body. Four arrays rather than one list with a `in:` tag,
+ * because the four are addressed differently by every caller and a scenario has
+ * to know which is which.
+ *
+ * `headers` joined the other three on 2026-08-17, having been missed when this
+ * region was written: the corpus it was validated against was cli-heavy, and the
+ * three hand-authored api corpora turned out to carry 305 of them — more than
+ * they carry query parameters. They are not all credentials. Strapi alone
+ * declares `Authorization` on every one of its 55 operations, and beside it
+ * `Content-Type`, `Accept`, `MCP-Protocol-Version`, a session id and two vendor
+ * toggles: content negotiation and protocol versioning are request inputs a
+ * caller gets wrong at the same cost as a missing body field.
+ *
+ * `Authorization` is a header here and nothing more. WHICH secret fills it is the
+ * recipe's `provides.credentials` to say and a scenario's `${credential:…}` to
+ * write — naming it twice would give one fact two sources.
+ *
+ * There is deliberately no `multipart` region. The split is by WHERE a caller
+ * puts a value, not by how it is encoded, and a multipart part is in the body —
+ * that the body is multipart is what its `Content-Type` header says. A fifth
+ * region would only make "is a part a body field?" ambiguous, and it is one.
  *
  * The absence rule of the contract region applies per array: OMITTED means the
  * extraction established nothing there, EMPTY means it established "none".
@@ -752,6 +779,8 @@ export const InterfaceApiRequestSchema = z
     /** Path-template parameters — the `{name}`s of the entry's own path. */
     params: z.array(InterfaceRequestFieldSchema).optional(),
     query: z.array(InterfaceRequestFieldSchema).optional(),
+    /** Request headers — `Authorization`, `Content-Type`, whatever the operation reads. */
+    headers: z.array(InterfaceRequestFieldSchema).optional(),
     body: z.array(InterfaceRequestFieldSchema).optional(),
   })
   .strict()
