@@ -32,7 +32,7 @@
  *     kinds);
  *   - `cli-steps.ts`  — `run` / `git` / `write` / `delete` / `patch`;
  *   - `api-steps.ts`  — `request` / `boot` / `signal` / `logs`;
- *   - `web-steps.ts`  — `navigate` / `click` / `fill` / `expect`.
+ *   - `web-steps.ts`  — `navigate` / `click` / `fill` / `upload` / `history` / `expect`.
  *
  * The dependency runs ONE WAY (primitives → driver verbs → this module), so a
  * driver's vocabulary can grow without this file growing with it. Every step MAY

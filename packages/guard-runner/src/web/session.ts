@@ -15,7 +15,7 @@
 
 import fs from 'node:fs'
 import type { Page } from 'playwright-core'
-import { launchWebBrowser, type WebBrowserHandle } from './browser.js'
+import { launchWebBrowser, type ArmedFileChooser, type WebBrowserHandle } from './browser.js'
 import type { WebSurfaceHandle } from './surface.js'
 
 export interface OpenWebSessionOptions {
@@ -35,6 +35,12 @@ export interface WebSession {
   browser: WebBrowserHandle
   /** Everything the page logged and every uncaught page error, in order. */
   consoleLines(): readonly string[]
+  /**
+   * Arm the page for the next file chooser — the session's, because the listener
+   * that intercepts them belongs to the page and lives as long as it does. See
+   * {@link WebBrowserHandle.armFileChooser} for why it is armed per step.
+   */
+  armFileChooser(): ArmedFileChooser
   /** Close the browser. Idempotent; the server outlives it and is the sandbox's. */
   close(): Promise<{ video: string | null }>
 }
@@ -72,6 +78,7 @@ export async function openWebSession(opts: OpenWebSessionOptions): Promise<OpenW
       server,
       browser,
       consoleLines: () => [...browser.consoleLines(), ...browser.pageErrors().map((e) => `pageerror: ${e}`)],
+      armFileChooser: () => browser.armFileChooser(),
       async close() {
         if (closed) return { video }
         closed = true

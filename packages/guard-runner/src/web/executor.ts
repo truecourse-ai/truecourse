@@ -29,6 +29,7 @@ import {
   isWebFillStep,
   isWebHistoryStep,
   isWebNavigateStep,
+  isWebUploadStep,
   webStateAssertions,
   webVisibleTargets,
   type GuardWebExpect,
@@ -37,6 +38,8 @@ import {
   type GuardWebStep,
 } from '@truecourse/shared'
 import { describeTextMatcher, matchTextMatcher, truncate, type ExpectMismatch } from '../expect.js'
+import type { ArmedFileChooser } from './browser.js'
+import type { WebFilePayload } from './upload.js'
 
 /**
  * Default budget for one web step's observable state to arrive. Shorter than the
@@ -111,6 +114,15 @@ export interface ExecuteWebStepOptions {
   evidenceDir: string
   /** This step's budget. */
   timeoutMs: number
+  /**
+   * The materialized file an `upload` step hands the chooser. The DRIVER resolves
+   * the declaration into bytes, because the sandbox a `path:` file is read from is
+   * the driver's context and not this module's — the executor drives the page, and
+   * a step whose payload could not be materialized never reaches it.
+   */
+  file?: WebFilePayload
+  /** Arm the page for the next file chooser — the session's, per step. */
+  armFileChooser?: () => ArmedFileChooser
   /** Run-level cancellation. */
   signal?: AbortSignal
 }
@@ -626,6 +638,42 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
       const target = await awaitTarget(page, step.fill, 'to fill', deadline, opts.signal)
       if ('mismatch' in target) mismatch = target.mismatch
       else await target.locator.fill(step.value, { timeout: Math.max(1, deadline - Date.now()) })
+    } else if (isWebUploadStep(step)) {
+      const target = await awaitTarget(page, step.upload, 'to upload to', deadline, opts.signal)
+      if ('mismatch' in target) {
+        mismatch = target.mismatch
+      } else if (!opts.file || !opts.armFileChooser) {
+        // The driver materializes the payload and settles an error when it cannot;
+        // reaching here without one means the executor was called by hand.
+        infra = 'the upload step reached the browser with no materialized file'
+      } else {
+        // ARM BEFORE THE CLICK. The chooser opens during the click, and a listener
+        // attached after it would race the event it exists to catch.
+        const armed = opts.armFileChooser()
+        await target.locator.click({ timeout: Math.max(1, deadline - Date.now()) })
+        const chooser = await armed.next(Math.max(1, deadline - Date.now()))
+        if (!chooser) {
+          // The control was there, it took the click, and nothing asked for a file.
+          // A real finding about the page — and precisely the one a `setInputFiles`
+          // on a CSS-addressed hidden input would have turned into a false pass.
+          mismatch = {
+            subject: 'target',
+            expected: describeWebCommand(step),
+            actual: `${describeWebLocator(step.upload)} opened no file chooser — it does not take a file`,
+            detail: [
+              `expected ${describeWebCommand(step)} at ${pageAddress(page)}`,
+              `${describeWebLocator(step.upload)} was found and clicked; nothing asked for a file`,
+              '--- visible page text ---',
+              await readVisibleText(page),
+            ],
+          }
+        } else {
+          await chooser.setFiles(
+            { name: opts.file.name, mimeType: opts.file.mimeType, buffer: opts.file.buffer },
+            { timeout: Math.max(1, deadline - Date.now()) },
+          )
+        }
+      }
     } else if (isWebHistoryStep(step)) {
       // The RETURN VALUE is deliberately ignored. A same-document traversal — every
       // Back in a single-page app — completes without a navigation response, and

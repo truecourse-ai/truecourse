@@ -40,6 +40,24 @@ export const GuardStepWebCheckSchema = z
 export type GuardStepWebCheck = z.infer<typeof GuardStepWebCheckSchema>
 
 /**
+ * The FILE an upload step handed the page — its identity, never its content. Name,
+ * size and digest are what a reader checks ("that is the seed's canonical PDF, and
+ * the app is showing its name"); the bytes themselves are a payload no record needs
+ * and, for an authored `text` file, may be the very data the scenario is about.
+ */
+export const GuardStepWebUploadSchema = z
+  .object({
+    /** The filename the app was shown. */
+    name: z.string(),
+    /** Decoded size in bytes. */
+    bytes: z.number().int().nonnegative(),
+    /** sha256 of the bytes, hex — auditable against a seed's published digest. */
+    sha256: z.string(),
+  })
+  .strict()
+export type GuardStepWebUpload = z.infer<typeof GuardStepWebUploadSchema>
+
+/**
  * What a WEB step did, in its own vocabulary. A browser step spawns nothing, so it
  * has no exit code and no streams: it has an action, an address, what it asserted
  * and what answered each assertion, the page's own words, and a picture.
@@ -58,6 +76,11 @@ export const GuardStepWebActualSchema = z
     text: z.string().optional(),
     /** Console lines and page errors seen during the step. */
     console: z.array(z.string()).optional(),
+    /**
+     * The file an `upload` step handed the page. Additive and optional (the
+     * `failure.visual` precedent): a bundle written before the verb carries none.
+     */
+    upload: GuardStepWebUploadSchema.optional(),
   })
   .strict()
 export type GuardStepWebActual = z.infer<typeof GuardStepWebActualSchema>
@@ -161,6 +184,7 @@ const InvocationStepSchema = z
         checks: z.array(GuardStepWebCheckSchema).optional(),
         visibleText: z.string().optional(),
         console: z.array(z.string()).optional(),
+        upload: GuardStepWebUploadSchema.optional(),
       })
       .passthrough()
       .optional(),
@@ -225,6 +249,7 @@ function webActual(step: InvocationStep): { web?: GuardStepWebActual } {
       checks: web.checks ?? [],
       ...(web.visibleText ? { text: web.visibleText } : {}),
       ...(web.console && web.console.length > 0 ? { console: web.console } : {}),
+      ...(web.upload ? { upload: web.upload } : {}),
     },
   }
 }

@@ -99,6 +99,13 @@ export interface EvidenceWebStep {
   visibleText: string
   /** Console lines and page errors seen during the step. */
   console?: readonly string[]
+  /**
+   * The file an `upload` step handed the page: its NAME, its SIZE and its DIGEST,
+   * and never a byte of it. The digest is what makes the record auditable — a seed
+   * publishes its fixture's sha256, so a reader can check that the document the app
+   * is showing is the document the scenario sent.
+   */
+  upload?: { name: string; bytes: number; sha256: string }
 }
 
 /**
@@ -378,6 +385,11 @@ function renderTranscript(params: WriteEvidenceParams): string {
       lines.push(`   web:      ${s.web.command}`)
       lines.push(`   at:       ${s.web.url}`)
       if (s.web.screenshot) lines.push(`   screen:   ${s.web.screenshot}`)
+      if (s.web.upload) {
+        lines.push(
+          `   file:     ${s.web.upload.name} · ${s.web.upload.bytes} bytes · sha256:${s.web.upload.sha256}`,
+        )
+      }
       for (const line of s.web.console ?? []) lines.push(`   console:  ${line}`)
       const checks = s.web.checks ?? []
       for (const check of checks) {

@@ -16,7 +16,7 @@
 
 import path from 'node:path'
 import type { GuardSandboxStep, GuardWebStep } from '@truecourse/shared'
-import { describeWebCommand, describeWebExpect, isWebStep } from '@truecourse/shared'
+import { describeWebCommand, describeWebExpect, isWebStep, isWebUploadStep } from '@truecourse/shared'
 import { stepExcerpt, type EvidenceStep } from '../evidence.js'
 import {
   DEFAULT_WEB_STEP_TIMEOUT_MS,
@@ -26,6 +26,7 @@ import {
 } from '../web/executor.js'
 import { openWebSession, type WebSession } from '../web/session.js'
 import { resolveWebStep } from '../web/tokens.js'
+import { materializeWebFile, type WebFilePayload } from '../web/upload.js'
 import type { SandboxSurface } from './surface.js'
 import type { StepDriver, StepOutcome, StepRunContext } from './types.js'
 
@@ -69,21 +70,26 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
 
     async execute(step, ctx) {
       const resolved = resolveWebStep(step as GuardWebStep, ctx.tok)
-      const failedToOpen = (message: string): StepOutcome => ({
+      const failedToTake = (message: string, url = '(the browser never opened)'): StepOutcome => ({
         status: 'error',
-        records: [
-          webStepRecord(ctx.stepIndex, resolved, {
-            url: '(the browser never opened)',
-            visibleText: '',
-            durationMs: 0,
-            checks: [],
-          }),
-        ],
+        records: [webStepRecord(ctx.stepIndex, resolved, { url, visibleText: '', durationMs: 0, checks: [] })],
         expected: STEP_TO_RUN,
         message,
       })
+      const failedToOpen = (message: string): StepOutcome => failedToTake(message)
 
       if (!opts.served.declared) return failedToOpen(NO_WEB_SURFACE_INFRA)
+
+      // The uploaded file is materialized BEFORE the browser is asked for anything:
+      // a declaration that cannot become bytes — a path that escapes the sandbox, a
+      // payload past the ceiling — observed nothing about the app, so it is an
+      // `error` naming itself, and it never costs a page load.
+      let file: WebFilePayload | undefined
+      if (isWebUploadStep(resolved)) {
+        const materialized = materializeWebFile(resolved.file, ctx.sandbox.cwd)
+        if (!materialized.ok) return failedToTake(materialized.reason, '(the file never reached the page)')
+        file = materialized.file
+      }
       if (!session) {
         const surface = await opts.served.open(ctx)
         if (!surface.ok) return failedToOpen(surface.reason)
@@ -106,12 +112,18 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
         stepIndex: ctx.stepIndex,
         evidenceDir: ctx.evidenceDir,
         timeoutMs: resolved.timeoutMs ?? DEFAULT_WEB_STEP_TIMEOUT_MS,
+        ...(file ? { file, armFileChooser: () => session!.armFileChooser() } : {}),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       })
       if (ctx.signal?.aborted) return { status: 'aborted' }
 
       const records = [
-        webStepRecord(ctx.stepIndex, resolved, result, session.consoleLines().slice(consoleBefore)),
+        webStepRecord(
+          ctx.stepIndex,
+          resolved,
+          { ...result, ...(file ? { file } : {}) },
+          session.consoleLines().slice(consoleBefore),
+        ),
       ]
       if (result.infra) {
         return { status: 'error', records, expected: STEP_TO_RUN, message: result.infra }
@@ -158,7 +170,10 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
 function webStepRecord(
   index: number,
   step: GuardWebStep,
-  result: Pick<WebStepResult, 'url' | 'visibleText' | 'durationMs' | 'checks'> & { screenshot?: string },
+  result: Pick<WebStepResult, 'url' | 'visibleText' | 'durationMs' | 'checks'> & {
+    screenshot?: string
+    file?: WebFilePayload
+  },
   consoleLines: readonly string[] = [],
 ): EvidenceStep {
   return {
@@ -171,6 +186,12 @@ function webStepRecord(
       ...(result.checks.length > 0 ? { checks: result.checks } : {}),
       url: result.url,
       ...(result.screenshot ? { screenshot: result.screenshot } : {}),
+      // The file's IDENTITY, never its bytes: a name, a size and a digest are what
+      // a reader checks the page's own words against, and the payload is either
+      // unreadable noise or the very data the scenario is about.
+      ...(result.file
+        ? { upload: { name: result.file.name, bytes: result.file.buffer.length, sha256: result.file.sha256 } }
+        : {}),
       visibleText: result.visibleText.slice(0, WEB_TEXT_LIMIT),
       ...(consoleLines.length > 0 ? { console: consoleLines } : {}),
     },

@@ -76,6 +76,7 @@ import { runApiScenario, type RunApiScenarioContext, type ServesPathVerdict } fr
 import { buildRouteManifest, whichAppServes, type RouteManifest } from './route-manifest.js'
 import { preflightApiServer } from './api/preflight.js'
 import { runSeed, SeedError } from './api/seed.js'
+import { containsFixtureReference } from './api/vars.js'
 import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 import {
   appendGuardHistory,
@@ -457,10 +458,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // otherwise. A `request` step counts as much as a web step — it is sent to that
   // same served surface, so a request-only scenario needs it built too.
   const webSurface = resolveWebSurface(loaded.recipe)
-  const servedExec = sandboxExec.filter((p) =>
-    // Teardown steps count: a browser or request step there still needs the surface.
-    guardExecutionSteps(p.scenario).some((step) => isWebStep(step) || isApiRequestStep(step)),
-  )
+  /** Does this scenario reach the served web surface? (Teardown steps count.) */
+  const usesServedSurface = (s: GuardScenario): boolean =>
+    guardExecutionSteps(s).some((step) => isWebStep(step) || isApiRequestStep(step))
+  const servedExec = sandboxExec.filter((p) => usesServedSurface(p.scenario))
   // What a sandbox scenario NEEDS decides its preparation: only a `run:` step
   // invokes the entry, so a scenario with none — a browser-only journey on a
   // web-only product (cal.com has no CLI) — must not be gated on `entry`. Its
@@ -469,6 +470,26 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const entryExec = sandboxExec.filter((p) =>
     guardExecutionSteps(p.scenario).some((step) => isRunStep(step as GuardCliStep)),
   )
+  /**
+   * Does this scenario need the run's PREPARED WORLD — the one-shot `api.services.up`
+   * and the `api.seed` that fills it? The same question the per-driver gate above
+   * asks, asked of the world the whole run SHARES rather than of one surface:
+   *
+   *  - an api-server scenario runs against the recipe's booted server, which is that
+   *    world by definition;
+   *  - a sandbox scenario that reaches the SERVED surface is driving the product —
+   *    the app the datastore stands behind, whose rows the seed wrote;
+   *  - a scenario whose steps read `{{fixture:…}}` is quoting the seed's own output,
+   *    which is a need for the seed however the step then uses it.
+   *
+   * Anything else — pure git/write/`run:` sandbox work — needs none of it, and that
+   * is the economy this predicate exists to protect: a cli-only selection must not
+   * start docker (item 98).
+   */
+  const needsPreparedWorld = (s: GuardScenario): boolean =>
+    isApiServerScenario(s) ||
+    usesServedSurface(s) ||
+    containsFixtureReference(JSON.stringify(guardExecutionSteps(s)))
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
   // Both recipe shapes collapse into ONE named-server map here, and every
@@ -541,6 +562,17 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     dependencyBlocked.push({ ...p, block })
     return false
   })
+
+  /**
+   * THE PREPARED-WORLD GATE (item 98). Services and the seed are the RUN's shared
+   * world, so what decides whether to prepare it is whether anything this selection
+   * will actually RUN needs it — not the size of the api pool. Gating on the pool is
+   * what made `guard run --scenario <a web one>` start no services and seed nothing,
+   * leaving every `{{fixture:…}}` in it settling as "the seed did not run for this
+   * selection". The api pool keeps its own disjunct so an api selection's preparation
+   * is byte-identical to what it always was, dependency-blocked scenarios included.
+   */
+  const worldNeeded = apiRunnableExec.length > 0 || runnable.some((p) => needsPreparedWorld(p.scenario))
 
   // B5: build the OpenAPI operation-schema index ONCE for the docs bound by api
   // scenarios that assert `schema: true`. Built only when at least one such scenario
@@ -663,6 +695,13 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // throwaway sandbox (the api analog of the entry preflight above, reported
     // through the SAME result status). Runs even under `skipBuild` — the server
     // boot is not the build, and birth validation needs the loud single error too.
+    //
+    // The SHARED half (services + seed) is prepared whenever this selection needs
+    // the world (`worldNeeded`); the api SERVER half — credentials, `fromRequest`
+    // logins, the per-server boot preflight — belongs to the api pool alone and is
+    // gated on `apiPool` below. A web-only selection therefore gets the seeded
+    // datastore its app reads and boots no api server for scenarios it will not run.
+    const apiPool = apiRunnableExec.length > 0
     /** Per bound server: its absolutized serve argv and its boot env. */
     const serverBoot = new Map<string, { resolvedServe: string[]; env: Record<string, string> }>()
     let apiCredentials: Map<string, string> | undefined
@@ -680,7 +719,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       external: ResolvedExternal
     }[] = []
     const externalBlockedIds = new Set<string>()
-    if (api && apiRunnableExec.length > 0) {
+    if (api && worldNeeded) {
       // User-provided external API accounts. A PROVIDED external puts its
       // base URL + its extra env into the SERVER env, ABOVE `api.env` (the account
       // the user supplied beats the recipe's default pointer) and BELOW a scenario's
@@ -735,12 +774,18 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // injection ON TOP — the user-supplied account beats the recipe's pointer.
       const externalsEnv = externalsInjectEnv(resolvedExternals)
       const loginsByServer = new Map<string, Record<string, RecipeApiCredential>>()
-      for (const [name, cred] of Object.entries(api.credentials ?? {})) {
-        if (!cred.fromRequest) continue
-        const server = cred.fromRequest.server ?? resolvedServers.defaultServer
-        const group = loginsByServer.get(server) ?? {}
-        group[name] = cred
-        loginsByServer.set(server, group)
+      // A `fromRequest` login is minted against a LIVE server, and only an api
+      // scenario can ever read the value. With no api pool the mint would boot a
+      // server for nobody, so a world-only preparation declares no logins — and
+      // `serversNeeded` below is then empty, which is what keeps it from booting one.
+      if (apiPool) {
+        for (const [name, cred] of Object.entries(api.credentials ?? {})) {
+          if (!cred.fromRequest) continue
+          const server = cred.fromRequest.server ?? resolvedServers.defaultServer
+          const group = loginsByServer.get(server) ?? {}
+          group[name] = cred
+          loginsByServer.set(server, group)
+        }
       }
       const serversNeeded = new Set<string>([
         // A scenario refused above never dispatches, so its server is not needed —
@@ -766,12 +811,21 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         { ...(resolvedServers.servers.get(resolvedServers.defaultServer)?.env ?? {}), ...externalsEnv }
       // Resolve declared credentials from the host env BEFORE booting — a missing
       // env var is a loud stop, and the secret values never touch the recipe env.
-      try {
-        const resolved = resolveApiCredentials(api.credentials, process.env)
-        apiCredentials = new Map([...resolved].map(([name, cred]) => [name, cred.value]))
-      } catch (e) {
-        if (e instanceof CredentialResolutionError) return { status: 'missing-credential-env', message: e.message }
-        throw e
+      // Only the api pool can READ a credential (a sandbox scenario binds no server,
+      // and `{{cred:…}}` is deliberately not active there — item 99), so a world-only
+      // preparation resolves none: refusing a web-only run over an api key nothing in
+      // it can use would be the same false gate item 98 removes. The seed still folds
+      // whatever it PUBLISHES into this map.
+      if (apiPool) {
+        try {
+          const resolved = resolveApiCredentials(api.credentials, process.env)
+          apiCredentials = new Map([...resolved].map(([name, cred]) => [name, cred.value]))
+        } catch (e) {
+          if (e instanceof CredentialResolutionError) return { status: 'missing-credential-env', message: e.message }
+          throw e
+        }
+      } else {
+        apiCredentials = new Map()
       }
       if (api.services) {
         const up = await runBuild(
@@ -1089,6 +1143,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               // Every binding is `provided` by construction — the gate above kept the
               // rest out of `runnable` — so this only ever materializes real instances.
               supplied: suppliedInstancesFor(scenario, resolvedDependencies),
+              // The seed's fixtures reach a SANDBOX scenario too (the api call site
+              // above passes the same map): the canonical document a seeded world
+              // published is the one a web step uploads and an api step posts, and
+              // one world has one copy of it. Undefined when the seed did not run —
+              // which the scenario reports as such, `seedDeclared` telling it apart
+              // from a fixture that simply does not exist.
+              ...(apiFixtures ? { fixtures: apiFixtures } : {}),
+              ...(api?.seed ? { seedDeclared: true } : {}),
               ...(webSurface ? { web: webSurface } : {}),
               stepTimeoutMs,
               capturePassEvidence,

@@ -7,9 +7,12 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-    GuardScenarioSchema,
+  GUARD_WEB_FILE_MAX_BYTES,
+  GUARD_WEB_FILE_TYPES,
+  GuardScenarioSchema,
   GuardSandboxStepSchema,
   GuardWebExpectSchema,
+  GuardWebFileSchema,
   GuardWebLocatorSchema,
   GuardWebStepSchema,
   captureDefects,
@@ -24,7 +27,9 @@ import {
   isWebHistoryStep,
   isWebNavigateStep,
   isWebStep,
+  isWebUploadStep,
   stepCaptureNames,
+  webFileType,
   webStateAssertions,
   webVisibleTargets,
   type GuardSandboxStep,
@@ -242,6 +247,168 @@ describe('the history verb', () => {
     expect(views.map((v) => v.kind)).toEqual(['web', 'web'])
     expect(views[1].command).toBe('go back')
     expect(views[1].expectation).toBe('address is “/”')
+  })
+})
+
+describe('the upload verb', () => {
+  it('parses with the locator in the verb key and the file beside it', () => {
+    const step = GuardWebStepSchema.parse({
+      driver: 'web',
+      upload: { role: 'button', name: 'Upload Document' },
+      file: { base64: 'aGk=', as: 'contract.pdf' },
+      expect: { text: { contains: 'contract.pdf' } },
+    })
+    expect(isWebUploadStep(step)).toBe(true)
+    expect(isWebUploadStep(GuardWebStepSchema.parse({ driver: 'web', navigate: '/x' }))).toBe(false)
+    const upload = step as Extract<GuardWebStep, { upload: unknown }>
+    expect(upload.upload.name).toBe('Upload Document')
+    expect(upload.file.as).toBe('contract.pdf')
+    // The whole scenario union takes it as one of its own steps.
+    expect(isWebStep(GuardSandboxStepSchema.parse(step) as GuardSandboxStep)).toBe(true)
+  })
+
+  it('is NOT an assert-only step — the negation that classifies every action verb', () => {
+    // `isWebExpectStep` is defined by NEGATION: a verb missing from it is read as a
+    // step that takes no action, and the executor, the token pass and the step
+    // rendering all silently agree to do nothing. That reads GREEN.
+    const step = GuardWebStepSchema.parse({
+      driver: 'web',
+      upload: { role: 'button', name: 'Attach' },
+      file: { text: 'hi', as: 'a.txt' },
+    })
+    expect(isWebExpectStep(step)).toBe(false)
+    expect([isWebNavigateStep(step), isWebClickStep(step), isWebFillStep(step), isWebHistoryStep(step)]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ])
+  })
+
+  it('names EXACTLY one byte source — two answers is not an answer', () => {
+    expect(GuardWebFileSchema.parse({ base64: 'aGk=', as: 'a.txt' }).base64).toBe('aGk=')
+    expect(GuardWebFileSchema.parse({ text: 'hi', as: 'a.txt' }).text).toBe('hi')
+    expect(GuardWebFileSchema.parse({ path: 'out/report.json' }).path).toBe('out/report.json')
+    expect(() => GuardWebFileSchema.parse({ base64: 'aGk=', text: 'hi', as: 'a.txt' })).toThrow()
+    expect(() => GuardWebFileSchema.parse({ path: 'a.txt', text: 'hi' })).toThrow()
+    expect(() => GuardWebFileSchema.parse({ as: 'a.txt' })).toThrow()
+    expect(() => GuardWebFileSchema.parse({})).toThrow()
+  })
+
+  it('refuses bytes with no name — a file the app sees has a filename', () => {
+    expect(() => GuardWebFileSchema.parse({ base64: 'aGk=' })).toThrow(/as/)
+    expect(() => GuardWebFileSchema.parse({ text: 'hi' })).toThrow(/as/)
+    // A `path` carries its own name; `as` only renames it.
+    expect(GuardWebFileSchema.parse({ path: 'out/report.json' }).as).toBeUndefined()
+    expect(GuardWebFileSchema.parse({ path: 'out/report.json', as: 'renamed.json' }).as).toBe('renamed.json')
+  })
+
+  it('refuses a name whose type cannot be read, and takes an explicit one', () => {
+    expect(() => GuardWebFileSchema.parse({ text: 'x', as: 'thing.qqq' })).toThrow(/type/)
+    expect(() => GuardWebFileSchema.parse({ text: 'x', as: 'noextension' })).toThrow(/type/)
+    expect(GuardWebFileSchema.parse({ text: 'x', as: 'thing.qqq', type: 'application/x-thing' }).type).toBe(
+      'application/x-thing',
+    )
+    expect(webFileType({ text: 'x', as: 'members.csv' })).toBe('text/csv')
+    expect(webFileType({ path: 'out/report.json' })).toBe('application/json')
+    expect(webFileType({ text: 'x', as: 'thing.qqq' })).toBeNull()
+    expect(GUARD_WEB_FILE_TYPES.pdf).toBe('application/pdf')
+    expect(GUARD_WEB_FILE_MAX_BYTES).toBe(10 * 1024 * 1024)
+  })
+
+  it('types a name that still carries its tokens — `${unique}` is inside the stem', () => {
+    const file = GuardWebFileSchema.parse({ base64: 'aGk=', as: 'contract-${unique}.pdf' })
+    expect(webFileType(file)).toBe('application/pdf')
+    expect(webFileType({ text: 'x', as: 'report.${unique}.CSV' })).toBe('text/csv')
+  })
+
+  it('keeps the locator closed — the hidden input is not addressable, and that is the point', () => {
+    expect(() =>
+      GuardWebStepSchema.parse({ driver: 'web', upload: { css: '#file' }, file: { text: 'x', as: 'a.txt' } }),
+    ).toThrow()
+    expect(() =>
+      GuardWebStepSchema.parse({
+        driver: 'web',
+        upload: { role: 'button', name: 'Attach', testId: 'document-upload-input' },
+        file: { text: 'x', as: 'a.txt' },
+      }),
+    ).toThrow()
+    // …and the step itself stays strict.
+    expect(() =>
+      GuardWebStepSchema.parse({
+        driver: 'web',
+        upload: { role: 'button', name: 'Attach' },
+        file: { text: 'x', as: 'a.txt' },
+        files: [],
+      }),
+    ).toThrow()
+  })
+
+  it('reads as a user describes it — the file and the control, never the bytes', () => {
+    expect(
+      describeWebCommand({
+        driver: 'web',
+        upload: { role: 'button', name: 'Upload Document' },
+        file: { base64: 'c2VjcmV0LWJ5dGVz', as: 'contract-a1b2.pdf' },
+      } as GuardWebStep),
+    ).toBe('upload “contract-a1b2.pdf” to button “Upload Document”')
+    // A `path` file is named by its BASENAME — the name the app is shown, which is
+    // the only name a reader can check the page's own words against.
+    expect(
+      describeWebCommand({
+        driver: 'web',
+        upload: { role: 'button', name: 'Attach' },
+        file: { path: 'out/report.json' },
+      } as GuardWebStep),
+    ).toBe('upload “report.json” to button “Attach”')
+    expect(
+      describeWebCommand({
+        driver: 'web',
+        upload: { role: 'button', name: 'Import members' },
+        file: { text: 'email,role\nada@example.test,admin\n', as: 'members.csv' },
+      } as GuardWebStep),
+    ).not.toContain('ada@example.test')
+  })
+
+  it('rides a mixed step list the one scenario schema takes', () => {
+    const parsed = GuardScenarioSchema.parse(
+      mixedScenario([
+        { run: ['note', 'notes.txt', 'seeded'], expect: { exit: 0 } },
+        { driver: 'web', navigate: '/upload' },
+        {
+          driver: 'web',
+          upload: { role: 'button', name: 'Choose a file' },
+          file: { text: 'hello', as: 'hello.txt' },
+          expect: { text: { contains: 'hello.txt' } },
+          milestone: 1,
+        },
+      ]),
+    )
+    const views = describeGuardScenarioSteps(mixedScenario(parsed.steps))
+    expect(views.map((v) => v.kind)).toEqual(['cli', 'web', 'web'])
+    expect(views[2].command).toBe('upload “hello.txt” to button “Choose a file”')
+    expect(views[2].expectation).toBe('page text contains “hello.txt”')
+  })
+
+  it('every corpus written before the verb parses exactly as it did', () => {
+    // The verb is one more `.strict()` arm on a keyed union: nothing already
+    // written changes meaning.
+    const five = [
+      { driver: 'web', navigate: '/notes' },
+      { driver: 'web', click: { role: 'button', name: 'Save' } },
+      { driver: 'web', fill: { role: 'textbox', name: 'Title' }, value: 'x' },
+      { driver: 'web', history: 'back' },
+      { driver: 'web', expect: { text: { contains: 'Notes' } } },
+    ]
+    const parsed = GuardScenarioSchema.parse(mixedScenario(five))
+    expect(parsed.steps).toEqual(five)
+    expect(parsed.steps.map((s) => isWebUploadStep(s as GuardWebStep))).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ])
   })
 })
 

@@ -5,14 +5,14 @@
  * grows.
  *
  * A web step is taken by a real browser against the web surface the sandbox serves.
- * There is no model anywhere in it: navigate, click, fill, assert — declarative,
- * deterministic, and waiting only on observable state.
+ * There is no model anywhere in it: navigate, click, fill, upload, assert —
+ * declarative, deterministic, and waiting only on observable state.
  *
  * Four decisions are load-bearing here, and each is documented at its schema:
  *   - the LOCATOR is role + accessible name, closed ({@link GuardWebLocatorSchema});
  *   - the step declares its own DRIVER ({@link webDriver});
  *   - the address is asserted ORIGIN-STRIPPED ({@link GuardWebExpectSchema});
- *   - the verb set is CLOSED at five ({@link GuardWebStepSchema}).
+ *   - the verb set is CLOSED at six ({@link GuardWebStepSchema}).
  */
 
 import { z } from 'zod'
@@ -402,6 +402,151 @@ export const GuardWebFillStepSchema = z
   .strict()
 
 /**
+ * THE MIME TYPES a file can be typed by its NAME. Closed, and closed at the formats
+ * an app actually asks a user for — because the type is what the page's own accept
+ * filter reads, and a file offered as the wrong type is rejected by the app before
+ * any claim is tested. A name this table cannot type is refused at LOAD (`type:`
+ * names it explicitly), which is the same discipline the locator follows: guess
+ * nothing, and make the author say what they mean.
+ */
+export const GUARD_WEB_FILE_TYPES: Readonly<Record<string, string>> = {
+  pdf: 'application/pdf',
+  csv: 'text/csv',
+  json: 'application/json',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  html: 'text/html',
+  xml: 'application/xml',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  zip: 'application/zip',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+}
+
+/**
+ * DECODED ceiling for one uploaded file. A scenario states a promise about an app,
+ * not about how much memory the runner will hold: the payload travels through the
+ * runner as a single buffer, and a fixture that grew a hundred megabytes would take
+ * the whole run down instead of naming its own mistake.
+ */
+export const GUARD_WEB_FILE_MAX_BYTES = 10 * 1024 * 1024
+
+/**
+ * What the two naming helpers below need of a file, structurally. Spelled out rather
+ * than taken from the schema because the schema's own refinement CALLS them: a
+ * parameter typed as the schema's inferred output would make the schema's type
+ * depend on itself.
+ */
+interface WebFileNaming {
+  as?: string
+  path?: string
+  type?: string
+}
+
+/**
+ * The filename the app is shown: the authored `as`, else the basename of the path
+ * the bytes came from. One function, because the transcript, the type derivation and
+ * the payload the browser receives must never disagree about what the file is called.
+ */
+export function webFileName(file: WebFileNaming): string {
+  if (file.as !== undefined) return file.as
+  const from = file.path ?? ''
+  return from.slice(from.lastIndexOf('/') + 1)
+}
+
+/**
+ * The MIME type a file is offered under — the declared `type`, else the one its
+ * extension names. `null` when neither answers, which the schema refuses at load:
+ * guessing `application/octet-stream` would send a real file under a type every
+ * accept filter rejects, and the scenario would fail for a reason it never stated.
+ */
+export function webFileType(file: WebFileNaming): string | null {
+  if (file.type !== undefined) return file.type
+  const name = webFileName(file)
+  const dot = name.lastIndexOf('.')
+  if (dot < 0) return null
+  return GUARD_WEB_FILE_TYPES[name.slice(dot + 1).toLowerCase()] ?? null
+}
+
+/**
+ * THE BYTES a step hands the page, and the identity they arrive under. Exactly ONE
+ * byte source, because two sources is two answers to "what did the user pick":
+ *
+ *  - `base64` — the seeded-binary channel, and the primary one. A real PDF, a real
+ *    PNG, published by the seed as a fixture field and referenced as
+ *    `{{fixture:pdf.base64}}` — one canonical document across every surface that
+ *    uploads it, rather than N copies of an unreviewable blob in the corpus.
+ *  - `text` — bytes an author can READ in the scenario: a CSV import, a config
+ *    file. UTF-8; anything else is base64's business.
+ *  - `path` — a file the scenario's OWN world already holds, sandbox-relative (a
+ *    cli step wrote it, or `setup.files` seeded it). It is the only source that
+ *    names itself, so `as` is optional for it alone.
+ *
+ * `as` is the filename the APP sees, and it interpolates: apps routinely make the
+ * filename the resource's title, so a `${unique}`-bearing name is what keeps two
+ * runs of one scenario from colliding in the app's own data.
+ */
+export const GuardWebFileSchema = z
+  .object({
+    /** Bytes as base64 — the seeded-binary channel. `{{fixture:…}}` interpolates. */
+    base64: z.string().min(1).optional(),
+    /** Bytes as authored text, UTF-8 encoded. `${…}` tokens interpolate. */
+    text: z.string().optional(),
+    /** A sandbox-relative file the scenario's own world holds. */
+    path: z.string().min(1).optional(),
+    /** The filename the app sees. `${…}` tokens interpolate. */
+    as: z.string().min(1).optional(),
+    /** The MIME type the app is offered; read from the name's extension when omitted. */
+    type: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((f) => [f.base64, f.text, f.path].filter((v) => v !== undefined).length === 1, {
+    message: 'a file names exactly one of `base64` | `text` | `path` — two byte sources is two answers',
+  })
+  .refine((f) => f.path !== undefined || f.as !== undefined, {
+    message: '`base64`/`text` bytes have no name of their own — name the file with `as`',
+  })
+  .refine((f) => webFileType(f) !== null, {
+    message:
+      'the file’s type could not be read from its name — name it with `type`, or use a known extension',
+  })
+
+/**
+ * Hand a file to the control a USER would operate — the button beside the drop
+ * zone, the labelled input — and let the browser's own file chooser carry the bytes.
+ *
+ * The verb's value is the LOCATOR for the same reason `fill`'s is: the thing a
+ * scenario names is the thing a reader clicks. The hidden `input[type=file]` behind
+ * a styled upload button has no role and no accessible name — it is deliberately
+ * unreachable by this vocabulary — and addressing it by selector would skip the
+ * disabled state, the tooltip gate and the app's own click handler, going green on a
+ * control a user cannot reach.
+ *
+ * The step asserts only that it could TAKE the action: the target resolved, a
+ * chooser opened, and the chooser took the files. Everything about the EFFECT — the
+ * document appearing, the accept filter refusing the type, a quota message — is the
+ * ordinary `expect` block. The action acts, the expectation judges.
+ */
+export const GuardWebUploadStepSchema = z
+  .object({
+    driver: webDriver,
+    /** The control a user would operate to pick a file — never the hidden input. */
+    upload: GuardWebLocatorSchema,
+    /** The bytes handed to the chooser, and the name they arrive under. */
+    file: GuardWebFileSchema,
+    expect: GuardWebExpectSchema.optional(),
+    timeoutMs,
+    note,
+    milestone,
+  })
+  .strict()
+
+/**
  * Move through the browser's own HISTORY — Back and Forward, the two buttons every
  * browser has and no page draws.
  *
@@ -446,18 +591,21 @@ export const GuardWebExpectStepSchema = z
 
 /**
  * ONE web step — one action, or one assertion, taken by a real browser against the
- * web surface the sandbox serves. The verbs are closed at five: navigate, click,
- * fill, history, expect. There is deliberately no hover, no scroll, no keyboard:
- * each would be a promise about how the page is OPERATED rather than what it
- * PROMISES, and the vocabulary grows only when a real claim cannot be stated
+ * web surface the sandbox serves. The verbs are closed at six: navigate, click,
+ * fill, upload, history, expect. There is deliberately no hover, no scroll, no
+ * keyboard: each would be a promise about how the page is OPERATED rather than what
+ * it PROMISES, and the vocabulary grows only when a real claim cannot be stated
  * without it — which is exactly what `history` was (2026-08-11: "Back and Forward
  * move through the views" had no verb, and rode as a re-navigation that proved a
- * different sentence).
+ * different sentence) and what `upload` is (2026-08-14: a document app's central
+ * promise is "you can put a file into it", and no combination of click and fill
+ * states it — a file chooser is not a text field).
  */
 export const GuardWebStepSchema = z.union([
   GuardWebNavigateStepSchema,
   GuardWebClickStepSchema,
   GuardWebFillStepSchema,
+  GuardWebUploadStepSchema,
   GuardWebHistoryStepSchema,
   GuardWebExpectStepSchema,
 ])
@@ -468,9 +616,11 @@ export type GuardWebStateExpect = z.infer<typeof GuardWebStateSchema>
 export type GuardWebAttributeExpect = z.infer<typeof GuardWebAttributeSchema>
 export type GuardWebClassExpect = z.infer<typeof GuardWebClassSchema>
 export type GuardWebExpect = z.infer<typeof GuardWebExpectSchema>
+export type GuardWebFile = z.infer<typeof GuardWebFileSchema>
 export type GuardWebNavigateStep = z.infer<typeof GuardWebNavigateStepSchema>
 export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
 export type GuardWebFillStep = z.infer<typeof GuardWebFillStepSchema>
+export type GuardWebUploadStep = z.infer<typeof GuardWebUploadStepSchema>
 export type GuardWebHistoryStep = z.infer<typeof GuardWebHistoryStepSchema>
 export type GuardWebExpectStep = z.infer<typeof GuardWebExpectStepSchema>
 export type GuardWebStep = z.infer<typeof GuardWebStepSchema>
@@ -499,15 +649,31 @@ export function isWebFillStep(step: GuardWebStep): step is GuardWebFillStep {
   return 'fill' in step
 }
 
+/** True when the web step hands a file to a control a user would operate. */
+export function isWebUploadStep(step: GuardWebStep): step is GuardWebUploadStep {
+  return 'upload' in step
+}
+
 /** True when the web step presses the browser's Back or Forward. */
 export function isWebHistoryStep(step: GuardWebStep): step is GuardWebHistoryStep {
   return 'history' in step
 }
 
-/** True when the web step only asserts (it takes no action on the page). */
+/**
+ * True when the web step only asserts (it takes no action on the page).
+ *
+ * Defined by NEGATION, which makes it the one place a new ACTION verb must be
+ * wired or it silently becomes an assert-only step: the executor would take no
+ * action, the token pass would drop its authored strings, the transcript would say
+ * "check the page" — and the step would go green having done nothing at all.
+ */
 export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep {
   return (
-    !isWebNavigateStep(step) && !isWebClickStep(step) && !isWebFillStep(step) && !isWebHistoryStep(step)
+    !isWebNavigateStep(step) &&
+    !isWebClickStep(step) &&
+    !isWebFillStep(step) &&
+    !isWebUploadStep(step) &&
+    !isWebHistoryStep(step)
   )
 }
 
@@ -587,6 +753,12 @@ export function describeWebCommand(step: GuardWebStep): string {
   if (isWebNavigateStep(step)) return `navigate ${step.navigate}`
   if (isWebClickStep(step)) return `click ${describeWebLocator(step.click)}`
   if (isWebFillStep(step)) return `fill ${describeWebLocator(step.fill)} with “${step.value}”`
+  // The file's NAME and the control, and never a byte of the payload: a base64
+  // fixture is unreadable noise in a step list and a `text` file may be data the
+  // scenario is about. Its size and digest ride the evidence instead.
+  if (isWebUploadStep(step)) {
+    return `upload “${webFileName(step.file)}” to ${describeWebLocator(step.upload)}`
+  }
   if (isWebHistoryStep(step)) return `go ${step.history}`
   return 'check the page'
 }

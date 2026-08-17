@@ -44,6 +44,12 @@
  *                     - button "Add filter", which pushes `?filter=on` WITHOUT a
  *                       document navigation and re-renders on `popstate` — so a
  *                       browser Back is observable in a single-page app too.
+ *   GET /upload   → heading "Upload"; the surface the `upload` verb needs — a
+ *                   visible labelled file input, a hidden one behind a button (the
+ *                   react-dropzone shape), an `accept=".pdf"` one that refuses
+ *                   anything else in the app's own words, and a button that opens
+ *                   no chooser at all. Every picked file is reported back with the
+ *                   name, the size, the type and its first bytes.
  *
  * The JSON surface — the SAME state the pages render, read as structured data, which
  * is what a `request` step is for: drive the UI, then ask the app what actually
@@ -165,6 +171,68 @@ renderMode()
 </script>`,
 )
 
+/**
+ * The page a file is handed to, carrying BOTH shapes a real app has:
+ *   - a labelled, VISIBLE `input[type=file]` ("Attachment") — the plain case;
+ *   - a `button` "Choose a file" whose click forwards to a `display:none` input,
+ *     which is the react-dropzone shape every styled "Upload Document" control in
+ *     the wild is (the input has no role and no accessible name, so the locator
+ *     vocabulary can only ever address the button);
+ *   - a labelled `accept=".pdf"` input ("PDF only") that REFUSES anything else in
+ *     the app's own words — the effect an `expect` block judges, never the step;
+ *   - a button "Not an upload" that opens no chooser at all, which is the failure
+ *     a `setInputFiles` shortcut on a hidden input would have hidden.
+ *
+ * Whichever input received the file, the page reports what it ACTUALLY got —
+ * `<source>: <name> · <n> bytes · <type> · <first bytes>` — so no test can pass on
+ * a chooser that opened and took nothing, and binary payloads (reported as hex)
+ * prove the bytes were never round-tripped through UTF-8.
+ */
+const UPLOAD = page(
+  'Upload',
+  `<h1>Upload</h1>
+<p><label for="visible-file">Attachment</label>
+<input id="visible-file" type="file"></p>
+<p><button type="button" id="pick">Choose a file</button>
+<input id="hidden-file" type="file" style="display:none"></p>
+<p><label for="pdf-file">PDF only</label>
+<input id="pdf-file" type="file" accept=".pdf"></p>
+<p><button type="button" id="inert">Not an upload</button></p>
+<p id="picked">nothing picked yet</p>
+<script>
+function firstBytes(buffer) {
+  const head = new Uint8Array(buffer).slice(0, 12)
+  const readable = Array.from(head).every(function (b) { return b >= 9 && b < 128 })
+  if (readable) return new TextDecoder().decode(head).replace(/[\\r\\n\\t]/g, ' ')
+  return 'hex:' + Array.from(new Uint8Array(buffer).slice(0, 8))
+    .map(function (b) { return b.toString(16).padStart(2, '0') })
+    .join('')
+}
+function report(source, input) {
+  const picked = document.getElementById('picked')
+  const file = input.files[0]
+  if (!file) { picked.textContent = source + ': nothing picked'; return }
+  if (input.id === 'pdf-file' && !/\\.pdf$/i.test(file.name)) {
+    picked.textContent = 'rejected: ' + file.name + ' is not a .pdf'
+    return
+  }
+  file.arrayBuffer().then(function (buffer) {
+    picked.textContent =
+      source + ': ' + file.name + ' · ' + file.size + ' bytes · ' +
+      (file.type || 'no type') + ' · ' + firstBytes(buffer)
+  })
+}
+document.getElementById('visible-file').onchange = function () { report('visible', this) }
+document.getElementById('hidden-file').onchange = function () { report('hidden', this) }
+document.getElementById('pdf-file').onchange = function () { report('pdf', this) }
+document.getElementById('pick').onclick = function () { document.getElementById('hidden-file').click() }
+// Found, clickable, and behind it nothing asks for a file.
+document.getElementById('inert').onclick = function () {
+  document.getElementById('picked').textContent = 'clicked, and no file was asked for'
+}
+</script>`,
+)
+
 /** The one piece of state this app has: the lines of `notes.txt` in the CWD. */
 function noteLines() {
   const notesFile = path.resolve(process.cwd(), 'notes.txt')
@@ -268,7 +336,9 @@ const server = http.createServer(async (req, res) => {
           ? SLOW
           : url.pathname === '/controls'
             ? CONTROLS
-            : null
+            : url.pathname === '/upload'
+              ? UPLOAD
+              : null
   if (html === null) {
     res.writeHead(404, { 'content-type': 'text/html' })
     res.end(page('Not found', '<h1>Not found</h1>'))

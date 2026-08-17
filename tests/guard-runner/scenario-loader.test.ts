@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
+import { describeGuardScenarioSteps, guardScenarioDrivers, type GuardSandboxStep } from '@truecourse/shared'
 import { loadScenarios, walkScenarioRelFiles, scenariosDir } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeScenario, writeScenarioFile, writeRecipe, scenario, apiScenario } from './helpers.js'
 
@@ -133,6 +134,74 @@ describe('loadScenarios', () => {
     expect(errors.map((e) => e.file.split('/').pop()).sort()).toEqual(['json.yaml', 'logs.yaml'])
     expect(errors.find((e) => e.file.endsWith('json.yaml'))!.message).toContain('expect.json.data.id')
     expect(errors.find((e) => e.file.endsWith('logs.yaml'))!.message).toContain('logs.match')
+  })
+})
+
+describe('an upload step, through the loader', () => {
+  it('round-trips through YAML with its locator, its bytes and its name', () => {
+    const r = repo()
+    writeRecipe(r)
+    const step = {
+      driver: 'web',
+      upload: { role: 'button', name: 'Upload Document' },
+      file: { base64: '{{fixture:doc.base64}}', as: 'contract-${unique}.pdf' },
+      expect: { url: { contains: '/edit' }, text: { contains: 'contract-${unique}.pdf' } },
+      milestone: 2,
+    }
+    writeScenario(
+      r,
+      'web/upload.yaml',
+      scenario({ id: 'up', steps: [{ driver: 'web', navigate: '/documents' }, step] as GuardSandboxStep[] }),
+    )
+
+    const { scenarios, errors } = loadScenarios(r)
+    expect(errors).toEqual([])
+    // Byte-identical to what was written: nothing about the file is normalized away.
+    expect(scenarios[0].steps[1]).toEqual(step)
+  })
+
+  it('a file with two byte sources is ONE load error, and the rest still loads', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(r, 'ok.yaml', scenario({ id: 'ok', steps: [{ run: [], expect: { exit: 0 } }] }))
+    writeScenario(
+      r,
+      'web/bad.yaml',
+      scenario({
+        id: 'bad',
+        steps: [
+          {
+            driver: 'web',
+            upload: { role: 'button', name: 'Attach' },
+            file: { base64: 'aGk=', text: 'hi', as: 'a.txt' },
+          },
+        ] as GuardSandboxStep[],
+      }),
+    )
+
+    const { scenarios, errors } = loadScenarios(r)
+    expect(scenarios.map((s) => s.id)).toEqual(['ok'])
+    expect(errors).toHaveLength(1)
+    expect(errors[0].file).toContain('bad.yaml')
+  })
+
+  it('wears the web kind and the web driver, like every other web verb', () => {
+    const s = scenario({
+      id: 'up',
+      steps: [
+        { run: ['version'], expect: { exit: 0 } },
+        {
+          driver: 'web',
+          upload: { role: 'button', name: 'Upload Document' },
+          file: { text: 'x', as: 'a.txt' },
+          expect: { text: { contains: 'a.txt' } },
+        },
+      ] as GuardSandboxStep[],
+    })
+    expect(guardScenarioDrivers(s)).toEqual(['cli', 'web'])
+    const views = describeGuardScenarioSteps(s)
+    expect(views[1].kind).toBe('web')
+    expect(views[1].command).toBe('upload “a.txt” to button “Upload Document”')
   })
 })
 

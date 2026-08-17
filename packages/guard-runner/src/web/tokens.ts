@@ -10,8 +10,14 @@
  * on both surfaces.
  */
 
-import type { GuardStreamMatcher, GuardWebExpect, GuardWebLocator, GuardWebStep } from '@truecourse/shared'
-import { isWebClickStep, isWebFillStep, isWebNavigateStep } from '@truecourse/shared'
+import type {
+  GuardStreamMatcher,
+  GuardWebExpect,
+  GuardWebFile,
+  GuardWebLocator,
+  GuardWebStep,
+} from '@truecourse/shared'
+import { isWebClickStep, isWebFillStep, isWebNavigateStep, isWebUploadStep } from '@truecourse/shared'
 
 type Tok = (text: string) => string
 
@@ -82,6 +88,23 @@ function resolveExpect(expect: GuardWebExpect, tok: Tok): GuardWebExpect {
 }
 
 /**
+ * An uploaded file with every authored string resolved: the bytes (`text`, or the
+ * `base64` a `{{fixture:…}}` put there), the sandbox-relative source, and the NAME
+ * the app is shown — which is the one that matters most, because an app that titles
+ * a resource after its filename needs `${unique}` to reach it or two runs of one
+ * scenario collide in the app's own data. `type` is a MIME type, never a template.
+ */
+function resolveFile(file: GuardWebFile, tok: Tok): GuardWebFile {
+  return {
+    ...file,
+    ...(file.base64 !== undefined ? { base64: tok(file.base64) } : {}),
+    ...(file.text !== undefined ? { text: tok(file.text) } : {}),
+    ...(file.path !== undefined ? { path: tok(file.path) } : {}),
+    ...(file.as !== undefined ? { as: tok(file.as) } : {}),
+  }
+}
+
+/**
  * The step the browser actually takes: every authored string with its tokens
  * substituted, so the action, the assertion, the transcript and the failure message
  * all quote the RESOLVED text a reader can act on.
@@ -92,6 +115,9 @@ export function resolveWebStep(step: GuardWebStep, tok: Tok): GuardWebStep {
   if (isWebClickStep(step)) return { ...step, click: resolveLocator(step.click, tok), ...expect }
   if (isWebFillStep(step)) {
     return { ...step, fill: resolveLocator(step.fill, tok), value: tok(step.value), ...expect }
+  }
+  if (isWebUploadStep(step)) {
+    return { ...step, upload: resolveLocator(step.upload, tok), file: resolveFile(step.file, tok), ...expect }
   }
   return { ...step, ...(step.expect ? { expect: resolveExpect(step.expect, tok) } : {}) }
 }

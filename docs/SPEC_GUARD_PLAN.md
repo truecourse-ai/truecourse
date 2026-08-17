@@ -5389,3 +5389,182 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     tests: `tests/guard-runner/run-driver-preparation.test.ts` (web-only runs
     entryless; run-step still refuses naming `entry`; surface-less browser
     scenario refuses naming `web`, not `entry`).
+
+    (96 is reserved for the resource-registry item landing from `sm/thick-interfaces`.)
+
+97. **The `upload` verb — a file the way a user gives one, plus the seed's fixtures
+    in sandbox scenarios (2026-08-14, documenso reference corpus).** STATUS: BUILT.
+    The documenso corpus filed it as G2: 24 of its 27 catalogued web tasks were
+    unreachable because the product's central promise — "you can put a document into
+    it" — had no verb. A file chooser is not a text field, so no combination of
+    `click` and `fill` states it, and the hidden `input[type=file]` behind every
+    styled upload button has no role and no accessible name, which is exactly what
+    the locator vocabulary refuses to address.
+
+    **The verb.** `upload: <locator>` with a sibling `file:` payload — `fill`'s
+    shape, locator in the verb key and data beside it. The locator names the control
+    a USER operates (documenso's `button "Upload Document"`, react-dropzone's styled
+    root), never the input it hides, and the executor drives Playwright's
+    `filechooser` event: arm, click the control a user clicks, answer the chooser
+    that opens. `locator.setInputFiles()` on a CSS-addressed input is REJECTED,
+    including as a fallback — it would skip the disabled state, the tooltip gate and
+    the app's own click handler, going green on a control a user cannot reach, and a
+    silent fallback would turn "this control opens no chooser" from a finding into a
+    false pass.
+
+    **The file.** `file: { base64 | text | path, as?, type? }` — exactly one byte
+    source, because two sources is two answers to "what did the user pick".
+    `base64` is the primary one and is fed by `{{fixture:<name>.base64}}`: the seed
+    already publishes the canonical document, so one document travels across every
+    surface that uploads it instead of N copies of an unreviewable blob in the
+    corpus. `text` is bytes an author can read (a CSV import, a config file, UTF-8
+    only); `path` is a file the scenario's OWN world already holds, sandbox-relative
+    and through the same `resolveInSandbox` containment rule every declared path goes
+    through. `as` is the filename the app sees and interpolates — apps routinely
+    title a resource after its filename, so `${unique}` in it is what keeps two runs
+    of one scenario from colliding in the app's own data. The type comes from the
+    name's extension against a closed table, or from an explicit `type`; a name
+    neither answers is refused AT LOAD rather than guessed into
+    `application/octet-stream`, which every accept filter rejects. Ceiling: 10 MiB
+    decoded, refused by name and size with nothing sent.
+
+    **What it asserts.** Only that it could TAKE the action: the target resolved
+    unambiguously, a chooser opened, and the chooser took the files. Everything about
+    the EFFECT — the document appearing, an accept filter refusing the type, a quota
+    message — is the ordinary `expect` block. The action acts, the expectation judges
+    (`history`'s rule). Its own failures are exactly three, all `subject: 'target'`,
+    all `fail`: the control is absent or ambiguous (the existing `targetMismatch`,
+    role inventory included), the control opened NO file chooser ("…it does not take
+    a file"), or the chooser refused the payload (the existing "the page refused the
+    interaction" catch). A payload that cannot be materialized — a path escaping the
+    sandbox, malformed base64, a file past the ceiling — is an `error`: nothing about
+    the app was observed, and it is settled before a page is ever loaded.
+
+    **G3a — the seed's fixtures reach a SANDBOX scenario.** `{{fixture:…}}` was
+    active only where its map was supplied, and the sandbox path was handed none, so
+    a fixture reference in a cli or web step stayed literal text. The `tok` closure
+    now runs a fixture pass FIRST, on the raw template, with the four `${…}` tokens
+    applied only to the literal segments between references — the api driver's
+    bounded-injection order, so a captured value can never expand into a fixture read
+    and a seeded value is never re-scanned (both proved by test). Fixture values are
+    NOT secrets (the seed manifest says so), which is what makes this cheap; the
+    credential half deliberately does not follow (item 99). An unknown fixture is a
+    scenario `error` naming it, and the two failures are told apart: a fixture the
+    seed does not publish is the author's mistake, while a seed that did not run for
+    this selection is the RUN's and says so — sending an author to fix a manifest
+    that is perfectly correct is the worse message. Item 98 has since landed, so the
+    selection that produced the second one no longer exists: a run prepares the seeded
+    world for anything that needs it, and the message survives only for a caller that
+    assembles a `RunScenarioContext` without fixtures by hand.
+
+    **Evidence.** The transcript gains one `file:` line beside `web:`/`at:`/`screen:`
+    — `file: contract-a1b2c3.pdf · 629 bytes · sha256:<hex>` — and the step record an
+    additive-optional `upload: { name, bytes, sha256 }`. BYTES NEVER ENTER EVIDENCE:
+    the digest is auditable against the seed's published one, and the payload is
+    either unreadable noise or the very data the scenario is about.
+
+    **Fingerprint discipline.** The verb is one more `.strict()` arm on a keyed union,
+    so every corpus written before it parses and behaves exactly as it did (named
+    test); the format marker it was written against has since been retired
+    altogether. `GENERATE_PROMPT_FINGERPRINT` cannot move: web
+    verbs are not in the authoring schema. `InterfaceStepKindSchema` is deliberately
+    NOT grown (it folds into `interfaceFingerprint`, and an upload target is the
+    `activate` it already is). The one real hazard was `isWebExpectStep`, which is
+    defined by NEGATION: an action verb missing from it is read as an assert-only
+    step — no action taken, tokens dropped, "check the page" in the transcript, and
+    green. It has its own named test.
+
+    **Known limitations, stated rather than papered over.** (1) A drag-ONLY dropzone
+    is unreachable (documenso's whole-page `EnvelopeDropZoneWrapper` is
+    `noClick: true`; the button beside it is the operable control, so documenso is
+    unaffected — a page whose only affordance is drag fails honestly, and an
+    `upload.mode: drop` is out of scope). (2) The File System Access API
+    (`showOpenFilePicker`) is not interceptable — a false red for apps that opt in;
+    react-dropzone defaults `useFsAccessApi: false`. (3) `text:` is UTF-8 only;
+    other encodings use `base64`. (4) One file per step in v1 — the growth path is
+    `file: <obj> | [<obj>, …]` (the `expect.visible` list precedent), and
+    `FileChooser.setFiles` already takes arrays. (5) The session video shows no OS
+    dialog (Playwright suppresses it); the post-step screenshot is the useful frame.
+
+    **As built.** Schema + rendering: `packages/shared/src/guard/web-steps.ts`
+    (`GUARD_WEB_FILE_TYPES`, `GUARD_WEB_FILE_MAX_BYTES`, `GuardWebFileSchema`,
+    `GuardWebUploadStepSchema`, `isWebUploadStep`, `webFileName`/`webFileType`, the
+    `isWebExpectStep` negation, `describeWebCommand`),
+    `packages/shared/src/guard/step-actuals.ts` (`GuardStepWebUploadSchema`).
+    Runner: `guard-runner/src/web/upload.ts` (new — `materializeWebFile`),
+    `web/{browser,session,executor,tokens}.ts` (the permanent `filechooser`
+    listener + per-step `armFileChooser`), `drivers/web-driver.ts`, `evidence.ts`,
+    `api/vars.ts` (`resolveFixtureText` over the one placeholder scanner),
+    `run-scenario.ts` (`fixtures` / `seedDeclared` context, the fixture-first `tok`
+    closure, the `UnknownFixtureError` settlement), `run.ts` (the sandbox call site
+    passes both). Fixture app: `tests/fixtures/guard-fixture-web/server.mjs` gains
+    `/upload` (visible labelled input, hidden input behind a button, an
+    `accept=".pdf"` one that refuses in the app's own words, a control that opens no
+    chooser, and a report of the name/size/type/first-bytes it actually received).
+    Tests: `tests/shared/guard-web-steps.test.ts` (nine new cases),
+    `tests/guard-runner/web-upload.test.ts` (new — thirteen real-browser cases plus
+    the token pass and the four G3a cases), `tests/guard-runner/scenario-loader.test.ts`.
+
+98. **G4 — the prepared world is gated on the API POOL, not on what the selection
+    needs (2026-08-14, documenso reference corpus).** STATUS: BUILT. `services.up`,
+    the seed and the credential mint all ran inside `if (api && apiRunnableExec.length
+    > 0)` (`guard-runner/src/run.ts`), so `guard run --scenario <a web one>` — or any
+    selection of cli/web scenarios alone — started no services and seeded nothing, and
+    every `{{fixture:…}}` in it settled the "the seed did not run for this selection"
+    error item 97 added. A full-corpus run was unaffected (the api pool is non-empty),
+    which is why this was its own item rather than a blocker for 97.
+
+    **As built.** The block is now `if (api && worldNeeded)`, where `worldNeeded` is
+    `apiRunnableExec.length > 0 || runnable.some(needsPreparedWorld)` — item 95's
+    principle applied to the world the whole RUN shares. `needsPreparedWorld(scenario)`
+    (`run.ts`, beside `servedExec`/`entryExec`) is three honest needs, read off the
+    scenario itself and never off a driver tag: an api-server scenario runs against the
+    booted server, which IS that world; a sandbox scenario that reaches the SERVED
+    surface (`usesServedSurface` — the predicate `servedExec` was already built from,
+    now extracted so the two cannot drift) is driving the product the datastore stands
+    behind; and a scenario whose steps carry a `{{fixture:…}}` is quoting the seed's own
+    output, whichever surface then uses it (`containsFixtureReference`, exported from
+    `api/vars.ts` beside the one placeholder scan so the pattern that ASKS and the
+    pattern that RESOLVES stay one). The api pool keeps its own disjunct, so an api
+    selection's preparation is byte-identical to what it always was.
+
+    Services were NOT already web-triggered: the web surface boots per-sandbox with
+    `recipe.env ⊕ web.env` and knew nothing of `api.services`, so both halves — the
+    bring-up and the seed — were genuinely missing for a web selection. What stays on
+    the api POOL (`apiPool`, inside the block) is the api SERVER half, which a
+    sandbox selection cannot use: `fromRequest` logins (minting one would boot a server
+    for nobody, and an empty `serversNeeded` is what keeps the preflight loop from
+    booting one) and `resolveApiCredentials` — refusing a web-only run over an api key
+    nothing in it can read would be the same false gate this item removes, so a
+    world-only preparation resolves none and the seed still folds in what it publishes.
+
+    Item 97's "the seed did not run for this selection" is now unreachable through
+    `runGuard`: a scenario that can raise it references a fixture in its steps, which is
+    exactly what makes `worldNeeded` true. It is kept (with its second clause corrected
+    — it used to claim a cli/web selection never starts the world) for the one residual:
+    `runScenario` is a public API, and a caller assembling a context without fixtures
+    still deserves the run-shaped answer rather than "no such fixture".
+
+    Tests: `tests/guard-runner/run-driver-preparation.test.ts` — a web-only selection
+    gets services + seed and resolves its `{{fixture:…}}` through an `upload`; a cli-only
+    selection that READS a fixture gets the seeded world too; a cli-only selection that
+    needs nothing starts no services and runs no seed (the economy, and the blast radius
+    this item had to respect); an api selection prepares the world exactly as before.
+
+99. **G3b — credentials in sandbox scenarios (2026-08-14).** STATUS: OPEN. The
+    fixture half landed with item 97; `{{cred:…}}` deliberately did not follow.
+    Credentials are SECRETS, and three things the api path has, the sandbox path
+    does not: a redactor over what is transcribed (`api/redact.ts` is applied on the
+    api path only), a per-server allowlisted view to resolve a credential against
+    (a sandbox scenario binds no server), and a single legitimate destination (the
+    api path confines a credential to a header; a sandbox step could put one in an
+    argv, a written file, or a page's text). documenso's own web sign-in uses fixture
+    FIELDS (`owner.email` / `owner.password`), so the corpus is not blocked on this.
+
+100. **G1 — multipart file parts on an api `request` step (2026-08-14).** STATUS:
+    OPEN. The api driver can send JSON and raw string bodies, so "the API accepts a
+    document upload" — the sibling of the claim item 97 made statable in the browser
+    — still has no form. Shape to reuse verbatim: `GuardWebFileSchema`'s
+    `{ base64 | text | path, as?, type? }`, as the value of a multipart part, so ONE
+    file declaration serves both surfaces and the same seeded document travels the
+    api and the web path (which is what makes the two findings comparable).

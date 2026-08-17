@@ -32,6 +32,7 @@ import {
   mapExpectStrings,
 } from './sandbox-token.js'
 import { applyCaptured, applyCapturedEnv, CapturedValueError } from './captured.js'
+import { resolveFixtureText, UnknownFixtureError } from './api/vars.js'
 import {
   applySupplied,
   applySuppliedEnv,
@@ -82,6 +83,32 @@ export interface RunScenarioContext {
    */
   supplied?: readonly SuppliedInstance[]
   stepTimeoutMs: number
+  /**
+   * The SEED's fixture manifest, when the run seeded one — what `{{fixture:…}}`
+   * resolves against in every authored string this scenario carries.
+   *
+   * Fixtures are not secrets (the seed manifest says so): they are the ids, handles
+   * and canonical documents a prepared world published, and a sandbox scenario needs
+   * them for exactly the reason an api one does — the same seeded PDF the API accepts
+   * is the one the UI must accept, and inlining it per scenario would put N copies of
+   * one unreviewable blob in the corpus. Absent ⇒ the seed did not run for this
+   * selection, and a scenario that references a fixture settles an `error` saying so
+   * rather than uploading the literal text `{{fixture:doc.base64}}`.
+   */
+  fixtures?: ReadonlyMap<string, Record<string, unknown>>
+  /**
+   * The recipe declares an `api.seed`. Only used to tell the two fixture failures
+   * apart: a fixture that does not exist is the author's mistake, and a seed that
+   * never ran for this selection is the RUN's — and sending an author to fix a
+   * manifest that is perfectly correct is the worse of the two messages.
+   *
+   * Since item 98 the run prepares the seeded world for ANY selection that needs one
+   * — a scenario referencing a fixture included — so `runGuard` no longer reaches
+   * this message. It stays because this context is a public API: a caller that
+   * assembles one without fixtures still gets the honest half of the answer rather
+   * than "no such fixture".
+   */
+  seedDeclared?: boolean
   /**
    * The recipe's WEB SURFACE, when it declares one — how the served app starts and
    * how its readiness is observed. Present ⇒ a web step may open the browser
@@ -293,10 +320,25 @@ export async function runScenario(
     // prints `${sandbox}` cannot make the next step's argv expand it.
     /** What each step captured, in scenario order — read live by `tok` below. */
     const captured = new Map<string, string>()
+    /**
+     * The seed's fixtures, always ACTIVE on this surface: an empty map still makes
+     * `{{fixture:…}}` a reference that must resolve, so a scenario written against a
+     * world this selection did not prepare says so instead of handing the literal
+     * token to a child process.
+     */
+    const fixtures = ctx.fixtures ?? new Map<string, Record<string, unknown>>()
+    /**
+     * `{{fixture:…}}` FIRST, on the raw template, and the four `${…}` tokens only on
+     * the literal text between the references — the api driver's bounded-injection
+     * order (`api/vars.ts`), which is what keeps a seeded value from being re-scanned
+     * and a captured one from ever expanding into a fixture read.
+     */
     const tok = (text: string): string =>
-      applyCaptured(
-        applySandbox(applySupplied(applyUnique(text, ctx.unique), sandbox.supplied), sandbox.cwd),
-        captured,
+      resolveFixtureText(text, fixtures, (segment) =>
+        applyCaptured(
+          applySandbox(applySupplied(applyUnique(segment, ctx.unique), sandbox.supplied), sandbox.cwd),
+          captured,
+        ),
       )
     const resolveExpect = <E extends GuardExpect | GuardFileExpect>(expect: E): E =>
       applyCapturedExpect(
@@ -576,6 +618,28 @@ export async function runScenario(
       : undefined
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
   } catch (e) {
+    // A `{{fixture:…}}` that resolves against nothing. An `error`, not a `fail` —
+    // the scenario never got to observe the app — and it says WHICH of the two
+    // mistakes it is: a fixture the seed does not publish (the author's), or a seed
+    // that did not run for this selection (the run's, and no edit to the scenario
+    // would fix it). The api driver settles the same throw the same way.
+    if (e instanceof UnknownFixtureError) {
+      const reference = `{{fixture:${e.fixture}}}`
+      return {
+        ...base,
+        outcome: 'error',
+        durationMs: Date.now() - start,
+        failure: {
+          step: stepInFlight,
+          expected: `fixture "${e.fixture}" to be provided by the recipe's api.seed`,
+          actual:
+            ctx.fixtures === undefined && ctx.seedDeclared
+              ? `${reference} — the seed did not run for this selection, so no fixture values exist; ` +
+                'the recipe declares an `api.seed` this run never executed, so the gap is the RUN’s and no edit to the scenario closes it'
+              : e.message,
+        },
+      }
+    }
     // A `${captured:…}` with nothing behind it. The loader's cross-check rejects
     // every committed scenario that could get here, so this is a freshly authored
     // one in birth validation: an author-fixable defect, reported as a `fail`

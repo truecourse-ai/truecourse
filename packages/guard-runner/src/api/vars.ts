@@ -261,25 +261,73 @@ function resolvePlaceholders(
   const kinds: string[] = []
   if (maps.credentials) kinds.push('cred')
   if (maps.fixtures) kinds.push('fixture')
-  if (kinds.length === 0) return interpolate(template, vars)
+  return substitutePlaceholders(
+    template,
+    kinds,
+    (kind, ident) => {
+      if (kind === 'cred') {
+        const secret = maps.credentials!.get(ident)
+        if (secret === undefined) throw new UnknownCredentialError(ident)
+        return secret
+      }
+      return resolveFixture(ident, maps.fixtures!)
+    },
+    (segment) => interpolate(segment, vars),
+  )
+}
 
+/**
+ * THE placeholder scan, and the only one: locate `{{kind:ident}}` in the RAW
+ * template, resolve each one, and run the caller's own `${…}` interpolation over the
+ * literal segments BETWEEN them. That order is the bounded-injection rule itself —
+ * a resolved value is inserted verbatim and never re-scanned — which is why it lives
+ * in one function rather than once per surface.
+ */
+function substitutePlaceholders(
+  template: string,
+  kinds: readonly string[],
+  resolveOne: (kind: string, ident: string) => string,
+  literal: (segment: string) => string,
+): string {
+  if (kinds.length === 0) return literal(template)
   const pattern = new RegExp(`\\{\\{(${kinds.join('|')}):([^{}]+)\\}\\}`, 'g')
   let out = ''
   let last = 0
   let match: RegExpExecArray | null
   while ((match = pattern.exec(template)) !== null) {
-    out += interpolate(template.slice(last, match.index), vars)
-    const [, kind, ident] = match
-    if (kind === 'cred') {
-      const secret = maps.credentials!.get(ident)
-      if (secret === undefined) throw new UnknownCredentialError(ident)
-      out += secret
-    } else {
-      out += resolveFixture(ident, maps.fixtures!)
-    }
+    out += literal(template.slice(last, match.index))
+    out += resolveOne(match[1], match[2])
     last = match.index + match[0].length
   }
-  return out + interpolate(template.slice(last), vars)
+  return out + literal(template.slice(last))
+}
+
+/**
+ * The FIXTURE half of {@link resolvePlaceholders}, for a surface whose `${…}` pass
+ * is NOT the api driver's `vars` map — the sandbox scenario's four-token closure
+ * (`${unique}` / `${supplied:…}` / `${sandbox}` / `${captured:…}`), which it takes as
+ * `literal`. Fixtures are usable everywhere because they are not secrets; the
+ * credential half deliberately does not follow, and stays the api path's alone
+ * (a sandbox scenario binds no server, so there is no allowlisted view to resolve
+ * one against, and no redactor over what a child process prints).
+ */
+export function resolveFixtureText(
+  template: string,
+  fixtures: ReadonlyMap<string, Record<string, unknown>>,
+  literal: (segment: string) => string,
+): string {
+  return substitutePlaceholders(template, ['fixture'], (_kind, ident) => resolveFixture(ident, fixtures), literal)
+}
+
+/**
+ * Does this text carry a `{{fixture:…}}` reference AT ALL? A question about need,
+ * not about value: the run asks it of a scenario's steps to decide whether this
+ * selection has to prepare the seeded world before anything runs (item 98). It
+ * lives beside {@link substitutePlaceholders} so the pattern it asks with and the
+ * pattern the scan resolves with can never drift apart.
+ */
+export function containsFixtureReference(text: string): boolean {
+  return /\{\{fixture:[^{}]+\}\}/.test(text)
 }
 
 /**

@@ -29,7 +29,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Browser, BrowserContext, BrowserType, Page } from 'playwright-core'
+import type { Browser, BrowserContext, BrowserType, FileChooser, Page } from 'playwright-core'
 
 /**
  * The pinned viewport. 1280×800 is the smallest common desktop size at which a
@@ -41,6 +41,12 @@ export const WEB_VIEWPORT = { width: 1280, height: 800 } as const
 /** The video file every web session leaves in its evidence directory. */
 export const WEB_VIDEO_FILE = 'session.webm'
 
+/** One armed wait for a file chooser — see {@link WebBrowserHandle.armFileChooser}. */
+export interface ArmedFileChooser {
+  /** The chooser the next click opens, or `null` when none opened in time. */
+  next(timeoutMs: number): Promise<FileChooser | null>
+}
+
 export interface WebBrowserHandle {
   /** The one page every web step of the scenario acts on. */
   page: Page
@@ -48,6 +54,18 @@ export interface WebBrowserHandle {
   consoleLines(): readonly string[]
   /** Page errors (uncaught exceptions) — the console's louder half. */
   pageErrors(): readonly string[]
+  /**
+   * Arm the page for the NEXT file chooser, and hand back the wait for it.
+   *
+   * Armed PER STEP, and arming DROPS whatever an earlier click left parked. Two
+   * facts make that the only correct shape: Playwright only intercepts a chooser
+   * while a listener is attached (so the listener is permanent, registered beside
+   * the console ones below), and a chooser some earlier click opened and nobody
+   * answered must never be handed to a later upload — that would report the file as
+   * having reached a control it never touched, which is the "green for the wrong
+   * reason" this engine exists to prevent.
+   */
+  armFileChooser(): ArmedFileChooser
   /**
    * Close the page, the context and the browser, and finish the video. Idempotent.
    * Returns the video's filename inside the evidence dir, or null when none landed.
@@ -178,6 +196,50 @@ export async function launchWebBrowser(
     pageErrors.push(error.message)
   })
 
+  // THE file-chooser channel. The listener is permanent because interception is:
+  // attaching one per step would race the click that opens the dialog (and, with
+  // no listener at all, Chromium shows a native dialog nothing can answer). A
+  // chooser that arrives unwaited-for is PARKED for the step that armed itself and
+  // then clicked; a chooser nobody ever asked for is dropped at the next arming.
+  let parked: FileChooser | null = null
+  let waiting: ((chooser: FileChooser) => void) | null = null
+  page.on('filechooser', (chooser) => {
+    if (waiting) {
+      const resume = waiting
+      waiting = null
+      resume(chooser)
+    } else {
+      parked = chooser
+    }
+  })
+  const armFileChooser = (): ArmedFileChooser => {
+    parked = null
+    waiting = null
+    return {
+      next(timeoutMs: number): Promise<FileChooser | null> {
+        // The click may already have opened it: `arm` → `click` → `next` is the
+        // order the executor drives, and the event lands in between.
+        if (parked) {
+          const chooser = parked
+          parked = null
+          return Promise.resolve(chooser)
+        }
+        return new Promise<FileChooser | null>((resolve) => {
+          const timer = setTimeout(() => {
+            waiting = null
+            // No chooser is a real answer about the page: the control took the
+            // click and asked for no file. The caller reports it as such.
+            resolve(null)
+          }, Math.max(1, timeoutMs))
+          waiting = (chooser) => {
+            clearTimeout(timer)
+            resolve(chooser)
+          }
+        })
+      },
+    }
+  }
+
   let closed: string | null = null
   let isClosed = false
 
@@ -209,6 +271,7 @@ export async function launchWebBrowser(
       page,
       consoleLines: () => consoleLines,
       pageErrors: () => pageErrors,
+      armFileChooser,
       close,
     },
   }

@@ -332,7 +332,9 @@ export {
   WEB_VIEWPORT,
   WEB_VIDEO_FILE,
 } from './web/browser.js'
-export type { WebBrowserHandle, LaunchWebBrowserOptions } from './web/browser.js'
+export type { WebBrowserHandle, LaunchWebBrowserOptions, ArmedFileChooser } from './web/browser.js'
+export { materializeWebFile } from './web/upload.js'
+export type { WebFilePayload, MaterializeWebFileResult } from './web/upload.js'
 export {
   executeWebStep,
   webLocator,
