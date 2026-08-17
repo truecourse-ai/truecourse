@@ -1,7 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { isInterfaceDrifted, runGuard, guardInterfacesPath, readInterfaceCatalog } from '@truecourse/guard-runner'
+import {
+  isInterfaceDrifted,
+  runGuard,
+  guardAuthoredInterfacesPath,
+  guardInterfacesPath,
+  readInterfaceCatalog,
+} from '@truecourse/guard-runner'
 import { interfaceFingerprint, type Interface, type InterfacesFile } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds } from './helpers.js'
 
@@ -25,20 +31,48 @@ function iface(id: string, command: string[], flags: string[] = []): Interface {
   return { id, title: command.join(' '), ...shape, fingerprint: interfaceFingerprint(shape) }
 }
 
-function writeCatalog(root: string, interfaces: Interface[]): InterfacesFile {
-  const file: InterfacesFile = {
+function catalogOf(interfaces: Interface[]): InterfacesFile {
+  return {
     version: 2,
     generatedAt: new Date().toISOString(),
     recipeFingerprint: 'sha256:recipe',
     interfaces,
   }
+}
+
+function writeCatalog(root: string, interfaces: Interface[]): InterfacesFile {
+  const file = catalogOf(interfaces)
   fs.mkdirSync(path.dirname(guardInterfacesPath(root)), { recursive: true })
   fs.writeFileSync(guardInterfacesPath(root), JSON.stringify(file, null, 2))
   return file
 }
 
+/** The COMMITTED half — the surfaces no derivation writes (see `store.ts`). */
+function writeAuthoredCatalog(root: string, interfaces: Interface[]): InterfacesFile {
+  const file = catalogOf(interfaces)
+  fs.mkdirSync(path.dirname(guardAuthoredInterfacesPath(root)), { recursive: true })
+  fs.writeFileSync(guardAuthoredInterfacesPath(root), JSON.stringify(file, null, 2))
+  return file
+}
+
 const VERSION = iface('cli/version', ['relkit', 'version'])
 const WHOAMI = iface('cli/whoami', ['relkit', 'whoami'])
+
+/** A hand-authored web task — the shape the mapper never derives, and therefore
+ *  the only shape that can go missing when a run reads the derived half alone. */
+const SILENCE_RULE: Interface = (() => {
+  const shape = {
+    type: 'web' as const,
+    entry: { method: 'GET', path: '/repos/{repoId}' },
+    steps: [{ kind: 'activate' as const, target: 'button "Rules"' }],
+  }
+  return {
+    id: 'web/silence-rule',
+    title: 'Silence a rule',
+    ...shape,
+    fingerprint: interfaceFingerprint(shape),
+  }
+})()
 
 describe('isInterfaceDrifted', () => {
   const catalog: InterfacesFile = {
@@ -155,6 +189,65 @@ describe('runGuard — interface-drift annotation', () => {
     expect(by.get('stale')).toMatchObject({ outcome: 'stale', interfaceDrifted: true })
     // Drift is never counted as a failure.
     expect(res.latest.summary).toMatchObject({ total: 5, pass: 4, fail: 0, stale: 1 })
+  })
+
+  it('resolves an AUTHORED interface — the drift baseline is the merged catalog, not the derived half', async () => {
+    // The regression the two-file split can cause: `isInterfaceDrifted` reads a
+    // missing id as drift, and the mapper derives `cli`/`api` only — so every web
+    // surface now lives in the committed authored file. A run that read the derived
+    // snapshot alone would stamp `interfaceDrifted` on every web-grounded scenario
+    // on EVERY run, with nothing having moved.
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [VERSION])
+    writeAuthoredCatalog(r, [SILENCE_RULE])
+
+    // Grounded on the authored half. Its steps are cli because the fixture app is a
+    // cli — what is under test is the GROUNDING resolving, not which driver runs it.
+    writeScenario(
+      r,
+      'authored.yaml',
+      scenario({
+        id: 'authored',
+        binds: specBinds('cli/version'),
+        interface: { path: ['web/silence-rule'], fingerprints: [SILENCE_RULE.fingerprint] },
+        steps: [{ run: ['--version'], expect: { exit: 0 } }],
+      }),
+    )
+    // Grounded on BOTH halves at once — a flow that walks a derived command and a
+    // hand-authored screen still has to resolve as one path.
+    writeScenario(
+      r,
+      'both.yaml',
+      scenario({
+        id: 'both',
+        binds: specBinds('cli/version'),
+        interface: {
+          path: ['cli/version', 'web/silence-rule'],
+          fingerprints: [VERSION.fingerprint, SILENCE_RULE.fingerprint],
+        },
+        steps: [{ run: ['--version'], expect: { exit: 0 } }],
+      }),
+    )
+    // The authored half moving is still real drift — merging must not blunt the signal.
+    writeScenario(
+      r,
+      'moved.yaml',
+      scenario({
+        id: 'moved',
+        binds: specBinds('cli/version'),
+        interface: { path: ['web/silence-rule'], fingerprints: ['sha256:older-surface'] },
+        steps: [{ run: ['--version'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    if (res.status !== 'ok') throw new Error('expected ok')
+    const by = new Map(res.latest.scenarios.map((s) => [s.id, s]))
+
+    expect(by.get('authored')!.interfaceDrifted).toBeUndefined()
+    expect(by.get('both')!.interfaceDrifted).toBeUndefined()
+    expect(by.get('moved')).toMatchObject({ interfaceDrifted: true })
   })
 
   it('annotates nothing when no mapping snapshot exists', async () => {

@@ -451,5 +451,91 @@ describe('the interface snapshot is gitignored', () => {
     const dir = ensureRepoTruecourseDir(repo);
     const ignored = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8').split('\n');
     expect(ignored).toContain('guard/interfaces.json');
+    // …and its authored sibling is NOT: hand-authored surfaces travel with the
+    // repo, or a fresh clone maps itself back down to cli + api.
+    expect(ignored).not.toContain('guard/interfaces.authored.json');
+  });
+});
+
+/**
+ * THE LEGACY CATALOG GUARD — the mapper derives `cli` and `api` and nothing else,
+ * so a `guard/interfaces.json` carrying anything ELSE was written by a human, and
+ * overwriting it destroys work no derivation can ever put back.
+ *
+ * It fails LOUD rather than warning: proceeding would run the whole pipeline
+ * without that surface and settle its flows as `no-interface` — the exact silent
+ * degradation the authored file exists to remove.
+ */
+describe('mapInterfaces refuses to overwrite a hand-authored catalog', () => {
+  const writeCatalog = (file: unknown): void => {
+    const target = path.join(repo, '.truecourse/guard/interfaces.json');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(file, null, 2));
+  };
+  const backups = (): string[] =>
+    fs
+      .readdirSync(path.join(repo, '.truecourse/guard'))
+      .filter((f) => f.startsWith('interfaces.legacy-'));
+
+  const webCatalog = {
+    version: 2,
+    generatedAt: '2026-08-01T00:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [
+      {
+        id: 'web/silence-rule',
+        type: 'web',
+        title: 'silence a rule',
+        entry: { command: ['open', 'rules'] },
+        steps: [{ kind: 'navigate', route: '/repos/1' }],
+        fingerprint: 'sha256:web',
+      },
+    ],
+  };
+
+  it('stops on a surface no derivation produces, and keeps a copy of what it found', async () => {
+    writeRepo({ 'package.json': JSON.stringify({ name: 'shipit' }), 'src/cli.ts': COMMANDER_CLI });
+    writeCatalog(webCatalog);
+
+    await expect(mapInterfaces(repo, { probeExec: null })).rejects.toThrow(
+      /guard\/interfaces\.json.*web.*interfaces\.authored\.json/s,
+    );
+    // Nothing is ever lost: the file is still there, and a dated copy sits beside it.
+    expect(JSON.parse(fs.readFileSync(path.join(repo, '.truecourse/guard/interfaces.json'), 'utf-8'))).toEqual(
+      webCatalog,
+    );
+    expect(backups()).toHaveLength(1);
+    expect(JSON.parse(fs.readFileSync(path.join(repo, '.truecourse/guard', backups()[0]), 'utf-8'))).toEqual(
+      webCatalog,
+    );
+  });
+
+  it('stops on a version 1 catalog — the shape no derivation has written since the SOM restructure', async () => {
+    writeRepo({ 'package.json': JSON.stringify({ name: 'shipit' }), 'src/cli.ts': COMMANDER_CLI });
+    writeCatalog({ ...webCatalog, version: 1, interfaces: [] });
+
+    await expect(mapInterfaces(repo, { probeExec: null })).rejects.toThrow(
+      /version 1.*migrate-interfaces-v2\.mts/s,
+    );
+    expect(backups()).toHaveLength(1);
+  });
+
+  it('overwrites its own output without ceremony — cli and api are what it derives', async () => {
+    writeRepo({ 'package.json': JSON.stringify({ name: 'shipit' }), 'src/cli.ts': COMMANDER_CLI });
+    await mapInterfaces(repo, { probeExec: null });
+
+    const again = await mapInterfaces(repo, { probeExec: null });
+    expect(again.catalog.interfaces.map((j) => j.id)).toContain('cli/deploy');
+    expect(backups()).toEqual([]);
+  });
+
+  it('leaves the authored sibling alone — it is the file the mapper never writes', async () => {
+    writeRepo({ 'package.json': JSON.stringify({ name: 'shipit' }), 'src/cli.ts': COMMANDER_CLI });
+    const authored = path.join(repo, '.truecourse/guard/interfaces.authored.json');
+    fs.mkdirSync(path.dirname(authored), { recursive: true });
+    fs.writeFileSync(authored, JSON.stringify(webCatalog, null, 2));
+
+    await mapInterfaces(repo, { probeExec: null });
+    expect(JSON.parse(fs.readFileSync(authored, 'utf-8'))).toEqual(webCatalog);
   });
 });

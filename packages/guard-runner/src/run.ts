@@ -81,7 +81,7 @@ import { runCredentialRequests, CredentialRequestError } from './api/credential-
 import {
   appendGuardHistory,
   readGuardLatest,
-  readInterfaceCatalog,
+  readMergedInterfaceCatalog,
   recipePath,
   writeGuardLatest,
   writeGuardRun,
@@ -434,7 +434,13 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // The interface grounding check — a per-scenario ANNOTATION, computed once against
   // the mapping snapshot (absent snapshot ⇒ no annotation anywhere). It never gates
   // execution: a scenario whose surface moved still runs its frozen steps.
-  const interfaceCatalog = readInterfaceCatalog(repoRoot)
+  //
+  // The baseline is the MERGED catalog, both halves of it: `isInterfaceDrifted`
+  // reads an id it cannot find as drift, and the mapper derives `cli`/`api` only —
+  // so every hand-authored surface lives in the committed
+  // `guard/interfaces.authored.json`. Reading the derived half alone would stamp
+  // every web-grounded scenario as drifted on every run, with nothing having moved.
+  const interfaceCatalog = readMergedInterfaceCatalog(repoRoot)
   const drifted = new Set(
     selected.filter((s) => isInterfaceDrifted(s, interfaceCatalog)).map((s) => s.id),
   )

@@ -69,7 +69,7 @@ import {
 } from '@truecourse/shared';
 import {
   loadRecipe,
-  readInterfaceCatalog,
+  readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
   recipePath,
   type Recipe,
@@ -424,7 +424,10 @@ async function planGuardRealizationStages(
   flowStage: GuardFlowStagePlan,
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
-  const catalog = readInterfaceCatalog(repoRoot);
+  // The MERGED catalog — the matcher runs against both halves, so an estimate that
+  // read the derived one alone would price no work at all for the hand-authored
+  // surfaces (every web surface there is).
+  const catalog = readMergedInterfaceCatalog(repoRoot);
   const catalogs = catalog ? buildSurfaceCatalogs(catalog.interfaces) : null;
   // Only surfaces with interfaces reach the matcher; without a snapshot we cannot
   // know which do, so every prepared surface counts (a ceiling, never a shortfall).

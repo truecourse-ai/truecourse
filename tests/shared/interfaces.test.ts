@@ -7,6 +7,7 @@ import {
   InterfaceControlReadableSchema,
   InterfaceMarkerReadableSchema,
   InterfaceOptionSchema,
+  InterfaceOriginSchema,
   InterfaceResourceKindSchema,
   InterfaceResourceSchema,
   InterfaceRowsReadableSchema,
@@ -2651,5 +2652,45 @@ describe('readables', () => {
     })
     expect(none.readables?.markers).toEqual([])
     expect(none.readables?.rows).toBeUndefined()
+  })
+})
+
+/**
+ * PROVENANCE — `origin`, the field that says whether an interface was derived
+ * from the tree or hand-authored in `guard/interfaces.authored.json`.
+ *
+ * Two invariants are pinned here, and they are the whole reason the field is
+ * shaped the way it is. It is STAMPED at merge time (never written to the
+ * authored file), so it can never disagree with where an entry actually came
+ * from; and it is OUTSIDE the fingerprint fold, so making authorship visible
+ * re-authors not one scenario.
+ */
+describe('interface provenance', () => {
+  it('origin is the closed two-member vocabulary, and optional — a lone file declares none', () => {
+    expect(InterfaceOriginSchema.options).toEqual(['derived', 'authored'])
+    const bare = iface([INVOKE])
+    expect(InterfaceSchema.parse(bare).origin).toBeUndefined()
+    expect(InterfaceSchema.parse({ ...bare, origin: 'authored' }).origin).toBe('authored')
+    expect(() => InterfaceSchema.parse({ ...bare, origin: 'hand-written' })).toThrow()
+  })
+
+  it('never moves an interface identity — where an entry came from is not WHICH task it is', () => {
+    const bare = iface([INVOKE])
+    expect(interfaceFingerprint({ ...bare, origin: 'authored' })).toBe(bare.fingerprint)
+    expect(interfaceFingerprint({ ...bare, origin: 'derived' })).toBe(bare.fingerprint)
+    // …and the surface still moves it, so the fingerprint is not simply inert.
+    expect(interfaceFingerprint({ ...bare, origin: 'authored', type: 'web' })).not.toBe(bare.fingerprint)
+  })
+
+  it('stamps the whole reference catalog without moving one fingerprint', () => {
+    // The migration invariant, restated for the field that made authorship
+    // visible: 114 entries, every one of them stamped, all 114 identities where
+    // they were — no scenario needs re-authoring because a catalog got merged.
+    const file = path.resolve(__dirname, '../../reference/store/.truecourse/guard/interfaces.json')
+    const catalog = InterfacesFileSchema.parse(JSON.parse(fs.readFileSync(file, 'utf-8')))
+    expect(catalog.interfaces).toHaveLength(114)
+    for (const j of catalog.interfaces) {
+      expect(interfaceFingerprint({ ...j, origin: 'authored' }), j.id).toBe(j.fingerprint)
+    }
   })
 })

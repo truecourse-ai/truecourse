@@ -57,7 +57,10 @@ import {
   readGuardDecisions,
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
-  readInterfaceCatalog,
+  mergeInterfaceLists,
+  mergeRegistries,
+  readAuthoredInterfaceCatalog,
+  readMergedInterfaceCatalog,
   manifestPath,
   runBuild,
   runInstall,
@@ -2700,17 +2703,33 @@ interface MappedSurface {
 
 /**
  * The interface catalog for this run: the injected mapper, else the last mapping's
- * snapshot, else empty. A mapper that throws degrades to the snapshot for the same
+ * snapshot, else empty — and, on EITHER path, the hand-authored catalog merged
+ * over the top. A mapper that throws degrades to the snapshot for the same
  * reason it degrades to empty — the spec half of the pipeline must keep working on
  * a repo the mapper chokes on.
+ *
+ * The authored merge is on the SUCCESS path deliberately (2026-08-17). Before it,
+ * this function reached for the on-disk catalog only when the mapper THREW, so a
+ * healthy mapping — which derives `cli` and `api` and no other surface — simply
+ * replaced every hand-authored web task, and the flows that grounded on them
+ * settled as `no-interface` while the run stayed green. Reaching for the authored
+ * file only on failure protected exactly the case that never happens.
+ *
+ * Exported for the test that pins that: the seam is one function, and what it
+ * merges is the whole difference between an authored surface reaching the
+ * generator and vanishing.
  */
-async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvider): Promise<MappedSurface> {
+export async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvider): Promise<MappedSurface> {
+  // A present-but-broken authored file THROWS out of here rather than reading as
+  // empty (see `readAuthoredInterfaceCatalog`): losing the surface quietly is the
+  // failure being fixed, so it is not a degradation this path offers.
+  const authored = readAuthoredInterfaceCatalog(repoRoot)
   if (provider) {
     try {
       const mapped = await provider()
       return {
-        interfaces: mapped.interfaces,
-        ...(mapped.resources ? { resources: mapped.resources } : {}),
+        interfaces: mergeInterfaceLists(mapped.interfaces, authored?.interfaces ?? []),
+        ...withResources(mergeRegistries(mapped.resources, authored?.resources)),
         externalServices: mapped.externalServices ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
@@ -2723,15 +2742,22 @@ async function mapInterfacesSafely(repoRoot: string, provider?: InterfaceProvide
   // The snapshot carries interfaces (and their resource registry) only — external
   // services are derived from the working tree, never persisted, so a degraded
   // run reports none rather than a stale list.
-  const snapshot = readInterfaceCatalog(repoRoot)
+  const snapshot = readMergedInterfaceCatalog(repoRoot)
   return {
     interfaces: snapshot?.interfaces ?? [],
-    ...(snapshot?.resources ? { resources: snapshot.resources } : {}),
+    ...withResources(snapshot?.resources),
     externalServices: [],
     database: null,
     datastoreUrls: [],
     outboundRequests: [],
   }
+}
+
+/** A registry rides along only when there is one — an absent one is not empty. */
+function withResources(
+  resources: Record<string, InterfaceResource[]> | undefined,
+): { resources?: Record<string, InterfaceResource[]> } {
+  return resources && Object.keys(resources).length > 0 ? { resources } : {}
 }
 
 // ---------------------------------------------------------------------------

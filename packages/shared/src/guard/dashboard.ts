@@ -34,6 +34,7 @@ import {
   InterfaceCatalogSourceSchema,
   InterfaceContractSchema,
   InterfaceEntrySchema,
+  InterfaceOriginSchema,
   InterfaceResourceSchema,
   InterfaceStepSchema,
 } from '../interfaces.js'
@@ -1108,8 +1109,20 @@ export const GuardInterfaceRowSchema = z
     flows: z.array(GuardInterfaceFlowRefSchema),
     /** The scenarios that ground on it. */
     scenarioIds: z.array(z.string()),
-    /** How this surface's catalog was derived (`tree` | `probes`). */
+    /**
+     * How this surface's catalog was derived (`tree` | `probes`) — absent for a
+     * surface no derivation produced, which is exactly what `origin` names.
+     */
     source: InterfaceCatalogSourceSchema.optional(),
+    /**
+     * WHERE THIS ROW CAME FROM — `derived` (a mapping read it off the tree) or
+     * `authored` (a human wrote it in `guard/interfaces.authored.json`). Stamped
+     * by the merge that joins the catalog's two halves, so it is a fact about
+     * this ENTRY rather than about its area: an authored operation shadowing a
+     * derived one sits inside a `tree`-derived surface and still says so, which
+     * no per-area `source` value could ever express.
+     */
+    origin: InterfaceOriginSchema.optional(),
     /** Declared in an OpenAPI doc, but no route registration serves it. */
     specOnly: z.literal(true).optional(),
     /**

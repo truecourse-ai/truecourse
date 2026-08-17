@@ -24,8 +24,9 @@ import {
   guardLatestPath,
   guardResultPath,
   manifestPath,
-  readInterfaceCatalog,
   readInterfaceCatalogRaw,
+  readMergedInterfaceCatalog,
+  guardAuthoredInterfacesPath,
   guardInterfacesPath,
   maskedRecipeText,
   recipePath,
@@ -1562,23 +1563,30 @@ export async function readGuardRunFlows(
 }
 
 // ---------------------------------------------------------------------------
-// Interfaces tab — the code-side catalog (`guard/interfaces.json`).
+// Interfaces tab — the code-side catalog, BOTH halves of it
+// (`guard/interfaces.json` + `guard/interfaces.authored.json`).
 // ---------------------------------------------------------------------------
 
 /**
  * The interface catalog plus the reverse index onto the flows that ground on it.
  *
- * The catalog is DERIVED from the working tree (the free Map action writes
- * `guard/interfaces.json`, which is gitignored), so it only exists where the store
+ * The catalog has two homes and this view reads the MERGE of them: the derived
+ * snapshot the Map action writes (`guard/interfaces.json`, gitignored) and the
+ * committed `guard/interfaces.authored.json` a human writes for the surfaces no
+ * derivation produces. Only `cli` and `api` are ever derived, so composing this
+ * view from the derived half alone would show a repo with no web surface at all.
+ * Each row carries `origin` for which half it came from.
+ *
+ * Both halves live in the working tree, so the view only exists where the store
  * materializes in place; a hosted repo reports `unavailable: 'no-working-tree'`
- * with an otherwise-empty payload. A missing snapshot is likewise a clean empty
+ * with an otherwise-empty payload. Neither half present is likewise a clean empty
  * payload (`mapped: false`) so the tab renders its Map CTA, never a null check.
  */
 export async function readGuardInterfaces(repoKey: string, ref?: string): Promise<GuardInterfacesView> {
   if (!guardsMaterializeInPlace()) {
     return { ...emptyInterfacesView(), unavailable: 'no-working-tree' }
   }
-  const catalog = readInterfaceCatalog(repoKey)
+  const catalog = readMergedInterfaceCatalog(repoKey)
   if (!catalog) return emptyInterfacesView()
 
   const corpus = await loadGuardCorpusForView(repoKey, ref)
@@ -1605,7 +1613,12 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
     fingerprint: j.fingerprint,
     flows: flowRefs.get(j.id) ?? [],
     scenarioIds: scenarioIdsByInterface.get(j.id) ?? [],
+    // How the AREA was derived, when it was. Absent for a hand-authored surface —
+    // `source` describes a derivation ladder and there was no derivation to
+    // describe; `origin` below is the row's own answer, and the honest one.
     ...(catalog.source?.[j.type] ? { source: catalog.source[j.type] } : {}),
+    // Which half of the catalog this row came from, as the merge stamped it.
+    ...(j.origin ? { origin: j.origin } : {}),
     ...(j.specOnly ? { specOnly: true as const } : {}),
     // The contract passes through verbatim — the view renders the catalog's own
     // words, and a catalog without one simply carries none.
@@ -1903,7 +1916,17 @@ function interfaceReverseIndex(
   return { flowRefs, scenarioIdsByInterface }
 }
 
-/** The detected-surface banner: one row per driver-registry surface, registry order. */
+/**
+ * The detected-surface banner: one row per driver-registry surface, registry order.
+ *
+ * `source` is carried ONLY where a derivation ran, and the merged catalog keeps the
+ * derived half's map verbatim rather than inventing a value for the authored half —
+ * `source` answers "which ladder derived this area", which a hand-written area has
+ * no answer to. So a sourceless row is read together with its interface count:
+ * sourceless with interfaces is a surface a human wrote; sourceless with NONE is a
+ * derivation that found nothing. Inside a mixed area the exact answer is per row
+ * (`origin`), because one area can hold both.
+ */
 function interfaceSurfaces(
   countByType: ReadonlyMap<string, number>,
   source: Record<string, 'tree' | 'probes'> | undefined,
@@ -2345,18 +2368,47 @@ function artifactSlice(
 }
 
 /**
- * One interface's entry in `guard/interfaces.json`. The catalog is DERIVED from the
- * working tree (gitignored, rewritten by every Map), so it only exists where the
- * store materializes in place — a hosted repo has no file to show and answers
- * `null`, exactly as {@link readGuardInterfaces} reports `no-working-tree`.
+ * One interface's entry, sliced out of WHICHEVER half of the catalog holds it —
+ * the derived `guard/interfaces.json` or the committed
+ * `guard/interfaces.authored.json`.
+ *
+ * The file is resolved first and only then sliced, rather than the merge being
+ * serialized back out: this reading exists to show the bytes that are actually on
+ * disk, so a reader sees a real file at a real path (the `file` label is what they
+ * would open) and none of the fields the merge stamps on top — `origin` in
+ * particular is computed, and a raw view that showed it would be showing a field
+ * no file contains. The authored half is looked at LAST for the same reason it wins
+ * the merge: where both name one id, it is the entry the view beside this one
+ * rendered.
+ *
+ * Both halves live in the working tree, so a hosted repo has no file to show and
+ * answers `null`, exactly as {@link readGuardInterfaces} reports `no-working-tree`.
  */
 export async function readGuardInterfaceRaw(
   repoKey: string,
   id: string,
 ): Promise<GuardArtifactSource | null> {
   if (!guardsMaterializeInPlace()) return null
-  const rel = path.relative(repoKey, guardInterfacesPath(repoKey)).split(path.sep).join('/')
-  return artifactSlice(readInterfaceCatalogRaw(repoKey), rel, 'interfaces', id)
+  const halves: [string, () => string | null][] = [
+    [guardInterfacesPath(repoKey), () => readInterfaceCatalogRaw(repoKey)],
+    [guardAuthoredInterfacesPath(repoKey), () => readFileTextOr(guardAuthoredInterfacesPath(repoKey))],
+  ]
+  let found: GuardArtifactSource | null = null
+  for (const [file, read] of halves) {
+    const rel = path.relative(repoKey, file).split(path.sep).join('/')
+    found = artifactSlice(read(), rel, 'interfaces', id) ?? found
+  }
+  return found
+}
+
+/** A file's text, or `null` when it is absent or unreadable — the raw readings
+ *  never fail a view, they simply have nothing to show. */
+function readFileTextOr(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf-8')
+  } catch {
+    return null
+  }
 }
 
 /**

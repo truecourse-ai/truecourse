@@ -1,9 +1,13 @@
 /**
  * Interface drift — the run-time check that a scenario's grounding still matches the
  * live code surface. A generated scenario embeds the interface path it was authored
- * from plus each interface's fingerprint; the mapping snapshot
- * (`.truecourse/guard/interfaces.json`) carries the fingerprints the surface derives
- * TODAY.
+ * from plus each interface's fingerprint; the catalog carries the fingerprints the
+ * surface has TODAY.
+ *
+ * The catalog to compare against is the MERGED one (`readMergedInterfaceCatalog`),
+ * never the derived half alone: an id this predicate cannot find counts as drift,
+ * and the surfaces nobody derives live in the committed
+ * `guard/interfaces.authored.json`. Half a catalog reads as half the repo moving.
  *
  * A mismatch is an ANNOTATION, never an outcome: the scenario's steps are frozen
  * and remain a valid probe of the spec claims it binds, so a moved surface only

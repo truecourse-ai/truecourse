@@ -9,6 +9,7 @@
  *   guard/result.json            last `guard generate` report (gitignored)
  *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
  *   guard/interfaces.json        last interface-mapping catalog (gitignored, re-derived)
+ *   guard/interfaces.authored.json  the hand-authored half of that catalog (COMMITTED)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  *
  * The committable corpus files live one level over, under `scenarios/`:
@@ -41,6 +42,7 @@ import {
   type GuardHistoryEntry,
   type GuardLatest,
   type GuardSetupReport,
+  type Interface,
   type InterfacesFile,
 } from '@truecourse/shared'
 
@@ -55,6 +57,7 @@ const RESULT_FILE = 'result.json'
 const SETUP_FILE = 'setup.json'
 const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
 const INTERFACES_FILE = 'interfaces.json'
+const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
@@ -97,6 +100,14 @@ export function guardSetupPath(repoRoot: string): string {
 /** The interface catalog the last mapping wrote — derived, gitignored, may be absent. */
 export function guardInterfacesPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), INTERFACES_FILE)
+}
+
+/**
+ * The HAND-AUTHORED half of the catalog — committed, and the one file under
+ * `guard/` no derivation ever writes. See {@link readAuthoredInterfaceCatalog}.
+ */
+export function guardAuthoredInterfacesPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), AUTHORED_INTERFACES_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -267,13 +278,164 @@ export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
 }
 
 /**
- * Read the interface catalog the last mapping wrote, or `null` when it is absent or
- * unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
+ * Read the interface catalog the last mapping DERIVED, or `null` when it is absent
+ * or unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
  * simply "no interface knowledge" — it never fails a run, it only means the drift
  * annotation has nothing to compare against.
+ *
+ * This is HALF the catalog. A consumer asking what surfaces the repo has wants
+ * {@link readMergedInterfaceCatalog}, which joins the hand-authored sibling over
+ * it; this reader is for the callers that mean the derivation specifically (the
+ * drift baseline, the raw-file view).
  */
 export function readInterfaceCatalog(repoRoot: string): InterfacesFile | null {
   return readJsonOr(guardInterfacesPath(repoRoot), InterfacesFileSchema, null)
+}
+
+/**
+ * Read the COMMITTED authored catalog — `guard/interfaces.authored.json`, the
+ * home of the interfaces and places NO derivation produces. The mapper derives
+ * `cli` and `api` and nothing else, so every web surface in existence is
+ * hand-authored; until this file existed they lived in the derived snapshot and
+ * one mapping deleted them.
+ *
+ * A MISSING file is the normal state and reads as "nothing authored" — most
+ * repos author none. A PRESENT-but-invalid one THROWS, and that is the one place
+ * this module refuses to degrade: every other reader here reads a corrupt file
+ * as absent because the file is derived and the next run re-derives it, while
+ * nothing re-derives this one. Reading it as empty would silently drop the exact
+ * surfaces it exists to protect and settle their flows as `no-interface` — the
+ * failure the whole design removes.
+ */
+export function readAuthoredInterfaceCatalog(repoRoot: string): InterfacesFile | null {
+  const file = guardAuthoredInterfacesPath(repoRoot)
+  if (!fs.existsSync(file)) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(fs.readFileSync(file, 'utf-8'))
+  } catch (error) {
+    throw new Error(
+      `${file} is not readable JSON (${error instanceof Error ? error.message : String(error)}). ` +
+        `It is the only home of the hand-authored surfaces, so it is never read as empty — fix the file, or move it aside to run without it.`,
+    )
+  }
+  const parsed = InterfacesFileSchema.safeParse(raw)
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    throw new Error(
+      `${file} is not a valid interface catalog: ${issue ? `${issue.path.join('.')} — ${issue.message}` : 'schema validation failed'}. ` +
+        `It is the only home of the hand-authored surfaces, so it is never read as empty.`,
+    )
+  }
+  return parsed.data
+}
+
+/**
+ * THE CATALOG AS A WHOLE: the derived snapshot joined with its authored sibling,
+ * authored winning. This is what every consumer that asks "what surfaces does
+ * this repo have" should read — {@link readInterfaceCatalog} answers only "what
+ * did the last mapping derive".
+ *
+ * `null` when neither half exists (a repo that has never mapped and authored
+ * nothing), so callers keep their single "no interface knowledge" branch.
+ */
+export function readMergedInterfaceCatalog(repoRoot: string): InterfacesFile | null {
+  const derived = readInterfaceCatalog(repoRoot)
+  const authored = readAuthoredInterfaceCatalog(repoRoot)
+  if (!derived && !authored) return null
+  return mergeInterfaceCatalogs(derived, authored)
+}
+
+/**
+ * The pure fold behind {@link readMergedInterfaceCatalog}, exported so a caller
+ * holding a FRESH mapping (guard generate's interface seam) merges by the exact
+ * same rules a reader does — one merge, not two that drift.
+ *
+ * Interfaces union by `id`, the authored entry winning OUTRIGHT (replaced, never
+ * field-merged: half a derived entry under an authored title is a shape neither
+ * side wrote). An override lands in the derived list's position, so authoring
+ * one entry never reshuffles the catalog. Registries — `resources` and `states`
+ * alike — merge per AREA and then by id inside it, the same way: an authored
+ * area arrives whole, an authored definition replaces the derived one it names.
+ * The state registry travels for a reason the interfaces alone would hide: an
+ * authored task's `startingState`/`at` ids resolve in it, and a merge that
+ * dropped it would hand consumers ids that name nothing.
+ *
+ * `origin` is STAMPED here, on both sides, and always overwrites what the file
+ * said. It is the honest answer the field exists for, and it is why the merge
+ * does NOT invent an `authored` value for `source`: `source` says how one AREA
+ * was DERIVED (`tree` vs the `probes` ladder), so an authored surface has no
+ * answer to give and claims none — its absence beside a non-empty interface list
+ * means "nobody derived this, a human wrote it", while its absence beside an
+ * EMPTY one means the derivation failed. The authored file's own `source` is
+ * dropped for the same reason: a hand-written catalog claiming
+ * `{"api":"tree","web":"tree"}` is precisely the lie that hid this loss, and no
+ * merged view will restate it.
+ *
+ * The envelope (`generatedAt`, `recipeFingerprint`) is the DERIVED run's when
+ * there is one: it dates a mapping, and the authored file is not a mapping.
+ */
+export function mergeInterfaceCatalogs(
+  derived: InterfacesFile | null,
+  authored: InterfacesFile | null,
+): InterfacesFile {
+  const envelope = derived ?? authored
+  const resources = mergeRegistries(derived?.resources, authored?.resources)
+  const states = mergeRegistries(derived?.states, authored?.states)
+  return {
+    version: 2,
+    generatedAt: envelope?.generatedAt ?? '',
+    recipeFingerprint: envelope?.recipeFingerprint ?? '',
+    interfaces: mergeInterfaceLists(derived?.interfaces ?? [], authored?.interfaces ?? []),
+    ...(states ? { states } : {}),
+    ...(resources ? { resources } : {}),
+    ...(derived?.source ? { source: derived.source } : {}),
+  }
+}
+
+/** The interface half of {@link mergeInterfaceCatalogs}, stamping both sides. */
+export function mergeInterfaceLists(
+  derived: readonly Interface[],
+  authored: readonly Interface[],
+): Interface[] {
+  return overlayById<Interface>(
+    derived.map((iface) => ({ ...iface, origin: 'derived' })),
+    authored.map((iface) => ({ ...iface, origin: 'authored' })),
+    (iface) => iface.id,
+  )
+}
+
+/** The registry half: per AREA, then by id inside it. `undefined` when neither
+ *  side names a single area — an absent registry is not an empty one. */
+export function mergeRegistries<T extends { id: string }>(
+  derived: Record<string, T[]> | undefined,
+  authored: Record<string, T[]> | undefined,
+): Record<string, T[]> | undefined {
+  if (!derived && !authored) return undefined
+  const areas = [...new Set([...Object.keys(derived ?? {}), ...Object.keys(authored ?? {})])]
+  const merged: Record<string, T[]> = {}
+  for (const area of areas) {
+    merged[area] = overlayById(derived?.[area] ?? [], authored?.[area] ?? [], (entry) => entry.id)
+  }
+  return merged
+}
+
+/** Overlay `over` onto `base` by key: a match replaces IN PLACE, the rest append
+ *  in `over`'s own order. */
+function overlayById<T>(base: readonly T[], over: readonly T[], key: (value: T) => string): T[] {
+  const overrides = new Map(over.map((value) => [key(value), value]))
+  const taken = new Set<string>()
+  const merged = base.map((value) => {
+    const id = key(value)
+    const override = overrides.get(id)
+    if (!override) return value
+    taken.add(id)
+    return override
+  })
+  for (const value of over) {
+    if (!taken.has(key(value))) merged.push(value)
+  }
+  return merged
 }
 
 /**

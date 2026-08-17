@@ -10,6 +10,15 @@
  * working on a repo the mapper chokes on. That includes C# without the Roslyn
  * host: interface mapping is tree-sitter-only, so analyze's hard-fail policy does
  * not extend here.
+ *
+ * The snapshot is HALF the catalog, and this half is the only one that is
+ * derived. `cli` and `api` are the only surfaces anything reads off a tree; the
+ * rest — every web surface in existence — is hand-authored, lives in the
+ * committed `guard/interfaces.authored.json`, is never written here, and is
+ * merged over this file by every reader (`readMergedInterfaceCatalog`). The one
+ * place that rule is enforced rather than assumed is
+ * {@link assertDerivedSnapshot}, which stops the mapping dead rather than
+ * overwrite authoring that landed in the derived file by mistake.
  */
 
 import crypto from 'node:crypto';
@@ -31,6 +40,7 @@ import {
   atomicWriteJson,
   computeRecipeFingerprint,
   corpusKeptDocs,
+  guardAuthoredInterfacesPath,
   guardInterfacesPath,
   loadRecipe,
   nodeRefContext,
@@ -118,6 +128,9 @@ export async function mapInterfaces(
   repoPath: string,
   opts: MapInterfacesOptions = {},
 ): Promise<MapInterfacesResult> {
+  // Before a single file is read: refuse to stand on top of a catalog a human
+  // wrote. Checked first so the refusal costs nothing and touches nothing.
+  assertDerivedSnapshot(repoPath);
   const interfaces = await deriveInterfaces(repoPath, opts);
   const placed = placeInterfaces(interfaces.interfaces, programName(repoPath));
 
@@ -142,6 +155,71 @@ export async function mapInterfaces(
     datastoreUrls: interfaces.datastoreUrls,
     outboundRequests: interfaces.outboundRequests,
   };
+}
+
+/** The surfaces a derivation actually produces. Everything else in
+ *  `guard/interfaces.json` was typed by a human. */
+const DERIVED_SURFACES = new Set(['cli', 'api']);
+
+/**
+ * REFUSE TO OVERWRITE HAND-AUTHORED WORK. The mapper derives `cli` and `api` and
+ * nothing else, so a snapshot carrying any other surface — or the pre-SOM v1
+ * shape — is somebody's authoring, and rewriting it destroys hours no derivation
+ * can reproduce. It has already happened: a 618KB curated catalog, gone in one
+ * command, with the run afterwards perfectly green.
+ *
+ * It throws rather than warning, and that is the point. Warning and proceeding
+ * means the rest of the pipeline runs without that surface and settles its flows
+ * as honest-looking `no-interface` gaps — the silent degradation this whole file
+ * split exists to remove. A copy is written first, so the loud path still loses
+ * nothing, and the error says exactly which two steps put the work back.
+ */
+function assertDerivedSnapshot(repoPath: string): void {
+  const file = guardInterfacesPath(repoPath);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {
+    // Absent, or bytes no reader could take for a catalog: the mapping owns the file.
+    return;
+  }
+  const evidence = handAuthoredEvidence(raw);
+  if (!evidence) return;
+
+  const backup = path.join(
+    path.dirname(file),
+    `interfaces.legacy-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+  );
+  fs.copyFileSync(file, backup);
+  const rel = (p: string) => path.relative(repoPath, p).split(path.sep).join('/');
+  throw new Error(
+    `${rel(file)} was written by hand, not derived: ${evidence}. Mapping would overwrite it, ` +
+      `and nothing can re-derive it — the mapper reads cli and api off the tree and no other surface. ` +
+      `A copy of what was found is at ${rel(backup)}. Migrate it with scripts/migrate-interfaces-v2.mts, ` +
+      `save the result as ${rel(guardAuthoredInterfacesPath(repoPath))} (committed — every mapping merges ` +
+      `it over the derived catalog instead of replacing it), then re-run the map.`,
+  );
+}
+
+/** What makes a snapshot recognizably somebody's authoring, in one clause — or
+ *  `null` for a file the mapper could have written itself. */
+function handAuthoredEvidence(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const file = raw as { version?: unknown; interfaces?: unknown };
+  if (file.version !== 2) {
+    return `it is a version ${String(file.version)} catalog, and no derivation has written that shape since the SOM restructure`;
+  }
+  if (!Array.isArray(file.interfaces)) return null;
+  const authored = new Set<string>();
+  for (const entry of file.interfaces) {
+    const type = (entry as { type?: unknown } | null)?.type;
+    if (typeof type === 'string' && !DERIVED_SURFACES.has(type)) authored.add(type);
+  }
+  if (authored.size === 0) return null;
+  const surfaces = [...authored].sort();
+  return `it carries ${surfaces.map((s) => `\`${s}\``).join(' and ')} interfaces, ${
+    surfaces.length === 1 ? 'a surface' : 'surfaces'
+  } no derivation produces`;
 }
 
 /**

@@ -23,6 +23,13 @@ export const TRUECOURSE_DIR = '.truecourse';
 // unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
 // LATEST convention as the analyze baseline.
 //
+// `guard/interfaces.authored.json` is the deliberate ABSENCE from the list below:
+// the hand-authored half of that catalog, holding the surfaces no derivation
+// produces (every web interface in existence). Nothing re-derives it, so it is
+// committed — an ignored copy would leave a fresh clone with cli + api and
+// nothing else. The derived `guard/interfaces.json` stays ignored; the two are
+// joined at read time, authored winning.
+//
 // `scenarios/externals.local.json` is the secrets overlay for the committed
 // `api.externals` declaration: base URLs and API keys for the external
 // accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH

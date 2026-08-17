@@ -1161,6 +1161,21 @@ export const InterfaceResourceSchema = z
   })
 export type InterfaceResource = z.infer<typeof InterfaceResourceSchema>
 
+/**
+ * WHERE one interface came from: `derived` = a mapping read it off the working
+ * tree (`cli` and `api`, the only two surfaces anything derives), `authored` =
+ * a human wrote it in `guard/interfaces.authored.json`, which no derivation
+ * writes and every mapping merges rather than replaces.
+ *
+ * Deliberately NOT a value of {@link InterfaceCatalogSourceSchema}: that field
+ * answers "how was this AREA derived" and is a degradation marker for one
+ * derivation ladder, while authorship is a fact about one ENTRY — a merged
+ * catalog can carry both origins inside the same area (an authored operation
+ * shadowing a derived one), which no single per-area value could ever say.
+ */
+export const InterfaceOriginSchema = z.enum(['derived', 'authored'])
+export type InterfaceOrigin = z.infer<typeof InterfaceOriginSchema>
+
 export const InterfaceSchema = z
   .object({
     /** `<type>/<slug>`, e.g. `cli/tasks-add`. */
@@ -1292,6 +1307,16 @@ export const InterfaceSchema = z
      *  {@link InterfaceContractSchema}. Absent where the derivation established
      *  the surface's shape only. Never fingerprinted. */
     contract: InterfaceContractSchema.optional(),
+    /**
+     * WHERE THIS ENTRY CAME FROM — see {@link InterfaceOriginSchema}. STAMPED at
+     * merge time by the reader that joins the derived catalog with its authored
+     * sibling, never written by the file itself: a field a file DECLARES can
+     * disagree with reality (and one did — a 100% hand-written catalog claiming
+     * `source: {"web":"tree"}` is what hid the loss for months), while a field
+     * the merge computes cannot. Optional because a catalog read on its own has
+     * no second half to be distinguished from. Never fingerprinted.
+     */
+    origin: InterfaceOriginSchema.optional(),
   })
   .strict()
 export type Interface = z.infer<typeof InterfaceSchema>
@@ -1306,6 +1331,13 @@ export type InterfaceCatalogSource = z.infer<typeof InterfaceCatalogSourceSchema
 
 /**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).
+ *
+ * ONE SHAPE, TWO HOMES (2026-08-17): the same schema validates
+ * `guard/interfaces.authored.json`, the COMMITTED half a human writes for the
+ * surfaces no derivation produces. The two are joined at read time
+ * (`readMergedInterfaceCatalog`), authored winning per interface id and per
+ * resource id, with each entry stamped {@link InterfaceSchema.origin}. Neither
+ * file describes a different thing, so neither gets a schema of its own.
  *
  * **version 2 (2026-08-14)** — the SOM restructure, and THE break the number was
  * reserved for. `version` stayed 1 through every additive growth: the contract
@@ -1533,6 +1565,12 @@ function stepIdentity(step: InterfaceStep): string {
  * whole reason ownership landed as a reference on a flat list (2026-08-14): the
  * SOM restructure reshaped every api contract and left all 114 reference
  * fingerprints byte-identical.
+ *
+ * {@link InterfaceSchema.origin} is excluded by the same rule and for the same
+ * stakes (2026-08-17): moving a hand-authored surface out of the derived file
+ * and into `interfaces.authored.json` must re-author NOTHING, so where an entry
+ * came from cannot be part of which task it is. The reference catalog is the
+ * proof — all 114 fingerprints hold with every entry stamped.
  */
 export function interfaceFingerprint(
   iface: Pick<Interface, 'type' | 'entry' | 'steps'>,
