@@ -886,9 +886,15 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
+      '@truecourse/interface-mapper':
+        specifier: workspace:*
+        version: link:../interface-mapper
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../shared
+      p-limit:
+        specifier: ^7.3.0
+        version: 7.3.0
       zod:
         specifier: ^3.23.8
         version: 3.25.76

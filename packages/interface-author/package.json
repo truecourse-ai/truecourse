@@ -19,7 +19,9 @@
   "dependencies": {
     "@truecourse/agent-loop": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
+    "@truecourse/interface-mapper": "workspace:*",
     "@truecourse/shared": "workspace:*",
+    "p-limit": "^7.3.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

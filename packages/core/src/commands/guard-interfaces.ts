@@ -28,6 +28,7 @@ import path from 'node:path';
 import { createSessionRun } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import { createConfiguredSessionDriver } from '../services/llm/session-driver.js';
+import { deriveWebAuthoringContext } from '../services/web-context.service.js';
 import type { LlmTransportFlag } from '../config/global-config.js';
 
 export interface GuardInterfacePlaceView {
@@ -85,11 +86,15 @@ export interface RunGuardInterfaceAuthorOptions {
   /** Re-author places that already carry tasks. */
   replace?: boolean;
   limit?: number;
+  /** How many sessions run at once; the authoring default answers otherwise. */
+  concurrency?: number;
   /** Per-run transport flag; the saved selection answers otherwise. */
   transport?: LlmTransportFlag;
   signal?: AbortSignal;
   onProgress?: (event: AuthorProgress) => void;
   onSessionEvent?: (placeId: string, event: SessionEvent) => void;
+  /** What the run is doing before the first session starts — the context pass. */
+  onStatus?: (message: string) => void;
 }
 
 export interface GuardInterfaceAuthorRun extends AuthorRunResult {
@@ -98,6 +103,8 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   runDir: string;
   /** Which backend ran the sessions, and on which model. */
   transport: { mode: string; model: string };
+  /** The context pass (item 105): how much grounding the sessions were given. */
+  context: { places: number; files: number; seconds: number };
 }
 
 /**
@@ -118,20 +125,38 @@ export async function runGuardInterfaceAuthoring(
     providerStateDir: path.join(run.dir, 'provider'),
   });
 
+  // The GROUNDING, once per run and amortised over every place in it (item 105):
+  // the route module of each place, the modules it renders, and the api effects
+  // its requests join to. One analyzer pass, so the sessions read instead of
+  // rediscovering. It degrades to nothing rather than failing the run.
+  opts.onStatus?.('reading the working tree');
+  const context = await deriveWebAuthoringContext(repoRoot, { catalog: readInterfaceCatalog(repoRoot) });
+  opts.onStatus?.(
+    `context: ${context.contexts.size} place(s) grounded from ${context.files} file(s) in ${context.seconds}s`,
+  );
+
   try {
     const result = await authorWebInterfaces({
       repoRoot,
       driver,
       persistence: run.persistence,
+      context: context.contexts,
       ...(opts.places ? { places: opts.places } : {}),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
     });
     run.finish(runStatus(result.places, opts.signal));
-    return { ...result, runId: run.runId, runDir: run.dir, transport: { mode, model } };
+    return {
+      ...result,
+      runId: run.runId,
+      runDir: run.dir,
+      transport: { mode, model },
+      context: { places: context.contexts.size, files: context.files, seconds: context.seconds },
+    };
   } catch (error) {
     run.finish('failed');
     throw error;

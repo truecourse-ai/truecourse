@@ -256,3 +256,54 @@ describe('the catalog schema, checked on the MERGE', () => {
     expect(result.errors.some((e) => e.includes('is not a resource the `web` registry defines'))).toBe(true)
   })
 })
+
+describe('the state registry is shared property', () => {
+  const REGISTERED = 'The repository is registered and on the home grid.'
+  const authored: InterfacesFile = {
+    version: 2,
+    generatedAt: '2026-08-17T00:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [],
+    states: { web: [{ id: 'repository-registered', description: REGISTERED }] },
+  }
+
+  it('accepts a task that REFERENCES an existing state, defining nothing', () => {
+    const result = validate(fragment({ interfaces: [task({ endState: 'repository-registered' })] }), { authored })
+    expect(result.errors).toEqual([])
+    // The registry gained nothing — the reference resolved against what was there.
+    expect(result.authored!.states!.web.map((s) => s.id)).toEqual(['repository-registered'])
+  })
+
+  it('refuses redefining an existing id as a different world', () => {
+    const result = validate(
+      fragment({
+        interfaces: [task({ endState: 'repository-registered' })],
+        states: [{ id: 'repository-registered', description: 'A repository row is on the grid.' }],
+      }),
+      { authored },
+    )
+    expect(result.errors.some((e) => e.includes('already names'))).toBe(true)
+  })
+
+  it('lets a re-author restate a state verbatim', () => {
+    const result = validate(
+      fragment({
+        interfaces: [task({ endState: 'repository-registered' })],
+        states: [{ id: 'repository-registered', description: REGISTERED }],
+      }),
+      { authored },
+    )
+    expect(result.errors).toEqual([])
+  })
+
+  it('reads the registry off the merged catalog — a derived state counts too', () => {
+    const result = validate(
+      fragment({
+        interfaces: [task({ endState: 'repository-registered' })],
+        states: [{ id: 'repository-registered', description: 'Something else entirely.' }],
+      }),
+      { derived: { ...DERIVED, states: { web: [{ id: 'repository-registered', description: REGISTERED }] } } },
+    )
+    expect(result.errors.some((e) => e.includes('already names'))).toBe(true)
+  })
+})

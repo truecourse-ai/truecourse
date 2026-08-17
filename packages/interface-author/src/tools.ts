@@ -26,6 +26,8 @@ const MAX_READ_LINES = 400
 const MAX_SEARCH_HITS = 60
 const MAX_FILE_BYTES = 2_000_000
 const MAX_LINE_CHARS = 400
+/** How many catalog entries one `list_interfaces` call hands back. */
+const MAX_INTERFACES_LISTED = 200
 
 export interface AuthorToolsInput {
   repoRoot: string
@@ -248,18 +250,32 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
         ...(input.derived?.interfaces ?? []).map((i) => ({ i, origin: 'derived' })),
         ...(input.authored?.interfaces ?? []).map((i) => ({ i, origin: 'authored' })),
       ].filter(({ i }) => i.type === args.surface)
+      if (all.length === 0) return { content: `The catalog has no \`${args.surface}\` interface at all.` }
       const needle = args.contains?.toLowerCase()
-      const matched = needle
+      const filtered = needle
         ? all.filter(({ i }) => i.id.toLowerCase().includes(needle) || i.title.toLowerCase().includes(needle))
         : all
-      if (matched.length === 0) return { content: `No \`${args.surface}\` interface matches.` }
-      const shown = matched.slice(0, 200)
+      // A filter that matches NOTHING answers the wrong question. The pilot's
+      // worst turn-waster was six `contains` probes guessing names against a
+      // surface that spells its operations differently — so a miss hands back the
+      // surface itself when it fits, which settles the question in one call.
+      const missed = needle !== undefined && filtered.length === 0
+      const matched = missed && all.length <= MAX_INTERFACES_LISTED ? all : filtered
+      if (matched.length === 0) {
+        return {
+          content: `No \`${args.surface}\` interface matches \`${args.contains}\`. The surface has ${all.length} entries — list them without \`contains\`, or search the source for what this screen actually calls.`,
+        }
+      }
+      const shown = matched.slice(0, MAX_INTERFACES_LISTED)
       const rows = shown.map(({ i, origin }) => {
         const entry = 'command' in i.entry ? i.entry.command.join(' ') : `${i.entry.method} ${i.entry.path}`
         return `${i.id}  ·  ${entry}  ·  ${origin}  ·  ${i.title}`
       })
+      const head = missed
+        ? `Nothing matches \`${args.contains}\`. The whole \`${args.surface}\` surface is ${all.length} entries, so here it is:\n`
+        : ''
       const tail = matched.length > shown.length ? `\n… ${matched.length - shown.length} more — narrow with \`contains\`.` : ''
-      return { content: rows.join('\n') + tail }
+      return { content: head + rows.join('\n') + tail }
     },
   })
 }

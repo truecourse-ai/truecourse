@@ -6051,3 +6051,314 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `tools/cli/src/commands/guard-interfaces.ts`, `tools/cli/src/index.ts`.
     Tests: `tests/interface-author/{draft,author}.test.ts`,
     `tests/core/guard-interfaces-author.test.ts`.
+
+105. **The authoring session is handed what the AST pass already knows
+    (2026-08-17).** STATUS: BUILT (derivation + prompt; the paid before/after
+    re-run is not).
+    Item 104's session got a place id and an address and nothing else, so it
+    rediscovered by search what the derivation had just computed and thrown away.
+    The first pilot measured the cost, and it is a third of every session:
+
+    - documenso `settings-tokens`, 14 turns, six of them `list_interfaces`
+      `contains` probes guessing `apiToken`, `api-token`, `create`, `delete`,
+      `getMany`, `trpc` against a tRPC surface where none of those names exist.
+      `apiEffects` came back mostly unestablished anyway.
+    - cal.diy `availability`, 19 turns, six walking `page.tsx` →
+      `availability-view.tsx` → `ScheduleListItem.tsx` → `Button.tsx` →
+      `packages/i18n/locales/en/common.json` in 20–40 line windows.
+    - a toy-repo session that returned an EMPTY fragment whose `unresolved` read
+      "Module rendering the `/` screen could not be located" — about a module the
+      mapper had named in the same run.
+
+    **Three facts, in the order they cost anything.** (1) The route module: free,
+    because `WebPlaceSeed.filePath` already says it and `formWebResources` mints
+    the place id from the same seed — the pair only needed carrying, so the
+    formation now hands back `seeds` (id → seed) instead of dropping the half it
+    did not use. (2) The component closure: one graph walk over the RESOLVED
+    import edges (`buildDependencyGraph` — a `FileAnalysis.imports` entry carries
+    a specifier, and turning one into a file needs tsconfig paths and workspace
+    packages, which that function already does). (3) The api effects: the
+    frontend→API join of AGENTIC_PIPELINE_PLAN §10.4, the requests the closure
+    makes joined to the api ids the catalog already carries.
+
+    **The two rules that make the pack worth having rather than worth ignoring**,
+    both of them about restraint:
+
+    - **Barrels are followed BY NAME.** A monorepo screen imports `Button` from
+      `@calcom/ui`, whose index re-exports the design system; following every edge
+      of it buys two hundred modules and names none of the ones that render the
+      screen. A module whose exports are all re-exports is treated as the
+      pass-through it is, and only the edges carrying a name the importer actually
+      asked for are followed. Nothing is guessed away: the names come from the
+      import statement.
+    - **A wrapper's request is attributed only when the closure imported it BY
+      NAME.** The alternative hangs a shared api client's whole endpoint list on
+      every screen that imports one function from it. So: every http call in the
+      place's own module, plus every call inside a function or class somebody in
+      the closure imported by name (the "one hop through the api-client module" of
+      §10.4). A call nobody asked for is not this place's effect and is silently
+      not attributed — not even as unjoined, because the honest statement about it
+      is that it is not here.
+
+    **What does not join is STATED, and that turned out to be the useful half.**
+    Both pilot corpora talk tRPC, and the api derivation reads route tables and
+    OpenAPI — so a tRPC procedure has no interface to join to, by construction,
+    and `apiEffects` on those repos is honestly empty. The pack therefore names
+    the procedures themselves (`trpc.apiToken.create`, `trpc.apiToken.delete` for
+    documenso's tokens screen; the five `trpc.viewer.availability.schedule.*` for
+    cal.diy's availability screen) as `calls` that CANNOT be `apiEffects`, plus
+    any http request that joined to nothing and any URL the source builds at
+    runtime. That is what replaces the guessing loop: the answer to "which api id
+    does this save button call" is "none, it calls `trpc.apiToken.create`", and a
+    session told that stops looking.
+
+    **Nothing derived here is ever stored.** `interfaceFingerprint`'s contract is
+    surface-visible shape only — "never internal symbol names, file paths" — and a
+    stored path goes stale the moment a file moves. The pack lives exactly where
+    `externalServices`, `database`, `datastoreUrls` and `outboundRequests` live:
+    re-derived per run, handed to the stage that needs it, never committed. It is
+    also deliberately NOT part of `mapInterfaces`, which runs inside `guard
+    generate` and `guard setup` where a dependency-graph build is a cost nobody
+    asked for; the ids still agree because both sides mint them with the same pure
+    function over the same tree. Measured: documenso 1924 files → 125 places in
+    18s, cal.diy 4541 files → 88 places in 39s, amortised over every place a run
+    authors.
+
+    **Two prompt fixes, from the same transcripts.** documenso's `inbox` returned
+    13 tasks, four of them next/previous/first/last page — the page inventory item
+    103's re-scope rejected, arriving through the back door. `SYSTEM_PROMPT` now
+    says what is NOT a task (pagination, sorting, table density, row expansion,
+    theme and language switchers, copy-to-clipboard) and that a screen whose only
+    controls are those has zero tasks. And `endState` was frequently omitted: it
+    is now required of any task that changes the world, since that difference is
+    what a scenario asserts. Third, smaller: a `list_interfaces` `contains` miss
+    hands back the whole surface when it fits in one page, instead of answering
+    nothing six times.
+
+    **Findings this work turned up, neither of them fixed here.** (a) A tRPC
+    router derives no api interfaces, so no web task on a tRPC app can carry
+    `apiEffects` — deriving procedures as api interfaces is a mapper slice of its
+    own, and it is the one that would make Tier 3 pay on both pilot corpora.
+    (b) cal.diy's `/bookings` place resolves to
+    `packages/platform/examples/base/src/pages/bookings.tsx` — a DEMO app inside
+    the monorepo declaring the same address as the real screen, which item 103's
+    precedence takes at face value. The briefing states its module as a fact and
+    tells the session to author nothing and say so in `unresolved` if the module
+    does not render the screen it was asked about, which contains the damage
+    without fixing the derivation.
+
+    **Deliberately not built.** (a) The paid before/after re-run of the pilot's 8
+    screens per repo (baseline turn counts: cal.diy 19/35/14/32, documenso
+    14/14/19/13/19/25/28) — the derivation is verified offline against both
+    checkouts, but the turn-count claim is not verified and is not made. (b) An
+    affordance for LOCALE FILES, the last hop of cal.diy's measured walk. An i18n
+    key resolves in a JSON file, which is not an import edge and not a
+    `FileAnalysis` at all, so it cannot come out of the closure; the prompt says
+    where to look instead, which costs one line rather than a JSON reader with a
+    key-resolution rule per framework. Revisit if accessible names keep coming
+    back unresolved on i18n-heavy screens.
+
+    **As built**: `packages/interface-mapper/src/web-context.ts` (the whole
+    derivation), `packages/interface-mapper/src/resources.ts` (`seeds`),
+    `packages/core/src/services/web-context.service.ts` (the one pass per run),
+    `packages/core/src/services/interface.service.ts` (`analyzeWorkingTree`
+    exported), `packages/interface-author/src/{session,author,tools}.ts`,
+    `packages/core/src/commands/guard-interfaces.ts`,
+    `tools/cli/src/commands/guard-interfaces.ts`. Tests:
+    `tests/interface-mapper/{web-context,resources}.test.ts` (the rules, over
+    synthetic analyses), `tests/core/web-context.test.ts` (the pass over a real
+    tree, including the wrapper hop through an api-client module),
+    `tests/interface-author/author.test.ts` (the briefing, and the
+    `list_interfaces` miss).
+
+106. **The state registry reaches the session (2026-08-17).** STATUS: BUILT.
+    Named states are the mechanism web tasks CHAIN by: a task's `endState` and
+    another task's `startingState` meet by id equality, across places and across
+    sessions, which is what lets a scenario walk from "an event type exists" to
+    "a booking on it is rescheduled" without either task knowing about the other.
+    Item 104's session could not see them. `list_places` returned places,
+    `list_interfaces` returned interfaces, and nothing returned the area's state
+    registry — so every session minted a fresh id for a world an earlier session
+    had already named, and the chaining mechanism was a coincidence of spelling.
+
+    **Measured on the pilot, and it is not a matter of degree.** Across both
+    baseline runs, ONE of 180 state references pointed at the standing registry
+    (cal.diy 0 of 81, documenso 1 of 99) — with 66 and 28 states respectively
+    already sitting in the committed catalog. 56 and 58 new states were minted,
+    41 and 36 of them referenced at most once. Sessions were not under-reusing;
+    each one was working in a private namespace.
+
+    **The registry rides in the BRIEFING, not behind a `list_states` tool**, and
+    that was the decision. A tool is opt-in, and the failure mode measured here
+    is precisely that a session does not look before it drafts — a tool it never
+    calls teaches it nothing, while a prompt rule telling it to call one costs
+    the same line as the table itself. The table also costs LESS than the call:
+    a tool call is a whole turn, which resends the entire context, whereas the
+    registry is ~1.9k tokens on the largest corpus (cal.diy, 66 states) read
+    once. And the registry is small BY DESIGN — reuse is the thing that keeps it
+    so, so the artefact that grows if the fix fails is the same artefact that
+    would have made a tool worth it. Capped at 200 entries with a tail naming
+    the file, so a run-away registry cannot swamp a session's context silently.
+    Nothing about the package's driver- and store-agnostic contract changes: the
+    briefing is a string the caller composes, and `registryStates` merges the
+    two catalog halves the caller already reads.
+
+    **The rule that gives it teeth.** `validateFragment` gained its fifth rule: a
+    draft may REFERENCE any id the registry defines (the merged-catalog schema
+    already resolves it) and may DEFINE a new one, but it may not redefine an
+    existing id as a different world — every task already chained to it would
+    silently start asserting something else, and the drift signal would be
+    poisoned at the source rather than reported. Restating one verbatim is
+    allowed, because a re-author of a place hands back the states it handed back
+    last time and idempotence there is worth more than the strictness. The
+    prompt's rule 5 was rewritten to match: a referenced id is defined once,
+    either already in the registry or newly in `states`, never both.
+
+    **The fold is what makes this work per-run rather than per-corpus.** Sessions
+    run sequentially and each place's fragment is written before the next session
+    starts (item 104), so `registryStates(derived, authored)` at the top of a
+    session is the catalog as the previous place left it — the second screen of a
+    run is briefed with the worlds the first one named, without any cross-session
+    machinery. It is also the reason parallelising the fold is not free: a worker
+    pool would brief its sessions with a registry that is stale by however many
+    places are in flight.
+
+    **As built**: `packages/interface-author/src/draft.ts` (`registryStates`,
+    rule 5), `packages/interface-author/src/session.ts` (`PlaceBriefingInput`,
+    the registry block, prompt rules 5 and the state bullet),
+    `packages/interface-author/src/author.ts` (the per-place registry).
+    Tests: `tests/interface-author/draft.test.ts` (reference / redefine /
+    restate-verbatim / a derived state counts too),
+    `tests/interface-author/author.test.ts` (the second place is briefed with
+    the first place's worlds).
+
+107. **A place is an address whose module renders, in the app under test
+    (2026-08-17).** STATUS: BUILT.
+    Item 103 derives the web places off the routing tree, and the readers answer
+    "what address does this file declare". That is not the same question as "can
+    a user stand here", and authoring pays for the difference: one session per
+    place, on a work list that took anything shaped like a route at face value.
+    Measured across the two benchmark checkouts, 22 of 213 places were neither.
+
+    **Rule one: a route module with no default export renders nothing.** It
+    serves a RESPONSE — documenso's ten `api+/*` handlers (a `loader` returning
+    JSON), its `share.$slug.opengraph.tsx` (an image), and four `_index.tsx`
+    routes whose loader only redirects, so a user never sees the address at all.
+    15 of that repo's 125 places, every one of them an authoring session spent on
+    a screen nobody can open, and a place every downstream consumer reads as
+    somewhere to navigate. The rule applies to the three idioms where the route
+    file IS the rendering module (`next-app`, `next-pages`, `remix-flat`) and
+    deliberately NOT to `react-router`, where the route is declared in a JSX table
+    and the component lives elsewhere — asking the table for a default export
+    would refuse every place that idiom produces.
+
+    **Rule two: the app under test is the one the recipe serves.** cal.com's
+    checkout holds four Next.js apps, and the bundled platform demo
+    (`packages/platform/examples/base`) declares seven addresses `apps/web` never
+    does — `/troubleshooter`, `/calendar-view`, `/conferencing-apps`, a bare
+    `/bookings`. The first pilot spent 14 turns on `/bookings` and returned an
+    honest empty. No fact in the tree settles it: both are real Next apps with
+    real routes. So the recipe says it or nobody does — `recipe.web.app`, the
+    repo-relative workspace directory, mirroring `RecipeApiServerSchema.app`
+    (item 88's join key) in name and in meaning. Optional, and absent keeps every
+    app's places: a rule that guessed would drop real screens, which is the one
+    failure direction worth designing against.
+
+    **The analyzer half, and it is the larger half.** Rule one needs to know
+    whether a module exports a component, and `FileAnalysis.exports` could not
+    say. `extractExportName` read only the `declaration` field, so
+    `export default function Page()` and `export default class Page` were
+    recorded and `export default Page;` — the VALUE form — was recorded as no
+    export at all. That is 74 of cal.diy's 79 route modules and 11 of
+    documenso's: the naive rule would have dropped nearly every screen in the
+    repository. `export { default } from './index'` was the same bug wearing a
+    different hat (`isDefault` was false for it), and cal.com's
+    `pages/router/embed.tsx` is that single line and nothing else — it was the
+    one false drop the first implementation produced, caught by diffing the
+    derived list rather than by a test, which is why the diff is worth running.
+
+    **Measured, before and after**: documenso 125 → 110 places; cal.diy 88 → 88
+    on the render rule alone (its pages all render) and → 81 once a recipe
+    declares `web.app: apps/web`. No authored task in either corpus stands on a
+    dropped place — checked before the rule shipped, because dropping a place an
+    authored task is `at` would break the merged catalog's reference resolution.
+
+    **Deliberately not classified.** Embeds, terminal pages (`/maintenance`,
+    `/auth/logout`) and status screens. They are real screens; a session on one
+    is cheap and correctly returns zero tasks, and a rule that skipped them would
+    be a guess about intent wearing a deterministic costume. The two rules above
+    are facts about the tree and the recipe, and nothing else qualified.
+
+    **As built**: `packages/analyzer/src/extractors/languages/{typescript,javascript}.ts`
+    (the two export-extraction fixes), `packages/interface-mapper/src/web-tree.ts`
+    (both rules), `packages/guard-runner/src/recipe.ts` (`web.app`),
+    `packages/core/src/services/interface.service.ts` (`servedWebAppRoot`).
+    Tests: `tests/analyzer/file-analyzer.test.ts` (a default export in every form
+    it is written), `tests/interface-mapper/web-tree.test.ts` (both rules, and
+    the react-router exemption).
+
+108. **Authoring sessions run in a pool; the fold stays serial (2026-08-17).**
+    STATUS: BUILT.
+    Item 104 ran one session at a time, and the wall clock said what that costs:
+    the 16-screen pilot took two runs of roughly an hour each, and a session is
+    ~20 turns of provider latency with almost no local work between them. The
+    full corpus is 191 places. Sessions are network-bound, so they run
+    `concurrency` at a time — `p-limit`, the same dependency and the same
+    `TRUECOURSE_MAX_CONCURRENCY` knob `guard generate` already uses, default
+    `min(cpus, 4)`, `--concurrency` on the command.
+
+    **The fold does not, and that is the whole design.** A fragment is validated
+    against the catalog it is about to join and then written to it; two of those
+    interleaved would each validate against a catalog the other is halfway
+    through changing, and the loser's write would silently drop the winner's
+    tasks. So the run splits in two: `runPlaceSession` (concurrent, reads the
+    repository, touches no catalog) and `foldOnePlace` behind a one-at-a-time
+    gate, which re-reads the LIVE authored file rather than the snapshot its
+    session was briefed with — because the answer to "is this id taken" changed
+    while the session was thinking.
+
+    **What concurrency costs is briefing freshness, and it is named rather than
+    hoped away.** A session is briefed with the catalog as it stands when it
+    starts, so the C-1 peers beside it are invisible: their states are not in its
+    registry (item 106) and their tasks are not in its `list_interfaces`. Two
+    consequences. A world named twice under two ids is the reuse item 106 buys
+    back, which is why the default is small and why the STANDING registry — the
+    committed half every session does see, and where all 20 of documenso's
+    measured reuses came from — carries the weight. And an id or fingerprint a
+    peer claimed mid-flight is a RACE: nothing told this session, so refusing its
+    whole fragment would throw away a screen's work over a name two settings
+    pages both wanted to call `web/create-webhook`.
+
+    **So the fold distinguishes the two collisions by WHEN they appeared.**
+    `pruneRacedTasks` compares the catalog the session was briefed with against
+    the one it is joining: an entry present in both is one the session was SHOWN
+    and authored over anyway, which stays the refusal item 104 exists for; an
+    entry that appeared in between is a race, and exactly those tasks come out
+    while the rest of the place lands. Both identities are checked, because both
+    are refusals — the id, and the fingerprint (one entry + steps is one task,
+    whatever it is called). The dropped ids are reported as `raced`, which is not
+    a problem: the task exists, it is just somebody else's entry now.
+
+    **Two smaller things the pool forced.** The result list is sorted back into
+    work-list order, because completion order is provider latency and a report
+    that reorders itself run to run is unreadable. And the CLI's spinner became
+    an aggregate — with several sessions in flight, per-place tool calls arrive
+    interleaved and a line showing the last one flickers between places without
+    saying anything, so it shows `done/total · N running · <places>` and keeps
+    the old single-place line when only one is in flight.
+
+    **Deliberately not built.** Ordering the WRITES by work item. It would make
+    the committed file's entry order independent of completion order, at the cost
+    of holding finished fragments back behind a slow earlier place — which would
+    give up item 104's "an interrupted run keeps what it finished". The order of
+    newly appended entries is not semantic, and a re-author keeps positions.
+
+    **As built**: `packages/interface-author/src/author.ts` (the pool, the
+    serial gate, `pruneRacedTasks`, `defaultAuthorConcurrency`),
+    `packages/interface-author/package.json` (`p-limit`),
+    `packages/core/src/commands/guard-interfaces.ts`,
+    `tools/cli/src/commands/guard-interfaces.ts` (the flag, the live line),
+    `tools/cli/src/index.ts`. Tests: `tests/interface-author/author.test.ts`
+    (sessions overlap, folds never do, work-list order, the race policy, the
+    briefed-with collision that is still refused, what the pool cannot brief,
+    abort).

@@ -39,6 +39,23 @@ export interface ResourceFormation {
   owners: Map<string, InterfaceResourceId>
 }
 
+/**
+ * The web formation, plus the one fact only it can state: which MODULE each
+ * place's id was minted from.
+ *
+ * The id is minted here, from the address; the module arrives on the seed
+ * (`WebPlaceSeed.filePath`). Nothing else in the pipeline can rejoin the two
+ * afterwards, so the formation hands the pair out rather than dropping it — and
+ * it stays OUT of the registry entry, because a file path is not surface-visible
+ * shape (`interfaceFingerprint`'s contract) and goes stale the moment a file
+ * moves. It is a working-tree fact, re-derived every run, never committed.
+ */
+export interface WebResourceFormation extends ResourceFormation {
+  /** Place id → the seed it was minted from: the module that IS the place, and
+   *  the address it is reached at. */
+  seeds: Map<InterfaceResourceId, WebPlace>
+}
+
 const EMPTY: ResourceFormation = { resources: [], owners: new Map() }
 
 /** `["spec","docs"]` → `spec-docs`; a segment with no alphanumerics contributes nothing. */
@@ -160,11 +177,12 @@ export function formCliResources(
  * slice, so there is nothing to own yet, and `owners` comes back empty rather
  * than guessed.
  */
-export function formWebResources(places: readonly WebPlace[]): ResourceFormation {
-  if (places.length === 0) return EMPTY
+export function formWebResources(places: readonly WebPlace[]): WebResourceFormation {
+  if (places.length === 0) return { resources: [], owners: new Map(), seeds: new Map() }
 
   const used = new Set<string>()
   const resources: InterfaceResource[] = []
+  const seeds = new Map<InterfaceResourceId, WebPlace>()
   for (const place of places) {
     // The root address slugifies to nothing, and `/` is a real screen — the one
     // every app has. It is named for what it is rather than left to the generic
@@ -172,9 +190,10 @@ export function formWebResources(places: readonly WebPlace[]): ResourceFormation
     const segments = place.address.split('/').filter(Boolean)
     const id = uniqueId(segments.length === 0 ? 'root' : slug(segments), used)
     resources.push({ id, kind: place.kind, title: place.address, address: place.address })
+    seeds.set(id, place)
   }
 
-  return { resources, owners: new Map() }
+  return { resources, owners: new Map(), seeds }
 }
 
 // ---------------------------------------------------------------------------

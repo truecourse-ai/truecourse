@@ -459,6 +459,7 @@ guardInterfacesCmd
   .option("--place <id>", "Author only this place (repeatable)", collectPlace, [])
   .option("--replace", "Re-author places that already carry tasks")
   .option("--limit <n>", "Author at most N places", parseInt)
+  .option("--concurrency <n>", "Run N sessions at once (default: min(cpus, 4))", parseInt)
   .option("-y, --yes", "Skip the pre-flight confirmation")
   .addOption(llmTransportOption())
   .action(async (options) => {
@@ -466,6 +467,7 @@ guardInterfacesCmd
       place: options.place,
       replace: !!options.replace,
       limit: options.limit,
+      concurrency: options.concurrency,
       yes: !!options.yes,
       llmTransport: options.llmTransport,
     });

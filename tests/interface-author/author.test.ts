@@ -279,6 +279,14 @@ describe('a session that authors', () => {
     expect([...index.values()][0].workItem).toBe('web:root')
   })
 
+  /**
+   * What SERIAL folding buys, at `concurrency: 1`: the second session's tools
+   * and its `check_draft` run against the catalog the first one already joined,
+   * so it is told about the collision while it can still do something about it.
+   * A session running BESIDE the first cannot be told — that collision is caught
+   * at the fold instead, and costs one task rather than the place (see the pool
+   * tests below).
+   */
   it('sees the earlier place\'s work — a second session cannot author the same task twice', async () => {
     const { persistence } = memoryPersistence()
     const { driver } = scriptedDriver(async (place, input) => {
@@ -289,7 +297,7 @@ describe('a session that authors', () => {
       return { kind: 'outcome', value: HOME_FRAGMENT }
     })
 
-    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence })
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 1 })
     expect(result.places.map((p) => p.status)).toEqual(['authored', 'rejected'])
     expect(result.places[1].problems.join('\n')).toContain('is the same task as')
     // The rejection changed nothing on disk.
@@ -424,5 +432,309 @@ describe('the tools are read-only and bounded to the repository', () => {
     })
     await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
     expect(hits).toContain('src/Home.tsx:')
+  })
+
+  /**
+   * The `contains` filter answers "is this in the catalog"; a MISS answers
+   * nothing, and the pilot spent six turns re-asking it with different guesses.
+   * A miss against a small surface hands the surface over instead.
+   */
+  it('hands back the whole surface when `contains` matches nothing', async () => {
+    const { persistence } = memoryPersistence()
+    let answer = ''
+    const { driver } = scriptedDriver(async (_place, input) => {
+      answer = await callTool(input, 'list_interfaces', { surface: 'api', contains: 'apiToken' })
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+    expect(answer).toContain('Nothing matches `apiToken`')
+    expect(answer).toContain('api/post-api-repos')
+  })
+})
+
+describe('the briefing carries what the AST pass knows (item 105)', () => {
+  it('states the route module, the modules it renders, and the calls with no api id', async () => {
+    const { persistence } = memoryPersistence()
+    let briefing = ''
+    const { driver } = scriptedDriver(async (_place, input) => {
+      briefing = input.initialMessages.join('\n')
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({
+      repoRoot: repo,
+      driver,
+      persistence,
+      places: ['root'],
+      context: new Map([
+        [
+          'root',
+          {
+            module: 'src/Home.tsx',
+            renders: ['src/RepoGrid.tsx'],
+            closure: 4,
+            apiEffects: ['api/post-api-repos'],
+            unjoined: ['GET /v3/insights — no api interface declares it'],
+            rpcCalls: ['trpc.repo.list'],
+          },
+        ],
+      ]),
+    })
+    expect(briefing).toContain('  module   src/Home.tsx')
+    expect(briefing).toContain('  renders  src/RepoGrid.tsx')
+    expect(briefing).toContain('  api      api/post-api-repos')
+    expect(briefing).toContain('  calls    trpc.repo.list')
+    expect(briefing).toContain('GET /v3/insights — no api interface declares it')
+  })
+
+  /**
+   * The registry is the mechanism tasks chain by: an id means the same world at
+   * every place, or it means nothing. A session that cannot SEE the worlds the
+   * catalog already names mints a fresh id for each one — the pilot referenced
+   * the standing registry once in 180 state references.
+   */
+  it('states the worlds the catalog already names, and the later place sees the earlier one\'s', async () => {
+    const { persistence } = memoryPersistence()
+    const briefings = new Map<string, string>()
+    const { driver } = scriptedDriver(async (place, input) => {
+      briefings.set(place, input.initialMessages.join('\n'))
+      return place === 'root'
+        ? { kind: 'outcome', value: HOME_FRAGMENT }
+        : { kind: 'outcome', value: { interfaces: [] } }
+    })
+    // Serially: a session is briefed with every place folded before it STARTED,
+    // so `repos-repoid` opens after `root` landed. Running beside it, it would
+    // not — which is the pool's cost, held to its own test below.
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 1 })
+
+    // Nothing was authored when the first session opened, so it has no registry.
+    expect(briefings.get('root')).not.toContain('repository-registered')
+    // The second one is briefed with the world the first one named.
+    expect(briefings.get('repos-repoid')).toContain(
+      '  repository-registered  The repository is registered and on the home grid.',
+    )
+    expect(briefings.get('repos-repoid')).toContain('Reuse an id above')
+  })
+
+  it('briefs a place with no context exactly as it did before the pack existed', async () => {
+    const { persistence } = memoryPersistence()
+    let briefing = ''
+    const { driver } = scriptedDriver(async (_place, input) => {
+      briefing = input.initialMessages.join('\n')
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], context: new Map() })
+    expect(briefing).not.toContain('  module   ')
+    expect(briefing).toContain('Start by finding the module that renders this place')
+  })
+})
+
+/**
+ * THE POOL. Sessions are network-bound, so they run several at a time; the FOLD
+ * is not, and must not. These hold the three properties that makes that safe:
+ * the sessions really do overlap, the validate-then-write never does, and a task
+ * a peer claimed mid-flight costs that task rather than the whole place.
+ */
+describe('sessions run in a pool, the fold does not', () => {
+  /** A derived catalog with four screens, so a pool has something to fill. */
+  const FOUR_SCREENS: InterfacesFile = {
+    ...DERIVED,
+    resources: {
+      web: [
+        { id: 'root', kind: 'screen', title: '/', address: '/' },
+        { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}' },
+        { id: 'settings', kind: 'screen', title: '/settings', address: '/settings' },
+        { id: 'rules', kind: 'screen', title: '/rules', address: '/rules' },
+      ],
+    },
+  }
+
+  const taskAt = (place: string, address: string, id: string): AuthoredFragment['interfaces'][number] => ({
+    id,
+    type: 'web',
+    title: `Do the thing at ${place}`,
+    entry: { method: 'GET', path: address },
+    steps: [{ kind: 'activate', target: 'button "Go"' }],
+    at: place,
+  })
+
+  beforeEach(() => {
+    fs.writeFileSync(guardInterfacesPath(repo), JSON.stringify(FOUR_SCREENS))
+  })
+
+  it('overlaps the sessions and serializes every fold', async () => {
+    const { persistence } = memoryPersistence()
+    let running = 0
+    let peak = 0
+    let foldsInFlight = 0
+    let foldOverlaps = 0
+
+    const { driver } = scriptedDriver(async (place) => {
+      running += 1
+      peak = Math.max(peak, running)
+      // Hold every session open until the others have started.
+      await new Promise((r) => setTimeout(r, 5))
+      running -= 1
+      const address = FOUR_SCREENS.resources!.web.find((r) => r.id === place)!.address!
+      return { kind: 'outcome', value: { interfaces: [taskAt(place, address, `web/task-${place}`)] } }
+    })
+
+    const result = await authorWebInterfaces({
+      repoRoot: repo,
+      driver,
+      persistence,
+      concurrency: 4,
+      // `place-done` fires inside the fold's critical section, so a second one
+      // arriving before the first returns would mean two folds interleaved.
+      onProgress: (event) => {
+        if (event.kind !== 'place-done') return
+        foldsInFlight += 1
+        if (foldsInFlight > 1) foldOverlaps += 1
+        foldsInFlight -= 1
+      },
+    })
+
+    expect(peak).toBeGreaterThan(1)
+    expect(foldOverlaps).toBe(0)
+    expect(result.places.map((p) => p.status)).toEqual(['authored', 'authored', 'authored', 'authored'])
+    // Every place landed, and the file is a valid half.
+    expect(readAuthoredFile().interfaces).toHaveLength(4)
+    expect(() => InterfacesFileSchema.parse(mergeInterfaceCatalogs(FOUR_SCREENS, readAuthoredFile()))).not.toThrow()
+  })
+
+  it('reports the places in work-list order, not completion order', async () => {
+    const { persistence } = memoryPersistence()
+    // The later a place is in the work list, the faster its session — so
+    // completion order is the reverse of the work list.
+    const delays: Record<string, number> = { root: 20, 'repos-repoid': 15, settings: 10, rules: 5 }
+    const { driver } = scriptedDriver(async (place) => {
+      await new Promise((r) => setTimeout(r, delays[place] ?? 0))
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4 })
+    expect(result.places.map((p) => p.placeId)).toEqual(['root', 'repos-repoid', 'settings', 'rules'])
+  })
+
+  /**
+   * The race the pool introduces: two sessions in flight cannot see each other,
+   * so both may claim one id. The one that folds second loses THAT TASK and
+   * keeps the rest — refusing its whole fragment would throw away a screen's
+   * work over a name two settings pages both wanted.
+   */
+  it('drops only the task a peer authored first, and keeps the rest of the place', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async (place) => {
+      const address = FOUR_SCREENS.resources!.web.find((r) => r.id === place)!.address!
+      if (place === 'root') {
+        return { kind: 'outcome', value: { interfaces: [taskAt('root', '/', 'web/create-webhook')] } }
+      }
+      if (place === 'settings') {
+        // Slower, so `root` folds first — and it wants the same id.
+        await new Promise((r) => setTimeout(r, 20))
+        return {
+          kind: 'outcome',
+          value: {
+            interfaces: [
+              taskAt('settings', address, 'web/create-webhook'),
+              taskAt('settings', address, 'web/rotate-signing-secret'),
+            ],
+          },
+        }
+      }
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4 })
+
+    const settings = result.places.find((p) => p.placeId === 'settings')!
+    expect(settings.status).toBe('authored')
+    expect(settings.raced).toEqual(['web/create-webhook'])
+    expect(settings.taskIds).toEqual(['web/rotate-signing-secret'])
+    expect(settings.problems).toEqual([])
+    // One `web/create-webhook` in the file, and it is the one that got there first.
+    const file = readAuthoredFile()
+    expect(file.interfaces.filter((i) => i.id === 'web/create-webhook')).toHaveLength(1)
+    expect(file.interfaces.find((i) => i.id === 'web/create-webhook')!.at).toBe('root')
+    expect(file.interfaces.map((i) => i.id).sort()).toEqual([
+      'web/create-webhook',
+      'web/rotate-signing-secret',
+    ])
+  })
+
+  /**
+   * A collision with an entry the session was SHOWN is not a race: it had the id
+   * in `list_interfaces` and authored over it anyway, and that is the refusal
+   * item 104 exists for. Only the difference between the briefing and the fold
+   * is forgiven.
+   */
+  it('still refuses a fragment that collides with what the session was briefed with', async () => {
+    const { persistence } = memoryPersistence()
+    const first = scriptedDriver(async (place) =>
+      place === 'root'
+        ? { kind: 'outcome', value: { interfaces: [taskAt('root', '/', 'web/create-webhook')] } }
+        : { kind: 'outcome', value: { interfaces: [] } },
+    )
+    await authorWebInterfaces({ repoRoot: repo, driver: first.driver, persistence, concurrency: 1 })
+
+    // A second run: `settings` is briefed with the catalog that already has it.
+    const second = scriptedDriver(async (place) =>
+      place === 'settings'
+        ? { kind: 'outcome', value: { interfaces: [taskAt('settings', '/settings', 'web/create-webhook')] } }
+        : { kind: 'outcome', value: { interfaces: [] } },
+    )
+    const result = await authorWebInterfaces({
+      repoRoot: repo,
+      driver: second.driver,
+      persistence,
+      concurrency: 1,
+    })
+    const settings = result.places.find((p) => p.placeId === 'settings')!
+    expect(settings.status).toBe('rejected')
+    expect(settings.raced).toBeUndefined()
+    expect(settings.problems.join('\n')).toContain('is already authored')
+  })
+
+  /**
+   * WHAT THE POOL COSTS, stated rather than hoped away. A session is briefed
+   * with the catalog as it stands when it STARTS, so peers in flight beside it
+   * are invisible — their states are not in its registry and their tasks are not
+   * in its `list_interfaces`. This is why the default concurrency is small, and
+   * why the standing registry (which every session does see) is where item 106's
+   * reuse actually comes from.
+   */
+  it('cannot brief a session with a peer that is still running', async () => {
+    const { persistence } = memoryPersistence()
+    const briefings = new Map<string, string>()
+    const { driver } = scriptedDriver(async (place, input) => {
+      briefings.set(place, input.initialMessages.join('\n'))
+      if (place !== 'root') await new Promise((r) => setTimeout(r, 10))
+      return place === 'root'
+        ? { kind: 'outcome', value: HOME_FRAGMENT }
+        : { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4 })
+    // `root` names `repository-registered`, and every peer had already opened.
+    expect(readAuthoredFile().states!.web.map((s) => s.id)).toEqual(['repository-registered'])
+    for (const place of ['repos-repoid', 'settings', 'rules']) {
+      expect(briefings.get(place), place).not.toContain('repository-registered')
+    }
+  })
+
+  it('starts nothing new once the caller aborts', async () => {
+    const { persistence } = memoryPersistence()
+    const controller = new AbortController()
+    const started: string[] = []
+    const { driver } = scriptedDriver(async (place) => {
+      started.push(place)
+      controller.abort()
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({
+      repoRoot: repo,
+      driver,
+      persistence,
+      concurrency: 1,
+      signal: controller.signal,
+    })
+    expect(started).toEqual(['root'])
   })
 })

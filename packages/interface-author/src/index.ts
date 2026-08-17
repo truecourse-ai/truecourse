@@ -18,6 +18,7 @@ export {
   AuthoredPlaceSchema,
   AuthoredTaskSchema,
   candidateAuthored,
+  registryStates,
   stampFragment,
   validateFragment,
   type AuthoredFragment,
@@ -34,10 +35,13 @@ export {
   placeBriefing,
   placeWorkItem,
   type AuthorSessionInput,
+  type PlaceBriefingInput,
 } from './session.js'
 export {
   authorWebInterfaces,
+  defaultAuthorConcurrency,
   planWorkItems,
+  pruneRacedTasks,
   type AuthorProgress,
   type AuthorRunOptions,
   type AuthorRunResult,

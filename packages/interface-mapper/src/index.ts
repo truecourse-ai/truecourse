@@ -44,4 +44,7 @@ export { deriveWebPlacesFromTree } from './web-tree.js'
 export type { WebPlace, WebPlaceIdiom } from './web-tree.js'
 
 export { formCliResources, formApiResources, formWebResources } from './resources.js'
-export type { ResourceFormation } from './resources.js'
+export type { ResourceFormation, WebResourceFormation } from './resources.js'
+
+export { deriveWebPlaceContexts } from './web-context.js'
+export type { WebPlaceContext, DeriveWebPlaceContextsInput } from './web-context.js'

@@ -144,6 +144,26 @@ export const AuthoredFragmentSchema = z
   .strict()
 export type AuthoredFragment = z.infer<typeof AuthoredFragmentSchema>
 
+/**
+ * The worlds the catalog already names, in catalog order, the authored file's
+ * wording winning where both halves define an id. This is the registry a
+ * session is briefed with and the one its draft is held to — one list, so what
+ * a session is shown and what it is refused for cannot disagree.
+ */
+export function registryStates(
+  derived: InterfacesFile | null,
+  authored: InterfacesFile | null,
+): InterfaceState[] {
+  const byId = new Map<string, InterfaceState>()
+  for (const state of [
+    ...(derived?.states?.[AUTHORED_SURFACE] ?? []),
+    ...(authored?.states?.[AUTHORED_SURFACE] ?? []),
+  ]) {
+    byId.set(state.id, state)
+  }
+  return [...byId.values()]
+}
+
 /** A task with the fingerprint computed for it — a complete {@link Interface}. */
 export type StampedTask = AuthoredTask & { fingerprint: string }
 
@@ -197,7 +217,7 @@ export interface ValidateFragmentInput {
 /**
  * Hold a fragment to every rule at once and return the file it would produce.
  * The schema does the structural half (ids resolve in the area registry, a
- * screen sits on nothing, a state id is not a sentence); this adds the four
+ * screen sits on nothing, a state id is not a sentence); this adds the five
  * rules that are about AUTHORING rather than about the shape:
  *
  *  1. an id names one thing — no collision with a derived or authored entry;
@@ -207,7 +227,9 @@ export interface ValidateFragmentInput {
  *     policy: an element with no role and no accessible name is not guessed at);
  *  4. a task is REACHABLE and says where it happens — `at`, or a first
  *     `navigate` step, and when both the address and the place are known they
- *     have to agree.
+ *     have to agree;
+ *  5. a state id names one world catalog-wide — a draft references what the
+ *     registry already defines and never redefines it as something else.
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
   const { derived, authored, fragment } = input
@@ -302,6 +324,24 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
           `\`${task.id}\` is not a task of \`${input.scope.screenId}\` — this session authors that place and the dialogs and panels on it`,
         )
       }
+    }
+  }
+
+  // ---- 5. a state id names one world, catalog-wide -------------------------
+  // The registry is what tasks chain BY: `at-least-one-repository-registered`
+  // means the same world at every place, or the chain is a coincidence of
+  // spelling. So a draft may REFERENCE any id the catalog defines (the schema
+  // check below resolves it) and may DEFINE a new one, but it may not quietly
+  // give an existing id a new meaning — every task already chained to it would
+  // silently start asserting something else. Restating one verbatim is fine: a
+  // re-author of a place hands back the states it handed back last time.
+  const existingStates = new Map(registryStates(derived, authored).map((state) => [state.id, state]))
+  for (const state of stamped.states) {
+    const existing = existingStates.get(state.id)
+    if (existing && existing.description !== state.description) {
+      errors.push(
+        `\`${state.id}\` already names "${existing.description}" — reference it without redefining it, or pick a new id if you mean a different world`,
+      )
     }
   }
 

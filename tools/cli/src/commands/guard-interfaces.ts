@@ -22,7 +22,7 @@ import {
   type GuardInterfacesAuthorView,
 } from "@truecourse/core/commands/guard-interfaces";
 import type { PlaceResult } from "@truecourse/interface-author";
-import { INTERFACE_AUTHOR_BUDGET } from "@truecourse/interface-author";
+import { INTERFACE_AUTHOR_BUDGET, defaultAuthorConcurrency } from "@truecourse/interface-author";
 import { assertSessionBackendReady } from "@truecourse/core/services/llm/session-driver";
 import { preflightLlmOrExit, type LlmTransportFlag } from "../lib/claude-preflight.js";
 import { isInteractive } from "./helpers.js";
@@ -52,6 +52,8 @@ export interface RunGuardInterfaceAuthorOptions extends RunGuardInterfacesOption
   /** Re-author places that already carry tasks. */
   replace?: boolean;
   limit?: number;
+  /** How many sessions run at once. */
+  concurrency?: number;
   yes?: boolean;
   llmTransport?: LlmTransportFlag;
 }
@@ -115,9 +117,10 @@ export async function runGuardInterfacesAuthor(
   // an averaged dollar figure for a range this wide would dress a guess as a
   // fact, so the ceiling is stated as a ceiling.
   const maxTurns = INTERFACE_AUTHOR_BUDGET.turns * (INTERFACE_AUTHOR_BUDGET.maxResumes + 1);
+  const concurrency = Math.max(1, opts.concurrency ?? defaultAuthorConcurrency());
   p.log.info(
     [
-      `${work.length} place(s) to author, one agent session each.`,
+      `${work.length} place(s) to author, one agent session each, ${concurrency} at a time.`,
       `Each session runs up to ${maxTurns} turns; most converge in a handful.`,
       ...work.map((place) => `  ${place.id}${place.address ? `  ${place.address}` : ""}`),
     ].join("\n"),
@@ -131,6 +134,7 @@ export async function runGuardInterfacesAuthor(
   }
 
   const spinner = p.spinner();
+  const live = liveProgress();
   spinner.start("Starting");
   let run;
   try {
@@ -139,14 +143,17 @@ export async function runGuardInterfacesAuthor(
       places: work.map((place) => place.id),
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
       ...(opts.llmTransport ? { transport: opts.llmTransport } : {}),
+      concurrency,
+      onStatus: (message) => spinner.message(message),
       onProgress: (event) => {
-        if (event.kind === "place-start") {
-          spinner.message(`${event.placeId}  (${event.index + 1}/${event.total})`);
-        }
+        if (event.kind === "place-start") live.start(event.placeId, event.total);
+        else live.done(event.place.placeId);
+        spinner.message(live.render());
       },
       onSessionEvent: (placeId, event) => {
         if (event.type === "assistant-turn" && event.toolCall) {
-          spinner.message(`${placeId}  ${event.toolCall.name}`);
+          live.tool(placeId, event.toolCall.name);
+          spinner.message(live.render());
         }
       },
     });
@@ -164,6 +171,7 @@ export async function runGuardInterfacesAuthor(
   }
   p.log.message(
     [
+      `context   ${run.context.places} place(s) grounded from ${run.context.files} file(s) in ${run.context.seconds}s`,
       `authored  ${run.authored} task(s)`,
       `turns     ${run.spent.turns}`,
       `tokens    ${run.spent.tokens.toLocaleString()}`,
@@ -187,6 +195,45 @@ export async function runGuardInterfacesAuthor(
 // ---------------------------------------------------------------------------
 // rendering
 // ---------------------------------------------------------------------------
+
+/**
+ * One spinner line for a pool of sessions. With one session in flight the line
+ * is what it always was — the place, and the tool it just called, which is the
+ * only liveness signal a 30-turn session gives. With several, per-place tool
+ * calls arrive interleaved from every session and a line showing the last one
+ * flickers between places without saying anything, so the line becomes the
+ * aggregate: how many are done, and who is still working.
+ */
+function liveProgress() {
+  const inFlight = new Map<string, string>();
+  let done = 0;
+  let total = 0;
+  return {
+    start(placeId: string, of: number) {
+      total = of;
+      inFlight.set(placeId, "");
+    },
+    tool(placeId: string, name: string) {
+      if (inFlight.has(placeId)) inFlight.set(placeId, name);
+    },
+    done(placeId: string) {
+      inFlight.delete(placeId);
+      done += 1;
+    },
+    render(): string {
+      const counted = `${done}/${total}`;
+      if (inFlight.size === 1) {
+        const [placeId, tool] = [...inFlight][0]!;
+        return `${placeId}${tool ? `  ${tool}` : ""}  (${counted})`;
+      }
+      return `${counted} done · ${inFlight.size} running · ${clip([...inFlight.keys()].join(", "), 56)}`;
+    },
+  };
+}
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
 
 function printView(view: GuardInterfacesAuthorView): void {
   const surfaces = [...new Set([...Object.keys(view.derived), ...Object.keys(view.authored)])].sort();
@@ -232,6 +279,9 @@ function printPlace(place: PlaceResult): void {
     case "failed":
       p.log.error(`${place.placeId} — ${place.problems.join("; ")}, ${spent}`);
       break;
+  }
+  if (place.raced && place.raced.length > 0) {
+    p.log.message(`  authored by another session first:\n  - ${place.raced.join("\n  - ")}`);
   }
   if (place.unresolved.length > 0) {
     p.log.message(`  unresolved:\n  - ${place.unresolved.join("\n  - ")}`);

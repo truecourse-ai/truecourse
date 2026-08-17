@@ -1,24 +1,43 @@
 /**
- * THE RUN — one authoring session per place, folded into the authored catalog.
+ * THE RUN — authoring sessions over places, folded into the authored catalog.
  *
  * This is the agentic pipeline's shape at the command level (§3.9): a run over
  * work items, each item one session through `runAgentLoop`, each session's
- * outcome validated and persisted before the next one starts. Three properties
- * follow from folding after every place rather than at the end:
+ * outcome validated and persisted as it lands. Three properties follow from
+ * folding after every place rather than at the end:
  *
- * - a later session SEES the earlier ones — its `list_interfaces` and its
- *   uniqueness checks run against the catalog as it now stands, so two places
- *   cannot author the same task twice;
+ * - a session SEES the places already folded — its `list_interfaces`, its state
+ *   registry and its uniqueness checks run against the catalog as it stands;
  * - an interrupted run keeps what it finished, because each place's write is
  *   atomic and complete;
  * - a session that fails costs exactly its own place. Failures are DATA here,
  *   the way `runAgentLoop` hands them back — the run reports them and continues.
+ *
+ * THE POOL, and the one thing it costs. Sessions are network-bound: a place is
+ * ~20 turns of provider latency and almost no local work, so running them one at
+ * a time makes the wall clock the sum of a hundred round-trip stacks. They run
+ * `concurrency` at a time instead — but the FOLD stays strictly serial, because
+ * a fragment is validated against the catalog it is about to join and then
+ * written to it, and two of those interleaved would each validate against a
+ * catalog the other is in the middle of changing.
+ *
+ * What concurrency costs is BRIEFING FRESHNESS. A session is briefed with the
+ * catalog as it stands when the session starts, so the C-1 peers in flight
+ * beside it are invisible to it: they cannot be in its state registry, and their
+ * tasks cannot be in its `list_interfaces`. Two consequences, and both are
+ * handled rather than hoped away — a state named twice under two ids is the
+ * reuse item 106 buys back, which is why the default concurrency is small; and a
+ * task id or fingerprint claimed by a peer mid-flight is a RACE, not an
+ * authoring error, so the fold drops that one task and keeps the rest
+ * ({@link pruneRacedTasks}) instead of refusing the fragment whole.
  *
  * The driver and the persistence are INJECTED. This package knows nothing about
  * which backend runs the session or where the transcript lands; `@truecourse/core`
  * picks both (the configured transport, the run's sessions store).
  */
 
+import os from 'node:os'
+import pLimit from 'p-limit'
 import {
   runAgentLoop,
   type SessionDriver,
@@ -26,10 +45,12 @@ import {
   type SessionPersistence,
 } from '@truecourse/agent-loop'
 import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner'
+import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import type { InterfaceResource, InterfacesFile } from '@truecourse/shared'
 import {
   AUTHORED_SURFACE,
   candidateAuthored,
+  registryStates,
   stampFragment,
   validateFragment,
   type AuthoredFragment,
@@ -47,6 +68,19 @@ export interface AuthorRunOptions {
   replace?: boolean
   /** Stop after this many places — the cheap way to try one session first. */
   limit?: number
+  /**
+   * How many sessions run at once. Defaults to {@link defaultAuthorConcurrency}.
+   * The fold stays serial whatever this is; what rises with it is how many peers
+   * a session cannot see in its briefing (see the module note).
+   */
+  concurrency?: number
+  /**
+   * What the AST pass knows about each place (item 105): its route module, the
+   * modules it renders, the api effects its requests join to. Derived per run by
+   * the caller — this package reads analyzer artifacts, it never produces them.
+   * A place with no entry is briefed exactly as it was before the pack existed.
+   */
+  context?: ReadonlyMap<string, WebPlaceContext>
   signal?: AbortSignal
   onProgress?: (event: AuthorProgress) => void
   /** Every transcript event, as it is persisted — the CLI's live line. */
@@ -71,6 +105,12 @@ export interface PlaceResult {
   unresolved: string[]
   /** Why it was rejected (validation) or how it failed (the session failure). */
   problems: string[]
+  /**
+   * Tasks a session in flight beside this one authored first — dropped from this
+   * fragment so the rest could land. Empty on a serial run, and never a problem:
+   * the task exists, it is just somebody else's entry now.
+   */
+  raced?: string[]
   spent: { turns: number; tokens: number; costUsd: number }
   /** Whether a resume grant could continue a failed session (§3.3). */
   resumable?: boolean
@@ -154,32 +194,95 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   let authoredCount = 0
   let path: string | undefined
 
-  for (const [index, item] of work.entries()) {
-    opts.onProgress?.({ kind: 'place-start', placeId: item.place.id, index, total: work.length })
-    // A named/`--replace` re-author may replace THIS place's own tasks and
-    // nothing else: every other authored entry is somebody else's work.
-    const replaceable = new Set(named || opts.replace ? item.existing : [])
-    const result = await authorOnePlace({ ...opts, derived, authored, item, replaceable })
-    results.push(result.place)
-    spent.turns += result.place.spent.turns
-    spent.tokens += result.place.spent.tokens
-    spent.costUsd += result.place.spent.costUsd
+  const runOne = pLimit(Math.max(1, opts.concurrency ?? defaultAuthorConcurrency()))
+  const fold = serially()
 
-    if (result.candidate) {
-      const written = writeAuthoredCatalog({
-        repoRoot: opts.repoRoot,
-        candidate: result.candidate,
-        derived,
-        now: opts.now,
-      })
-      authored = written.file
-      path = written.path
-      authoredCount += result.place.taskIds.length
-    }
-    opts.onProgress?.({ kind: 'place-done', place: result.place })
-  }
+  await Promise.all(
+    work.map((item, index) =>
+      runOne(async () => {
+        // A run the caller aborted starts nothing else. The sessions already in
+        // flight get the signal and end themselves.
+        if (opts.signal?.aborted) return
+        opts.onProgress?.({ kind: 'place-start', placeId: item.place.id, index, total: work.length })
+        // A named/`--replace` re-author may replace THIS place's own tasks and
+        // nothing else: every other authored entry is somebody else's work.
+        const replaceable = new Set(named || opts.replace ? item.existing : [])
+        // The catalog this session is BRIEFED with, captured before it starts.
+        // The fold below re-reads the live one — between the two lies everything
+        // its peers landed while it was thinking.
+        const briefedWith = authored
+        const outcome = await runPlaceSession({ ...opts, derived, authored: briefedWith, item, replaceable })
+
+        // THE FOLD, one place at a time however many sessions are running: the
+        // fragment is validated against the catalog it is about to join, and
+        // that catalog cannot be moving while it is checked.
+        await fold(() => {
+          const result = foldOnePlace({
+            outcome,
+            item,
+            derived,
+            authored,
+            briefedWith,
+            replaceable,
+          })
+          results.push(result.place)
+          spent.turns += result.place.spent.turns
+          spent.tokens += result.place.spent.tokens
+          spent.costUsd += result.place.spent.costUsd
+
+          if (result.candidate) {
+            const written = writeAuthoredCatalog({
+              repoRoot: opts.repoRoot,
+              candidate: result.candidate,
+              derived,
+              now: opts.now,
+            })
+            authored = written.file
+            path = written.path
+            authoredCount += result.place.taskIds.length
+          }
+          opts.onProgress?.({ kind: 'place-done', place: result.place })
+        })
+      }),
+    ),
+  )
+
+  // Completion order is provider latency; the report is the work list.
+  const order = new Map(work.map((item, index) => [item.place.id, index]))
+  results.sort((a, b) => (order.get(a.placeId) ?? 0) - (order.get(b.placeId) ?? 0))
 
   return { places: results, authored: authoredCount, ...(path ? { path } : {}), skipped, spent }
+}
+
+/**
+ * How many sessions run at once by default. Small on purpose: the limit here is
+ * not the machine, it is that a session cannot see its peers' work (see the
+ * module note), so every extra worker buys wall clock and costs a little
+ * cross-place agreement. Shares `TRUECOURSE_MAX_CONCURRENCY` with the
+ * generator's own limit — one knob for "how much parallel LLM work at once".
+ */
+export function defaultAuthorConcurrency(): number {
+  const declared = process.env.TRUECOURSE_MAX_CONCURRENCY
+  if (declared) {
+    const n = Number.parseInt(declared, 10)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return Math.min(os.cpus().length, 4)
+}
+
+/**
+ * A one-at-a-time gate: each call runs after the previous one has settled,
+ * whatever order the callers arrive in. The critical section is validate → write
+ * → adopt, which is synchronous but re-entrant through the promise queue if it
+ * were not gated.
+ */
+function serially(): <T>(task: () => T) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve()
+  return <T>(task: () => T): Promise<T> => {
+    const result = tail.then(task)
+    tail = result.catch(() => undefined)
+    return result
+  }
 }
 
 interface OnePlaceInput extends AuthorRunOptions {
@@ -189,15 +292,21 @@ interface OnePlaceInput extends AuthorRunOptions {
   replaceable: Set<string>
 }
 
-async function authorOnePlace(
-  input: OnePlaceInput,
-): Promise<{ place: PlaceResult; candidate?: InterfacesFile }> {
+/** What one session produced — the loop's own outcome, plus who produced it. */
+type PlaceSession = {
+  sessionId: string
+  outcome: Awaited<ReturnType<typeof runAgentLoop<AuthoredFragment>>['outcome']>
+}
+
+/**
+ * THE SESSION — the part that runs concurrently. It reads the repository and
+ * hands back a fragment; nothing here touches the catalog, which is why several
+ * of these can be in flight at once.
+ */
+async function runPlaceSession(input: OnePlaceInput): Promise<PlaceSession> {
   const { item, derived, authored, replaceable } = input
   const sessionId = (input.mintSessionId ?? (() => globalThis.crypto.randomUUID()))()
-  const scope = {
-    screenId: item.place.id,
-    ...(item.place.address ? { address: item.place.address } : {}),
-  }
+  const scope = scopeOf(item)
   const def = interfaceAuthorSessionDef({
     repoRoot: input.repoRoot,
     derived,
@@ -209,7 +318,16 @@ async function authorOnePlace(
   const outcome = await runAgentLoop<AuthoredFragment>({
     def,
     workItem: placeWorkItem(item.place.id),
-    initialMessages: [placeBriefing(item.place, item.existing)],
+    initialMessages: [
+      placeBriefing({
+        place: item.place,
+        existing: item.existing,
+        // The catalog as it stood when this session started: every place already
+        // folded, and none of the peers still running beside it.
+        states: registryStates(derived, authored),
+        ...(input.context?.get(item.place.id) ? { context: input.context.get(item.place.id)! } : {}),
+      }),
+    ],
     driver: input.driver,
     persistence: tee(input.persistence, (event) => input.onSessionEvent?.(item.place.id, event)),
     sessionId,
@@ -218,6 +336,30 @@ async function authorOnePlace(
     ...(input.now ? { now: input.now } : {}),
   }).outcome
 
+  return { sessionId, outcome }
+}
+
+interface FoldInput {
+  session: PlaceSession
+  item: AuthorWorkItem
+  derived: InterfacesFile | null
+  /** The catalog as it stands NOW — what the fragment is validated against. */
+  authored: InterfacesFile | null
+  /** The catalog the session was briefed with; the difference is its peers' work. */
+  briefedWith: InterfacesFile | null
+  replaceable: Set<string>
+}
+
+/**
+ * THE FOLD — the part that runs one at a time. It reads the catalog as it now
+ * stands, not as the session was briefed, because the answer to "is this id
+ * taken" changed while the session was thinking.
+ */
+function foldOnePlace(
+  input: Omit<FoldInput, 'session'> & { outcome: PlaceSession },
+): { place: PlaceResult; candidate?: InterfacesFile } {
+  const { item, derived, authored, briefedWith, replaceable } = input
+  const { sessionId, outcome } = input.outcome
   const base = { placeId: item.place.id, sessionId, spent: outcome.spent }
 
   if (outcome.status === 'failed') {
@@ -233,18 +375,27 @@ async function authorOnePlace(
     }
   }
 
-  const fragment = outcome.output
-  const unresolved = [...(fragment.unresolved ?? [])]
+  const unresolved = [...(outcome.output.unresolved ?? [])]
+  const { fragment, raced } = pruneRacedTasks(outcome.output, briefedWith, authored, replaceable)
+  const racedField = raced.length > 0 ? { raced } : {}
   if (fragment.interfaces.length === 0) {
-    return { place: { ...base, status: 'empty', taskIds: [], unresolved, problems: [] } }
+    // Either the session honestly found nothing, or everything it found was
+    // authored by a peer first. Both are empty, and `raced` says which.
+    return { place: { ...base, status: 'empty', taskIds: [], unresolved, problems: [], ...racedField } }
   }
 
-  const validation = validateFragment({ derived, authored, fragment, replaceable, scope })
+  const validation = validateFragment({
+    derived,
+    authored,
+    fragment,
+    replaceable,
+    scope: scopeOf(item),
+  })
   if (!validation.ok) {
     // The session had `check_draft` and either never called it or ignored it.
     // The fragment is dropped whole: half a place's tasks is not a place.
     return {
-      place: { ...base, status: 'rejected', taskIds: [], unresolved, problems: validation.errors },
+      place: { ...base, status: 'rejected', taskIds: [], unresolved, problems: validation.errors, ...racedField },
     }
   }
   return {
@@ -254,8 +405,62 @@ async function authorOnePlace(
       taskIds: fragment.interfaces.map((task) => task.id),
       unresolved,
       problems: [],
+      ...racedField,
     },
     candidate: validation.authored ?? candidateAuthored(authored, stampFragment(fragment), replaceable),
+  }
+}
+
+/**
+ * Drop the tasks a session in flight beside this one claimed first.
+ *
+ * A collision with an entry that was ALREADY there when this session was briefed
+ * is an authoring error — the session was shown that entry and authored over it
+ * anyway, and `validateFragment` refuses the fragment for it. A collision with
+ * an entry that appeared WHILE the session ran is a race: nothing told it, and
+ * refusing the whole fragment would throw away a screen's work over one id two
+ * settings pages both wanted to call `web/create-webhook`. So exactly the raced
+ * tasks come out, and the rest of the place lands.
+ *
+ * Both identities are checked, because both are refusals: the `id` (one id names
+ * one thing) and the FINGERPRINT (one entry + steps is one task, whatever it is
+ * called).
+ */
+export function pruneRacedTasks(
+  fragment: AuthoredFragment,
+  briefedWith: InterfacesFile | null,
+  authored: InterfacesFile | null,
+  replaceable: ReadonlySet<string>,
+): { fragment: AuthoredFragment; raced: string[] } {
+  const before = new Set((briefedWith?.interfaces ?? []).map((iface) => iface.id))
+  const landedIds = new Set<string>()
+  const landedFingerprints = new Set<string>()
+  for (const iface of authored?.interfaces ?? []) {
+    if (before.has(iface.id) || replaceable.has(iface.id)) continue
+    landedIds.add(iface.id)
+    landedFingerprints.add(iface.fingerprint)
+  }
+  if (landedIds.size === 0) return { fragment, raced: [] }
+
+  const raced: string[] = []
+  const kept = stampFragment(fragment).interfaces.filter((task) => {
+    if (!landedIds.has(task.id) && !landedFingerprints.has(task.fingerprint)) return true
+    raced.push(task.id)
+    return false
+  })
+  if (raced.length === 0) return { fragment, raced: [] }
+  const byId = new Map(fragment.interfaces.map((task) => [task.id, task]))
+  return {
+    fragment: { ...fragment, interfaces: kept.map((task) => byId.get(task.id)!) },
+    raced,
+  }
+}
+
+/** The place a session authors — its screen, and the address it sits at. */
+function scopeOf(item: AuthorWorkItem): { screenId: string; address?: string } {
+  return {
+    screenId: item.place.id,
+    ...(item.place.address ? { address: item.place.address } : {}),
   }
 }
 

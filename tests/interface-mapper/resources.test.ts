@@ -236,5 +236,21 @@ describe('formWebResources', () => {
 
   it('forms nothing from an empty tree', () => {
     expect(formWebResources([]).resources).toEqual([])
+    expect(formWebResources([]).seeds.size).toBe(0)
+  })
+
+  /**
+   * The id is minted here and the module arrives on the seed, so this is the one
+   * place the two can be joined (item 105). It stays OUT of the registry entry:
+   * a file path is not surface-visible shape, and it goes stale the moment a file
+   * moves.
+   */
+  it('hands back which module each place’s id was minted from, without storing it', () => {
+    const { resources, seeds } = formWebResources([place('/'), place('/availability')])
+    expect([...seeds].map(([id, seed]) => [id, seed.filePath])).toEqual([
+      ['root', '/r/app//page.tsx'],
+      ['availability', '/r/app/availability/page.tsx'],
+    ])
+    expect(resources.every((r) => !('filePath' in r))).toBe(true)
   })
 })
