@@ -39,7 +39,7 @@ export const MAX_OTHER_OPERATIONS = 30
  * (verbatim, so a request never has to be invented) plus what the handler reads off
  * the request. Non-api interfaces and duplicates are dropped.
  *
- * The request half is read off THE INTERFACE'S OWN CONTRACT (plan item 98). It used
+ * The request half is read off THE INTERFACE'S OWN CONTRACT (plan item 102). It used
  * to arrive as a second argument — a separate `ApiRequestContract[]` product joined
  * here by method+path, which meant the two halves could only agree if two
  * derivations composed their paths identically, and meant a run reading the

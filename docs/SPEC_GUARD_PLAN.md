@@ -5712,7 +5712,7 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
       can now read a count and `compare` it, which covers the claims seen so far;
       an expectation member would be a second way to say it.
 
-98. **The Surface Object Model — Tier 1: the contract goes surface-native, the
+102. **The Surface Object Model — Tier 1: the contract goes surface-native, the
     resource goes universal (2026-08-15).** STATUS: BUILT. Item 96 made the PLACE
     first-class for the web surface and left the other two flat. What the cli and
     api catalogs looked like after it: 60-odd sibling entries with no envelope, a
@@ -5763,7 +5763,7 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
       with no stream, `rows` = the shared row grammar minus the stream, `writes`).
       The operation copies NO identity: method and path live on the entry, once.
       There is deliberately NO `web` member — a web task's contract is its
-      resource's readables plus the capture vocabulary (items 96, 97), and a
+      resource's readables plus the capture vocabulary (items 96, 101), and a
       member invented ahead of a claim would be a shape nothing fills; the union
       is exactly what makes it land additively. `contract.surface` must equal the
       interface's `type`, cross-checked at file level.
@@ -5869,8 +5869,8 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     product bug that degrades today's grounding independently of the SOM, and the
     cheapest of the three cost centres the report named.
 
-99. **The web surface derives its PLACES (2026-08-17).** STATUS: BUILT (structural
-    half). Item 98's Tier-2 note (d) — "deriving the web registry rather than
+103. **The web surface derives its PLACES (2026-08-17).** STATUS: BUILT (structural
+    half). Item 102's Tier-2 note (d) — "deriving the web registry rather than
     hand-authoring it". Every web interface that exists across the three benchmark
     corpora, 126 of them, was typed by an agent reading the target's JSX, because
     `mapInterfaces` derived `cli` and `api` and nothing else. This item derives the

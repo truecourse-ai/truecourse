@@ -420,7 +420,7 @@ export async function guardGenerateInProcess(
           return {
             interfaces: mapped.catalog.interfaces,
             // The resource registry rides the same seam — the mapper forms the
-            // cli and api places itself now (plan item 98), and a hand-authored
+            // cli and api places itself now (plan item 102), and a hand-authored
             // web registry arrives the same way.
             ...(mapped.catalog.resources ? { resources: mapped.catalog.resources } : {}),
             externalServices: mapped.externalServices,

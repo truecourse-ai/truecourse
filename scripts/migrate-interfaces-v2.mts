@@ -1,6 +1,6 @@
 /**
  * ONE-OFF: migrate a HAND-AUTHORED `interfaces.json` from v1 to v2 (the SOM
- * restructure, plan item 98).
+ * restructure, plan item 102).
  *
  * The derived catalogs need no migration — `guard/interfaces.json` is gitignored
  * and re-derived, so a v1 file simply fails to parse and the next map rewrites

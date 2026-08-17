@@ -82,7 +82,7 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
 }
 
 /** An api interface carrying its own request contract — the catalog shape the
- *  mapper writes since the contract found its one home (plan item 98). */
+ *  mapper writes since the contract found its one home (plan item 102). */
 function contracted(
   method: string,
   path: string,

@@ -241,7 +241,7 @@ function handAuthoredEvidence(raw: unknown): string | null {
 }
 
 /**
- * THE PLACES, and each interface's owner — the SOM envelope (plan item 98)
+ * THE PLACES, and each interface's owner — the SOM envelope (plan item 102)
  * formed over the interfaces the surface derivations just produced. Pure and
  * deterministic; the formation rules themselves live in the mapper
  * (`formCliResources` / `formApiResources`) so the reference-catalog migration
@@ -358,7 +358,7 @@ async function deriveInterfaces(
 
   // The two authoring-grounding products, derived before the api catalog is
   // assembled: the request contract is no longer a product BESIDE the catalog,
-  // it is the api contract's `request` region (plan item 98), so it has to exist
+  // it is the api contract's `request` region (plan item 102), so it has to exist
   // by the time the api interfaces are built.
   const requestContracts = safely('request contracts', () => collectApiRequestContracts(fileAnalyses));
 
@@ -397,7 +397,7 @@ async function deriveInterfaces(
 }
 
 /**
- * THE ONE HOME for the api request contract (plan item 98): what each handler
+ * THE ONE HOME for the api request contract (plan item 102): what each handler
  * reads off the request, written ONTO the operation it belongs to instead of
  * travelling beside the catalog as a second product joined at prompt time.
  *

@@ -1008,7 +1008,7 @@ function resourceLines(place: InterfaceResource): string[] {
   ]
   const r = place.readables
   // A cli command group and an api noun carry NO readables — those are DOM
-  // facts (plan item 98) — so such a place renders its identity line and stops,
+  // facts (plan item 102) — so such a place renders its identity line and stops,
   // exactly as an unfleshed web place does.
   if (!r) return lines
   for (const m of r.markers ?? []) {

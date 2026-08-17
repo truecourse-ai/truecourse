@@ -1050,7 +1050,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals)
   // The code-truth grounding. The inbound half needs no plumbing at all: what a
   // handler reads off the request lives ON its operation in the catalog (plan
-  // item 98), so it is read per flow from the interfaces the plan walks. The
+  // item 102), so it is read per flow from the interfaces the plan walks. The
   // outbound half is repo-level and capped here, once.
   const outboundRequestHints = buildOutboundRequestHints(mapped.outboundRequests, externalServices)
   const outboundRequestsOverflow = outboundOverflow(mapped.outboundRequests)

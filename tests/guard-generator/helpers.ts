@@ -196,7 +196,7 @@ export function withCodeTruth(
 ): InterfaceProvider {
   return async () => {
     const mapped = await provider()
-    // The inbound contract has ONE home now (plan item 98): the operation it
+    // The inbound contract has ONE home now (plan item 102): the operation it
     // belongs to. The helper keeps its `ApiRequestContract[]` ergonomics and
     // writes them onto the catalog exactly as `mapInterfaces` does.
     const byOperation = new Map(
