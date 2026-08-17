@@ -119,6 +119,48 @@ describe('interface schemas', () => {
     ).toThrow()
   })
 
+  /**
+   * `apiEffects` is a reference like any other id in the file, and it went
+   * unchecked. Measured on the first authoring pilot: 14 tasks carried the
+   * field, 11 of them named api ids the catalog never defined, and all 11
+   * landed in the committed file. The field's own contract says a fact it
+   * cannot settle is "never guessed" — this is what makes that enforceable.
+   */
+  it('an api effect names an api entry this catalog defines', () => {
+    const api: Interface = iface([REQUEST], {
+      id: 'api/post-tasks',
+      type: 'api',
+      title: 'create a task',
+      entry: { method: 'POST', path: '/tasks' },
+    })
+    const file = (apiEffects: string[]) => ({
+      version: 2 as const,
+      generatedAt: '2026-08-17T12:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [
+        api,
+        iface([INVOKE]),
+        iface([ACTIVATE], {
+          id: 'web/add-task',
+          type: 'web',
+          title: 'Add a task',
+          entry: { method: 'GET', path: '/board' },
+          apiEffects,
+        }),
+      ],
+    })
+    expect(() => InterfacesFileSchema.parse(file(['api/post-tasks']))).not.toThrow()
+    // `[]` stays a real answer — it claims the task reaches no server at all.
+    expect(() => InterfacesFileSchema.parse(file([]))).not.toThrow()
+    expect(() => InterfacesFileSchema.parse(file(['api/post-api-v2-envelope-create']))).toThrow(
+      /`api\/post-api-v2-envelope-create` is not an interface this catalog defines/,
+    )
+    // An id that resolves to the WRONG surface is not an api effect either.
+    expect(() => InterfacesFileSchema.parse(file(['cli/tasks-add']))).toThrow(
+      /is a `cli` interface — an api effect names an api entry/,
+    )
+  })
+
   it('the registry defines an area’s states once, and an interface’s ids must resolve in it', () => {
     const web = (over: Partial<Interface> = {}): Interface =>
       iface([ACTIVATE], {

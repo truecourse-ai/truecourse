@@ -1520,6 +1520,9 @@ export const InterfacesFileSchema = InterfacesFileShapeSchema
         }
       })
     }
+    // Interfaces resolve by id catalog-wide, not per area: `apiEffects` is a
+    // web task naming an api entry, so the lookup crosses surfaces by design.
+    const byId = new Map(file.interfaces.map((iface) => [iface.id, iface]))
     file.interfaces.forEach((iface, i) => {
       const known = registry.get(iface.type)
       for (const field of ['startingState', 'endState'] as const) {
@@ -1543,6 +1546,33 @@ export const InterfacesFileSchema = InterfacesFileShapeSchema
             code: z.ZodIssueCode.custom,
             path: ['interfaces', i, field],
             message: `\`${id}\` is not a resource the \`${iface.type}\` registry defines`,
+          })
+        }
+      }
+      // `apiEffects` is a REFERENCE like every other id here, and it resolves
+      // the same way: an id that names no api entry names nothing. It was the
+      // one reference field nothing checked, and the cost was measured — of the
+      // 14 authored tasks that carried the field in the first pilot, 11 named
+      // ids that did not exist (`api/post-api-v2-envelope-create` against a
+      // catalog that has no such entry), and every one of them landed in the
+      // committed file. The field's own rule is "never guessed"; this is what
+      // makes that rule true rather than advisory. It resolves against the
+      // whole catalog because an authored web task names a DERIVED api entry —
+      // which is exactly why it is checked here, on the merge, and not in the
+      // half-schema.
+      for (const effect of iface.apiEffects ?? []) {
+        const target = byId.get(effect)
+        if (!target) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, 'apiEffects'],
+            message: `\`${effect}\` is not an interface this catalog defines`,
+          })
+        } else if (target.type !== 'api') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['interfaces', i, 'apiEffects'],
+            message: `\`${effect}\` is a \`${target.type}\` interface — an api effect names an api entry`,
           })
         }
       }
