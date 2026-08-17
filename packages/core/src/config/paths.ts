@@ -53,6 +53,7 @@ export const GITIGNORE_CONTENTS = [
   'guard/auto-resolutions.json',
   'scenarios/externals.local.json',
   'scenarios/dependencies.local.json',
+  'sessions/',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------

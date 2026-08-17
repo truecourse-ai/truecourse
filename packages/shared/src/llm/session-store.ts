@@ -40,6 +40,10 @@ export const RunRecordSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   status: RunStatusSchema,
+  /** The run process's pid — the OSS reconciliation sweep's liveness probe
+   *  (§3.9: nothing stays `running` on a dead process's memory). EE's
+   *  table store tracks liveness its own way and may omit it. */
+  pid: z.number().int().optional(),
   /** The live session API while the process runs — a URL plus auth token,
    *  never a bare port, so the EE runner's service endpoint fits the field. */
   endpoint: z.object({ url: z.string(), token: z.string() }).optional(),

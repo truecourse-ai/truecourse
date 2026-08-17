@@ -12,6 +12,7 @@
 
 import type { SessionDef } from './session-def.js';
 import type {
+  RawPayload,
   SessionEvent,
   SessionEventBody,
   SessionFailure,
@@ -48,8 +49,10 @@ export interface SessionRunInput {
   initialMessages: readonly string[];
   resume?: SessionResume;
   /** Drivers emit event BODIES as they happen; the shell stamps seq + ts
-   *  and persists. Full content, never summaries. */
-  onEvent(event: SessionEventBody): void;
+   *  and persists. Full content, never summaries. A driver may attach the
+   *  raw escape hatch (§3.9) — its native wire payload — which the shell
+   *  carries onto the persisted envelope. */
+  onEvent(event: SessionEventBody & { raw?: RawPayload }): void;
   signal: AbortSignal;
 }
 

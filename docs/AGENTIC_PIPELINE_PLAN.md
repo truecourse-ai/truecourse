@@ -406,6 +406,27 @@ builds loop machinery of its own. This supersedes the loop's slotting
 inside §8.9 Phase 1 — that phase consumes the shared module rather than
 producing it.
 
+**Implementation status (2026-08-17).** Landed, test-first, on
+`sm/agentic-pipeline-plan`: the policy shell
+(`packages/shared/src/llm/agent-loop.ts`, `tests/shared/agent-loop.test.ts`),
+the OSS file sessions store with the boot reconciliation sweep
+(`packages/core/src/lib/sessions-store.ts`,
+`tests/server/sessions-store.test.ts`), the api driver
+(`packages/llm-api/src/session-driver.ts`,
+`tests/llm-api/session-driver.test.ts`), the Agent SDK driver in the new
+`packages/llm-claude-agent` (isolation invariants hardcoded; SDK wrapper an
+optional peer behind a lazy import, pinned 0.3.233;
+`tests/llm-claude-agent/session-driver.test.ts`), and the conformance suite
+running both drivers through one spec
+(`tests/llm-drivers/session-driver-conformance.test.ts`). The
+`@anthropic-ai/claude-agent-sdk` import boundary is enforced by
+`tests/architecture/ee-import-boundary.test.ts`. Still ahead per §3.9: the
+session API library (inbound POSTs with command-id idempotency) and the
+dashboard-server read routes; and per-workstream migration off the one-shot
+`cliTransport` stages. The SDK driver has run only against the scripted
+fake so far — a live smoke run against the real binary is the next
+verification step.
+
 ### 3.4 Model policy (decision 2026-08-06)
 
 One model everywhere. Every session in every workstream (authoring,

@@ -43,6 +43,7 @@ export * from './session-events.js';
 export * from './session-def.js';
 export * from './session-driver.js';
 export * from './session-store.js';
+export * from './agent-loop.js';
 export {
   StageTransportTallySchema,
   LlmStageFailureError,

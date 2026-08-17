@@ -1,5 +1,5 @@
 {
-  "name": "@truecourse/llm-api",
+  "name": "@truecourse/llm-claude-agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,14 +17,17 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@ai-sdk/amazon-bedrock": "^4.0.0",
-    "@ai-sdk/anthropic": "^3.0.0",
-    "@ai-sdk/openai": "^3.0.0",
-    "@ai-sdk/openai-compatible": "^2.0.0",
     "@truecourse/shared": "workspace:*",
-    "ai": "^6.0.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.233"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

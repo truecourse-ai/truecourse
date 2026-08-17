@@ -108,6 +108,10 @@
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
     },
+    "./lib/sessions-store": {
+      "types": "./dist/lib/sessions-store.d.ts",
+      "import": "./dist/lib/sessions-store.js"
+    },
     "./lib/contract-store": {
       "types": "./dist/lib/contract-store.d.ts",
       "import": "./dist/lib/contract-store.js"
