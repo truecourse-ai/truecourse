@@ -149,6 +149,19 @@ of running one session against one backend.
   api mode run our own loop, and the session-driver contract (§3.3) plus
   its conformance suite are what keep the two semantically one.
 
+**First production consumer (2026-08-17).** The loop's first caller in the
+product is INTERFACE AUTHORING — the web tasks no derivation produces —
+shipped as `truecourse guard interfaces author`
+(`packages/interface-author`, SPEC_GUARD_PLAN item 104): one session per
+derived place, five read-only tools, an outcome the write path validates,
+and the transcripts in the standard sessions store under a
+`guard-interfaces` command. It also lands the piece every later workstream
+needs — `createConfiguredSessionDriver` in core, the session analog of
+`install-transport.ts`: the Agent SDK driver on Opus in claude-code mode,
+the api driver on the configured flagship in api mode (§3.4). It is
+deliberately a stage OUTSIDE §§6–8, so the loop is proven against a real
+subject before the three owned workstreams build on it.
+
 ### 3.2 The only LLM call shape
 
 **The loop is the pipeline's only LLM call shape** (decision 2026-08-06).

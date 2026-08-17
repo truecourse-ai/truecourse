@@ -751,6 +751,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
+      '@truecourse/interface-author':
+        specifier: workspace:*
+        version: link:../interface-author
       '@truecourse/interface-mapper':
         specifier: workspace:*
         version: link:../interface-mapper
@@ -760,6 +763,9 @@ importers:
       '@truecourse/llm-api':
         specifier: workspace:*
         version: link:../llm-api
+      '@truecourse/llm-claude-agent':
+        specifier: workspace:*
+        version: link:../llm-claude-agent
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../shared
@@ -868,6 +874,28 @@ importers:
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/interface-author:
+    dependencies:
+      '@truecourse/agent-loop':
+        specifier: workspace:*
+        version: link:../agent-loop
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../guard-runner
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -1035,6 +1063,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../../packages/guard-runner
+      '@truecourse/interface-author':
+        specifier: workspace:*
+        version: link:../../packages/interface-author
       '@truecourse/shared':
         specifier: workspace:^
         version: link:../../packages/shared

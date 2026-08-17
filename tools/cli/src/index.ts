@@ -54,6 +54,10 @@ import { runGuardFindings } from "./commands/guard-findings.js";
 import { runGuardSetup } from "./commands/guard-setup.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runGuardExternals } from "./commands/guard-externals.js";
+import {
+  runGuardInterfaces,
+  runGuardInterfacesAuthor,
+} from "./commands/guard-interfaces.js";
 import { runGuardSeed } from "./commands/guard-seed.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
@@ -78,6 +82,11 @@ function llmTransportOption(): Option {
     "--llm-transport <mode>",
     "How to reach the LLM for this run: 'cli' (spawn claude -p), 'agent' (filesystem mailbox), or 'api' (the provider in ~/.truecourse/config.json)",
   ).choices(["cli", "agent", "api"]);
+}
+
+/** Accumulate repeatable `--place <id>` values. */
+function collectPlace(value: string, previous: string[]): string[] {
+  return [...previous, value];
 }
 
 /** Accumulate repeatable `--header k=v` values. */
@@ -433,6 +442,33 @@ guardCmd
   .option("--init", "Removed — `truecourse guard setup` drafts the seed")
   .action(async (options) => {
     await runGuardSeed({ init: !!options.init });
+  });
+
+// The interface catalog: the derived half is read off the tree by `guard setup`;
+// the web TASKS are authored, one agent session per place (SPEC_GUARD_PLAN 104).
+const guardInterfacesCmd = guardCmd
+  .command("interfaces")
+  .description("Show the interface catalog's places and the tasks authored on them (read-only)")
+  .action(async () => {
+    await runGuardInterfaces({});
+  });
+
+guardInterfacesCmd
+  .command("author")
+  .description("Author the web tasks no derivation produces — one agent session per place")
+  .option("--place <id>", "Author only this place (repeatable)", collectPlace, [])
+  .option("--replace", "Re-author places that already carry tasks")
+  .option("--limit <n>", "Author at most N places", parseInt)
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardInterfacesAuthor({
+      place: options.place,
+      replace: !!options.replace,
+      limit: options.limit,
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
   });
 
 guardCmd

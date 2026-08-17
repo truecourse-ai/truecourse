@@ -13,7 +13,15 @@ import {
   type SessionEvent,
 } from './session-events.js';
 
-export const SessionCommandSchema = z.enum(['spec-scan', 'guard-setup', 'guard-generate']);
+export const SessionCommandSchema = z.enum([
+  'spec-scan',
+  'guard-setup',
+  'guard-generate',
+  // Interface authoring (SPEC_GUARD_PLAN item 104) — the web tasks no
+  // derivation produces. Its own command because its runs are its own: they
+  // are re-run per place, independently of any generate.
+  'guard-interfaces',
+]);
 export type SessionCommand = z.infer<typeof SessionCommandSchema>;
 
 export const RunStatusSchema = z.enum(['running', 'completed', 'failed', 'interrupted']);

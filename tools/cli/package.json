@@ -22,6 +22,7 @@
     "@truecourse/core": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
+    "@truecourse/interface-author": "workspace:*",
     "@truecourse/shared": "workspace:^",
     "@truecourse/spec-consolidator": "workspace:*",
     "commander": "^12.1.0",

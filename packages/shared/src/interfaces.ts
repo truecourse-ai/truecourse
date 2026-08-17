@@ -1383,12 +1383,15 @@ export type InterfaceCatalogSource = z.infer<typeof InterfaceCatalogSourceSchema
 /**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).
  *
- * ONE SHAPE, TWO HOMES (2026-08-17): the same schema validates
+ * ONE SHAPE, TWO HOMES (2026-08-17): the same shape validates
  * `guard/interfaces.authored.json`, the COMMITTED half a human writes for the
  * surfaces no derivation produces. The two are joined at read time
  * (`readMergedInterfaceCatalog`), authored winning per interface id and per
  * resource id, with each entry stamped {@link InterfaceSchema.origin}. Neither
- * file describes a different thing, so neither gets a schema of its own.
+ * file describes a different thing, so neither gets a schema of its own — the
+ * halves are read with {@link InterfacesFragmentSchema} (shape) and the WHOLE
+ * is held to this one (shape + the id resolution below), because a reference
+ * that crosses the two halves can only be resolved in the merge.
  *
  * **version 2 (2026-08-14)** — the SOM restructure, and THE break the number was
  * reserved for. `version` stayed 1 through every additive growth: the contract
@@ -1406,7 +1409,7 @@ export type InterfaceCatalogSource = z.infer<typeof InterfaceCatalogSourceSchema
  * and costs nothing: the file is gitignored and derived, so a v1 file fails
  * parse, reads as "no catalog", and the next map re-derives it.
  */
-export const InterfacesFileSchema = z
+const InterfacesFileShapeSchema = z
   .object({
     version: z.literal(2),
     /** ISO timestamp of the mapping run that wrote the file. */
@@ -1444,6 +1447,27 @@ export const InterfacesFileSchema = z
     source: z.record(z.string(), InterfaceCatalogSourceSchema).optional(),
   })
   .strict()
+
+/**
+ * HALF a catalog: the shape above, with the CROSS-REFERENCE rules below left
+ * out. This is what `guard/interfaces.authored.json` is read with, and the
+ * distinction is forced by the split itself (2026-08-17): the authored file
+ * holds the interfaces no derivation produces, and their `at`/`to`/`resource`
+ * ids resolve against the MERGED catalog — a web task stands on a screen the
+ * derivation writes into the gitignored half. Checking those references against
+ * the authored file alone would refuse every task that stands on a derived
+ * place, and on a fresh clone (where the derived half does not exist yet) it
+ * would refuse the file the clone just inherited from git.
+ *
+ * So the halves are checked for SHAPE and the WHOLE is checked for references:
+ * {@link InterfacesFileSchema} — this schema plus the id resolution — is what a
+ * merged catalog is held to, and what the authoring write path validates its
+ * fragment against before a byte lands.
+ */
+export const InterfacesFragmentSchema = InterfacesFileShapeSchema
+export type InterfacesFragment = z.infer<typeof InterfacesFragmentSchema>
+
+export const InterfacesFileSchema = InterfacesFileShapeSchema
   .superRefine((file, ctx) => {
     // An id is only a NAME if something defines it. Ids resolve in the registry
     // of the interface's OWN area, so two surfaces may name a state alike and

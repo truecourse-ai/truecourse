@@ -34,6 +34,7 @@ import {
   GuardLatestSchema,
   GuardSetupReportSchema,
   InterfacesFileSchema,
+  InterfacesFragmentSchema,
   type GuardAutoResolutions,
   type GuardClaimsFile,
   type GuardFlowsFile,
@@ -306,6 +307,14 @@ export function readInterfaceCatalog(repoRoot: string): InterfacesFile | null {
  * nothing re-derives this one. Reading it as empty would silently drop the exact
  * surfaces it exists to protect and settle their flows as `no-interface` — the
  * failure the whole design removes.
+ *
+ * It is read as a FRAGMENT (`InterfacesFragmentSchema`): the shape in full, the
+ * cross-reference rules not here. An authored task stands on a place the
+ * DERIVATION writes (item 103 derives the web screens into the gitignored half),
+ * so its `at`/`to` ids resolve in the merge and nowhere else — and on a fresh
+ * clone, where nothing has mapped yet, the derived half does not exist at all.
+ * Checking them here would refuse a file that is correct. They are checked where
+ * they can be: against the merged catalog, by the authoring write path.
  */
 export function readAuthoredInterfaceCatalog(repoRoot: string): InterfacesFile | null {
   const file = guardAuthoredInterfacesPath(repoRoot)
@@ -319,7 +328,7 @@ export function readAuthoredInterfaceCatalog(repoRoot: string): InterfacesFile |
         `It is the only home of the hand-authored surfaces, so it is never read as empty — fix the file, or move it aside to run without it.`,
     )
   }
-  const parsed = InterfacesFileSchema.safeParse(raw)
+  const parsed = InterfacesFragmentSchema.safeParse(raw)
   if (!parsed.success) {
     const issue = parsed.error.issues[0]
     throw new Error(

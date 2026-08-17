@@ -5948,3 +5948,106 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `tests/analyzer/web-routes.test.ts`, `tests/interface-mapper/web-tree.test.ts`,
     `tests/interface-mapper/resources.test.ts`, `tests/shared/interfaces.test.ts`,
     `tests/core/{interface.service,guard-interfaces-authored}.test.ts`.
+
+104. **Interface authoring runs on the agent loop (2026-08-17).** STATUS: BUILT.
+    Item 103 derived the web PLACES and stopped where derivation honestly stops:
+    a task is an ordered navigate/activate sequence with a start and an end
+    state — intent, which no tree states. Every web interface in existence (126
+    across the three corpora) was typed by an agent reading the target's JSX by
+    hand, outside the product. This item makes that an actual pipeline stage, and
+    it is the agent loop's FIRST production consumer: `runAgentLoop` shipped with
+    two drivers and a conformance suite, and nothing in the product called it.
+
+    **The unit of work is the PLACE, and that is the whole design.** A web task is
+    "one task from one state" (AGENTIC_PIPELINE_PLAN §10.4), and the state a task
+    starts from is a place plus a world. One session per screen gives a bounded
+    reading job (that screen's route module and the components it renders), a
+    natural done-condition, and a work item that re-runs alone — authoring one
+    place again re-authors nothing else. It also means the work LIST is derived
+    rather than typed: item 103's screens are the agenda, so `guard interfaces`
+    shows the bill before it is paid and the coverage after.
+
+    **What the model may write, and what it may not.** The outcome schema
+    (`AuthoredFragmentSchema`) is the web shape and nothing else: tasks, the
+    states they assume and leave, the dialogs/panels no derivation produces, and
+    `unresolved` — what the reading could not settle, one line each. Three fields
+    are deliberately absent. `fingerprint` is a FUNCTION of the entry and steps,
+    so it is computed after the outcome (a model-written one can disagree with
+    its own entry, and every scenario grounded on it inherits the disagreement).
+    `origin` is stamped by the merge, never declared — the field exists because a
+    declared one lied for months. `contract` cannot exist for a web entry at all:
+    the union has cli and api members and `contract.surface` must equal the type.
+    The step vocabulary is narrowed to the three WEB members, so a task that
+    wanted an `invoke` step is refused at parse rather than in review.
+
+    **`check_draft` is why this is a LOOP and not a prompt.** The session's five
+    tools are read-only — `read_file`, `search_repo` (repo-bounded, capped,
+    binary-skipping), `list_places`, `list_interfaces`, and `check_draft`, which
+    runs the identical function the write path runs. The rules are dozens of small
+    structural facts (an id that resolves, a role that exists, an entry that
+    agrees with its place); a model that can ASK converges on them, and a draft
+    that checks clean cannot be refused afterwards. Nothing writes: a tool that
+    wrote would leave half a fragment on disk every time a session ran out of
+    budget mid-draft.
+
+    **The rules, each one because the alternative is a plausible entry nothing can
+    run**: one id names one thing (no shadowing a derived entry, no silent
+    overwrite of an authored one); one fingerprint names one task (the same task
+    authored twice would double every scenario grounded on it); every target is
+    `<role> "<accessible name>"` with a real ARIA role — §10.3's locator policy,
+    and the grammar all 57 reference targets are already in; a task says where it
+    happens (`at`) or how it gets there (a first `navigate`), and its entry
+    agrees with the address of the place it stands on; and a session's tasks
+    belong to ITS place — one screen, plus the dialogs and panels that sit on it.
+
+    **The fold, not a rewrite.** Each place's fragment is validated and written
+    before the next session starts, so a later session sees the earlier ones
+    (uniqueness is checked against the catalog as it now stands), an interrupted
+    run keeps what it finished, and a failing session costs exactly its own
+    place — failures are DATA, the way the shell hands them back. A re-author may
+    replace ITS OWN place's tasks and nothing else: the rest of
+    `guard/interfaces.authored.json` is somebody else's committed work.
+
+    **The half-catalog fix (root cause, not a workaround).** The authored file was
+    read with the full `InterfacesFileSchema`, whose refinement resolves every
+    `at`/`to`/state id INSIDE the file — so an authored task standing on a DERIVED
+    place could not be read at all, and on a fresh clone (where the derived half
+    is gitignored and absent) neither could one standing on any place. The halves
+    are now checked for SHAPE (`InterfacesFragmentSchema`) and the WHOLE for
+    REFERENCES: the merged catalog is what `InterfacesFileSchema` holds, and the
+    authoring write path validates its fragment against the merge before a byte
+    lands. Without this the entire point of item 103 — tasks standing on derived
+    places — was unreachable.
+
+    **Surfaces**: `truecourse guard interfaces` (read-only: places, what is
+    authored on each, per-surface derived/authored counts) and
+    `truecourse guard interfaces author [--place <id>] [--replace] [--limit n]
+    [-y] [--llm-transport]`. The pre-flight is §3.5's shape — work items × the
+    session's own turn range, no averaged dollar figure dressed up as a fact.
+    Transcripts land in the standard sessions store under the new
+    `guard-interfaces` command; the driver comes from
+    `createConfiguredSessionDriver` (the session analog of
+    `install-transport.ts`): the Agent SDK driver on Opus in claude-code mode,
+    our per-turn loop on the configured flagship in api mode (§3.4, one model
+    everywhere). `--llm-transport agent` is refused with a reason — a mailbox is
+    not a session backend.
+
+    **Deliberately not built.** (a) READABLES — what a place SHOWS is its own
+    vocabulary (items 96, 101) and its own authoring pass. (b) Enriching the
+    DERIVED cli/api contracts through the same loop: the seam is open (the
+    authored file overlays any id, and the merge already prefers it) but a
+    surface that re-derives every mapping has a different incrementality story,
+    so it is a decision of its own. (c) Parallel sessions — the fold is
+    sequential by construction; a concurrent run needs the uniqueness check to
+    move behind a lock, which is worth doing when a corpus is large enough to
+    feel it. (d) Estimation in dollars, per §3.5's open rework.
+
+    **As built**: `packages/interface-author/` (the whole package),
+    `packages/shared/src/interfaces.ts` (`InterfacesFragmentSchema`),
+    `packages/guard-runner/src/store.ts` (the authored read),
+    `packages/agent-loop/src/session-store.ts` (the `guard-interfaces` command),
+    `packages/core/src/services/llm/session-driver.ts`,
+    `packages/core/src/commands/guard-interfaces.ts`,
+    `tools/cli/src/commands/guard-interfaces.ts`, `tools/cli/src/index.ts`.
+    Tests: `tests/interface-author/{draft,author}.test.ts`,
+    `tests/core/guard-interfaces-author.test.ts`.
