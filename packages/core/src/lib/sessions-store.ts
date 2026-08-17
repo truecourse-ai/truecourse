@@ -21,7 +21,7 @@ import {
   type SessionEvent,
   type SessionIndexEntry,
   type SessionPersistence,
-} from '@truecourse/shared/llm';
+} from '@truecourse/agent-loop';
 import { getRepoTruecourseDir } from '../config/paths.js';
 import { atomicWriteJson } from './atomic-write.js';
 

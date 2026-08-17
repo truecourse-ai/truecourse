@@ -37,13 +37,9 @@ import {
 // Re-exported here so every output-only prompt reaches it through the same
 // `@truecourse/shared/llm` entry it already imports the transport from.
 export { OUTPUT_ONLY_GUARDRAIL } from './guardrail.js';
-// The agent-session contract (AGENTIC_PIPELINE_PLAN §3): transcript events,
-// session definitions, the driver seam, and the sessions-store shapes.
-export * from './session-events.js';
-export * from './session-def.js';
-export * from './session-driver.js';
-export * from './session-store.js';
-export * from './agent-loop.js';
+// The agent-session contract and policy shell moved to `@truecourse/agent-loop`
+// (decision 2026-08-17): one package defines the loop, one package per
+// backend implements it.
 export {
   StageTransportTallySchema,
   LlmStageFailureError,

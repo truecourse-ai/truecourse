@@ -33,7 +33,7 @@ import {
   type SessionTool,
   type ToolContext,
   type TurnUsage,
-} from '@truecourse/shared/llm';
+} from '@truecourse/agent-loop';
 import { loadSdk } from './sdk-import.js';
 import type {
   SdkAssistantMessage,

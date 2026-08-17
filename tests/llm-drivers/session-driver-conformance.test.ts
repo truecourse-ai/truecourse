@@ -25,8 +25,8 @@ import {
   type SessionEvent,
   type SessionIndexEntry,
   type SessionPersistence,
-} from '../../packages/shared/src/llm/transport';
-import { defineSessionTool } from '../../packages/shared/src/llm/transport';
+} from '../../packages/agent-loop/src/index';
+import { defineSessionTool } from '../../packages/agent-loop/src/index';
 
 // ---------------------------------------------------------------------------
 // the abstract scenario a backend plays

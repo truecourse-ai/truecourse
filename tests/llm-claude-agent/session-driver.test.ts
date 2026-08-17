@@ -19,8 +19,8 @@ import type {
   SdkUserMessage,
   SdkMcpToolResult,
 } from '../../packages/llm-claude-agent/src/sdk-types';
-import type { SessionDef, SessionEventBody, SessionRunInput } from '@truecourse/shared/llm';
-import { defineSessionTool } from '@truecourse/shared/llm';
+import type { SessionDef, SessionEventBody, SessionRunInput } from '../../packages/agent-loop/src/index';
+import { defineSessionTool } from '../../packages/agent-loop/src/index';
 
 // ---------------------------------------------------------------------------
 // fake SDK

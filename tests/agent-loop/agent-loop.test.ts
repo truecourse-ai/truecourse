@@ -16,7 +16,7 @@ import {
   type SessionRunInput,
   type ToolContext,
   type TurnUsage,
-} from '../../packages/shared/src/llm/transport';
+} from '../../packages/agent-loop/src/index';
 
 // ---------------------------------------------------------------------------
 // harness: a scripted fake driver + an in-memory persistence

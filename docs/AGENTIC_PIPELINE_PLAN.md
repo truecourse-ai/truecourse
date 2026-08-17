@@ -388,17 +388,24 @@ session that exhausts the LAST budget fails exactly as this section
 already requires — `budget-exhausted`, naming what it did not reach.
 Resume grants time, never leniency.
 
-**Module placement (revised 2026-08-17).** The policy shell
-(`runAgentLoop`: budgets, ceilings, resume grants, malformed policy,
-transcript events, sub-session depth) lives in
-`packages/shared/src/llm/agent-loop.ts` — driver-agnostic, importing
-neither `ai` nor the Agent SDK, with persistence injected. The api
-driver lives in `packages/llm-api` (the only OSS package allowed to
-import `ai`); the Agent SDK driver in `packages/llm-claude-agent` (the
-only package allowed to import the SDK wrapper). The shell emits
-transcript events through a sink callback; consumers wire the sink to
-the sessions store (§3.9). The driver conformance suite lives in
-`tests/` and runs both drivers through one spec.
+**Module placement (revised 2026-08-17; package split settled with
+Sarkis the same day).** ONE package defines the loop:
+`packages/agent-loop` holds the session contract (transcript events,
+session defs, the driver seam, the sessions-store shapes) and the
+policy shell (`runAgentLoop`: budgets, ceilings, resume grants,
+malformed policy, sub-session depth) — driver-agnostic, importing
+neither `ai` nor the Agent SDK nor node builtins, with persistence
+injected. One package per backend implements it: the api driver in
+`packages/llm-api` (the only OSS package allowed to import `ai` —
+kept there, NOT in agent-loop, because it shares internals with the
+one-shot transport and the `ai` boundary plus EE's `ee-llm` re-export
+hang off that package); the Agent SDK driver in
+`packages/llm-claude-agent` (the only package allowed to reference the
+SDK wrapper, so its optional-peer packaging stays scoped to one leaf).
+`packages/shared` carries no loop code. The shell emits transcript
+events through a sink callback; consumers wire the sink to the
+sessions store (§3.9). The driver conformance suite lives in `tests/`
+and runs both drivers through one spec.
 
 **Delivery (decision 2026-08-07).** The loop is shared infrastructure
 built ONCE, BEFORE the workstreams, and shared by §§6–8; no workstream
@@ -407,8 +414,8 @@ inside §8.9 Phase 1 — that phase consumes the shared module rather than
 producing it.
 
 **Implementation status (2026-08-17).** Landed, test-first, on
-`sm/agentic-pipeline-plan`: the policy shell
-(`packages/shared/src/llm/agent-loop.ts`, `tests/shared/agent-loop.test.ts`),
+`sm/agentic-pipeline-plan`: the contract + policy shell
+(`packages/agent-loop`, `tests/agent-loop/`),
 the OSS file sessions store with the boot reconciliation sweep
 (`packages/core/src/lib/sessions-store.ts`,
 `tests/server/sessions-store.test.ts`), the api driver

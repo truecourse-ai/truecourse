@@ -8,7 +8,7 @@ import {
   defineSessionTool,
   type SessionEvent,
   type ToolContext,
-} from '../../packages/shared/src/llm/transport';
+} from '../../packages/agent-loop/src/index';
 
 const envelope = { seq: 0, ts: '2026-08-17T00:00:00.000Z' };
 const usage = {

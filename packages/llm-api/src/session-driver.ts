@@ -33,7 +33,7 @@ import type {
   ToolContext,
   TurnUsage,
   RawPayload,
-} from '@truecourse/shared/llm';
+} from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
 import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from './strict-schema.js';
 import type { ProviderConfig } from './types.js';

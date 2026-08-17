@@ -15,7 +15,7 @@ import {
   sessionRunDir,
 } from '../../packages/core/src/lib/sessions-store.js';
 import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths.js';
-import type { SessionEvent } from '../../packages/shared/src/llm/transport';
+import type { SessionEvent } from '../../packages/agent-loop/src/index';
 
 let repo: string;
 

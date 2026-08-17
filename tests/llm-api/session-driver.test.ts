@@ -17,8 +17,8 @@ import type {
   SessionDef,
   SessionEventBody,
   SessionRunInput,
-} from '@truecourse/shared/llm';
-import { defineSessionTool, SessionToolArgsError } from '@truecourse/shared/llm';
+} from '../../packages/agent-loop/src/index';
+import { defineSessionTool, SessionToolArgsError } from '../../packages/agent-loop/src/index';
 
 const cfg = {
   provider: 'anthropic' as const,
