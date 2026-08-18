@@ -120,7 +120,7 @@ function buildFileAnalysis(
   const functionContext = buildFunctionContext(functions, classes)
   const calls = extractCalls(tree, filePath, language, functionContext)
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
-  const { routes: rawRoutes, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
+  const { routes: rawRoutes, mounts: routerMounts, rpcRouters } = extractRouteRegistrations(tree, filePath, language)
   const webRoutes = extractWebRoutes(tree, filePath, language)
   const webRedirects = extractWebRedirects(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
@@ -146,6 +146,7 @@ function buildFileAnalysis(
     httpCalls,
     ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
     ...(routerMounts.length > 0 ? { routerMounts } : {}),
+    ...(rpcRouters.length > 0 ? { rpcRouters } : {}),
     ...(webRoutes.length > 0 ? { webRoutes } : {}),
     ...(webRedirects.redirects.length > 0 ? { webRedirects: webRedirects.redirects } : {}),
     ...(webRedirects.redirectsUnconditionally ? { redirectsUnconditionally: true } : {}),

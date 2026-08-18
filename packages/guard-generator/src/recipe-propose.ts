@@ -170,10 +170,16 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
  * The api route surface as the proposer consumes it — the method + path of every
  * operation-rooted interface. Lets a caller that already mapped interfaces hand the
  * surface over without a second analysis pass.
+ *
+ * RPC-derived operations are left out (item 12): they are the same procedure
+ * behind one adapter address, so probing them says nothing a probe of the app's
+ * own routes does not, and they are excluded from scenario generation this round
+ * anyway.
  */
 export function routesFromInterfaces(interfaces: readonly Interface[]): ApiRouteRef[] {
   const routes: ApiRouteRef[] = []
   for (const j of interfaces) {
+    if (j.procedure) continue
     const entry = j.entry as { method?: string; path?: string }
     if (typeof entry?.method === 'string' && typeof entry.path === 'string') {
       routes.push({ method: entry.method, path: entry.path })

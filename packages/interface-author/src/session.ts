@@ -156,13 +156,14 @@ export function placeBriefing({
  * - `module` is exact — the routing tree names this file as the place.
  * - `renders` is a bounded import walk, so it is a starting set and not a
  *   boundary: the source is still what says which components a screen shows.
- * - `api` are the requests the closure makes, joined to catalog ids.
- * - `calls` are the RPC procedures it calls, which HAVE no catalog id.
+ * - `api` are the requests the closure makes — HTTP calls and RPC procedures
+ *   alike — joined to catalog ids.
+ * - `calls` are the RPC procedures that joined to NO id.
  *
- * The last two are stated together because the useful answer is usually the
- * second one: "which api id does this screen's save button call" has the answer
- * "none, it calls `trpc.apiToken.create`", and a session told that stops looking.
- * A session not told it spent six turns guessing.
+ * The last two are stated together because the honest answer is often the second
+ * one: "which api id does this screen's save button call" has the answer "none
+ * the catalog carries, it calls `apiToken.create`", and a session told that
+ * stops looking. A session not told it spent six turns guessing.
  */
 function contextLines(context: WebPlaceContext): string[] {
   const lines = [...block('module', [context.module]), ...block('renders', context.renders)]
@@ -172,18 +173,23 @@ function contextLines(context: WebPlaceContext): string[] {
   lines.push(...block('api', context.apiEffects), ...block('calls', context.rpcCalls))
   lines.push(
     ``,
-    context.apiEffects.length > 0
-      ? `The api ids above are the requests this screen's modules make, joined to the`
-      : `No request this screen's modules make joined to an api interface, so the`,
-    context.apiEffects.length > 0
-      ? `catalog by path — use them for \`apiEffects\`, and only add one you READ.`
-      : `honest \`apiEffects\` is to omit the field unless you READ the call yourself.`,
+    ...(context.apiEffects.length > 0
+      ? [
+          `The api ids above are the server calls this screen's modules make, joined to`,
+          `the catalog — an http request by path, a tRPC procedure by name. Use them for`,
+          `\`apiEffects\`, and only add one you READ.`,
+        ]
+      : [
+          `No request this screen's modules make joined to an api interface, so the`,
+          `honest \`apiEffects\` is to omit the field unless you READ the call yourself.`,
+        ]),
   )
   if (context.rpcCalls.length > 0) {
     lines.push(
-      `The \`calls\` are tRPC procedures. The api derivation produces no interface for`,
-      `a tRPC router, so they have no id and NEVER belong in \`apiEffects\` — they are`,
-      `here because they say what this screen's controls actually do.`,
+      `The \`calls\` are tRPC procedures the catalog does NOT define — the derivation`,
+      `maps a router tree only where an adapter states its mount, so these have no id`,
+      `and cannot go in \`apiEffects\`. A procedure that DOES have one is already in`,
+      `\`api\` above. They are here because they say what this screen's controls do.`,
     )
   }
   if (context.unjoined.length > 0) {

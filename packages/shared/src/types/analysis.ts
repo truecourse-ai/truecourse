@@ -425,6 +425,64 @@ export const WebRedirectSchema = z.object({
 export type WebRedirect = z.infer<typeof WebRedirectSchema>
 
 // ---------------------------------------------------------------------------
+// RPC Router
+//
+// The third way a JS/TS app declares its server surface, beside the routes it
+// CALLS and the ones it DECORATES: a tRPC router is an object literal whose keys
+// are procedures and whose values are builder chains, composed into a tree by
+// nesting one router inside another. Nothing about it is an HTTP route in the
+// source — the address only exists once an adapter mounts the tree — so the
+// per-file fact is the TREE NODE and never a path: this router's own procedures,
+// and the routers it names as children. Composition, the mount and the HTTP
+// method are the mapper's job (`interface-mapper/rpc-interfaces.ts`), because a
+// child router usually lives in another file and the mount lives in a third.
+// ---------------------------------------------------------------------------
+
+/** How a procedure is invoked, which is also what decides its HTTP method downstream. */
+export const RpcProcedureKindSchema = z.enum(['query', 'mutation', 'subscription'])
+export type RpcProcedureKind = z.infer<typeof RpcProcedureKindSchema>
+
+/**
+ * One procedure of one router, named as its OWN router names it — dotted only
+ * when an inline nested router put it a level down (`schedule.create`). The
+ * enclosing router's key path is added by whoever composes the tree.
+ */
+export const RpcProcedureSchema = z.object({
+  name: z.string(),
+  kind: RpcProcedureKindSchema,
+  location: SourceLocationSchema,
+})
+
+export type RpcProcedure = z.infer<typeof RpcProcedureSchema>
+
+/**
+ * A child router this one mounts: the KEY it is mounted under, and the
+ * IDENTIFIER its value names. The identifier is left unresolved on purpose — the
+ * per-file extractor cannot know which module defines it, and a guessed
+ * resolution would compose a procedure path that no server answers.
+ */
+export const RpcRouterRefSchema = z.object({
+  key: z.string(),
+  router: z.string(),
+})
+
+export type RpcRouterRef = z.infer<typeof RpcRouterRefSchema>
+
+/** One `router({…})` / `createTRPCRouter({…})` binding: its symbol, what it offers,
+ *  and the routers it composes. */
+export const RpcRouterSchema = z.object({
+  /** The symbol the router is bound to here (`appRouter`, `bookingsRouter`). */
+  name: z.string(),
+  /** Whether this module exports it — a child router is reached by import. */
+  exported: z.boolean(),
+  procedures: z.array(RpcProcedureSchema),
+  children: z.array(RpcRouterRefSchema),
+  location: SourceLocationSchema,
+})
+
+export type RpcRouter = z.infer<typeof RpcRouterSchema>
+
+// ---------------------------------------------------------------------------
 // CLI Command
 // ---------------------------------------------------------------------------
 
@@ -472,6 +530,8 @@ export const FileAnalysisSchema = z.object({
   httpCalls: z.array(HttpCallSchema),
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
+  /** tRPC routers this file BINDS (`const appRouter = router({…})`); absent when none. */
+  rpcRouters: z.array(RpcRouterSchema).optional(),
   /** Routes this file DECLARES as JSX (React Router); absent when none. */
   webRoutes: z.array(WebRouteSchema).optional(),
   /** Static redirects this file declares as a framework CONFIG table

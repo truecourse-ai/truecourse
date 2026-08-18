@@ -550,7 +550,7 @@ describe('the briefing carries what the AST pass knows (item 105)', () => {
             closure: 4,
             apiEffects: ['api/post-api-repos'],
             unjoined: ['GET /v3/insights — no api interface declares it'],
-            rpcCalls: ['trpc.repo.list'],
+            rpcCalls: ['repo.list'],
           },
         ],
       ]),
@@ -558,8 +558,13 @@ describe('the briefing carries what the AST pass knows (item 105)', () => {
     expect(briefing).toContain('  module   src/Home.tsx')
     expect(briefing).toContain('  renders  src/RepoGrid.tsx')
     expect(briefing).toContain('  api      api/post-api-repos')
-    expect(briefing).toContain('  calls    trpc.repo.list')
+    expect(briefing).toContain('  calls    repo.list')
     expect(briefing).toContain('GET /v3/insights — no api interface declares it')
+    // Item 12 inverted the rule this paragraph used to state: a procedure the
+    // derivation mapped IS an api effect, and only the unmapped remainder is here.
+    expect(briefing).toContain('tRPC procedures the catalog does NOT define')
+    expect(briefing).toContain('A procedure that DOES have one is already in')
+    expect(briefing).not.toContain('NEVER belong in `apiEffects`')
   })
 
   /**

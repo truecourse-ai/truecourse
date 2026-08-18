@@ -40,6 +40,8 @@ export { collectApiRequestContracts } from './api-contracts.js'
 export { buildApiInterfaces } from './api-interfaces.js'
 export type { ApiInterfaceSeed } from './api-interfaces.js'
 
+export { deriveRpcOperations } from './rpc-interfaces.js'
+
 export { deriveWebPlacesFromTree } from './web-tree.js'
 export type { WebPlace, WebPlaceIdiom } from './web-tree.js'
 

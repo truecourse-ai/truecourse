@@ -29,6 +29,8 @@ interface FileSpec {
   calls?: string[]
   /** Re-exported names — a file whose exports are ALL re-exports is a barrel. */
   reexports?: string[]
+  /** Imports as `name from source` — what proves a tRPC client proxy. */
+  imports?: string[]
 }
 
 function file(path: string, spec: FileSpec = {}): FileAnalysis {
@@ -47,7 +49,14 @@ function file(path: string, spec: FileSpec = {}): FileAnalysis {
       }
     }),
     classes: classesOf(path, spec.methods ?? []),
-    imports: [],
+    imports: (spec.imports ?? []).map((entry) => {
+      const [name, source] = entry.split(' from ')
+      return {
+        source,
+        specifiers: [{ name, isDefault: false, isNamespace: false }],
+        isTypeOnly: false,
+      }
+    }),
     exports: (spec.reexports ?? []).map((name) => ({ name, isDefault: false, source: './somewhere' })),
     calls: (spec.calls ?? []).map((entry) => {
       const [callee, line] = entry.split('@')
@@ -128,6 +137,11 @@ function api(method: string, path: string): Interface {
     steps,
     fingerprint: interfaceFingerprint({ type: 'api', entry, steps }),
   }
+}
+
+/** An api interface the RPC derivation minted: an operation that is also a procedure. */
+function procedure(method: string, path: string, name: string): Interface {
+  return { ...api(method, path), procedure: name }
 }
 
 function place(address: string, path: string): WebPlace {
@@ -328,10 +342,10 @@ describe('the frontend→API join (tier 3)', () => {
     ])
   })
 
-  it('names the tRPC procedures a screen calls, and keeps them out of apiEffects', () => {
-    // documenso and cal.diy both talk tRPC, so this is the join's whole result
-    // there: a procedure has no api interface behind it, and saying so is what
-    // stops a session guessing ids it will never find.
+  it('names the tRPC procedures a screen calls, namespace-free, when the catalog defines none', () => {
+    // documenso and cal.diy both talk tRPC, so this is the join's whole result on
+    // a repo whose adapter states no mount: the procedures have no api interface
+    // behind them, and saying so is what stops a session guessing ids.
     const contexts = derive(
       { 'settings-tokens': place('/settings/tokens', 'page.tsx') },
       [
@@ -345,7 +359,62 @@ describe('the frontend→API join (tier 3)', () => {
       catalog,
     )
     const context = contexts.get('settings-tokens')!
-    expect(context.rpcCalls).toEqual(['trpc.apiToken.create', 'trpc.apiToken.getMany'])
+    expect(context.rpcCalls).toEqual(['apiToken.create', 'apiToken.getMany'])
     expect(context.apiEffects).toEqual([])
+  })
+
+  it('joins a procedure the catalog DOES define to its api id (item 12)', () => {
+    // The inversion the RPC derivation buys: a mounted router tree is real api
+    // interfaces, so the screen's `trpc.…` call is an api effect like any other
+    // server call — and `rpcCalls` keeps only what did not resolve.
+    const contexts = derive(
+      { 'settings-tokens': place('/settings/tokens', 'page.tsx') },
+      [
+        file('page.tsx', {
+          calls: ['trpc.apiToken.getMany.useQuery@8', 'trpc.webhook.list.useQuery@9'],
+        }),
+      ],
+      [],
+      [...catalog, procedure('GET', '/api/trpc/apiToken.getMany', 'apiToken.getMany')],
+    )
+    const context = contexts.get('settings-tokens')!
+    expect(context.apiEffects).toEqual(['api/get-api-trpc-apiToken-getMany'])
+    expect(context.rpcCalls).toEqual(['webhook.list'])
+  })
+
+  it('reads a t3 app’s `api` proxy, proven by the import it is bound through', () => {
+    // `import { api } from "~/trpc/react"` — the callee is `api.post.create.…`,
+    // which a gate keyed on the literal word `trpc` matches never.
+    const contexts = derive(
+      { home: place('/', 'page.tsx') },
+      [
+        file('page.tsx', {
+          imports: ['api from ~/trpc/react'],
+          calls: ['api.post.create.useMutation@12', 'api.post.getLatest.useSuspenseQuery@14'],
+        }),
+      ],
+      [],
+      [procedure('POST', '/api/trpc/post.create', 'post.create')],
+    )
+    const context = contexts.get('home')!
+    expect(context.apiEffects).toEqual(['api/post-api-trpc-post-create'])
+    expect(context.rpcCalls).toEqual(['post.getLatest'])
+  })
+
+  it('does not read a proxy nothing binds to tRPC', () => {
+    // `cache.get(key)` and `store.items.filter` are not server calls, and an
+    // identifier imported from an unrelated module proves nothing.
+    const contexts = derive(
+      { home: place('/', 'page.tsx') },
+      [
+        file('page.tsx', {
+          imports: ['client from ~/lib/api-client'],
+          calls: ['client.post.create.useMutation@12'],
+        }),
+      ],
+      [],
+      catalog,
+    )
+    expect(contexts.get('home')?.rpcCalls).toEqual([])
   })
 })

@@ -63,11 +63,17 @@ export interface WebPlaceContext {
    */
   unjoined: string[]
   /**
-   * The RPC procedures the closure calls — tRPC today. They are the whole of the
-   * join on a tRPC app, and they can NEVER be `apiEffects`: the api derivation
-   * reads route tables and OpenAPI, and a tRPC router is neither. Naming them is
-   * still the useful fact, and it is precisely the fact whose absence cost the
-   * pilot six turns guessing `apiToken`, `api-token`, `create`, `getMany`.
+   * The RPC procedures the closure calls that the catalog does NOT define — the
+   * remainder of the tRPC join, as dotted procedure names (`apiToken.create`).
+   *
+   * Since item 12 the api derivation composes a mounted tRPC tree into real
+   * operations, so a procedure the catalog carries resolves to an api id and
+   * lands in `apiEffects` like every other server effect. What stays here is
+   * everything that did not resolve: a repo whose adapter states no mount, a
+   * procedure on a router the composition could not reach, a client proxy the
+   * derivation never saw. Naming them is still the useful fact — it is precisely
+   * the fact whose absence cost the pilot six turns guessing `apiToken`,
+   * `api-token`, `create`, `getMany`.
    */
   rpcCalls: string[]
 }
@@ -126,7 +132,7 @@ export function deriveWebPlaceContexts(
 ): Map<string, WebPlaceContext> {
   const analyses = new Map(input.fileAnalyses.map((analysis) => [analysis.filePath, analysis]))
   const edges = groupEdges(input.dependencies)
-  const operations = apiOperations(input.apiInterfaces)
+  const index = apiOperations(input.apiInterfaces)
   const depth = input.depth ?? DEPTH
 
   const contexts = new Map<string, WebPlaceContext>()
@@ -140,7 +146,7 @@ export function deriveWebPlaceContexts(
         relative(input.repoRoot, path),
       ),
       closure: closure.length,
-      ...join(closure, analyses, operations),
+      ...join(closure, analyses, index),
     })
   }
   return contexts
@@ -303,15 +309,27 @@ interface ApiOperation {
   slots: string[]
 }
 
-function apiOperations(interfaces: readonly Interface[]): ApiOperation[] {
+/** The api catalog indexed the two ways a frontend call can name an operation. */
+interface ApiIndex {
+  operations: ApiOperation[]
+  /** Dotted procedure → api interface id, for the entries item 12 derived. */
+  procedures: Map<string, string>
+}
+
+function apiOperations(interfaces: readonly Interface[]): ApiIndex {
   const operations: ApiOperation[] = []
+  const procedures = new Map<string, string>()
   for (const iface of interfaces) {
     if (iface.type !== 'api') continue
+    // The procedure index is the RPC join key (item 12): the catalog says which
+    // id `viewer.bookings.get` is, so the client call resolves by NAME and never
+    // by the `?input=`-encoded URL it is actually sent as.
+    if (iface.procedure && !procedures.has(iface.procedure)) procedures.set(iface.procedure, iface.id)
     const entry = iface.entry as { method?: string; path?: string }
     if (!entry.method || !entry.path) continue
     operations.push({ id: iface.id, method: entry.method.toUpperCase(), slots: slots(entry.path) })
   }
-  return operations
+  return { operations, procedures }
 }
 
 /**
@@ -330,7 +348,7 @@ function apiOperations(interfaces: readonly Interface[]): ApiOperation[] {
 function join(
   closure: readonly ClosureNode[],
   analyses: ReadonlyMap<string, FileAnalysis>,
-  operations: readonly ApiOperation[],
+  index: ApiIndex,
 ): Pick<WebPlaceContext, 'apiEffects' | 'unjoined' | 'rpcCalls'> {
   const effects = new Set<string>()
   const unjoined = new Set<string>()
@@ -340,16 +358,19 @@ function join(
     const analysis = analyses.get(node.path)
     if (!analysis) continue
 
-    // The RPC half. A tRPC procedure is a server call with no api interface
-    // behind it (the api derivation reads route tables and OpenAPI, and a tRPC
-    // router is neither), so it can never be an `apiEffect` — but naming it is
-    // the difference between a session that knows what the screen does and one
-    // that guesses ids until its budget runs out.
+    // The RPC half. A procedure the catalog defines (item 12: a mounted tRPC
+    // tree composed into operations) resolves to that api id and joins like any
+    // other server effect; one it does not is still named, because "this screen
+    // calls `apiToken.create` and nothing maps it" is the fact that stops a
+    // session guessing ids until its budget runs out.
+    const proxies = rpcProxies(analysis)
     for (const call of analysis.calls) {
-      const procedure = rpcProcedure(call.callee)
+      const procedure = rpcProcedure(call.callee, proxies)
       if (!procedure) continue
       if (node.hop > 0 && !requestedByName(call.location.startLine, analysis, node.names)) continue
-      rpcCalls.add(procedure)
+      const id = index.procedures.get(procedure)
+      if (id) effects.add(id)
+      else rpcCalls.add(procedure)
     }
 
     for (const call of analysis.httpCalls) {
@@ -370,7 +391,7 @@ function join(
         }
         continue
       }
-      const matched = match(call.method, path, operations)
+      const matched = match(call.method, path, index.operations)
       if (matched.length === 1) effects.add(matched[0].id)
       else if (matched.length === 0) unjoined.add(`${call.method} ${path} — no api interface declares it`)
       else unjoined.add(`${call.method} ${path} — matches ${matched.length} api interfaces`)
@@ -392,19 +413,60 @@ function capped(values: ReadonlySet<string>, max: number): string[] {
 }
 
 /**
- * The procedure a tRPC client call names, or `null` for a call that is not one.
+ * The procedure a tRPC client call names, or `null` for a call that is not one —
+ * NAMESPACE-FREE and dotted (`viewer.bookings.get`), which is the form the api
+ * derivation composes and therefore the only form the two sides can be compared
+ * in. The client's own proxy name is a local alias and says nothing about which
+ * procedure was called.
  *
- * Keyed on the idiom and nothing looser: a callee with a `trpc` segment, minus
- * the react-query hook or the imperative verb on the end. `trpc.apiToken.create.
- * useMutation` is `trpc.apiToken.create`, and `map.get(x)` is not a server call.
+ * The gate is the PROXY (see {@link rpcProxies}) plus one of two shapes: the
+ * callee ends in a react-query hook or an imperative verb (`api.post.create.
+ * useMutation`), or it names at least two segments below the proxy
+ * (`trpc.apiToken.create`, the `await` form). One bare segment under a proxy is
+ * a property read, not a procedure call.
  */
-function rpcProcedure(callee: string): string | null {
+function rpcProcedure(callee: string, proxies: ReadonlySet<string>): string | null {
   const segments = callee.split('.')
-  if (!segments.includes('trpc') || segments.length < 3) return null
-  const tail = segments[segments.length - 1]
-  const body = RPC_TAILS.has(tail) ? segments.slice(0, -1) : segments
-  return body.length >= 2 ? body.join('.') : null
+  const head = segments[0]
+  if (head === undefined || !proxies.has(head)) return null
+  const rest = segments.slice(1)
+  const last = rest[rest.length - 1]
+  const invoked = last !== undefined && RPC_TAILS.has(last)
+  const body = invoked ? rest.slice(0, -1) : rest
+  if (body.length === 0 || (!invoked && body.length < 2)) return null
+  return body.join('.')
 }
+
+/**
+ * The identifiers this file uses as a tRPC CLIENT PROXY.
+ *
+ * `trpc` is one by name — the ecosystem's own convention, and the gate this join
+ * shipped with. The rest have to be proven, and the proof available in a
+ * per-file artifact is the IMPORT: a t3 app calls its proxy `api`
+ * (`import { api } from "~/trpc/react"`) and a callee gate keyed on the literal
+ * word `trpc` matches nothing there — which is why every t3 screen's procedures
+ * used to read as `toast.success`-grade noise. So an imported name counts when
+ * its specifier is a tRPC client: `@trpc/react-query` / `@trpc/client` /
+ * `@trpc/next` (where `createTRPCReact` / `createTRPCProxyClient` come from), or
+ * a first-party module whose path NAMES trpc, which is where every app puts the
+ * proxy those factories return.
+ *
+ * Deliberately not proven from a `createTRPCReact()` call in this file: that
+ * call sits in the client module, and a per-file artifact carries no binding
+ * from a call to the const it initializes. The import at the USE site is the
+ * fact that is actually available, and it is the stronger one.
+ */
+function rpcProxies(analysis: FileAnalysis): Set<string> {
+  const proxies = new Set<string>(['trpc'])
+  for (const imp of analysis.imports) {
+    if (!TRPC_CLIENT_SOURCE.test(imp.source)) continue
+    for (const specifier of imp.specifiers) proxies.add(specifier.alias ?? specifier.name)
+  }
+  return proxies
+}
+
+/** A module specifier that names trpc: `@trpc/react-query`, `~/trpc/react`, `../utils/trpc`. */
+const TRPC_CLIENT_SOURCE = /(^|[/@._-])trpc([/._-]|$)/i
 
 /** The hooks and verbs a tRPC procedure is invoked THROUGH, never part of its name. */
 const RPC_TAILS = new Set([

@@ -63,10 +63,20 @@ export interface SurfaceCatalog {
  * run its scenarios) and fingerprint each group over its interfaces' own
  * fingerprints, sorted — so the value depends on the SET of surfaces a user can
  * reach, never on derivation order.
+ *
+ * RPC-DERIVED OPERATIONS ARE NOT CANDIDATES (item 12). A tRPC procedure composed
+ * into `POST /api/trpc/viewer.bookings.create` is genuinely invocable, but its
+ * body is the procedure's input schema in tRPC's own envelope, and whether a
+ * scenario should be authored against that encoding is a decision this round did
+ * not take. They stay in the catalog — the web context pack joins a screen's
+ * `trpc.…` calls to exactly these ids — and stay out of the matcher, the
+ * grounding hints and the surface fingerprint, so a repo that gains the RPC
+ * derivation re-authors nothing.
  */
 export function buildSurfaceCatalogs(interfaces: readonly Interface[]): Map<GuardDriverId, SurfaceCatalog> {
   const byType = new Map<GuardDriverId, Interface[]>()
   for (const iface of interfaces) {
+    if (iface.procedure) continue
     const list = byType.get(iface.type)
     if (list) list.push(iface)
     else byType.set(iface.type, [iface])

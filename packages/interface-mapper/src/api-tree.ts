@@ -1,9 +1,11 @@
 /**
- * The api derivation: HTTP operations from BOTH declarations of the surface —
+ * The api derivation: HTTP operations from every declaration of the surface —
  * route registrations the analyzer read out of the framework's own calls
- * (`FileAnalysis.routeRegistrations` + `routerMounts`), and the operations of any
- * committed OpenAPI doc. The union is the surface; identity is the operation, so
- * the two sources dedupe onto one interface (`api-interfaces.ts`).
+ * (`FileAnalysis.routeRegistrations` + `routerMounts`), the procedures of a tRPC
+ * router tree once an adapter states where it is mounted (`rpc-interfaces.ts`),
+ * and the operations of any committed OpenAPI doc. The union is the surface;
+ * identity is the operation, so the sources dedupe onto one interface
+ * (`api-interfaces.ts`).
  *
  * The OpenAPI double-agent rule: an operation declared in an OpenAPI doc with NO
  * matching route registration is kept and marked `specOnly` — the
@@ -15,6 +17,7 @@
 
 import { canonicalRoutePath, type FileAnalysis, type Interface, type RouterMount } from '@truecourse/shared'
 import { buildApiInterfaces, type ApiInterfaceSeed } from './api-interfaces.js'
+import { deriveRpcOperations } from './rpc-interfaces.js'
 
 /** One OpenAPI operation, as `deriveOpenApiSections` reports it. */
 export interface ApiSpecOperation {
@@ -28,8 +31,8 @@ export interface ApiSpecOperation {
 
 /**
  * Derive the api interfaces: route registrations (mount prefixes composed) ∪
- * OpenAPI operations, one interface per operation, deterministically ordered by
- * path then method.
+ * tRPC procedures (mounted) ∪ OpenAPI operations, one interface per operation,
+ * deterministically ordered by path then method.
  */
 export function deriveApiInterfacesFromTree(
   fileAnalyses: readonly FileAnalysis[],
@@ -41,6 +44,21 @@ export function deriveApiInterfacesFromTree(
   for (const op of codeOps) {
     const key = `${op.method} ${op.path}`
     if (!merged.has(key)) merged.set(key, op)
+  }
+
+  // The RPC half joins on the same key as everything else — the operation — so a
+  // procedure whose address a route table ALSO declares (a hand-written catch-all
+  // beside the adapter) stays one interface, and keeps the procedure name that
+  // says what it is.
+  const rpcOps = deriveRpcOperations(fileAnalyses)
+  for (const op of rpcOps) {
+    const key = `${op.method} ${op.path}`
+    const existing = merged.get(key)
+    if (existing) {
+      if (!existing.procedure) existing.procedure = op.procedure
+      continue
+    }
+    merged.set(key, op)
   }
 
   for (const spec of specOperations) {
@@ -57,9 +75,10 @@ export function deriveApiInterfacesFromTree(
       method,
       path,
       ...(spec.operationId ? { label: spec.operationId } : {}),
-      // Only a repo whose framework the route extractors DID read can assert
-      // "documented but not routed" — see the module doc.
-      ...(codeOps.length > 0 ? { specOnly: true as const } : {}),
+      // Only a repo whose framework the code-side extraction DID read can assert
+      // "documented but not routed" — see the module doc. A tRPC tree counts as
+      // read: its procedures are the code side of an app that has no route table.
+      ...(codeOps.length + rpcOps.length > 0 ? { specOnly: true as const } : {}),
     })
   }
 
@@ -181,8 +200,11 @@ const SOURCE_EXTENSION = /\.(ts|tsx|js|jsx|mjs|cjs|py)$/i
  * specifier resolves exactly against the importer's directory (`./routes/todos.js`
  * from `src/app.ts` → `src/routes/todos`); a bare/dotted one (Python
  * `.routes.todos`) falls back to path-suffix matching.
+ *
+ * Exported for the RPC derivation, which resolves a child ROUTER across files by
+ * the same rule and must not grow a second opinion about what an import means.
  */
-function fileMatchesImportSource(importerPath: string, filePath: string, source: string): boolean {
+export function fileMatchesImportSource(importerPath: string, filePath: string, source: string): boolean {
   const fileBase = filePath.replace(SOURCE_EXTENSION, '')
   const bare = source.replace(SOURCE_EXTENSION, '')
 

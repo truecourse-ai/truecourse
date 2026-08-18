@@ -254,6 +254,29 @@ describe('interface schemas', () => {
     expect(() => InterfaceSchema.parse({ ...specOnly, specOnly: false })).toThrow()
   })
 
+  /**
+   * `procedure` — the RPC name an operation was composed from (item 12). It is
+   * top-level rather than part of `entry` on purpose: the entry is the strict
+   * descriptor of WHAT is invoked, and what is invoked is an HTTP operation.
+   */
+  it('procedure is the RPC name, top-level and never inside the entry', () => {
+    const rpc = {
+      ...iface([REQUEST], { type: 'api', entry: { method: 'GET', path: '/api/trpc/viewer.bookings.get' } }),
+      procedure: 'viewer.bookings.get',
+    }
+    expect(InterfaceSchema.parse(JSON.parse(JSON.stringify(rpc))).procedure).toBe('viewer.bookings.get')
+    expect(InterfaceSchema.parse(iface([REQUEST], { type: 'api', entry: { method: 'GET', path: '/t' } })).procedure).toBeUndefined()
+    // A named nothing is not a name.
+    expect(() => InterfaceSchema.parse({ ...rpc, procedure: '' })).toThrow()
+    // The entry stays strict: the procedure has no home in it.
+    expect(() =>
+      InterfaceSchema.parse({
+        ...rpc,
+        entry: { method: 'GET', path: '/api/trpc/x', procedure: 'x' },
+      }),
+    ).toThrow()
+  })
+
   it('records per-surface how the catalog was derived, and tolerates its absence', () => {
     const base = {
       version: 2 as const,
@@ -335,6 +358,14 @@ describe('interfaceFingerprint', () => {
     const bare = iface([ACTIVATE], { type: 'web' })
     expect(interfaceFingerprint({ ...bare, apiEffects: ['api/get-api-repos'] })).toBe(bare.fingerprint)
     expect(interfaceFingerprint({ ...bare, apiEffects: [] })).toBe(bare.fingerprint)
+  })
+
+  it('the procedure name is provenance, never identity', () => {
+    // A repo that gains the tRPC derivation for operations already in its catalog
+    // must not move a fingerprint — the same procedure through the same mount IS
+    // the same operation whichever side named it.
+    const bare = iface([REQUEST], { type: 'api', entry: { method: 'GET', path: '/api/trpc/post.getLatest' } })
+    expect(interfaceFingerprint({ ...bare, procedure: 'post.getLatest' } as Interface)).toBe(bare.fingerprint)
   })
 
   it('a label is cosmetic — it never moves the fingerprint', () => {

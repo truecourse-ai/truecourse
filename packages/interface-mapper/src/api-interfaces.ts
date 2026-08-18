@@ -19,6 +19,8 @@ export interface ApiInterfaceSeed {
   label?: string
   /** Declared in an OpenAPI doc with no matching route registration (drift cross-check). */
   specOnly?: boolean
+  /** The dotted tRPC procedure this operation IS — see {@link Interface.procedure}. */
+  procedure?: string
 }
 
 /**
@@ -60,6 +62,7 @@ export function buildApiInterfaces(seeds: readonly ApiInterfaceSeed[]): Interfac
       steps,
       fingerprint: interfaceFingerprint({ type: 'api', entry, steps }),
       ...(seed.specOnly ? { specOnly: true as const } : {}),
+      ...(seed.procedure ? { procedure: seed.procedure } : {}),
     })
   }
   return interfaces

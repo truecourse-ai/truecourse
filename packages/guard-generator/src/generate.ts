@@ -1059,10 +1059,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api interfaces — the block simply renders not.
   const apiInterfaces = catalogs.get('api')?.interfaces ?? []
-  options.onInterfaces?.(catalog.length, catalogs.size)
+  // The counts describe what this run GROUNDED ON — the surface catalogs, not the
+  // catalog file — which is why the total is their sum. They are read when flows
+  // settle unrealized, and an entry the matcher never sees (an RPC-derived
+  // operation, item 12) counted there would answer that question wrong.
+  const bySurface = [...catalogs].map(([surface, c]) => [surface, c.interfaces.length] as const)
+  const total = bySurface.reduce((sum, [, count]) => sum + count, 0)
+  options.onInterfaces?.(total, catalogs.size)
   const interfacesReport: GuardInterfacesReport = {
-    total: catalog.length,
-    bySurface: Object.fromEntries([...catalogs].map(([surface, c]) => [surface, c.interfaces.length])),
+    total,
+    bySurface: Object.fromEntries(bySurface),
   }
 
   // 5. Flow synthesis — the spec-side generation unit. Reads claims and outlines

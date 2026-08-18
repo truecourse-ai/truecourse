@@ -1,9 +1,10 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
-import type { RouteRegistration, RouterMount, SupportedLanguage } from '@truecourse/shared'
+import type { RouteRegistration, RouterMount, RpcRouter, SupportedLanguage } from '@truecourse/shared'
 import { extractPythonRoutes } from './routes/python.js'
 import { extractCSharpRoutes } from './routes/csharp.js'
 import { extractNestControllerRoutes } from './routes/nest-decorators.js'
 import { extractStrapiRouteTables } from './routes/strapi-tables.js'
+import { extractTrpcRouters } from './routes/trpc-routers.js'
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all'])
 
@@ -94,6 +95,17 @@ interface ReceiverEvidence {
 }
 
 /**
+ * What one file declares about the server surface: the routes it registers, the
+ * routers it mounts, and — JS/TS only — the RPC routers it binds.
+ */
+export interface RouteExtraction {
+  routes: RouteRegistration[]
+  mounts: RouterMount[]
+  /** tRPC router bindings; always empty for a language with no such idiom. */
+  rpcRouters: RpcRouter[]
+}
+
+/**
  * Extract route registrations and router mounts from source files.
  * Dispatches to language-specific extractors.
  */
@@ -101,18 +113,18 @@ export function extractRouteRegistrations(
   tree: Tree,
   filePath: string,
   language: SupportedLanguage,
-): { routes: RouteRegistration[]; mounts: RouterMount[] } {
+): RouteExtraction {
   switch (language) {
     case 'python':
-      return extractPythonRoutes(tree, filePath)
+      return { ...extractPythonRoutes(tree, filePath), rpcRouters: [] }
     case 'csharp':
-      return extractCSharpRoutes(tree, filePath)
+      return { ...extractCSharpRoutes(tree, filePath), rpcRouters: [] }
     case 'typescript':
     case 'tsx':
     case 'javascript':
       return extractJsRoutes(tree, filePath)
     default:
-      return { routes: [], mounts: [] }
+      return { routes: [], mounts: [], rpcRouters: [] }
   }
 }
 
@@ -123,15 +135,15 @@ export function extractRouteRegistrations(
  *
  *  - routes CALLED on a router (`router.get('/x', h)`) — below, the original;
  *  - routes DECLARED as decorators (NestJS) — `routes/nest-decorators.js`;
- *  - routes DECLARED as data (Strapi route tables) — `routes/strapi-tables.js`.
+ *  - routes DECLARED as data (Strapi route tables) — `routes/strapi-tables.js`;
+ *  - operations declared as an RPC TREE (tRPC) — `routes/trpc-routers.js`, whose
+ *    product is not a route at all: a router node names no address, so it is
+ *    carried as its own fact and composed into operations by the mapper.
  *
  * A file is normally written in exactly one of them, and each reader carries its
- * own gate, so running all three costs one extra walk and no cross-talk.
+ * own gate, so running all four costs one extra walk and no cross-talk.
  */
-function extractJsRoutes(
-  tree: Tree,
-  filePath: string,
-): { routes: RouteRegistration[]; mounts: RouterMount[] } {
+function extractJsRoutes(tree: Tree, filePath: string): RouteExtraction {
   const strapi = extractStrapiRouteTables(tree, filePath)
   const routes: RouteRegistration[] = [...extractNestControllerRoutes(tree, filePath), ...strapi.routes]
   const mounts: RouterMount[] = [...strapi.mounts]
@@ -180,7 +192,7 @@ function extractJsRoutes(
   }
 
   traverse()
-  return { routes, mounts }
+  return { routes, mounts, rpcRouters: extractTrpcRouters(tree, filePath) }
 }
 
 /**

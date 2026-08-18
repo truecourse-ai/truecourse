@@ -56,6 +56,11 @@ export function buildInterfaceContractHints(
   for (const iface of interfaces) {
     const entry = iface.entry as { method?: string; path?: string }
     if (iface.type !== 'api' || !entry?.method || !entry?.path) continue
+    // An RPC-derived operation is real and invocable, but its request grammar is
+    // the procedure's input schema encoded into `?input=` — a shape no hint here
+    // describes and no scenario is authored against this round (item 12). It
+    // stays in the catalog for the web join; it does not ground a scenario.
+    if (iface.procedure) continue
     const key = `${entry.method.toUpperCase()} ${entry.path}`
     if (seen.has(key)) continue
     seen.add(key)

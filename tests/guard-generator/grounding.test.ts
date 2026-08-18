@@ -131,6 +131,13 @@ describe('buildInterfaceContractHints', () => {
     const hints = buildInterfaceContractHints([SIGNUP, SIGNUP, cli]);
     expect(hints).toHaveLength(1);
   });
+
+  it('leaves an RPC-derived operation out — it is not authored against this round (item 12)', () => {
+    // The operation is real and invocable; its request grammar is the procedure's
+    // input schema in tRPC's `?input=` envelope, which no hint here describes.
+    const rpc = { ...apiInterface('GET', '/api/trpc/post.getLatest'), procedure: 'post.getLatest' };
+    expect(buildInterfaceContractHints([SIGNUP, rpc]).map((h) => h.path)).toEqual(['/v1/auth/signup']);
+  });
 });
 
 describe('buildOtherOperationHints — the setup surface', () => {

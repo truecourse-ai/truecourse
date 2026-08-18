@@ -1354,6 +1354,26 @@ export const InterfaceSchema = z
      *  code-side extraction couldn't find. Provenance, never fingerprinted — a spec-only
      *  interface that fails birth IS the documented-but-unimplemented drift signal. */
     specOnly: z.literal(true).optional(),
+    /**
+     * THE RPC NAME this operation is: the dotted tRPC procedure
+     * (`viewer.bookings.get`) the entry's method + path were composed from — a
+     * `.query` under the adapter's mount is that GET, a `.mutation` is that POST.
+     *
+     * It is both a MARKER and a JOIN KEY, which is why it is a field rather than
+     * a flag. As a marker: an entry carrying it was derived from a router tree,
+     * not from a route table or an OpenAPI doc, and scenario generation excludes
+     * it for now (item 12 — authoring `?input=`-encoded tRPC calls is its own
+     * decision). As a key: the frontend join (`interface-mapper/web-context.ts`)
+     * indexes the catalog by procedure, so a screen calling
+     * `trpc.viewer.bookings.get.useQuery` resolves to THIS id and the call lands
+     * in `apiEffects` like every other server effect.
+     *
+     * Top-level, beside `apiEffects` and `specOnly`, and deliberately NOT inside
+     * `entry`: the entry is the strict fingerprinted descriptor of WHAT is
+     * invoked, and what is invoked here is an HTTP operation. Never fingerprinted
+     * — see {@link interfaceFingerprint}.
+     */
+    procedure: z.string().min(1).optional(),
     /** The full public contract, in this entry's OWN surface vocabulary — see
      *  {@link InterfaceContractSchema}. Absent where the derivation established
      *  the surface's shape only. Never fingerprinted. */
@@ -1670,6 +1690,12 @@ function stepIdentity(step: InterfaceStep): string {
  * whole reason ownership landed as a reference on a flat list (2026-08-14): the
  * SOM restructure reshaped every api contract and left all 114 reference
  * fingerprints byte-identical.
+ *
+ * {@link InterfaceSchema.procedure} is excluded too (item 12): the RPC name an
+ * HTTP operation was composed from is provenance and a join key, not a second
+ * identity — a repo that gains the tRPC derivation for operations it already had
+ * must not move a fingerprint, and the same procedure reached through the same
+ * mount IS the same operation whichever side named it.
  *
  * {@link InterfaceSchema.origin} is excluded by the same rule and for the same
  * stakes (2026-08-17): moving a hand-authored surface out of the derived file
