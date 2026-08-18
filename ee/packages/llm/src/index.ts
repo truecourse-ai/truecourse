@@ -17,6 +17,11 @@ export {
   buildModel,
   runWithTrace,
   currentTrace,
+  // The per-provider cache/tool-call tuning the driver applies to every call.
+  // EE reaches the same providers OSS does, so it reads the same table.
+  providerTuningFor,
+  COPILOT_PROVIDER_NAME,
+  type ProviderTuning,
   type ApiSessionDriverOptions,
   type ApiTransportOptions,
   type AiSdkTransportOptions,
