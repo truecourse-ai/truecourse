@@ -45,6 +45,31 @@ export const BudgetSpentSchema = z.object({
 export type BudgetSpent = z.infer<typeof BudgetSpentSchema>;
 
 // ---------------------------------------------------------------------------
+// model attribution
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH MODEL ANSWERED — declared by the driver, stamped on `session-start`
+ * by the shell. A transcript read months later has to answer "what ran this"
+ * without anyone reconstructing the config of the day; the per-turn
+ * `assistant-turn.model` answers the same question for a turn the provider
+ * actually served (a fallback swap, or a deployment name that resolves to
+ * something else).
+ *
+ * `endpoint` is the base URL only — a gateway is part of "what answered".
+ * Credentials never enter a transcript: no api key, no auth headers.
+ */
+export const SessionLlmSchema = z.object({
+  provider: z.string(),
+  /** The CONFIGURED model id — on Bedrock/Foundry a deployment name, which
+   *  is why the response-reported id is recorded per turn as well. */
+  model: z.string(),
+  fallbackModel: z.string().optional(),
+  endpoint: z.string().optional(),
+});
+export type SessionLlm = z.infer<typeof SessionLlmSchema>;
+
+// ---------------------------------------------------------------------------
 // failures
 // ---------------------------------------------------------------------------
 
@@ -176,6 +201,9 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     toolNames: z.array(z.string()),
     /** The prior session id when this start is a resume into a fresh process. */
     resumeOf: z.string().optional(),
+    /** What the driver declared it will call (optional: a driver predating
+     *  attribution still produces a legal transcript). */
+    llm: SessionLlmSchema.optional(),
   }),
   // A steer, an initial message, or a resume observation. `actor` is empty in
   // OSS, the workspace user in EE, so "who answered" is auditable.
@@ -190,6 +218,9 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     text: z.string().optional(),
     toolCall: z.object({ name: z.string(), args: z.unknown() }).optional(),
     usage: TurnUsageSchema,
+    /** The model the RESPONSE reported, when the backend reports one — the
+     *  honest answer for a turn a fallback or a deployment alias served. */
+    model: z.string().optional(),
   }),
   z.object({
     type: z.literal('tool-result'),
@@ -203,6 +234,23 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     questionId: z.string(),
     answer: z.unknown(),
     resolvedBy: z.enum(['user', 'policy']),
+  }),
+  // The provider made us wait: a call failed retryably (or the model was
+  // swapped for the fallback) and another attempt is coming. Budget-INERT —
+  // a retry is not a turn, and the shell's `track` ignores it — but visible,
+  // because a session that looks stalled for minutes is otherwise unexplained.
+  z.object({
+    type: z.literal('provider-retry'),
+    /** 1-based over THIS turn's retries: the first retry is 1. */
+    attempt: z.number().int().positive(),
+    /** HTTP status when the failure had a response; absent for a connection
+     *  error (timeout, socket reset) that never got one. */
+    status: z.number().int().optional(),
+    message: z.string(),
+    /** The wait before the next attempt — 0 when there is none. */
+    delayMs: z.number().nonnegative(),
+    /** The model the NEXT attempt runs on, so a fallback swap reads as one. */
+    model: z.string(),
   }),
   // The one re-ask for a genuinely invalid action (§3.3's narrowed policy).
   z.object({ type: z.literal('re-ask'), invalid: z.string(), reason: z.string() }),

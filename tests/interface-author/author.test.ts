@@ -143,6 +143,7 @@ function scriptedDriver(script: Script): { driver: SessionDriver; seen: SessionR
   const seen: SessionRunInput[] = []
   const driver: SessionDriver = {
     capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
+    attribution: { provider: 'test', model: 'scripted' },
     runSession(input) {
       seen.push(input)
       const done = (async () => {

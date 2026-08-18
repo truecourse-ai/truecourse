@@ -46,6 +46,7 @@ function fakeDriver(
       resumeAtMessage: false,
       ...capabilities,
     },
+    attribution: { provider: 'test', model: 'scripted', endpoint: 'https://example.test' },
     runSession(input) {
       runs.push(input);
       let interrupted = false;
@@ -421,6 +422,80 @@ describe('runAgentLoop completion', () => {
     expect(outcome.resumable).toBe(true);
     expect(index.get('s1')?.status).toBe('failed');
     expect(persistence.readEvents('s1').at(-1)?.type).toBe('failure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attribution + provider retries
+// ---------------------------------------------------------------------------
+
+describe('runAgentLoop attribution', () => {
+  it('stamps the driver\'s declared model onto session-start', async () => {
+    const { driver } = fakeDriver(async () => ({ kind: 'outcome', value: { verdict: 'keep' } }));
+    const { persistence } = memoryPersistence();
+
+    await runAgentLoop({
+      def: makeDef(),
+      workItem: 'docs/a.md',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    // Declared DATA the shell reads — never an `if` on which driver this is.
+    expect(persistence.readEvents('s1')[0]).toMatchObject({
+      type: 'session-start',
+      llm: { provider: 'test', model: 'scripted', endpoint: 'https://example.test' },
+    });
+  });
+
+  it('records provider retries without charging them to the budget', async () => {
+    const { driver } = fakeDriver(async ({ emit }) => {
+      await emit({ type: 'assistant-turn', text: 'one', usage: usage(100) });
+      await emit({
+        type: 'provider-retry',
+        attempt: 1,
+        status: 529,
+        message: 'overloaded',
+        delayMs: 2000,
+        model: 'scripted',
+      });
+      await emit({
+        type: 'provider-retry',
+        attempt: 2,
+        message: 'socket hang up',
+        delayMs: 4000,
+        model: 'scripted',
+      });
+      await emit({ type: 'assistant-turn', text: 'two', usage: usage(100) });
+      return { kind: 'outcome', value: { verdict: 'keep' } };
+    });
+    const { persistence } = memoryPersistence();
+
+    const outcome = await runAgentLoop({
+      def: makeDef({ budget: { turns: 3, maxResumes: 0, tokenCeiling: 1_000_000 } }),
+      workItem: 'docs/a.md',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    // A retry is a wait, not a turn: two turns spent, and no resume grant.
+    expect(outcome.status).toBe('completed');
+    expect(outcome.spent).toEqual({ turns: 2, tokens: 200, costUsd: 0 });
+    const events = persistence.readEvents('s1');
+    expect(events.filter((e) => e.type === 'resume-grant')).toHaveLength(0);
+    // Recorded in place, in order, so the gap in the timestamps is explained.
+    expect(events.map((e) => e.type)).toEqual([
+      'session-start',
+      'assistant-turn',
+      'provider-retry',
+      'provider-retry',
+      'assistant-turn',
+      'outcome',
+    ]);
   });
 });
 

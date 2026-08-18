@@ -42,6 +42,7 @@ import type {
   SdkModule,
   SdkQuery,
   SdkQueryOptions,
+  SdkRateLimitEvent,
   SdkResultMessage,
   SdkSessionStore,
   SdkSystemMessage,
@@ -85,6 +86,16 @@ export function createClaudeAgentSessionDriver(
 ): SessionDriver {
   return {
     capabilities: { steering: 'live', structuredOutcome: 'native', resumeAtMessage: true },
+    // The backend is the user's own `claude` harness: the provider is fixed,
+    // and the model is whatever we asked it for — an alias (`opus`), which is
+    // why the per-turn `model` the API reports is recorded as well. Left
+    // unset, the harness picks its own default and only the turns can say
+    // which. There is no endpoint: the subprocess owns its own transport.
+    attribution: {
+      provider: 'claude-code',
+      model: opts.model ?? 'harness-default',
+      ...(opts.fallbackModel ? { fallbackModel: opts.fallbackModel } : {}),
+    },
     runSession(input) {
       let status: SessionStatus = 'running';
       let interruptRequested = false;
@@ -173,6 +184,8 @@ async function runClaudeAgentSession(
     texts: string[];
     toolCall?: { name: string; args: unknown };
     usage: TurnUsage;
+    /** What the API said served this turn — an alias resolved, or a fallback. */
+    model: string | undefined;
     raws: SdkAssistantMessage[];
   }
   let pendingTurn: PendingTurn | undefined;
@@ -184,6 +197,7 @@ async function runClaudeAgentSession(
       ...(text ? { text } : {}),
       ...(pendingTurn.toolCall ? { toolCall: pendingTurn.toolCall } : {}),
       usage: pendingTurn.usage,
+      ...(pendingTurn.model ? { model: pendingTurn.model } : {}),
       raw: {
         source: 'claude-agent-sdk.assistant',
         payload: pendingTurn.raws.length === 1 ? pendingTurn.raws[0] : pendingTurn.raws,
@@ -195,7 +209,13 @@ async function runClaudeAgentSession(
     const id = message.message?.id;
     if (!pendingTurn || id === undefined || pendingTurn.id !== id) {
       flushTurn();
-      pendingTurn = { id, texts: [], usage: turnUsageOf(message), raws: [] };
+      pendingTurn = {
+        id,
+        texts: [],
+        usage: turnUsageOf(message),
+        model: message.message?.model,
+        raws: [],
+      };
     }
     const blocks = Array.isArray(message.message?.content) ? message.message.content : [];
     for (const block of blocks) {
@@ -293,6 +313,23 @@ async function runClaudeAgentSession(
       switch (message.type) {
         case 'system': {
           const system = message as SdkSystemMessage;
+          // The harness owns this retry; we own the RECORD of it (item 11).
+          // Budget-inert — a retry is not a turn — but a session that sits
+          // silent for minutes is otherwise indistinguishable from a hang.
+          if (system.subtype === 'api_retry') {
+            onEvent({
+              type: 'provider-retry',
+              attempt: Math.max(1, Math.trunc(system.attempt ?? 1)),
+              ...(typeof system.error_status === 'number'
+                ? { status: system.error_status }
+                : {}),
+              message: system.error ?? 'the provider call failed retryably',
+              delayMs: Math.max(0, system.retry_delay_ms ?? 0),
+              model: attributedModel(opts),
+              raw: { source: 'claude-agent-sdk.system', payload: system },
+            });
+            break;
+          }
           if (system.subtype !== 'init') break; // status chatter
           // init fires PER TURN; only the session id is process truth.
           if (typeof system.session_id === 'string') providerSessionId = system.session_id;
@@ -321,6 +358,23 @@ async function runClaudeAgentSession(
           // Tool results replayed by the SDK; the MCP handlers already
           // emitted the transcript events at execution time.
           break;
+        case 'rate_limit_event': {
+          // A LEVEL signal, fired on every change of the subscription's
+          // rate-limit window — most of them say "still allowed", which is
+          // not a wait and not a transcript line. Only `rejected` is the
+          // provider actually holding this session back.
+          const info = (message as SdkRateLimitEvent).rate_limit_info;
+          if (info?.status !== 'rejected') break;
+          onEvent({
+            type: 'provider-retry',
+            attempt: 1,
+            message: `rate limited${info.rateLimitType ? ` (${info.rateLimitType})` : ''}`,
+            delayMs: resetDelayMs(info.resetsAt),
+            model: attributedModel(opts),
+            raw: { source: 'claude-agent-sdk.rate_limit_event', payload: message },
+          });
+          break;
+        }
         case 'result': {
           lastResult = message as SdkResultMessage;
           wiring.queue.end();
@@ -370,6 +424,20 @@ async function runClaudeAgentSession(
   }
   // The stream ended without any result message (interrupt, closed input).
   return endedWithoutOutcome();
+}
+
+/** The model this driver declares — see the `attribution` block above. */
+function attributedModel(opts: ClaudeAgentDriverOptions): string {
+  return opts.model ?? 'harness-default';
+}
+
+/** `resetsAt` as a wait from now. The field is a unix timestamp whose unit
+ *  the SDK does not state, so a value too small to be milliseconds is read
+ *  as seconds; either way a past reset is no wait at all. */
+function resetDelayMs(resetsAt: unknown): number {
+  if (typeof resetsAt !== 'number' || !Number.isFinite(resetsAt)) return 0;
+  const at = resetsAt > 1e12 ? resetsAt : resetsAt * 1000;
+  return Math.max(0, at - Date.now());
 }
 
 function failure(f: SessionFailure, resumeCursor?: unknown): DriverResult {
@@ -507,14 +575,19 @@ function mapResultError(result: SdkResultMessage): SessionFailure {
   return { kind: 'transport', detail, class: 'provider', retryability: 'transient' };
 }
 
-/** Message types we deliberately ignore — known chatter, not turns. */
+/**
+ * Message types we deliberately ignore — known chatter, not turns. Two that
+ * used to live here now have cases of their own: `rate_limit_event` (a level
+ * signal whose `rejected` state IS a wait) and `api_retry` — which was never
+ * a top-level type at all, only a `system` subtype, so ignoring it here never
+ * did anything.
+ */
 const IGNORED_MESSAGE_TYPES = new Set([
   'stream_event',
   'tool_progress',
   'thinking_tokens',
   'status',
   'auth_status',
-  'rate_limit_event',
   'task_notification',
   'task_started',
   'task_updated',
@@ -526,7 +599,6 @@ const IGNORED_MESSAGE_TYPES = new Set([
   'files_persisted',
   'tool_use_summary',
   'memory_recall',
-  'api_retry',
   'informational',
   'prompt_suggestion',
 ]);

@@ -207,6 +207,7 @@ function startSession<TOutcome>(
       systemPrompt: def.systemPrompt,
       toolNames: def.tools.map((t) => t.name),
       ...(input.resume ? { resumeOf: input.resume.of } : {}),
+      llm: driver.attribution,
     });
     updateIndex();
 

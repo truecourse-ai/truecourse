@@ -27,6 +27,9 @@ const cfg = {
   apiKey: 'test',
 };
 
+/** The same config with nothing to fall back to — retries are all there is. */
+const cfgNoFallback = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
+
 // ---------------------------------------------------------------------------
 // scripted provider stub
 // ---------------------------------------------------------------------------
@@ -79,6 +82,27 @@ function scriptedModel(turns: StubTurn[]) {
       },
     },
   };
+}
+
+/**
+ * A provider error in the SHAPE the AI SDK raises (`APICallError`): the
+ * status, the SDK's own retryability verdict, and the response headers. The
+ * class itself is not importable here — `ai` is llm-api's dependency alone
+ * (tests/architecture/ee-import-boundary) — which is also why the driver
+ * classifies by shape rather than `instanceof`.
+ */
+function apiError(
+  statusCode: number | undefined,
+  isRetryable: boolean,
+  responseHeaders?: Record<string, string>,
+): Error {
+  return Object.assign(new Error(`http ${statusCode ?? 'none'}`), {
+    name: 'AI_APICallError',
+    url: 'https://api.test/v1/messages',
+    ...(statusCode !== undefined ? { statusCode } : {}),
+    ...(responseHeaders ? { responseHeaders } : {}),
+    isRetryable,
+  });
 }
 
 const text = (t: string): StubContent => ({ type: 'text', text: t });
@@ -481,5 +505,215 @@ describe('api session driver', () => {
     expect(prompt).toContain('tool-result:probe');
     // New observations append AFTER the rebuilt history.
     expect(prompt).toContain('and one new observation');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attribution (item 2): what ran this, on the driver and on every turn
+// ---------------------------------------------------------------------------
+
+describe('api session driver attribution', () => {
+  it('declares the configured provider, models and gateway — never the key', () => {
+    buildModelMock.mockReturnValue(scriptedModel([]).model);
+    const driver = createApiSessionDriver({
+      ...cfg,
+      baseURL: 'https://gateway.internal/v1',
+      headers: { 'x-secret': 'shhh' },
+    });
+
+    expect(driver.attribution).toEqual({
+      provider: 'anthropic',
+      model: 'primary-model',
+      fallbackModel: 'fallback-model',
+      endpoint: 'https://gateway.internal/v1',
+    });
+    // A transcript is not a credential store.
+    expect(JSON.stringify(driver.attribution)).not.toContain('test');
+    expect(JSON.stringify(driver.attribution)).not.toContain('shhh');
+  });
+
+  it('omits what the config does not set', () => {
+    buildModelMock.mockReturnValue(scriptedModel([]).model);
+    const driver = createApiSessionDriver({
+      provider: 'openai',
+      model: 'gpt-5',
+      apiKey: 'test',
+    });
+    expect(driver.attribution).toEqual({ provider: 'openai', model: 'gpt-5' });
+  });
+
+  it('records the model the RESPONSE reported on every turn', async () => {
+    const scripted = scriptedModel([
+      { content: [text('thinking')] },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfg));
+    await handle.done;
+
+    // The configured id is `primary-model`; what answered says `mock-model` —
+    // the deployment-name / alias gap the per-turn field exists to close.
+    const turns = events.filter((e) => e.type === 'assistant-turn');
+    expect(turns).toHaveLength(2);
+    for (const turn of turns) expect(turn).toMatchObject({ model: 'mock-model' });
+    // And it rides the raw payload too, next to the wire messages.
+    expect((turns[0] as { raw?: { payload?: { modelId?: string } } }).raw?.payload?.modelId).toBe(
+      'mock-model',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// provider retries (item 11): the wait is transcript, not silence
+// ---------------------------------------------------------------------------
+
+describe('api session driver provider retries', () => {
+  /** Drive a session with the waits captured instead of slept. */
+  function retryHarness(
+    turns: StubTurn[],
+    retry?: Partial<{ attempts: number; baseDelayMs: number; maxDelayMs: number }>,
+    fallbackTurns?: StubTurn[],
+  ) {
+    const primary = scriptedModel(turns);
+    const fallback = scriptedModel(fallbackTurns ?? []);
+    buildModelMock.mockImplementation((_cfg: unknown, modelId: string) =>
+      modelId === 'primary-model' ? primary.model : fallback.model,
+    );
+    const slept: number[] = [];
+    const driver = createApiSessionDriver(fallbackTurns ? cfg : cfgNoFallback, {
+      ...(retry ? { retry } : {}),
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    return { ...runSession(driver), slept, primary, fallback };
+  }
+
+  it('retries a retryable failure with exponential backoff, recording each wait', async () => {
+    const { handle, events, slept, primary } = retryHarness([
+      { throws: apiError(529, true) },
+      { throws: apiError(503, true) },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    const result = await handle.done;
+
+    expect(result.kind).toBe('outcome');
+    expect(primary.calls).toHaveLength(3);
+    expect(slept).toEqual([2000, 4000]); // 2s, doubled
+    // One event per wait — attempt-numbered, and never counted as a turn.
+    expect(events.filter((e) => e.type === 'provider-retry')).toEqual([
+      { type: 'provider-retry', attempt: 1, status: 529, message: 'http 529', delayMs: 2000, model: 'primary-model' },
+      { type: 'provider-retry', attempt: 2, status: 503, message: 'http 503', delayMs: 4000, model: 'primary-model' },
+    ]);
+    expect(events.filter((e) => e.type === 'assistant-turn')).toHaveLength(1);
+  });
+
+  it('honors Retry-After, clamped to the single-wait cap', async () => {
+    const { handle, events, slept } = retryHarness(
+      [
+        { throws: apiError(429, true, { 'retry-after': '7' }) },
+        { throws: apiError(429, true, { 'retry-after': '3600' }) },
+        { content: [outcomeCall({ verdict: 'keep' })] },
+      ],
+      { maxDelayMs: 60_000 },
+    );
+    await handle.done;
+
+    // 7s as asked; an hour is not a wait we honor blindly.
+    expect(slept).toEqual([7000, 60_000]);
+    expect(events.filter((e) => e.type === 'provider-retry').map((e) => (e as { delayMs: number }).delayMs)).toEqual([
+      7000, 60_000,
+    ]);
+  });
+
+  it('never retries a failure the SDK judged final', async () => {
+    const { handle, events, primary } = retryHarness([{ throws: apiError(400, false) }]);
+    const result = await handle.done;
+
+    expect(primary.calls).toHaveLength(1);
+    expect(events.some((e) => e.type === 'provider-retry')).toBe(false);
+    expect(result).toMatchObject({
+      kind: 'failure',
+      failure: { kind: 'transport', class: 'validation', retryability: 'none' },
+    });
+  });
+
+  it('gives up after the attempt cap and reports the last failure', async () => {
+    const { handle, events, slept, primary } = retryHarness(
+      [{ throws: apiError(529, true) }, { throws: apiError(529, true) }, { throws: apiError(529, true) }],
+      { attempts: 3 },
+    );
+    const result = await handle.done;
+
+    expect(primary.calls).toHaveLength(3);
+    expect(slept).toHaveLength(2); // no wait after the last attempt
+    expect(events.filter((e) => e.type === 'provider-retry')).toHaveLength(2);
+    expect(result).toMatchObject({
+      kind: 'failure',
+      failure: { kind: 'transport', class: 'provider', retryability: 'transient' },
+    });
+  });
+
+  it('records the fallback swap as a retry naming the model taking over', async () => {
+    const { handle, events, primary, fallback } = retryHarness(
+      [{ throws: apiError(529, true) }, { throws: apiError(529, true) }],
+      { attempts: 2 },
+      [{ content: [outcomeCall({ verdict: 'keep' })] }],
+    );
+    const result = await handle.done;
+
+    expect(result.kind).toBe('outcome');
+    expect(primary.calls).toHaveLength(2);
+    expect(fallback.calls).toHaveLength(1);
+    // The last event of the turn is the swap: no wait, and the model changes.
+    expect(events.filter((e) => e.type === 'provider-retry').at(-1)).toMatchObject({
+      attempt: 2,
+      delayMs: 0,
+      model: 'fallback-model',
+    });
+    // The turn that landed is attributed to whoever actually answered.
+    expect(events.find((e) => e.type === 'assistant-turn')).toMatchObject({ model: 'mock-model' });
+  });
+
+  it('swaps to the fallback without retrying when the failure is final', async () => {
+    const { handle, events, primary, fallback } = retryHarness(
+      [{ throws: apiError(400, false) }],
+      undefined,
+      [{ content: [outcomeCall({ verdict: 'keep' })] }],
+    );
+    expect((await handle.done).kind).toBe('outcome');
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'provider-retry')).toEqual([
+      { type: 'provider-retry', attempt: 1, status: 400, message: 'http 400', delayMs: 0, model: 'fallback-model' },
+    ]);
+  });
+
+  it('stops retrying once the shell interrupts the turn', async () => {
+    const scripted = scriptedModel([
+      { throws: apiError(529, true) },
+      { throws: apiError(529, true) },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const events: SessionEventBody[] = [];
+    const driver = createApiSessionDriver(cfgNoFallback, {
+      sleep: async () => {
+        // The interrupt lands while the driver is waiting out the backoff.
+        void handle.interrupt();
+      },
+    });
+    const handle = driver.runSession({
+      def: makeDef(),
+      initialMessages: ['go'],
+      onEvent: (e) => events.push(e),
+      signal: new AbortController().signal,
+    });
+    const result = await handle.done;
+
+    // One wait recorded, then the turn stops instead of sitting out four more.
+    expect(scripted.calls).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'provider-retry')).toHaveLength(1);
+    expect(result.kind).toBe('failure');
   });
 });

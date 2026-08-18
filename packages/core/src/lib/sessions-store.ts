@@ -43,6 +43,13 @@ export interface SessionRunStore {
   readonly persistence: SessionPersistence;
   /** Advertise the live session API (§3.9: URL + token, never a bare port). */
   setEndpoint(endpoint: { url: string; token: string }): void;
+  /**
+   * Record what the run's sessions run on: the transport mode plus the
+   * driver's own attribution. Written after creation for the same reason the
+   * endpoint is — the driver is built against the run's directory, so it
+   * cannot exist before the record does. Never credentials.
+   */
+  setLlm(llm: NonNullable<RunRecord['llm']>): void;
   /** Terminal write: stamps `finishedAt` and drops the dead endpoint. */
   finish(status: Exclude<RunStatus, 'running'>): void;
 }
@@ -51,6 +58,11 @@ export function createSessionRun(
   repoDir: string,
   opts: { command: SessionCommand; gitRef: string; now?: () => Date },
 ): SessionRunStore {
+  // Starting a run is the boot the sweep belongs to (§3.9): before this
+  // process writes a new record, every run left `running` by a process that
+  // is gone gets the honest status. Runs of THIS process are untouched — its
+  // pid is alive — so a concurrent run is never mistaken for a corpse.
+  reconcileSessionsStore(repoDir);
   const startedAt = (opts.now?.() ?? new Date()).toISOString();
   const runId = `${startedAt.replace(/[:.]/g, '-').replace(/-\d{3}Z$/, 'Z')}_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
   const record: RunRecord = {
@@ -107,6 +119,10 @@ function openRun(dir: string, record: RunRecord): SessionRunStore {
       record.endpoint = endpoint;
       write();
     },
+    setLlm(llm) {
+      record.llm = llm;
+      write();
+    },
     finish(status) {
       record.status = status;
       record.finishedAt = new Date().toISOString();
@@ -147,12 +163,27 @@ function readTranscript(filePath: string): SessionEvent[] {
   return events;
 }
 
-/** List every run record, newest first (optionally one command's). */
+/**
+ * List every run record, newest first (optionally one command's) — swept
+ * first, so a listing never shows a run as `running` on a dead process's
+ * memory. The sweep needs the whole store, so the command filter narrows the
+ * RESULT, not the read.
+ */
 export function listSessionRuns(repoDir: string, command?: SessionCommand): RunRecord[] {
+  const runs = readSessionRuns(repoDir);
+  // Mutates the records in place, so the listing shows the swept status
+  // without a second read.
+  sweepRuns(repoDir, runs, defaultIsProcessAlive);
+  return (command ? runs.filter((run) => run.command === command) : runs).sort((a, b) =>
+    b.startedAt.localeCompare(a.startedAt),
+  );
+}
+
+/** Every run record on disk, unswept and unsorted. */
+function readSessionRuns(repoDir: string): RunRecord[] {
   const root = sessionsDir(repoDir);
-  const commands = command ? [command] : listDirs(root);
   const runs: RunRecord[] = [];
-  for (const cmd of commands) {
+  for (const cmd of listDirs(root)) {
     for (const runId of listDirs(path.join(root, cmd))) {
       const runJson = path.join(root, cmd, runId, 'run.json');
       try {
@@ -162,7 +193,7 @@ export function listSessionRuns(repoDir: string, command?: SessionCommand): RunR
       }
     }
   }
-  return runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  return runs;
 }
 
 function listDirs(dir: string): string[] {
@@ -187,8 +218,18 @@ export function reconcileSessionsStore(
   opts?: { isProcessAlive?: (pid: number) => boolean },
 ): { interrupted: RunRecord[] } {
   const isAlive = opts?.isProcessAlive ?? defaultIsProcessAlive;
+  return { interrupted: sweepRuns(repoDir, readSessionRuns(repoDir), isAlive) };
+}
+
+/** The sweep itself, over records already read — mutated in place and, when
+ *  they changed, written back. */
+function sweepRuns(
+  repoDir: string,
+  runs: readonly RunRecord[],
+  isAlive: (pid: number) => boolean,
+): RunRecord[] {
   const interrupted: RunRecord[] = [];
-  for (const run of listSessionRuns(repoDir)) {
+  for (const run of runs) {
     if (run.status !== 'running') continue;
     if (run.pid !== undefined && isAlive(run.pid)) continue;
     run.status = 'interrupted';
@@ -202,7 +243,7 @@ export function reconcileSessionsStore(
     atomicWriteJson(path.join(sessionRunDir(repoDir, run.command, run.runId), 'run.json'), run);
     interrupted.push(run);
   }
-  return { interrupted };
+  return interrupted;
 }
 
 function defaultIsProcessAlive(pid: number): boolean {

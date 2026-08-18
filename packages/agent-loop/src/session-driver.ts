@@ -16,6 +16,7 @@ import type {
   SessionEvent,
   SessionEventBody,
   SessionFailure,
+  SessionLlm,
   SessionStatus,
 } from './session-events.js';
 
@@ -80,5 +81,11 @@ export interface SessionHandle {
 
 export interface SessionDriver {
   capabilities: DriverCapabilities;
+  /**
+   * What this driver will call — the same doctrine as `capabilities`:
+   * declared DATA the shell reads and stamps onto `session-start`, never an
+   * engine `if` on the driver's name. Credentials are not part of it.
+   */
+  attribution: SessionLlm;
   runSession(input: SessionRunInput): SessionHandle;
 }

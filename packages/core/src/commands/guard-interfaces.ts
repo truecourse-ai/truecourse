@@ -101,8 +101,9 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   runId: string;
   /** `<repo>/.truecourse/sessions/guard-interfaces/<runId>` — the transcripts. */
   runDir: string;
-  /** Which backend ran the sessions, and on which model. */
-  transport: { mode: string; model: string };
+  /** Which backend ran the sessions, and on whose model — the same record the
+   *  run.json carries and every transcript's `session-start` stamps. */
+  transport: { mode: string; provider: string; model: string; fallbackModel?: string };
   /** The context pass (item 105): how much grounding the sessions were given. */
   context: { places: number; files: number; seconds: number };
 }
@@ -119,11 +120,21 @@ export async function runGuardInterfaceAuthoring(
   const { repoRoot } = opts;
   const gitRef = await resolveCommitSha(repoRoot);
   const run = createSessionRun(repoRoot, { command: 'guard-interfaces', gitRef });
-  const { driver, mode, model } = createConfiguredSessionDriver({
+  const { driver, mode, attribution } = createConfiguredSessionDriver({
     ...(opts.transport ? { transport: opts.transport } : {}),
     cwd: repoRoot,
     providerStateDir: path.join(run.dir, 'provider'),
   });
+  // Which model answered is part of what a run MEANS: a transcript read after
+  // a config change, or after a fallback swap, must not need the config of the
+  // day to be interpretable.
+  const llm = {
+    mode,
+    provider: attribution.provider,
+    model: attribution.model,
+    ...(attribution.fallbackModel ? { fallbackModel: attribution.fallbackModel } : {}),
+  };
+  run.setLlm(llm);
 
   // The GROUNDING, once per run and amortised over every place in it (item 105):
   // the route module of each place, the modules it renders, and the api effects
@@ -154,7 +165,7 @@ export async function runGuardInterfaceAuthoring(
       ...result,
       runId: run.runId,
       runDir: run.dir,
-      transport: { mode, model },
+      transport: llm,
       context: { places: context.contexts.size, files: context.files, seconds: context.seconds },
     };
   } catch (error) {

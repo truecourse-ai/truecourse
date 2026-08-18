@@ -163,7 +163,13 @@ export async function runGuardInterfacesAuthor(
     p.outro("Aborted.");
     process.exit(1);
   }
-  spinner.stop(`${run.places.length} session(s) on ${run.transport.model} (${run.transport.mode})`);
+  // Provider AND model: "opus" alone does not say whose opus, and an api-mode
+  // run against a gateway is otherwise indistinguishable from a direct one.
+  spinner.stop(
+    `${run.places.length} session(s) on ${run.transport.provider}/${run.transport.model}${
+      run.transport.fallbackModel ? ` (fallback ${run.transport.fallbackModel})` : ""
+    } via ${run.transport.mode}`,
+  );
 
   for (const place of run.places) printPlace(place);
   if (run.skipped.length > 0) {

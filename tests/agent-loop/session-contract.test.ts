@@ -31,8 +31,47 @@ describe('session transcript events', () => {
         systemPrompt: 'you are…',
         toolNames: ['read-doc'],
       },
+      {
+        ...envelope,
+        type: 'session-start',
+        kind: 'spec-scan.curation',
+        workItem: 'docs/a.md',
+        systemPrompt: 'you are…',
+        toolNames: ['read-doc'],
+        llm: {
+          provider: 'anthropic',
+          model: 'claude-opus-4-6',
+          fallbackModel: 'claude-sonnet-4-6',
+          endpoint: 'https://gateway.internal/v1',
+        },
+      },
       { ...envelope, type: 'user-message', content: 'skip the archive', actor: 'sarkis' },
       { ...envelope, type: 'assistant-turn', text: 'thinking it over', usage },
+      {
+        ...envelope,
+        type: 'assistant-turn',
+        text: 'served by the fallback',
+        usage,
+        model: 'claude-sonnet-4-6-20260101',
+      },
+      {
+        ...envelope,
+        type: 'provider-retry',
+        attempt: 1,
+        status: 429,
+        message: 'rate limited',
+        delayMs: 2000,
+        model: 'claude-opus-4-6',
+      },
+      // A connection error never got a response: no status to report.
+      {
+        ...envelope,
+        type: 'provider-retry',
+        attempt: 2,
+        message: 'socket hang up',
+        delayMs: 0,
+        model: 'claude-sonnet-4-6',
+      },
       {
         ...envelope,
         type: 'assistant-turn',
@@ -96,6 +135,48 @@ describe('session transcript events', () => {
     expect(SessionEventBodySchema.safeParse({ type: 'outcome', value: 1 }).success).toBe(true);
   });
 
+  it('keeps attribution optional and credential-free', () => {
+    // A driver that declares nothing still produces a legal transcript.
+    expect(
+      SessionEventBodySchema.safeParse({
+        type: 'session-start',
+        kind: 'k',
+        workItem: 'w',
+        systemPrompt: 's',
+        toolNames: [],
+      }).success,
+    ).toBe(true);
+    // The schema is non-strict, so a key it does not declare is STRIPPED
+    // rather than rejected — which is what keeps a leaked secret out of a
+    // re-serialized transcript.
+    const parsed = SessionEventBodySchema.parse({
+      type: 'session-start',
+      kind: 'k',
+      workItem: 'w',
+      systemPrompt: 's',
+      toolNames: [],
+      llm: { provider: 'anthropic', model: 'opus', apiKey: 'sk-leak' },
+    });
+    expect(parsed).toMatchObject({ llm: { provider: 'anthropic', model: 'opus' } });
+    expect(JSON.stringify(parsed)).not.toContain('sk-leak');
+  });
+
+  it('rejects a provider-retry missing the fields a reader needs', () => {
+    const good = {
+      type: 'provider-retry' as const,
+      attempt: 1,
+      message: 'overloaded',
+      delayMs: 1000,
+      model: 'opus',
+    };
+    expect(SessionEventBodySchema.safeParse(good).success).toBe(true);
+    // Which model, and how long the wait is, are the whole point of the event.
+    expect(SessionEventBodySchema.safeParse({ ...good, model: undefined }).success).toBe(false);
+    expect(SessionEventBodySchema.safeParse({ ...good, delayMs: undefined }).success).toBe(false);
+    // Attempts are 1-based; a zeroth retry is not a thing.
+    expect(SessionEventBodySchema.safeParse({ ...good, attempt: 0 }).success).toBe(false);
+  });
+
   it('requires the retryability axis on every failure kind', () => {
     expect(
       SessionFailureSchema.safeParse({ kind: 'transport', detail: '429', class: 'provider' })
@@ -135,6 +216,29 @@ describe('run record', () => {
     };
     const parsed = RunRecordSchema.parse(run);
     expect(parsed.sessions[0].resumeCursor).toEqual(run.sessions[0].resumeCursor);
+  });
+
+  it('carries what the run ran on across a reopen', () => {
+    const run = {
+      command: 'guard-interfaces',
+      runId: '2026-08-18T00-00-00Z_abc123',
+      gitRef: 'abc',
+      startedAt: '2026-08-18T00:00:00.000Z',
+      status: 'completed',
+      llm: {
+        mode: 'api',
+        provider: 'bedrock',
+        model: 'eu.anthropic.claude-opus-4-6-v1:0',
+        fallbackModel: 'eu.anthropic.claude-sonnet-4-6-v1:0',
+      },
+      sessions: [],
+    };
+    // The schema is non-strict — an undeclared key would be silently dropped
+    // on reopen, which is exactly why `llm` has to be declared.
+    expect(RunRecordSchema.parse(run).llm).toEqual(run.llm);
+    // Optional: a run recorded before attribution existed still reopens.
+    const { llm: _llm, ...older } = run;
+    expect(RunRecordSchema.parse(older).llm).toBeUndefined();
   });
 });
 

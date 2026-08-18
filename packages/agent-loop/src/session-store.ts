@@ -55,6 +55,21 @@ export const RunRecordSchema = z.object({
   /** The live session API while the process runs — a URL plus auth token,
    *  never a bare port, so the EE runner's service endpoint fits the field. */
   endpoint: z.object({ url: z.string(), token: z.string() }).optional(),
+  /**
+   * What the run's sessions ran on: the transport MODE the config selected
+   * (`claude-code` | `api` — a string here, since the mode enum is core's)
+   * plus the driver's own attribution. Optional because a run recorded
+   * before attribution existed reopens unchanged; declared because this
+   * schema is non-strict and would otherwise strip it on reopen.
+   */
+  llm: z
+    .object({
+      mode: z.string(),
+      provider: z.string(),
+      model: z.string(),
+      fallbackModel: z.string().optional(),
+    })
+    .optional(),
   sessions: z.array(SessionIndexEntrySchema),
 });
 export type RunRecord = z.infer<typeof RunRecordSchema>;

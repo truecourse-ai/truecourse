@@ -50,10 +50,36 @@ const CONTINUE_NUDGE = `Continue. When you have reached the final result, call t
 
 const CACHE_BREAKPOINT = { anthropic: { cacheControl: { type: 'ephemeral' as const } } };
 
+/**
+ * How this driver answers a provider failure (item 11). The AI SDK's own
+ * retry has no observation hook, so `maxRetries: 0` hands the loop to us and
+ * every wait becomes a `provider-retry` transcript event. Attempts are per
+ * TURN and per MODEL: the primary gets `attempts` tries, then the fallback
+ * (when configured) gets the same allowance.
+ */
+export interface ApiRetryPolicy {
+  /** Tries on ONE model, the first included. */
+  attempts: number;
+  /** The first backoff; doubled per attempt. */
+  baseDelayMs: number;
+  /** Cap on a SINGLE wait — a `Retry-After` past it is clamped, not obeyed. */
+  maxDelayMs: number;
+}
+
+export const DEFAULT_API_RETRY: ApiRetryPolicy = {
+  attempts: 5,
+  baseDelayMs: 2_000,
+  maxDelayMs: 60_000,
+};
+
 export interface ApiSessionDriverOptions {
   /** Cost for one turn's usage, in USD — same hook as the one-shot transport.
    *  Present ⇒ turns record `costSource: 'model-priced'`; absent ⇒ `unpriced`. */
   pricing?: (modelId: string, usage: CallUsage) => number;
+  /** Overrides on `DEFAULT_API_RETRY`, field by field. */
+  retry?: Partial<ApiRetryPolicy>;
+  /** Test seam: what a backoff wait is made of. Aborts with the signal. */
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 export function createApiSessionDriver(
@@ -64,9 +90,18 @@ export function createApiSessionDriver(
   const fallback = cfg.fallbackModel
     ? { model: buildModel(cfg, cfg.fallbackModel), modelId: cfg.fallbackModel }
     : undefined;
+  const retry = { ...DEFAULT_API_RETRY, ...opts.retry };
 
   return {
     capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
+    // Declared, never inferred: the config IS the answer to "what ran this".
+    // The key and the headers stay out — a transcript is not a credential store.
+    attribution: {
+      provider: cfg.provider,
+      model: cfg.model,
+      ...(cfg.fallbackModel ? { fallbackModel: cfg.fallbackModel } : {}),
+      ...(cfg.baseURL ? { endpoint: cfg.baseURL } : {}),
+    },
     runSession(input) {
       let interrupted = false;
       let status: SessionStatus = 'running';
@@ -76,6 +111,9 @@ export function createApiSessionDriver(
         primary,
         fallback,
         pricing: opts.pricing,
+        retry,
+        sleep: opts.sleep ?? delay,
+        onEvent: input.onEvent,
         interrupted: () => interrupted,
         drainSteers: () => steers.splice(0),
       }).then((result) => {
@@ -100,6 +138,11 @@ interface SessionRuntime {
   primary: { model: LanguageModel; modelId: string };
   fallback?: { model: LanguageModel; modelId: string };
   pricing?: ApiSessionDriverOptions['pricing'];
+  retry: ApiRetryPolicy;
+  sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** The turn loop's own emitter, threaded down so a wait INSIDE one model
+   *  call is recorded where it happened rather than inferred afterwards. */
+  onEvent: SessionRunInput['onEvent'];
   interrupted: () => boolean;
   drainSteers: () => string[];
 }
@@ -147,9 +190,14 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
     const usage = turnUsageOf(result.usage, modelId, rt.pricing);
     const toolCalls = result.toolCalls;
     const first = toolCalls[0];
+    // What the RESPONSE says served the turn, which the configured model id
+    // does not always answer: on Bedrock/Foundry it is a deployment name, and
+    // a fallback swap changes it mid-session.
+    const respondedModelId = result.response.modelId;
     const raw: RawPayload = {
       source: 'llm-api.generateText',
       payload: {
+        modelId: respondedModelId,
         messages: result.response.messages,
         finishReason: result.finishReason,
         usage: result.usage,
@@ -162,6 +210,7 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
         ? { toolCall: { name: first.toolName, args: strippedInput(first, widenedByTool) } }
         : {}),
       usage,
+      ...(respondedModelId ? { model: respondedModelId } : {}),
       raw,
     } as SessionEventBody & { raw?: RawPayload });
     messages.push(...(result.response.messages as ModelMessage[]));
@@ -235,7 +284,13 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
   }
 }
 
-/** One model call, full history + cache breakpoints, fallback retry. */
+/**
+ * One model call, full history + cache breakpoints, retries and the fallback
+ * swap. `maxRetries: 0` takes the retry away from the SDK — it has no
+ * observation hook, and an unexplained multi-minute gap in a transcript is
+ * indistinguishable from a hang. Every wait is a `provider-retry` event
+ * instead; the shell ignores them for budget, so a retry is never a turn.
+ */
 async function callModel(
   def: SessionDef,
   messages: readonly ModelMessage[],
@@ -257,18 +312,115 @@ async function callModel(
       messages: prompt,
       tools,
       abortSignal: signal,
+      maxRetries: 0,
       // The transcript event models ONE tool call per turn, so parallel
       // calls are discouraged at the source (anthropic honors this; other
       // providers ignore the namespaced option). A turn that still carries
       // several is executed in full — see the loop.
       providerOptions: { anthropic: { disableParallelToolUse: true } },
     });
-  try {
-    return { result: await run(rt.primary.model), modelId: rt.primary.modelId };
-  } catch (err) {
-    if (!rt.fallback || signal.aborted) throw err;
-    return { result: await run(rt.fallback.model), modelId: rt.fallback.modelId };
+
+  const candidates = rt.fallback ? [rt.primary, rt.fallback] : [rt.primary];
+  let retries = 0;
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index];
+    for (let attempt = 1; attempt <= rt.retry.attempts; attempt++) {
+      try {
+        return { result: await run(candidate.model), modelId: candidate.modelId };
+      } catch (err) {
+        // An abort is a decision, not a provider problem: never retried.
+        if (signal.aborted) throw err;
+        const failure = retryabilityOf(err);
+        const again = attempt < rt.retry.attempts && failure.retryable;
+        // Out of tries on this model — the fallback is the next thing to try,
+        // and the swap is recorded like any other retry rather than silently.
+        const next = again ? candidate : candidates[index + 1];
+        if (!next) throw err;
+        const delayMs = again
+          ? Math.min(
+              failure.retryAfterMs ?? rt.retry.baseDelayMs * 2 ** (attempt - 1),
+              rt.retry.maxDelayMs,
+            )
+          : 0;
+        rt.onEvent({
+          type: 'provider-retry',
+          attempt: ++retries,
+          ...(failure.status !== undefined ? { status: failure.status } : {}),
+          message: err instanceof Error ? err.message : String(err),
+          delayMs,
+          model: next.modelId,
+        });
+        if (delayMs > 0) await rt.sleep(delayMs, signal);
+        // A shell interrupt lands mid-turn: stop spending waits on a turn
+        // whose result is about to be discarded anyway.
+        if (rt.interrupted() || signal.aborted) throw err;
+        if (!again) break; // move on to the fallback model
+      }
+    }
   }
+  /* c8 ignore next -- the loops above always return or throw */
+  throw new Error('unreachable: no model candidate left');
+}
+
+/**
+ * Is another attempt worth making? Read from the error's SHAPE, never its
+ * message — and by shape rather than `instanceof`, the same reason the tool
+ * paths use a name check: the SDK error may come from a different module
+ * instance than this file resolves.
+ *
+ * `isRetryable` is the SDK's own verdict on a call it made (`APICallError`,
+ * `GatewayError`): 408/409/429, 5xx and its transport cases. A status the SDK
+ * judged final is final. Everything left carried no response at all — a
+ * connection failure (timeout, reset) worth another attempt, unless it is an
+ * SDK error (every one of them is named `AI_*`), which means a bad argument,
+ * tool or schema on our side: a defect retrying cannot fix.
+ */
+function retryabilityOf(err: unknown): {
+  retryable: boolean;
+  status?: number;
+  retryAfterMs?: number;
+} {
+  const shape = err as {
+    statusCode?: unknown;
+    isRetryable?: unknown;
+    responseHeaders?: Record<string, string>;
+  };
+  const status = typeof shape?.statusCode === 'number' ? shape.statusCode : undefined;
+  if (typeof shape?.isRetryable === 'boolean') {
+    const retryAfterMs = retryAfterOf(shape.responseHeaders);
+    return {
+      retryable: shape.isRetryable,
+      ...(status !== undefined ? { status } : {}),
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    };
+  }
+  if (status !== undefined) return { retryable: false, status };
+  return { retryable: !(err instanceof Error && err.name.startsWith('AI_')) };
+}
+
+/** `Retry-After`, in either legal form: delta-seconds or an HTTP date. */
+function retryAfterOf(headers: Record<string, string> | undefined): number | undefined {
+  const value = headers?.['retry-after'] ?? headers?.['Retry-After'];
+  if (value === undefined) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
+/** An abortable wait — an interrupt must not sit out a 60s backoff. */
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+  });
 }
 
 /**

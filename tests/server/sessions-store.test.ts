@@ -193,6 +193,44 @@ describe('reconciliation sweep', () => {
     expect(openSessionRun(repo, 'spec-scan', finished.runId).record().status).toBe('completed');
   });
 
+  /** Stage `run` as the leftovers of a process that is gone. */
+  const orphan = (dir: string): void => {
+    const runJson = path.join(dir, 'run.json');
+    const record = JSON.parse(fs.readFileSync(runJson, 'utf-8'));
+    // Above Linux's default pid_max — never a live process.
+    record.pid = 0x7fffffff;
+    fs.writeFileSync(runJson, JSON.stringify(record));
+  };
+
+  it('runs on its own at the two call sites that boot the store', () => {
+    // Starting a run is a boot: a corpse from a previous process is reconciled
+    // before this process writes anything of its own.
+    const crashed = createSessionRun(repo, { command: 'guard-generate', gitRef: 'main' });
+    crashed.persistence.updateIndex({
+      sessionId: 's-running',
+      kind: 'guard-generate.author',
+      workItem: 'flow:a',
+      status: 'running',
+      spent: { turns: 1, tokens: 2, costUsd: 0 },
+    });
+    orphan(crashed.dir);
+
+    const fresh = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
+    const swept = openSessionRun(repo, 'guard-generate', crashed.runId).record();
+    expect(swept.status).toBe('interrupted');
+    expect(swept.sessions[0].status).toBe('parked');
+    // This process's own run is untouched — its pid is alive.
+    expect(openSessionRun(repo, 'spec-scan', fresh.runId).record().status).toBe('running');
+
+    // And listing is the other boot: nothing is ever listed as `running` on a
+    // dead process's memory, on disk or in the returned records.
+    const second = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
+    orphan(second.dir);
+    const listed = listSessionRuns(repo).find((run) => run.runId === second.runId);
+    expect(listed?.status).toBe('interrupted');
+    expect(openSessionRun(repo, 'spec-scan', second.runId).record().status).toBe('interrupted');
+  });
+
   it('leaves a running run with a live process alone', () => {
     const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
     const { interrupted } = reconcileSessionsStore(repo, { isProcessAlive: () => true });

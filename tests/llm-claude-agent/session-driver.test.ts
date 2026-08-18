@@ -516,3 +516,116 @@ describe('claude agent session driver', () => {
     expect(events.some((e) => e.type === 'assistant-turn')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// attribution (item 2) + provider retries (item 11)
+// ---------------------------------------------------------------------------
+
+describe('claude agent session driver attribution', () => {
+  it('declares the harness as the provider and the model it was asked for', () => {
+    const { sdk } = fakeSdk(async function* () {});
+    expect(
+      createClaudeAgentSessionDriver({ sdk, model: 'opus', fallbackModel: 'sonnet' }).attribution,
+    ).toEqual({ provider: 'claude-code', model: 'opus', fallbackModel: 'sonnet' });
+    // Unasked, the harness picks; only the turns can then say which.
+    expect(createClaudeAgentSessionDriver({ sdk }).attribution).toEqual({
+      provider: 'claude-code',
+      model: 'harness-default',
+    });
+  });
+
+  it('records the model the API reported for the turn', async () => {
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      yield {
+        type: 'assistant',
+        parent_tool_use_id: null,
+        session_id: 'prov-1',
+        message: {
+          id: 'msg-1',
+          model: 'claude-opus-4-6-20260105',
+          content: [{ type: 'text', text: 'thinking' }],
+          usage: { input_tokens: 10, output_tokens: 2 },
+        },
+      } as SdkMessage;
+      yield success({ verdict: 'keep' });
+    });
+    const { handle, events } = runSession(sdk);
+    await handle.done;
+
+    // `opus` is an alias; the turn records what actually served it.
+    expect(events.find((e) => e.type === 'assistant-turn')).toMatchObject({
+      model: 'claude-opus-4-6-20260105',
+    });
+  });
+});
+
+describe('claude agent session driver provider retries', () => {
+  it('maps the harness api_retry into the transcript', async () => {
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      yield {
+        type: 'system',
+        subtype: 'api_retry',
+        attempt: 2,
+        max_retries: 5,
+        retry_delay_ms: 4000,
+        error_status: 529,
+        error: 'overloaded',
+        session_id: 'prov-1',
+      } as SdkMessage;
+      // A connection error never got a response: status is null.
+      yield {
+        type: 'system',
+        subtype: 'api_retry',
+        attempt: 3,
+        max_retries: 5,
+        retry_delay_ms: 8000,
+        error_status: null,
+        session_id: 'prov-1',
+      } as SdkMessage;
+      yield success({ verdict: 'keep' });
+    });
+    const { handle, events } = runSession(sdk);
+    await handle.done;
+
+    expect(events.filter((e) => e.type === 'provider-retry')).toMatchObject([
+      { attempt: 2, status: 529, message: 'overloaded', delayMs: 4000, model: 'harness-default' },
+      { attempt: 3, delayMs: 8000 },
+    ]);
+    // No status invented for a call that never got a response.
+    expect(events.filter((e) => e.type === 'provider-retry')[1]).not.toHaveProperty('status');
+    // A retry is not a turn.
+    expect(events.some((e) => e.type === 'assistant-turn')).toBe(false);
+  });
+
+  it('records a rate-limit rejection but not the level chatter around it', async () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 30;
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      // Still allowed — a level signal, not a wait.
+      yield {
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'allowed_warning', utilization: 0.9 },
+        session_id: 'prov-1',
+      } as SdkMessage;
+      yield {
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt },
+        session_id: 'prov-1',
+      } as SdkMessage;
+      yield success({ verdict: 'keep' });
+    });
+    const { handle, events } = runSession(sdk);
+    await handle.done;
+
+    const retries = events.filter((e) => e.type === 'provider-retry');
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({ message: 'rate limited (five_hour)' });
+    // The wait is the window's own reset, in whole seconds from now.
+    expect(Math.round((retries[0] as { delayMs: number }).delayMs / 1000)).toBe(30);
+  });
+});

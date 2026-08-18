@@ -39,8 +39,15 @@ export type SdkAssistantContentBlock =
 export interface SdkAssistantMessage {
   type: 'assistant';
   /** One API assistant turn may arrive as SEVERAL of these sharing
-   *  `message.id` (one per content block), each repeating the usage. */
-  message: { id?: string; content: SdkAssistantContentBlock[]; usage?: SdkApiUsage };
+   *  `message.id` (one per content block), each repeating the usage.
+   *  `model` is the API's own answer for what served the turn — the
+   *  harness resolves aliases (`opus`) and may fall back mid-session. */
+  message: {
+    id?: string;
+    model?: string;
+    content: SdkAssistantContentBlock[];
+    usage?: SdkApiUsage;
+  };
   /** Non-null on subagent-originated messages — not this session's turns. */
   parent_tool_use_id: string | null;
   session_id: string;
@@ -54,6 +61,29 @@ export interface SdkSystemMessage {
   apiKeySource?: string;
   tools?: string[];
   mcp_servers?: Array<{ name: string; status: string }>;
+  // -- subtype 'api_retry': a retryable API failure and the wait before the
+  //    next attempt. `error_status` is null for a connection error that never
+  //    got a response.
+  attempt?: number;
+  max_retries?: number;
+  retry_delay_ms?: number;
+  error_status?: number | null;
+  error?: string;
+  [k: string]: unknown;
+}
+
+/**
+ * The subscription rate-limit LEVEL, emitted whenever it changes — not a
+ * retry. Only `rejected` means the provider is actually holding the session.
+ */
+export interface SdkRateLimitEvent {
+  type: 'rate_limit_event';
+  rate_limit_info?: {
+    status?: string;
+    resetsAt?: number;
+    rateLimitType?: string;
+    [k: string]: unknown;
+  };
   [k: string]: unknown;
 }
 
@@ -91,6 +121,7 @@ export type SdkMessage =
   | SdkAssistantMessage
   | SdkSystemMessage
   | SdkResultMessage
+  | SdkRateLimitEvent
   | { type: string; [k: string]: unknown };
 
 // ---------------------------------------------------------------------------

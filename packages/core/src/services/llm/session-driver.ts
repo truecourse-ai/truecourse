@@ -21,7 +21,7 @@ import {
   loadSdk,
   providerSessionStore,
 } from '@truecourse/llm-claude-agent';
-import type { SessionDriver } from '@truecourse/agent-loop';
+import type { SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import { effectiveLlmMode, readApiLlmConfig } from '../../config/global-config.js';
 import type { LlmTransportFlag, LlmTransportMode } from '../../config/global-config.js';
@@ -33,8 +33,13 @@ export const SESSION_MODEL_CLAUDE_CODE = 'opus';
 export interface ConfiguredSessionDriver {
   driver: SessionDriver;
   mode: LlmTransportMode;
-  /** What the sessions will actually run on — rendered in the pre-flight. */
-  model: string;
+  /**
+   * What the sessions will actually run on — provider, model, and (api mode)
+   * the gateway. Read from the driver itself rather than rebuilt here, so the
+   * pre-flight, the CLI footer and the run record all quote ONE source: the
+   * declaration the driver also stamps on every `session-start`.
+   */
+  attribution: SessionLlm;
 }
 
 export interface SessionDriverOptions {
@@ -61,22 +66,16 @@ export function createConfiguredSessionDriver(
   const mode = effectiveLlmMode(opts.transport);
   if (mode === 'api') {
     const cfg = buildProviderConfig(readApiLlmConfig());
-    return {
-      driver: createApiSessionDriver(cfg, { pricing: priceCall }),
-      mode,
-      model: cfg.model,
-    };
+    const driver = createApiSessionDriver(cfg, { pricing: priceCall });
+    return { driver, mode, attribution: driver.attribution };
   }
-  return {
-    driver: createClaudeAgentSessionDriver({
-      pathToClaudeCodeExecutable: resolveClaudeBinary(),
-      model: SESSION_MODEL_CLAUDE_CODE,
-      ...(opts.cwd ? { cwd: opts.cwd } : {}),
-      ...(opts.providerStateDir ? { sessionStore: providerSessionStore(opts.providerStateDir) } : {}),
-    }),
-    mode,
+  const driver = createClaudeAgentSessionDriver({
+    pathToClaudeCodeExecutable: resolveClaudeBinary(),
     model: SESSION_MODEL_CLAUDE_CODE,
-  };
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    ...(opts.providerStateDir ? { sessionStore: providerSessionStore(opts.providerStateDir) } : {}),
+  });
+  return { driver, mode, attribution: driver.attribution };
 }
 
 /**
