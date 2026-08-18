@@ -625,7 +625,10 @@ describe('claude agent session driver provider retries', () => {
     const retries = events.filter((e) => e.type === 'provider-retry');
     expect(retries).toHaveLength(1);
     expect(retries[0]).toMatchObject({ message: 'rate limited (five_hour)' });
-    // The wait is the window's own reset, in whole seconds from now.
-    expect(Math.round((retries[0] as { delayMs: number }).delayMs / 1000)).toBe(30);
+    // The wait is the window's own reset — measured from mapping time, so
+    // anything the test itself spent is legitimately shaved off the 30s.
+    const delaySec = (retries[0] as { delayMs: number }).delayMs / 1000;
+    expect(delaySec).toBeGreaterThan(25);
+    expect(delaySec).toBeLessThanOrEqual(30);
   });
 });
