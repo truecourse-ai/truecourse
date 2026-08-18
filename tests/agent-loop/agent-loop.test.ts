@@ -925,6 +925,248 @@ describe('runAgentLoop questions and steering', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// the outcome precondition (01 step 2k)
+// ---------------------------------------------------------------------------
+
+describe('runAgentLoop outcome precondition', () => {
+  const PRECONDITION = {
+    tool: 'check_draft',
+    message: 'You have not called `check_draft` yet. Call it, then state your outcome.',
+  };
+  const gated = (overrides?: Partial<SessionDef<Outcome>>) =>
+    makeDef({ outcomePrecondition: PRECONDITION, ...overrides });
+
+  /** Drivers record `user-message` at the moment they ingest it. */
+  const ingest = async (ctx: FakeScriptCtx) => {
+    for (const m of ctx.input.initialMessages) await ctx.emit({ type: 'user-message', content: m });
+  };
+
+  it('refuses an outcome produced before the required tool ran, and takes the next one', async () => {
+    let run = 0;
+    const { driver, runs } = fakeDriver(async (ctx) => {
+      run += 1;
+      await ingest(ctx);
+      if (run === 1) {
+        await ctx.emit({ type: 'assistant-turn', text: 'drafting', usage: usage(10) });
+        return {
+          kind: 'outcome',
+          value: { verdict: 'premature' },
+          resumeCursor: { providerSessionId: 'p-1' },
+        };
+      }
+      await ctx.emit({
+        type: 'assistant-turn',
+        toolCall: { name: 'check_draft', args: {} },
+        usage: usage(10),
+      });
+      await ctx.emit({ type: 'tool-result', toolName: 'check_draft', content: 'ok' });
+      await ctx.emit({ type: 'assistant-turn', text: 'settled', usage: usage(10) });
+      return { kind: 'outcome', value: { verdict: 'checked' } };
+    });
+    const { persistence } = memoryPersistence();
+
+    const outcome = await runAgentLoop({
+      def: gated(),
+      workItem: 'w',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    if (outcome.status !== 'completed') throw new Error('unreachable');
+    expect(outcome.output).toEqual({ verdict: 'checked' });
+    // A real round trip: the message goes back, and the refused turn is still
+    // charged to the budget.
+    expect(runs).toHaveLength(2);
+    expect(runs[1].initialMessages).toEqual([PRECONDITION.message]);
+    expect(runs[1].resume?.cursor).toEqual({ providerSessionId: 'p-1' });
+    expect(runs[1].resume?.events.some((e) => e.type === 'assistant-turn' && e.text === 'drafting')).toBe(true);
+    expect(outcome.spent.turns).toBe(3);
+
+    // The refused value is never an outcome event; the message follows the
+    // turn that produced it.
+    const events = persistence.readEvents('s1');
+    expect(events.map((e) => e.type)).toEqual([
+      'session-start',
+      'user-message',
+      'assistant-turn',
+      'user-message',
+      'assistant-turn',
+      'tool-result',
+      'assistant-turn',
+      'outcome',
+    ]);
+    expect(events.filter((e) => e.type === 'outcome')).toEqual([
+      expect.objectContaining({ value: { verdict: 'checked' } }),
+    ]);
+    expect(events[3]).toMatchObject({ type: 'user-message', content: PRECONDITION.message });
+  });
+
+  it('is not a malformed turn — a session that skipped a step is told, not killed', async () => {
+    let run = 0;
+    const { driver } = fakeDriver(async (ctx) => {
+      run += 1;
+      await ingest(ctx);
+      if (run === 1) {
+        await ctx.emit({
+          type: 'assistant-turn',
+          toolCall: { name: 'nope', args: {} },
+          usage: usage(10),
+        });
+        await ctx.emit({ type: 're-ask', invalid: '{}', reason: 'unknown tool' });
+        return { kind: 'outcome', value: { verdict: 'premature' } };
+      }
+      await ctx.emit({ type: 'tool-result', toolName: 'check_draft', content: 'ok' });
+      await ctx.emit({ type: 'assistant-turn', text: 'settled', usage: usage(10) });
+      return { kind: 'outcome', value: { verdict: 'checked' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: gated(),
+      workItem: 'w',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    // The two-consecutive rule saw one re-ask, and the refusal added none.
+    expect(persistence.readEvents('s1').filter((e) => e.type === 're-ask')).toHaveLength(1);
+    expect(persistence.readEvents('s1').some((e) => e.type === 'failure')).toBe(false);
+  });
+
+  it('fires at most once — a second outcome stands on its own merits', async () => {
+    const { driver, runs } = fakeDriver(async (ctx) => {
+      await ingest(ctx);
+      await ctx.emit({ type: 'assistant-turn', text: 'still no check', usage: usage(10) });
+      return { kind: 'outcome', value: { verdict: 'unchecked' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: gated(),
+      workItem: 'w',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    if (outcome.status !== 'completed') throw new Error('unreachable');
+    expect(outcome.output).toEqual({ verdict: 'unchecked' });
+    expect(runs).toHaveLength(2);
+  });
+
+  it('a session that burns its budget still refusing ends budget-exhausted, not malformed', async () => {
+    let run = 0;
+    const { driver, runs } = fakeDriver(async (ctx) => {
+      run += 1;
+      await ingest(ctx);
+      if (run === 1) {
+        await ctx.emit({ type: 'assistant-turn', text: 'drafting', usage: usage(10) });
+        return { kind: 'outcome', value: { verdict: 'premature' } };
+      }
+      for (let i = 0; i < 20 && !ctx.interrupted(); i++) {
+        await ctx.emit({ type: 'assistant-turn', text: `turn ${i}`, usage: usage(10) });
+      }
+      return endedWithoutOutcome();
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: gated({ budget: { turns: 3, maxResumes: 0, tokenCeiling: 1_000_000 } }),
+      workItem: 'w',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status !== 'failed') throw new Error('unreachable');
+    expect(outcome.failure.kind).toBe('budget-exhausted');
+    expect(runs).toHaveLength(2);
+  });
+
+  it('does not refuse an outcome the shell has already decided to stop for', async () => {
+    // The budget interrupt fired on the very turn that produced the outcome:
+    // there is no budget left to comply in, so it stands on its own merits.
+    const { driver, runs } = fakeDriver(async (ctx) => {
+      await ingest(ctx);
+      await ctx.emit({ type: 'assistant-turn', text: 'last turn', usage: usage(10) });
+      return { kind: 'outcome', value: { verdict: 'unchecked' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: gated({ budget: { turns: 1, maxResumes: 0, tokenCeiling: 1_000_000 } }),
+      workItem: 'w',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    expect(runs).toHaveLength(1);
+  });
+
+  it('counts a tool-result carried by the resumed-from transcript', async () => {
+    const { persistence } = memoryPersistence();
+    persistence.appendEvent('s1', {
+      type: 'tool-result',
+      toolName: 'check_draft',
+      content: 'ok',
+      seq: 0,
+      ts: '2026-08-17T00:00:00.000Z',
+    });
+    const { driver, runs } = fakeDriver(async () => ({
+      kind: 'outcome',
+      value: { verdict: 'resumed' },
+    }));
+
+    const outcome = await runAgentLoop({
+      def: gated(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's2',
+      resume: { of: 's1' },
+    }).outcome;
+
+    // The tool ran; this session carries that transcript as its history.
+    expect(outcome.status).toBe('completed');
+    expect(runs).toHaveLength(1);
+  });
+
+  it('counts an error result — what matters is that the tool ran', async () => {
+    const { driver, runs } = fakeDriver(async (ctx) => {
+      await ctx.emit({
+        type: 'tool-result',
+        toolName: 'check_draft',
+        content: 'two ids collide',
+        isError: true,
+      });
+      return { kind: 'outcome', value: { verdict: 'revised' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: gated(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    expect(runs).toHaveLength(1);
+  });
+});
+
 /** Drivers pass their own ctx; the shell's wrapper must ignore it. */
 function dummyToolCtx(): ToolContext {
   return {

@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { guardInterfaceFindingsPath } from '@truecourse/guard-runner'
-import { appendInterfaceFindings } from '../../packages/interface-author/src/findings'
+import { appendInterfaceFindings } from '../../packages/core/src/services/interface-author/findings'
 
 let repo: string
 

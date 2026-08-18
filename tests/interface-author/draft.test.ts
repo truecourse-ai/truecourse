@@ -12,7 +12,7 @@ import {
   stampFragment,
   validateFragment,
   type AuthoredFragment,
-} from '../../packages/interface-author/src/draft'
+} from '../../packages/core/src/services/interface-author/draft'
 import { interfaceFingerprint, type InterfacesFile } from '../../packages/shared/src/index'
 
 const DERIVED: InterfacesFile = {

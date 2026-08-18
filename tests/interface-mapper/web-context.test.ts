@@ -29,7 +29,7 @@ interface FileSpec {
   calls?: string[]
   /** Re-exported names — a file whose exports are ALL re-exports is a barrel. */
   reexports?: string[]
-  /** Imports as `name from source` — what proves a tRPC client proxy. */
+  /** Imports as `name from source` or `name as alias from source`. */
   imports?: string[]
 }
 
@@ -50,10 +50,11 @@ function file(path: string, spec: FileSpec = {}): FileAnalysis {
     }),
     classes: classesOf(path, spec.methods ?? []),
     imports: (spec.imports ?? []).map((entry) => {
-      const [name, source] = entry.split(' from ')
+      const [binding, source] = entry.split(' from ')
+      const [name, alias] = binding.split(' as ')
       return {
         source,
-        specifiers: [{ name, isDefault: false, isNamespace: false }],
+        specifiers: [{ name, ...(alias ? { alias } : {}), isDefault: false, isNamespace: false }],
         isTypeOnly: false,
       }
     }),
@@ -256,6 +257,138 @@ describe('the component closure (tier 2)', () => {
     // no control.
     expect(contexts.get('root')?.renders).toEqual(['ui/button.tsx'])
     expect(contexts.get('root')?.closure).toBe(3)
+  })
+})
+
+/**
+ * IMPORTED IS NOT RENDERED. The measured miss: documenso's `/signin` route imports
+ * one CONSTANT from `signup.tsx`, and a closure that reads every import as a
+ * render told the session the sign-in screen renders the sign-up form — and
+ * everything reachable behind it. Membership needs USE evidence, and the posture
+ * on the other side is refuse-nothing: an edge whose usage the analyzer cannot
+ * see stays in.
+ */
+describe('render evidence (item 105, the `/signin` regression)', () => {
+  it('drops a module imported for a CONSTANT, and everything reached only through it', () => {
+    const contexts = derive(
+      { signin: place('/signin', 'app/signin/page.tsx') },
+      [
+        file('app/signin/page.tsx', { calls: ['SignInForm@20'] }),
+        file('app/signin/signin-form.tsx'),
+        file('app/signup/signup.tsx'),
+        file('app/profile/user-profile.tsx'),
+      ],
+      [
+        edge('app/signin/page.tsx -> app/signin/signin-form.tsx {SignInForm}'),
+        edge('app/signin/page.tsx -> app/signup/signup.tsx {SIGNUP_ERROR_MESSAGES}'),
+        edge('app/signup/signup.tsx -> app/profile/user-profile.tsx {UserProfile}'),
+      ],
+    )
+    const context = contexts.get('signin')!
+    expect(context.renders).toEqual(['app/signin/signin-form.tsx'])
+    // The closure is untouched — the JOIN still walks every import, because an
+    // api client is reached by exactly the kind of edge this pass declines.
+    expect(context.closure).toBe(4)
+  })
+
+  it('keeps a component passed as a PROP — a JSX attribute ref is a use', () => {
+    const contexts = derive(
+      { root: place('/', 'page.tsx') },
+      [file('page.tsx', { calls: ['Panel@8', 'Form@9'] }), file('panel.tsx'), file('form.tsx')],
+      [edge('page.tsx -> panel.tsx {Panel}'), edge('page.tsx -> form.tsx {Form}')],
+    )
+    expect(contexts.get('root')?.renders).toEqual(['form.tsx', 'panel.tsx'])
+  })
+
+  it('keeps an ALIASED component — the graph records the export, `calls` the alias', () => {
+    const contexts = derive(
+      { root: place('/', 'page.tsx') },
+      [
+        file('page.tsx', {
+          imports: ['SignUpForm as Form from ./signup-form'],
+          calls: ['Form@12'],
+        }),
+        file('signup-form.tsx'),
+      ],
+      [edge('page.tsx -> signup-form.tsx {SignUpForm}')],
+    )
+    expect(contexts.get('root')?.renders).toEqual(['signup-form.tsx'])
+  })
+
+  it('keeps every edge whose usage the analyzer cannot see', () => {
+    // Four unknowns, all resolved IN: a namespace import names no binding; an
+    // importer with no analysis states nothing; a `.svelte` importer hides its
+    // template from `calls`; and a barrel renders nothing of its own, so the
+    // module behind it is what the importer asked for.
+    const contexts = derive(
+      { root: place('/', 'page.tsx') },
+      [
+        file('page.tsx', { calls: ['Button@4'] }),
+        file('ui/index.ts', { reexports: ['Button'] }),
+        file('ui/button.tsx'),
+        file('shell.svelte'),
+        file('shell-inner.tsx'),
+        file('deep.tsx'),
+      ],
+      [
+        // asked for by name → the barrel hop carries the name through
+        edge('page.tsx -> ui/index.ts {Button}'),
+        edge('ui/index.ts -> ui/button.tsx {Button}'),
+        // namespace import: no names at all
+        edge('page.tsx -> shell.svelte'),
+        edge('shell.svelte -> shell-inner.tsx {Inner}'),
+        // `mid.tsx` was never analyzed
+        edge('page.tsx -> mid.tsx'),
+        edge('mid.tsx -> deep.tsx {Deep}'),
+      ],
+      [],
+      3,
+    )
+    expect(contexts.get('root')?.renders.sort()).toEqual([
+      'deep.tsx',
+      'mid.tsx',
+      'shell-inner.tsx',
+      'shell.svelte',
+      'ui/button.tsx',
+    ])
+  })
+
+  it('keeps the WHOLE view list when no view has evidence — under-pruning is the posture', () => {
+    // A rendering idiom this pass cannot see (`return SignUpForm` bare) would
+    // otherwise empty the list and tell the session the screen renders nothing.
+    const contexts = derive(
+      { root: place('/', 'page.tsx') },
+      [
+        file('page.tsx', { calls: ['useState@2'] }),
+        file('view.tsx'),
+        file('table.tsx'),
+      ],
+      [edge('page.tsx -> view.tsx {View}'), edge('page.tsx -> table.tsx {Table}')],
+    )
+    expect(contexts.get('root')?.renders).toEqual(['table.tsx', 'view.tsx'])
+  })
+
+  it('leaves the api join alone — a module can be an effect without being a render', () => {
+    const contexts = derive(
+      { schedules: place('/schedules', 'page.tsx') },
+      [
+        file('page.tsx', { calls: ['Panel@8'] }),
+        file('panel.tsx'),
+        file('hooks/use-schedules.tsx', {
+          functions: ['useSchedules:5-9'],
+          http: ['POST /v2/schedules@6', 'GET /v3/nope@7'],
+        }),
+      ],
+      [
+        edge('page.tsx -> panel.tsx {Panel}'),
+        edge('page.tsx -> hooks/use-schedules.tsx {useSchedules}'),
+      ],
+      [api('POST', '/v2/schedules')],
+    )
+    const context = contexts.get('schedules')!
+    expect(context.renders).toEqual(['panel.tsx'])
+    expect(context.apiEffects).toEqual(['api/post-v2-schedules'])
+    expect(context.unjoined).toEqual(['GET /v3/nope — no api interface declares it'])
   })
 })
 

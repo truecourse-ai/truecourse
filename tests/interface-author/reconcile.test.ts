@@ -19,7 +19,7 @@ import {
   reconcileAuthoredStates,
   reconcileStates,
   type ReconcileComplete,
-} from '../../packages/interface-author/src/reconcile'
+} from '../../packages/core/src/services/interface-author/reconcile'
 import { interfaceFingerprint, type Interface, type InterfacesFile } from '../../packages/shared/src/index'
 import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/guard-runner'
 

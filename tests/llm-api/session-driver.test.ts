@@ -11,7 +11,13 @@ import { z } from 'zod';
 const { buildModelMock } = vi.hoisted(() => ({ buildModelMock: vi.fn() }));
 vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMock }));
 
-import { createApiSessionDriver, OUTCOME_TOOL_NAME } from '../../packages/llm-api/src/index';
+import {
+  createApiSessionDriver,
+  DEFAULT_API_RETRY,
+  OUTCOME_TOOL_NAME,
+  RETRY_JITTER,
+  retryDelayMs,
+} from '../../packages/llm-api/src/index';
 import type {
   ApiSessionDriverOptions,
   ProviderConfig,
@@ -772,6 +778,9 @@ describe('api session driver provider retries', () => {
       sleep: async (ms) => {
         slept.push(ms);
       },
+      // Jitter off: what is under test here is the ladder, the Retry-After
+      // floor and the cap, and a random stretch would make every wait a range.
+      random: () => 0,
     });
     return { ...runSession(driver), slept, primary, fallback };
   }
@@ -811,6 +820,18 @@ describe('api session driver provider retries', () => {
     expect(events.filter((e) => e.type === 'provider-retry').map((e) => (e as { delayMs: number }).delayMs)).toEqual([
       7000, 60_000,
     ]);
+  });
+
+  it('floors a short Retry-After with the ladder (01 step 2i)', async () => {
+    // The header is advice about a world that does not include the load we
+    // ourselves generate: twenty sessions each waiting the suggested second
+    // keep the deployment saturated forever.
+    const { handle, slept } = retryHarness([
+      { throws: apiError(429, true, { 'retry-after': '1' }) },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    await handle.done;
+    expect(slept).toEqual([2000]);
   });
 
   it('never retries a failure the SDK judged final', async () => {
@@ -902,5 +923,36 @@ describe('api session driver provider retries', () => {
     expect(scripted.calls).toHaveLength(1);
     expect(events.filter((e) => e.type === 'provider-retry')).toHaveLength(1);
     expect(result.kind).toBe('failure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// retryDelayMs (01 step 2i): the three rules, as arithmetic
+// ---------------------------------------------------------------------------
+
+describe('retryDelayMs', () => {
+  const policy = DEFAULT_API_RETRY;
+  const noJitter = () => 0;
+
+  it('floors Retry-After with the ladder, obeys a longer one, and caps both', () => {
+    expect(retryDelayMs(policy, 1, 1000, noJitter)).toBe(2000); // ladder wins
+    expect(retryDelayMs(policy, 1, 7000, noJitter)).toBe(7000); // the header wins
+    expect(retryDelayMs(policy, 2, undefined, noJitter)).toBe(4000); // the ladder alone
+    expect(retryDelayMs(policy, 1, 3_600_000, noJitter)).toBe(60_000); // an hour is not a wait
+  });
+
+  it('stretches by up to the full jitter fraction, rounded', () => {
+    expect(retryDelayMs(policy, 1, undefined, () => 1)).toBe(2000 * (1 + RETRY_JITTER));
+    expect(retryDelayMs(policy, 1, undefined, () => 1 / 3)).toBe(2167); // 2166.67, rounded
+  });
+
+  it('is monotone in the attempt and never negative', () => {
+    const waits = [1, 2, 3, 4, 5].map((attempt) => retryDelayMs(policy, attempt, undefined, noJitter));
+    expect(waits).toEqual([...waits].sort((a, b) => a - b));
+    for (const wait of waits) expect(wait).toBeGreaterThanOrEqual(0);
+    // Concurrent sessions that failed together never re-collide on one tick.
+    expect(retryDelayMs(policy, 1, undefined, () => 0.5)).toBeGreaterThan(
+      retryDelayMs(policy, 1, undefined, noJitter),
+    );
   });
 });

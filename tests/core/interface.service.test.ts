@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mapInterfaces, interfaceTypeFingerprints } from '../../packages/core/src/services/interface.service';
 import { ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
+import { interfaceFingerprint } from '../../packages/shared/src/interfaces';
 import type { InterfacesFile } from '../../packages/shared/src/index';
 
 const COMMANDER_CLI = `
@@ -335,11 +336,77 @@ describe('mapInterfaces', () => {
     // second copy for the generator to join by method+path.
     expect('requestContracts' in result).toBe(false);
 
-    // Nothing else is invented: no statuses, no body markers, no path params —
-    // the derivation establishes none of them, and omitted is the honest answer.
-    expect(post.operation.produces).toBeUndefined();
+    // The response side rides along, mapped onto the catalog's own fact kinds:
+    // a status is a string, a body key is the marker AS THE RESPONSE CARRIES IT.
+    expect(post.operation.produces).toEqual({
+      statuses: [{ status: '201' }, { status: '400' }],
+      body: [{ marker: '"error"' }],
+    });
+    expect(get.operation.produces).toEqual({ statuses: [{ status: '200' }] });
+
+    // Nothing else is invented: no consumes, no path params — the derivation
+    // establishes neither, and omitted is the honest answer.
     expect(post.operation.consumes).toBeUndefined();
     expect(post.operation.request!.params).toBeUndefined();
+  });
+
+  it('writes only the REGIONS the derivation established', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'src/server.ts': `
+        import express from 'express'
+        const app = express()
+        app.get('/healthz', (_req, res) => res.status(204).end())
+        app.post('/ingest', (req, res) => { enqueue(req.body.payload) })
+        app.get('/opaque', handleOpaque)
+        app.listen(3000)
+      `,
+    });
+
+    const result = await mapInterfaces(repo, { probeExec: null });
+    const contractOf = (id: string) => result.catalog.interfaces.find((j) => j.id === id)!.contract;
+
+    // Answers but reads nothing — a produces-only contract carries no empty
+    // `request` envelope.
+    const healthz = contractOf('api/get-healthz')!;
+    if (healthz.surface !== 'api') throw new Error('not an api contract');
+    expect(healthz.operation).toEqual({ produces: { statuses: [{ status: '204' }] } });
+
+    // Reads but answers invisibly — the mirror case.
+    const ingest = contractOf('api/post-ingest')!;
+    if (ingest.surface !== 'api') throw new Error('not an api contract');
+    expect(ingest.operation).toEqual({
+      request: { body: [{ name: 'payload', required: 'unknown' }] },
+    });
+
+    // Says nothing at all — no contract, rather than an empty one.
+    expect(contractOf('api/get-opaque')).toBeUndefined();
+  });
+
+  it('gaining a contract moves NO fingerprint — it is not which operation this is', async () => {
+    const server = (handler: string) => `
+      import express from 'express'
+      const app = express()
+      app.post('/deploys', ${handler})
+      app.listen(3000)
+    `;
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit' }),
+      'src/server.ts': server(`createDeploy`),
+    });
+    const bare = (await mapInterfaces(repo, { probeExec: null })).catalog.interfaces[0];
+    expect(bare.contract).toBeUndefined();
+
+    writeRepo({
+      'src/server.ts': server(`(req, res) => { const { service } = req.body; res.status(201).json({ id: 1 }) }`),
+    });
+    const contracted = (await mapInterfaces(repo, { probeExec: null })).catalog.interfaces[0];
+
+    expect(contracted.contract).toBeDefined();
+    expect(contracted.fingerprint).toBe(bare.fingerprint);
+    expect(contracted.fingerprint).toBe(
+      interfaceFingerprint({ type: contracted.type, entry: contracted.entry, steps: contracted.steps }),
+    );
   });
 
   it('unions the corpus-kept OpenAPI doc into the api catalog and marks unrouted operations specOnly', async () => {

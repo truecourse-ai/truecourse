@@ -15,8 +15,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { WebPlaceContext } from '../../packages/interface-mapper/src/web-context'
-import { clusterPlaces } from '../../packages/interface-author/src/cluster'
-import { MAX_PACK_BYTES, clusterPack } from '../../packages/interface-author/src/pack'
+import {
+  MAX_CLUSTER_MEMBERS,
+  MIN_SHARED,
+  clusterPlaces,
+  orderClustersLongestFirst,
+  type PlaceCluster,
+} from '../../packages/core/src/services/interface-author/cluster'
+import { MAX_PACK_BYTES, clusterPack } from '../../packages/core/src/services/interface-author/pack'
 
 /** A context pack carrying only what clustering reads: the rendered modules. */
 function renders(...modules: string[]): WebPlaceContext {
@@ -111,6 +117,73 @@ describe('clustering places by what they render', () => {
     const clusters = clusterPlaces({ places: ['a', 'b'], context, minShared: 2, minJaccard: 0.5 })
     expect(clusters.map((c) => c.places)).toEqual([['a', 'b']])
     expect(clusters[0].shared).toEqual(['a.tsx', 'b.tsx'])
+  })
+})
+
+/**
+ * THE SERIAL-CHAIN BOUND (01 step 2j). A cluster's members run one after
+ * another, so the run cannot finish before its longest cluster does — at ~20
+ * minutes a member, an eight-member group is a two-and-a-half hour critical
+ * path that no amount of workers shortens. The greedy pass therefore stops
+ * admitting members at {@link MAX_CLUSTER_MEMBERS}, and the peers it turns away
+ * regroup under a later seed rather than being scattered into singletons.
+ */
+describe('a cluster is capped at the serial chain it can afford', () => {
+  /** Eight places that all render the same eight modules plus one of their own. */
+  const eight = new Map<string, WebPlaceContext>(
+    ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'].map((id) => [
+      id,
+      renders(...SHELL, `${id}.tsx`),
+    ]),
+  )
+  const places = [...eight.keys()]
+
+  it('splits an over-large group into whole clusters, each still worth a pack', () => {
+    const clusters = clusterPlaces({ places, context: eight })
+
+    // Every pair here is 0.8 alike, so without the cap this is one group of 8.
+    expect(clusters.map((c) => c.places)).toEqual([
+      ['p1', 'p2', 'p3'],
+      ['p4', 'p5', 'p6'],
+      ['p7', 'p8'],
+    ])
+    for (const cluster of clusters) {
+      expect(cluster.places.length).toBeLessThanOrEqual(MAX_CLUSTER_MEMBERS)
+      // A split cluster is still a cluster: it keeps the shared-prefix property.
+      expect(cluster.shared.length).toBeGreaterThanOrEqual(MIN_SHARED)
+    }
+    // Seeded by the first unassigned place, so the ids read off the work list.
+    expect(clusters.map((c) => c.id)).toEqual(['cluster/p1', 'cluster/p4', 'cluster/p7'])
+    // Still a pure function of its input, cap and all.
+    expect(clusterPlaces({ places, context: eight })).toEqual(clusters)
+  })
+
+  it('is a threshold like the others — a measurement may lift it', () => {
+    const clusters = clusterPlaces({ places, context: eight, maxMembers: Number.POSITIVE_INFINITY })
+    expect(clusters.map((c) => c.places)).toEqual([places])
+    expect(clusters[0].shared).toEqual([...SHELL].sort())
+  })
+})
+
+/**
+ * THE HAND-OFF ORDER (same step). The pool starts serial groups in the order it
+ * is handed them, so the order IS the schedule: starting the longest chain last
+ * adds its whole length to the makespan for nothing.
+ */
+describe('ordering the clusters for the pool', () => {
+  const cluster = (id: string, size: number): PlaceCluster => ({
+    id,
+    places: Array.from({ length: size }, (_, index) => `${id}-${index}`),
+    shared: [],
+  })
+
+  it('puts the longest chain first and keeps equal-length clusters in work-list order', () => {
+    const input = [cluster('a', 1), cluster('b', 3), cluster('c', 2), cluster('d', 3), cluster('e', 1)]
+    const before = input.map((c) => c.id)
+
+    expect(orderClustersLongestFirst(input).map((c) => c.id)).toEqual(['b', 'd', 'c', 'a', 'e'])
+    // The caller keeps its own list — the schedule is a second view of it.
+    expect(input.map((c) => c.id)).toEqual(before)
   })
 })
 

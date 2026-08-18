@@ -14,7 +14,7 @@
  * at an address nobody serves is worse than one nobody mapped.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
 import { deriveRpcOperations } from '../../packages/interface-mapper/src/rpc-interfaces'
 import { deriveApiInterfacesFromTree } from '../../packages/interface-mapper/src/api-tree'
@@ -59,6 +59,32 @@ const T3_TREE = [
   analyze('src/app/api/trpc/[trpc]/route.ts', NEXT_HANDLER),
   analyze('src/server/api/root.ts', T3_ROOT),
   analyze('src/server/api/routers/post.ts', T3_POST_ROUTER),
+]
+
+/** A file-routed fetch adapter that names ONE router — the cal.com per-router shape. */
+const ADAPTER_OF = (router: string, source: string): string => `
+  import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+  import { ${router} } from "${source}";
+  const handler = (req: Request) => fetchRequestHandler({ req, router: ${router} });
+  export { handler as GET, handler as POST };
+`
+
+/** Two sibling sub-trees, each its own root — what a per-router mount serves. */
+const ALPHA_BETA_ROUTERS = [
+  analyze(
+    'src/server/api/alpha.ts',
+    `
+      import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+      export const alphaRouter = createTRPCRouter({ a: publicProcedure.query(fn) });
+    `,
+  ),
+  analyze(
+    'src/server/api/beta.ts',
+    `
+      import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+      export const betaRouter = createTRPCRouter({ b: publicProcedure.mutation(fn) });
+    `,
+  ),
 ]
 
 describe('deriveRpcOperations — composition', () => {
@@ -221,11 +247,31 @@ describe('deriveRpcOperations — the mount', () => {
     expect(deriveRpcOperations(tree).map((s) => s.path)).toContain('/trpc/health')
   })
 
-  it('derives nothing when two adapters state two different mounts', () => {
+  it('serves the SAME tree at every mount that states it — two mounts, both derive', () => {
+    // Two adapters, two addresses, one root. The union is the honest answer: both
+    // addresses really answer, so deriving neither would hide half the surface.
     const tree = [
       analyze('src/app/api/trpc/[trpc]/route.ts', NEXT_HANDLER),
       analyze('src/pages/api/v2/trpc/[trpc].ts', NEXT_HANDLER),
       ...T3_TREE.slice(1),
+    ]
+    expect(deriveRpcOperations(tree).map((s) => `${s.method} ${s.path}`)).toEqual([
+      'GET /api/trpc/health',
+      'POST /api/trpc/post.create',
+      'GET /api/trpc/post.getLatest',
+      'GET /api/v2/trpc/health',
+      'POST /api/v2/trpc/post.create',
+      'GET /api/v2/trpc/post.getLatest',
+    ])
+  })
+
+  it('derives nothing for a PATH two adapters give two different roots', () => {
+    // The refusal moved down to the path: which tree `/api/trpc` serves is what
+    // this repo failed to state, and half-guessing it renames every procedure.
+    const tree = [
+      analyze('apps/web/pages/api/trpc/[trpc].ts', ADAPTER_OF('alphaRouter', '~/server/api/alpha')),
+      analyze('apps/admin/pages/api/trpc/[trpc].ts', ADAPTER_OF('betaRouter', '~/server/api/beta')),
+      ...ALPHA_BETA_ROUTERS,
     ]
     expect(deriveRpcOperations(tree)).toEqual([])
   })
@@ -268,6 +314,210 @@ describe('deriveRpcOperations — the root', () => {
       'post.getLatest',
     ])
   })
+
+  it('refuses an adapter file naming TWO same-named routers, never falling back to the global root', () => {
+    // In a many-mounts world the whole-tree guess is the wrong answer, not a
+    // safer one: it would serve `appRouter` at an address that answers `items`.
+    const items = `
+      import { router, publicProcedure } from "../trpc";
+      export const itemsRouter = router({ list: publicProcedure.query(fn) });
+    `
+    const tree = [
+      analyze('src/app/api/trpc/[trpc]/route.ts', ADAPTER_OF('itemsRouter', '~/server/admin/items')),
+      analyze(
+        'src/server/api/root.ts',
+        `
+          import { router, publicProcedure } from "./trpc";
+          import { itemsRouter } from "./admin/items";
+          export const appRouter = router({ admin: itemsRouter, ping: publicProcedure.query(fn) });
+        `,
+      ),
+      analyze('src/server/admin/items.ts', items),
+      analyze('src/server/public/items.ts', items),
+    ]
+    expect(deriveRpcOperations(tree)).toEqual([])
+  })
+})
+
+describe('deriveRpcOperations — many mounts (item 12, the cal.com shape)', () => {
+  it('derives every (mount, root) pair, each procedure relative to its OWN root', () => {
+    // cal.com ships 29 `pages/api/trpc/<router>/[trpc].ts` files, each serving a
+    // DIFFERENT sub-tree. The served name is what the server answers at that
+    // address: `a`, never `alpha.a` — the sub-tree IS the root there.
+    const tree = [
+      analyze('src/pages/api/trpc/alpha/[trpc].ts', ADAPTER_OF('alphaRouter', '~/server/api/alpha')),
+      analyze('src/pages/api/trpc/beta/[trpc].ts', ADAPTER_OF('betaRouter', '~/server/api/beta')),
+      ...ALPHA_BETA_ROUTERS,
+    ]
+    const seeds = deriveRpcOperations(tree)
+    expect(seeds.map((s) => `${s.method} ${s.path}`)).toEqual([
+      'GET /api/trpc/alpha/a',
+      'POST /api/trpc/beta/b',
+    ])
+    expect(seeds.map((s) => s.procedure)).toEqual(['a', 'b'])
+  })
+
+  it('drops only the ambiguous PATH — every other pair still derives', () => {
+    const tree = [
+      analyze('apps/web/pages/api/trpc/[trpc].ts', ADAPTER_OF('alphaRouter', '~/server/api/alpha')),
+      analyze('apps/admin/pages/api/trpc/[trpc].ts', ADAPTER_OF('betaRouter', '~/server/api/beta')),
+      analyze('apps/web/pages/api/other/trpc/[trpc].ts', ADAPTER_OF('gammaRouter', '~/server/api/gamma')),
+      ...ALPHA_BETA_ROUTERS,
+      analyze(
+        'src/server/api/gamma.ts',
+        `
+          import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+          export const gammaRouter = createTRPCRouter({ g: publicProcedure.query(fn) });
+        `,
+      ),
+    ]
+    expect(deriveRpcOperations(tree).map((s) => `${s.method} ${s.path}`)).toEqual([
+      'GET /api/other/trpc/g',
+    ])
+  })
+
+  it('reports a clipped tree rather than claiming a completeness it lacks', () => {
+    // The budget is GLOBAL across pairs: five mounts of a 500-procedure router is
+    // 2500 operations against a 2000 bound, so the tail is clipped and said so.
+    const procedures = Array.from({ length: 500 }, (_, i) => `p${i}: publicProcedure.query(fn),`).join('\n')
+    const tree = [
+      ...Array.from({ length: 5 }, (_, i) =>
+        analyze(`src/pages/api/trpc/m${i}/[trpc].ts`, ADAPTER_OF('bigRouter', '~/server/api/big')),
+      ),
+      analyze(
+        'src/server/api/big.ts',
+        `
+          import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+          export const bigRouter = createTRPCRouter({ ${procedures} });
+        `,
+      ),
+    ]
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(deriveRpcOperations(tree)).toHaveLength(2000)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn.mock.calls[0][0]).toMatch(/clipped at 2000 procedures across 5 mount\(s\)/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
+describe('deriveRpcOperations — adapter evidence beyond the file-routed shape', () => {
+  /** documenso's shape: the mount is here, the adapter import is one hop away. */
+  const HOP_APP = `
+    import { Hono } from 'hono'
+    import { reactRouterTrpcServer } from './trpc/hono-trpc-remix'
+    const app = new Hono()
+    app.use('/api/trpc/*', reactRouterTrpcServer)
+  `
+
+  it('follows the mounted identifier ONE hop to the module that imports the adapter', () => {
+    const tree = [
+      analyze('src/router.ts', HOP_APP),
+      analyze(
+        'src/trpc/hono-trpc-remix.ts',
+        `
+          import { trpcServer } from '@hono/trpc-server'
+          import { appRouter } from '../server/api/root'
+          export const reactRouterTrpcServer = trpcServer({ router: appRouter })
+        `,
+      ),
+      ...T3_TREE.slice(1),
+    ]
+    // `/api/trpc/*` serves the tree AT `/api/trpc` — composing the star in would
+    // put every procedure at an address nobody answers.
+    expect(deriveRpcOperations(tree).map((s) => s.path)).toEqual([
+      '/api/trpc/health',
+      '/api/trpc/post.create',
+      '/api/trpc/post.getLatest',
+    ])
+  })
+
+  it('stays no-evidence when the mounted identifier resolves to nothing', () => {
+    const tree = [
+      analyze(
+        'src/router.ts',
+        `
+          import { Hono } from 'hono'
+          const app = new Hono()
+          app.use('/api/trpc/*', reactRouterTrpcServer)
+        `,
+      ),
+      ...T3_TREE.slice(1),
+    ]
+    expect(deriveRpcOperations(tree)).toEqual([])
+  })
+
+  it('stays no-evidence when the hop lands on a module that imports no adapter', () => {
+    const tree = [
+      analyze('src/router.ts', HOP_APP),
+      analyze(
+        'src/trpc/hono-trpc-remix.ts',
+        `
+          import { appRouter } from '../server/api/root'
+          export const reactRouterTrpcServer = somethingElse({ router: appRouter })
+        `,
+      ),
+      ...T3_TREE.slice(1),
+    ]
+    expect(deriveRpcOperations(tree)).toEqual([])
+  })
+
+  it('reads a COMMUNITY adapter package the same way it reads an official one', () => {
+    const tree = [
+      analyze(
+        'src/server.ts',
+        `
+          import { Hono } from 'hono'
+          import { trpcServer } from '@hono/trpc-server'
+          import { appRouter } from './server/api/root'
+          const app = new Hono()
+          const handler = trpcServer({ router: appRouter })
+          app.use('/api/trpc/*', handler)
+        `,
+      ),
+      ...T3_TREE.slice(1),
+    ]
+    expect(deriveRpcOperations(tree).map((s) => s.path)).toContain('/api/trpc/health')
+  })
+
+  it('never counts a RELATIVE `./trpc-server` as adapter evidence — that is the repo’s own wrapper', () => {
+    const tree = [
+      analyze(
+        'src/server.ts',
+        `
+          import { Hono } from 'hono'
+          import { trpcServer } from './trpc-server'
+          import { appRouter } from './server/api/root'
+          const app = new Hono()
+          const handler = trpcServer({ router: appRouter })
+          app.use('/api/trpc/*', handler)
+        `,
+      ),
+      ...T3_TREE.slice(1),
+    ]
+    expect(deriveRpcOperations(tree)).toEqual([])
+  })
+
+  it('derives nothing from a mount that is nothing but a wildcard', () => {
+    // `app.use('/*', h)` states a middleware, not an address.
+    const bare = (path: string) => [
+      analyze(
+        'src/server.ts',
+        `
+          import express from 'express'
+          import * as trpcExpress from '@trpc/server/adapters/express'
+          import { appRouter } from './server/api/root'
+          const app = express()
+          app.use('${path}', trpcMiddleware)
+        `,
+      ),
+      ...T3_TREE.slice(1),
+    ]
+    expect(deriveRpcOperations(bare('/*'))).toEqual([])
+    expect(deriveRpcOperations(bare('*'))).toEqual([])
+  })
 })
 
 describe('the api derivation with an RPC tree', () => {
@@ -289,5 +539,30 @@ describe('the api derivation with an RPC tree', () => {
     const rpc = interfaces.find((j) => j.procedure === 'health')!
     const plain = deriveApiInterfacesFromTree([], [{ method: 'GET', routePath: '/api/trpc/health' }])[0]
     expect(rpc.fingerprint).toBe(plain.fingerprint)
+  })
+
+  it('gaining an rpc mount moves NO pre-existing interface’s fingerprint', () => {
+    // A repo that grows the tRPC derivation must re-author nothing it already had.
+    const routes = [
+      analyze(
+        'src/server.ts',
+        `
+          import express from 'express'
+          const app = express()
+          app.get('/health', getHealth)
+          app.post('/deploys', createDeploy)
+          app.listen(3000)
+        `,
+      ),
+    ]
+    const before = deriveApiInterfacesFromTree(routes)
+    const after = deriveApiInterfacesFromTree([...routes, ...T3_TREE])
+    const afterById = new Map(after.map((j) => [j.id, j]))
+
+    expect(before.length).toBeGreaterThan(0)
+    expect(after.length).toBe(before.length + 3)
+    for (const iface of before) {
+      expect(afterById.get(iface.id)?.fingerprint).toBe(iface.fingerprint)
+    }
   })
 })

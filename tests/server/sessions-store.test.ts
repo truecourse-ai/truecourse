@@ -15,6 +15,7 @@ import {
   sessionRunDir,
 } from '../../packages/core/src/lib/sessions-store.js';
 import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths.js';
+import { RunRecordSchema, SessionCommandSchema } from '../../packages/agent-loop/src/index';
 import type { SessionEvent } from '../../packages/agent-loop/src/index';
 
 let repo: string;
@@ -122,6 +123,28 @@ describe('sessions store', () => {
     const runs = listSessionRuns(repo);
     expect(runs.map((r) => r.runId)).toEqual([second.runId, first.runId]);
     expect(listSessionRuns(repo, 'spec-scan')).toEqual([]);
+  });
+
+  it('gives run adjudication its own command directory (01 step 2d)', () => {
+    // Adjudication runs against a RUN, on its own cadence — its own command.
+    const run = createSessionRun(repo, { command: 'guard-adjudicate', gitRef: 'main' });
+    const runJson = path.join(sessionRunDir(repo, 'guard-adjudicate', run.runId), 'run.json');
+    expect(fs.existsSync(runJson)).toBe(true);
+
+    const record = RunRecordSchema.parse(JSON.parse(fs.readFileSync(runJson, 'utf-8')));
+    expect(record).toMatchObject({ command: 'guard-adjudicate', runId: run.runId, status: 'running' });
+    expect(openSessionRun(repo, 'guard-adjudicate', run.runId).record().command).toBe(
+      'guard-adjudicate',
+    );
+
+    // The widening is additive: every command that existed still parses.
+    expect(SessionCommandSchema.options).toEqual([
+      'spec-scan',
+      'guard-setup',
+      'guard-generate',
+      'guard-interfaces',
+      'guard-adjudicate',
+    ]);
   });
 
   it('is gitignored entirely', () => {

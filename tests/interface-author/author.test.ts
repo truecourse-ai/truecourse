@@ -23,14 +23,15 @@ import type {
   SessionRunInput,
   TurnUsage,
 } from '../../packages/agent-loop/src/index'
-import { authorWebInterfaces, planWorkItems } from '../../packages/interface-author/src/author'
-import type { AuthoredFragment } from '../../packages/interface-author/src/draft'
+import { authorWebInterfaces, planWorkItems } from '../../packages/core/src/services/interface-author/author'
+import type { AuthoredFragment } from '../../packages/core/src/services/interface-author/draft'
 import { InterfacesFileSchema, type InterfacesFile } from '../../packages/shared/src/index'
 import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   mergeInterfaceCatalogs,
   readAuthoredInterfaceCatalog,
+  staleAuthoredPlaceDiagnostics,
 } from '@truecourse/guard-runner'
 
 // ---------------------------------------------------------------------------
@@ -139,16 +140,54 @@ const usage = (): TurnUsage => ({
 /** What one work item's session does. `workItem` is `web:<placeId>`. */
 type Script = (workItem: string, input: SessionRunInput) => Promise<DriverResult>
 
-function scriptedDriver(script: Script): { driver: SessionDriver; seen: SessionRunInput[] } {
+/**
+ * A driver that runs `script` per session.
+ *
+ * Two things it does beyond calling the script, both because a real driver does
+ * them and the shell's own machinery reads them back:
+ *
+ * - it records a `user-message` as it ingests each opening message. The shell
+ *   probes the transcript for exactly that to decide whether a retry has to
+ *   replay the briefing, and it is what lets {@link placeOf} still name the
+ *   place on a run that opens with no briefing at all.
+ * - it records a `check_draft` tool-result before an outcome, unless the script
+ *   already called the tool itself. The session def carries an
+ *   `outcomePrecondition` on `check_draft`, so a session that never ran it has
+ *   its FIRST outcome refused; a script standing in for a model that followed
+ *   the prompt has run it. `checksDraft: false` opts out — that is the model
+ *   the precondition exists for.
+ */
+function scriptedDriver(
+  script: Script,
+  opts: { checksDraft?: boolean } = {},
+): { driver: SessionDriver; seen: SessionRunInput[] } {
   const seen: SessionRunInput[] = []
   const driver: SessionDriver = {
     capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
     attribution: { provider: 'test', model: 'scripted' },
     runSession(input) {
       seen.push(input)
+      let ranCheckDraft = false
+      const observed: SessionRunInput = {
+        ...input,
+        onEvent: (event) => {
+          if (event.type === 'tool-result' && event.toolName === 'check_draft') ranCheckDraft = true
+          input.onEvent(event)
+        },
+      }
+      for (const content of input.initialMessages) input.onEvent({ type: 'user-message', content })
       const done = (async () => {
         await new Promise((r) => setTimeout(r, 0))
-        return script(placeOf(input), input)
+        const result = await script(placeOf(input), observed)
+        if (result.kind === 'outcome' && !ranCheckDraft && opts.checksDraft !== false) {
+          input.onEvent({
+            type: 'tool-result',
+            toolName: 'check_draft',
+            content: 'The draft is valid.',
+            isError: false,
+          })
+        }
+        return result
       })()
       return {
         done,
@@ -165,10 +204,24 @@ function scriptedDriver(script: Script): { driver: SessionDriver; seen: SessionR
  * The place the briefing names — the driver's stand-in for the model reading it.
  * The briefing is the LAST opening message: a cluster's shared pack rides in
  * front of it, and the pack is about several places at once.
+ *
+ * A CONTINUED run opens with no briefing: the shell's transient retry, its
+ * outcome-precondition refusal and the pool's transient re-queue each hand the
+ * driver the transcript so far instead. The briefing is in that transcript, as
+ * the `user-message` the first run recorded when it ingested it.
  */
 function placeOf(input: SessionRunInput): string {
-  const match = /^\s+place\s+(\S+)/m.exec(input.initialMessages.at(-1) ?? '')
-  return match ? match[1] : ''
+  const openings = [
+    input.initialMessages.at(-1) ?? '',
+    ...[...(input.resume?.events ?? [])]
+      .reverse()
+      .flatMap((event) => (event.type === 'user-message' ? [event.content] : [])),
+  ]
+  for (const opening of openings) {
+    const match = /^\s+place\s+(\S+)/m.exec(opening)
+    if (match) return match[1]
+  }
+  return ''
 }
 
 /** Call a session tool the way a driver does, recording the turn + result. */
@@ -484,6 +537,152 @@ describe('re-running', () => {
     await expect(
       authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['nowhere'] }),
     ).rejects.toThrow(/no such place: nowhere/)
+  })
+})
+
+/**
+ * STALE AUTHORED PLACES (01 step 2h). An authored screen the derivation no
+ * longer produces is an address nobody can stand at — the measured case is a
+ * route module that now only redirects. It stays in the MERGED catalog (a fresh
+ * clone has no derived half at all), but it earns no session: a work-list rule,
+ * reported by name rather than silently dropped.
+ */
+describe('an authored screen the derivation no longer produces', () => {
+  /** An authored half naming a screen the derivation does not, and a dialog. */
+  const AUTHORED_WITH_STALE: InterfacesFile = {
+    version: 2,
+    generatedAt: '2026-08-17T00:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [],
+    resources: {
+      web: [
+        { id: 'home', kind: 'screen', title: 'the old home screen', address: '/home' },
+        { id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repos-repoid' },
+      ],
+    },
+  }
+
+  beforeEach(() => {
+    fs.writeFileSync(guardAuthoredInterfacesPath(repo), JSON.stringify(AUTHORED_WITH_STALE))
+  })
+
+  /** Every place a session was actually opened for, in start order. */
+  function runOver(
+    derived: InterfacesFile | null,
+  ): Promise<{ started: string[]; result: Awaited<ReturnType<typeof authorWebInterfaces>> }> {
+    if (derived) fs.writeFileSync(guardInterfacesPath(repo), JSON.stringify(derived))
+    else fs.rmSync(guardInterfacesPath(repo))
+    const { persistence } = memoryPersistence()
+    const started: string[] = []
+    const { driver } = scriptedDriver(async (place) => {
+      started.push(place)
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    return authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 1 }).then(
+      (result) => ({ started, result }),
+    )
+  }
+
+  it('is reported by name and earns no session', async () => {
+    expect(staleAuthoredPlaceDiagnostics(DERIVED, AUTHORED_WITH_STALE)).toEqual([
+      {
+        surface: 'web',
+        kind: 'authored-place-not-derived',
+        subject: 'home',
+        detail: expect.stringContaining('authored screen `home` (/home) is not in the derived catalog'),
+      },
+    ])
+
+    const { started, result } = await runOver(DERIVED)
+    expect(result.diagnostics.map((d) => [d.kind, d.subject])).toEqual([
+      ['authored-place-not-derived', 'home'],
+    ])
+    // Not authored, not reported as a place, and not merely "skipped" either —
+    // `skipped` means "already has tasks", which is a different statement.
+    expect(started).toEqual(['root', 'repos-repoid'])
+    expect(result.places.map((p) => p.placeId)).toEqual(['root', 'repos-repoid'])
+    expect(result.skipped).toEqual([])
+  })
+
+  it('never reports a dialog or a panel — nothing derives those in the first place', async () => {
+    const { result } = await runOver(DERIVED)
+    expect(result.diagnostics.map((d) => d.subject)).not.toContain('rules-dialog')
+  })
+
+  /**
+   * THE ESCAPE HATCH. A repository whose web half the derivation cannot read at
+   * all (an unrecognized routing idiom, or a fresh clone that has not mapped
+   * yet) has every authored screen legitimately unbacked — reporting them all
+   * would be reporting the derivation's own gap as the author's mistake.
+   */
+  it('is authored normally when the derived web half is empty', async () => {
+    const { started, result } = await runOver({ ...DERIVED, resources: { web: [] } })
+    expect(result.diagnostics).toEqual([])
+    expect(started).toEqual(['home'])
+  })
+
+  it('is authored normally when nothing has been derived at all', async () => {
+    const { started, result } = await runOver(null)
+    expect(result.diagnostics).toEqual([])
+    expect(started).toEqual(['home'])
+  })
+
+  /** It is a WORK-LIST rule: the catalog readers see is unchanged by it. */
+  it('stays in the merged catalog regardless', async () => {
+    await runOver(DERIVED)
+    const merged = mergeInterfaceCatalogs(DERIVED, readAuthoredInterfaceCatalog(repo))
+    expect(merged.resources!.web.map((place) => place.id)).toContain('home')
+  })
+
+  it('is refused by name, and says why instead of "no such place"', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [] } }))
+    await expect(
+      authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['home'] }),
+    ).rejects.toThrow(/stale authored place: home/)
+    await expect(
+      authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['nowhere'] }),
+    ).rejects.toThrow(/no such place: nowhere/)
+  })
+
+  it('is an empty list on a run with nothing to report', async () => {
+    fs.rmSync(guardAuthoredInterfacesPath(repo))
+    const { result } = await runOver(DERIVED)
+    expect(result.diagnostics).toEqual([])
+  })
+})
+
+/**
+ * THE OUTCOME PRECONDITION (01 step 2k), wired onto this def. The prompt has
+ * demanded an early `check_draft` in the strongest terms it has, and across 110
+ * measured sessions the median first call was turn 9 — eight never called it.
+ * So the shell refuses the FIRST outcome of a session that skipped it, feeds
+ * the def's message back, and lets the session carry on.
+ */
+describe('a session that skipped `check_draft`', () => {
+  it('has its first outcome refused, is told so, and its second accepted', async () => {
+    const { persistence } = memoryPersistence()
+    const opened: string[][] = []
+    const { driver } = scriptedDriver(
+      async (_place, input) => {
+        opened.push([...input.initialMessages])
+        return { kind: 'outcome', value: HOME_FRAGMENT }
+      },
+      { checksDraft: false },
+    )
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+
+    // Two runs of one session: the briefing, then the refusal message alone.
+    expect(opened).toHaveLength(2)
+    expect(opened[0][0]).toContain('  place    root (screen)')
+    expect(opened[1]).toEqual([
+      'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your complete draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` again.',
+    ])
+    // It fires at most once: the second outcome is taken though the tool still
+    // never ran, so a stubborn session ends on its own merits, not in a loop.
+    expect(result.places[0].status).toBe('authored')
+    expect(result.places[0].taskIds).toEqual(['web/add-repository-by-path'])
   })
 })
 
@@ -946,6 +1145,45 @@ describe('sessions run in a pool, the fold does not', () => {
       expect(briefings.get('settings')).toContain('  repository-registered  ')
       // The other cluster started beside it and could not be told.
       expect(briefings.get('rules')).not.toContain('repository-registered')
+    })
+
+    /**
+     * THE HAND-OFF ORDER (01 step 2j). A cluster's members run serially, so the
+     * run cannot finish before its longest chain does; the pool starts groups in
+     * the order it is handed them, so handing over the longest one first is the
+     * whole of the scheduling. What must NOT move is the report.
+     */
+    it('hands the pool the longest cluster first, and still reports the work list', async () => {
+      // `root` is its own cluster; the other three share a shell — so the LPT
+      // order is the reverse of the work list at its head.
+      const lopsided = new Map([
+        ['root', pack('src/Home.tsx', ['src/Grid.tsx'])],
+        ['repos-repoid', pack('src/Repo.tsx', [...SHELL, 'src/Report.tsx'])],
+        ['settings', pack('src/Settings.tsx', [...SHELL, 'src/Form.tsx'])],
+        ['rules', pack('src/Rules.tsx', [...SHELL, 'src/RuleList.tsx'])],
+      ])
+      const { persistence } = memoryPersistence()
+      const started: string[] = []
+      const { driver } = scriptedDriver(async () => ({ kind: 'outcome', value: { interfaces: [] } }))
+
+      const result = await authorWebInterfaces({
+        repoRoot: repo,
+        driver,
+        persistence,
+        concurrency: 1,
+        context: lopsided,
+        onProgress: (event) => {
+          if (event.kind === 'place-start') started.push(event.placeId)
+        },
+      })
+
+      expect(started).toEqual(['repos-repoid', 'settings', 'rules', 'root'])
+      expect(result.places.map((p) => p.placeId)).toEqual([
+        'root',
+        'repos-repoid',
+        'settings',
+        'rules',
+      ])
     })
   })
 
