@@ -72,8 +72,9 @@ import type { RouteRegistration, RouterMount } from '@truecourse/shared'
 // auth grounding in the file — `'admin::isAuthenticatedAdmin'` is precisely what
 // the hand-authored contracts wrote as `Authorization: Bearer <admin JWT>` — but
 // `RouteRegistration` has nowhere to put it. The only optional field it carries
-// is `requestContract`, which describes the request BODY and QUERY and has no
-// notion of a credential. Carrying policies needs a field of its own.
+// is `requestContract`, which describes the request BODY and QUERY (and, since
+// the 2f extension, the response side) and has no notion of a credential.
+// Carrying policies needs a field of its own.
 //
 // WHAT IS DELIBERATELY NOT DERIVED, because none of it is a route table:
 // the per-content-type CRUD Strapi GENERATES at boot (`core-api/routes/index.ts`),

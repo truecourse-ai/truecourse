@@ -1,6 +1,8 @@
 /**
- * The api surface's REQUEST CONTRACTS: what each operation's handler
- * reads off the request, keyed by the operation identity interfaces already use.
+ * The api surface's REQUEST/RESPONSE CONTRACTS: what each operation's handler
+ * reads off the request — and what it statically produces back (`produces`:
+ * response statuses + top-level response-body keys) — keyed by the operation
+ * identity interfaces already use.
  *
  * It lives beside the api derivation because it must compose paths EXACTLY as
  * `deriveApiInterfacesFromTree` does — mount prefix included, `canonicalRoutePath`
@@ -34,7 +36,17 @@ import { buildMountPrefixes, composePath } from './api-tree.js'
 export function collectApiRequestContracts(fileAnalyses: readonly FileAnalysis[]): ApiRequestContract[] {
   const validators = buildValidatorIndex(fileAnalyses)
   const prefixes = buildMountPrefixes(fileAnalyses)
-  const byOperation = new Map<string, { method: string; path: string; body: FieldMerge; query: FieldMerge }>()
+  const byOperation = new Map<
+    string,
+    {
+      method: string
+      path: string
+      body: FieldMerge
+      query: FieldMerge
+      statuses: Set<number>
+      bodyKeys: Set<string>
+    }
+  >()
 
   for (const file of fileAnalyses) {
     const prefix = prefixes.get(file.filePath) ?? ''
@@ -49,11 +61,15 @@ export function collectApiRequestContracts(fileAnalyses: readonly FileAnalysis[]
         path,
         body: new FieldMerge(),
         query: new FieldMerge(),
+        statuses: new Set<number>(),
+        bodyKeys: new Set<string>(),
       }
       entry.body.addAll(contract.bodyFields ?? [])
       entry.query.addAll(contract.queryFields ?? [])
       for (const ref of contract.bodyValidatorRefs ?? []) entry.body.addAll(validators.get(ref) ?? [])
       for (const ref of contract.queryValidatorRefs ?? []) entry.query.addAll(validators.get(ref) ?? [])
+      for (const status of contract.produces?.statuses ?? []) entry.statuses.add(status)
+      for (const bodyKey of contract.produces?.bodyKeys ?? []) entry.bodyKeys.add(bodyKey)
       byOperation.set(key, entry)
     }
   }
@@ -62,12 +78,22 @@ export function collectApiRequestContracts(fileAnalyses: readonly FileAnalysis[]
   for (const entry of byOperation.values()) {
     const bodyFields = entry.body.list()
     const queryFields = entry.query.list()
-    if (bodyFields.length === 0 && queryFields.length === 0) continue
+    // Pass-through merge of the response side: statuses sorted for a canonical
+    // order, body keys kept first-seen like the field lists.
+    const produces = {
+      ...(entry.statuses.size > 0 ? { statuses: [...entry.statuses].sort((a, b) => a - b) } : {}),
+      ...(entry.bodyKeys.size > 0 ? { bodyKeys: [...entry.bodyKeys] } : {}),
+    }
+    const hasProduces = Object.keys(produces).length > 0
+    // The honesty rule, operation-level: an operation the walks established
+    // NOTHING about — no request field, no response fact — gets no contract.
+    if (bodyFields.length === 0 && queryFields.length === 0 && !hasProduces) continue
     out.push({
       method: entry.method,
       path: entry.path,
       ...(bodyFields.length > 0 ? { bodyFields } : {}),
       ...(queryFields.length > 0 ? { queryFields } : {}),
+      ...(hasProduces ? { produces } : {}),
     })
   }
   return out.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method))

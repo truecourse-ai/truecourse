@@ -216,10 +216,33 @@ export const RequestFieldSchema = z.object({
 export type RequestField = z.infer<typeof RequestFieldSchema>
 
 /**
+ * What ONE route registration's handler statically PRODUCES — the response side
+ * of the contract, the same honesty class as the request side. `statuses` are the
+ * HTTP statuses the source itself names (`res.status(404)`, `c.json(x, 400)`,
+ * Nest's `@HttpCode(…)`) plus the idiom's OWN documented default where the
+ * framework defines one (200 for a body-sending call that names no status, 201
+ * for a Nest POST) — a default is only claimed when the handler demonstrably
+ * sends a response, never invented from nothing. `bodyKeys` are the TOP-LEVEL
+ * literal keys of response bodies written right there (`c.json({ ok: true })` →
+ * `ok`); a body built elsewhere contributes nothing.
+ */
+export const ResponseContractSchema = z.object({
+  /** Statuses the handler answers with, statically visible at the handler. */
+  statuses: z.array(z.number().int()).optional(),
+  /** Top-level literal keys of response bodies the handler writes. */
+  bodyKeys: z.array(z.string()).optional(),
+})
+
+export type ResponseContract = z.infer<typeof ResponseContractSchema>
+
+/**
  * What ONE route registration says about the request it accepts — harvested from
  * the handler's own body, never from a doc. Everything here is statically visible
  * near the handler; anything that would need type-checking or a cross-file
- * inference the analyzer cannot make honestly is left out.
+ * inference the analyzer cannot make honestly is left out. Despite the name it
+ * carries the whole per-route contract — `produces` (the response side) rides
+ * here too, additively, because a second per-route envelope would give one route
+ * two contract homes.
  *
  * `bodyValidatorRefs` / `queryValidatorRefs` are the ONE deliberate indirection: a
  * handler that hands `req.body` to a named function (`parseSignupBody(req.body)`)
@@ -234,6 +257,8 @@ export const RequestContractSchema = z.object({
   bodyValidatorRefs: z.array(z.string()).optional(),
   /** Symbols the handler hands `req.query` to, unresolved at file level. */
   queryValidatorRefs: z.array(z.string()).optional(),
+  /** What the handler statically produces — see {@link ResponseContractSchema}. */
+  produces: ResponseContractSchema.optional(),
 })
 
 export type RequestContract = z.infer<typeof RequestContractSchema>
@@ -266,6 +291,8 @@ export const ApiRequestContractSchema = z.object({
   path: z.string(),
   bodyFields: z.array(RequestFieldSchema).optional(),
   queryFields: z.array(RequestFieldSchema).optional(),
+  /** The operation's response side, merged across its registrations. */
+  produces: ResponseContractSchema.optional(),
 })
 
 export type ApiRequestContract = z.infer<typeof ApiRequestContractSchema>

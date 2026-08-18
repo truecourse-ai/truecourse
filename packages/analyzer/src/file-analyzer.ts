@@ -129,9 +129,14 @@ function buildFileAnalysis(
   // The request contract is harvested in its own pass and merged onto the
   // routes by call SITE — the route extractor stays language-dispatched and
   // untouched, and a route whose handler says nothing keeps its exact old shape.
+  // The key carries all FOUR coordinates because chained registrations
+  // (`new Hono().post('/a', h).post('/b', h)`) share a start position — see
+  // RequestContractExtraction. A route that already carries a contract (Nest
+  // decorator routes attach theirs at extraction) keeps it untouched.
   const contracts = extractRequestContracts(tree, filePath, language)
   const routeRegistrations = rawRoutes.map((route) => {
-    const contract = contracts.byRouteLocation.get(`${route.location.startLine}:${route.location.startColumn}`)
+    const { startLine, startColumn, endLine, endColumn } = route.location
+    const contract = contracts.byRouteLocation.get(`${startLine}:${startColumn}:${endLine}:${endColumn}`)
     return contract ? { ...route, requestContract: contract } : route
   })
 

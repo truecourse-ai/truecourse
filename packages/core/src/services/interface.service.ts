@@ -398,16 +398,28 @@ async function deriveInterfaces(
 }
 
 /**
- * THE ONE HOME for the api request contract (plan item 102): what each handler
- * reads off the request, written ONTO the operation it belongs to instead of
- * travelling beside the catalog as a second product joined at prompt time.
+ * THE ONE HOME for the api contract (plan item 102): what each handler reads off
+ * the request — and, since the 2f extension, what it statically PRODUCES back —
+ * written ONTO the operation it belongs to instead of travelling beside the
+ * catalog as a second product joined at prompt time.
  *
  * Only what the derivation established goes in. `params` are not written: the
  * path template already names them on the entry, and nothing in the extraction
  * says more about them than the path does — omitted is the honest answer, and
  * inventing them here would be the derivation claiming a fact it never made.
  * An operation whose handler reads nothing statically visible gets no contract
- * at all, for the same reason.
+ * at all, for the same reason — and a contract writes only the REGIONS it
+ * established (a produces-only contract carries no empty `request`).
+ *
+ * The response side maps onto the catalog's own fact kinds: each status becomes
+ * an {@link InterfaceApiStatusFact} (stringified, no invented `when`), and each
+ * top-level body key becomes an {@link InterfaceApiBodyFact} whose marker is the
+ * key AS THE SERIALIZED RESPONSE CARRIES IT — `"key"`, quotes included, because
+ * the marker contract is "a stable substring of what the operation writes back".
+ *
+ * None of this moves an interface: `contract` sits outside
+ * {@link interfaceFingerprint} (type + entry + steps only), so gaining or
+ * growing a contract re-authors nothing.
  */
 function withApiContracts(
   interfaces: readonly Interface[],
@@ -420,17 +432,26 @@ function withApiContracts(
     if (iface.type !== 'api' || !entry.method || !entry.path) return iface;
     const contract = byOperation.get(`${entry.method.toUpperCase()} ${entry.path}`);
     if (!contract) return iface;
+    const request = {
+      ...(contract.queryFields ? { query: contract.queryFields.map((f) => ({ ...f })) } : {}),
+      ...(contract.bodyFields ? { body: contract.bodyFields.map((f) => ({ ...f })) } : {}),
+    };
+    const produces = {
+      ...(contract.produces?.statuses?.length
+        ? { statuses: contract.produces.statuses.map((status) => ({ status: String(status) })) }
+        : {}),
+      ...(contract.produces?.bodyKeys?.length
+        ? { body: contract.produces.bodyKeys.map((key) => ({ marker: `"${key}"` })) }
+        : {}),
+    };
+    const operation = {
+      ...(Object.keys(request).length > 0 ? { request } : {}),
+      ...(Object.keys(produces).length > 0 ? { produces } : {}),
+    };
+    if (Object.keys(operation).length === 0) return iface;
     return {
       ...iface,
-      contract: {
-        surface: 'api' as const,
-        operation: {
-          request: {
-            ...(contract.queryFields ? { query: contract.queryFields.map((f) => ({ ...f })) } : {}),
-            ...(contract.bodyFields ? { body: contract.bodyFields.map((f) => ({ ...f })) } : {}),
-          },
-        },
-      },
+      contract: { surface: 'api' as const, operation },
     };
   });
 }
