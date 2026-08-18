@@ -39,8 +39,16 @@ function handler(filePath: string): FileAnalysis {
 }
 
 /** The `next.config.js` whose presence claims a Next.js app root. */
-function nextConfig(dir: string): FileAnalysis {
-  return file(`${dir}/next.config.js`, { language: 'javascript' })
+function nextConfig(dir: string, webRedirects: FileAnalysis['webRedirects'] = undefined): FileAnalysis {
+  return file(`${dir}/next.config.js`, {
+    language: 'javascript',
+    ...(webRedirects ? { webRedirects } : {}),
+  })
+}
+
+/** A route module whose whole body is one redirect — the analyzer's flag, set. */
+function redirecting(filePath: string): FileAnalysis {
+  return file(filePath, { redirectsUnconditionally: true })
 }
 
 /** The `routes.ts` whose `remix-flat-routes` import claims a flat-routes tree. */
@@ -304,6 +312,93 @@ describe('a route module that renders nothing is not a place', () => {
         addresses([config, file('/r/apps/web/app/inbox/page.tsx', { exports: [exported] })]),
       ).toEqual(['/inbox'])
     }
+  })
+})
+
+/**
+ * AN ADDRESS THAT REDIRECTS IS NOT A PLACE EITHER. The exports gate reads what a
+ * module EXPORTS, and both of these pass it: documenso's `dashboard.tsx` exports
+ * a full page component behind a `loader` that throws `redirect('/documents')`,
+ * and cal.diy's `/bookings` has no module at all — `next.config.ts` answers it
+ * with a permanent redirect to `/bookings/upcoming`. Each is an authoring
+ * session spent on a screen nobody can open.
+ *
+ * The other half is what must NOT be dropped: documenso's `certificate.tsx`
+ * redirects only when a feature flag is off and genuinely renders otherwise, and
+ * a pattern or conditioned config source redirects a FAMILY of addresses that
+ * the app still serves screens under. The analyzer says which kind each fact is;
+ * this registry drops only the unconditional, exactly-addressed ones.
+ */
+describe('an address the app redirects away is not a place', () => {
+  it('drops a route module whose whole body is one redirect, component or not', () => {
+    expect(
+      addresses([
+        flatRoutesConfig('/r/apps/remix/app'),
+        redirecting('/r/apps/remix/app/routes/_authenticated+/dashboard.tsx'),
+        file('/r/apps/remix/app/routes/_authenticated+/documents._index.tsx'),
+      ]),
+    ).toEqual(['/documents'])
+  })
+
+  it('keeps a module whose redirect is conditional — it renders for somebody', () => {
+    // `certificate.tsx`: the analyzer sets no flag, and no fact refuses nothing.
+    expect(
+      addresses([
+        flatRoutesConfig('/r/apps/remix/app'),
+        file('/r/apps/remix/app/routes/_internal+/[__htmltopdf]+/certificate.tsx'),
+      ]),
+    ).toEqual(['/__htmltopdf/certificate'])
+  })
+
+  it('drops an address a static config source redirects away', () => {
+    expect(
+      addresses([
+        nextConfig('/r/apps/web', [
+          { source: '/bookings', destination: '/bookings/upcoming', permanent: true },
+        ]),
+        file('/r/apps/web/app/(main)/bookings/page.tsx'),
+        file('/r/apps/web/app/(main)/bookings/[status]/page.tsx'),
+      ]),
+    ).toEqual(['/bookings/{status}'])
+  })
+
+  it('keeps an address whose redirect is conditioned on `has`', () => {
+    expect(
+      addresses([
+        nextConfig('/r/apps/web', [
+          { source: '/bookings', destination: '/embed/bookings', permanent: false, conditional: true },
+        ]),
+        file('/r/apps/web/app/bookings/page.tsx'),
+      ]),
+    ).toEqual(['/bookings'])
+  })
+
+  it('keeps every address under a PATTERN source, which redirects a family', () => {
+    // `/:user/:type` spans real screens; dropping on it would delete them all.
+    expect(
+      addresses([
+        nextConfig('/r/apps/web', [
+          { source: '/:path*', destination: '/maintenance', permanent: false },
+          { source: '/event-types/:id', destination: '/event-types', permanent: true },
+        ]),
+        file('/r/apps/web/app/event-types/[id]/page.tsx'),
+        file('/r/apps/web/app/settings/page.tsx'),
+      ]),
+    ).toEqual(['/event-types/{id}', '/settings'])
+  })
+
+  it('applies a config to its OWN app, not to the one beside it', () => {
+    // Both apps declare `/bookings`; only the one whose config redirects it loses
+    // the place, so the survivor has to be the OTHER app's module.
+    const places = deriveWebPlacesFromTree([
+      nextConfig('/r/apps/web', [
+        { source: '/bookings', destination: '/bookings/upcoming', permanent: true },
+      ]),
+      file('/r/apps/web/app/bookings/page.tsx'),
+      nextConfig('/r/packages/examples/base'),
+      file('/r/packages/examples/base/src/pages/bookings.tsx'),
+    ])
+    expect(places.map((p) => p.filePath)).toEqual(['/r/packages/examples/base/src/pages/bookings.tsx'])
   })
 })
 

@@ -392,6 +392,39 @@ export const WebRouteSchema = z.object({
 export type WebRoute = z.infer<typeof WebRouteSchema>
 
 // ---------------------------------------------------------------------------
+// Web Redirect
+//
+// The other half of "what does this address DO": a route can exist and still be
+// somewhere nobody stands, because the framework sends every visitor elsewhere
+// before anything renders. Two forms, and both are read deterministically:
+// a CONFIG table (`next.config.*`'s `redirects()`), and a route module whose
+// whole body is one redirect. Only the config table needs a record per entry —
+// the module form is one bit about the file, `FileAnalysis.redirectsUnconditionally`.
+// ---------------------------------------------------------------------------
+
+/**
+ * One entry of a framework config's redirect table, as the config LITERALLY
+ * writes it. Only entries whose `source` and `destination` are string literals
+ * are recorded — an entry assembled at runtime states nothing a derivation can
+ * act on.
+ */
+export const WebRedirectSchema = z.object({
+  /** The matched address, verbatim: `/bookings`, `/:path*`, `/old/:slug`. */
+  source: z.string(),
+  destination: z.string(),
+  /** 308 rather than 307, when the entry states it as a literal. */
+  permanent: z.boolean().optional(),
+  /**
+   * The entry carries `has` / `missing` conditions, so it fires only for SOME
+   * visitors and the address still renders for the rest. Consumers that drop a
+   * place on a redirect must not drop one on this.
+   */
+  conditional: z.boolean().optional(),
+})
+
+export type WebRedirect = z.infer<typeof WebRedirectSchema>
+
+// ---------------------------------------------------------------------------
 // CLI Command
 // ---------------------------------------------------------------------------
 
@@ -441,6 +474,16 @@ export const FileAnalysisSchema = z.object({
   routerMounts: z.array(RouterMountSchema).optional(),
   /** Routes this file DECLARES as JSX (React Router); absent when none. */
   webRoutes: z.array(WebRouteSchema).optional(),
+  /** Static redirects this file declares as a framework CONFIG table
+   *  (`next.config.*`'s `redirects()`); absent when it declares none. */
+  webRedirects: z.array(WebRedirectSchema).optional(),
+  /**
+   * This route module's whole job is to redirect: its `loader` — or, for a page
+   * module, its default export — does nothing but `throw redirect(…)`. Absent
+   * when it is not one, which includes every module whose redirect is behind a
+   * condition and therefore renders for somebody.
+   */
+  redirectsUnconditionally: z.boolean().optional(),
   cliCommands: z.array(CliCommandSchema).optional(),
   /** http(s) URL literals naming a third-party host; absent when none. */
   externalHttpRefs: z.array(ExternalHttpRefSchema).optional(),

@@ -24,7 +24,11 @@
  * JSON, an image, a redirect — and is no more a screen than an Express handler
  * is. So the registry drops a route module with no default export, for the
  * idioms where the route file is the rendering module (see
- * {@link FILE_IS_THE_MODULE}).
+ * {@link FILE_IS_THE_MODULE}) — and, on the same rule, the two ways an address
+ * stays alive while nothing renders at it: a module whose whole body is one
+ * redirect, and an address the framework CONFIG redirects away (see
+ * {@link configRedirectedAddresses}). Both facts come from the analyzer, and a
+ * fact we do not have refuses nothing.
  *
  * SCOPE, deliberately: screens only. `InterfaceResource` also has `dialog` and
  * `panel`, and dialog primitives (`DialogContent`, `role="dialog"`) are readable
@@ -102,12 +106,14 @@ export function deriveWebPlacesFromTree(
   }
 
   const analyses = new Map(fileAnalyses.map((analysis) => [analysis.filePath, analysis]))
+  const redirected = configRedirectedAddresses(fileAnalyses)
   const byAddress = new Map<string, WebPlace>()
   for (const read of READERS) {
     for (const seed of read(tree)) {
       if (!servedByTheAppUnderTest(seed, options.appRoot)) continue
       if (!rendersAPlace(seed, analyses)) continue
       const address = canonicalRoutePath(seed.address)
+      if (redirectedAwayByConfig(seed, address, redirected)) continue
       const key = slotted(address)
       if (byAddress.has(key)) continue
       byAddress.set(key, { ...seed, address })
@@ -157,8 +163,58 @@ const FILE_IS_THE_MODULE = new Set<WebPlaceIdiom>(['next-app', 'next-pages', 're
  */
 function rendersAPlace(seed: WebPlaceSeed, analyses: ReadonlyMap<string, FileAnalysis>): boolean {
   if (!FILE_IS_THE_MODULE.has(seed.idiom)) return true
-  const exports = analyses.get(seed.filePath)?.exports
+  const analysis = analyses.get(seed.filePath)
+  // A module whose whole body is one redirect renders nothing however much it
+  // exports — documenso's `dashboard.tsx` throws out of its `loader` and keeps a
+  // full page component below it that no visitor ever reaches.
+  if (analysis?.redirectsUnconditionally) return false
+  const exports = analysis?.exports
   return exports ? exports.some((exported) => exported.isDefault) : true
+}
+
+/**
+ * The addresses a framework config redirects away, per app. Keyed by the config's
+ * own directory, because that is the app the table belongs to: a monorepo's
+ * second Next.js app serves `/bookings` for itself whatever the first one's
+ * config says about it.
+ *
+ * ONLY EXACT SOURCES. A pattern source (`/:path*`, `/old/:slug`) matches a family
+ * of addresses, and dropping every place under it would delete screens the app
+ * still serves — cal.diy redirects `/:orgSlug/:user` while serving `/{user}` and
+ * a dozen static addresses that the pattern also spans. A conditioned entry
+ * (`has` / `missing`) fires for only some visitors, so the address renders for
+ * the rest. Both are kept.
+ */
+function configRedirectedAddresses(analyses: readonly FileAnalysis[]): Map<string, Set<string>> {
+  const byApp = new Map<string, Set<string>>()
+  for (const analysis of analyses) {
+    if (!analysis.webRedirects?.length) continue
+    const appRoot = analysis.filePath.slice(0, analysis.filePath.lastIndexOf('/'))
+    const addresses = byApp.get(appRoot) ?? new Set<string>()
+    for (const redirect of analysis.webRedirects) {
+      if (redirect.conditional) continue
+      if (!EXACT_SOURCE.test(redirect.source)) continue
+      addresses.add(canonicalRoutePath(redirect.source))
+    }
+    byApp.set(appRoot, addresses)
+  }
+  return byApp
+}
+
+/** A source naming ONE address: no parameter, wildcard, or regex segment. */
+const EXACT_SOURCE = /^\/[^:*?()[\]{}+\\|]*$/
+
+/** Whether the config of the app this place belongs to redirects its address away. */
+function redirectedAwayByConfig(
+  seed: WebPlaceSeed,
+  address: string,
+  redirected: ReadonlyMap<string, ReadonlySet<string>>,
+): boolean {
+  for (const [appRoot, addresses] of redirected) {
+    if (!seed.filePath.startsWith(`${appRoot}/`)) continue
+    if (addresses.has(address)) return true
+  }
+  return false
 }
 
 /** An address with its slots anonymized — the identity two spellings share. */

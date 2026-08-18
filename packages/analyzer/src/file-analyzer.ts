@@ -6,6 +6,7 @@ import { extractCalls, buildFunctionContext } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
 import { extractWebRoutes } from './extractors/web-routes.js'
+import { extractWebRedirects } from './extractors/web-redirects.js'
 import { extractCliCommands } from './extractors/cli-commands.js'
 import { extractExternalHttp } from './extractors/external-http.js'
 import { extractOutboundRequests } from './extractors/outbound-requests.js'
@@ -121,6 +122,7 @@ function buildFileAnalysis(
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
   const { routes: rawRoutes, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
   const webRoutes = extractWebRoutes(tree, filePath, language)
+  const webRedirects = extractWebRedirects(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
   const externalHttp = extractExternalHttp(tree, filePath, language)
   const outboundRequests = extractOutboundRequests(tree, filePath, language)
@@ -145,6 +147,8 @@ function buildFileAnalysis(
     ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
     ...(routerMounts.length > 0 ? { routerMounts } : {}),
     ...(webRoutes.length > 0 ? { webRoutes } : {}),
+    ...(webRedirects.redirects.length > 0 ? { webRedirects: webRedirects.redirects } : {}),
+    ...(webRedirects.redirectsUnconditionally ? { redirectsUnconditionally: true } : {}),
     ...(cliCommands.length > 0 ? { cliCommands } : {}),
     ...(externalHttp.refs.length > 0 ? { externalHttpRefs: externalHttp.refs } : {}),
     ...(externalHttp.urlEnvReads.length > 0 ? { urlEnvReads: externalHttp.urlEnvReads } : {}),
