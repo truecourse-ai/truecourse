@@ -57,6 +57,7 @@ import { runGuardExternals } from "./commands/guard-externals.js";
 import {
   runGuardInterfaces,
   runGuardInterfacesAuthor,
+  runGuardInterfacesReconcile,
 } from "./commands/guard-interfaces.js";
 import { runGuardSeed } from "./commands/guard-seed.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
@@ -468,6 +469,18 @@ guardInterfacesCmd
       replace: !!options.replace,
       limit: options.limit,
       concurrency: options.concurrency,
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
+  });
+
+guardInterfacesCmd
+  .command("reconcile")
+  .description("Collapse the state registry's synonyms — one LLM call, no authoring")
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardInterfacesReconcile({
       yes: !!options.yes,
       llmTransport: options.llmTransport,
     });

@@ -2,8 +2,9 @@
  * `truecourse guard interfaces` — the interface catalog's places, and the
  * authoring run that fills the half no derivation produces.
  *
- *   guard interfaces           what the catalog knows: places, and the tasks on them
- *   guard interfaces author    author the missing web tasks, one agent session per place
+ *   guard interfaces            what the catalog knows: places, and the tasks on them
+ *   guard interfaces author     author the missing web tasks, one agent session per place
+ *   guard interfaces reconcile  collapse the state registry's synonyms (one LLM call)
  *
  * The read view is free and LLM-less, like every other `guard` view, and it is
  * the SAME work list the authoring run takes — so the bill is visible before it
@@ -19,9 +20,10 @@ import * as p from "@clack/prompts";
 import {
   readGuardInterfacesAuthorView,
   runGuardInterfaceAuthoring,
+  runGuardInterfaceReconcile,
   type GuardInterfacesAuthorView,
 } from "@truecourse/core/commands/guard-interfaces";
-import type { PlaceResult } from "@truecourse/interface-author";
+import type { PlaceResult, StateReconciliation } from "@truecourse/interface-author";
 import { INTERFACE_AUTHOR_BUDGET, defaultAuthorConcurrency } from "@truecourse/interface-author";
 import { assertSessionBackendReady } from "@truecourse/core/services/llm/session-driver";
 import { preflightLlmOrExit, type LlmTransportFlag } from "../lib/claude-preflight.js";
@@ -122,6 +124,8 @@ export async function runGuardInterfacesAuthor(
     [
       `${work.length} place(s) to author, one agent session each, ${concurrency} at a time.`,
       `Each session runs up to ${maxTurns} turns; most converge in a handful.`,
+      // The bill is stated before it is paid, and this call is part of it.
+      "Plus one closing call to reconcile the state registry.",
       ...work.map((place) => `  ${place.id}${place.address ? `  ${place.address}` : ""}`),
     ].join("\n"),
   );
@@ -175,10 +179,12 @@ export async function runGuardInterfacesAuthor(
   if (run.skipped.length > 0) {
     p.log.info(`Skipped (already authored): ${run.skipped.join(", ")}`);
   }
+  if (run.reconcile) printReconcileProblems(run.reconcile);
   p.log.message(
     [
       `context   ${run.context.places} place(s) grounded from ${run.context.files} file(s) in ${run.context.seconds}s`,
       `authored  ${run.authored} task(s)`,
+      run.reconcile ? `states    ${describeReconcile(run.reconcile)}` : "",
       `turns     ${run.spent.turns}`,
       `tokens    ${run.spent.tokens.toLocaleString()}`,
       run.spent.costUsd > 0 ? `cost      $${run.spent.costUsd.toFixed(2)}` : "",
@@ -198,9 +204,97 @@ export async function runGuardInterfacesAuthor(
   );
 }
 
+export interface RunGuardInterfacesReconcileOptions extends RunGuardInterfacesOptions {
+  yes?: boolean;
+  llmTransport?: LlmTransportFlag;
+}
+
+/**
+ * `guard interfaces reconcile` — collapse the state registry's synonyms without
+ * authoring anything. The authoring run closes with this pass already, so this
+ * command is for the catalog that was authored before it existed, or one whose
+ * registry drifted apart across several partial runs. ONE model call, whatever
+ * the app's size, and it rewrites references only: no fingerprint moves, so no
+ * scenario is invalidated by running it.
+ */
+export async function runGuardInterfacesReconcile(
+  opts: RunGuardInterfacesReconcileOptions = {},
+): Promise<void> {
+  const repoRoot = opts.cwd ?? process.cwd();
+  p.intro("Reconcile states");
+
+  const view = readGuardInterfacesAuthorView(repoRoot);
+  if (view.unmapped) {
+    p.log.error(
+      "No interface catalog. `truecourse guard setup` derives it — the places it finds are what authoring runs against.",
+    );
+    p.outro("Aborted.");
+    process.exit(1);
+  }
+
+  await preflightLlmOrExit(opts.llmTransport);
+  p.log.info(
+    "One LLM call over the whole state registry: ids that name the same world are collapsed, and every `startingState`/`endState` that referenced one is rewritten. No fingerprint moves.",
+  );
+  if (!opts.yes && isInteractive()) {
+    const go = await p.confirm({ message: "Reconcile the state registry?" });
+    if (p.isCancel(go) || !go) {
+      p.outro("Cancelled.");
+      return;
+    }
+  }
+
+  const spinner = p.spinner();
+  spinner.start("Reconciling");
+  let result;
+  try {
+    result = await runGuardInterfaceReconcile({
+      repoRoot,
+      ...(opts.llmTransport ? { transport: opts.llmTransport } : {}),
+    });
+  } catch (error) {
+    spinner.stop("Failed");
+    p.log.error(error instanceof Error ? error.message : String(error));
+    p.outro("Aborted.");
+    process.exit(1);
+  }
+  spinner.stop(`states ${describeReconcile(result)}`);
+
+  for (const merge of result.merges) {
+    p.log.message(`  ${merge.keep} ← ${merge.absorb.join(", ")}`);
+  }
+  printReconcileProblems(result);
+  if (result.path) p.log.message(`written   ${result.path}`);
+
+  if (result.status === "rejected") process.exitCode = 1;
+  p.outro(
+    result.status === "reconciled"
+      ? "Review the registry and commit `guard/interfaces.authored.json`."
+      : result.status === "rejected"
+        ? "Nothing was written."
+        : "The registry already names each world once.",
+  );
+}
+
 // ---------------------------------------------------------------------------
 // rendering
 // ---------------------------------------------------------------------------
+
+/** `N→M (K merged)` — the one line both the run footer and this command print. */
+function describeReconcile(result: StateReconciliation): string {
+  return `${result.before}→${result.after} (${result.merged} merged)`;
+}
+
+/** A dropped group is a report, never a silent correction — so it is printed. */
+function printReconcileProblems(result: StateReconciliation): void {
+  if (result.dropped.length > 0) {
+    p.log.warn(`Dropped ${result.dropped.length} proposed group(s):\n  - ${result.dropped.join("\n  - ")}`);
+  }
+  if (result.problems.length > 0) {
+    const say = result.status === "rejected" ? p.log.error : p.log.warn;
+    say(`State reconciliation:\n  - ${result.problems.join("\n  - ")}`);
+  }
+}
 
 /**
  * One spinner line for a pool of sessions. With one session in flight the line

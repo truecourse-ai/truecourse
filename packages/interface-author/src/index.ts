@@ -48,4 +48,18 @@ export {
   type AuthorWorkItem,
   type PlaceResult,
 } from './author.js'
+export {
+  STATE_RECONCILE_RESPONSE_SCHEMA,
+  STATE_RECONCILE_STAGE,
+  StateMergeSchema,
+  StateReconcileResponseSchema,
+  reconcileAuthoredStates,
+  reconcilePrompt,
+  reconcileStates,
+  type ReconcileAuthoredInput,
+  type ReconcileComplete,
+  type ReconcileStatesInput,
+  type StateMerge,
+  type StateReconciliation,
+} from './reconcile.js'
 export { writeAuthoredCatalog, type WriteAuthoredInput } from './write.js'

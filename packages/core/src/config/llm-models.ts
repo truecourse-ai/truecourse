@@ -65,6 +65,8 @@ export type StageId =
   | 'guard.visualJudge'
   | 'guard.recipe'
   | 'guard.seed'
+  // --- guard interfaces (the authored web surface) ---
+  | 'guard.stateReconcile'
   | 'rules.violationGen';
 
 /**
@@ -142,6 +144,13 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // must satisfy the FK closure and every non-nullable column — the authoring tier's
   // task, not the recipe proposer's structured fill-in. Opus, and it is one call.
   'guard.seed': 'opus',
+  // Collapsing the state registry's synonyms: ONE call per authoring run, over
+  // every state at once, deciding which sentences name the same world. Top tier
+  // for the same reason `spec.verifyOverlap` and `guard.triage` are — a wrong
+  // merge conflates two worlds, and every task that chains through either one
+  // inherits the conflation silently, while the one-call-per-run shape keeps the
+  // spend negligible whatever the app's size.
+  'guard.stateReconcile': 'opus',
   'rules.violationGen': 'opus',
 };
 

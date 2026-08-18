@@ -13,23 +13,42 @@
  * The sessions store is the standard one (§3.9): `sessions/guard-interfaces/
  * <runId>/`, a `run.json` index plus one transcript per session, reconciled on
  * boot like every other command's. A run that dies leaves a record that says so.
+ *
+ * One stage here is NOT a session: the state reconciliation that closes a run
+ * (item 3) is a single schema-bearing completion, so it resolves the ordinary
+ * one-shot transport beside the session driver rather than through it.
  */
 
 import {
   authorWebInterfaces,
   planWorkItems,
+  reconcileAuthoredStates,
+  STATE_RECONCILE_STAGE,
   type AuthorProgress,
   type AuthorRunResult,
   type PlaceResult,
+  type ReconcileComplete,
+  type StateReconciliation,
 } from '@truecourse/interface-author';
 import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner';
+import {
+  cliTransport,
+  extractJsonValue,
+  getDefaultTransport,
+  type LlmTransport,
+} from '@truecourse/shared/llm';
 import type { SessionEvent } from '@truecourse/agent-loop';
 import path from 'node:path';
 import { createSessionRun } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
+import {
+  createConfiguredApiTransport,
+  installConfiguredLlmTransport,
+} from '../services/llm/install-transport.js';
 import { createConfiguredSessionDriver } from '../services/llm/session-driver.js';
 import { deriveWebAuthoringContext } from '../services/web-context.service.js';
-import type { LlmTransportFlag } from '../config/global-config.js';
+import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
+import { effectiveLlmMode, type LlmTransportFlag } from '../config/global-config.js';
 
 export interface GuardInterfacePlaceView {
   id: string;
@@ -106,6 +125,12 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   transport: { mode: string; provider: string; model: string; fallbackModel?: string };
   /** The context pass (item 105): how much grounding the sessions were given. */
   context: { places: number; files: number; seconds: number };
+  /**
+   * The state reconciliation that closed the run (item 3), when there was
+   * anything to reconcile. Absent when nothing was authored: a run that wrote no
+   * task minted no state, and the registry is exactly what it already was.
+   */
+  reconcile?: StateReconciliation;
 }
 
 /**
@@ -160,6 +185,21 @@ export async function runGuardInterfaceAuthoring(
       ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
     });
+    // THE CLOSING PASS (item 3): the sessions ran without seeing each other, so
+    // the states they minted say one world several ways. Reconciling here — one
+    // call, after the last fold — is what makes the registry a vocabulary
+    // without any session needing to know what its peers were doing. It never
+    // fails the run: the tasks are already written, and a reconciliation that
+    // could not run costs a re-run of this pass alone.
+    let reconcile: StateReconciliation | undefined;
+    if (result.authored > 0) {
+      opts.onStatus?.('reconciling the state registry');
+      reconcile = await reconcileAuthoredStates({
+        repoRoot,
+        complete: stateReconcileComplete(repoRoot, opts.transport),
+      });
+    }
+
     run.finish(runStatus(result.places, opts.signal));
     return {
       ...result,
@@ -167,11 +207,71 @@ export async function runGuardInterfaceAuthoring(
       runDir: run.dir,
       transport: llm,
       context: { places: context.contexts.size, files: context.files, seconds: context.seconds },
+      ...(reconcile ? { reconcile } : {}),
     };
   } catch (error) {
     run.finish('failed');
     throw error;
   }
+}
+
+export interface RunGuardInterfaceReconcileOptions {
+  repoRoot: string;
+  /** Per-run transport flag; the saved selection answers otherwise. */
+  transport?: LlmTransportFlag;
+}
+
+/**
+ * Reconcile an EXISTING catalog's state registry without authoring anything
+ * (item 3). The same pass the authoring run closes with, reachable on its own:
+ * a catalog authored before this pass existed — or one whose registry drifted
+ * apart over several partial runs — is fixed for one call, and no session runs.
+ */
+export async function runGuardInterfaceReconcile(
+  opts: RunGuardInterfaceReconcileOptions,
+): Promise<StateReconciliation> {
+  return reconcileAuthoredStates({
+    repoRoot: opts.repoRoot,
+    complete: stateReconcileComplete(opts.repoRoot, opts.transport),
+  });
+}
+
+/**
+ * The one-shot model call the reconciliation asks through. It is NOT the session
+ * driver: this is a single schema-bearing completion with no tools and no
+ * transcript, so it goes through the ordinary `LlmTransport` seam every other
+ * one-shot stage uses — api mode's direct transport when that is configured, an
+ * EE-injected default when one is installed, and `claude -p` otherwise.
+ */
+function stateReconcileComplete(repoRoot: string, flag?: LlmTransportFlag): ReconcileComplete {
+  const mode = effectiveLlmMode(flag);
+  const transport = oneShotTransport(flag);
+  const model = resolveModel(STATE_RECONCILE_STAGE, undefined, repoRoot, mode);
+  const fallbackModel = resolveFallbackModel(repoRoot, mode);
+  return async (prompt, schema) => {
+    const raw = await transport({
+      id: STATE_RECONCILE_STAGE,
+      stage: STATE_RECONCILE_STAGE,
+      model,
+      ...(fallbackModel ? { fallbackModel } : {}),
+      system: prompt.system,
+      user: prompt.user,
+      responseFormat: 'json',
+      schema,
+      // One call over the whole registry — a 300-state list is a long read and a
+      // long answer, so the ceiling is the authoring stages' order, not a view's.
+      timeoutMs: 600_000,
+    });
+    return JSON.parse(extractJsonValue(raw));
+  };
+}
+
+/** The transport a one-shot stage of this command resolves to. */
+function oneShotTransport(flag?: LlmTransportFlag): LlmTransport {
+  if (flag === 'api') return createConfiguredApiTransport();
+  if (flag === 'cli') return cliTransport();
+  installConfiguredLlmTransport();
+  return getDefaultTransport() ?? cliTransport();
 }
 
 /** Every session reached an outcome ⇒ completed; none did ⇒ failed. */
