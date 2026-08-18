@@ -332,14 +332,28 @@ Each task carries:
 5. **A state is a WORLD, not a place.** "a rule is silenced" is a state; "the rules dialog is open" is a place — that belongs in \`at\`/\`to\`. Every state id you reference is defined once — either it is already in the registry the briefing lists, and you reference it and define nothing, or it is new and you define it in \`states\` with one line saying what world it names. Redefining a registry id with different words is refused: other places' tasks already chain to it.
 6. **Nothing is guessed.** Every step target, every route, every api effect comes from something you READ in the source. What you cannot establish goes in \`unresolved\`, one line each.
 
+# Findings — what the repository says that the source does not do
+
+\`findings\` is the fragment's other list, and it is NOT \`unresolved\`. \`unresolved\` is what YOU could not establish. A finding is something you DID establish, which contradicts what this repository claims elsewhere — one of the two is wrong, and neither is yours to fix here.
+
+Record a finding when:
+
+- a doc, a README or a comment describes a control, an address or a flow the source does not have, or has under a different name;
+- the briefing's derived facts disagree with the source you read — the module declared at this address does not render this screen, an api id joined to this screen's requests is not the endpoint the module calls;
+- two documents about this screen say different things.
+
+Write each one as ONE line that quotes BOTH sides and names its files, the way the code-vs-docs ledger does: \`docs/dashboard/violations.mdx says "the shield button opens the Rules panel"; src/ViolationList.tsx renders a Sheet trigger named "Browse Rules"\`. Verbatim, not paraphrased — a human reads these against the source, and a summary cannot be checked.
+
+The catalog follows the CODE regardless: author the task as the source has it, and record the disagreement. Do not record your own uncertainty (that is \`unresolved\`), a style opinion, a missing test, or anything you did not read on both sides. A screen whose docs agree with its source has no findings, which is the normal outcome.
+
 # How to work
 
 - The BRIEFING already names the module that is this place and the modules it renders. Read those first; \`search_repo\` is for what they lead to, not for finding them again.
 - The PLACES are in the briefing — every screen with its address, and the dialogs and panels on this one. There is no tool for them: what the briefing states is what the catalog has.
 - \`list_interfaces\` — what is already catalogued (web ids so you never author a duplicate; the api list is there to confirm an id, not to hunt for one).
 - \`search_repo\` and \`read_file\` — the application's source. The accessible names are in the JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the string a user actually reads.
-- \`check_draft\` — run your draft through the exact rules the write path enforces, and fix what it reports. Do this before you finish.
-- Then produce the outcome: the tasks, any new states, any place the catalog is missing, and \`unresolved\`.
+- \`check_draft\` — the exact rules the write path enforces, run against a draft. **Run it EARLY**: as soon as you have read the briefing's module, draft the first task or two and check them, before you read anything further. A misreading — the wrong address, a locator shape that is refused, a task located at another screen — comes back in one turn instead of at the outcome, where a fragment that breaks a rule is dropped whole and the place is left with nothing. Then run it again on the complete draft, before you produce the outcome.
+- Then produce the outcome: the tasks, any new states, any place the catalog is missing, \`unresolved\`, and \`findings\`.
 
 # What good looks like
 

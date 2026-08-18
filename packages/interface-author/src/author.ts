@@ -72,6 +72,7 @@ import {
   type AuthoredFragment,
 } from './draft.js'
 import { clusterPlaces } from './cluster.js'
+import type { AuthorFinding } from './findings.js'
 import { clusterPack } from './pack.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
 import { writeAuthoredCatalog } from './write.js'
@@ -122,6 +123,12 @@ export interface PlaceResult {
   status: 'authored' | 'empty' | 'rejected' | 'failed'
   taskIds: string[]
   unresolved: string[]
+  /**
+   * Code-vs-docs discrepancies this session found, verbatim. Kept whatever the
+   * status: a finding is about the REPOSITORY, so a fragment that was refused
+   * still found what it found.
+   */
+  findings: string[]
   /** Why it was rejected (validation) or how it failed (the session failure). */
   problems: string[]
   /**
@@ -143,6 +150,11 @@ export interface AuthorRunResult {
   path?: string
   /** Places that were skipped because they already carry authored tasks. */
   skipped: string[]
+  /**
+   * Every finding the run's sessions reported, in work-list order and tagged
+   * with the place that found it — what the caller appends to the ledger.
+   */
+  findings: AuthorFinding[]
   spent: { turns: number; tokens: number; costUsd: number }
 }
 
@@ -311,8 +323,18 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // Completion order is provider latency; the report is the work list.
   const order = new Map(work.map((item, index) => [item.place.id, index]))
   results.sort((a, b) => (order.get(a.placeId) ?? 0) - (order.get(b.placeId) ?? 0))
+  const findings = results.flatMap((place) =>
+    place.findings.map((note) => ({ placeId: place.placeId, note })),
+  )
 
-  return { places: results, authored: authoredCount, ...(path ? { path } : {}), skipped, spent }
+  return {
+    places: results,
+    authored: authoredCount,
+    ...(path ? { path } : {}),
+    skipped,
+    findings,
+    spent,
+  }
 }
 
 /**
@@ -430,12 +452,15 @@ function foldOnePlace(
   const base = { placeId: item.place.id, sessionId, spent: outcome.spent }
 
   if (outcome.status === 'failed') {
+    // A session that never reached an outcome reported nothing: what it read on
+    // the way is in its transcript, and this ledger takes stated findings only.
     return {
       place: {
         ...base,
         status: 'failed',
         taskIds: [],
         unresolved: [],
+        findings: [],
         problems: [describeFailure(outcome.failure)],
         resumable: outcome.resumable,
       },
@@ -443,12 +468,15 @@ function foldOnePlace(
   }
 
   const unresolved = [...(outcome.output.unresolved ?? [])]
+  const findings = [...(outcome.output.findings ?? [])]
   const { fragment, raced } = pruneRacedTasks(outcome.output, briefedWith, authored, replaceable)
   const racedField = raced.length > 0 ? { raced } : {}
   if (fragment.interfaces.length === 0) {
     // Either the session honestly found nothing, or everything it found was
     // authored by a peer first. Both are empty, and `raced` says which.
-    return { place: { ...base, status: 'empty', taskIds: [], unresolved, problems: [], ...racedField } }
+    return {
+      place: { ...base, status: 'empty', taskIds: [], unresolved, findings, problems: [], ...racedField },
+    }
   }
 
   const validation = validateFragment({
@@ -462,7 +490,15 @@ function foldOnePlace(
     // The session had `check_draft` and either never called it or ignored it.
     // The fragment is dropped whole: half a place's tasks is not a place.
     return {
-      place: { ...base, status: 'rejected', taskIds: [], unresolved, problems: validation.errors, ...racedField },
+      place: {
+        ...base,
+        status: 'rejected',
+        taskIds: [],
+        unresolved,
+        findings,
+        problems: validation.errors,
+        ...racedField,
+      },
     }
   }
   return {
@@ -471,6 +507,7 @@ function foldOnePlace(
       status: 'authored',
       taskIds: fragment.interfaces.map((task) => task.id),
       unresolved,
+      findings,
       problems: [],
       ...racedField,
     },

@@ -343,6 +343,79 @@ describe('an outcome that breaks a rule', () => {
   })
 })
 
+/**
+ * ITEM 13. A finding is a code-vs-docs discrepancy, not an authoring complaint:
+ * it is about the REPOSITORY, so it survives a fragment that was refused, and it
+ * never reaches the catalog — the interface schema has no home for a diagnostic.
+ */
+describe('the findings a session reports', () => {
+  it('rides the place result, joins the run result with its place, and stays out of the catalog', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async (place) =>
+      place === 'root'
+        ? {
+            kind: 'outcome',
+            value: {
+              ...HOME_FRAGMENT,
+              findings: ['docs/setup.mdx says the path field is a file picker; src/Home.tsx renders a textbox'],
+            } satisfies AuthoredFragment,
+          }
+        : { kind: 'outcome', value: { interfaces: [] } },
+    )
+
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 1 })
+
+    const home = result.places.find((p) => p.placeId === 'root')!
+    expect(home.status).toBe('authored')
+    expect(home.findings).toEqual([
+      'docs/setup.mdx says the path field is a file picker; src/Home.tsx renders a textbox',
+    ])
+    expect(result.findings).toEqual([
+      {
+        placeId: 'root',
+        note: 'docs/setup.mdx says the path field is a file picker; src/Home.tsx renders a textbox',
+      },
+    ])
+    expect(result.places.find((p) => p.placeId === 'repos-repoid')!.findings).toEqual([])
+    // The written half carries interfaces, states and places — never a finding.
+    expect(JSON.stringify(readAuthoredFile())).not.toContain('file picker')
+  })
+
+  it('survives a fragment the rules refused — the doc bug is real either way', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async () => ({
+      kind: 'outcome',
+      value: {
+        interfaces: [{ ...HOME_TASK, steps: [{ kind: 'activate', target: '#add-repo' }] }],
+        findings: ['docs/setup.mdx names a "Import" button src/Home.tsx does not render'],
+      } satisfies AuthoredFragment,
+    }))
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+    expect(result.places[0].status).toBe('rejected')
+    expect(result.places[0].findings).toEqual([
+      'docs/setup.mdx names a "Import" button src/Home.tsx does not render',
+    ])
+  })
+
+  /**
+   * The two lists are different claims, and the prompt has to keep them apart —
+   * `unresolved` is what this session could not establish, a finding is what it
+   * established and the repository contradicts. The prompt also has to demand
+   * the EARLY `check_draft` (item 10): a rule broken at turn 24 costs the place.
+   */
+  it('is a field the session is told about, beside the early draft check', async () => {
+    const { persistence } = memoryPersistence()
+    let prompt = ''
+    const { driver } = scriptedDriver(async (_place, input) => {
+      prompt = input.def.systemPrompt
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+    expect(prompt).toContain("`findings` is the fragment's other list, and it is NOT `unresolved`")
+    expect(prompt).toContain('Run it EARLY')
+  })
+})
+
 describe('a session that fails', () => {
   it('costs its own place and no other', async () => {
     const { persistence } = memoryPersistence()

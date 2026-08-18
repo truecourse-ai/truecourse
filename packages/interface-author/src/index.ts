@@ -34,6 +34,11 @@ export {
   type ClusterPlacesInput,
   type PlaceCluster,
 } from './cluster.js'
+export {
+  appendInterfaceFindings,
+  type AppendFindingsInput,
+  type AuthorFinding,
+} from './findings.js'
 export { MAX_PACK_BYTES, clusterPack, type ClusterPack } from './pack.js'
 export { buildAuthorTools, type AuthorToolsInput } from './tools.js'
 export {

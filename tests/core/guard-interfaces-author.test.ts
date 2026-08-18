@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/guard-runner';
+import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths';
 import type { InterfacesFile } from '../../packages/shared/src/index';
 import { readGuardInterfacesAuthorView } from '../../packages/core/src/commands/guard-interfaces';
 import { listSessionRuns } from '../../packages/core/src/lib/sessions-store';
@@ -97,6 +98,24 @@ describe('the read view', () => {
     const view = readGuardInterfacesAuthorView(repo);
     expect(view.unmapped).toBe(true);
     expect(view.authored).toEqual({ web: 1 });
+  });
+});
+
+describe('the findings ledger', () => {
+  /**
+   * It is a report about the REPOSITORY (a doc that disagrees with the source),
+   * so it travels through git like the authored half beside it. The store's
+   * ignore template must not catch it — by a line of its own, or by a directory
+   * pattern over `guard/`.
+   */
+  it('is committable: no line of the ignore template catches it', () => {
+    const rel = 'guard/interfaces.findings.md';
+    const catching = GITIGNORE_CONTENTS.split('\n')
+      .filter((line) => line !== '')
+      .filter((line) => rel === line || (line.endsWith('/') && rel.startsWith(line)));
+    expect(catching).toEqual([]);
+    // The derived catalog beside it IS ignored — the two halves differ on this.
+    expect(GITIGNORE_CONTENTS.split('\n')).toContain('guard/interfaces.json');
   });
 });
 

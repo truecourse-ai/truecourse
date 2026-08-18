@@ -21,6 +21,11 @@
  * agrees with its place), and a model that can ASK is a model that converges on
  * them instead of being re-prompted about them. It is the same function the
  * write path runs, so a draft that checks clean cannot be refused afterwards.
+ *
+ * What it is asked for (item 10) is an EARLY call, not only a closing one: the
+ * fragment is dropped whole when it breaks a rule, so a session that first
+ * checks at turn 24 pays for a misreading with the whole place, while the same
+ * misreading on a first task at turn 5 costs a turn.
  */
 
 import fs from 'node:fs'
@@ -259,7 +264,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
   return defineSessionTool({
     name: 'check_draft',
     description:
-      'Check a draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the `<role> "<name>"` locator policy, reachability, and the catalog schema. Call it before producing the outcome; a draft that checks clean is a draft that lands.',
+      'Check a draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the `<role> "<name>"` locator policy, reachability, and the catalog schema. Call it EARLY, on your first task or two, and again on the complete draft before you produce the outcome; a draft that checks clean is a draft that lands, and a misreading caught on the first task costs one turn instead of the place.',
     kind: 'check-draft',
     readOnly: true,
     destructive: false,

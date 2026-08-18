@@ -20,6 +20,7 @@
  */
 
 import {
+  appendInterfaceFindings,
   authorWebInterfaces,
   planWorkItems,
   reconcileAuthoredStates,
@@ -126,6 +127,12 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   /** The context pass (item 105): how much grounding the sessions were given. */
   context: { places: number; files: number; seconds: number };
   /**
+   * The append to `guard/interfaces.findings.md` this run made — the committed
+   * doc-bug feed, and how many bullets landed in it (the run's findings with the
+   * duplicates of one discrepancy collapsed). Absent when no session found one.
+   */
+  findingsLedger?: { path: string; appended: number };
+  /**
    * The state reconciliation that closed the run (item 3), when there was
    * anything to reconcile. Absent when nothing was authored: a run that wrote no
    * task minted no state, and the registry is exactly what it already was.
@@ -185,6 +192,16 @@ export async function runGuardInterfaceAuthoring(
       ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
     });
+    // THE LEDGER (item 13): what the sessions read in the source that the docs
+    // and the derivations contradict. It is appended under this run's id, before
+    // anything else can fail — a reconciliation that throws must not cost the
+    // findings, which are about the repository rather than about the run.
+    const findings = appendInterfaceFindings({
+      repoRoot,
+      runId: run.runId,
+      findings: result.findings,
+    });
+
     // THE CLOSING PASS (item 3): the sessions ran without seeing each other, so
     // the states they minted say one world several ways. Reconciling here — one
     // call, after the last fold — is what makes the registry a vocabulary
@@ -207,6 +224,7 @@ export async function runGuardInterfaceAuthoring(
       runDir: run.dir,
       transport: llm,
       context: { places: context.contexts.size, files: context.files, seconds: context.seconds },
+      ...(findings ? { findingsLedger: findings } : {}),
       ...(reconcile ? { reconcile } : {}),
     };
   } catch (error) {

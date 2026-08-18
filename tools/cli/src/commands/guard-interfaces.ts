@@ -184,6 +184,9 @@ export async function runGuardInterfacesAuthor(
     [
       `context   ${run.context.places} place(s) grounded from ${run.context.files} file(s) in ${run.context.seconds}s`,
       `authored  ${run.authored} task(s)`,
+      run.findingsLedger
+        ? `findings  ${run.findingsLedger.appended} → ${run.findingsLedger.path}`
+        : "",
       run.reconcile ? `states    ${describeReconcile(run.reconcile)}` : "",
       `turns     ${run.spent.turns}`,
       `tokens    ${run.spent.tokens.toLocaleString()}`,
@@ -199,8 +202,12 @@ export async function runGuardInterfacesAuthor(
   if (failed.length > 0) process.exitCode = 1;
   p.outro(
     run.authored > 0
-      ? "Review the authored tasks and commit `guard/interfaces.authored.json`."
-      : "Nothing was authored.",
+      ? `Review the authored tasks and commit \`guard/interfaces.authored.json\`${
+          run.findingsLedger ? " and `guard/interfaces.findings.md`" : ""
+        }.`
+      : run.findingsLedger
+        ? "Nothing was authored — the findings ledger has what the sessions read instead."
+        : "Nothing was authored.",
   );
 }
 
@@ -385,5 +392,10 @@ function printPlace(place: PlaceResult): void {
   }
   if (place.unresolved.length > 0) {
     p.log.message(`  unresolved:\n  - ${place.unresolved.join("\n  - ")}`);
+  }
+  // A finding is a bug in the repository, not in the run — so it is printed
+  // beside the place that found it whatever that place's own status was.
+  if (place.findings.length > 0) {
+    p.log.message(`  findings:\n  - ${place.findings.join("\n  - ")}`);
   }
 }

@@ -128,10 +128,22 @@ export type AuthoredPlace = z.infer<typeof AuthoredPlaceSchema>
 
 /**
  * What one session returns: the tasks it authored, the worlds they assume and
- * leave, the places they need, and what it could NOT establish. `unresolved` is
- * a first-class outcome, not a failure — a task the source does not state is a
- * recorded gap, and the alternative (guessing a control that is not there) is
- * the drift signal poisoned at the source.
+ * leave, the places they need, what it could NOT establish, and what it found
+ * wrong on the way. `unresolved` is a first-class outcome, not a failure — a
+ * task the source does not state is a recorded gap, and the alternative
+ * (guessing a control that is not there) is the drift signal poisoned at the
+ * source.
+ *
+ * `findings` is the OTHER list, and the distinction is the whole reason there
+ * are two: `unresolved` is a complaint about authorability (this session could
+ * not establish something), while a finding is something it DID establish and
+ * that contradicts what the repository claims elsewhere — a doc that describes a
+ * control the source does not have, a derivation that disagrees with the module
+ * it names. That is `reference/AUTHORING.md`'s transform-gaps contract: a
+ * code-vs-docs discrepancy is a diagnostic, never resolved silently, and
+ * preserved VERBATIM. The catalog has no home for a diagnostic by design (it is
+ * run reporting, not interface data), so the run appends them to the findings
+ * ledger instead.
  */
 export const AuthoredFragmentSchema = z
   .object({
@@ -140,6 +152,8 @@ export const AuthoredFragmentSchema = z
     resources: z.array(AuthoredPlaceSchema).optional(),
     /** What the reading could not settle, one line each — never a guess. */
     unresolved: z.array(z.string().min(1)).optional(),
+    /** Code-vs-docs discrepancies, one verbatim line each — the doc-bug feed. */
+    findings: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type AuthoredFragment = z.infer<typeof AuthoredFragmentSchema>

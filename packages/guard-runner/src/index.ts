@@ -359,6 +359,7 @@ export {
   guardSetupPath,
   guardInterfacesPath,
   guardAuthoredInterfacesPath,
+  guardInterfaceFindingsPath,
   scenariosDir,
   recipePath,
   manifestPath,

@@ -10,6 +10,7 @@
  *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
  *   guard/interfaces.json        last interface-mapping catalog (gitignored, re-derived)
  *   guard/interfaces.authored.json  the hand-authored half of that catalog (COMMITTED)
+ *   guard/interfaces.findings.md    the authoring sessions' doc-bug feed (COMMITTED)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  *
  * The committable corpus files live one level over, under `scenarios/`:
@@ -59,6 +60,7 @@ const SETUP_FILE = 'setup.json'
 const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
 const INTERFACES_FILE = 'interfaces.json'
 const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json'
+const INTERFACE_FINDINGS_FILE = 'interfaces.findings.md'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
@@ -109,6 +111,16 @@ export function guardInterfacesPath(repoRoot: string): string {
  */
 export function guardAuthoredInterfacesPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), AUTHORED_INTERFACES_FILE)
+}
+
+/**
+ * The FINDINGS LEDGER the authoring sessions append to — committed, like the
+ * catalog half beside it, because what it holds is a report about the
+ * REPOSITORY (a doc that disagrees with the source), not a record of a run. A
+ * teammate who never ran authoring still has to be able to read it.
+ */
+export function guardInterfaceFindingsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), INTERFACE_FINDINGS_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
