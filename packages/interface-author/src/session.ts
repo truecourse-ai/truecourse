@@ -76,6 +76,10 @@ export interface PlaceBriefingInput {
   context?: WebPlaceContext
   /** The worlds the catalog already names — the ids this session reuses. */
   states: readonly InterfaceState[]
+  /** Every screen the catalog knows, in catalog order — what `to` may name. */
+  screens: readonly { id: string; address?: string }[]
+  /** The dialogs and panels that sit on THIS place — what `of` already names. */
+  nested: readonly { id: string; kind: string; title: string }[]
 }
 
 /**
@@ -98,8 +102,21 @@ export interface PlaceBriefingInput {
  * enables only happens if the session looks before it drafts, and the pilot's
  * sessions did not look. It costs a table a session reads once instead of a turn
  * it spends asking.
+ *
+ * The PLACES are here for a third reason on top of those two (item 9): they were
+ * a tool, and a tool result is re-sent on every turn that follows it while a
+ * briefing sits in the prefix a provider caches. Only the two facts a draft
+ * actually resolves against are stated — the screens with their addresses, which
+ * is what `to` may name, and the places on THIS one, which is what `of` names.
  */
-export function placeBriefing({ place, existing, context, states }: PlaceBriefingInput): string {
+export function placeBriefing({
+  place,
+  existing,
+  context,
+  states,
+  screens,
+  nested,
+}: PlaceBriefingInput): string {
   const lines = [
     `Author the web tasks of ONE place.`,
     ``,
@@ -120,6 +137,8 @@ export function placeBriefing({ place, existing, context, states }: PlaceBriefin
       ...existing.map((id) => `  ${id}`),
     )
   }
+  lines.push(...nestedLines(place.id, nested))
+  lines.push(...screenLines(screens))
   lines.push(...registryLines(states))
   lines.push(
     ``,
@@ -183,6 +202,53 @@ function contextLines(context: WebPlaceContext): string[] {
   )
   return lines
 }
+
+/**
+ * The places already on this one: what `of` names, and what a session must not
+ * declare a second time under a new id. A dialog authored by an earlier session
+ * of this place — or by the derivation — is the same dialog.
+ */
+function nestedLines(
+  placeId: string,
+  nested: readonly { id: string; kind: string; title: string }[],
+): string[] {
+  if (nested.length === 0) return []
+  return [
+    ``,
+    `The places already on this one. Use these ids in \`at\` and \`to\`; declare a new`,
+    `place in \`resources\` only when none of them is the one you mean:`,
+    ...nested.map((place) => `  ${place.id}  ·  ${place.kind}  ·  ${place.title}`),
+    `(all of them sit \`of: "${placeId}"\`.)`,
+  ]
+}
+
+/**
+ * Every screen the catalog knows, id and address. This is the whole of what a
+ * task's `to` may name — a task that moves the user leaves them at a SCREEN or
+ * at a place on one, and both resolve here. Capped like the registry: a listing
+ * whose tail is counted is a fact, a listing silently cut in half is not.
+ */
+function screenLines(screens: readonly { id: string; address?: string }[]): string[] {
+  if (screens.length === 0) return []
+  const shown = screens.slice(0, MAX_SCREENS_BRIEFED)
+  const width = Math.max(...shown.map((screen) => screen.id.length))
+  const lines = [
+    ``,
+    `Every screen this catalog knows. A task that MOVES the user names one of these`,
+    `ids in \`to\`; an address is where a screen is reached, exactly as it is written:`,
+    ...shown.map((screen) => `  ${screen.id.padEnd(width)}  ${screen.address ?? '—'}`),
+  ]
+  if (screens.length > shown.length) {
+    lines.push(
+      `  … ${screens.length - shown.length} more — the whole list is the \`resources.web\` of`,
+      `  \`.truecourse/guard/interfaces.json\`, which \`read_file\` reads.`,
+    )
+  }
+  return lines
+}
+
+/** How many screens one briefing states before the tail counts the rest. */
+const MAX_SCREENS_BRIEFED = 250
 
 /**
  * The state registry as the session sees it: every world the catalog names, its
@@ -252,7 +318,7 @@ Each task carries:
   - \`{"kind": "navigate", "route": "/repos/{repoId}"}\` — moving to an address.
   - \`{"kind": "activate", "target": "button \\"Analyze\\""}\` — a click, a tap, a submit.
   - \`{"kind": "input", "target": "textbox \\"Repository path\\""}\` — putting a value in a field.
-- \`at\` — the place the task is performed at (a resource id from \`list_places\`).
+- \`at\` — the place the task is performed at: this place, or a dialog or panel on it. **The briefing lists both** — the places already on this one, and every screen the catalog knows.
 - \`to\` — the place it leaves the user at, ONLY when it moves them. A task that acts in place carries \`at\` alone.
 - \`startingState\` / \`endState\` — ids from the state registry: the world the task assumes, and the world it leaves. **The briefing lists the registry — reuse an id from it before you mint one**, and mint only when no id there names that world. **A task that CHANGES the world states its \`endState\`** — anything that creates, edits, deletes, enables, invites or cancels leaves a world different from the one it found, and that difference is what a scenario asserts. Omit \`endState\` only for a task that leaves the data exactly as it was (a navigation, a filter, a read).
 - \`apiEffects\` — the ids of the api interfaces the task's steps call. **The briefing already states them**: the requests this screen's own modules make, joined to the catalog by path. Use those ids, add one only if you READ the call yourself, and when the briefing joined nothing, omit the field — do not go looking for an id with \`list_interfaces\` guesses. \`[]\` means the task reaches no server at all, which is a stronger claim than omitting. Never guess.
@@ -269,7 +335,8 @@ Each task carries:
 # How to work
 
 - The BRIEFING already names the module that is this place and the modules it renders. Read those first; \`search_repo\` is for what they lead to, not for finding them again.
-- \`list_places\` — the places and their addresses. \`list_interfaces\` — what is already catalogued (web ids so you never author a duplicate; the api list is there to confirm an id, not to hunt for one).
+- The PLACES are in the briefing — every screen with its address, and the dialogs and panels on this one. There is no tool for them: what the briefing states is what the catalog has.
+- \`list_interfaces\` — what is already catalogued (web ids so you never author a duplicate; the api list is there to confirm an id, not to hunt for one).
 - \`search_repo\` and \`read_file\` — the application's source. The accessible names are in the JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the string a user actually reads.
 - \`check_draft\` — run your draft through the exact rules the write path enforces, and fix what it reports. Do this before you finish.
 - Then produce the outcome: the tasks, any new states, any place the catalog is missing, and \`unresolved\`.

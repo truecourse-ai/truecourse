@@ -6,6 +6,15 @@
  * in {@link ../write.ts} — a tool that wrote would put half a fragment on disk
  * every time a session ran out of budget mid-draft.
  *
+ * THE PLACES ARE NOT A TOOL (item 9). They were — `list_places` — and a tool
+ * result is the most expensive way to state a fact that never changes: every
+ * session called it once, and the whole table then rode every subsequent turn
+ * of that session's history, 245KB of re-sent tool results per run. The same
+ * table in the BRIEFING sits in the cached prefix instead, and the session has
+ * it before it asks. What a session needs of it is small and stated there: the
+ * screens with their addresses (what `to` names), and the dialogs and panels on
+ * its own place (what `of` names).
+ *
  * `check_draft` is the one that makes the LOOP earn its keep rather than a
  * single prompt: the rules of {@link validateFragment} are dozens of small
  * structural facts (an id that resolves, a role that exists, an entry that
@@ -19,13 +28,13 @@ import path from 'node:path'
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import { DOC_DISCOVERY_SKIP_DIRS, type InterfacesFile } from '@truecourse/shared'
-import { AUTHORED_SURFACE, AuthoredFragmentSchema, validateFragment } from './draft.js'
+import { AuthoredFragmentSchema, validateFragment } from './draft.js'
+import { clipLine, renderFileView } from './file-view.js'
 
 /** Caps — a tool result is context, and context is the budget (§3.3). */
 const MAX_READ_LINES = 400
 const MAX_SEARCH_HITS = 60
 const MAX_FILE_BYTES = 2_000_000
-const MAX_LINE_CHARS = 400
 /** How many catalog entries one `list_interfaces` call hands back. */
 const MAX_INTERFACES_LISTED = 200
 
@@ -42,7 +51,7 @@ export interface AuthorToolsInput {
 }
 
 export function buildAuthorTools(input: AuthorToolsInput): SessionTool[] {
-  return [readFileTool(input.repoRoot), searchTool(input.repoRoot), placesTool(input), interfacesTool(input), checkDraftTool(input)]
+  return [readFileTool(input.repoRoot), searchTool(input.repoRoot), interfacesTool(input), checkDraftTool(input)]
 }
 
 // ---------------------------------------------------------------------------
@@ -111,9 +120,9 @@ function readFileTool(repoRoot: string): SessionTool {
       if (slice.length === 0) {
         return { content: `\`${args.path}\` has ${all.length} lines — line ${start} is past the end.`, isError: true }
       }
-      const body = slice.map((line, i) => `${start + i}\t${clip(line)}`).join('\n')
-      const tail = start - 1 + slice.length < all.length ? `\n… ${all.length - (start - 1 + slice.length)} more lines` : ''
-      return { content: `${args.path} (${all.length} lines)\n${body}${tail}` }
+      return {
+        content: renderFileView({ path: args.path, lines: slice, start, total: all.length }),
+      }
     },
   })
 }
@@ -164,7 +173,7 @@ function searchTool(repoRoot: string): SessionTool {
             truncated = true
             break
           }
-          hits.push(`${rel}:${i + 1}: ${clip(lines[i].trim())}`)
+          hits.push(`${rel}:${i + 1}: ${clipLine(lines[i].trim())}`)
         }
         if (truncated) break
       }
@@ -196,40 +205,6 @@ function* walk(dir: string): Generator<string> {
 // ---------------------------------------------------------------------------
 // the catalog the draft extends
 // ---------------------------------------------------------------------------
-
-function placesTool(input: AuthorToolsInput): SessionTool {
-  return defineSessionTool({
-    name: 'list_places',
-    description:
-      'List the web places the catalog knows — the derived screens with the address each is reached at, plus any authored dialog or panel. `at`, `to` and `of` resolve against these ids.',
-    kind: 'list-places',
-    readOnly: true,
-    destructive: false,
-    inputSchema: z.object({}).strict(),
-    async execute() {
-      const places = [
-        ...(input.derived?.resources?.[AUTHORED_SURFACE] ?? []).map((r) => ({ r, origin: 'derived' })),
-        ...(input.authored?.resources?.[AUTHORED_SURFACE] ?? []).map((r) => ({ r, origin: 'authored' })),
-      ]
-      if (places.length === 0) {
-        return { content: 'The catalog knows no web places. Nothing derived a screen for this repository.' }
-      }
-      const rows = places.map(({ r, origin }) =>
-        [
-          r.id,
-          r.kind,
-          r.address ?? '—',
-          r.of ? `of ${r.of}` : '',
-          origin,
-          r.description ?? r.title,
-        ]
-          .filter(Boolean)
-          .join('  ·  '),
-      )
-      return { content: `id · kind · address · of · origin · title\n${rows.join('\n')}` }
-    },
-  })
-}
 
 function interfacesTool(input: AuthorToolsInput): SessionTool {
   return defineSessionTool({
@@ -307,10 +282,6 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
       return { content: `${result.errors.length} problem(s):\n- ${result.errors.join('\n- ')}`, isError: true }
     },
   })
-}
-
-function clip(line: string): string {
-  return line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}…` : line
 }
 
 function message(error: unknown): string {

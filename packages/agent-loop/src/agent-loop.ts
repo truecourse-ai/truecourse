@@ -16,6 +16,7 @@ import type {
   SessionDriver,
   SessionHandle,
   SessionResume,
+  SharedPromptPrefix,
 } from './session-driver.js';
 import type {
   RawPayload,
@@ -48,6 +49,13 @@ export interface AgentLoopInput<TOutcome> {
   /** The work item this session serves (a doc path, an area, a flow id). */
   workItem: string;
   initialMessages: readonly string[];
+  /**
+   * A prefix this session shares with its cluster peers (item 8) — carried to
+   * the driver untouched. It does NOT descend to a child session: a child runs
+   * on its own system prompt, so the same prefix would be 60KB no cache of any
+   * provider could reuse.
+   */
+  sharedPrefix?: SharedPromptPrefix;
   driver: SessionDriver;
   persistence: SessionPersistence;
   /** Minted by the run orchestrator; one transcript per session id. */
@@ -292,6 +300,7 @@ function startSession<TOutcome>(
         handle = driver.runSession({
           def: wrappedDef,
           initialMessages,
+          ...(input.sharedPrefix ? { sharedPrefix: input.sharedPrefix } : {}),
           ...(resume ? { resume } : {}),
           onEvent: track,
           signal: controller.signal,

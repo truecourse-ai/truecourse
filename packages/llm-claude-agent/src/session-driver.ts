@@ -291,8 +291,9 @@ async function runClaudeAgentSession(
 
   // Opening messages: fresh sessions get their initial messages (or a bare
   // opener); a resume treats them as NEW observations, nudging when empty.
-  if (input.initialMessages.length > 0) {
-    for (const m of input.initialMessages) wiring.sendUser(m);
+  const opening = openingMessages(input);
+  if (opening.length > 0) {
+    for (const m of opening) wiring.sendUser(m);
   } else {
     wiring.sendUser(input.resume ? RESUME_NUDGE : 'Begin.');
   }
@@ -424,6 +425,21 @@ async function runClaudeAgentSession(
   }
   // The stream ended without any result message (interrupt, closed input).
   return endedWithoutOutcome();
+}
+
+/**
+ * What the session is told to open with. A cluster's shared prefix (item 8)
+ * leads it, JOINED to the first initial message rather than queued ahead of it:
+ * streaming input makes every queued message a turn of its own, and this
+ * backend caches on its own terms — so a prefix of its own would buy no cache
+ * and cost the session a turn spent answering it alone. A resume carries the
+ * prefix already, and whatever arrives then is a new observation.
+ */
+function openingMessages(input: SessionRunInput): string[] {
+  const prefix = input.resume ? [] : (input.sharedPrefix?.messages ?? []);
+  if (prefix.length === 0) return [...input.initialMessages];
+  const [first, ...rest] = input.initialMessages;
+  return [[...prefix, ...(first ? [first] : [])].join('\n\n'), ...rest];
 }
 
 /** The model this driver declares — see the `attribution` block above. */

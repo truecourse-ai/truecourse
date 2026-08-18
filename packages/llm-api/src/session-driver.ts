@@ -3,8 +3,9 @@
  * on the AI SDK's `generateText` — tools declared without `execute` so the
  * model's tool call comes back unrun (one step per turn), the FULL message
  * history resent every turn under the configured provider's cache strategy
- * (`provider-tuning.ts` — breakpoints on the system prompt and the moving
- * tail, or a per-request cluster key), and a per-turn fallback-model retry.
+ * (`provider-tuning.ts` — breakpoints on the system prompt, a cluster's shared
+ * prefix and the moving tail, or a per-request cluster key), and a per-turn
+ * fallback-model retry.
  *
  * The driver owns MECHANICS only. The policy shell (`runAgentLoop` in
  * `@truecourse/shared/llm`) counts budgets from the events emitted here and
@@ -87,6 +88,10 @@ export interface ApiSessionDriverOptions {
    * Default: that session id, so one session's turns cluster together and
    * separate sessions never collide. Ignored by anthropic and bedrock, which
    * key their cache by the prefix content itself.
+   *
+   * A run that declares a `sharedPrefix` per session (item 8) names its cluster
+   * there instead, and that key wins: it is the one the shared prefix is
+   * actually shared under.
    */
   cacheKey?: string | ((sessionId: string) => string);
   /** Test seam: what a backoff wait is made of. Aborts with the signal. */
@@ -128,9 +133,11 @@ export function createApiSessionDriver(
         retry,
         tuning,
         cacheKey:
-          typeof opts.cacheKey === 'function'
+          input.sharedPrefix?.cacheKey ??
+          (typeof opts.cacheKey === 'function'
             ? opts.cacheKey(sessionId)
-            : (opts.cacheKey ?? sessionId),
+            : (opts.cacheKey ?? sessionId)),
+        sharedPrefix: input.sharedPrefix?.messages.length ?? 0,
         sleep: opts.sleep ?? delay,
         onEvent: input.onEvent,
         interrupted: () => interrupted,
@@ -162,6 +169,8 @@ interface SessionRuntime {
   tuning: ProviderTuning;
   /** Resolved once per session — the cluster the request-keyed providers cache under. */
   cacheKey: string;
+  /** How many leading messages are the cluster's shared prefix; 0 = none. */
+  sharedPrefix: number;
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   /** The turn loop's own emitter, threaded down so a wait INSIDE one model
    *  call is recorded where it happened rather than inferred afterwards. */
@@ -190,6 +199,11 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
     messages.push({ role: 'user', content });
     onEvent({ type: 'user-message', content });
   };
+  // The cluster's shared prefix opens a FRESH conversation, ahead of anything
+  // this session alone was told. A resume rebuilds it out of the transcript
+  // like any other user message, so saying it again would both duplicate it and
+  // move the boundary the breakpoint below sits on.
+  if (!input.resume) for (const content of input.sharedPrefix?.messages ?? []) say(content);
   for (const content of input.initialMessages) say(content);
   if (messages.length === 0) say(BEGIN_MESSAGE);
 
@@ -322,9 +336,13 @@ async function callModel(
   signal: AbortSignal,
   rt: SessionRuntime,
 ): Promise<{ result: Awaited<ReturnType<typeof generateText>>; modelId: string }> {
-  // The system prompt and the moving tail close the two cacheable prefixes;
-  // a provider that keys its cache per request leaves both unmarked.
+  // The system prompt and the moving tail close the two cacheable prefixes,
+  // and a cluster's shared prefix closes a third BETWEEN them: without a
+  // breakpoint of its own it would only ever be cached as part of one session's
+  // tail, which the next session of the cluster cannot read. A provider that
+  // keys its cache per request leaves all of them unmarked.
   const breakpoint = rt.tuning.breakpoint;
+  const sharedEnd = rt.sharedPrefix - 1;
   const prompt: ModelMessage[] = [
     {
       role: 'system',
@@ -332,7 +350,7 @@ async function callModel(
       ...(breakpoint ? { providerOptions: breakpoint } : {}),
     },
     ...messages.map((m, i) =>
-      breakpoint && i === messages.length - 1
+      breakpoint && (i === messages.length - 1 || i === sharedEnd)
         ? ({ ...m, providerOptions: { ...m.providerOptions, ...breakpoint } } as ModelMessage)
         : m,
     ),

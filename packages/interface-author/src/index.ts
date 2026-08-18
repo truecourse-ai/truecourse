@@ -27,6 +27,14 @@ export {
   type FragmentValidation,
   type ValidateFragmentInput,
 } from './draft.js'
+export {
+  MIN_JACCARD,
+  MIN_SHARED,
+  clusterPlaces,
+  type ClusterPlacesInput,
+  type PlaceCluster,
+} from './cluster.js'
+export { MAX_PACK_BYTES, clusterPack, type ClusterPack } from './pack.js'
 export { buildAuthorTools, type AuthorToolsInput } from './tools.js'
 export {
   INTERFACE_AUTHOR_BUDGET,

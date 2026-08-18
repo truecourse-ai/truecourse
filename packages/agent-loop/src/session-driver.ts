@@ -45,9 +45,30 @@ export interface SessionResume {
   events: readonly SessionEvent[];
 }
 
+/**
+ * A prompt prefix several sessions SHARE (SPEC_GUARD_PLAN item 8): messages
+ * that lead the conversation identically for every session of a cluster, and
+ * the name that cluster caches under.
+ *
+ * It is separate from `initialMessages` because WHICH messages are shared is
+ * what a driver needs to know: the providers that cache by prefix content take
+ * a breakpoint at the end of the shared part (a breakpoint on a per-session
+ * message caches nothing twice), and the providers that cache per request take
+ * `cacheKey` as the cluster's routing hint. A driver with neither mechanism
+ * simply sends the messages first, which is what they are.
+ */
+export interface SharedPromptPrefix {
+  /** Sent ahead of `initialMessages`, byte-identical across the cluster. */
+  messages: readonly string[];
+  /** Names the cluster for the providers that key their prompt cache per request. */
+  cacheKey: string;
+}
+
 export interface SessionRunInput {
   def: SessionDef;
   initialMessages: readonly string[];
+  /** The cluster prefix this session opens with, when it belongs to one. */
+  sharedPrefix?: SharedPromptPrefix;
   resume?: SessionResume;
   /** Drivers emit event BODIES as they happen; the shell stamps seq + ts
    *  and persists. Full content, never summaries. A driver may attach the

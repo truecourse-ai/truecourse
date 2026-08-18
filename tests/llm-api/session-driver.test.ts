@@ -524,10 +524,11 @@ describe('api session driver provider cache strategy', () => {
     provider: ProviderConfig,
     turns: StubTurn[] = [{ content: [outcomeCall({ verdict: 'keep' })] }],
     opts?: ApiSessionDriverOptions,
+    run?: Partial<SessionRunInput>,
   ) {
     const scripted = scriptedModel(turns);
     buildModelMock.mockReturnValue(scripted.model);
-    const { handle } = runSession(createApiSessionDriver(provider, opts));
+    const { handle } = runSession(createApiSessionDriver(provider, opts), run);
     await handle.done;
     return scripted.calls;
   }
@@ -641,6 +642,45 @@ describe('api session driver provider cache strategy', () => {
     });
     expect(seen).toHaveLength(1);
     expect(derived[0].providerOptions?.openai?.promptCacheKey).toBe(`author:${seen[0]}`);
+  });
+
+  /**
+   * A cluster's shared prefix (item 8) is the only part of two sessions' prompts
+   * that is byte-identical, so it has to close a cacheable prefix of its own:
+   * marked only as part of one session's moving tail, the next session of the
+   * cluster has nothing to read back.
+   */
+  it('opens on the cluster prefix, closes it with a breakpoint, and takes its key', async () => {
+    const sharedPrefix = { messages: ['the shared modules'], cacheKey: 'cluster/settings' };
+
+    const anthropic = scriptedModel([{ content: [outcomeCall({ verdict: 'keep' })] }]);
+    buildModelMock.mockReturnValue(anthropic.model);
+    const { handle, events } = runSession(
+      createApiSessionDriver({ provider: 'anthropic', model: 'claude-x', apiKey: 't' }),
+      { sharedPrefix },
+    );
+    await handle.done;
+
+    // The prefix leads the conversation, ahead of what this session alone was told…
+    expect(promptSummary(anthropic.calls[0].prompt)).toEqual([
+      'system=you curate docs',
+      'user=the shared modules',
+      'user=go',
+    ]);
+    // …and it is a real user message in the transcript, not a hidden prelude.
+    expect(events.filter((e) => e.type === 'user-message')).toHaveLength(2);
+
+    const ephemeral = { anthropic: { cacheControl: { type: 'ephemeral' } } };
+    const options = messageOptions(anthropic.calls[0].prompt);
+    expect(options[0]).toEqual(ephemeral); // the system prompt
+    expect(options[1]).toEqual(ephemeral); // the end of the shared prefix
+    expect(options[2]).toEqual(ephemeral); // the moving tail
+
+    // Where the cache is keyed per request, the cluster is what it is keyed on.
+    const openai = await callsFor({ provider: 'openai', model: 'gpt-5', apiKey: 't' }, undefined, {
+      cacheKey: 'per-session-default',
+    }, { sharedPrefix });
+    expect(openai[0].providerOptions?.openai?.promptCacheKey).toBe('cluster/settings');
   });
 
   it('keys the cluster per session even where the key is not sent', async () => {

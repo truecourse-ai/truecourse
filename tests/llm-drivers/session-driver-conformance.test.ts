@@ -288,6 +288,30 @@ for (const fixture of [apiFixture(), sdkFixture()]) {
       expect(types).not.toContain('re-ask');
     });
 
+    /**
+     * A cluster's shared prefix (item 8) is a MESSAGE fact, not a provider one:
+     * whatever each backend does with the cache key — and one of them does
+     * nothing with it — both open the session on the prefix, ahead of what that
+     * session alone was told, and both record it as something the model saw.
+     * Whether it arrives as its own message is mechanics, and differs.
+     */
+    it('opens on a shared cluster prefix, ahead of its own initial messages', async () => {
+      const driver = fixture.make([{ kind: 'outcome', value: { verdict: 'keep' } }]);
+      const { persistence } = memoryPersistence();
+      const outcome = await loop(driver, persistence, {
+        sharedPrefix: { messages: ['the shared modules'], cacheKey: 'cluster/settings' },
+      }).outcome;
+
+      expect(outcome.status).toBe('completed');
+      const said = persistence
+        .readEvents('s1')
+        .filter((e) => e.type === 'user-message')
+        .map((e) => (e.type === 'user-message' ? e.content : ''))
+        .join('\n');
+      expect(said).toContain('the shared modules');
+      expect(said.indexOf('the shared modules')).toBeLessThan(said.indexOf('go'));
+    });
+
     it('stops at the turn budget with the budget-exhausted failure', async () => {
       const driver = fixture.make([]); // never converges: endless text turns
       const { persistence } = memoryPersistence();

@@ -161,9 +161,13 @@ function scriptedDriver(script: Script): { driver: SessionDriver; seen: SessionR
   return { driver, seen }
 }
 
-/** The place the briefing names — the driver's stand-in for the model reading it. */
+/**
+ * The place the briefing names — the driver's stand-in for the model reading it.
+ * The briefing is the LAST opening message: a cluster's shared pack rides in
+ * front of it, and the pack is about several places at once.
+ */
 function placeOf(input: SessionRunInput): string {
-  const match = /place\s+(\S+)/.exec(input.initialMessages.join('\n'))
+  const match = /^\s+place\s+(\S+)/m.exec(input.initialMessages.at(-1) ?? '')
   return match ? match[1] : ''
 }
 
@@ -236,7 +240,6 @@ describe('a session that authors', () => {
     const toolCalls: string[] = []
     const { driver } = scriptedDriver(async (place, input) => {
       if (place !== 'root') return { kind: 'outcome', value: { interfaces: [] } }
-      toolCalls.push(await callTool(input, 'list_places', {}))
       toolCalls.push(await callTool(input, 'read_file', { path: 'src/Home.tsx' }))
       toolCalls.push(await callTool(input, 'check_draft', HOME_FRAGMENT))
       input.onEvent({ type: 'assistant-turn', text: 'done', usage: usage() })
@@ -246,9 +249,8 @@ describe('a session that authors', () => {
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence })
 
     // The tools really read this repository.
-    expect(toolCalls[0]).toContain('root')
-    expect(toolCalls[1]).toContain('aria-label="Repository path"')
-    expect(toolCalls[2]).toContain('The draft is valid')
+    expect(toolCalls[0]).toContain('aria-label="Repository path"')
+    expect(toolCalls[1]).toContain('The draft is valid')
 
     const home = result.places.find((p) => p.placeId === 'root')!
     expect(home.status).toBe('authored')
@@ -530,6 +532,65 @@ describe('the briefing carries what the AST pass knows (item 105)', () => {
 })
 
 /**
+ * ITEM 9. The places were a TOOL, and a tool result is re-sent on every turn
+ * after it — 245KB of re-sent `list_places` per run. The two facts a draft
+ * resolves against are in the briefing instead, where they sit in the prefix a
+ * provider caches: the screens with their addresses, and the places on this one.
+ */
+describe('the places are in the briefing, not a tool', () => {
+  it('states every screen with its address, and no `list_places` tool exists', async () => {
+    const { persistence } = memoryPersistence()
+    let briefing = ''
+    let tools: string[] = []
+    const { driver } = scriptedDriver(async (_place, input) => {
+      briefing = input.initialMessages.join('\n')
+      tools = input.def.tools.map((tool) => tool.name)
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+
+    expect(tools).toEqual(['read_file', 'search_repo', 'list_interfaces', 'check_draft'])
+    expect(briefing).toContain('Every screen this catalog knows')
+    expect(briefing).toContain('  root          /')
+    expect(briefing).toContain('  repos-repoid  /repos/{repoId}')
+  })
+
+  it('states the dialogs and panels an earlier session put on this place', async () => {
+    const { persistence } = memoryPersistence()
+    // The first run authors the rules dialog onto `repos-repoid`…
+    await authorWebInterfaces({
+      repoRoot: repo,
+      driver: scriptedDriver(async (place) =>
+        place === 'repos-repoid'
+          ? { kind: 'outcome', value: REPORT_FRAGMENT }
+          : { kind: 'outcome', value: { interfaces: [] } },
+      ).driver,
+      persistence,
+      concurrency: 1,
+    })
+
+    // …so the re-author of that place is told the dialog already exists.
+    let briefing = ''
+    const { driver } = scriptedDriver(async (_place, input) => {
+      briefing = input.initialMessages.join('\n')
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({
+      repoRoot: repo,
+      driver,
+      persistence,
+      places: ['repos-repoid'],
+      replace: true,
+    })
+    expect(briefing).toContain('The places already on this one')
+    expect(briefing).toContain('rules-dialog  ·  dialog  ·  the Rules dialog')
+    expect(briefing).toContain('(all of them sit `of: "repos-repoid"`.)')
+    // The dialog is not a screen, so it never joins the screen table.
+    expect(briefing).not.toMatch(/^ {2}rules-dialog {2}—$/m)
+  })
+})
+
+/**
  * THE POOL. Sessions are network-bound, so they run several at a time; the FOLD
  * is not, and must not. These hold the three properties that makes that safe:
  * the sessions really do overlap, the validate-then-write never does, and a task
@@ -718,6 +779,96 @@ describe('sessions run in a pool, the fold does not', () => {
     for (const place of ['repos-repoid', 'settings', 'rules']) {
       expect(briefings.get(place), place).not.toContain('repository-registered')
     }
+  })
+
+  /**
+   * ITEM 4 + ITEM 8. The pool consumes CLUSTERS: the places that render the same
+   * modules run one after another, so each is briefed with its peers' work
+   * already folded in — and they open on one shared pack under one cache key.
+   */
+  describe('a cluster runs serially, on a shared pack', () => {
+    /** Four screens: three render the same shell, `rules` renders its own thing. */
+    const SHELL = ['src/Shell.tsx', 'src/Table.tsx', 'src/Field.tsx', 'src/Dialog.tsx', 'src/Button.tsx']
+    const context = new Map([
+      ['root', pack('src/Home.tsx', [...SHELL, 'src/Grid.tsx'])],
+      ['repos-repoid', pack('src/Repo.tsx', [...SHELL, 'src/Report.tsx'])],
+      ['settings', pack('src/Settings.tsx', [...SHELL, 'src/Form.tsx'])],
+      ['rules', pack('src/Rules.tsx', ['src/RuleList.tsx', 'src/RuleRow.tsx'])],
+    ])
+
+    function pack(module: string, renders: string[]) {
+      return { module, renders, closure: renders.length + 1, apiEffects: [], unjoined: [], rpcCalls: [] }
+    }
+
+    beforeEach(() => {
+      for (const module of [...SHELL, 'src/Grid.tsx', 'src/Report.tsx', 'src/Form.tsx']) {
+        fs.writeFileSync(path.join(repo, module), `export const ${path.basename(module, '.tsx')} = () => null\n`)
+      }
+    })
+
+    it('never overlaps two places of one cluster, and does overlap the clusters', async () => {
+      const { persistence } = memoryPersistence()
+      const inFlight = new Set<string>()
+      let clusterOverlaps = 0
+      let peak = 0
+      const cluster = new Set(['root', 'repos-repoid', 'settings'])
+
+      const { driver } = scriptedDriver(async (place) => {
+        inFlight.add(place)
+        peak = Math.max(peak, inFlight.size)
+        if ([...inFlight].filter((id) => cluster.has(id)).length > 1) clusterOverlaps += 1
+        await new Promise((r) => setTimeout(r, 5))
+        inFlight.delete(place)
+        return { kind: 'outcome', value: { interfaces: [] } }
+      })
+
+      await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4, context })
+      expect(clusterOverlaps).toBe(0)
+      // `rules` is its own cluster, so it runs beside the shell cluster.
+      expect(peak).toBe(2)
+    })
+
+    it('opens every member on the same pack, under the same cluster key', async () => {
+      const { persistence } = memoryPersistence()
+      const prefixes = new Map<string, SessionRunInput['sharedPrefix']>()
+      const { driver } = scriptedDriver(async (place, input) => {
+        prefixes.set(place, input.sharedPrefix)
+        return { kind: 'outcome', value: { interfaces: [] } }
+      })
+      await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4, context })
+
+      const shared = prefixes.get('root')!
+      expect(shared.cacheKey).toBe('cluster/root')
+      // The five modules all three render — and only those.
+      for (const module of SHELL) expect(shared.messages[0]).toContain(`${module} (2 lines)`)
+      expect(shared.messages[0]).not.toContain('src/Grid.tsx')
+      expect(shared.messages[0]).toContain('Do NOT `read_file` any of them again')
+
+      // Byte-identical across the cluster: that is the whole point of a prefix.
+      expect(prefixes.get('repos-repoid')).toEqual(shared)
+      expect(prefixes.get('settings')).toEqual(shared)
+      // A cluster of one shares nothing, so it opens on its briefing alone.
+      expect(prefixes.get('rules')).toBeUndefined()
+    })
+
+    it('briefs the second member with what the first one authored', async () => {
+      const { persistence } = memoryPersistence()
+      const briefings = new Map<string, string>()
+      const { driver } = scriptedDriver(async (place, input) => {
+        briefings.set(place, input.initialMessages.join('\n'))
+        return place === 'root'
+          ? { kind: 'outcome', value: HOME_FRAGMENT }
+          : { kind: 'outcome', value: { interfaces: [] } }
+      })
+      await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4, context })
+
+      // `root` folded before its cluster peers started, so they see its world —
+      // which is exactly what running a cluster serially buys (item 4).
+      expect(briefings.get('repos-repoid')).toContain('  repository-registered  ')
+      expect(briefings.get('settings')).toContain('  repository-registered  ')
+      // The other cluster started beside it and could not be told.
+      expect(briefings.get('rules')).not.toContain('repository-registered')
+    })
   })
 
   it('starts nothing new once the caller aborts', async () => {
