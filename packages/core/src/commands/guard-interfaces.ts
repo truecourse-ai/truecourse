@@ -4,7 +4,7 @@
  *
  * The engine halves live where they belong: the derivation in
  * `services/interface.service.ts` (`mapInterfaces`), the authoring sessions in
- * `@truecourse/interface-author`. THIS module is the adapter both UIs call — it
+ * `services/interface-author/`. THIS module is the adapter both UIs call — it
  * resolves the run's context (which driver the configured transport selects,
  * where the transcripts go, which commit the run stands on) and hands the
  * package everything it needs, exactly as `guard-externals.ts` adapts the
@@ -30,7 +30,7 @@ import {
   type PlaceResult,
   type ReconcileComplete,
   type StateReconciliation,
-} from '@truecourse/interface-author';
+} from '../services/interface-author/index.js';
 import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner';
 import {
   cliTransport,

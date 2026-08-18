@@ -253,8 +253,8 @@ export type {
   OpenSurfaceResult,
 } from './drivers/index.js'
 
-export { createSandbox, resolveInSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
-export type { Sandbox, SandboxOptions } from './sandbox.js'
+export { createSandbox, createWorkingSandbox, resolveInSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
+export type { Sandbox, SandboxOptions, WorkingSandbox } from './sandbox.js'
 
 export { constructChildEnv, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
 export type { ChildEnvOptions } from './child-env.js'
@@ -391,6 +391,8 @@ export {
   mergeInterfaceCatalogs,
   mergeInterfaceLists,
   mergeRegistries,
+  staleAuthoredPlaceDiagnostics,
+  type InterfaceMergeDiagnostic,
   readInterfaceCatalogRaw,
   readGuardFlowsCorpus,
   readGuardClaimsCorpus,

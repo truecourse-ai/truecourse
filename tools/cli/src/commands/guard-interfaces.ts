@@ -23,8 +23,8 @@ import {
   runGuardInterfaceReconcile,
   type GuardInterfacesAuthorView,
 } from "@truecourse/core/commands/guard-interfaces";
-import type { PlaceResult, StateReconciliation } from "@truecourse/interface-author";
-import { INTERFACE_AUTHOR_BUDGET, defaultAuthorConcurrency } from "@truecourse/interface-author";
+import type { PlaceResult, StateReconciliation } from "@truecourse/core/services/interface-author";
+import { INTERFACE_AUTHOR_BUDGET, defaultAuthorConcurrency } from "@truecourse/core/services/interface-author";
 import { assertSessionBackendReady } from "@truecourse/core/services/llm/session-driver";
 import { preflightLlmOrExit, type LlmTransportFlag } from "../lib/claude-preflight.js";
 import { isInteractive } from "./helpers.js";

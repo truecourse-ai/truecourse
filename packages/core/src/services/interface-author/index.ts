@@ -4,13 +4,14 @@
  * SPEC_GUARD_PLAN item 104).
  *
  * `mapInterfaces` derives the cli and api surfaces whole and the web surface's
- * PLACES; a web TASK is intent no tree states, so it is authored. This package
+ * PLACES; a web TASK is intent no tree states, so it is authored. This service
  * is that authoring as SESSIONS: one per place, on the shared loop, with
  * read-only tools over the repository and a validator the session iterates
  * against until its draft is one the write path accepts.
  *
  * Driver-agnostic and store-agnostic by construction — the session driver and
- * the transcript persistence are injected by the caller (`@truecourse/core`).
+ * the transcript persistence are injected by the caller (the command adapter
+ * in `commands/guard-interfaces.ts`).
  */
 export {
   AUTHORED_SURFACE,

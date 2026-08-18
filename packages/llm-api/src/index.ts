@@ -8,6 +8,10 @@ export {
 export {
   createApiSessionDriver,
   OUTCOME_TOOL_NAME,
+  retryDelayMs,
+  RETRY_JITTER,
+  DEFAULT_API_RETRY,
+  type ApiRetryPolicy,
   type ApiSessionDriverOptions,
 } from './session-driver.js';
 export { buildModel } from './model.js';

@@ -60,6 +60,19 @@ export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef
     tools: buildAuthorTools(input),
     outcomeSchema: AuthoredFragmentSchema,
     budget: INTERFACE_AUTHOR_BUDGET,
+    // The structural half of "run check_draft" (01 step 2k). The prompt already
+    // demands it in the strongest available terms and did not carry it: across
+    // 110 measured sessions the median first `check_draft` was turn 9, and 8
+    // sessions never called it at all — each of those risking a whole fragment
+    // dropped at the outcome for a rule one turn would have caught. So the
+    // shell refuses the FIRST outcome of a session that never ran it, feeds
+    // this message back, and lets the session continue (not malformed, at most
+    // once, on the ordinary budget).
+    outcomePrecondition: {
+      tool: 'check_draft',
+      message:
+        'Outcome refused: you never ran `check_draft` in this session. Call `check_draft` on your complete draft now — it runs the exact validation the write path will run, so a problem it finds costs one turn to fix here instead of the whole fragment at the outcome. Fix anything it reports, then call `outcome` again.',
+    },
   }
 }
 
@@ -340,7 +353,7 @@ Each task carries:
 
 # Findings — what the repository says that the source does not do
 
-\`findings\` is the fragment's other list, and it is NOT \`unresolved\`. \`unresolved\` is what YOU could not establish. A finding is something you DID establish, which contradicts what this repository claims elsewhere — one of the two is wrong, and neither is yours to fix here.
+\`findings\` is the fragment's other list, and it is NOT \`unresolved\`. \`unresolved\` is what YOU could not establish. A finding is a CONTRADICTION you DID establish: it has TWO NAMED SIDES — what one artifact CLAIMS, and what the other SHOWS — and one of the two must be wrong. A statement with one side is not a finding, whatever it observes. The findings ledger is committed and append-only, so a non-finding in it is noise that compounds forever.
 
 Record a finding when:
 
@@ -348,7 +361,17 @@ Record a finding when:
 - the briefing's derived facts disagree with the source you read — the module declared at this address does not render this screen, an api id joined to this screen's requests is not the endpoint the module calls;
 - two documents about this screen say different things.
 
-Write each one as ONE line that quotes BOTH sides and names its files, the way the code-vs-docs ledger does: \`docs/dashboard/violations.mdx says "the shield button opens the Rules panel"; src/ViolationList.tsx renders a Sheet trigger named "Browse Rules"\`. Verbatim, not paraphrased — a human reads these against the source, and a summary cannot be checked.
+Write each one as ONE line that quotes BOTH sides and names its files, the way the code-vs-docs ledger does. Verbatim, not paraphrased — a human reads these against the source, and a summary cannot be checked.
+
+Real examples, from past runs. Findings — two sides, both named:
+
+- \`docs/organisations/email-domains.mdx says click "Verify" to confirm a domain; the domains table component renders a button named "Sync"\` — the doc claims one control, the source shows another.
+- \`the briefing says /signin renders apps/remix/app/components/forms/signup.tsx; signin.tsx imports only SIGNUP_ERROR_MESSAGES from it and renders <SignInForm />\` — the derived fact claims one thing, the module shows another.
+
+NOT findings — one side, nothing contradicted:
+
+- \`no additional task controls are present on this screen\` — that is the ABSENCE of a finding; an empty (or complete) task list already says it. Report nothing.
+- \`the audit-log table renders no interactive controls\` — a statement that nothing further exists. If it means "this place has no authorable control", that is \`unresolved\`, the channel that already holds exactly that.
 
 The catalog follows the CODE regardless: author the task as the source has it, and record the disagreement. Do not record your own uncertainty (that is \`unresolved\`), a style opinion, a missing test, or anything you did not read on both sides. A screen whose docs agree with its source has no findings, which is the normal outcome.
 

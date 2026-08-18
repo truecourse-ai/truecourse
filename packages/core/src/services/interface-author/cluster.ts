@@ -51,9 +51,10 @@ export interface ClusterPlacesInput {
   places: readonly string[]
   /** What the AST pass knows about each place (item 105); the `renders` is the input. */
   context: ReadonlyMap<string, WebPlaceContext>
-  /** Overridable for measurement; the defaults are {@link MIN_JACCARD}/{@link MIN_SHARED}. */
+  /** Overridable for measurement; the defaults are {@link MIN_JACCARD}/{@link MIN_SHARED}/{@link MAX_CLUSTER_MEMBERS}. */
   minJaccard?: number
   minShared?: number
+  maxMembers?: number
 }
 
 /**
@@ -74,16 +75,39 @@ export const MIN_JACCARD = 0.5
 export const MIN_SHARED = 5
 
 /**
+ * How many places one cluster may hold — the bound on the SERIAL chain.
+ *
+ * A cluster runs one member after another so peers see each other's folded
+ * work, and the run's wall clock is bound by the longest single chain: on the
+ * measured documenso run the makespan at 20 workers equalled the longest
+ * cluster exactly, and 40 workers bought nothing. At ~20 min/member an 8-member
+ * chain is a ~2.5 hour critical path, so over-large groups are SPLIT (the
+ * greedy pass stops admitting members at the cap; the leftover peers seed their
+ * own clusters by the same similarity rules, so every split cluster keeps the
+ * shared-prefix property).
+ *
+ * The tradeoff is real: clustering exists so peers of one cluster see each
+ * other's folded work — which is what killed the pilot's duplicate-id
+ * collisions — and a smaller cap means more cross-cluster pairs that cannot see
+ * each other. Phase C's reconciliation is the backstop for exactly those pairs.
+ * Raising this buys agreement and costs wall clock, linearly.
+ */
+export const MAX_CLUSTER_MEMBERS = 3
+
+/**
  * Group the places. Seeded greedily in work-list order: the first unassigned
  * place opens a cluster, and every later unassigned place joins it when it is
  * alike enough (Jaccard against the SEED — the pairwise fact) AND leaves the
  * cluster with enough in common (against the running intersection — the pack's
- * fact). Everything else ends up in a cluster of its own, which is the correct
+ * fact), until the cluster is FULL ({@link MAX_CLUSTER_MEMBERS} — the serial
+ * chain bound; the members it turns away regroup under a later seed).
+ * Everything else ends up in a cluster of its own, which is the correct
  * answer for a place nobody shares a screen's worth of components with.
  */
 export function clusterPlaces(input: ClusterPlacesInput): PlaceCluster[] {
   const minJaccard = input.minJaccard ?? MIN_JACCARD
   const minShared = input.minShared ?? MIN_SHARED
+  const maxMembers = input.maxMembers ?? MAX_CLUSTER_MEMBERS
   const rendered = new Map<string, Set<string>>()
   for (const place of input.places) {
     rendered.set(place, new Set(input.context.get(place)?.renders ?? []))
@@ -102,6 +126,7 @@ export function clusterPlaces(input: ClusterPlacesInput): PlaceCluster[] {
     // anybody, so it never opens a cluster of more than itself.
     if (seedModules.size >= minShared) {
       for (const candidate of input.places) {
+        if (places.length >= maxMembers) break
         if (taken.has(candidate)) continue
         const modules = rendered.get(candidate)!
         if (jaccard(seedModules, modules) < minJaccard) continue
@@ -119,6 +144,25 @@ export function clusterPlaces(input: ClusterPlacesInput): PlaceCluster[] {
     })
   }
   return clusters
+}
+
+/**
+ * LPT ORDER — longest chain first. A cluster's members run serially, so the run
+ * cannot finish before its longest cluster does; starting that chain LAST adds
+ * its whole length to the makespan for free. Classic longest-processing-time
+ * scheduling, with total member count as the length proxy (session duration is
+ * provider latency nobody knows up front). STABLE on ties — clusters of equal
+ * size keep their work-list order — so the hand-off stays deterministic.
+ *
+ * Members inside each cluster keep their order untouched: the pool runs a
+ * serial group in item order, and a member's briefing builds on its
+ * predecessors' folded work.
+ */
+export function orderClustersLongestFirst(clusters: readonly PlaceCluster[]): PlaceCluster[] {
+  return clusters
+    .map((cluster, index) => ({ cluster, index }))
+    .sort((a, b) => b.cluster.places.length - a.cluster.places.length || a.index - b.index)
+    .map((entry) => entry.cluster)
 }
 
 /** |A ∩ B| / |A ∪ B|; two empty sets are alike in nothing. */

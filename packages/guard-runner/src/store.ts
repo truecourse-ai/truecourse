@@ -441,6 +441,63 @@ export function mergeRegistries<T extends { id: string }>(
   return merged
 }
 
+/**
+ * One thing the two catalog halves disagree about, noticed at merge time and
+ * REPORTED, never stored — a diagnostic is a statement about this working tree
+ * and goes stale the moment the tree moves, so it lives in run reporting the way
+ * the context pack does. The shape is the mapper's general `MapperDiagnostic`
+ * (`{surface, kind, subject, detail}`) so the two fold into one stream.
+ */
+export interface InterfaceMergeDiagnostic {
+  surface: string
+  kind: 'authored-place-not-derived'
+  /** The authored place id nothing derives any more. */
+  subject: string
+  detail: string
+}
+
+/**
+ * The authored SCREENS the derivation no longer backs — stale places.
+ *
+ * An authored screen whose id no derivation produced usually means the routing
+ * tree moved on: the measured case is a route module that now only redirects
+ * (item 5 correctly drops it), leaving an authored entry that re-earns an
+ * authoring session on every `--replace` run for an address nobody can stand at.
+ * The MERGE keeps the entry regardless — a fresh clone has no derived half at
+ * all, and dropping authored places there would drop every web surface — so
+ * the rule lives here as a REPORT for the authoring work-list to act on, never
+ * as a merge rule.
+ *
+ * Two deliberate exclusions:
+ * - authored `panel`/`dialog` places are never stale — nothing derives those,
+ *   which is precisely why they are authored;
+ * - a repo whose derived web half is absent or EMPTY reports nothing — the
+ *   documented escape hatch for a routing idiom the derivation does not
+ *   recognize, where every authored screen is legitimate.
+ */
+export function staleAuthoredPlaceDiagnostics(
+  derived: InterfacesFile | null,
+  authored: InterfacesFile | null,
+): InterfaceMergeDiagnostic[] {
+  const derivedPlaces = derived?.resources?.['web'] ?? []
+  if (derivedPlaces.length === 0) return []
+  const derivedIds = new Set(derivedPlaces.map((place) => place.id))
+  const diagnostics: InterfaceMergeDiagnostic[] = []
+  for (const place of authored?.resources?.['web'] ?? []) {
+    if (place.kind !== 'screen' || derivedIds.has(place.id)) continue
+    diagnostics.push({
+      surface: 'web',
+      kind: 'authored-place-not-derived',
+      subject: place.id,
+      detail:
+        `authored screen \`${place.id}\`${place.address ? ` (${place.address})` : ''} is not in the derived catalog — ` +
+        `the routing tree no longer produces it (moved, deleted, or a redirect-only module). ` +
+        `It stays in the merged catalog, but authoring skips it; remove it from guard/interfaces.authored.json if it is truly gone.`,
+    })
+  }
+  return diagnostics
+}
+
 /** Overlay `over` onto `base` by key: a match replaces IN PLACE, the rest append
  *  in `over`'s own order. */
 function overlayById<T>(base: readonly T[], over: readonly T[], key: (value: T) => string): T[] {

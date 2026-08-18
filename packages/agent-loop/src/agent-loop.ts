@@ -157,6 +157,12 @@ function startSession<TOutcome>(
   let prevTurnMalformed = false;
   let currentTurnMalformed = false;
 
+  // The outcome precondition (01 step 2k): whether the required tool has
+  // produced a result in this session. Tracked live from the shell's own
+  // events; a resumed-from prior transcript is folded in below. Stays false
+  // (and unread) when the def declares no precondition.
+  let preconditionMet = false;
+
   const track = (body: SessionEventBody & { raw?: RawPayload }): void => {
     append(body);
     switch (body.type) {
@@ -193,6 +199,12 @@ function startSession<TOutcome>(
             interruptCause = 'malformed';
             requestInterrupt();
           }
+        }
+        break;
+      }
+      case 'tool-result': {
+        if (def.outcomePrecondition && body.toolName === def.outcomePrecondition.tool) {
+          preconditionMet = true;
         }
         break;
       }
@@ -324,6 +336,12 @@ function startSession<TOutcome>(
     // A cross-process resume hands the driver the PRIOR session's persisted
     // transcript (audit truth) plus its opaque cursor (§3.3).
     const priorEvents = input.resume ? persistence.readEvents(input.resume.of) : [];
+    // A precondition satisfied in the resumed-from session stays satisfied:
+    // the tool ran, and this session carries that transcript as its history.
+    if (def.outcomePrecondition && !preconditionMet) {
+      const required = def.outcomePrecondition.tool;
+      preconditionMet = priorEvents.some((e) => e.type === 'tool-result' && e.toolName === required);
+    }
     let result = await runOnce(
       input.resume ? { cursor: input.resume.cursor, events: priorEvents } : undefined,
     );
@@ -349,6 +367,26 @@ function startSession<TOutcome>(
         .readEvents(sessionId)
         .some((e) => e.type === 'user-message');
       result = await runOnce({ cursor, events }, ingestedInitials ? [] : undefined);
+    }
+
+    // The outcome precondition (01 step 2k): an outcome produced before the
+    // required tool was ever called is refused ONCE — the message goes back as
+    // a user message (the resumed driver run records it on ingestion) and the
+    // session continues under its ordinary budget. Not a malformed turn, and
+    // never re-fired: the next outcome, satisfied or not, proceeds through the
+    // normal schema validation below. Gated on `interruptCause` the same way
+    // the transient retry is — once the shell has decided to stop the session
+    // (budget, ceiling, abort), there is no budget left to comply in, so the
+    // outcome stands on its own merits rather than earning a continuation.
+    if (
+      result.kind === 'outcome' &&
+      def.outcomePrecondition &&
+      !preconditionMet &&
+      interruptCause === undefined
+    ) {
+      const events = [...priorEvents, ...persistence.readEvents(sessionId)];
+      const cursor = result.resumeCursor ?? input.resume?.cursor;
+      result = await runOnce({ cursor, events }, [def.outcomePrecondition.message]);
     }
 
     // -----------------------------------------------------------------------

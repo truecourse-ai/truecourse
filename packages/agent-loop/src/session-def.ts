@@ -90,6 +90,23 @@ export interface SessionDef<TOutcome = unknown> {
   budget: SessionBudget;
   /** May wait on user input (§3.7). Non-interactive runs never block. */
   interactive?: boolean;
+  /**
+   * A structural demand that `tool` was called before the outcome is accepted
+   * (01 step 2k). Exists because prompting alone did not carry it: across 110
+   * authoring sessions the median first validator call was turn 9 despite the
+   * prompt demanding it "EARLY", and 8 sessions never called it at all.
+   *
+   * When set and an outcome arrives with no `tool-result` for `tool` in this
+   * session (a resumed-from prior transcript counts), the shell refuses the
+   * outcome and feeds `message` back so the session can comply — a real round
+   * trip that consumes a turn under the ordinary budget. The refusal is NOT a
+   * malformed turn: a session that skipped a step is told and allowed to
+   * continue. It fires at most once per session — a second outcome proceeds
+   * through normal schema validation whether or not the tool was called, and a
+   * session that burns its budget still refusing ends `budget-exhausted`, the
+   * honest result. Absent ⇒ behavior identical to before the field existed.
+   */
+  outcomePrecondition?: { tool: string; message: string };
 }
 
 /**

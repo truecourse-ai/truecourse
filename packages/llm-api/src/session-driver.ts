@@ -62,9 +62,11 @@ const CONTINUE_NUDGE = `Continue. When you have reached the final result, call t
 export interface ApiRetryPolicy {
   /** Tries on ONE model, the first included. */
   attempts: number;
-  /** The first backoff; doubled per attempt. */
+  /** The first backoff; doubled per attempt. The ladder is also a FLOOR under
+   *  `Retry-After` — see {@link retryDelayMs}. */
   baseDelayMs: number;
-  /** Cap on a SINGLE wait — a `Retry-After` past it is clamped, not obeyed. */
+  /** Cap on a SINGLE wait's deterministic part — a `Retry-After` past it is
+   *  clamped, not obeyed. Jitter (up to +{@link RETRY_JITTER}) rides on top. */
   maxDelayMs: number;
 }
 
@@ -73,6 +75,36 @@ export const DEFAULT_API_RETRY: ApiRetryPolicy = {
   baseDelayMs: 2_000,
   maxDelayMs: 60_000,
 };
+
+/** Waits stretch by up to this fraction, uniformly at random, so concurrent
+ *  sessions that failed together do not re-collide on the same tick. */
+export const RETRY_JITTER = 0.25;
+
+/**
+ * The wait before one retry (`attempt` is 1-based). Three rules (01 step 2i):
+ *
+ * - The exponential ladder (`baseDelayMs · 2^(attempt-1)`) FLOORS a provider's
+ *   `Retry-After`: the header is advice about a world that does not include
+ *   the load we ourselves are generating — twenty concurrent sessions each
+ *   politely waiting the suggested 1s keep the deployment saturated forever.
+ *   A `Retry-After` above the ladder is obeyed (clamped by `maxDelayMs`).
+ * - `maxDelayMs` caps the deterministic part.
+ * - Jitter stretches the result by up to +{@link RETRY_JITTER}, so it may
+ *   exceed `maxDelayMs` by that fraction.
+ *
+ * Pure: `random` (uniform in [0, 1)) is injected for tests.
+ */
+export function retryDelayMs(
+  policy: ApiRetryPolicy,
+  attempt: number,
+  retryAfterMs: number | undefined,
+  random: () => number = Math.random,
+): number {
+  const ladder = policy.baseDelayMs * 2 ** (attempt - 1);
+  const floored = retryAfterMs === undefined ? ladder : Math.max(retryAfterMs, ladder);
+  const wait = Math.min(floored, policy.maxDelayMs);
+  return Math.round(wait * (1 + RETRY_JITTER * random()));
+}
 
 export interface ApiSessionDriverOptions {
   /** Cost for one turn's usage, in USD — same hook as the one-shot transport.
@@ -96,6 +128,8 @@ export interface ApiSessionDriverOptions {
   cacheKey?: string | ((sessionId: string) => string);
   /** Test seam: what a backoff wait is made of. Aborts with the signal. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Test seam: the jitter's randomness (uniform in [0, 1)). */
+  random?: () => number;
 }
 
 export function createApiSessionDriver(
@@ -139,6 +173,7 @@ export function createApiSessionDriver(
             : (opts.cacheKey ?? sessionId)),
         sharedPrefix: input.sharedPrefix?.messages.length ?? 0,
         sleep: opts.sleep ?? delay,
+        random: opts.random ?? Math.random,
         onEvent: input.onEvent,
         interrupted: () => interrupted,
         drainSteers: () => steers.splice(0),
@@ -172,6 +207,8 @@ interface SessionRuntime {
   /** How many leading messages are the cluster's shared prefix; 0 = none. */
   sharedPrefix: number;
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** The jitter's randomness — injected so retry waits are unit-testable. */
+  random: () => number;
   /** The turn loop's own emitter, threaded down so a wait INSIDE one model
    *  call is recorded where it happened rather than inferred afterwards. */
   onEvent: SessionRunInput['onEvent'];
@@ -385,12 +422,7 @@ async function callModel(
         // and the swap is recorded like any other retry rather than silently.
         const next = again ? candidate : candidates[index + 1];
         if (!next) throw err;
-        const delayMs = again
-          ? Math.min(
-              failure.retryAfterMs ?? rt.retry.baseDelayMs * 2 ** (attempt - 1),
-              rt.retry.maxDelayMs,
-            )
-          : 0;
+        const delayMs = again ? retryDelayMs(rt.retry, attempt, failure.retryAfterMs, rt.random) : 0;
         rt.onEvent({
           type: 'provider-retry',
           attempt: ++retries,

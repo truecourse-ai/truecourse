@@ -17,7 +17,11 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { constructChildEnv, sandboxXdgDirs, DETERMINISM_PINS } from './child-env.js'
+import { spawn } from 'node:child_process'
+import { DEFAULT_BUILD_TIMEOUT_MS, type BuildResult } from './build.js'
+import { armChildKill } from './child-kill.js'
+import { constructChildEnv, sandboxXdgDirs, DETERMINISM_PINS, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
+import { executeStep, type StepCapture } from './executor.js'
 import { applySandbox, applySandboxEnv } from './sandbox-token.js'
 import { applySupplied, materializeSupplied, SUPPLIED_DIR, type SuppliedInstance, type SuppliedOmissions, type SuppliedValues } from './dependencies.js'
 import { resolveEntry } from './recipe.js'
@@ -189,6 +193,138 @@ function seedFiles(cwd: string, files: Record<string, string>): void {
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, content)
   }
+}
+
+/**
+ * A PERSISTENT sandbox an agent session works in across turns. Every other
+ * sandbox in this file is fresh/single-use — created, one scenario, cleaned up.
+ * Recipe-repair and seed sessions need the opposite: one world where an
+ * install's `node_modules`, a build's `dist/`, a scaffolded project accumulate
+ * call over call, so turn 7 builds on what turn 3 installed. Same isolation as
+ * every sandbox (allowlist env, redirected HOME/XDG/TMP, containment via
+ * {@link resolveInSandbox}); only the lifetime differs — the caller holds it
+ * open across an entire session and `cleanup()` is unchanged.
+ */
+export interface WorkingSandbox extends Sandbox {
+  /**
+   * argv exec via the existing {@link executeStep} — pipes, hard timeout, group
+   * kill, zero retries. `cwd` defaults to the sandbox cwd; a supplied one is
+   * resolved against it and refused if it escapes.
+   */
+  exec(
+    argv: string[],
+    opts?: {
+      cwd?: string
+      env?: Record<string, string>
+      stdin?: string
+      timeoutMs?: number
+      signal?: AbortSignal
+    },
+  ): Promise<StepCapture>
+  /**
+   * A `shell: true` command via the `runBuild` machinery — install/build class,
+   * 600s default timeout, combined stdout+stderr, detached POSIX group-kill.
+   * Runs in the SANDBOX cwd, not the repo root: that is the difference from
+   * `runBuild`, which prepares the real working tree once per run — here the
+   * session iterates in its own world, and nothing it installs or builds
+   * touches the developer's checkout.
+   */
+  shell(command: string, opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<BuildResult>
+}
+
+/**
+ * Create a {@link WorkingSandbox}: an ordinary {@link createSandbox} world plus
+ * the two ways a session runs commands in it. The `shell` env is the sandbox
+ * env layered OVER the build passthrough set — proxy/TLS config and toolchain
+ * roots ({@link BUILD_PASSTHROUGH}) reach an install the sandbox env alone
+ * would starve, while the sandbox's redirected HOME/XDG/TMP and determinism
+ * pins still win, so host user config and secrets stay out.
+ */
+export function createWorkingSandbox(opts: SandboxOptions = {}): WorkingSandbox {
+  const sandbox = createSandbox(opts)
+
+  // Passthrough base first, sandbox env second (sandbox wins): BUILD_PASSTHROUGH
+  // names HOME/XDG too, and those MUST stay the redirected sandbox dirs.
+  const shellEnv: NodeJS.ProcessEnv = {
+    ...constructChildEnv({ passthrough: BUILD_PASSTHROUGH }),
+    ...sandbox.env,
+  }
+
+  return {
+    ...sandbox,
+    exec(argv, execOpts = {}) {
+      const cwd = execOpts.cwd !== undefined
+        ? resolveInSandbox(sandbox.cwd, execOpts.cwd, 'exec cwd')
+        : sandbox.cwd
+      return executeStep({
+        argv,
+        cwd,
+        env: overlayStepEnv(sandbox.env, execOpts.env),
+        ...(execOpts.stdin !== undefined ? { stdin: execOpts.stdin } : {}),
+        ...(execOpts.timeoutMs !== undefined ? { timeoutMs: execOpts.timeoutMs } : {}),
+        ...(execOpts.signal ? { signal: execOpts.signal } : {}),
+      })
+    },
+    shell(command, shellOpts = {}) {
+      return runSandboxShell(sandbox.cwd, shellEnv, command, shellOpts)
+    },
+  }
+}
+
+/**
+ * The `runBuild`-style spawn, pointed into the sandbox: `shell: true`, detached
+ * POSIX group-lead (so the timeout SIGKILL reaps whatever the shell forked),
+ * combined stdout+stderr, settle on `close`/`error`. Kept here rather than
+ * reusing `runBuild` itself because that one is defined to run in the repo root
+ * with the passthrough-only env — the two differences that make this a
+ * WORKING-sandbox shell.
+ */
+function runSandboxShell(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  command: string,
+  opts: { timeoutMs?: number; signal?: AbortSignal },
+): Promise<BuildResult> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS
+  // Already-cancelled callers never spawn anything (same rule as runBuild).
+  if (opts.signal?.aborted) {
+    return Promise.resolve({ ok: false, command, exitCode: null, timedOut: false, output: '' })
+  }
+  return new Promise<BuildResult>((resolve) => {
+    const child = spawn(command, {
+      cwd,
+      env,
+      shell: true,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let output = ''
+    let settled = false
+
+    const kill = armChildKill(child, timeoutMs, opts.signal, { processGroup: true })
+
+    const finish = (exitCode: number | null): void => {
+      if (settled) return
+      settled = true
+      kill.disarm()
+      resolve({
+        ok: exitCode === 0 && !kill.timedOut,
+        command,
+        exitCode,
+        timedOut: kill.timedOut,
+        output,
+      })
+    }
+
+    child.stdout.on('data', (c: Buffer) => (output += c.toString('utf-8')))
+    child.stderr.on('data', (c: Buffer) => (output += c.toString('utf-8')))
+    child.on('error', (err) => {
+      output += `\n${err.message}`
+      finish(null)
+    })
+    child.on('close', (code) => finish(code))
+  })
 }
 
 /**

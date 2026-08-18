@@ -21,6 +21,10 @@ export const SessionCommandSchema = z.enum([
   // derivation produces. Its own command because its runs are its own: they
   // are re-run per place, independently of any generate.
   'guard-interfaces',
+  // Run adjudication — the failing-scenario triage/control sessions that read
+  // a guard run's evidence. Its own command for the same reason: adjudication
+  // runs against a RUN, on its own cadence, independently of any generate.
+  'guard-adjudicate',
 ]);
 export type SessionCommand = z.infer<typeof SessionCommandSchema>;
 

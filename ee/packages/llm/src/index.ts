@@ -21,6 +21,12 @@ export {
   // EE reaches the same providers OSS does, so it reads the same table.
   providerTuningFor,
   COPILOT_PROVIDER_NAME,
+  // The retry-delay arithmetic (Retry-After floor + jitter) the driver waits
+  // by. EE sessions retry against the same providers, so they share the policy.
+  retryDelayMs,
+  RETRY_JITTER,
+  DEFAULT_API_RETRY,
+  type ApiRetryPolicy,
   type ProviderTuning,
   type ApiSessionDriverOptions,
   type ApiTransportOptions,

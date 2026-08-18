@@ -19,17 +19,20 @@
  * `concurrency` at a time instead — but the FOLD stays strictly serial, because
  * a fragment is validated against the catalog it is about to join and then
  * written to it, and two of those interleaved would each validate against a
- * catalog the other is in the middle of changing.
+ * catalog the other is in the middle of changing. The pool MECHANICS (the
+ * permit limit, the serial fold gate, the event tee, the abort discipline) are
+ * the generic `runSessionPool` in `services/agent/session-pool.ts`; what stays
+ * here is the planning and the fold — the parts that know what an interface is.
  *
  * WHAT THE POOL CONSUMES IS CLUSTERS, NOT PLACES (item 4). A cluster is the
  * places whose sessions read the same modules ({@link clusterPlaces}), and its
- * members run SERIALLY: each one is briefed with its peers' work already folded
- * in. That is where the agreement actually matters — every duplicate-id
- * collision the pilot produced was between two places of one cluster, two
- * sessions naming one settings dialog twice because neither could see the other.
- * Running a cluster serially costs nothing in wall clock (the clusters run in
- * parallel with each other, and there are as many of them as the pool has
- * workers) and buys back the collisions that were worth having.
+ * members run SERIALLY — the pool's serial groups: each one is briefed with its
+ * peers' work already folded in. That is where the agreement actually matters —
+ * every duplicate-id collision the pilot produced was between two places of one
+ * cluster, two sessions naming one settings dialog twice because neither could
+ * see the other. Running a cluster serially costs nothing in wall clock (the
+ * clusters run in parallel with each other, and there are as many of them as
+ * the pool has workers) and buys back the collisions that were worth having.
  *
  * What concurrency still costs is BRIEFING FRESHNESS ACROSS clusters. A session
  * is briefed with the catalog as it stands when the session starts, so the peers
@@ -46,23 +49,27 @@
  * one cache key, so the modules are in context before the first turn and the
  * prefix is bytes a provider's prompt cache can reuse between members.
  *
- * The driver and the persistence are INJECTED. This package knows nothing about
- * which backend runs the session or where the transcript lands; `@truecourse/core`
- * picks both (the configured transport, the run's sessions store).
+ * The driver and the persistence are INJECTED. This service knows nothing about
+ * which backend runs the session or where the transcript lands; the command
+ * adapter picks both (the configured transport, the run's sessions store).
  */
 
-import os from 'node:os'
-import pLimit from 'p-limit'
-import {
-  runAgentLoop,
-  type SessionDriver,
-  type SessionEvent,
-  type SessionPersistence,
-  type SharedPromptPrefix,
+import type {
+  SessionDriver,
+  SessionEvent,
+  SessionOutcome,
+  SessionPersistence,
+  SharedPromptPrefix,
 } from '@truecourse/agent-loop'
-import { readAuthoredInterfaceCatalog, readInterfaceCatalog } from '@truecourse/guard-runner'
+import {
+  readAuthoredInterfaceCatalog,
+  readInterfaceCatalog,
+  staleAuthoredPlaceDiagnostics,
+  type InterfaceMergeDiagnostic,
+} from '@truecourse/guard-runner'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import type { InterfaceResource, InterfacesFile } from '@truecourse/shared'
+import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
   AUTHORED_SURFACE,
   candidateAuthored,
@@ -71,7 +78,7 @@ import {
   validateFragment,
   type AuthoredFragment,
 } from './draft.js'
-import { clusterPlaces } from './cluster.js'
+import { clusterPlaces, orderClustersLongestFirst, type PlaceCluster } from './cluster.js'
 import type { AuthorFinding } from './findings.js'
 import { clusterPack } from './pack.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
@@ -97,7 +104,7 @@ export interface AuthorRunOptions {
   /**
    * What the AST pass knows about each place (item 105): its route module, the
    * modules it renders, the api effects its requests join to. Derived per run by
-   * the caller — this package reads analyzer artifacts, it never produces them.
+   * the caller — this service reads analyzer artifacts, it never produces them.
    * A place with no entry is briefed exactly as it was before the pack existed.
    */
   context?: ReadonlyMap<string, WebPlaceContext>
@@ -155,6 +162,14 @@ export interface AuthorRunResult {
    * with the place that found it — what the caller appends to the ledger.
    */
   findings: AuthorFinding[]
+  /**
+   * What the planning noticed and did not act on: authored screens the
+   * derivation no longer backs ({@link staleAuthoredPlaceDiagnostics}). Each one
+   * was EXCLUDED from the work-list — a session on an address that only
+   * redirects is a session wasted — and is reported here rather than silently
+   * dropped. Never stored; the merged catalog readers see is unchanged.
+   */
+  diagnostics: InterfaceMergeDiagnostic[]
   spent: { turns: number; tokens: number; costUsd: number }
 }
 
@@ -209,6 +224,18 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   let authored = readAuthoredInterfaceCatalog(opts.repoRoot)
 
   const all = planWorkItems(derived, authored)
+
+  // THE STALE-PLACE RULE (01 step 2h) — a WORK-LIST rule, never a merge rule.
+  // An authored screen the derivation no longer produces (in a repo whose
+  // derived web half is non-empty) is an address nobody can stand at any more —
+  // the measured case is a route module that now only redirects — and a session
+  // spent on it is a session wasted, on every `--replace` run, forever. It stays
+  // in the merged catalog (a fresh clone has no derived half at all, and the
+  // empty-derived-half escape hatch below rests on exactly that), but it earns
+  // no session: excluded here, reported as a named diagnostic on the result.
+  const diagnostics = staleAuthoredPlaceDiagnostics(derived, authored)
+  const stale = new Set(diagnostics.map((diagnostic) => diagnostic.subject))
+
   const named = opts.places && opts.places.length > 0 ? new Set(opts.places) : undefined
   if (named) {
     const unknown = [...named].filter((id) => !all.some((item) => item.place.id === id))
@@ -217,9 +244,18 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
         `no such place: ${unknown.join(', ')}. \`truecourse guard interfaces\` lists the places this repository has.`,
       )
     }
+    const staleNamed = [...named].filter((id) => stale.has(id))
+    if (staleNamed.length > 0) {
+      throw new Error(
+        `stale authored place: ${staleNamed.join(', ')} — authored as a screen, but no derivation produces it any more ` +
+          `(the routing tree moved on, or the module only redirects). Authoring it would spend a session on an address ` +
+          `nobody can stand at; remove it from guard/interfaces.authored.json if it is truly gone.`,
+      )
+    }
   }
   const skipped: string[] = []
   const selected = all.filter((item) => {
+    if (stale.has(item.place.id)) return false
     if (named) return named.has(item.place.id)
     if (item.existing.length > 0 && !opts.replace) {
       skipped.push(item.place.id)
@@ -234,91 +270,133 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   let authoredCount = 0
   let path: string | undefined
 
-  // THE CLUSTERS (item 8): the places that read the same modules, grouped. The
-  // pool consumes these — one worker per cluster, its members in order.
+  // THE CLUSTERS (item 8): the places that read the same modules, grouped. They
+  // become the pool's serial groups — one worker per cluster, members in order.
   const clusters = clusterPlaces({
     places: work.map((item) => item.place.id),
     context: opts.context ?? new Map(),
   })
+  const clusterOf = new Map<string, PlaceCluster>()
+  for (const cluster of clusters) {
+    for (const placeId of cluster.places) clusterOf.set(placeId, cluster)
+  }
+  // THE HAND-OFF ORDER (step 2j): longest cluster first. The pool starts serial
+  // groups in first-appearance order of the item list, so the ORDER of this
+  // list IS the schedule — LPT here means the longest serial chain starts at
+  // t=0 instead of last. The REPORT is unaffected: results are re-sorted to
+  // the work-list order below, whatever order the sessions ran in.
   const itemOf = new Map(work.map((item) => [item.place.id, item]))
-  const positionOf = new Map(work.map((item, index) => [item.place.id, index]))
-
-  const runCluster = pLimit(Math.max(1, opts.concurrency ?? defaultAuthorConcurrency()))
-  const fold = serially()
-
-  await Promise.all(
-    clusters.map((cluster) =>
-      runCluster(async () => {
-        // Read ONCE, before the cluster's first session: every member opens with
-        // the same bytes, which is what makes it a shared prefix rather than a
-        // per-session copy of the same files.
-        const pack = clusterPack(opts.repoRoot, cluster)
-        const sharedPrefix: SharedPromptPrefix | undefined = pack
-          ? { messages: [pack.text], cacheKey: cluster.id }
-          : undefined
-
-        for (const placeId of cluster.places) {
-          // A run the caller aborted starts nothing else. The sessions already in
-          // flight get the signal and end themselves.
-          if (opts.signal?.aborted) return
-          const item = itemOf.get(placeId)!
-          opts.onProgress?.({
-            kind: 'place-start',
-            placeId,
-            index: positionOf.get(placeId) ?? 0,
-            total: work.length,
-          })
-          // A named/`--replace` re-author may replace THIS place's own tasks and
-          // nothing else: every other authored entry is somebody else's work.
-          const replaceable = new Set(named || opts.replace ? item.existing : [])
-          // The catalog this session is BRIEFED with, captured before it starts.
-          // The fold below re-reads the live one — between the two lies everything
-          // its peers landed while it was thinking. For a peer of this cluster
-          // there is nothing there: it already folded.
-          const briefedWith = authored
-          const outcome = await runPlaceSession({
-            ...opts,
-            derived,
-            authored: briefedWith,
-            item,
-            replaceable,
-            ...(sharedPrefix ? { sharedPrefix } : {}),
-          })
-
-          // THE FOLD, one place at a time however many sessions are running: the
-          // fragment is validated against the catalog it is about to join, and
-          // that catalog cannot be moving while it is checked.
-          await fold(() => {
-            const result = foldOnePlace({
-              outcome,
-              item,
-              derived,
-              authored,
-              briefedWith,
-              replaceable,
-            })
-            results.push(result.place)
-            spent.turns += result.place.spent.turns
-            spent.tokens += result.place.spent.tokens
-            spent.costUsd += result.place.spent.costUsd
-
-            if (result.candidate) {
-              const written = writeAuthoredCatalog({
-                repoRoot: opts.repoRoot,
-                candidate: result.candidate,
-                derived,
-                now: opts.now,
-              })
-              authored = written.file
-              path = written.path
-              authoredCount += result.place.taskIds.length
-            }
-            opts.onProgress?.({ kind: 'place-done', place: result.place })
-          })
-        }
-      }),
-    ),
+  const scheduled = orderClustersLongestFirst(clusters).flatMap((cluster) =>
+    cluster.places.map((placeId) => itemOf.get(placeId)!),
   )
+  // The pack, read ONCE per cluster at its first member: every member opens with
+  // the same bytes, which is what makes it a shared prefix rather than a
+  // per-session copy of the same files. Members run serially, so "first member"
+  // is well-defined and the read happens when the cluster starts, not before.
+  const packs = new Map<string, SharedPromptPrefix | undefined>()
+  const prefixOf = (placeId: string): SharedPromptPrefix | undefined => {
+    const cluster = clusterOf.get(placeId)!
+    if (!packs.has(cluster.id)) {
+      const pack = clusterPack(opts.repoRoot, cluster)
+      packs.set(cluster.id, pack ? { messages: [pack.text], cacheKey: cluster.id } : undefined)
+    }
+    return packs.get(cluster.id)
+  }
+
+  // Per-session captures, keyed by place: the catalog each session was BRIEFED
+  // with (taken when its def is built — the pool builds def and briefing in one
+  // tick) and the ids it may replace. The fold below re-reads the live catalog —
+  // between the two lies everything its peers landed while it was thinking. For
+  // a peer of the same cluster there is nothing there: it already folded.
+  const briefed = new Map<string, InterfacesFile | null>()
+  const replaceableOf = new Map<string, Set<string>>()
+  const placeOf = new Map(work.map((item) => [placeWorkItem(item.place.id), item.place.id]))
+
+  await runSessionPool<AuthorWorkItem, AuthoredFragment>({
+    items: scheduled,
+    workItem: (item) => placeWorkItem(item.place.id),
+    serialKey: (item) => clusterOf.get(item.place.id)!.id,
+    sharedPrefix: (item) => prefixOf(item.place.id),
+    session: (item) => {
+      // A named/`--replace` re-author may replace THIS place's own tasks and
+      // nothing else: every other authored entry is somebody else's work.
+      const replaceable = new Set(named || opts.replace ? item.existing : [])
+      replaceableOf.set(item.place.id, replaceable)
+      briefed.set(item.place.id, authored)
+      return interfaceAuthorSessionDef({
+        repoRoot: opts.repoRoot,
+        derived,
+        authored,
+        replaceable,
+        scope: scopeOf(item),
+      })
+    },
+    briefing: (item) => {
+      // The catalog as it stood when this session started: every place already
+      // folded, and none of the peers still running beside it.
+      const briefedWith = briefed.get(item.place.id) ?? null
+      const places = placeIndex(derived, briefedWith)
+      return [
+        placeBriefing({
+          place: item.place,
+          existing: item.existing,
+          states: registryStates(derived, briefedWith),
+          screens: screenTable(places),
+          nested: placesOn(item.place.id, places),
+          ...(opts.context?.get(item.place.id)
+            ? { context: opts.context.get(item.place.id)! }
+            : {}),
+        }),
+      ]
+    },
+    driver: opts.driver,
+    persistence: opts.persistence,
+    ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
+    ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
+    ...(opts.now ? { now: opts.now } : {}),
+    onProgress: (event) => {
+      if (event.kind !== 'item-start') return
+      opts.onProgress?.({
+        kind: 'place-start',
+        placeId: placeOf.get(event.workItem)!,
+        index: event.index,
+        total: event.total,
+      })
+    },
+    onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
+    // THE FOLD, one place at a time however many sessions are running: the
+    // fragment is validated against the catalog it is about to join, and that
+    // catalog cannot be moving while it is checked.
+    fold: (item, outcome, sessionId) => {
+      const result = foldOnePlace({
+        item,
+        sessionId,
+        outcome,
+        derived,
+        authored,
+        briefedWith: briefed.get(item.place.id) ?? null,
+        replaceable: replaceableOf.get(item.place.id) ?? new Set(),
+      })
+      results.push(result.place)
+      spent.turns += result.place.spent.turns
+      spent.tokens += result.place.spent.tokens
+      spent.costUsd += result.place.spent.costUsd
+
+      if (result.candidate) {
+        const written = writeAuthoredCatalog({
+          repoRoot: opts.repoRoot,
+          candidate: result.candidate,
+          derived,
+          now: opts.now,
+        })
+        authored = written.file
+        path = written.path
+        authoredCount += result.place.taskIds.length
+      }
+      opts.onProgress?.({ kind: 'place-done', place: result.place })
+    },
+  })
 
   // Completion order is provider latency; the report is the work list.
   const order = new Map(work.map((item, index) => [item.place.id, index]))
@@ -333,104 +411,23 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     ...(path ? { path } : {}),
     skipped,
     findings,
+    diagnostics,
     spent,
   }
 }
 
 /**
- * How many clusters run at once by default. Small on purpose: the limit here is
- * not the machine, it is that a session cannot see the work of a peer in another
- * cluster (see the module note), so every extra worker buys wall clock and costs
- * a little cross-place agreement. Shares `TRUECOURSE_MAX_CONCURRENCY` with the
- * generator's own limit — one knob for "how much parallel LLM work at once".
+ * How many clusters run at once by default — the pool's own default, kept under
+ * the name the CLI has always imported. See {@link defaultPoolConcurrency} for
+ * why it is small and which knob (`TRUECOURSE_MAX_CONCURRENCY`) moves it.
  */
-export function defaultAuthorConcurrency(): number {
-  const declared = process.env.TRUECOURSE_MAX_CONCURRENCY
-  if (declared) {
-    const n = Number.parseInt(declared, 10)
-    if (Number.isFinite(n) && n > 0) return n
-  }
-  return Math.min(os.cpus().length, 4)
-}
-
-/**
- * A one-at-a-time gate: each call runs after the previous one has settled,
- * whatever order the callers arrive in. The critical section is validate → write
- * → adopt, which is synchronous but re-entrant through the promise queue if it
- * were not gated.
- */
-function serially(): <T>(task: () => T) => Promise<T> {
-  let tail: Promise<unknown> = Promise.resolve()
-  return <T>(task: () => T): Promise<T> => {
-    const result = tail.then(task)
-    tail = result.catch(() => undefined)
-    return result
-  }
-}
-
-interface OnePlaceInput extends AuthorRunOptions {
-  derived: InterfacesFile | null
-  authored: InterfacesFile | null
-  item: AuthorWorkItem
-  replaceable: Set<string>
-  /** The cluster pack, when this place belongs to a cluster of more than one. */
-  sharedPrefix?: SharedPromptPrefix
-}
-
-/** What one session produced — the loop's own outcome, plus who produced it. */
-type PlaceSession = {
-  sessionId: string
-  outcome: Awaited<ReturnType<typeof runAgentLoop<AuthoredFragment>>['outcome']>
-}
-
-/**
- * THE SESSION — the part that runs concurrently. It reads the repository and
- * hands back a fragment; nothing here touches the catalog, which is why several
- * of these can be in flight at once.
- */
-async function runPlaceSession(input: OnePlaceInput): Promise<PlaceSession> {
-  const { item, derived, authored, replaceable } = input
-  const sessionId = (input.mintSessionId ?? (() => globalThis.crypto.randomUUID()))()
-  const scope = scopeOf(item)
-  const def = interfaceAuthorSessionDef({
-    repoRoot: input.repoRoot,
-    derived,
-    authored,
-    replaceable,
-    scope,
-  })
-
-  const places = placeIndex(derived, authored)
-  const outcome = await runAgentLoop<AuthoredFragment>({
-    def,
-    workItem: placeWorkItem(item.place.id),
-    initialMessages: [
-      placeBriefing({
-        place: item.place,
-        existing: item.existing,
-        // The catalog as it stood when this session started: every place already
-        // folded, and none of the peers still running beside it.
-        states: registryStates(derived, authored),
-        screens: screenTable(places),
-        nested: placesOn(item.place.id, places),
-        ...(input.context?.get(item.place.id) ? { context: input.context.get(item.place.id)! } : {}),
-      }),
-    ],
-    ...(input.sharedPrefix ? { sharedPrefix: input.sharedPrefix } : {}),
-    driver: input.driver,
-    persistence: tee(input.persistence, (event) => input.onSessionEvent?.(item.place.id, event)),
-    sessionId,
-    ...(input.signal ? { signal: input.signal } : {}),
-    ...(input.mintSessionId ? { mintSessionId: input.mintSessionId } : {}),
-    ...(input.now ? { now: input.now } : {}),
-  }).outcome
-
-  return { sessionId, outcome }
-}
+export { defaultPoolConcurrency as defaultAuthorConcurrency }
 
 interface FoldInput {
-  session: PlaceSession
   item: AuthorWorkItem
+  sessionId: string
+  /** The loop's own outcome for this place's session. */
+  outcome: SessionOutcome<AuthoredFragment>
   derived: InterfacesFile | null
   /** The catalog as it stands NOW — what the fragment is validated against. */
   authored: InterfacesFile | null
@@ -444,11 +441,8 @@ interface FoldInput {
  * stands, not as the session was briefed, because the answer to "is this id
  * taken" changed while the session was thinking.
  */
-function foldOnePlace(
-  input: Omit<FoldInput, 'session'> & { outcome: PlaceSession },
-): { place: PlaceResult; candidate?: InterfacesFile } {
-  const { item, derived, authored, briefedWith, replaceable } = input
-  const { sessionId, outcome } = input.outcome
+function foldOnePlace(input: FoldInput): { place: PlaceResult; candidate?: InterfacesFile } {
+  const { item, sessionId, outcome, derived, authored, briefedWith, replaceable } = input
   const base = { placeId: item.place.id, sessionId, spent: outcome.spent }
 
   if (outcome.status === 'failed') {
@@ -588,18 +582,6 @@ function scopeOf(item: AuthorWorkItem): { screenId: string; address?: string } {
   return {
     screenId: item.place.id,
     ...(item.place.address ? { address: item.place.address } : {}),
-  }
-}
-
-/** Wrap persistence so the caller sees every event the transcript records. */
-function tee(persistence: SessionPersistence, observe: (event: SessionEvent) => void): SessionPersistence {
-  return {
-    appendEvent(sessionId, event) {
-      persistence.appendEvent(sessionId, event)
-      observe(event)
-    },
-    updateIndex: (entry) => persistence.updateIndex(entry),
-    readEvents: (sessionId) => persistence.readEvents(sessionId),
   }
 }
 

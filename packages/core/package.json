@@ -224,6 +224,10 @@
       "types": "./dist/services/interface.service.d.ts",
       "import": "./dist/services/interface.service.js"
     },
+    "./services/interface-author": {
+      "types": "./dist/services/interface-author/index.d.ts",
+      "import": "./dist/services/interface-author/index.js"
+    },
     "./services/violation-query": {
       "types": "./dist/services/violation-query.service.d.ts",
       "import": "./dist/services/violation-query.service.js"
@@ -289,7 +293,6 @@
     "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
-    "@truecourse/interface-author": "workspace:*",
     "@truecourse/interface-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/llm-api": "workspace:*",
