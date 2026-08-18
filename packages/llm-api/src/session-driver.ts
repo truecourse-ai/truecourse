@@ -2,8 +2,9 @@
  * The api SESSION DRIVER (AGENTIC_PIPELINE_PLAN §3.3): our own per-turn loop
  * on the AI SDK's `generateText` — tools declared without `execute` so the
  * model's tool call comes back unrun (one step per turn), the FULL message
- * history resent every turn with `cache_control` breakpoints on the system
- * prompt and the moving tail, and a per-turn fallback-model retry.
+ * history resent every turn under the configured provider's cache strategy
+ * (`provider-tuning.ts` — breakpoints on the system prompt and the moving
+ * tail, or a per-request cluster key), and a per-turn fallback-model retry.
  *
  * The driver owns MECHANICS only. The policy shell (`runAgentLoop` in
  * `@truecourse/shared/llm`) counts budgets from the events emitted here and
@@ -18,6 +19,7 @@
  * use it.
  */
 
+import { randomUUID } from 'node:crypto';
 import { generateText, jsonSchema, tool, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
@@ -36,6 +38,7 @@ import type {
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
 import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from './strict-schema.js';
+import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './transport.js';
 
@@ -47,8 +50,6 @@ const BEGIN_MESSAGE = 'Begin.';
 /** Sent after a text-only (deliberation) turn so the history keeps
  *  alternating; recorded as a real user message — the model saw it. */
 const CONTINUE_NUDGE = `Continue. When you have reached the final result, call the \`${OUTCOME_TOOL_NAME}\` tool.`;
-
-const CACHE_BREAKPOINT = { anthropic: { cacheControl: { type: 'ephemeral' as const } } };
 
 /**
  * How this driver answers a provider failure (item 11). The AI SDK's own
@@ -78,6 +79,16 @@ export interface ApiSessionDriverOptions {
   pricing?: (modelId: string, usage: CallUsage) => number;
   /** Overrides on `DEFAULT_API_RETRY`, field by field. */
   retry?: Partial<ApiRetryPolicy>;
+  /**
+   * Pins the prompt-cache CLUSTER for the providers that key their cache per
+   * REQUEST (openai, copilot) — calls sharing a key share a warm prefix.
+   * A string pins one cluster across every session this driver runs; a
+   * function is handed the driver's per-session id and returns the key.
+   * Default: that session id, so one session's turns cluster together and
+   * separate sessions never collide. Ignored by anthropic and bedrock, which
+   * key their cache by the prefix content itself.
+   */
+  cacheKey?: string | ((sessionId: string) => string);
   /** Test seam: what a backoff wait is made of. Aborts with the signal. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
@@ -91,6 +102,8 @@ export function createApiSessionDriver(
     ? { model: buildModel(cfg, cfg.fallbackModel), modelId: cfg.fallbackModel }
     : undefined;
   const retry = { ...DEFAULT_API_RETRY, ...opts.retry };
+  // Declared once, from the config — never re-decided at a call site.
+  const tuning = providerTuningFor(cfg.provider);
 
   return {
     capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
@@ -106,12 +119,18 @@ export function createApiSessionDriver(
       let interrupted = false;
       let status: SessionStatus = 'running';
       const steers: string[] = [];
+      const sessionId = randomUUID();
 
       const done = runApiSession(input, {
         primary,
         fallback,
         pricing: opts.pricing,
         retry,
+        tuning,
+        cacheKey:
+          typeof opts.cacheKey === 'function'
+            ? opts.cacheKey(sessionId)
+            : (opts.cacheKey ?? sessionId),
         sleep: opts.sleep ?? delay,
         onEvent: input.onEvent,
         interrupted: () => interrupted,
@@ -139,6 +158,10 @@ interface SessionRuntime {
   fallback?: { model: LanguageModel; modelId: string };
   pricing?: ApiSessionDriverOptions['pricing'];
   retry: ApiRetryPolicy;
+  /** The configured provider's cache + tool-call strategy (item 7). */
+  tuning: ProviderTuning;
+  /** Resolved once per session — the cluster the request-keyed providers cache under. */
+  cacheKey: string;
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   /** The turn loop's own emitter, threaded down so a wait INSIDE one model
    *  call is recorded where it happened rather than inferred afterwards. */
@@ -285,11 +308,12 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
 }
 
 /**
- * One model call, full history + cache breakpoints, retries and the fallback
- * swap. `maxRetries: 0` takes the retry away from the SDK — it has no
- * observation hook, and an unexplained multi-minute gap in a transcript is
- * indistinguishable from a hang. Every wait is a `provider-retry` event
- * instead; the shell ignores them for budget, so a retry is never a turn.
+ * One model call, full history under the provider's cache strategy, retries
+ * and the fallback swap. `maxRetries: 0` takes the retry away from the SDK —
+ * it has no observation hook, and an unexplained multi-minute gap in a
+ * transcript is indistinguishable from a hang. Every wait is a
+ * `provider-retry` event instead; the shell ignores them for budget, so a
+ * retry is never a turn.
  */
 async function callModel(
   def: SessionDef,
@@ -298,26 +322,33 @@ async function callModel(
   signal: AbortSignal,
   rt: SessionRuntime,
 ): Promise<{ result: Awaited<ReturnType<typeof generateText>>; modelId: string }> {
+  // The system prompt and the moving tail close the two cacheable prefixes;
+  // a provider that keys its cache per request leaves both unmarked.
+  const breakpoint = rt.tuning.breakpoint;
   const prompt: ModelMessage[] = [
-    { role: 'system', content: def.systemPrompt, providerOptions: CACHE_BREAKPOINT },
+    {
+      role: 'system',
+      content: def.systemPrompt,
+      ...(breakpoint ? { providerOptions: breakpoint } : {}),
+    },
     ...messages.map((m, i) =>
-      i === messages.length - 1
-        ? ({ ...m, providerOptions: { ...m.providerOptions, ...CACHE_BREAKPOINT } } as ModelMessage)
+      breakpoint && i === messages.length - 1
+        ? ({ ...m, providerOptions: { ...m.providerOptions, ...breakpoint } } as ModelMessage)
         : m,
     ),
   ];
-  const run = (model: LanguageModel) =>
+  const run = (candidate: { model: LanguageModel; modelId: string }) =>
     generateText({
-      model,
+      model: candidate.model,
       messages: prompt,
       tools,
       abortSignal: signal,
       maxRetries: 0,
-      // The transcript event models ONE tool call per turn, so parallel
-      // calls are discouraged at the source (anthropic honors this; other
-      // providers ignore the namespaced option). A turn that still carries
-      // several is executed in full — see the loop.
-      providerOptions: { anthropic: { disableParallelToolUse: true } },
+      // Carries the prompt-cache cluster key and, because the transcript
+      // event models ONE tool call per turn, this provider's way of asking
+      // for a single call. A turn that still carries several is executed in
+      // full — see the loop.
+      providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey),
     });
 
   const candidates = rt.fallback ? [rt.primary, rt.fallback] : [rt.primary];
@@ -326,7 +357,7 @@ async function callModel(
     const candidate = candidates[index];
     for (let attempt = 1; attempt <= rt.retry.attempts; attempt++) {
       try {
-        return { result: await run(candidate.model), modelId: candidate.modelId };
+        return { result: await run(candidate), modelId: candidate.modelId };
       } catch (err) {
         // An abort is a decision, not a provider problem: never retried.
         if (signal.aborted) throw err;

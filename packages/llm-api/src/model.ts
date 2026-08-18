@@ -10,6 +10,7 @@ import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
 import type { ProviderConfig } from './types.js';
+import { COPILOT_PROVIDER_NAME } from './provider-tuning.js';
 
 /** GitHub Copilot's OpenAI-compatible chat endpoint. */
 const COPILOT_BASE_URL = 'https://api.githubcopilot.com';
@@ -36,8 +37,10 @@ export function buildModel(cfg: ProviderConfig, modelId: string): LanguageModel 
         sessionToken: cfg.sessionToken,
       })(modelId);
     case 'copilot':
+      // The name is also the `providerOptions` namespace this model reads —
+      // see `provider-tuning.ts`.
       return createOpenAICompatible({
-        name: 'github-copilot',
+        name: COPILOT_PROVIDER_NAME,
         baseURL: cfg.baseURL ?? COPILOT_BASE_URL,
         apiKey: cfg.apiKey,
         headers: cfg.headers,

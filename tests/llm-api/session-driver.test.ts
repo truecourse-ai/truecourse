@@ -13,6 +13,10 @@ vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMo
 
 import { createApiSessionDriver, OUTCOME_TOOL_NAME } from '../../packages/llm-api/src/index';
 import type {
+  ApiSessionDriverOptions,
+  ProviderConfig,
+} from '../../packages/llm-api/src/index';
+import type {
   DriverResult,
   SessionDef,
   SessionEventBody,
@@ -407,8 +411,8 @@ describe('api session driver', () => {
     const result = await handle.done;
 
     expect(result.kind).toBe('outcome');
-    // The provider is asked not to parallel-call (anthropic honors it;
-    // others ignore the namespaced option).
+    // The provider is asked not to parallel-call, in whatever way it takes
+    // (here anthropic's own option — see the per-provider suite below).
     expect(scripted.calls[0].providerOptions?.anthropic?.disableParallelToolUse).toBe(true);
     // When a turn still carries several calls, all execute (the provider
     // protocol needs every call id answered) and every result is recorded;
@@ -505,6 +509,149 @@ describe('api session driver', () => {
     expect(prompt).toContain('tool-result:probe');
     // New observations append AFTER the rebuilt history.
     expect(prompt).toContain('and one new observation');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// per-provider cache strategy (item 7): each provider is told to cache and to
+// keep tool calls single-file in the way IT takes — never anthropic's way
+// aimed at everyone and silently dropped by three of the four.
+// ---------------------------------------------------------------------------
+
+describe('api session driver provider cache strategy', () => {
+  /** Run one session under `cfg` and hand back what the provider was sent. */
+  async function callsFor(
+    provider: ProviderConfig,
+    turns: StubTurn[] = [{ content: [outcomeCall({ verdict: 'keep' })] }],
+    opts?: ApiSessionDriverOptions,
+  ) {
+    const scripted = scriptedModel(turns);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle } = runSession(createApiSessionDriver(provider, opts));
+    await handle.done;
+    return scripted.calls;
+  }
+
+  /** Every message-level `providerOptions` in a provider prompt, in order. */
+  function messageOptions(prompt: unknown[]): Array<Record<string, unknown> | undefined> {
+    return (prompt as Array<{ providerOptions?: Record<string, unknown> }>).map(
+      (m) => m.providerOptions,
+    );
+  }
+
+  it('anthropic: cacheControl on the system prompt and the moving tail', async () => {
+    const calls = await callsFor({ provider: 'anthropic', model: 'claude-x', apiKey: 't' });
+    const options = messageOptions(calls[0].prompt);
+
+    const ephemeral = { anthropic: { cacheControl: { type: 'ephemeral' } } };
+    expect(options[0]).toEqual(ephemeral);
+    expect(options.at(-1)).toEqual(ephemeral);
+    // Two of the four breakpoints the provider allows — the tool list renders
+    // before the system prompt, so the system one already covers it.
+    expect(options.filter((o) => o !== undefined)).toHaveLength(2);
+    expect(calls[0].providerOptions).toEqual({ anthropic: { disableParallelToolUse: true } });
+  });
+
+  it('openai: a per-request prompt cache key and no parallel tool calls', async () => {
+    const calls = await callsFor({ provider: 'openai', model: 'gpt-5', apiKey: 't' });
+
+    // The cache is keyed per REQUEST here, so no message is marked at all.
+    expect(messageOptions(calls[0].prompt).every((o) => o === undefined)).toBe(true);
+    expect(calls[0].providerOptions).toEqual({
+      openai: { promptCacheKey: expect.any(String), parallelToolCalls: false },
+    });
+    expect(calls[0].providerOptions?.openai?.promptCacheKey).not.toBe('');
+  });
+
+  it('copilot: the same two settings under its own namespace, in WIRE names', async () => {
+    const calls = await callsFor({ provider: 'copilot', model: 'gpt-5', apiKey: 't' });
+
+    expect(messageOptions(calls[0].prompt).every((o) => o === undefined)).toBe(true);
+    // The openai-compatible provider forwards what it does not own verbatim
+    // into the body, so camelCase here would reach the API as camelCase.
+    expect(calls[0].providerOptions).toEqual({
+      'github-copilot': { prompt_cache_key: expect.any(String), parallel_tool_calls: false },
+    });
+  });
+
+  it('bedrock: cachePoint at the same two positions', async () => {
+    const calls = await callsFor({
+      provider: 'bedrock',
+      model: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      region: 'us-east-1',
+    });
+    const options = messageOptions(calls[0].prompt);
+
+    const cachePoint = { bedrock: { cachePoint: { type: 'default' } } };
+    expect(options[0]).toEqual(cachePoint);
+    expect(options.at(-1)).toEqual(cachePoint);
+    // Converse has no parallel-tool-use field; the hosted model's native one
+    // goes through the passthrough.
+    expect(calls[0].providerOptions).toEqual({
+      bedrock: {
+        additionalModelRequestFields: {
+          tool_choice: { type: 'auto', disable_parallel_tool_use: true },
+        },
+      },
+    });
+  });
+
+  it('bedrock: never sends the anthropic-native field to another family', async () => {
+    const calls = await callsFor({
+      provider: 'bedrock',
+      model: 'us.amazon.nova-pro-v1:0',
+      region: 'us-east-1',
+    });
+
+    // cachePoint is Converse's own, so it still rides…
+    expect(messageOptions(calls[0].prompt)[0]).toEqual({
+      bedrock: { cachePoint: { type: 'default' } },
+    });
+    // …but `tool_choice` is raw passthrough to the model, and Nova would read
+    // it as a malformed request rather than ignore it.
+    expect(calls[0].providerOptions).toEqual({});
+  });
+
+  it('holds the cache key steady across a session and apart between sessions', async () => {
+    const twoTurns: StubTurn[] = [
+      { content: [text('thinking')] },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ];
+    const openai: ProviderConfig = { provider: 'openai', model: 'gpt-5', apiKey: 't' };
+    const first = await callsFor(openai, twoTurns);
+    const second = await callsFor(openai, [{ content: [outcomeCall({ verdict: 'keep' })] }]);
+
+    const keyOf = (call: (typeof first)[number]) => call.providerOptions?.openai?.promptCacheKey;
+    expect(first).toHaveLength(2);
+    expect(keyOf(first[0])).toBe(keyOf(first[1]));
+    expect(keyOf(second[0])).not.toBe(keyOf(first[0]));
+  });
+
+  it('lets a caller pin the cluster key, by value or from the session id', async () => {
+    const openai: ProviderConfig = { provider: 'openai', model: 'gpt-5', apiKey: 't' };
+    const pinned = await callsFor(openai, undefined, { cacheKey: 'interface-author:v1' });
+    expect(pinned[0].providerOptions?.openai?.promptCacheKey).toBe('interface-author:v1');
+
+    const seen: string[] = [];
+    const derived = await callsFor(openai, undefined, {
+      cacheKey: (sessionId) => {
+        seen.push(sessionId);
+        return `author:${sessionId}`;
+      },
+    });
+    expect(seen).toHaveLength(1);
+    expect(derived[0].providerOptions?.openai?.promptCacheKey).toBe(`author:${seen[0]}`);
+  });
+
+  it('keys the cluster per session even where the key is not sent', async () => {
+    // anthropic caches by prefix content, so the key never leaves the driver —
+    // asking for one must not change what the provider is told.
+    const calls = await callsFor(
+      { provider: 'anthropic', model: 'claude-x', apiKey: 't' },
+      undefined,
+      { cacheKey: 'interface-author:v1' },
+    );
+    expect(JSON.stringify(calls[0].providerOptions)).not.toContain('interface-author');
   });
 });
 
