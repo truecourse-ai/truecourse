@@ -47,8 +47,11 @@ export interface WebPlaceContext {
   module: string
   /**
    * The first-party modules this place renders, nearest hop first, repo-relative.
-   * Capped for context (see {@link MAX_RENDERS}); {@link closure} says how many
-   * modules the walk actually reached.
+   * Membership requires RENDER evidence, not mere import (see
+   * {@link renderReachable}): a route that imports one CONSTANT from a form
+   * module does not render that form. Capped for context (see
+   * {@link MAX_RENDERS}); {@link closure} says how many modules the walk
+   * actually reached.
    */
   renders: string[]
   /** How many first-party modules the walk reached, cap or no cap. */
@@ -140,9 +143,10 @@ export function deriveWebPlaceContexts(
     const module = seed.filePath
     if (!analyses.has(module)) continue
     const closure = walk(module, { analyses, edges, depth })
+    const rendered = renderReachable(module, closure, analyses, edges)
     contexts.set(placeId, {
       module: relative(input.repoRoot, module),
-      renders: renderedModules(closure, analyses, seed.address).map((path) =>
+      renders: renderedModules(closure, analyses, seed.address, rendered).map((path) =>
         relative(input.repoRoot, path),
       ),
       closure: closure.length,
@@ -247,6 +251,96 @@ function isBarrel(analysis: FileAnalysis): boolean {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Render evidence — imported is not rendered
+// ---------------------------------------------------------------------------
+
+/** The extensions whose per-file `calls` include JSX usage (the compiler-AST
+ *  extraction runs on .tsx/.jsx; plain calls come from tree-sitter for all
+ *  four). A file outside this set — a .vue/.svelte template — hides its usage
+ *  from the analyzer, and a fact we do not have refuses nothing. */
+const USAGE_VISIBLE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs']
+
+/**
+ * The closure members with RENDER evidence: reachable from the route module over
+ * edges whose imported binding is actually USED — as a JSX element (`<SignInForm/>`,
+ * captured by the compiler-AST JSX extraction into `calls`), as a component-valued
+ * prop (`component={Form}` — a JSX attribute expression, same extraction), or as a
+ * plain invocation. A binding that is merely imported and never referenced as any
+ * of those — the measured case: `/signin` importing the constant
+ * `SIGNUP_ERROR_MESSAGES` from `signup.tsx` — is not render evidence, so neither
+ * that module nor anything reached only THROUGH it belongs in `renders`.
+ *
+ * The refuse-nothing posture is kept edge by edge — an edge whose usage the
+ * analyzer cannot see counts as evidenced, so unknown stays IN:
+ * - the importer has no analysis, or its extension hides usage (.vue/.svelte);
+ * - the importer is a barrel (a pass-through renders nothing itself; `walk`
+ *   already restricted its edges to the names somebody asked for);
+ * - the edge is a namespace/side-effect import (`importedNames` empty).
+ *
+ * One documented miss, accepted: a component RETURNED bare from the importer's
+ * own component (`return SignUpForm`) is an identifier reference, not a call,
+ * and the per-file artifact does not carry it. {@link renderedModules} has a
+ * whole-list fallback for the pathological case where this pass would empty a
+ * non-empty view list.
+ *
+ * This prunes the NAMED list only — the closure and the api join walk every
+ * import as before, because an api client is reached by a value import that is
+ * exactly the kind of edge this pass declines to call rendering.
+ */
+function renderReachable(
+  root: string,
+  closure: readonly ClosureNode[],
+  analyses: ReadonlyMap<string, FileAnalysis>,
+  edges: ReadonlyMap<string, readonly ModuleDependency[]>,
+): Set<string> {
+  const members = new Set(closure.map((node) => node.path))
+  const rendered = new Set<string>([root])
+  const queue = [root]
+  for (let i = 0; i < queue.length; i++) {
+    const source = queue[i]
+    const analysis = analyses.get(source)
+    for (const edge of edges.get(source) ?? []) {
+      if (!members.has(edge.target) || rendered.has(edge.target)) continue
+      if (!renderEvidenced(analysis, edge)) continue
+      rendered.add(edge.target)
+      queue.push(edge.target)
+    }
+  }
+  return rendered
+}
+
+/** Does this edge carry render evidence? See {@link renderReachable} for the rule. */
+function renderEvidenced(analysis: FileAnalysis | undefined, edge: ModuleDependency): boolean {
+  if (!analysis) return true
+  if (isBarrel(analysis)) return true
+  if (!USAGE_VISIBLE_EXTENSIONS.some((extension) => analysis.filePath.endsWith(extension))) return true
+  if (edge.importedNames.length === 0) return true
+  const locals = localNames(analysis, edge.importedNames)
+  return analysis.calls.some((call) =>
+    [...locals].some((name) => call.callee === name || call.callee.startsWith(`${name}.`)),
+  )
+}
+
+/**
+ * The LOCAL bindings an edge's imported names answer to in the importer. The
+ * dependency graph records the EXPORTED name (`SignUpForm` for
+ * `import { SignUpForm as Form }`), while `calls` — JSX included — records the
+ * alias; missing that mapping would prune every aliased component, which is the
+ * wrong direction to be imprecise in. Aliases are collected from every import
+ * statement that names the binding, without matching the statement to the edge's
+ * target — over-collecting keeps a module IN, and under-pruning is the posture.
+ */
+function localNames(analysis: FileAnalysis, importedNames: readonly string[]): Set<string> {
+  const locals = new Set(importedNames)
+  for (const imp of analysis.imports) {
+    for (const specifier of imp.specifiers) {
+      if (specifier.alias && locals.has(specifier.name)) locals.add(specifier.alias)
+    }
+  }
+  return locals
+}
+
 /**
  * The modules worth NAMING: the views of the closure, the screen's own feature
  * first.
@@ -262,11 +356,18 @@ function isBarrel(analysis: FileAnalysis): boolean {
  * address's own words (`availability-view.tsx` for `/availability`) comes before
  * the app shell and the design-system primitives every screen imports. Hop
  * distance breaks the tie, because it is the only other thing the graph says.
+ *
+ * Only modules with RENDER evidence are named (`rendered`, from
+ * {@link renderReachable}) — with one guard in the under-pruning direction: a
+ * closure whose view files ALL lack evidence (a rendering idiom the evidence
+ * pass cannot see) keeps its unpruned view list rather than omitting the
+ * screen's real components.
  */
 function renderedModules(
   closure: readonly ClosureNode[],
   analyses: ReadonlyMap<string, FileAnalysis>,
   address: string,
+  rendered: ReadonlySet<string>,
 ): string[] {
   const words = addressWords(address)
   const rank = (node: ClosureNode): number => (matchesAddress(node.path, words) ? 0 : 1)
@@ -280,7 +381,9 @@ function renderedModules(
     if (analysis && isBarrel(analysis)) return false
     return COMPONENT_EXTENSIONS.some((extension) => node.path.endsWith(extension))
   })
-  const kept = views.length > 0 ? views : ordered.filter((node) => node.hop === 1)
+  const evidenced = views.filter((node) => rendered.has(node.path))
+  const keptViews = evidenced.length > 0 ? evidenced : views
+  const kept = keptViews.length > 0 ? keptViews : ordered.filter((node) => node.hop === 1)
   return kept.slice(0, MAX_RENDERS).map((node) => node.path)
 }
 
