@@ -25,6 +25,8 @@ export interface DocRef {
   version?: string;
   /** ISO timestamp; feeds newest-wins (`lastTouched`). */
   updatedAt: string;
+  /** ISO timestamp of creation in the source tool, when it exposes one. */
+  createdAt?: string;
 }
 
 /** One document's content, as fetched from the source. */

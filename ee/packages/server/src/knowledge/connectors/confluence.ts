@@ -28,6 +28,8 @@ interface ConfluencePage {
   id: string | number;
   title?: string;
   version?: { number?: number; when?: string };
+  /** Present only when the request asked for `expand=history`. */
+  history?: { createdDate?: string };
   body?: { storage?: { value?: string } };
   _links?: { webui?: string };
 }
@@ -116,7 +118,7 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
       const space = encodeURIComponent(cfg.spaceKey);
       const list = await getJson<ConfluenceList>(
         cfg,
-        `/content?spaceKey=${space}&type=page&status=current&expand=version&limit=${PAGE_LIMIT}&start=${start}`,
+        `/content?spaceKey=${space}&type=page&status=current&expand=version,history&limit=${PAGE_LIMIT}&start=${start}`,
       );
       const results = list.results ?? [];
       const base = list._links?.base ?? siteBase(cfg);
@@ -127,6 +129,7 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
           url: pageUrl(cfg, base, p),
           version: p.version?.number != null ? String(p.version.number) : undefined,
           updatedAt: p.version?.when ?? '1970-01-01T00:00:00.000Z',
+          createdAt: p.history?.createdDate,
         });
       }
       if (!list._links?.next || results.length === 0) break;
@@ -138,7 +141,7 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
   async fetch(cfg, id): Promise<DocContent> {
     const page = await getJson<ConfluencePage>(
       cfg,
-      `/content/${encodeURIComponent(id)}?expand=body.storage,version`,
+      `/content/${encodeURIComponent(id)}?expand=body.storage,version,history`,
     );
     const title = page.title ?? `(untitled ${id})`;
     const body = storageXhtmlToMarkdown(page.body?.storage?.value ?? '');

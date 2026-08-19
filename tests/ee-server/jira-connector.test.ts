@@ -496,3 +496,172 @@ describe('jiraConnector', () => {
     ]);
   });
 });
+
+/**
+ * The metadata header is a TEXT convention: a malformed one does not throw, it
+ * is simply never found, and the doc silently falls back to its file mtime. So
+ * these assert the CONTRACT the consolidator's `parseDocDate` / `parseDocStatus`
+ * impose, not the header string — a string assertion would pass while the parser
+ * rejected the shape.
+ *
+ * The readers live in `@truecourse/spec-consolidator` but are not on this base
+ * yet, so the contract is mirrored below. When they land, delete `headerDate` /
+ * `headerStatusLine` and import the real functions — the assertions stay as they
+ * are, which is the point of writing them against the contract.
+ */
+
+/** The date-field names the consolidator recognizes, MOST authoritative first. */
+const DATE_FIELDS = ['resolved', 'resolutiondate', 'updated', 'lastmodified', 'modified', 'date', 'created'];
+/** Only the first 40 lines are scanned, and only `Name: value` lines match. */
+const FIELD_LINE = /^\s*[-*]?\s*\*{0,2}([a-z][a-z _-]*?)\*{0,2}\s*[:=]\s*(.+?)\s*$/i;
+
+/** The date the consolidator would take from this body, or undefined. */
+function headerDate(body: string): string | undefined {
+  const found = new Map<string, string>();
+  for (const line of body.split('\n').slice(0, 40)) {
+    const m = FIELD_LINE.exec(line);
+    if (!m) continue;
+    const field = m[1].toLowerCase().replace(/[\s_-]/g, '');
+    // First occurrence of a field wins — a stray line above the header would shadow it.
+    if (!DATE_FIELDS.includes(field) || found.has(field)) continue;
+    const d = new Date(m[2]);
+    if (!Number.isNaN(d.getTime())) found.set(field, d.toISOString());
+  }
+  for (const field of DATE_FIELDS) {
+    const hit = found.get(field);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** The raw value on the body's `Status:` line, or undefined. */
+function headerStatusLine(body: string): string | undefined {
+  for (const line of body.split('\n').slice(0, 40)) {
+    const m = /^\s*[-*]?\s*\*{0,2}status\*{0,2}\s*[:=]\s*(.+?)\s*$/i.exec(line);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
+describe('jiraConnector — metadata header contract', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const STATUS_ITEM = (from: string, to: string) => ({
+    field: 'status',
+    fieldtype: 'jira',
+    fromString: from,
+    toString: to,
+  });
+
+  const FULL_HISTORY = [
+    { created: '2026-01-05T09:00:00.000-0700', items: [STATUS_ITEM('To Do', 'In Progress')] },
+    { created: '2026-03-02T10:00:00.000-0700', items: [STATUS_ITEM('In Progress', 'Done')] },
+  ];
+
+  function stubSearch(issues: unknown[]) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const body = String(input).includes('/changelog?')
+          ? { values: FULL_HISTORY, isLast: true }
+          : { issues };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  }
+
+  /** A closed issue carrying every field. `fields` overrides MERGE; the rest replace. */
+  function issue({ fields, ...rest }: Record<string, unknown> = {}) {
+    return {
+      id: '10001',
+      key: 'ENG-1',
+      changelog: { total: 2, histories: FULL_HISTORY },
+      ...rest,
+      fields: {
+        summary: 'Idempotent order creation',
+        created: '2026-01-04T08:00:00.000-0700',
+        updated: '2026-03-02T10:00:00.000-0700',
+        resolutiondate: '2026-03-02T10:00:00.000-0700',
+        status: { name: 'Done', statusCategory: { key: 'done' } },
+        description: description(),
+        ...(fields as object | undefined),
+      },
+    };
+  }
+
+  async function bodyOf(one: unknown): Promise<string> {
+    stubSearch([one]);
+    const map = await jiraConnector.fetchMany!(CFG, ['10001']);
+    return map.get('10001')!.markdown;
+  }
+
+  it('emits dates in the scanned window, preferring the resolution date', async () => {
+    const md = await bodyOf(issue());
+    expect(md.split('\n').slice(0, 40).join('\n')).toContain('Created:');
+    // `resolved` outranks `updated` and `created`.
+    expect(headerDate(md)).toBe('2026-03-02T17:00:00.000Z');
+    expect(headerStatusLine(md)).toBe('Done');
+  });
+
+  it('normalizes Jira offsets to a Z form, since `-0700` is not portable', async () => {
+    const md = await bodyOf(issue());
+    // Jira emits `2026-03-02T10:00:00.000-0700`; the header must not pass it through.
+    expect(md).not.toContain('-0700');
+    expect(md).toContain('Updated: 2026-03-02T17:00:00.000Z');
+  });
+
+  it('falls back to the changelog when a closed issue has no resolution date', async () => {
+    const md = await bodyOf(issue({ fields: { resolutiondate: null } }));
+    // Taken from the last transition INTO the current done-category status.
+    expect(md).toContain('Resolved: 2026-03-02T17:00:00.000Z');
+    expect(headerDate(md)).toBe('2026-03-02T17:00:00.000Z');
+  });
+
+  it('leaves Resolved absent on an unfinished issue, so `updated` orders it', async () => {
+    const md = await bodyOf(
+      issue({
+        fields: {
+          resolutiondate: null,
+          status: { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+        },
+      }),
+    );
+    expect(md).not.toContain('Resolved:');
+    expect(headerDate(md)).toBe('2026-03-02T17:00:00.000Z');
+    expect(headerStatusLine(md)).toBe('In Progress');
+  });
+
+  it('renders status history as dated lines the date reader ignores', async () => {
+    const md = await bodyOf(issue());
+    expect(md).toContain('## Status history');
+    expect(md).toContain('- 2026-01-05T16:00:00.000Z  To Do -> In Progress');
+    // A history line opens with the timestamp, so it can never match the
+    // field-name group — the January transition must not outrank March.
+    expect(headerDate(md)).not.toBe('2026-01-05T16:00:00.000Z');
+    // …and the heading must not read as a status line.
+    expect(headerStatusLine('## Status history\n- 2026-01-05T16:00:00.000Z  To Do -> Done')).toBeUndefined();
+  });
+
+  it('re-fetches the changelog when the search embedded only part of it', async () => {
+    // `total` exceeds what the search returned, and the MISSING entry is the
+    // earliest one — exactly the part the history block needs.
+    const md = await bodyOf(issue({ changelog: { total: 2, histories: [FULL_HISTORY[1]] } }));
+    expect(md).toContain('To Do -> In Progress');
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.some((c) => String(c[0]).includes('/changelog?'))).toBe(true);
+  });
+
+  it('omits the block entirely when an issue carries no metadata', async () => {
+    stubSearch([{ id: '10001', key: 'ENG-1', fields: { summary: 'Bare', description: description() } }]);
+    const map = await jiraConnector.fetchMany!(CFG, ['10001']);
+    const md = map.get('10001')!.markdown;
+    expect(md).not.toContain('Status:');
+    expect(md).not.toContain('## Status history');
+    expect(headerDate(md)).toBeUndefined();
+  });
+});
