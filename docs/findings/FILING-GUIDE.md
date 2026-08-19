@@ -160,6 +160,13 @@ gh api -X POST repos/<owner>/<repo>/security-advisories/reports --input payload.
 
   The payload takes `summary`, `description` (the full report body), `severity`, and a `vulnerabilities` array naming the affected package and version range. The reply's `state` is `triage` and the advisory is visible only to the maintainers and the reporter.
 - **Give the account a profile** before a long campaign: avatar, bio, profile README saying what it files. Cheap, and it changes how both the heuristics and the maintainers read it.
+- **Accept the reporter credit.** After submitting an advisory, GitHub offers the reporting account a pending credit (`type: reporter`). Standing decision: accept it. If the maintainers publish the advisory, `truecourse-agent` is then listed in its Credits section, which carries through to the GitHub Advisory Database and any CVE record. That is durable public evidence that the pipeline finds real security defects, it accrues to the agent account rather than to a personal one, and it gives a new account genuine standing. Note Strapi's SECURITY.md treats credit as opt-in with "no credit" as the default, so state the preference in the report body too. Accepting is UI-only, there is no API endpoint; the API can only read the state:
+
+```bash
+gh api repos/<owner>/<repo>/security-advisories/<GHSA-ID> \
+  --jq '.credits_detailed[] | "\(.user.login) \(.type) \(.state)"'
+```
+
 - **Hold a sibling public issue when a private advisory covers the same code.** Filing the docs-side issue for a finding whose security half is still in triage would disclose it early.
 
 ## The filing procedure

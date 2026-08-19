@@ -139,3 +139,5 @@ Rules adopted:
 - Private security advisories do not count against this. They are not public content and carry no spam signal, so they can go any day. Both strapi/strapi and documenso/documenso have private vulnerability reporting enabled, so they can be filed with `gh api -X POST repos/<owner>/<repo>/security-advisories/reports` rather than the web form.
 - Let the account age. Give it a profile, avatar, bio and profile README before the next batch; an account with a filled-in profile reads very differently to both the heuristics and the maintainers.
 - At this cadence the remaining 43 drafts clear in roughly two weeks.
+
+- GHSA-h3c5-gq5q-4q3m: reporter credit ACCEPTED for truecourse-agent (2026-08-19). Standing policy from here: accept the reporter credit on every advisory. If Strapi publishes it, the account is credited on the advisory, in the GitHub Advisory Database and in any CVE record.
