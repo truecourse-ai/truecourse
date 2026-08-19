@@ -8,7 +8,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { GuardScenarioSchema, type GuardScenario } from '@truecourse/shared'
 import { loadScenarios } from '@truecourse/guard-runner'
-import type { GenerateRunner, RawGeneratedScenario } from '@truecourse/guard-generator'
+import type { RawGeneratedScenario } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
   rmrf,
@@ -16,9 +16,9 @@ import {
   writeCorpus,
   writeDoc,
   raw,
-  extractBy,
+  extractSessionBy,
   runGenerate,
-  stampMilestones,
+  submitWorkerSessions,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -42,11 +42,14 @@ function seed(): string {
   return r
 }
 
-/** An author that returns the given steps for whatever flow it is asked about. */
-function authoring(steps: RawGeneratedScenario['steps']): GenerateRunner {
-  return async (ctx) => ({
-    scenario: stampMilestones(raw('telemetry status under two environments', steps), ctx.milestones.length),
-  })
+/** A worker that submits the given steps for whatever flow it is handed. */
+function authoring(steps: RawGeneratedScenario['steps']) {
+  return submitWorkerSessions(() => raw('telemetry status under two environments', steps))
+}
+
+/** The same, for steps the author expects to FAIL (declared, then committed). */
+function authoringRed(steps: RawGeneratedScenario['steps']) {
+  return submitWorkerSessions(() => ({ red: raw('telemetry status under two environments', steps) }))
 }
 
 describe('generateGuards — per-step env', () => {
@@ -55,8 +58,8 @@ describe('generateGuards — per-step env', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authoring([
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: authoring([
         { run: ['env', 'MODE'], expect: { exit: 0, stdout: { equals: 'MODE=(unset)\n' } } },
         { run: ['env', 'MODE'], env: { MODE: 'ci' }, expect: { exit: 0, stdout: { equals: 'MODE=ci\n' } } },
       ]),
@@ -80,10 +83,10 @@ describe('generateGuards — per-step env', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({}),
+      extractSession: extractSessionBy({}),
       // The env is declared on step 1, but step 2 — with no overlay of its own —
       // asserts it too. It must NOT leak, so birth fails on step 2.
-      generateRunner: authoring([
+      flowWorkerSession: authoringRed([
         { run: ['env', 'MODE'], env: { MODE: 'ci' }, expect: { exit: 0, stdout: { equals: 'MODE=ci\n' } } },
         { run: ['env', 'MODE'], expect: { exit: 0, stdout: { equals: 'MODE=ci\n' } } },
       ]),

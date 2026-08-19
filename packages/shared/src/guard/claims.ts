@@ -24,6 +24,7 @@
 
 import crypto from 'node:crypto'
 import { z } from 'zod'
+import { ClaimNeedSchema } from './extract-outcome.js'
 
 /**
  * One extracted claim. Identity = `doc` + `anchor` + `title`.
@@ -49,6 +50,13 @@ export const GuardClaimSchema = z
     contentHash: z.string().min(1),
     /** How the claim is observed (the falsifiable form), when extraction named one. */
     verifyVia: z.string().min(1).optional(),
+    /**
+     * What testing this claim requires beyond an empty sandbox (the extraction
+     * session's structured `needs`). Advisory grounding for flow synthesis and
+     * the dependency catalog — deliberately OUTSIDE {@link claimContentHash}, so
+     * a re-extraction that only refines needs never re-authors the claim's flows.
+     */
+    needs: z.array(ClaimNeedSchema).optional(),
   })
   .strict()
 export type GuardClaim = z.infer<typeof GuardClaimSchema>

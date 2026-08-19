@@ -49,7 +49,6 @@ import {
   loadRecipe,
   recipePath,
   buildRouteManifest,
-  resolveApiServers,
   loadResolvedExternals,
   computeRecipeFingerprint,
   dependenciesPath,

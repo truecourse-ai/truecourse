@@ -19,6 +19,9 @@ import {
 import { DetectedExternalServiceSchema } from '../external-services.js'
 import { GuardAutoResolutionSourceSchema } from './auto-resolutions.js'
 import { OutputExcerptsSchema } from './excerpts.js'
+// Value import into a file flows.ts type-imports back from — the reverse edge is
+// type-only (erased), so there is no runtime cycle.
+import { GuardExpectedRedSchema } from './flows.js'
 // The per-stage transport tally lives with the LLM seam; imported from the
 // node-free `tally` module so this schema stays browser-safe.
 import { StageTransportTallySchema } from '../llm/tally.js'
@@ -263,6 +266,14 @@ export const GuardScenarioDiagnosisSchema = z.object({
   /** The triage verdict that committed this test (`code-drift` / `doc-drift`).
    *  Absent when the test committed untriaged (no runner, or a fail-soft call). */
   triage: GuardTriageSchema.optional(),
+  /**
+   * The FLOW WORKER's own adjudication of this committed red (plan 04 step 17):
+   * the `expectedReds` prediction the engine's confirmation run reproduced before
+   * the submission was accepted. On the session path this takes the triage
+   * verdict's place — `triage` stays absent; a one-shot generate writes `triage`
+   * and leaves this absent.
+   */
+  expectedRed: GuardExpectedRedSchema.optional(),
 })
 export type GuardScenarioDiagnosis = z.infer<typeof GuardScenarioDiagnosisSchema>
 
@@ -373,6 +384,13 @@ export const GuardBirthFindingSchema = z
      * A `fidelity` rejection carries none (the reviewer's verdict is its own).
      */
     triage: GuardTriageSchema.optional(),
+    /**
+     * The FLOW WORKER's adjudication of a committed red (plan 04 step 17) — the
+     * confirmed `expectedReds` prediction. The session path's analog of `triage`
+     * (a worker-committed red carries this and no triage verdict). Optional so
+     * every one-shot report keeps parsing.
+     */
+    expectedRed: GuardExpectedRedSchema.optional(),
     /**
      * Set when the auto-resolve loop KEPT rejecting this flow's test: the
      * verdict said auto-resolve (a HIGH-confidence generation-defect, a

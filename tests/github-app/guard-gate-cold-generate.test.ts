@@ -7,7 +7,7 @@
  * scenario tree into the clone, exactly as the real in-process generate does).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
+import { flowStageSeams, extractSessionBy, submitWorkerSessions, raw } from '../guard-generator/helpers.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,12 +22,7 @@ import { setGuardStore, resetGuardStore, type RepoRef } from '@truecourse/core/l
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { buildGuardReport } from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
-import {
-  generateGuards,
-  type GuardGenerateResult,
-  type ExtractRunner,
-  type GenerateRunner,
-} from '@truecourse/guard-generator';
+import { generateGuards, type GuardGenerateResult } from '@truecourse/guard-generator';
 import { defaultGuardColdGenerate } from '../../ee/packages/github-app/src/guard-gate-runner';
 
 const REPO = 'acme/api';
@@ -242,36 +237,24 @@ describe('defaultGuardColdGenerate', () => {
     writeFile(dir, 'package.json', JSON.stringify({ name: 'relkit', version: '1.0.0' }));
     writeFile(dir, 'README.md', '## version\n`--version` prints the version and exits 0.\n');
     const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));
-    const extract: ExtractRunner = async ({ outline }) => ({
-      claims: [
-        {
-          claim: '`--version` prints the version and exits 0',
-          driver: 'cli',
-          sectionAnchor: outline[0].anchor,
-          reason: 'exit code observable',
-        },
-      ],
-      untestable: [],
-    });
-    const author: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(
-        { title: 'version works', steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-        ctx.milestones.length,
-      ),
-    });
     // The REAL generate: the verification/birth build only succeeds after install.
+    // The LLM stages are agent SESSIONS now (plan 04), so the four seams are
+    // stubbed with the answers a session would give.
     const generate = async (d: string) => ({
       guard: await generateGuards({
         repoRoot: d,
-        ...flowStageRunners(d),
-        ...stubAdjudicationRunners(),
+        ...flowStageSeams(d),
+        extractSession: extractSessionBy({
+          version: [{ claim: '`--version` prints the version and exits 0' }],
+        }),
+        flowWorkerSession: submitWorkerSessions(() =>
+          raw('version works', [{ run: ['--version'], expect: { exit: 0 } }]),
+        ),
         recipeRunner: async () => ({
           install: 'touch install-marker',
           build: 'test -f install-marker',
           entry: ['node', FIXTURE_BIN],
         }),
-        extractRunner: extract,
-        generateRunner: author,
       }),
     });
     try {

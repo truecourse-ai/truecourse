@@ -38,7 +38,6 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
-  type AuthorFailure,
 } from "@truecourse/core/commands/guard-in-process";
 import {
   composeGuardStatus,
@@ -329,8 +328,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   await requireGitRepo(repoRoot);
   await registerProject(repoRoot);
 
-  if (opts.llmTransport === "agent" && !opts.io) {
-    p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
+  if (opts.llmTransport === "agent") {
+    // The generate pipeline's LLM stages run as agent SESSIONS (plan 04) — the
+    // mailbox transport has no session driver, so there is nothing it could run.
+    p.log.error("--llm-transport agent is not supported by guard generate: its stages run as agent sessions, which the mailbox transport cannot drive. Use --llm-transport cli or api.");
     p.outro("Aborted.");
     process.exit(1);
   }
@@ -339,7 +340,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // answers via the filesystem mailbox, so neither applies there).
   await preflightLlmOrExit(opts.llmTransport);
 
-  const autoApprove = !!opts.yes || opts.llmTransport === "agent";
+  const autoApprove = !!opts.yes;
   // The estimate resolves its own spinner line before the panel prints; the
   // checklist below only starts once the run does, so it paints exactly once.
   const renderer = createStdoutStepRenderer();
@@ -357,10 +358,6 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
         estimatedCostUsd = est.estimatedCostUsd;
         return promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } });
       },
-      // Authoring failures surface LIVE — a warn line the moment each attempt
-      // fails, above the checklist. A flow that is timing out never ticks the
-      // settle counter, so it is otherwise indistinguishable from a slow one.
-      onAuthorFailure: (f) => renderer.log(authorFailureLine(f)),
     }));
   } catch (e: unknown) {
     renderer.dispose();
@@ -496,18 +493,6 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.log.success(`Wrote ${guard.written.length} test file${guard.written.length === 1 ? "" : "s"} to .truecourse/scenarios/.`);
   }
   p.outro(closing);
-}
-
-/**
- * A live authoring-failure warn line: the flow (with its surface), the one-line
- * reason, and whether a corrective re-ask follows (`retrying (2/2)`) or the flow
- * is given up on for this run.
- */
-export function authorFailureLine(f: AuthorFailure): string {
-  const subject = `${f.flowId} · ${f.surface}`;
-  return f.willRetry
-    ? `✗ ${subject} — ${f.reason}, retrying (${f.attempt + 1}/2)`
-    : `✗ ${subject} — ${f.reason}; flow failed, will retry next generate`;
 }
 
 /**

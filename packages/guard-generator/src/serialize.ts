@@ -21,7 +21,8 @@ import {
   type Interface,
 } from '@truecourse/shared'
 import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
-import type { RawGeneratedScenario } from './schemas.js'
+import { RawGeneratedScenarioSchema, type RawGeneratedScenario } from './schemas.js'
+import { flattenZodError } from './validate.js'
 import type { SectionInput } from './section-plan.js'
 
 /** The leaf heading segment of an anchor — the id stem (`a/b/rate-limit` → `rate-limit`). */
@@ -106,6 +107,53 @@ export function buildFlowScenario(opts: {
     normalize: raw.normalize ?? [],
   }
   return GuardScenarioSchema.parse(candidate)
+}
+
+/**
+ * Parse a flow worker's submitted scenario YAML into the RAW authored shape (the
+ * same fields the one-shot author returns as JSON: title, setup?, steps,
+ * normalize?). Engine-owned fields (`id`, `flow`, `interface`, `binds`, `promise`,
+ * `server`) are NEVER read from the model — {@link buildFlowScenario} stamps
+ * them — so a worker yaml carrying any is refused with the reason, not silently
+ * stripped. Returns a model-facing error line on any defect (the tool result's
+ * isError seed).
+ */
+export function parseRawScenarioYaml(text: string): { raw: RawGeneratedScenario } | { error: string } {
+  let loaded: unknown
+  try {
+    loaded = yaml.load(text)
+  } catch (e) {
+    return { error: `the yaml does not parse: ${(e as Error).message}` }
+  }
+  if (loaded === null || typeof loaded !== 'object' || Array.isArray(loaded)) {
+    return { error: 'the yaml must be one mapping with the scenario fields (title, setup?, steps, normalize?)' }
+  }
+  const engineOwned = ['id', 'flow', 'interface', 'binds', 'promise', 'server'].filter((k) => k in (loaded as object))
+  if (engineOwned.length > 0) {
+    return {
+      error:
+        `the yaml carries engine-owned field(s) ${engineOwned.join(', ')} — the engine assigns those itself. ` +
+        'Author ONLY title, setup?, steps, normalize?.',
+    }
+  }
+  const parsed = RawGeneratedScenarioSchema.safeParse(loaded)
+  if (!parsed.success) return { error: `invalid scenario: ${flattenZodError(parsed.error)}` }
+  return { raw: parsed.data }
+}
+
+/**
+ * Parse a COMMITTED-shape scenario yaml (the exact bytes {@link serializeScenarioYaml}
+ * produced — the worker cache stores these) back into a {@link GuardScenario}.
+ * Null on any defect: a rotten cache entry is a MISS, never a throw.
+ */
+export function parseScenarioYaml(text: string): GuardScenario | null {
+  try {
+    const loaded = yaml.load(text)
+    const parsed = GuardScenarioSchema.safeParse(loaded)
+    return parsed.success ? parsed.data : null
+  } catch {
+    return null
+  }
 }
 
 /** Scenario id → absolute file path, across every committed scenario file. */

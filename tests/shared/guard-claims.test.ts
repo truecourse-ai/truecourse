@@ -58,20 +58,44 @@ describe('GuardClaimsFileSchema', () => {
     ).toEqual({ ...base, contentHash: 'sha256:abc' })
   })
 
-  // A claim is a SENTENCE and its provenance. What testing it takes is the
-  // dependency catalog's answer and why it was worded so is the doc's, so a store
-  // still carrying either field is a stale corpus and must fail to load rather
-  // than silently drop half of what it says.
-  it('rejects the retired `needs` and `notes` fields outright', () => {
-    for (const stale of [{ needs: ['supplied-project'] }, { notes: 'authoring rationale' }, { needs: [] }]) {
-      const result = GuardClaimsFileSchema.safeParse({
+  // `needs` came BACK as a structured field with plan 04 step 15: the
+  // extraction session reports what testing a claim takes beyond an empty
+  // sandbox, and those needs ride into flow synthesis. The retired STRING form
+  // (and `notes`, which never came back) must still fail to load rather than
+  // silently drop half of what a stale corpus says.
+  it('accepts structured `needs`, and still rejects the retired string form and `notes`', () => {
+    const parse = (over: Record<string, unknown>) =>
+      GuardClaimsFileSchema.safeParse({
         version: 1,
         generatedAt: 'x',
-        claims: [{ ...base, contentHash: 'sha256:abc', ...stale }],
+        claims: [{ ...base, contentHash: 'sha256:abc', ...over }],
       })
+
+    expect(parse({ needs: [] }).success).toBe(true)
+    const structured = parse({ needs: [{ kind: 'credential', name: 'github-token', detail: 'a repo token' }] })
+    expect(structured.success).toBe(true)
+    expect(structured.data?.claims[0].needs).toEqual([
+      { kind: 'credential', name: 'github-token', detail: 'a repo token' },
+    ])
+
+    for (const stale of [
+      { needs: ['supplied-project'] },
+      { notes: 'authoring rationale' },
+      { needs: [{ kind: 'invented', name: 'x' }] },
+      { needs: [{ kind: 'fixture', name: 'x', extra: 1 }] },
+    ]) {
+      const result = parse(stale)
       expect(result.success, Object.keys(stale)[0]).toBe(false)
-      expect(JSON.stringify(result.error?.issues)).toContain(Object.keys(stale)[0])
     }
+  })
+
+  // Needs are ADVISORY grounding — refining them must never re-author the
+  // claim's flows, so they stay outside the content hash and the identity key.
+  it('keeps `needs` out of the content hash and the identity key', () => {
+    const withNeeds: GuardClaim = { ...claim(), needs: [{ kind: 'state', name: 'an-existing-project' }] }
+    expect(claimContentHash(withNeeds)).toBe(claimContentHash(claim()))
+    expect(guardClaimKey(withNeeds)).toBe(guardClaimKey(claim()))
+    expect(isClaimContentCurrent(withNeeds)).toBe(true)
   })
 
   it('rejects an unknown field and a missing identity component', () => {

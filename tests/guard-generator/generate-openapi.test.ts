@@ -11,12 +11,12 @@ import {
   writeApiRecipe,
   writeCorpus,
   writeDoc,
-  extractBy,
-  authorBy,
+  extractSessionBy,
   rawApi,
   runGenerate,
   interfacesOf,
   apiInterface,
+  submitWorkerSessions,
 } from './helpers.js'
 
 const FIXTURE_OPENAPI = fileURLToPath(new URL('../fixtures/guard-fixture-api/openapi.yaml', import.meta.url))
@@ -56,7 +56,7 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: todoInterfaces(r),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         'paths/get-listtodos': [{ driver: 'api', claim: 'GET /todos returns 200 with the todo list', reason: 'HTTP status + body' }],
         'paths/post-createtodo': [{ driver: 'api', claim: 'POST /todos creates a todo and returns 201', reason: 'HTTP status + body' }],
         'paths/get-gethealth': { untestable: 'liveness probe, covered by ops' },
@@ -65,10 +65,11 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
         'paths/delete-deletetodo': { untestable: 'covered by list' },
       }),
       // A flow is titled after the operation anchor, so its id is the anchor slug.
-      generateRunner: authorBy({
-        'paths-get-listtodos': rawApi('GET /todos answers 200 with the empty list', LIST_STEPS),
-        'paths-post-createtodo': rawApi('POST /todos creates a todo (201)', CREATE_STEPS),
-      }),
+      flowWorkerSession: submitWorkerSessions((task) =>
+        task.flowId === 'paths-get-listtodos'
+          ? rawApi('GET /todos answers 200 with the empty list', LIST_STEPS)
+          : rawApi('POST /todos creates a todo (201)', CREATE_STEPS),
+      ),
     })
 
     expect(res.status).toBe('ok')
@@ -106,7 +107,7 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
     let authorCalls = 0
     const runner = {
       interfaces: todoInterfaces(r),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         'paths/get-listtodos': [{ driver: 'api', claim: 'GET /todos returns 200 with the todo list', reason: 'HTTP status + body' }],
         'paths/get-gethealth': { untestable: 'probe' },
         'paths/post-createtodo': { untestable: 'covered' },
@@ -114,9 +115,9 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
         'paths/patch-updatetodo': { untestable: 'covered' },
         'paths/delete-deletetodo': { untestable: 'covered' },
       }),
-      generateRunner: authorBy(
-        { 'paths-get-listtodos': rawApi('GET /todos answers 200 with the empty list', LIST_STEPS) },
-        () => authorCalls++,
+      flowWorkerSession: submitWorkerSessions(
+        () => rawApi('GET /todos answers 200 with the empty list', LIST_STEPS),
+        { onSubmit: () => authorCalls++ },
       ),
     }
     const first = await runGenerate({ repoRoot: r, ...runner })

@@ -29,8 +29,10 @@ import { z } from 'zod'
 import { GuardDriverIdSchema } from './drivers.js'
 
 /** What drove an auto-resolution: a HIGH-confidence `generation-defect` triage
- *  verdict, or a HIGH-confidence fidelity flag (the self-heal discard). */
-export const GuardAutoResolutionSourceSchema = z.enum(['triage', 'fidelity'])
+ *  verdict, a HIGH-confidence fidelity flag (the self-heal discard), or — on the
+ *  session path (plan 04 step 17) — a flow-worker session ending `retired` (the
+ *  worker itself judged its attempts defective and gave the flow up this run). */
+export const GuardAutoResolutionSourceSchema = z.enum(['triage', 'fidelity', 'worker'])
 export type GuardAutoResolutionSource = z.infer<typeof GuardAutoResolutionSourceSchema>
 
 /** One tracked flow — how many times its test has auto-resolved without

@@ -4,7 +4,8 @@
  * transport — the one production uses when no other transport is installed, and
  * therefore the only path on which the engine's own runner construction is
  * exercised. A test that injects runners never reaches it, which is exactly how a
- * whole stage failing to spawn went unnoticed.
+ * whole stage failing to spawn went unnoticed. It covers the ONE-SHOT stages
+ * only; agent sessions never spawn a binary through this transport.
  *
  * Point `CLAUDE_CODE_BINARY` at this file and it answers every stage from a script:
  *
@@ -20,32 +21,19 @@
  */
 
 import fs from 'node:fs';
-import {
-  EXTRACT_SYSTEM_PROMPT,
-  FLOWS_SYSTEM_PROMPT,
-  FLOWS_EPIC_SYSTEM_PROMPT,
-  MATCH_SYSTEM_PROMPT,
-  GENERATE_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
-  FIDELITY_SYSTEM_PROMPT,
-  TRIAGE_SYSTEM_PROMPT,
-  RECIPE_SYSTEM_PROMPT,
-  SEED_SYSTEM_PROMPT,
-} from '@truecourse/guard-generator';
+import { MATCH_SYSTEM_PROMPT, RECIPE_SYSTEM_PROMPT } from '@truecourse/guard-generator';
 
-// Authoring and its evidence retry share one system prompt (one runner, one
-// contract), so both answer under `guard.generate`.
+/**
+ * The `claude -p` ONE-SHOT stages guard generate still has (plan 04 step 20).
+ * Claim extraction, flow synthesis, authoring, fidelity review and triage are
+ * agent SESSIONS now (or gone): they never spawn this binary, so scripting them
+ * here would only advertise a path that no longer exists. A test that needs a
+ * session scripted drives the session DRIVER instead (see
+ * `tests/core/guard-generate-*.test.ts`).
+ */
 const STAGE_BY_SYSTEM = new Map([
-  [EXTRACT_SYSTEM_PROMPT, 'guard.extract'],
-  [FLOWS_SYSTEM_PROMPT, 'guard.flows'],
-  [FLOWS_EPIC_SYSTEM_PROMPT, 'guard.flows.epic'],
   [MATCH_SYSTEM_PROMPT, 'guard.match'],
-  [GENERATE_SYSTEM_PROMPT, 'guard.generate'],
-  [GENERATE_API_SYSTEM_PROMPT, 'guard.generate.api'],
-  [FIDELITY_SYSTEM_PROMPT, 'guard.fidelity'],
-  [TRIAGE_SYSTEM_PROMPT, 'guard.triage'],
   [RECIPE_SYSTEM_PROMPT, 'guard.recipe'],
-  [SEED_SYSTEM_PROMPT, 'guard.seed'],
 ]);
 
 function die(message) {

@@ -13,16 +13,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  extractDocClaims,
   planGuardWork,
   readSuppressionIndex,
   suppressedQuotesIn,
   suppressionKey,
   sectionInputsKey,
   flowGenerationInputsHash,
-  type ExtractRunner,
-  type GuardDoc,
-  type SectionInput,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
 
@@ -82,23 +78,6 @@ function writeDecisions(dir: string, conflictResolutions: unknown[]): void {
   )
 }
 
-/** A single-view GuardDoc for docs/SPEC.md, optionally carrying suppressed quotes. */
-function specDoc(suppressedQuotes: string[]): GuardDoc {
-  const content = `# rm <id>\n${QUOTE}\n`
-  const section: SectionInput = {
-    doc: 'docs/SPEC.md',
-    anchor: 'rm-id',
-    fingerprint: 'sha256:deadbeef',
-    headingText: 'rm <id>',
-    level: 1,
-    ownText: content,
-    fullText: content,
-    areaTags: ['core/persistence'],
-    suppressionFingerprint: suppressionKey(suppressedQuotes),
-  }
-  return { doc: 'docs/SPEC.md', content, sections: [section], suppressedQuotes }
-}
-
 describe('suppression helpers', () => {
   it('suppressedQuotesIn matches by normalized substring; misses when absent', () => {
     expect(suppressedQuotesIn('before `rm archives`   the task, keeping history. after', [QUOTE])).toEqual([QUOTE])
@@ -155,50 +134,13 @@ describe('readSuppressionIndex', () => {
   })
 })
 
-describe('extraction suppression flow', () => {
-  it('injects the block, re-keys only the affected view, and drops the loser claim', async () => {
-    repo = tempRepo()
-    const calls: Array<string[] | undefined> = []
-    // The mock model emits the loser claim UNLESS its input flags it stale.
-    const runner: ExtractRunner = async (ctx) => {
-      calls.push(ctx.suppressed)
-      const stale = (ctx.suppressed ?? []).length > 0
-      return { claims: stale ? [] : [{ claim: 'rm archives the task', driver: 'cli', sectionAnchor: 'rm-id', reason: 'observable rm behavior' }], untestable: [] }
-    }
-
-    // 1) No suppression → runner called, ctx carries no block, claim extracted + cached.
-    const r1 = await extractDocClaims(repo, specDoc([]), runner)
-    expect(r1.ok).toBe(true)
-    if (r1.ok) expect(r1.data.claims).toHaveLength(1)
-    expect(calls).toEqual([undefined])
-
-    // 2) Suppression added → cache MISS (key changed): runner re-called with the
-    //    block, and the loser claim is dropped.
-    const r2 = await extractDocClaims(repo, specDoc([QUOTE]), runner)
-    expect(r2.ok).toBe(true)
-    if (r2.ok) expect(r2.data.claims).toHaveLength(0)
-    expect(calls).toHaveLength(2)
-    expect(calls[1]).toEqual([QUOTE])
-
-    // 3) Back to no suppression → cache HIT on the ORIGINAL key: runner NOT called
-    //    again (unaffected views keep their cache), original claim returned.
-    const r3 = await extractDocClaims(repo, specDoc([]), runner)
-    expect(calls).toHaveLength(2)
-    if (r3.ok) expect(r3.data.claims).toHaveLength(1)
-  })
-
-  it('a dismissal injects nothing (runner sees no block)', async () => {
-    repo = tempRepo()
-    const seen: Array<string[] | undefined> = []
-    const runner: ExtractRunner = async (ctx) => {
-      seen.push(ctx.suppressed)
-      return { claims: [{ claim: 'x', driver: 'cli', sectionAnchor: 'rm-id', reason: 'y' }], untestable: [] }
-    }
-    // A dismissed verdict yields no suppressed quotes, so the doc carries none.
-    await extractDocClaims(repo, specDoc([]), runner)
-    expect(seen).toEqual([undefined])
-  })
-})
+// The per-view `extractDocClaims` runner is RETIRED (plan 04 step 15): extraction
+// is one `guard-generate.extract` agent SESSION per doc, and the suppression
+// block now rides in the session's briefing while the suppression key re-keys the
+// per-doc session cache. Both halves are pinned against the real briefing and the
+// real key in `tests/core/guard-generate-extract-session.test.ts`; what stays here
+// is the deterministic half this package still owns — the index, the keys, and the
+// re-keying of an unchanged losing section.
 
 describe('a side verdict re-keys the losing section', () => {
   it('an unchanged loser section keeps its text but gains a suppression key, moving its flow hash', () => {

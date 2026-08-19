@@ -1,8 +1,9 @@
 /**
  * COMPOSITION validation — the rules the scenario schema accepts but the engine
- * cannot execute, checked at authoring and corrected through the SAME one
- * corrective re-ask a schema failure gets. They are per driver, because the two
- * surfaces compose differently:
+ * cannot execute. On the worker path (plan 04 step 17) they are part of
+ * `run_scenario`/`submit_scenario`'s deterministic PRE-FLIGHT: a defect comes
+ * back as the tool error WITHOUT an execution, and the session revises in-loop.
+ * They are per driver, because the two surfaces compose differently:
  *
  *  - cli — `run` is argv APPENDED to the recipe entrypoint, so `run[0]` must be an
  *    argument, never the program's own name and never a foreign binary;
@@ -17,8 +18,6 @@ import {
   apiCompositionDefect,
   cliCompositionDefect,
   scenarioCompositionDefect,
-  type AuthorUserContext,
-  type GenerateRunner,
 } from '@truecourse/guard-generator'
 import type { GuardApiStep, GuardStep } from '@truecourse/shared'
 import {
@@ -27,7 +26,12 @@ import {
   writeRecipe,
   writeDoc,
   writeCorpus,
-  extractBy,
+  extractSessionBy,
+  flowWorkerSessionOf,
+  faithfulJudge,
+  acceptedSha,
+  scenarioYaml,
+  PASSING_STEPS,
   raw,
   runGenerate,
   stampMilestones,
@@ -158,44 +162,55 @@ describe('apiCompositionDefect — an interface has to chain with itself', () =>
   })
 })
 
-describe('generateGuards — the composition defect routes through the corrective re-ask', () => {
-  it('re-asks ONCE with the rule, and persists the corrected scenario', async () => {
+describe('generateGuards — the composition defect is the worker’s pre-flight', () => {
+  it('bounces the draft in-session (no execution), and the corrected draft persists', async () => {
     const r = seed()
-    const contexts: AuthorUserContext[] = []
-    let calls = 0
-    const gen: GenerateRunner = async (ctx) => {
-      contexts.push(ctx)
-      calls++
-      // Round 1 composes a whole command line (the recipe entry is
-      // `["node", "…/bin.mjs"]`); round 2 returns argv only.
-      const steps =
-        calls === 1
-          ? [{ run: ['node', 'bin.mjs', '--version'], expect: { exit: 0 } }]
-          : [{ run: ['--version'], expect: { exit: 0 } }]
-      return { scenario: stampMilestones(raw('version prints', steps as never), ctx.milestones.length) }
-    }
-
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
-
-    expect(calls).toBe(2)
-    expect(contexts[1].issues?.composition).toContain('repeats the entrypoint')
-    expect(res.errors).toEqual([])
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
-  })
-
-  it('records an error when the scenario still does not compose after the re-ask', async () => {
-    const r = seed()
-    const gen: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(
-        raw('version prints', [{ run: ['npm', 'run', 'version'], expect: { exit: 0 } }] as never),
-        ctx.milestones.length,
-      ),
+    const reports: { content: string; isError?: boolean }[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        // Round 1 composes a whole command line (the recipe entry is
+        // `["node", "…/bin.mjs"]`); round 2 returns argv only.
+        reports.push(
+          await task.runScenario(
+            scenarioYaml(stampMilestones(raw('version prints', [{ run: ['node', 'bin.mjs', '--version'], expect: { exit: 0 } }] as never), 1)),
+          ),
+        )
+        const good = scenarioYaml(stampMilestones(raw('version prints', PASSING_STEPS), 1))
+        const accepted = await task.submitScenario(good, [], faithfulJudge)
+        reports.push(accepted)
+        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: acceptedSha(accepted)!, expectedReds: [] } }
+      }),
     })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+    expect(reports[0].isError).toBe(true)
+    expect(reports[0].content).toContain('pre-flight defect (not executed)')
+    expect(reports[0].content).toContain('repeats the entrypoint')
+    expect(res.errors).toEqual([])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+  }, 60_000)
 
+  it('a foreign binary is refused the same way, on submit as on run', async () => {
+    const r = seed()
+    const foreign = scenarioYaml(
+      stampMilestones(raw('version prints', [{ run: ['npm', 'run', 'version'], expect: { exit: 0 } }] as never), 1),
+    )
+    const reports: { content: string; isError?: boolean }[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        reports.push(await task.runScenario(foreign))
+        reports.push(await task.submitScenario(foreign, [], faithfulJudge))
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 2, lastEvidence: 'cannot compose a step' } }
+      }),
+    })
+
+    for (const report of reports) {
+      expect(report.isError).toBe(true)
+      expect(report.content).toContain('is the foreign binary "npm"')
+    }
     expect(res.written).toEqual([])
-    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    expect(res.errors[0].message).toContain('still does not compose after re-ask')
-  })
+  }, 60_000)
 })

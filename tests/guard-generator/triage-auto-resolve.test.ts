@@ -1,32 +1,30 @@
 /**
- * HIGH-confidence `generation-defect` verdicts auto-retire to the
- * ledger: no committed test, no human task, an auditable `triage-resolve` row,
- * and the flow re-attempts next generate with its author cache bypassed. The
- * durable ledger (`guard/auto-resolutions.json`) is the safety valve: past the
- * escalation threshold the same flow surfaces as a human task instead
- * ("re-generation is not fixing this").
+ * THE AUTO-RESOLUTION LEDGER ACROSS RUNS. The triage STAGE is retired (plan 04
+ * step 20) — a committed red's adjudication is the worker's own confirmed
+ * `expectedReds` prediction — but the durable ledger it fed lives on, now fed
+ * by the flow worker's `retired` outcomes (source `worker`) and by the fidelity
+ * child's rejections (source `fidelity`).
+ *
+ * The safety valve is what this file is about: a flow that keeps retiring is
+ * auto-resolved only so many times before it surfaces as a human task
+ * ("re-generation is not fixing this"), and a flow that CONVERGES clears its
+ * budget so the count never haunts a later regression. The single-run routing
+ * of each outcome kind is `tests/guard-generator/flow-worker.test.ts`.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import type { GuardTriage } from '@truecourse/shared'
 import { autoResolutionKey } from '@truecourse/shared'
+import { readGuardAutoResolutions, writeGuardAutoResolutions, loadScenarios } from '@truecourse/guard-runner'
 import {
-  readGuardAutoResolutions,
-  writeGuardAutoResolutions,
-  readManifest,
-  loadScenarios,
-} from '@truecourse/guard-runner'
-import {
-  makeTempRepo,
-  rmrf,
-  writeRecipe,
-  writeDoc,
-  writeCorpus,
-  raw,
-  extractBy,
-  authorBy,
-  runGenerate,
-  FAILING_STEPS,
   PASSING_STEPS,
+  extractSessionBy,
+  makeTempRepo,
+  raw,
+  rmrf,
+  runGenerate,
+  submitWorkerSessions,
+  writeCorpus,
+  writeDoc,
+  writeRecipe,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -56,134 +54,63 @@ function seed(): string {
   return r
 }
 
-const versionCliBgUntestable = extractBy({ background: { untestable: 'design history' } })
+const versionCliBgUntestable = extractSessionBy({ background: { untestable: 'design history' } })
 const KEY = autoResolutionKey('version', 'cli')
+const EVIDENCE = 'no scenario asserts the exact version line the section quotes'
 
-const genDefect = (confidence: GuardTriage['confidence']): GuardTriage => ({
-  verdict: 'generation-defect',
-  confidence,
-  brief: 'The scenario asserts an exit code the section never states.',
-  recommendation: 'Author against the documented behavior instead.',
-})
-
-describe('generation-defect auto-retire', () => {
-  it('HIGH under budget: retired to the ledger — no test, no task, a visible row, the flow re-attempts', async () => {
-    const r = seed()
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      triageRunner: async () => genDefect('high'),
-    })
-
-    // Nothing committed, and — unlike a medium/low verdict — no finding row either:
-    // the ledger row IS the record.
-    expect(res.written).toEqual([])
-    expect(res.birthFindings).toEqual([])
-    expect(res.autoResolved).toEqual([
-      {
-        kind: 'triage-resolve',
-        flowId: 'version',
-        surface: 'cli',
-        doc: DOC,
-        anchor: 'version',
-        title: 'always broken',
-        verdict: 'generation-defect',
-        brief: genDefect('high').brief,
-      },
-    ])
-    // The flow re-attempts next generate.
-    expect(readManifest(r)!.flows.find((f) => f.flowId === 'version')!.generationInputsHash).toBeNull()
-    expect(res.flows).toMatchObject({ settled: 0, unsettled: 1 })
-
-    // The durable ledger counted it AND tainted the flow (the author cache still
-    // holds the rejected scenario).
-    const ledger = readGuardAutoResolutions(r)
-    expect(ledger.entries[KEY]).toMatchObject({ count: 1, source: 'triage' })
-    expect(ledger.tainted[KEY]).toMatchObject({
-      flowId: 'version',
-      surface: 'cli',
-      title: 'always broken',
-      mismatch: genDefect('high').brief,
-    })
-  })
-
-  it('medium/low: withheld as a HUMAN finding — never auto-resolved, still tainted', async () => {
-    const r = seed()
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      triageRunner: async () => genDefect('medium'),
-    })
-    expect(res.written).toEqual([])
-    expect(res.autoResolved).toEqual([])
-    expect(res.birthFindings).toHaveLength(1)
-    expect(res.birthFindings[0].committed).toBeUndefined()
-    expect(res.birthFindings[0].autoResolveEscalation).toBeUndefined()
-    expect(readGuardAutoResolutions(r).entries[KEY]).toBeUndefined()
-    expect(readGuardAutoResolutions(r).tainted[KEY]).toBeTruthy()
-  })
-
-  it('past the threshold: escalates as a human task — "re-generation is not fixing this"', async () => {
-    const r = seed()
-    writeGuardAutoResolutions(r, {
-      version: 1,
-      entries: { [KEY]: { count: 2, source: 'triage', updatedAt: '2026-07-01T00:00:00Z' } },
-      tainted: {},
-    })
-    const res = await runGenerate({
-      repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-      triageRunner: async () => genDefect('high'),
-    })
-    // No further auto-resolution: a withheld finding carrying the escalation note.
-    expect(res.autoResolved).toEqual([])
-    expect(res.birthFindings).toHaveLength(1)
-    expect(res.birthFindings[0].autoResolveEscalation).toEqual({ count: 2, source: 'triage' })
-    // The count is kept (still escalated next run), not bumped.
-    expect(readGuardAutoResolutions(r).entries[KEY]).toMatchObject({ count: 2 })
-  })
-
+describe('the worker-fed auto-resolution ledger', () => {
   it('the whole loop, three generates: retire, retire, escalate (escalateAutoResolveAfter honored)', async () => {
     const r = seed()
     const run = () =>
       runGenerate({
         repoRoot: r,
-        extractRunner: versionCliBgUntestable,
-        generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
-        triageRunner: async () => genDefect('high'),
+        extractSession: versionCliBgUntestable,
+        flowWorkerSession: submitWorkerSessions(() => ({ retired: { attempts: 3, lastEvidence: EVIDENCE } })),
         escalateAutoResolveAfter: 2,
       })
 
     const first = await run()
-    expect(first.autoResolved).toHaveLength(1)
-    expect(readGuardAutoResolutions(r).entries[KEY]!.count).toBe(1)
+    expect(first.birthFindings).toEqual([])
+    expect(readGuardAutoResolutions(r).entries[KEY]).toMatchObject({ count: 1, source: 'worker' })
 
     const second = await run()
-    expect(second.autoResolved).toHaveLength(1)
+    expect(second.birthFindings).toEqual([])
     expect(readGuardAutoResolutions(r).entries[KEY]!.count).toBe(2)
 
+    // Past the budget: a human task instead of a third silent retirement.
     const third = await run()
-    expect(third.autoResolved).toEqual([])
     expect(third.birthFindings).toHaveLength(1)
-    expect(third.birthFindings[0].autoResolveEscalation).toEqual({ count: 2, source: 'triage' })
+    expect(third.birthFindings[0].autoResolveEscalation).toEqual({ count: 2, source: 'worker' })
+    expect(third.birthFindings[0].actual).toContain(EVIDENCE)
+    // …and the count is KEPT, not bumped — it stays escalated next run too.
+    expect(readGuardAutoResolutions(r).entries[KEY]!.count).toBe(2)
   })
 
   it('a flow that CONVERGES clears its budget — the count never haunts a later regression', async () => {
     const r = seed()
     writeGuardAutoResolutions(r, {
       version: 1,
-      entries: { [KEY]: { count: 2, source: 'triage', updatedAt: '2026-07-01T00:00:00Z' } },
+      entries: { [KEY]: { count: 2, source: 'worker', updatedAt: '2026-07-01T00:00:00Z' } },
       tainted: {},
     })
     await runGenerate({
       repoRoot: r,
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('now green', PASSING_STEPS) }),
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions(() => raw('now green', PASSING_STEPS)),
     })
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
     expect(readGuardAutoResolutions(r).entries[KEY]).toBeUndefined()
-  })
+  }, 60_000)
+
+  it('a clean run never creates the ledger file at all', async () => {
+    const r = seed()
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions(() => raw('green', PASSING_STEPS)),
+    })
+    const ledger = readGuardAutoResolutions(r)
+    expect(ledger.entries).toEqual({})
+    expect(ledger.tainted).toEqual({})
+  }, 60_000)
 })

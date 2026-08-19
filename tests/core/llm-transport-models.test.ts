@@ -13,7 +13,6 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { resetKvCacheStore } from '@truecourse/llm';
 import { setDefaultTransport } from '@truecourse/shared/llm';
 
@@ -43,12 +42,15 @@ vi.mock('../../packages/core/src/services/llm/install-transport.js', async (impo
 });
 
 import { writeGlobalConfig } from '../../packages/core/src/config/global-config.js';
-import { STAGE_DEFAULTS } from '../../packages/core/src/config/llm-models.js';
+import { STAGE_DEFAULTS, resolveModel } from '../../packages/core/src/config/llm-models.js';
+import {
+  SESSION_MODEL_CLAUDE_CODE,
+  createConfiguredSessionDriver,
+} from '../../packages/core/src/services/llm/session-driver.js';
 import { guardGenerateInProcess } from '../../packages/core/src/commands/guard-in-process.js';
 import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
 import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe, DEFAULT_INTERFACES } from '../guard-generator/helpers.js';
 
-const FAKE_CLAUDE = fileURLToPath(new URL('../fixtures/fake-claude/claude.mjs', import.meta.url));
 const API_MODEL = 'gpt-5.5';
 const DOC = 'docs/cli.md';
 const DOC_CONTENT = '## version\n`relkit --version` prints the version and exits 0.\n';
@@ -72,11 +74,6 @@ const REPLIES: Record<string, unknown> = {
   },
 };
 
-interface FakeCall {
-  stage: string;
-  model: string;
-}
-
 let home: string;
 const dirs: string[] = [];
 const repos: string[] = [];
@@ -86,25 +83,6 @@ function saveSelection(transport: 'api' | 'claude-code'): void {
   writeGlobalConfig({
     llm: { transport, api: { provider: 'openai', model: API_MODEL, apiKey: 'sk-test' } },
   });
-}
-
-/** Point `claude` at the fake binary for one case, scripted + logging its argv model. */
-function scriptFakeClaude(): () => FakeCall[] {
-  const io = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-fake-claude-'));
-  dirs.push(io);
-  const script = path.join(io, 'script.json');
-  const log = path.join(io, 'calls.ndjson');
-  fs.writeFileSync(
-    script,
-    JSON.stringify(Object.fromEntries(Object.entries(REPLIES).map(([stage, reply]) => [stage, [{ reply }]]))),
-  );
-  process.env.CLAUDE_CODE_BINARY = FAKE_CLAUDE;
-  process.env.FAKE_CLAUDE_SCRIPT = script;
-  process.env.FAKE_CLAUDE_LOG = log;
-  return () =>
-    fs.existsSync(log)
-      ? fs.readFileSync(log, 'utf-8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as FakeCall)
-      : [];
 }
 
 function guardRepo(): string {
@@ -138,43 +116,53 @@ afterEach(() => {
 // guard generate
 // ---------------------------------------------------------------------------
 
+/**
+ * GUARD GENERATE now runs its content stages as agent SESSIONS on ONE model
+ * (§3.4; plan 04 steps 15–18), so the per-stage tiers those cases pinned
+ * (`guard.extract`, `guard.flows`) no longer exist — `resolveGuardModels`
+ * carries `match` + `recipe` + `fallback` and nothing else. What survives the
+ * move is the question the cases were written for: a run FORCED onto one
+ * transport must never resolve the other one's model. It is pinned in both
+ * directions on the two seams that still decide it — the session driver for the
+ * session stages, the per-stage table for the two remaining one-shots.
+ */
 describe('guard generate — the models follow the run transport', () => {
-  // The api model must never reach the `claude` argv: this drives the REAL cli
-  // transport (a fake binary that records the `--model` it was spawned with).
-  it('spawns claude on the tier models when `cli` overrides a saved api selection', async () => {
-    const r = guardRepo();
+  it('pins the claude-code session model when `cli` overrides a saved api selection', () => {
     saveSelection('api');
-    const calls = scriptFakeClaude();
+    const { mode, attribution } = createConfiguredSessionDriver({ transport: 'cli' });
+    expect(mode).toBe('claude-code');
+    expect(attribution.model).toBe(SESSION_MODEL_CLAUDE_CODE);
+    expect(attribution.model).not.toBe(API_MODEL);
+  });
 
-    await guardGenerateInProcess(r, {
-      llm: 'cli',
-      interfaces: DEFAULT_INTERFACES(r),
-      stopAfterFlows: true,
-    });
-
-    const seen = calls();
-    const tiers = new Set([STAGE_DEFAULTS['guard.extract'], STAGE_DEFAULTS['guard.flows']]);
-    expect(seen.map((c) => c.stage)).toContain('guard.extract');
-    expect(seen.map((c) => c.stage)).toContain('guard.flows');
-    expect(seen.every((c) => tiers.has(c.model))).toBe(true);
-    expect(seen.some((c) => c.model === API_MODEL)).toBe(false);
-    // Nothing built the provider transport either — one config, read once, or not at all.
-    expect(apiTransport.requests).toEqual([]);
-  }, 120_000);
-
-  it('runs the api model when `api` overrides a saved Claude Code selection', async () => {
-    const r = guardRepo();
+  it('resolves the api model when `api` overrides a saved Claude Code selection', () => {
     saveSelection('claude-code');
+    const { mode, attribution } = createConfiguredSessionDriver({ transport: 'api' });
+    expect(mode).toBe('api');
+    expect(attribution.model).toBe(API_MODEL);
+  });
 
-    await guardGenerateInProcess(r, {
-      llm: 'api',
-      interfaces: DEFAULT_INTERFACES(r),
-      stopAfterFlows: true,
-    });
+  it('keeps the two remaining ONE-SHOT stages on the run’s transport too', () => {
+    saveSelection('api');
+    const r = guardRepo();
+    // `GuardGenerateModels` is down to the one-shots: match, recipe, fallback.
+    // Every session stage runs on the driver's one model instead.
+    for (const stage of ['guard.match', 'guard.recipe'] as const) {
+      expect(resolveModel(stage, undefined, r, 'claude-code')).toBe(STAGE_DEFAULTS[stage]);
+      expect(resolveModel(stage, undefined, r, 'api')).toBe(API_MODEL);
+    }
+  });
 
-    expect(apiTransport.requests.map((q) => q.stage)).toContain('guard.extract');
-    expect(apiTransport.requests.every((q) => q.model === API_MODEL)).toBe(true);
-  }, 120_000);
+  // The `agent` (filesystem mailbox) transport has no session driver, so a
+  // generate run on it is refused BEFORE anything is spent.
+  it('refuses the `agent` transport before the run spends anything', async () => {
+    const r = guardRepo();
+    const io = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-agent-io-'));
+    dirs.push(io);
+    await expect(guardGenerateInProcess(r, { llm: 'agent', io, interfaces: DEFAULT_INTERFACES(r) })).rejects.toThrow(
+      /session driver/i,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

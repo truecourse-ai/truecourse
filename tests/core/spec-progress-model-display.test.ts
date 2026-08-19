@@ -45,15 +45,18 @@ afterEach(() => {
 
 describe('stageUsageTag — the model fallback and its EE suppression', () => {
   // No usage was recorded for these stages in this process, so both cases take
-  // the fallback path — the state a full cache (or EE) leaves behind.
+  // the fallback path — the state a full cache (or EE) leaves behind. The stage
+  // must be a LIVE per-stage id: guard generate's content stages became agent
+  // sessions on one model (plan 04 step 20) and left the table, so a retired id
+  // resolves to no model at all and would pass the EE case vacuously.
   it('OSS (default): falls back to the resolved per-stage model', () => {
-    const tag = stageUsageTag(['guard.extract', 'guard.flows'], repo);
+    const tag = stageUsageTag(['guard.match'], repo);
     expect(MODEL_TIER.test(tag)).toBe(true);
   });
 
   it('EE (suppressed): names no model', () => {
     setShowResolvedStageModel(false);
-    expect(stageUsageTag(['guard.extract', 'guard.flows'], repo)).toBe('');
+    expect(stageUsageTag(['guard.match'], repo)).toBe('');
   });
 
   it('is empty for a step that maps to no stage', () => {

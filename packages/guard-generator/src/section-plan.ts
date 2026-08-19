@@ -33,9 +33,6 @@ import {
   type OpenApiDoc,
 } from '@truecourse/shared/openapi'
 import {
-  EXTRACT_PROMPT_FINGERPRINT,
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_PROMPT_FINGERPRINT,
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
@@ -44,6 +41,21 @@ import {
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 import { securityFingerprintForSection } from './openapi-security.js'
+
+/**
+ * The RETIRED one-shot extract / flows / epic prompts' fingerprints, FROZEN as
+ * literals (plan 04 step 20). They stay in {@link flowGenerationInputsHash} as
+ * constant salt on purpose: swapping in the session prompts' fingerprints (or
+ * dropping these) would move EVERY committed flow's hash and mass-re-author
+ * every user's corpus for no behavioral reason. The trade: an edit to the
+ * session extract/flows prompts no longer re-authors committed flows through
+ * this hash — it re-runs those STAGES via their own caches, and only a flow
+ * whose claims/flows actually changed re-authors (fingerprint-driven, which is
+ * the accurate signal anyway).
+ */
+const RETIRED_EXTRACT_PROMPT_FINGERPRINT = '87fe2fdd9881b428'
+const RETIRED_FLOWS_PROMPT_FINGERPRINT = '654d47c7386fcd58'
+const RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT = 'fa167e39be3b4a5b'
 
 /** One section fed to the LLM stages — its identity, its text, and area context. */
 export interface SectionInput {
@@ -211,9 +223,11 @@ export function flowGenerationInputsHash(input: {
     [...input.sectionKeys].sort().join(''),
     [...input.interfaceFingerprints].sort().join(''),
     input.recipeFingerprint,
-    EXTRACT_PROMPT_FINGERPRINT,
-    FLOWS_PROMPT_FINGERPRINT,
-    FLOWS_EPIC_PROMPT_FINGERPRINT,
+    // Frozen salt for the retired one-shot stages (see the constants above) —
+    // kept so committed flow hashes did not move on the session cut-over.
+    RETIRED_EXTRACT_PROMPT_FINGERPRINT,
+    RETIRED_FLOWS_PROMPT_FINGERPRINT,
+    RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
     MATCH_PROMPT_FINGERPRINT,
     GENERATE_PROMPT_FINGERPRINT,
     GENERATE_API_PROMPT_FINGERPRINT,

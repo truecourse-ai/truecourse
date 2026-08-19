@@ -12,7 +12,6 @@ import {
   MAX_EXAMPLE_BLOCK_BYTES,
   type AuthorUserContext,
   type DocExampleBlock,
-  type GenerateRunner,
 } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
@@ -20,8 +19,12 @@ import {
   writeRecipe,
   writeDoc,
   writeCorpus,
-  extractBy,
+  acceptedSha,
+  extractSessionBy,
+  faithfulJudge,
+  flowWorkerSessionOf,
   runGenerate,
+  scenarioYaml,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -176,48 +179,52 @@ describe('generateGuards — the doc example is embedded byte-for-byte end to en
     '```',
   ].join('\n')
 
-  it('re-asks on a reformatted embedding and commits the exact bytes', async () => {
+  it('the pre-flight bounces a reformatted embedding, and the exact bytes commit', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const ctxs: AuthorUserContext[] = []
-    const gen: GenerateRunner = async (ctx) => {
-      ctxs.push(ctx)
-      // First attempt reformats the doc's example (the historical defect);
-      // the corrective re-ask then copies it byte-for-byte.
-      const content = ctx.issues?.exampleFidelity ? BLOCK : 'line one\nindented line'
-      return {
-        scenario: {
-          title: 'the version prints for the documented input',
-          setup: { files: { 'input.txt': content } },
-          steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
-        },
-      }
-    }
+    let briefing = ''
+    const reports: { content: string; isError?: boolean }[] = []
+    const scenario = (content: string) =>
+      scenarioYaml({
+        title: 'the version prints for the documented input',
+        setup: { files: { 'input.txt': content } },
+        steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
+      } as never)
 
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({ check: [{ claim: 'the version prints for the documented input' }] }),
-      generateRunner: gen,
+      extractSession: extractSessionBy({ check: [{ claim: 'the version prints for the documented input' }] }),
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        briefing = await task.prepare()
+        // The historical defect: the doc's example reformatted on the way in.
+        reports.push(await task.runScenario(scenario('line one\nindented line')))
+        const accepted = await task.submitScenario(scenario(BLOCK), [], faithfulJudge)
+        reports.push(accepted)
+        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: acceptedSha(accepted)!, expectedReds: [] } }
+      }),
     })
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])
     expect(res.written).toHaveLength(1)
 
-    // The engine re-asked ONCE, naming exactly the reformatted carrier…
-    expect(ctxs).toHaveLength(2)
-    expect(ctxs[1].issues?.exampleFidelity).toContain('setup.files["input.txt"]')
-    expect(ctxs[1].issues?.exampleFidelity).toContain(`${DOC}#check`)
-    // …and the round-1 prompt already carried the mined block, byte-exact.
-    expect(ctxs[0].milestones[0].examples).toEqual([{ lang: 'txt', content: BLOCK }])
+    // The engine bounced the reformatted draft WITHOUT executing it, naming
+    // exactly the reformatted carrier…
+    expect(reports[0].isError).toBe(true)
+    expect(reports[0].content).toContain('pre-flight defect (not executed)')
+    expect(reports[0].content).toContain('setup.files["input.txt"]')
+    expect(reports[0].content).toContain(`${DOC}#check`)
+    // …and the briefing already carried the mined block, byte-exact.
+    expect(briefing).toContain('DOC EXAMPLE 1.1 (txt)')
+    expect(briefing).toContain(`<<<DOC-EXAMPLE\n${BLOCK}\nDOC-EXAMPLE>>>`)
 
     // The committed scenario embeds the doc's exact bytes.
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
       setup: { files: Record<string, string> }
     }
     expect(committed.setup.files['input.txt']).toBe(BLOCK)
-  })
+  }, 60_000)
 })

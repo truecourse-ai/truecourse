@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { spawnGenerateRunner, type AuthorUserContext, type GenerateRunner } from '@truecourse/guard-generator'
 import { readManifest } from '@truecourse/guard-runner'
 import { GuardScenarioSchema, guardManifestSections, guardScenarioDrivers } from '@truecourse/shared'
 import {
@@ -11,15 +10,14 @@ import {
   writeApiRecipe,
   writeDoc,
   writeCorpus,
-  extractBy,
-  authorBy,
+  extractSessionBy,
+  submitWorkerSessions,
   runGenerate,
   interfacesOf,
   cliInterface,
   apiInterface,
   raw,
   rawApi,
-  stampMilestones,
   PASSING_STEPS,
   PASSING_API_STEPS,
   FAILING_API_STEPS,
@@ -46,7 +44,7 @@ const DOC_CONTENT = [
 ].join('\n')
 
 /** The api claim on `list`; `version` states nothing a driver can assert. */
-const listExtract = extractBy({
+const listExtract = extractSessionBy({
   list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status + body' }],
   version: { untestable: 'covered elsewhere' },
 })
@@ -61,8 +59,8 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
-      extractRunner: listExtract,
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200 with the empty list', PASSING_API_STEPS) }),
+      extractSession: listExtract,
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200 with the empty list', PASSING_API_STEPS)),
     })
 
     expect(res.status).toBe('ok')
@@ -119,22 +117,29 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
-      extractRunner: listExtract,
-      generateRunner: authorBy({
-        list: rawApi('the todos server comes up', PASSING_API_STEPS, {
+      extractSession: listExtract,
+      flowWorkerSession: submitWorkerSessions(() =>
+        rawApi('the todos server comes up', PASSING_API_STEPS, {
           setup: { env: { TC_FAIL_BOOT: '1', TC_LEAK: SECRET } },
         }),
-      }),
+      ),
     })
 
     expect(res.status).toBe('ok')
-    const err = res.errors.find((e) => e.message.includes('the todos server comes up'))
+    // On the worker path the boot failure comes back through `submit_scenario`'s
+    // rendered report; the run records ONE error for the (flow, surface), built
+    // from the BIRTH CAPTURE — so the output excerpts ride the STRUCTURED fields
+    // and not only the free text.
+    const err = res.errors.find((e) => e.flowId === 'list' && e.surface === 'api')
     expect(err).toBeDefined()
-    // The distinctive boot line survived (fix 3): result.json now shows WHY it didn't boot.
+    expect(err!.kind).toBe('birth')
+    // The distinctive boot line survived: result.json still shows WHY it didn't boot.
     expect(err!.stderr).toContain('boot-fail: fixture refused to boot')
+    expect(err!.message).toContain('boot-fail: fixture refused to boot')
     // The credential the fixture echoed into boot output is masked, never raw.
     expect(err!.stdout ?? '').not.toContain(SECRET)
     expect(err!.stdout).toContain('«cred:leak»')
+    expect(err!.message).not.toContain(SECRET)
   }, 60_000)
 
   it('an api scenario asserting the claim against drifted code becomes a birth finding', async () => {
@@ -146,13 +151,13 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/boom')),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /boom answers 200', reason: 'HTTP status' }],
         version: { untestable: 'covered elsewhere' },
       }),
-      // Round 1 AND the retry both author the claim's (correct) assertion; the
-      // fixture answers 500 → the disagreement is committed as a FAILING test.
-      generateRunner: authorBy({ list: rawApi('GET /boom answers 200', FAILING_API_STEPS) }),
+      // The worker authors the claim's (correct) assertion; the fixture answers
+      // 500, so it DECLARES the red and the disagreement commits as a failing test.
+      flowWorkerSession: submitWorkerSessions(() => ({ red: rawApi('GET /boom answers 200', FAILING_API_STEPS) })),
     })
 
     expect(res.status).toBe('ok')
@@ -187,37 +192,34 @@ describe('generateGuards — api surface authoring + birth', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const calls: { flowId: string; driver: string; hasEntry: boolean; hasServe: boolean }[] = []
-    const perSurface: GenerateRunner = async (ctx) => {
-      calls.push({
-        flowId: ctx.flow.id,
-        driver: ctx.driver,
-        hasEntry: ctx.recipeEntry !== undefined,
-        hasServe: ctx.recipeServe !== undefined,
-      })
-      const scenario =
-        ctx.driver === 'api'
-          ? rawApi('GET /todos answers 200', PASSING_API_STEPS)
-          : raw('relkit --version exits 0', PASSING_STEPS)
-      return { scenario: stampMilestones(scenario, ctx.milestones.length) }
-    }
+    const calls: { flowId: string; surface: string; briefing: string }[] = []
 
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), apiInterface('GET', '/todos')),
-      extractRunner: listExtract,
-      generateRunner: perSurface,
+      extractSession: listExtract,
+      flowWorkerSession: submitWorkerSessions(
+        (task) =>
+          task.surface === 'api'
+            ? rawApi('GET /todos answers 200', PASSING_API_STEPS)
+            : raw('relkit --version exits 0', PASSING_STEPS),
+        { onBriefing: (task, briefing) => calls.push({ flowId: task.flowId, surface: task.surface, briefing }) },
+      ),
     })
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])
-    // Two calls for the ONE flow — one per surface, never mixed.
+    // Two WORKERS for the ONE flow — one per surface, never mixed.
     expect(calls).toHaveLength(2)
     expect(calls.every((c) => c.flowId === 'list')).toBe(true)
-    expect(calls.map((c) => c.driver).sort()).toEqual(['api', 'cli'])
-    // Each call is handed only its own surface's preparation.
-    expect(calls.find((c) => c.driver === 'api')).toMatchObject({ hasEntry: false, hasServe: true })
-    expect(calls.find((c) => c.driver === 'cli')).toMatchObject({ hasEntry: true, hasServe: false })
+    expect(calls.map((c) => c.surface).sort()).toEqual(['api', 'cli'])
+    // Each worker is briefed only on its own surface's preparation.
+    const api = calls.find((c) => c.surface === 'api')!
+    const cli = calls.find((c) => c.surface === 'cli')!
+    expect(api.briefing).toContain('Service serve command:')
+    expect(api.briefing).not.toContain('Program entrypoint:')
+    expect(cli.briefing).toContain('Program entrypoint:')
+    expect(cli.briefing).not.toContain('Service serve command:')
 
     // Both surfaces persist as their own scenario under the one flow.
     expect(res.written.map((w) => w.surface).sort()).toEqual(['api', 'cli'])
@@ -240,8 +242,8 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit'])), // cli only
-      extractRunner: listExtract,
-      generateRunner: authorBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }),
+      extractSession: listExtract,
+      flowWorkerSession: submitWorkerSessions(() => raw('relkit --version exits 0', PASSING_STEPS)),
     })
 
     expect(res.written.map((w) => w.surface)).toEqual(['cli'])
@@ -253,29 +255,7 @@ describe('generateGuards — api surface authoring + birth', () => {
   }, 60_000)
 })
 
-describe('spawnGenerateRunner — per-driver system prompt', () => {
-  it('sends the api authoring prompt for an api scenario and the cli one otherwise', async () => {
-    const systems: string[] = []
-    const transport = async (input: { system: string }): Promise<string> => {
-      systems.push(input.system)
-      return '{"blockedOn":["nothing"]}'
-    }
-    const runner = spawnGenerateRunner({ transport: transport as never })
-    const base: Omit<AuthorUserContext, 'driver'> = {
-      flow: { id: 'list', title: 'list the todos', goal: 'a user sees their todos' },
-      milestones: [
-        { order: 1, claim: 'GET /todos returns 200', doc: 'docs/api.md', sectionHeading: 'list', sectionText: '', realization: [] },
-      ],
-      interfacePath: ['api/get-todos'],
-      areaTags: [],
-      recipeBuild: 'true',
-    }
-    await runner({ ...base, driver: 'api', recipeServe: ['node', 'server.js'], recipeHealthPath: '/health' })
-    await runner({ ...base, driver: 'cli', recipeEntry: ['node', 'cli.js'] })
-    expect(systems[0]).toContain('HTTP service')
-    // The api prompt embeds the api VOCABULARY (there is no driver field to name).
-    expect(systems[0]).toContain('"request"')
-    expect(systems[1]).toContain('command-line program')
-    expect(systems[1]).not.toContain('"request"')
-  })
-})
+// `spawnGenerateRunner` is RETIRED (plan 04 step 20): the per-driver system
+// prompt is now the flow-worker session's, pinned in
+// `tests/core/guard-generate-worker-seam.test.ts` ("authors each surface under
+// its own prompt").

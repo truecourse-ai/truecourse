@@ -27,7 +27,6 @@ import {
   printGuardGenerateSummary,
   guardGenerateOutro,
   recipeFailureLines,
-  authorFailureLine,
   collapseAuthoringErrors,
   blockedDependencyLines,
   visualJudgeSummary,
@@ -39,14 +38,12 @@ import {
   writeApiRecipe,
   writeDoc,
   writeCorpus,
-  extractBy,
-  authorBy,
+  extractSessionBy,
+  flowStageSeams,
+  flowWorkerSessionOf,
+  submitWorkerSessions,
   raw,
-  faithfulReviewer,
-  flowStageRunners,
-  stampMilestones,
   PASSING_STEPS,
-  FAILING_STEPS,
 } from '../guard-generator/helpers.js'
 import {
   writeRecipe as writeRunRecipe,
@@ -56,8 +53,8 @@ import {
 } from '../guard-runner/helpers.js'
 import { execSync } from 'node:child_process'
 import { recordStageUsage, getLlmCallSink } from '@truecourse/shared/llm'
+import os from 'node:os'
 import path from 'node:path'
-import type { GenerateRunner, FidelityRunner } from '@truecourse/guard-generator'
 
 const repos: string[] = []
 function repo(): string {
@@ -78,6 +75,22 @@ const DOC_CONTENT = [
   'The history of relkit; nothing externally observable here.',
 ].join('\n')
 
+/**
+ * The stub SEAMS a driver test runs on (plan 04): guard generate's LLM stages
+ * are agent sessions and the four seams are REQUIRED, so a test states the
+ * answers the sessions give instead of the replies runners returned. The worker
+ * seam behaves like a well-behaved session — it submits one passing scenario per
+ * task through the engine's own `submit_scenario` closure.
+ */
+function generateSeams(r: string, over: Partial<Parameters<typeof guardGenerateInProcess>[1]> = {}) {
+  return {
+    ...flowStageSeams(r),
+    extractSession: extractSessionBy({ background: { untestable: 'design history' } }),
+    flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS)),
+    ...over,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Report persisted at the end of a generate (runner-injection, no real LLM).
 // ---------------------------------------------------------------------------
@@ -89,12 +102,7 @@ describe('guardGenerateInProcess — persisted report', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const { guard } = await guardGenerateInProcess(r, {
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'design history' } }),
-      generateRunner: authorBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    })
+    const { guard } = await guardGenerateInProcess(r, generateSeams(r))
 
     expect(guard.status).toBe('ok')
     expect(fs.existsSync(guardResultPath(r))).toBe(true)
@@ -117,16 +125,10 @@ describe('guardGenerateInProcess — persisted report', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const runners = {
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    }
-    await guardGenerateInProcess(r, runners)
+    await guardGenerateInProcess(r, generateSeams(r))
     fs.rmSync(guardResultPath(r)) // prove the second run rewrites it
 
-    const { guard } = await guardGenerateInProcess(r, runners)
+    const { guard } = await guardGenerateInProcess(r, generateSeams(r))
     expect(guard.noChanges).toBe(true)
     expect(fs.existsSync(guardResultPath(r))).toBe(true)
     expect(readGuardResult(r)!.noChanges).toBe(true)
@@ -163,12 +165,7 @@ describe('guardGenerateInProcess — per-call LLM log', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    await guardGenerateInProcess(r, {
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'design history' } }),
-      generateRunner: authorBy({ version: raw('relkit --version exits 0', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    })
+    await guardGenerateInProcess(r, generateSeams(r))
 
     const files = llmLogFiles(r)
     expect(files.some((f) => f.endsWith('.jsonl'))).toBe(true)
@@ -189,85 +186,26 @@ describe('guardGenerateInProcess — per-call LLM log', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Grounding progress reaches the tracker (CLI + dashboard consume the same one).
+// The AUTHOR step's line is the worker POOL's (plan 04 step 20): `workers a/b ·
+// settled n · blocked m`, fed from the pool's per-task tick — cache hits
+// included. The grounding sweep (real-CLI probe capture, run while briefings
+// render) rides the same line so a cold run's probe minutes never look idle.
 // ---------------------------------------------------------------------------
 
-describe('guardGenerateInProcess — grounding progress on the author step', () => {
+describe('guardGenerateInProcess — the worker line on the author step', () => {
   /** Collect every distinct detail the author step showed across the run. */
-  function trackAuthorDetails(): { tracker: StepTracker; details: string[] } {
+  function trackAuthorDetails(): { tracker: StepTracker; details: string[]; done: string[] } {
     const details: string[] = []
+    const done: string[] = []
     const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
       const author = payload.steps?.find((s) => s.key === 'author')
-      if (author?.detail && details[details.length - 1] !== author.detail) details.push(author.detail)
+      if (!author?.detail) return
+      const bucket = author.status === 'done' ? done : details
+      if (bucket[bucket.length - 1] !== author.detail) bucket.push(author.detail)
     }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
-    return { tracker, details }
+    return { tracker, details, done }
   }
 
-  it('surfaces "grounding probes X/Y · authoring Z/W flow scenarios" on the author detail', async () => {
-    const r = repo()
-    writeRecipe(r) // build 'true' → probing runs
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const { tracker, details } = trackAuthorDetails()
-    await guardGenerateInProcess(r, {
-      tracker,
-      ...flowStageRunners(r),
-      extractRunner: extractBy({
-        version: [{ claim: '`--version` prints the version and exits 0' }],
-        background: { untestable: 'design history' },
-      }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    })
-
-    // The grounding counter rode the author step's detail line at least once.
-    expect(details.some((d) => /grounding probes \d+\/\d+ · authoring \d+\/\d+ flow scenario/.test(d))).toBe(true)
-  })
-
-  it('shows the plain flow-scenario counter (no grounding prefix) when no probes run', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const runners = {
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    }
-    await guardGenerateInProcess(r, runners) // warm the authoring cache
-
-    // Re-work the flow (empty manifest); authoring is now a cache HIT, so nothing
-    // enters grounding and no probes run.
-    writeManifest(r, { flows: [] })
-    const { tracker, details } = trackAuthorDetails()
-    await guardGenerateInProcess(r, { tracker, ...runners })
-
-    expect(details.some((d) => d.includes('grounding'))).toBe(false)
-    expect(details.some((d) => /\d+\/\d+ flow scenario/.test(d))).toBe(true)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Authoring failures surface LIVE — the hook fires per failed attempt, the CLI
-// renders a warn line, and the flow counter gains a "· N failed" reading.
-// ---------------------------------------------------------------------------
-
-describe('guardGenerateInProcess — live authoring failures', () => {
-  /** Collect every distinct validate detail — where the flow counter lives. */
-  function trackValidateDetails(): { tracker: StepTracker; details: string[] } {
-    const details: string[] = []
-    const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
-      const step = payload.steps?.find((s) => s.key === 'validate')
-      if (step?.detail && details[details.length - 1] !== step.detail) details.push(step.detail)
-    }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
-    return { tracker, details }
-  }
-
-  // Two testable sections: `version` authors fine (so birth runs and the validate
-  // line is LIVE), `help` times out — the failure the counter must show.
   const TWO_DOC = 'docs/two.md'
   const TWO_CONTENT = [
     '## version',
@@ -277,74 +215,104 @@ describe('guardGenerateInProcess — live authoring failures', () => {
     '`relkit --version` also answers here and exits 0.',
   ].join('\n')
 
-  const oneFlowExplodes: GenerateRunner = async (ctx) => {
-    if (ctx.flow.id === 'help') throw new Error('claude timed out after 600000ms')
-    return { scenario: stampMilestones(raw('version exits 0', PASSING_STEPS), ctx.milestones.length) }
-  }
-
-  function seedRepo(): string {
+  function twoFlowRepo(): string {
     const r = repo()
-    writeRecipe(r)
+    writeRecipe(r) // build 'true' → probing runs
     writeCorpus(r, [{ ref: TWO_DOC }])
     writeDoc(r, TWO_DOC, TWO_CONTENT)
     return r
   }
 
-  it('forwards each failed attempt and counts the given-up flows on the live counter', async () => {
-    const r = seedRepo()
-    const { tracker, details } = trackValidateDetails()
-    const seen: string[] = []
+  it('ticks `workers a/b · settled n · blocked m` and closes on the final tally', async () => {
+    const r = twoFlowRepo()
+    const { tracker, details, done } = trackAuthorDetails()
 
     await guardGenerateInProcess(r, {
       tracker,
-      ...flowStageRunners(r),
-      extractRunner: extractBy({}),
-      generateRunner: oneFlowExplodes,
-      fidelityRunner: faithfulReviewer(),
-      onAuthorFailure: (f) => seen.push(`${f.flowId} ${f.reason} ${f.willRetry}`),
+      ...generateSeams(r, { extractSession: extractSessionBy({}) }),
     })
 
-    expect(seen).toEqual(['help timed out after 10m false'])
-    expect(details.some((d) => d.includes('1 failed'))).toBe(true)
+    // The live sequence walks the pool, naming the outcome tally as it goes.
+    const workers = details.map((d) => d.replace(/^grounding probes \d+\/\d+ · /, ''))
+    expect(workers).toContain('workers 1/2 · settled 1 · blocked 0')
+    // The pool completes the step on its final tally; the run's closing summary
+    // then replaces it with what was written.
+    expect(done).toEqual(['workers 2/2 · settled 2 · blocked 0', '2 tests written'])
+    // Nothing from the retired stages may appear on the line.
+    expect(details.join(' ')).not.toMatch(/birth|retrying|fidelity|triaging|authoring/)
   })
 
-  it('leaves the counter alone for a caller that wires no failure sink (the dashboard popup)', async () => {
-    const r = seedRepo()
-    const { tracker, details } = trackValidateDetails()
+  it('prefixes the line with the grounding probes while briefings are still rendering', async () => {
+    const r = twoFlowRepo()
+    const { tracker, details } = trackAuthorDetails()
 
     await guardGenerateInProcess(r, {
       tracker,
-      ...flowStageRunners(r),
-      extractRunner: extractBy({}),
-      generateRunner: oneFlowExplodes,
-      fidelityRunner: faithfulReviewer(),
+      ...generateSeams(r, { extractSession: extractSessionBy({}) }),
     })
 
-    expect(details.some((d) => d.includes('failed'))).toBe(false)
-    expect(details.some((d) => /flows \d+\/\d+/.test(d))).toBe(true)
+    expect(details.some((d) => /^grounding probes \d+\/\d+ · workers \d+\/\d+ · settled \d+ · blocked \d+$/.test(d))).toBe(
+      true,
+    )
+  })
+
+  it('shows the plain worker counter (no grounding prefix) when no probe runs', async () => {
+    const r = twoFlowRepo()
+    const { tracker, details } = trackAuthorDetails()
+
+    // A seam that never opens a briefing captures no probes — the shape of a
+    // fully cache-served pool, where nothing is prepared at all.
+    await guardGenerateInProcess(r, {
+      tracker,
+      ...generateSeams(r, {
+        extractSession: extractSessionBy({}),
+        flowWorkerSession: flowWorkerSessionOf(async () => ({
+          kind: 'outcome',
+          outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'a real account' }] },
+        })),
+      }),
+    })
+
+    expect(details.some((d) => d.includes('grounding'))).toBe(false)
+    // A cache-served `blocked` tick moves the tally with no session behind it.
+    expect(details).toContain('workers 1/2 · settled 0 · blocked 1')
+  })
+
+  it('keys the dashboard contract: the step list is exactly the seven generate steps', () => {
+    expect(GUARD_GENERATE_STEPS.map((s) => s.key)).toEqual([
+      'index',
+      'extract',
+      'interfaces',
+      'flows',
+      'match',
+      'author',
+      'validate',
+    ])
   })
 })
 
-describe('authorFailureLine', () => {
-  const failure = {
-    flowId: 'create-a-task',
-    flowTitle: 'Create a task',
-    surface: 'cli' as const,
-    doc: 'docs/cli.md',
-    anchor: 'tasks/add',
-    reason: 'timed out after 10m',
-  }
+// ---------------------------------------------------------------------------
+// The `agent` (filesystem mailbox) transport has no session driver, so it cannot
+// drive a generate at all — refused before anything is spent.
+// ---------------------------------------------------------------------------
 
-  it('says a re-ask is coming when one is', () => {
-    expect(authorFailureLine({ ...failure, reason: 'invalid output', attempt: 1, willRetry: true })).toBe(
-      '✗ create-a-task · cli — invalid output, retrying (2/2)',
-    )
-  })
+describe('guardGenerateInProcess — the agent transport', () => {
+  it('is refused with the no-session-driver reason before the run spends anything', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    const io = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-agent-io-'))
 
-  it('says the flow was given up on when it was', () => {
-    expect(authorFailureLine({ ...failure, attempt: 1, willRetry: false })).toBe(
-      '✗ create-a-task · cli — timed out after 10m; flow failed, will retry next generate',
-    )
+    try {
+      await expect(guardGenerateInProcess(r, { llm: 'agent', io })).rejects.toThrow(
+        /agent sessions.*no session driver/s,
+      )
+      // Nothing was written: no report, no estimate, no scenarios.
+      expect(fs.existsSync(guardResultPath(r))).toBe(false)
+    } finally {
+      fs.rmSync(io, { recursive: true, force: true })
+    }
   })
 })
 
@@ -387,29 +355,22 @@ describe('guardGenerateInProcess — extract step units', () => {
     return { tracker, live, done }
   }
 
-  it('live counter shows "views X/Y" with the planned denominator from the start; completion reports docs AND views', async () => {
+  it('live counter shows "docs X/Y" with the pool denominator from the start; completion reports docs', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
     const { tracker, live, done } = trackExtractDetails()
-    await guardGenerateInProcess(r, {
-      tracker,
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    })
+    await guardGenerateInProcess(r, { tracker, ...generateSeams(r) })
 
-    // Every live tick carries the denominator — never a bare count.
+    // Extraction is ONE session per DOC now (plan 04 step 15) — the per-view
+    // denominator is gone, and every live tick still carries its own.
     expect(live.length).toBeGreaterThan(0)
-    for (const d of live) expect(d).toMatch(/^views \d+\/\d+/)
-    // The planned total is visible before the first view resolves (0/N).
-    expect(live[0]).toMatch(/^views 0\/\d+/)
-    // Completed line keeps both units: one doc read, one extraction view called.
-    expect(done).toHaveLength(1)
-    expect(done[0]).toMatch(/^1 doc · 1 view\b/)
+    for (const d of live) expect(d).toMatch(/^docs \d+\/\d+/)
+    // The planned total is visible before the first doc resolves (0/N).
+    expect(live[0]).toMatch(/^docs 0\/\d+/)
+    expect(done).toEqual(['1 doc'])
   })
 })
 
@@ -478,10 +439,12 @@ describe('guardGenerateInProcess — an early abort ticks no phase that never ra
 
     const { guard } = await guardGenerateInProcess(r, {
       tracker,
-      interfaces: async () => ({ interfaces: [] }),
-      extractRunner: async () => {
-        throw new Error('extraction must not run — the recipe was rejected')
-      },
+      ...generateSeams(r, {
+        interfaces: async () => ({ interfaces: [] }),
+        extractSession: async () => {
+          throw new Error('extraction must not run — the recipe was rejected')
+        },
+      }),
     })
 
     expect(guard.status).toBe('recipe-failed')
@@ -780,123 +743,75 @@ describe('runGuardRun — output shape', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Sections-led birth line + retry spend attribution (stage guard.retry).
+// The VALIDATE step's line after the session cut-over: the recipe build that
+// precedes the pool ("building…"), then the per-FLOW settle counter. Every
+// execution (birth runs, confirmations, fidelity children) happens INSIDE the
+// worker sessions now, so there are no birth/retry/fidelity/triage counters —
+// and no retry/fidelity SPEND either: a session's tokens ride the sessions
+// store, never the stage-usage sink the report totals.
 // ---------------------------------------------------------------------------
 
-describe('guardGenerateInProcess — flow-led birth line + retry usage', () => {
-  /** Collect every distinct detail the validate (birth) step showed across the run. */
-  function trackValidateDetails(): { tracker: StepTracker; details: string[] } {
+describe('guardGenerateInProcess — the settle line on the validate step', () => {
+  /** Collect every distinct validate detail, split by live vs completed. */
+  function trackValidateDetails(): { tracker: StepTracker; details: string[]; done: string[] } {
     const details: string[] = []
+    const done: string[] = []
     const tracker = new StepTracker((payload: AnalysisProgressPayload) => {
       const step = payload.steps?.find((s) => s.key === 'validate')
-      if (step?.detail && details[details.length - 1] !== step.detail) details.push(step.detail)
+      if (!step?.detail) return
+      const bucket = step.status === 'done' ? done : details
+      if (bucket[bucket.length - 1] !== step.detail) bucket.push(step.detail)
     }, GUARD_GENERATE_STEPS.map((s) => ({ ...s })))
-    return { tracker, details }
+    return { tracker, details, done }
   }
 
-  it('leads the birth line with the fixed flow denominator and a plain birth count', async () => {
+  it('leads with the fixed flow denominator, shows `building…` first, and names no retired counter', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const { tracker, details } = trackValidateDetails()
-    await guardGenerateInProcess(r, {
-      tracker,
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
-    })
+    const { tracker, details, done } = trackValidateDetails()
+    await guardGenerateInProcess(r, { tracker, ...generateSeams(r) })
 
-    // Every live line leads with the run's flow denominator (one flow for DOC).
-    const live = details.filter((d) => /^flows /.test(d))
-    expect(live.length).toBeGreaterThan(0)
-    expect(live.every((d) => /^flows \d+\/1 · (building…|birth \d+)/.test(d))).toBe(true)
-    // The birth count carries NO denominator — its total grows across rounds.
-    expect(live.some((d) => /birth \d+\//.test(d))).toBe(false)
+    // The build lands before the first flow settles, then the counter walks.
+    expect(details).toEqual(['flows 0/1 · building…', 'flows 1/1'])
+    // The step closes on the settle split (after carrying its last live line).
+    expect(done).toEqual(['flows 1/1', '1/1 flow settled · 1 written'])
+    // Nothing from the retired stages may appear on the line.
+    expect([...details, ...done].join(' ')).not.toMatch(/birth|retrying|fidelity|triaging/)
   })
 
-  it('shows retrying R/T with the live guard.retry usage tag, and totals retry spend in the report', async () => {
+  it('totals only the two remaining ONE-SHOT stages in the persisted usage', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    // Round 1 fails birth, the evidence-retry fixes it. The runner records usage
-    // the way the transport would: round 1 under guard.generate, the retry under
-    // guard.retry.
-    const runner: GenerateRunner = async (ctx) => {
-      const isRetry = ctx.retry !== undefined
-      recordStageUsage(isRetry ? 'guard.retry' : 'guard.generate', {
-        model: isRetry ? 'retry-model' : 'gen-model',
-        inputTokens: 100,
-        outputTokens: 50,
-        costUsd: isRetry ? 0.5 : 0.25,
-      })
-      return {
-        scenario: stampMilestones(isRetry ? raw('fixed', PASSING_STEPS) : raw('broken', FAILING_STEPS), ctx.milestones.length),
-      }
-    }
-
-    const { tracker, details } = trackValidateDetails()
     const { guard } = await guardGenerateInProcess(r, {
-      tracker,
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: runner,
-      fidelityRunner: faithfulReviewer(),
-    })
-    expect(guard.written.map((w) => w.title)).toEqual(['fixed'])
-
-    // The retry counter and the guard.retry usage (model recorded on the retry
-    // call) ride the SAME birth line.
-    expect(details.some((d) => /^flows \d+\/1 · birth \d+ · retrying \d+\/\d+ · retry-model/.test(d))).toBe(true)
-
-    // result.json totals include the retry spend under the new stage.
-    const report = readGuardResult(r)!
-    expect(report.usage).toEqual({ calls: 2, inputTokens: 200, outputTokens: 100, costUsd: 0.75 })
-  })
-
-  it('shows the fidelity counter on the birth line and totals fidelity spend under guard.fidelity', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    // The reviewer records usage the way the transport would — under guard.fidelity.
-    const reviewer: FidelityRunner = async () => {
-      recordStageUsage('guard.fidelity', { model: 'fidelity-model', inputTokens: 80, outputTokens: 10, costUsd: 0.1 })
-      return { verdict: 'faithful' }
-    }
-
-    const { tracker, details } = trackValidateDetails()
-    const { guard } = await guardGenerateInProcess(r, {
-      tracker,
-      ...flowStageRunners(r),
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: reviewer,
+      ...generateSeams(r, {
+        matchRunner: async (ctx) => {
+          recordStageUsage('guard.match', { model: 'match-model', inputTokens: 20, outputTokens: 5, costUsd: 0.2 })
+          return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
+        },
+      }),
     })
     expect(guard.written.map((w) => w.flowId)).toEqual(['version'])
 
-    // The fidelity counter rides the SAME validate (birth) line.
-    expect(details.some((d) => /^flows \d+\/1 · .*fidelity 1/.test(d))).toBe(true)
-
-    // result.json totals include the fidelity-review spend under the new stage.
-    const report = readGuardResult(r)!
-    expect(report.usage).toEqual({ calls: 1, inputTokens: 80, outputTokens: 10, costUsd: 0.1 })
+    // Only `guard.recipe` + `guard.match` reach the sink; a session's spend does not.
+    expect(readGuardResult(r)!.usage).toEqual({ calls: 1, inputTokens: 20, outputTokens: 5, costUsd: 0.2 })
   })
 })
 
 // ---------------------------------------------------------------------------
 // The flow-led progress steps the CLI renders (`Mapping interfaces` /
 // `Synthesizing flows` / `Matching flows`): every long stage ticks a live
-// counter, and the LLM-backed ones carry their model/spend tag.
+// counter, and the one that still rides the TRANSPORT carries its model/spend
+// tag. Synthesis is a session now, so it carries none.
 // ---------------------------------------------------------------------------
 
 describe('guardGenerateInProcess — flow-led progress steps', () => {
-  it('renders the three flow steps with live counters, and a usage tag on the LLM ones', async () => {
+  it('renders the three flow steps with live counters, and a usage tag on the one-shot one', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -916,39 +831,30 @@ describe('guardGenerateInProcess — flow-led progress steps', () => {
 
     await guardGenerateInProcess(r, {
       tracker,
-      ...flowStageRunners(r),
-      flowsRunner: async (ctx) => {
-        recordStageUsage('guard.flows', { model: 'flows-model', inputTokens: 40, outputTokens: 10, costUsd: 0.3 })
-        return {
-          flows: ctx.claims.map((c) => ({
-            title: c.anchor,
-            goal: `verify ${c.claim}`,
-            milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.claim }],
-          })),
-          noFlowClaims: [],
-        }
-      },
-      matchRunner: async (ctx) => {
-        recordStageUsage('guard.match', { model: 'match-model', inputTokens: 20, outputTokens: 5, costUsd: 0.2 })
-        return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
-      },
-      extractRunner: extractBy({ background: { untestable: 'history' } }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      fidelityRunner: faithfulReviewer(),
+      ...generateSeams(r, {
+        matchRunner: async (ctx) => {
+          recordStageUsage('guard.match', { model: 'match-model', inputTokens: 20, outputTokens: 5, costUsd: 0.2 })
+          return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
+        },
+      }),
     })
 
     expect(painted.get('interfaces')?.label).toBe('Mapping interfaces')
     expect(painted.get('flows')?.label).toBe('Synthesizing flows')
     expect(painted.get('match')?.label).toBe('Matching flows')
+    expect(painted.get('author')?.label).toBe('Working flows')
 
-    // Interface mapping is deterministic — a result, never a model tag.
+    // Interface mapping is deterministic and free — a result, never a model tag.
     const interfaces = painted.get('interfaces')!.details.join('\n')
     expect(interfaces).toMatch(/\d+ interfaces? · \d+ surfaces?/)
     expect(interfaces).not.toContain('model')
 
-    // Synthesis + matching tick a counter and carry their live spend.
-    expect(painted.get('flows')!.details.some((d) => /areas? .*flows-model/.test(d) || /\d+ area/.test(d))).toBe(true)
-    expect(painted.get('flows')!.details.some((d) => d.includes('flows-model'))).toBe(true)
+    // Synthesis ticks its area counter but carries NO usage tag: its spend lives
+    // in the sessions store, not the stage-usage sink.
+    expect(painted.get('flows')!.details.some((d) => /\d+ areas?/.test(d))).toBe(true)
+    expect(painted.get('flows')!.details.join(' ')).not.toMatch(/\$|tok/)
+
+    // Matching is the one-shot that survives — counter AND live spend.
     expect(painted.get('match')!.details.some((d) => /flow×surface/.test(d))).toBe(true)
     expect(painted.get('match')!.details.some((d) => d.includes('match-model'))).toBe(true)
   })

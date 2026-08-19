@@ -9,10 +9,7 @@
 
 export {
   generateGuards,
-  authorCacheKey,
-  retryCacheKey,
-  GENERATE_CACHE_NAME,
-  FIDELITY_CACHE_NAME,
+  workerCacheKey,
   type GenerateGuardsOptions,
   type GuardGenerateResult,
   type GuardGenerateModels,
@@ -20,8 +17,17 @@ export {
   type GuardBirthFinding,
   type GuardGenerateError,
   type GuardExtractionFailure,
-  type AuthorFailure,
   type InterfaceProvider,
+  // The flow-worker session seam (plan 04 steps 17 + 18) — implemented by
+  // `@truecourse/core`, injected by the command adapter.
+  type FlowWorkerSessionSeam,
+  type FlowWorkerSessionResult,
+  type FlowWorkerTask,
+  type FlowWorkerToolReport,
+  type FlowWorkerCacheMaterial,
+  type WorkerFidelityInput,
+  type WorkerFidelityVerdict,
+  type WorkerFidelityJudge,
 } from './generate.js'
 
 export {
@@ -82,34 +88,42 @@ export {
 } from './suppression.js'
 
 export {
-  extractDocClaims,
-  docExtractionCached,
-  countExtractViews,
-  countUncachedExtractViews,
-  EXTRACT_CACHE_NAME,
+  snapExtraction,
+  isSystemicSessionLoss,
   type DocClaims,
   type ExtractResult,
+  type ExtractedClaimWithNeeds,
+  type ExtractSessionSeam,
+  type GuardSessionSummary,
 } from './extract.js'
 
 export {
   synthesizeFlows,
-  planFlowSynthesis,
   buildFlowAreas,
   flowAreaIdForDoc,
-  flowAreaCacheKey,
-  flowEpicCacheKey,
+  flowAreaClaimsMaterial,
+  flowAreaOutlinesMaterial,
+  flowEpicDigestsMaterial,
   flowSectionKey,
   flowsPath,
   readFlowsFile,
-  FLOWS_CACHE_NAME,
+  checkFlowSet,
+  checkEpicSet,
+  isFlowSetClean,
+  isFlowSynthesisWipeout,
   type SynthesizeFlowsOptions,
   type FlowSynthesisResult,
-  type FlowSynthesisPlan,
-  type FlowAreaPlan,
   type FlowSynthesisArea,
   type FlowAreaDocInput,
   type FlowClaimInput,
   type FlowDocInput,
+  type FlowSetCheckContext,
+  type FlowSetCheckReport,
+  type FlowsAreaSessionSeam,
+  type FlowsAreaSessionResult,
+  type FlowsEpicSessionSeam,
+  type FlowsEpicSessionResult,
+  type FlowsSessionGrounding,
   type SubsumedFlow,
   type UnsettledArea,
 } from './flows.js'
@@ -248,21 +262,16 @@ export {
   type BirthRound,
 } from './birth.js'
 
-// Failing-test triage — the post-birth judgment stage.
-export {
-  runTriage,
-  triageCacheKey,
-  buildTriageUserPrompt,
-  TRIAGE_CACHE_NAME,
-  TRIAGE_SYSTEM_PROMPT,
-  TRIAGE_PROMPT_FINGERPRINT,
-  type TriageUserContext,
-  type TriageFlowContext,
-  type TriageMilestone,
-} from './triage.js'
+// Scenario yaml round-trip helpers the worker session path reads through.
+export { serializeScenarioYaml, parseRawScenarioYaml, parseScenarioYaml } from './serialize.js'
+
+// The failing-test TRIAGE stage is RETIRED (plan 04 step 20): a committed
+// red's adjudication is the flow worker's own confirmed `expectedReds`
+// prediction. The orphaned `.cache/guard/triage` files remain on disk
+// (derived, deletable); `GuardTriageSchema` lives on in `@truecourse/shared`
+// because committed manifests still carry historical triage verdicts read-side.
 
 export {
-  EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_API_PROMPT_FINGERPRINT,
@@ -272,10 +281,6 @@ export {
   buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
-  FLOWS_SYSTEM_PROMPT,
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_SYSTEM_PROMPT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
   GENERATE_PROMPT_FINGERPRINT,
@@ -283,8 +288,6 @@ export {
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
   buildRecipeUserPrompt,
-  buildFlowsUserPrompt,
-  buildFlowsEpicUserPrompt,
   type AuthorUserContext,
   type InterfaceContractHint,
   type OutboundRequestHint,
@@ -295,10 +298,6 @@ export {
   type MatchUserContext,
   type MatchMilestoneLine,
   type InterfaceDigest,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
-  type FlowClaimLine,
-  type FlowDocOutline,
   type FlowDigest,
   type OutlineEntry,
   type SeedDraftInput,
@@ -319,21 +318,9 @@ export {
 } from './examples.js'
 
 export {
-  spawnExtractRunner,
-  spawnGenerateRunner,
   spawnRecipeRunner,
-  spawnFidelityRunner,
-  spawnTriageRunner,
-  spawnFlowsRunner,
-  spawnFlowsEpicRunner,
   spawnMatchRunner,
-  type ExtractRunner,
-  type GenerateRunner,
   type RecipeRunner,
-  type FidelityRunner,
-  type TriageRunner,
-  type FlowsRunner,
-  type FlowsEpicRunner,
   type MatchRunner,
 } from './runners.js'
 
@@ -353,6 +340,7 @@ export {
   RealizationMatchSchema,
   FidelityReviewSchema,
   FlowSynthesisSchema,
+  FlowSetSchema,
   EpicSynthesisSchema,
   SynthesizedFlowSchema,
   SynthesizedMilestoneSchema,
@@ -375,6 +363,7 @@ export {
   type RealizationStep,
   type FidelityReview,
   type FlowSynthesis,
+  type FlowSet,
   type EpicSynthesis,
   type SynthesizedFlow,
   type SynthesizedMilestone,

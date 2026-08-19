@@ -178,6 +178,106 @@ export function guardNoFlowClaimGapKind(reason: string): GuardCoverageGapKind {
   return 'untestable'
 }
 
+// --- The flow-worker session outcome (plan 04 step 17) ----------------------
+
+/**
+ * One PREDICTED red step of a submitted scenario — the flow worker's own verdict
+ * on a doc-vs-code disagreement it confirmed by running the scenario. A red
+ * submission is accepted ONLY when the engine's fresh confirmation run reproduces
+ * every declared prediction (`predictedActual` against the observed actual), so a
+ * committed red test carries the worker's adjudication as its diagnosis instead
+ * of a separate triage stage's.
+ */
+export const GuardExpectedRedSchema = z
+  .object({
+    /** 1-based failing step of the submitted scenario. */
+    step: z.number().int().positive(),
+    /** The actual the worker OBSERVED (copied off its own run) and predicts the
+     *  confirmation run reproduces. */
+    predictedActual: z.string().min(1),
+    /** The worker's drift verdict — `generation-defect` is deliberately absent:
+     *  a worker that authored a defective scenario fixes or retires it in-loop. */
+    verdict: z.enum(['doc-drift', 'code-drift']),
+    /** One-paragraph plain-words assessment — the committed red's diagnosis brief. */
+    brief: z.string().min(1),
+  })
+  .strict()
+export type GuardExpectedRed = z.infer<typeof GuardExpectedRedSchema>
+
+/** Which payload fields each outcome kind requires — the pairing the flattened
+ *  schema's `superRefine` enforces (see {@link GuardFlowWorkerOutcomeSchema}). */
+const FLOW_WORKER_PAYLOAD_FIELDS = {
+  settled: ['scenarioYamlSha', 'expectedReds'],
+  blocked: ['perMilestone'],
+  'journey-defect': ['report'],
+  retired: ['attempts', 'lastEvidence'],
+} as const satisfies Record<string, readonly string[]>
+
+/**
+ * The `guard-generate.flow-worker` session's outcome (plan 04 step 17) —
+ * exhaustive: a worker cannot end without one of these four kinds.
+ *
+ * ONE object discriminated by `kind`, carrying exactly the payload fields that
+ * match it — deliberately NOT a `z.discriminatedUnion`: a union renders as a
+ * root-level `anyOf` JSON schema, and the drivers hand this schema to provider
+ * surfaces that require an OBJECT root (the api driver's injected `outcome`
+ * tool inputSchema, the Agent SDK driver's `outputFormat` json-schema). The
+ * pairing the union used to encode structurally is enforced by the
+ * `superRefine` — the loop parses every outcome against this schema before
+ * completing a session, so a kind without its payload fails `malformed` there.
+ * Same recipe as guard-setup's `AuthProofOutcomeSchema`.
+ *
+ * The flattening is SHAPE-COMPATIBLE with existing `guard/generate` cache
+ * entries: a stored `{kind: 'settled'|'blocked', …}` object carries exactly
+ * its kind's fields under the same names, so old entries still parse as hits.
+ *
+ * `settled` references the ENGINE-STASHED accepted scenario by the sha the
+ * `submit_scenario` acceptance reported — the fold takes the yaml from the stash,
+ * never from the outcome text. No `.default()` anywhere: a session outcome
+ * schema must be Input≡Output (`SessionDef.outcomeSchema` is `z.ZodType<T>`).
+ */
+export const GuardFlowWorkerOutcomeSchema = z
+  .object({
+    kind: z.enum(['settled', 'blocked', 'journey-defect', 'retired']),
+    /** settled: sha256 of the accepted scenario yaml, verbatim from the acceptance. */
+    scenarioYamlSha: z.string().min(1).optional(),
+    /** settled: the declared red predictions, exactly as submitted (empty on a green). */
+    expectedReds: z.array(GuardExpectedRedSchema).optional(),
+    /** blocked: per-milestone capability the sandbox cannot provide (order = milestone). */
+    perMilestone: z
+      .array(z.object({ order: z.number().int().positive(), capability: z.string().min(1) }).strict())
+      .min(1)
+      .optional(),
+    /** journey-defect: the derived interface the worker found wrong against the real app. */
+    report: z.object({ interfaceId: z.string().min(1), detail: z.string().min(1) }).strict().optional(),
+    /** retired: how many authoring attempts the worker spent before giving up. */
+    attempts: z.number().int().nonnegative().optional(),
+    /** retired: the last run's evidence — why no faithful scenario could be produced. */
+    lastEvidence: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const wanted: readonly string[] = FLOW_WORKER_PAYLOAD_FIELDS[value.kind]
+    const allFields = Object.values(FLOW_WORKER_PAYLOAD_FIELDS).flat()
+    for (const field of allFields) {
+      const present = value[field as keyof typeof value] !== undefined
+      if (wanted.includes(field) && !present) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: `kind "${value.kind}" requires \`${field}\``,
+        })
+      } else if (!wanted.includes(field) && present) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: `kind "${value.kind}" must not carry \`${field}\``,
+        })
+      }
+    }
+  })
+export type GuardFlowWorkerOutcome = z.infer<typeof GuardFlowWorkerOutcomeSchema>
+
 /** `.truecourse/scenarios/flows.json` — the synthesized flow corpus. */
 export const GuardFlowsFileSchema = z
   .object({

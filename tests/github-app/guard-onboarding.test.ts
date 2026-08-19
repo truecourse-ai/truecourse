@@ -35,13 +35,8 @@ import {
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
-import {
-  generateGuards,
-  type GuardGenerateResult,
-  type ExtractRunner,
-  type GenerateRunner,
-} from '@truecourse/guard-generator';
-import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
+import { generateGuards, type GuardGenerateResult } from '@truecourse/guard-generator';
+import { flowStageSeams, extractSessionBy, submitWorkerSessions, raw } from '../guard-generator/helpers.js';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import {
   materializeStoredCorpus,
@@ -574,34 +569,21 @@ describe('guard onboarding pipeline', () => {
   const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));
   const DOC_BODY = '## version\n`--version` prints the version and exits 0.\n';
 
-  const extractVersion: ExtractRunner = async ({ outline }) => ({
-    claims: [
-      {
-        claim: '`--version` prints the version and exits 0',
-        driver: 'cli',
-        sectionAnchor: outline[0].anchor,
-        reason: 'exit code observable',
-      },
-    ],
-    untestable: [],
-  });
-  const authorVersion: GenerateRunner = async (ctx) => ({
-    scenario: stampMilestones(
-      { title: 'version works', steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-      ctx.milestones.length,
-    ),
-  });
-
-  /** The real generate wired with a fixed recipe proposal — no LLM, everything else real. */
+  /** The real generate wired with a fixed recipe proposal — no LLM, everything
+   *  else real. Guard generate's LLM stages are agent SESSIONS (plan 04), so the
+   *  four required seams answer with what a session would have produced. */
   function realGenerateProposing(proposal: { install?: string; build: string; entry: string[] }) {
     return async (dir: string) => ({
       guard: await generateGuards({
         repoRoot: dir,
-        ...flowStageRunners(dir),
-        ...stubAdjudicationRunners(),
+        ...flowStageSeams(dir),
+        extractSession: extractSessionBy({
+          version: [{ claim: '`--version` prints the version and exits 0' }],
+        }),
+        flowWorkerSession: submitWorkerSessions(() =>
+          raw('version works', [{ run: ['--version'], expect: { exit: 0 } }]),
+        ),
         recipeRunner: async () => proposal,
-        extractRunner: extractVersion,
-        generateRunner: authorVersion,
       }),
     });
   }

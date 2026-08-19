@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import {
-  EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_PROMPT_FINGERPRINT,
@@ -9,10 +8,6 @@ import {
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
-  FLOWS_SYSTEM_PROMPT,
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_SYSTEM_PROMPT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
   flowGenerationInputsHash,
@@ -20,15 +15,11 @@ import {
   buildFidelityUserPrompt,
   buildMatchUserPrompt,
   buildRecipeUserPrompt,
-  buildFlowsUserPrompt,
-  buildFlowsEpicUserPrompt,
   RawGeneratedCliScenarioSchema,
   type AuthorMilestone,
   type AuthorUserContext,
   type FidelityUserContext,
   type MatchUserContext,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
 } from '@truecourse/guard-generator'
 import { OUTPUT_ONLY_GUARDRAIL, jsonSchemaHint } from '@truecourse/shared/llm'
 
@@ -168,57 +159,17 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('REAL BEHAVIOR')
   })
 
-  it('EXTRACT and RECIPE carry the shared output-only guardrail', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
+  it('RECIPE carries the shared output-only guardrail', () => {
     expect(RECIPE_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
-  it('GENERATE keeps its own richer no-tools block, not the shared constant', () => {
-    // GENERATE was hardened by an earlier pass with a fuller block; leave it as is.
-    expect(GENERATE_SYSTEM_PROMPT).not.toContain(OUTPUT_ONLY_GUARDRAIL)
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# No tools, no repository access')
-  })
-
-  it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: the prompt renders the driver registry's ids, so the
-    // desktop + mobile interface-type rows moved this from 40e35f8ec26c72cb (the api
-    // driver becoming authorable). It must not move again silently.
-    // Rolled once: the `api` driver row now covers the SERVER PROCESS
-    // (startup under a configuration, a failed start, boot migrations, request
-    // logging, shutdown, restart persistence), because those claims were landing on
-    // `cli` and dying as "blocked on a recipe `entry`" on repos that have no CLI at
-    // all. A re-extract of every doc is the cost, and it is the point.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('87fe2fdd9881b428')
-  })
-
-  it('EXTRACT_SYSTEM_PROMPT routes SERVER-PROCESS claims to api, not cli', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('the behavior of the service PROCESS itself')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('shuts down on SIGTERM/SIGINT')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('state survives a restart')
-    // …and the line that keeps a package script on cli.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('`cli` is for a\n  COMMAND a user runs to completion')
-  })
-
-  // LLM-dependent commands classify as blocked-on, never authored.
-  it('EXTRACT_SYSTEM_PROMPT classifies LLM-provider-dependent commands as blocked-on', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('commands that need an LLM provider are not cli-testable')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('authenticated LLM provider')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('external AI CLI')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('llm-provider')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('Do NOT extract such a command')
-    // General, not a fixed command list.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('any provider-auth-dependent command')
-  })
-
-  // Programmatic import-by-name API claims classify as library (recorded, not authored).
-  it('EXTRACT_SYSTEM_PROMPT classifies programmatic-API claims as library, by consumption form', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('- library — ')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('IMPORTING it from user')
-    // The deciding line is how the docs consume it, not which feature it is.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('documented consumption form')
-    // api became authorable; only web/tui/library stay recorded-only.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('web/tui/library claims')
-  })
+  // The EXTRACT one-shot prompt (and its fingerprint) is RETIRED — plan 04
+  // step 15 replaced it with the `guard-generate.extract` SESSION, whose prompt
+  // lives in `@truecourse/core`. Its classification rules (server-process ⇒ api,
+  // llm-provider ⇒ untestable, library by consumption form) are re-pinned
+  // against the session prompt in
+  // `tests/core/guard-generate-extract-session.test.ts`; the session prompt is
+  // fingerprinted by its own cache key, so there is no literal to pin here.
 
   // Assertions come from the claim/doc, never the transcript (AUTHORING).
   it('GENERATE_SYSTEM_PROMPT rules assertions come from the claim, not the transcript', () => {
@@ -1297,106 +1248,13 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('or { "unrealizable": "<one')
   })
 
-  // --- flow synthesis (guard.flows) -----------------------------------------
-
-  it('FLOWS_SYSTEM_PROMPT closes the action space with the shared no-tools guardrail', () => {
-    expect(FLOWS_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
-  })
-
-  it('FLOWS_SYSTEM_PROMPT keeps synthesis spec-only — the independence invariant', () => {
-    // Milestones are copies of extracted claims, never new assertions.
-    expect(FLOWS_SYSTEM_PROMPT).toContain('COPIES one given claim')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('Never invent, reword, translate, shorten, merge, or split a claim')
-    // No code, no probes, no recipe ever reach this stage.
-    expect(FLOWS_SYSTEM_PROMPT).toContain('You have NO code, NO commands, NO test framework, and NO repository')
-    expect(FLOWS_SYSTEM_PROMPT).not.toContain('transcript')
-    expect(FLOWS_SYSTEM_PROMPT).not.toContain('recipe')
-    expect(FLOWS_SYSTEM_PROMPT).not.toContain('interface')
-  })
-
-  it('FLOWS_SYSTEM_PROMPT states the coverage honesty rule and the granularity spectrum', () => {
-    expect(FLOWS_SYSTEM_PROMPT).toContain('# Coverage honesty')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('account: required')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('noFlowClaims')
-    // Atomic flows are legitimate; near-duplicates are not.
-    expect(FLOWS_SYSTEM_PROMPT).toContain('A ONE-MILESTONE flow is correct and expected')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('No near-duplicates')
-  })
-
-  it('FLOWS_PROMPT_FINGERPRINT is pinned — moves only with an intended re-synthesis', () => {
-    expect(FLOWS_PROMPT_FINGERPRINT).toBe('654d47c7386fcd58')
-    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
-    // "journey" retired in favour of "interface" across stores, schemas and copy,
-    // and this prompt renders that vocabulary, so its text moved without a single
-    // rule moving with it. A rename, not vocabulary growth.
-    expect(FLOWS_EPIC_PROMPT_FINGERPRINT).toBe('fa167e39be3b4a5b')
-  })
-
-  it('FLOWS_EPIC_SYSTEM_PROMPT defaults to no epics and only chains listed flows', () => {
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain('The default answer is none')
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain('DIFFERENT areas')
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain('{ "epics": [] }')
-  })
-
-  it('buildFlowsUserPrompt carries the claims, the outlines, and the accounting marks', () => {
-    const ctx: FlowsUserContext = {
-      areaId: 'tasks',
-      claims: [
-        { doc: 'docs/tasks.md', anchor: 'tasks/creating-tasks', claim: '`add <title>` creates a task', driver: 'cli', required: true },
-        { doc: 'docs/tasks.md', anchor: 'tasks/board', claim: 'the board shows one card per task', driver: 'web', required: false },
-      ],
-      docs: [
-        {
-          doc: 'docs/tasks.md',
-          outline: [{ anchor: 'tasks/creating-tasks', headingText: 'Creating tasks', level: 2 }],
-          untestable: [{ anchor: 'tasks/rationale', reason: 'design history' }],
-        },
-      ],
-    }
-    const p = buildFlowsUserPrompt(ctx)
-    expect(p).toContain('Area: tasks')
-    expect(p).toContain('DOCUMENT OUTLINES')
-    expect(p).toContain('tasks/creating-tasks — Creating tasks')
-    expect(p).toContain('no testable behavior: tasks/rationale')
-    expect(p).toContain('claim: `add <title>` creates a task')
-    expect(p).toContain('surface: cli   account: required')
-    expect(p).toContain('surface: web   account: optional')
-    expect(p).not.toContain('CORRECTION')
-  })
-
-  it('buildFlowsUserPrompt quotes back unknown references and unaccounted claims', () => {
-    const p = buildFlowsUserPrompt({
-      areaId: 'tasks',
-      claims: [],
-      docs: [],
-      issues: {
-        unknownReferences: ['docs/tasks.md#tasks/creating-tasks — "`archive` hides a task"'],
-        uncoveredClaims: ['docs/tasks.md#tasks/listing-tasks — "`list` prints open tasks"'],
-      },
-    })
-    expect(p).toContain('matched NO claim above')
-    expect(p).toContain('`archive` hides a task')
-    expect(p).toContain('account: required` but your answer put')
-    expect(p).toContain('`list` prints open tasks')
-    expect(p).toContain('Return the COMPLETE answer again')
-  })
-
-  it('buildFlowsEpicUserPrompt renders digests only — refs, titles, milestones', () => {
-    const ctx: FlowsEpicUserContext = {
-      digests: [
-        {
-          ref: 'F1',
-          areaId: 'tasks',
-          title: 'Create and complete a task',
-          goal: 'A user finishes a task.',
-          milestones: [{ doc: 'docs/tasks.md', anchor: 'tasks/creating-tasks', claimTitle: '`add <title>` creates a task' }],
-        },
-      ],
-    }
-    const p = buildFlowsEpicUserPrompt(ctx)
-    expect(p).toContain('--- F1  (area: tasks)')
-    expect(p).toContain('title: Create and complete a task')
-    expect(p).toContain('1. docs/tasks.md#tasks/creating-tasks — `add <title>` creates a task')
-  })
+  // The flow-synthesis one-shot prompts (FLOWS / FLOWS_EPIC, their fingerprints
+  // and `buildFlowsUserPrompt` / `buildFlowsEpicUserPrompt`) are RETIRED — plan
+  // 04 step 16 replaced them with the `guard-generate.flows` SESSIONS, whose
+  // prompts and briefings live in `@truecourse/core` and are pinned in
+  // `tests/core/guard-generate-flows-session.test.ts`. One rule genuinely
+  // CHANGED with the move and is pinned there in its new form: synthesis is no
+  // longer blind to the code — the briefing carries interface digests and the
+  // dependency catalog as GROUNDING, while the binding rule (a milestone COPIES
+  // a given claim) survives whole.
 })

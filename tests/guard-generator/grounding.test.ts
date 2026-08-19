@@ -29,8 +29,8 @@ import {
   writeDoc,
   writeCorpus,
   writeApiRecipe,
-  extractBy,
-  authorBy,
+  extractSessionBy,
+  submitWorkerSessions,
   runGenerate,
   interfacesOf,
   apiInterface as helperApiInterface,
@@ -314,13 +314,13 @@ describe('generateGuards — the grounding rides the SAME provider the interface
     while (repos.length) rmrf(repos.pop()!);
   });
 
-  it('reaches the api authoring context per interface, and never a cli one', async () => {
+  it('reaches the api WORKER briefing per interface, and never a cli one', async () => {
     const r = makeTempRepo();
     repos.push(r);
     writeApiRecipe(r, { entry: null });
     writeCorpus(r, [{ ref: 'docs/api.md' }]);
     writeDoc(r, 'docs/api.md', ['## list', 'GET /todos returns 200 with the todo list.'].join('\n'));
-    const contexts: AuthorUserContext[] = [];
+    const briefings: string[] = [];
 
     await runGenerate({
       repoRoot: r,
@@ -332,24 +332,20 @@ describe('generateGuards — the grounding rides the SAME provider the interface
         ],
         outboundRequests: [FORECAST],
       }),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (c) =>
-        contexts.push(c),
-      ),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+        onBriefing: (_task, text) => briefings.push(text),
+      }),
     });
 
-    const api = contexts.find((c) => c.driver === 'api')!;
-    expect(api.interfaceContracts).toEqual([
-      { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
-    ]);
-    expect(api.outboundRequests?.[0].path).toBe('/v1/forecast');
-    // The flow walks the only api interface, so there is no OTHER-operations block.
-    expect(api.otherOperations ?? []).toEqual([]);
-    const prompt = buildAuthorUserPrompt(api);
+    const prompt = briefings[0];
     expect(prompt).toContain('- GET /todos — query also reads limit');
     expect(prompt).toContain('timeformat="unixtime"');
+    // The flow walks the only api interface, so there is no OTHER-operations block.
+    expect(prompt).not.toContain('OTHER OPERATIONS AVAILABLE');
+    // An operation this flow does NOT walk never leaks into its briefing.
     expect(prompt).not.toContain('secretish');
   });
 
@@ -359,7 +355,7 @@ describe('generateGuards — the grounding rides the SAME provider the interface
     writeApiRecipe(r, { entry: null });
     writeCorpus(r, [{ ref: 'docs/api.md' }]);
     writeDoc(r, 'docs/api.md', ['## list', 'GET /todos returns 200 with the todo list.'].join('\n'));
-    const contexts: AuthorUserContext[] = [];
+    const briefings: string[] = [];
 
     await runGenerate({
       repoRoot: r,
@@ -371,21 +367,19 @@ describe('generateGuards — the grounding rides the SAME provider the interface
           ],
         },
       ),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (c) =>
-        contexts.push(c),
-      ),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+        onBriefing: (_task, text) => briefings.push(text),
+      }),
     });
 
-    const api = contexts.find((c) => c.driver === 'api')!;
     // The flow's plan walks /todos; /signup is the setup surface it may reach for.
-    expect(api.interfaceContracts?.map((j) => j.path)).toEqual(['/todos']);
-    expect(api.otherOperations).toEqual([
-      { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
-    ]);
-    expect(buildAuthorUserPrompt(api)).toContain('OTHER OPERATIONS AVAILABLE');
+    const prompt = briefings[0];
+    expect(prompt).toContain('OTHER OPERATIONS AVAILABLE');
+    expect(prompt).toContain('POST /signup');
+    expect(prompt).toContain('email');
   });
 });
 

@@ -434,6 +434,23 @@ export const FlowSynthesisSchema = z
 export type FlowSynthesis = z.infer<typeof FlowSynthesisSchema>
 
 /**
+ * The flow-synthesis SESSION outcome (`guard-generate.flows`, plan 04 step 16) —
+ * the same {flows, noFlowClaims} pair as {@link FlowSynthesisSchema}, but
+ * `.strict()` with BOTH arrays required: the agent loop's outcome gate re-asks
+ * on a malformed reply, so the one-shot schema's omission tolerance would only
+ * hide a drifting model. It doubles as the `check_flows` tool's input schema —
+ * the validator-as-tool pattern, where the draft a session checks IS the
+ * outcome it will produce.
+ */
+export const FlowSetSchema = z
+  .object({
+    flows: z.array(SynthesizedFlowSchema),
+    noFlowClaims: z.array(SynthesizedNoFlowClaimSchema),
+  })
+  .strict()
+export type FlowSet = z.infer<typeof FlowSetSchema>
+
+/**
  * One epic flow: a cross-area path that CHAINS flows the per-area pass already
  * produced. `composedOf` carries the digest refs of the chained flows (the engine
  * rewrites them to flow ids); every milestone must be one of those flows'

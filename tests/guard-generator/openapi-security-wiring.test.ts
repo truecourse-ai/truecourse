@@ -8,13 +8,12 @@
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import {
-  authorCacheKey,
+  workerCacheKey,
   sectionInputsKey,
   flowGenerationInputsHash,
   planGuardWork,
   type SectionInput,
-  type AuthorUserContext,
-  type GenerateRunner,
+  type FlowWorkerSessionSeam,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
 import {
@@ -23,7 +22,8 @@ import {
   writeApiRecipe,
   writeCorpus,
   writeDoc,
-  extractBy,
+  extractSessionBy,
+  submitWorkerSessions,
   runGenerate,
   interfacesOf,
   apiInterface,
@@ -124,7 +124,7 @@ describe('planGuardWork — securityFingerprint stamping', () => {
   })
 })
 
-describe('authorCacheKey — security fold', () => {
+describe('workerCacheKey — security fold', () => {
   const FLOW = { fingerprint: 'sha256:flow' }
   function section(securityFingerprint: string): SectionInput {
     return {
@@ -142,7 +142,14 @@ describe('authorCacheKey — security fold', () => {
     }
   }
   const key = (securityFingerprint: string) =>
-    authorCacheKey(FLOW, 'api', [sectionInputsKey(section(securityFingerprint))], INTERFACES, 'sha256:recipe')
+    workerCacheKey(
+      'prompt-fp',
+      FLOW,
+      'api',
+      [sectionInputsKey(section(securityFingerprint))],
+      INTERFACES,
+      'sha256:recipe',
+    )
 
   it('is byte-identical when the section is public, and moves once secured / on a scheme change', () => {
     // An empty securityFingerprint folds nothing — identical to the pre-B7 key surface.
@@ -152,68 +159,63 @@ describe('authorCacheKey — security fold', () => {
   })
 })
 
-describe('generateGuards — the api author prompt carries the operation-auth mapping', () => {
-  /** Collect every (flow, surface) authoring context's operationAuth, authoring nothing. */
-  function collectAuth(): { ctxs: AuthorUserContext[]; runner: GenerateRunner } {
-    const ctxs: AuthorUserContext[] = []
-    const runner: GenerateRunner = async (c) => {
-      ctxs.push(c)
-      return { blockedOn: ['a spy runner authors nothing'] }
-    }
-    return { ctxs, runner }
+describe('generateGuards — the api worker briefing carries the operation-auth mapping', () => {
+  /** Collect every (flow, surface) worker BRIEFING, authoring nothing. */
+  function collectAuth(): { byFlow: Map<string, string>; runner: FlowWorkerSessionSeam } {
+    const byFlow = new Map<string, string>()
+    const runner = submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'a spy worker authors nothing' }] }), {
+      onBriefing: (task, briefing) => byFlow.set(task.flowId, briefing),
+    })
+    return { byFlow, runner }
   }
 
   it('advertises the satisfying credential for a matched scheme and blocks on an unsatisfied one', async () => {
     const r = setupRepo(openapi(), API_KEY)
-    const { ctxs, runner } = collectAuth()
+    const { byFlow, runner } = collectAuth()
     await runGenerate({
       repoRoot: r,
       interfaces: meInterfaces(r),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getadmin': [{ claim: 'GET /admin returns admin data', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getpublic': [{ claim: 'GET /public returns data', driver: 'api', reason: 'HTTP 200' }],
       }),
-      generateRunner: runner,
+      flowWorkerSession: runner,
     })
-    // Every bound operation is authored for, so the mapping must reach some call.
-    expect(ctxs.map((c) => c.flow.id).sort()).toEqual([
-      'paths-get-getadmin',
-      'paths-get-getme',
-      'paths-get-getpublic',
-    ])
-    const satisfied = ctxs.flatMap((c) => c.operationAuth?.satisfiedBy ?? [])
-    const unsatisfied = ctxs.flatMap((c) => c.operationAuth?.unsatisfied ?? [])
+    // Every bound operation gets a worker, so the mapping must reach some briefing.
+    expect([...byFlow.keys()].sort()).toEqual(['paths-get-getadmin', 'paths-get-getme', 'paths-get-getpublic'])
+    const all = [...byFlow.values()].join('\n')
     // apiKeyAuth (GET /me) is satisfied by the api-key credential via the header heuristic.
-    expect(satisfied).toContainEqual({ scheme: 'apiKeyAuth', credential: 'api-key', header: 'X-API-Key' })
-    // oauth2Auth (GET /admin) has no declared credential → named in unsatisfied.
-    expect(unsatisfied).toContain('oauth2Auth')
+    expect(byFlow.get('paths-get-getme')!).toContain('apiKeyAuth')
+    expect(byFlow.get('paths-get-getme')!).toContain('X-API-Key')
+    // oauth2Auth (GET /admin) has no declared credential → named as unsatisfied.
+    expect(all).toContain('oauth2Auth')
   }, 60_000)
 
   it('names the required scheme as unsatisfied when the recipe declares no credential for it', async () => {
     const r = setupRepo(openapi(), undefined)
-    const { ctxs, runner } = collectAuth()
+    const { byFlow, runner } = collectAuth()
     await runGenerate({
       repoRoot: r,
       interfaces: meInterfaces(r),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getadmin': { untestable: 'needs oauth' },
         'paths/get-getpublic': { untestable: 'trivial' },
       }),
-      generateRunner: runner,
+      flowWorkerSession: runner,
     })
-    // No credentials → apiKeyAuth is unsatisfiable, so the secured GET /me surfaces as
-    // blocked (still auth-relevant) with nothing in satisfiedBy.
-    const auth = ctxs.map((c) => c.operationAuth).find((a) => a && a.unsatisfied.length > 0)
-    expect(auth?.satisfiedBy).toEqual([])
-    expect(auth?.unsatisfied).toContain('apiKeyAuth')
+    // No credentials → apiKeyAuth is unsatisfiable, so the secured GET /me is
+    // briefed with the scheme named as unsatisfied and no credential beside it.
+    const me = byFlow.get('paths-get-getme')!
+    expect(me).toContain('apiKeyAuth')
+    expect(me).not.toContain('X-API-Key')
   }, 60_000)
 })
 
 describe('generateGuards — `satisfies` validation', () => {
-  /** A generate runner that must never be reached: validation stops the run first. */
-  const neverAuthors: GenerateRunner = async () => {
+  /** A worker seam that must never be reached: validation stops the run first. */
+  const neverAuthors: FlowWorkerSessionSeam = async () => {
     throw new Error('authoring must not run — the recipe was rejected')
   }
 
@@ -224,10 +226,10 @@ describe('generateGuards — `satisfies` validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: meInterfaces(r),
-      extractRunner: async () => {
+      extractSession: async () => {
         throw new Error('extraction must not run — the recipe was rejected')
       },
-      generateRunner: neverAuthors,
+      flowWorkerSession: neverAuthors,
     })
     expect(res.status).toBe('recipe-failed')
     expect(res.reason).toContain('"api-key"')
@@ -243,12 +245,12 @@ describe('generateGuards — `satisfies` validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: meInterfaces(r),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         'paths/get-getme': { untestable: 'nothing to author here' },
         'paths/get-getadmin': { untestable: 'nothing to author here' },
         'paths/get-getpublic': { untestable: 'nothing to author here' },
       }),
-      generateRunner: neverAuthors,
+      flowWorkerSession: neverAuthors,
     })
     expect(res.status).toBe('ok')
     expect(res.recipe?.warnings).toBeUndefined()
@@ -266,8 +268,8 @@ describe('generateGuards — `satisfies` validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r),
-      extractRunner: extractBy({ login: { untestable: 'prose only' } }),
-      generateRunner: neverAuthors,
+      extractSession: extractSessionBy({ login: { untestable: 'prose only' } }),
+      flowWorkerSession: neverAuthors,
     })
     expect(res.status).toBe('ok')
     expect(res.recipe?.warnings).toHaveLength(1)
