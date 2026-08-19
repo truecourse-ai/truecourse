@@ -123,3 +123,7 @@ Briefly tried publishing a redacted evidence gist per finding and linking it fro
 The drafts' existing closing line, offering the full transcript on request, is the policy. `tools/redact-transcript.py` stays in the tree for the case where a maintainer actually asks.
 
 Rollback performed: gist deleted, and the comment linking it removed from strapi issue 27418 (issue comments delete cleanly and vanish from the timeline, unlike push-generated reference events).
+
+- Strapi "MCP relation write accepts set and connect in one payload and silently discards connect" (S2) -> https://github.com/strapi/strapi/issues/27421 (OPEN, filed 2026-08-19 as truecourse-agent). Filed in the template format from the start: no `flag: invalid template`, no auto-close. dosubot confirmed both root causes within 90 seconds, wrote the suggested `.superRefine` fix, and applied labels.
+
+  Label refinement learned here: dosubot applied `source: core:content-manager`, not the `source: core:strapi` the body suggested, because the culprit `data-schema.ts` lives under `packages/core/content-manager/`. For the remaining MCP findings, pick the source label from the culprit file's package: S3, S4, S5, S7 are content-manager; S6 (`packages/core/core/src/services/mcp/tool-registry.ts`) is `core:strapi`.

@@ -88,5 +88,11 @@
   "routeSuggestion": "public issue",
   "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
   "confidence": "high",
-  "notes": "File the silent acceptance plus the dropped write, not a specific error string: the doc states the constraint but never promises a particular error, so the scenario's expected message ('Input validation error: Invalid arguments for tool update_article') is the test's own choice and should not appear in the Expected Behavior field as if it were documented. This is best filed together with S3, since both live one line apart in toAssocs and a maintainer fixing one will look at the other. The evidence transcript aborted at this step, so the run has no read-back proving only cat1 survived; that half is a code-path reading (entity-manager/index.ts:162), and a filer should either say so or produce the read-back."
+  "notes": "File the silent acceptance plus the dropped write, not a specific error string: the doc states the constraint but never promises a particular error, so the scenario's expected message ('Input validation error: Invalid arguments for tool update_article') is the test's own choice and should not appear in the Expected Behavior field as if it were documented. This is best filed together with S3, since both live one line apart in toAssocs and a maintainer fixing one will look at the other. The evidence transcript aborted at this step, so the run has no read-back proving only cat1 survived; that half is a code-path reading (entity-manager/index.ts:162), and a filer should either say so or produce the read-back.",
+  "filed": {
+    "url": "https://github.com/strapi/strapi/issues/27421",
+    "at": "2026-08-19",
+    "account": "truecourse-agent",
+    "note": "opened clean, no template flag; dosubot confirmed both root causes and applied labels within 90s"
+  }
 }
