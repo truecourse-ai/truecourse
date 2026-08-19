@@ -950,6 +950,9 @@ LLM.
 ```bash
 # Spec consolidation (docs → curated corpus)
 truecourse spec scan                              # Curate docs into corpus.json (areas + overlap flags)
+truecourse spec scan --only-<step>                # Run ONE scan step in isolation: orchestrate | curate | settle | overlap.
+                                                  # Prior steps replay from their stored artifacts (a missing one aborts,
+                                                  # naming the flag to run first); only --only-overlap writes corpus.json.
 truecourse spec status [--json]                   # Summary: docs, areas, open vs resolved overlaps
 
 # Conflict resolution — flagged within-area overlaps

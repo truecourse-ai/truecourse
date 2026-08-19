@@ -38,7 +38,8 @@ export type {
 } from '@truecourse/spec-consolidator';
 import { getStageUsage, stageTokenTotal } from '@truecourse/shared/llm';
 import type { SessionDriver, UserInputQuestion } from '@truecourse/agent-loop';
-import { runSpecScanSessions } from '../services/spec-scan/run.js';
+import { runSpecScanSessions, type ScanStep } from '../services/spec-scan/run.js';
+export { SCAN_STEPS, ScanStepNotReadyError, type ScanStep } from '../services/spec-scan/run.js';
 import { normalizeScopePath } from '../services/spec-scan/orchestrate.js';
 import { createSessionRun } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
@@ -305,6 +306,15 @@ export interface SpecCurateInProcessResult {
   pendingQuestions: UserInputQuestion[];
   /** The orchestrator session's findings — verbatim observations for human eyes. */
   scanFindings: string[];
+  /**
+   * Set when a single-step run (`only`) stopped before assembly — the step ran,
+   * corpus.json is untouched. Absent on a completed scan (including
+   * `only: 'overlap'`, which runs through the corpus write).
+   */
+  stoppedAfter?: ScanStep;
+  /** The sessions-store run dir (`.truecourse/sessions/spec-scan/<runId>/`) —
+   *  where this run's transcripts landed, for stepwise inspection. */
+  sessionsRunDir: string;
 }
 
 export interface CurateInProcessOptions {
@@ -357,6 +367,14 @@ export interface CurateInProcessOptions {
   onEstimatePhase?: EstimatePhase;
   /** Ceiling on concurrent sessions (the pool's governor may run fewer). */
   concurrency?: number;
+  /**
+   * Single-step mode (the CLI's `--only-<step>` flags): run only this step's
+   * sessions — prior steps replay from their durable artifacts (a missing one
+   * throws {@link ScanStepNotReadyError}), later steps never start, and
+   * corpus.json is written only by the final step (`overlap`). The estimate
+   * gate prices only the chosen step.
+   */
+  only?: ScanStep;
   /** Skip the overlap sessions (the workspace corpus sync passes this). */
   disableOverlapDetection?: boolean;
   /**
@@ -414,7 +432,7 @@ export async function curateInProcess(
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode }),
+      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode, only: options.only }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -492,6 +510,7 @@ export async function curateInProcess(
         skipCorpusWrite: options.skipCorpusWrite,
         disableOverlapDetection: options.disableOverlapDetection,
         disableScopeOrchestration: options.disableScopeOrchestration,
+        ...(options.only !== undefined ? { only: options.only } : {}),
         ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
         onDiscover: (docs, toCurate) =>
           tracker?.detail('discover', `${docs} docs · ${toCurate} to curate`),
@@ -524,17 +543,28 @@ export async function curateInProcess(
       throw e;
     }
 
-    ensureVerify();
-    tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
-    tracker?.done(
-      'verify',
-      result.stats.autoResolvedConflicts.length > 0
-        ? `${result.stats.autoResolvedConflicts.length} auto-resolved`
-        : 'anchors verified',
-    );
+    if (result.stoppedAfter) {
+      // Single-step run: close only the steps that actually opened. The CLI
+      // hands the tracker a reduced checklist, so the later keys don't exist
+      // (and StepTracker no-ops on unknown keys anyway).
+      const note = `stopped after ${result.stoppedAfter}`;
+      if (tagStarted) tracker?.done('tag', note);
+      else tracker?.done('discover', note);
+    } else {
+      ensureVerify();
+      tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
+      tracker?.done(
+        'verify',
+        result.stats.autoResolvedConflicts.length > 0
+          ? `${result.stats.autoResolvedConflicts.length} auto-resolved`
+          : 'anchors verified',
+      );
+    }
     run.finish('completed');
 
-    if (options.source) {
+    // A partial (single-step) run never reports telemetry — its counts would
+    // read as a whole scan's.
+    if (options.source && !result.stoppedAfter) {
       await trackEvent('spec_scan', {
         source: options.source,
         docsScannedRange: bucketFileCount(result.stats.docsScanned),
@@ -552,6 +582,8 @@ export async function curateInProcess(
       noChanges: result.noChanges,
       pendingQuestions: result.pendingQuestions,
       scanFindings: result.scanFindings,
+      ...(result.stoppedAfter ? { stoppedAfter: result.stoppedAfter } : {}),
+      sessionsRunDir: run.dir,
     };
   } catch (e) {
     // The run record is closed exactly once; the inner catch handled the scan

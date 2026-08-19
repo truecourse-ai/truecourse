@@ -38,6 +38,12 @@
  * session is spent; only cache-missing items enter the pool, and only
  * completed outcomes are written back. Tools never write repo/store state —
  * every write happens in the fold here, after the outcomes.
+ *
+ * SINGLE-STEP MODE (`only` / the CLI's `--only-<step>` flags): run one step's
+ * sessions in isolation — prior steps replay from their durable artifacts
+ * (stored scope verdicts, outcome caches; a miss fails loud), later steps
+ * never start, and corpus.json is written only by the final step. See
+ * {@link SpecScanSessionsOptions.only}.
  */
 
 import type {
@@ -138,6 +144,33 @@ import {
 } from './orchestrate.js'
 import { buildScanUniverse, instructionsFingerprint } from './tools.js'
 
+// ---------------------------------------------------------------------------
+// Single-step mode (`--only-<step>`)
+// ---------------------------------------------------------------------------
+
+/** The scan's four session steps, in pipeline order. */
+export const SCAN_STEPS = ['orchestrate', 'curate', 'settle', 'overlap'] as const
+export type ScanStep = (typeof SCAN_STEPS)[number]
+
+/**
+ * A single-step run (`only`) found a PRIOR step's artifact missing: the prior
+ * step's outcome cache has no entry for `missing`, so replaying it would spend
+ * sessions that belong to that step's own flag. Deliberately loud — a silent
+ * re-run here would mask exactly the cache-key drift a stepwise run exists to
+ * expose. The fix is always `truecourse spec scan --only-<step>`.
+ */
+export class ScanStepNotReadyError extends Error {
+  constructor(
+    readonly step: ScanStep,
+    readonly missing: string[],
+  ) {
+    super(
+      `the ${step} step has ${missing.length} uncached item${missing.length === 1 ? '' : 's'} — run \`truecourse spec scan --only-${step}\` first`,
+    )
+    this.name = 'ScanStepNotReadyError'
+  }
+}
+
 export interface SpecScanSessionsOptions {
   repoRoot: string
   /**
@@ -168,6 +201,16 @@ export interface SpecScanSessionsOptions {
   disableScopeOrchestration?: boolean
   /** Ceiling on concurrent sessions per pool (the governor may run fewer). */
   concurrency?: number
+  /**
+   * Single-step mode: run ONLY this step's sessions. Prior steps replay from
+   * their durable artifacts — orchestrate from the stored scope verdicts (its
+   * session is skipped even on an uncovered universe), curate/settle from their
+   * outcome caches (a cache miss throws {@link ScanStepNotReadyError} instead
+   * of silently spending the prior step's sessions). Later steps never start,
+   * and `corpus.json` is written only when the FINAL step (`overlap`) runs —
+   * every earlier stop returns `stoppedAfter` and touches no corpus.
+   */
+  only?: ScanStep
   // --- progress hooks -------------------------------------------------------
   onDiscover?: (docs: number, toCurate: number) => void
   /**
@@ -209,6 +252,13 @@ export interface SpecScanSessionsResult extends CurateResult {
   pendingQuestions: UserInputQuestion[]
   /** The orchestrator's `findings` — verbatim observations for human eyes. */
   scanFindings: string[]
+  /**
+   * Set in single-step mode when the run stopped BEFORE assembly: the named
+   * step ran, later steps never started, and `corpus.json` is untouched (the
+   * returned `corpus` is an empty skeleton). Absent on a completed scan —
+   * including `only: 'overlap'`, which runs through the corpus write.
+   */
+  stoppedAfter?: ScanStep
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +298,12 @@ interface CachedPoolOptions<TItem, TOutcome> {
   /** Strictly serial across items: hits in item order (before the pool), fresh
    *  outcomes in completion order (inside the pool's serial fold). */
   fold(item: TItem, result: CachedPoolResult<TOutcome>): void
+  /**
+   * Single-step mode, replaying a PRIOR step: serve every item from cache and
+   * throw {@link ScanStepNotReadyError} (naming this step) on any miss instead
+   * of running a session — the misses belong to this step's own `--only` flag.
+   */
+  cacheOnly?: ScanStep
 }
 
 /**
@@ -306,6 +362,15 @@ async function runCachedSessionPool<TItem, TOutcome>(
       }),
     )
     await decided
+  }
+
+  // A cache-only replay refuses to spend: the misses' parked promises are
+  // simply abandoned (nothing awaits them past this throw).
+  if (opts.cacheOnly !== undefined && toRun.length > 0) {
+    throw new ScanStepNotReadyError(
+      opts.cacheOnly,
+      toRun.map((item) => opts.workItem(item)),
+    )
   }
 
   if (toRun.length > 0) {
@@ -407,6 +472,10 @@ export async function runSpecScanSessions(
   opts: SpecScanSessionsOptions,
 ): Promise<SpecScanSessionsResult> {
   const { repoRoot } = opts
+  const only = opts.only
+  /** Single-step mode: is `step` PRIOR to the chosen one (replay, never spend)? */
+  const replayOnly = (step: ScanStep): boolean =>
+    only !== undefined && SCAN_STEPS.indexOf(step) < SCAN_STEPS.indexOf(only)
   let decisions = opts.decisions ?? readCorpusDecisions(repoRoot)
 
   // ---- Discover (det) ------------------------------------------------------
@@ -442,6 +511,11 @@ export async function runSpecScanSessions(
     const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? [])
     if (coverage.covered) {
       opts.onScope?.('covered')
+    } else if (replayOnly('orchestrate')) {
+      // Single-step mode, a later step: the scope session belongs to
+      // `--only-orchestrate`. Proceed on the stored verdicts — uncovered
+      // subtrees stay kept, the same fail-open a lost session leaves.
+      opts.onScope?.('skipped')
     } else {
       const summary = {
         kind: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
@@ -494,6 +568,56 @@ export async function runSpecScanSessions(
       opts.onScope?.(settled ? 'ran' : 'failed')
     }
     allDocs = applyScopeVerdicts(allDocs, decisions.scopeVerdicts ?? [], scanScope.sources)
+  }
+
+  // Single-step early return: what ran so far, an empty corpus skeleton (the
+  // real corpus.json is untouched), and `stoppedAfter`. `noChanges` keeps its
+  // meaning per step — a warm re-run of one step spends and reports nothing.
+  const stoppedResult = (
+    stoppedAfter: ScanStep,
+    summaries: (ScanSessionKindSummary & { firstError?: string })[],
+    over: { skippedDocs?: CurateStats['skippedDocs']; stats?: Partial<CurateStats> } = {},
+  ): SpecScanSessionsResult => {
+    const llmFailures = summaries
+      .map((s) => kindTally(s))
+      .filter((t): t is StageTransportTally => t !== null)
+    const ran = summaries.reduce((n, s) => n + s.ran, 0)
+    return {
+      corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [], skippedDocs: [] },
+      skippedDocs: over.skippedDocs ?? [],
+      decisions,
+      stats: {
+        docsScanned: allDocs.length,
+        docsKept: 0,
+        areaCount: 0,
+        overlapFlags: 0,
+        overlapRefuted: 0,
+        thirdPartyDropped: 0,
+        thirdPartyRestored: 0,
+        classifyFailed: 0,
+        autoResolvedConflicts: [],
+        openOverlaps: [],
+        skippedDocs: over.skippedDocs ?? [],
+        scopeGlobs,
+        outOfScopeManualIncludes,
+        llmFailures,
+        ...over.stats,
+      },
+      noChanges: ran === 0 && llmFailures.length === 0,
+      sessions: summaries.map(({ kind, ran, fromCache, failed, spent }) => ({
+        kind,
+        ran,
+        fromCache,
+        failed,
+        spent,
+      })),
+      pendingQuestions,
+      scanFindings,
+      stoppedAfter,
+    }
+  }
+  if (only === 'orchestrate') {
+    return stoppedResult('orchestrate', orchestrateSummary ? [orchestrateSummary] : [])
   }
 
   // The standing instructions bind every downstream session: they open each
@@ -553,6 +677,7 @@ export async function runSpecScanSessions(
     briefing: (doc) => curateDocBriefing(doc, identity, instructions),
     driver: opts.driver,
     persistence: opts.persistence,
+    ...(replayOnly('curate') ? { cacheOnly: 'curate' as const } : {}),
     ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
     ...(opts.onCurateProgress ? { onProgress: opts.onCurateProgress } : {}),
     ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
@@ -644,6 +769,18 @@ export async function runSpecScanSessions(
     skippedDocs.push({ path: doc.path, reason: attributed.reason, category: attributed.category })
   }
 
+  if (only === 'curate') {
+    return stoppedResult('curate', [...(orchestrateSummary ? [orchestrateSummary] : []), curateSummary], {
+      skippedDocs,
+      stats: {
+        docsKept: keptProse.length + structuralKept.length,
+        thirdPartyDropped,
+        thirdPartyRestored: reinstatedCount.value,
+        classifyFailed: curateSummary.failed,
+      },
+    })
+  }
+
   // ---- Settle-areas session (≤1, true barrier after the curation pool) -----
   const canonicalByPath = new Map<string, AreaTag[]>(
     keptProse.map((doc) => [doc.path, canonicalDocTags(tagsByPath.get(doc.path)?.tags ?? [])]),
@@ -666,6 +803,7 @@ export async function runSpecScanSessions(
       driver: opts.driver,
       persistence: opts.persistence,
       concurrency: 1,
+      ...(replayOnly('settle') ? { cacheOnly: 'settle' as const } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
       ...(opts.now ? { now: opts.now } : {}),
@@ -704,6 +842,27 @@ export async function runSpecScanSessions(
     }),
   )
   const grouped = groupByArea(keptProse, groupTags, decisions.manualAreas ?? [], vocabMap)
+
+  if (only === 'settle') {
+    return stoppedResult(
+      'settle',
+      [
+        ...(orchestrateSummary ? [orchestrateSummary] : []),
+        curateSummary,
+        ...(settleSummary ? [settleSummary] : []),
+      ],
+      {
+        skippedDocs,
+        stats: {
+          docsKept: keptProse.length + structuralKept.length,
+          areaCount: grouped.areas.length,
+          thirdPartyDropped,
+          thirdPartyRestored: reinstatedCount.value,
+          classifyFailed: curateSummary.failed,
+        },
+      },
+    )
+  }
 
   // ---- Overlap sessions (one per area) -------------------------------------
   const overlapItems: OverlapWorkItem[] = []

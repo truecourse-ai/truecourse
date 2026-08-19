@@ -78,6 +78,7 @@ import {
   scopeCoverage,
 } from '../spec-scan/orchestrate.js';
 import { buildScanUniverse, instructionsFingerprint } from '../spec-scan/tools.js';
+import type { ScanStep } from '../spec-scan/run.js';
 import { SESSION_MODEL_CLAUDE_CODE } from './session-driver.js';
 import { apiModeModel } from '../../config/global-config.js';
 import {
@@ -334,7 +335,7 @@ const mean = (ns: number[]): number =>
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode } = {},
+  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode; only?: ScanStep } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.mode);
 
@@ -539,8 +540,17 @@ export async function estimateScanTokens(
   ];
 
   const changedDocs = missCount;
+  // Single-step mode prices only the chosen step — prior steps replay from
+  // cache (a miss fails the run loudly, never spends), later ones don't start.
+  const SCAN_STEP_KIND: Record<ScanStep, string> = {
+    orchestrate: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+    curate: CURATE_DOC_SESSION_KIND,
+    settle: SETTLE_AREAS_SESSION_KIND,
+    overlap: OVERLAP_SESSION_KIND,
+  };
+  const included = opts.only ? stages.filter((s) => s.stage === SCAN_STEP_KIND[opts.only!]) : stages;
   return estimateStageTokens(
-    withLabels(stages),
+    withLabels(included),
     changedSubject(curateItems.length, changedDocs, 'doc'),
     prices,
   );
