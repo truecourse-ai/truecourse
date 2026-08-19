@@ -63,7 +63,7 @@ Root: /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/2bf12aed-
 
 ## Filed (issue URLs)
 
-- Strapi "Admin token permissions on localized content types are deleted at every server restart" (S1) -> **https://github.com/strapi/strapi/issues/27418** (OPEN, filed 2026-08-19 as truecourse-agent, passed the template checker clean, no flag). Supersedes https://github.com/strapi/strapi/issues/27417, which was auto-closed on template format before triage and now carries a comment pointing at 27418; asked maintainers to close it as a duplicate. dosubot confirmed the mechanism on the original. See FILING-GUIDE.md for the format rules this taught us.
+- Strapi "Admin token permissions on localized content types are deleted at every server restart" (S1) -> **https://github.com/strapi/strapi/issues/27418** (labelled by dosubot within a minute with exactly the four labels the body suggested: `issue: bug`, `severity: high`, `source: core:admin`, `version: 5`; the bot also verified the analysis against develop, endorsed fix option 1 and wrote the patch) (OPEN, filed 2026-08-19 as truecourse-agent, passed the template checker clean, no flag). Supersedes https://github.com/strapi/strapi/issues/27417, which was auto-closed on template format before triage and now carries a comment pointing at 27418; asked maintainers to close it as a duplicate. dosubot confirmed the mechanism on the original. See FILING-GUIDE.md for the format rules this taught us.
 
 ## Filing lesson (IMPORTANT for the rest of the batch)
 

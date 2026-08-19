@@ -90,7 +90,15 @@ gh issue list --repo <owner>/<repo> --state all --limit 25 \
   --jq '.[] | "#\(.number) [\((.labels|map(.name))|join(", "))]  \(.title[0:60])"'
 ```
 
-Our filing account cannot apply labels (first-time contributor), so put a **Suggested labels** line in the body and let maintainers or the triage bot apply them.
+Our filing account **cannot** apply labels. Verified, not assumed: `gh issue edit <n> --add-label ...` as `truecourse-agent` returns
+
+```
+truecourse-agent does not have the correct permissions to execute `AddLabelsToLabelable`
+```
+
+Applying labels needs triage or write access, which an outside contributor does not have. Every outside-filed issue in these trackers therefore starts with zero labels.
+
+**The workaround works, and is proven.** Put a `#### Suggested labels` line in the body with the repo's real label names. On strapi/strapi #27418, `dosubot[bot]` applied all four suggested labels verbatim within one minute of filing (`issue: bug`, `severity: high`, `source: core:admin`, `version: 5`) and proposed one more (`status: pending reproduction`). Getting the vocabulary right matters: on the earlier #27417 the same bot invented `severity: 2`, which does not exist in that repo, whereas when the body suggested the real `severity: high` it used that instead.
 
 strapi/strapi taxonomy, sampled from issues #27350 to #27417:
 
@@ -115,7 +123,105 @@ Drafts end with "the full transcript is available on request" instead of pasting
 - **Secrets**: transcripts contain live credentials (admin JWT, token `accessKey`, seeded passwords). They need a redaction pass before publication.
 - **Redundancy**: the draft already inlines the exact requests and responses that prove the claim, which is what a maintainer needs to reproduce.
 
-If a maintainer asks for the whole thing, publish a **redacted gist** and link it, rather than pasting inline. Screenshots are different: attach them directly when the finding is visual (the Strapi bulk-unpublish dialog, the Documenso send screen), since the templates have a Media or Screenshots field.
+**Publish a redacted gist and link it from the issue.** This is now the default, not a fallback: it costs one command, keeps the issue body readable, and a maintainer who can read the whole session is far likelier to trust a report filed by an unknown account. Screenshots are different: attach them directly when the finding is visual (the Strapi bulk-unpublish dialog, the Documenso send screen), since the templates have a Media or Screenshots field.
+
+### Redacting
+
+`filing/tools/redact-transcript.py` replaces credentials with stable `<REDACTED:name>` placeholders (the same secret always maps to the same placeholder, so a reader can still follow which credential went where).
+
+```bash
+# ALWAYS dry-run first and read the residual scan
+python3 filing/tools/redact-transcript.py <files...> --check
+
+# then write the redacted copies
+python3 filing/tools/redact-transcript.py <files...> -o /tmp/gist-<ID>
+```
+
+**Never skip the `--check` pass.** On its first run it reported `residual scan: clean` for the plain transcript but flagged three live-capture files, and the flag was right: guard transcripts embed response bodies as *escaped* JSON, so a key appears as `\"accessKey\":\"...` as well as `"accessKey":"..."`, and the first version of the patterns only matched the unescaped form. A real 256-character admin key would have been published. The patterns now accept either quote form, and the residual scanner is deliberately noisy (it also flags long hex runs, which harmlessly matches git SHAs) on the principle that a false positive costs a glance while a false negative leaks a credential.
+
+Before publishing, re-scan what actually went out, not just what you generated:
+
+```bash
+for f in $(gh gist view <id> --files); do
+  gh gist view <id> -f "$f" --raw | grep -oiE 'accessKey\\?"\s*:\s*\\?"[A-Za-z0-9]{8}|Bearer [A-Za-z0-9]{8}'
+done
+```
+
+Give the gist a `00-README.md` that says what each file is, states that credentials are redacted and nothing else altered, and names the two files that show the defect fastest. Worked example: https://gist.github.com/truecourse-agent/0096cb24fd6c9f21b60ad01bbc229e75 linked from strapi/strapi#27418.
+
+## Identity: everything is truecourse-agent
+
+**Every artifact of this work, upstream and in this repo, is attributed to `truecourse-agent`. Never `mushgev`, and never any mention of Claude, Claude Code or Anthropic in a commit message, issue, PR or comment.**
+
+Upstream actions: `gh auth switch -u truecourse-agent` before, `gh auth switch -u mushgev` and `gh config set -h github.com git_protocol ssh` after.
+
+Commits in this repo need a separate step, because `gh auth switch` changes only which account the API acts as; commit authorship comes from git config. Do NOT change the repo-level or global git config (that would relabel unrelated work). Pass the identity per commit instead:
+
+```bash
+git -c user.name="TrueCourse Agent" -c user.email="agent@truecourse.dev" \
+    commit -F <message-file>
+```
+
+`agent@truecourse.dev` is the account's verified public email, so GitHub links the commit to the `truecourse-agent` profile. Verify after pushing:
+
+```bash
+gh api repos/truecourse-ai/truecourse/commits/<sha> \
+  --jq '"\(.commit.author.name) <\(.commit.author.email)> -> \(.author.login // "UNLINKED")"'
+```
+
+It must print `-> truecourse-agent`. `UNLINKED` means the email is not verified on the account and the commit shows as a plain name with no avatar.
+
+Commit messages carry no co-author trailer and no tool attribution of any kind.
+
+### Never put issue-linking syntax in a commit message
+
+**A commit message must not contain `#NNNNN`, `owner/repo#NNNNN`, or a URL to an upstream issue or PR.** Write "strapi issue 27418" in plain words instead.
+
+Why this matters more than it looks: when a commit whose message references an issue is pushed, GitHub creates a `referenced` event on that upstream issue, and it attributes the event to **the account that pushed**, not to the commit author. Rewriting the commit author does not help; the push identity is what shows.
+
+That happened here. Two commit messages said `strapi/strapi#27418`, and pushing them put two public entries reading "mushgev added a commit that references this issue" on the strapi timeline, next to a report filed by `truecourse-agent`.
+
+It cannot be undone from our side:
+- there is no API to delete a timeline event (only issue comments are deletable);
+- dropping the commit and force-pushing does not retract the event, because GitHub keeps orphaned commits reachable and the event survives;
+- the only remedies are asking GitHub Support to remove the cross-reference and garbage-collect the orphaned commits, or leaving it.
+
+Since `truecourse-agent` has only read access to this repo, pushes will keep coming from a human account, so the plain-words rule is the whole defence. Check before every push:
+
+```bash
+git log origin/main..HEAD --format='%B' | grep -nE '(^|[^A-Za-z0-9/])#[0-9]{4,6}|github\.com/[^ ]+/(issues|pull)/'
+```
+
+That must print nothing.
+
+### Fixing commits that went out under the wrong identity
+
+Rewrite author, committer and message over the range, then force-push with a lease:
+
+```bash
+git worktree add /tmp/rw <branch> && cd /tmp/rw
+export FILTER_BRANCH_SQUELCH_WARNING=1
+git filter-branch -f \
+  --env-filter 'export GIT_AUTHOR_NAME="TrueCourse Agent" GIT_AUTHOR_EMAIL="agent@truecourse.dev" GIT_COMMITTER_NAME="TrueCourse Agent" GIT_COMMITTER_EMAIL="agent@truecourse.dev"' \
+  --msg-filter 'python3 -c "
+import sys,re
+lines=[l for l in sys.stdin.read().split(chr(10)) if not re.match(r\"^Co-[Aa]uthored-[Bb]y:.*(laude|nthropic)\", l)]
+while lines and not lines[-1].strip(): lines.pop()
+sys.stdout.write(chr(10).join(lines)+chr(10))"' \
+  origin/main..HEAD
+git push --force-with-lease origin <branch>
+```
+
+**Do not use a `sed | awk 'BEGIN{RS=""}...'` message filter.** With `RS=""` awk reads paragraph-separated records, so `{print; exit}` emits only the subject line and silently discards every commit body. That happened here and was caught only by diffing the message line counts afterwards. Always verify after a rewrite:
+
+```bash
+git log origin/main..HEAD --format='%h %an <%ae>'          # authorship
+git log origin/main..HEAD --format='%B' | grep -i claude   # must be empty
+git diff --stat <old-head> HEAD                            # must be empty: content unchanged
+for c in $(git rev-list origin/main..HEAD); do git log -1 --format=%B $c | wc -l; done   # bodies intact
+```
+
+filter-branch keeps the pre-rewrite commits at `refs/original/refs/heads/<branch>`, so a botched rewrite is recoverable with `git reset --hard refs/original/refs/heads/<branch>`.
 
 ## The filing procedure
 
