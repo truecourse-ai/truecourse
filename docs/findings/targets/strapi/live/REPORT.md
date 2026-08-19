@@ -1,7 +1,7 @@
 # Strapi live re-verification report
 
 **Checked:** 2026-08-19
-**Build:** strapi/strapi `develop` @ `c7dbadd4feec41f0d3892c1bc9f5435e7aad3672`, committed 2026-08-19 17:01:14 +0200 ("enhancement(data-transfer): clarify partial transfer stage scope (#27322)"). This is the same head `filing/STATE.md` recorded this morning, so upstream has not moved since the plan was written.
+**Build:** strapi/strapi `develop` @ `c7dbadd4feec41f0d3892c1bc9f5435e7aad3672`, committed 2026-08-19 17:01:14 +0200 ("enhancement(data-transfer): clarify partial transfer stage scope (#27322)"). This is the same head `targets/STATE.md` recorded this morning, so upstream has not moved since the plan was written.
 **Version the instance reports:** Strapi **5.52.1** (`packages/core/strapi/package.json`, and the boot banner), on node v24.14.1. The original guard run tested 5.52.0 @ `c43e9ee1e2`, so this re-verification is one patch release and 14 commits later.
 
 Every finding attempted reproduces. Nothing is fixed, nothing changed behaviour, and three findings came back **wider** than the original evidence supported, because steps the original runs aborted before reaching were executed here.

@@ -2,11 +2,11 @@
 
 You draft upstream issue texts for findings that the re-verify research (and, where available, the live re-run) says still stand. Nothing is filed; the drafts are for human approval. One file per finding, one issue per defect.
 
-All paths are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/docs/findings/strapi-documenso-caldiy/`.
+All paths are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/docs/findings/targets/`.
 
 ## Inputs per finding
 
-- `filing/FINDINGS-INDEX.json`: id, scenario ids, review JSON path(s), `reviewPart`, culprit files, docs repo.
+- `targets/FINDINGS-INDEX.json`: id, scenario ids, review JSON path(s), `reviewPart`, culprit files, docs repo.
 - `<repo>/<scenario-id>.json`: the original review (docClaim quote + doc path, observed, rootCause file:lines + explanation, introducedBy commit/PR/date, notes with a maintainer-facing repro recipe). For multi-defect JSONs use the part named by `reviewPart`.
 - `filing/reverify/<repo>/<ID>.json`: today's source state (unchanged / changed / fixed), permalinks at the tested commit and at today's head, tracker dedupe results, cited items' state, the route suggestion and its policy basis.
 - `filing/reverify/<repo>/POLICY.md`: the repo's SECURITY.md / CONTRIBUTING / issue-template requirements. Follow the template's section names when the repo has one (e.g. a required "Steps to reproduce / Expected behavior / Actual behavior / System" block): keep our content, but put it under their headings, and fill the version fields.
@@ -16,7 +16,7 @@ All paths are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/
 
 ## Shape of an issue draft
 
-File: `filing/issues/<target>/<ID>-<slug>.md` where `<target>` is the repository the issue is filed in: `strapi` (strapi/strapi), `strapi-documentation` (strapi/documentation), `documenso` (documenso/documenso, code and apps/docs alike), `caldiy` (calcom/cal.diy), `calcom-help` (calcom/help). `<slug>` is 3 to 6 lowercase words joined by hyphens.
+File: `targets/<target>/issues/<target>/<ID>-<slug>.md` where `<target>` is the repository the issue is filed in: `strapi` (strapi/strapi), `strapi-documentation` (strapi/documentation), `documenso` (documenso/documenso, code and apps/docs alike), `caldiy` (calcom/cal.diy), `calcom-help` (calcom/help). `<slug>` is 3 to 6 lowercase words joined by hyphens.
 
 Front matter block at the top (machine-readable, stays in the file, is not pasted):
 

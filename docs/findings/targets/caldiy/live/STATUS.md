@@ -9,7 +9,7 @@ Halted by: coordinator STOP directive (disk floor), complied.
   `/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/caldiy`
 - HEAD sha: `176037d0afbe572f870a3c702985e7cd83fe6c0c`
 - Commit date: 2026-08-08 17:13:42 +0000
-- Confirmed: matches the sha recorded in filing/STATE.md (unchanged since 2026-08-08).
+- Confirmed: matches the sha recorded in targets/STATE.md (unchanged since 2026-08-08).
 - packageManager: yarn@4.12.0 (corepack).
 
 ## What completed

@@ -131,14 +131,14 @@ Screenshots are the exception: attach them directly to the issue when the findin
 
 ### Redacting, when evidence does have to leave the machine
 
-`filing/tools/redact-transcript.py` replaces credentials with stable `<REDACTED:name>` placeholders (the same secret always maps to the same placeholder, so a reader can still follow which credential went where).
+`tools/redact-transcript.py` replaces credentials with stable `<REDACTED:name>` placeholders (the same secret always maps to the same placeholder, so a reader can still follow which credential went where).
 
 ```bash
 # ALWAYS dry-run first and read the residual scan
-python3 filing/tools/redact-transcript.py <files...> --check
+python3 tools/redact-transcript.py <files...> --check
 
 # then write the redacted copies
-python3 filing/tools/redact-transcript.py <files...> -o /tmp/redacted
+python3 tools/redact-transcript.py <files...> -o /tmp/redacted
 ```
 
 **Never skip the `--check` pass.** On its first run it reported the plain transcript as clean but flagged three live-capture files, and the flag was right: guard transcripts embed response bodies as *escaped* JSON, so a key appears as `\"accessKey\":\"...` as well as `"accessKey":"..."`, and the first version of the patterns matched only the unescaped form. A real 256-character admin key would have gone out. The patterns now accept either quote form, and the residual scanner is deliberately noisy (it also flags long hex runs, which harmlessly matches git SHAs) on the principle that a false positive costs a glance while a false negative leaks a credential.

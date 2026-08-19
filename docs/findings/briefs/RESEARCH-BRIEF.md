@@ -1,8 +1,8 @@
 # Re-verify research brief (plan steps 1 and 2: upstream state + tracker dedupe)
 
-You are re-verifying a set of findings from `docs/findings/strapi-documenso-caldiy.md` before they are filed upstream. For EACH finding assigned to you, decide (a) whether the defect / doc bug is still present in the upstream default branch today, (b) whether anyone has reported or fixed it since 2026-08-15, and (c) whether every upstream item the original review cited is still in the state the review recorded. You do not file anything. You write one JSON per finding.
+You are re-verifying a set of findings from `docs/findings/targets/<target>/report.md` before they are filed upstream. For EACH finding assigned to you, decide (a) whether the defect / doc bug is still present in the upstream default branch today, (b) whether anyone has reported or fixed it since 2026-08-15, and (c) whether every upstream item the original review cited is still in the state the review recorded. You do not file anything. You write one JSON per finding.
 
-All paths below are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/docs/findings/strapi-documenso-caldiy/`.
+All paths below are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/docs/findings/targets/`.
 
 ## Ground rules
 
@@ -15,9 +15,9 @@ All paths below are absolute or relative to `/Users/musheghgevorgyan/repos/truec
 ## Inputs
 
 - `FINDINGS-INDEX.json` (in `filing/`): for each finding id the scenario ids, the per-scenario review JSON(s), `reviewPart` (which part of a multi-defect JSON is this finding), the culprit files to git-log, the upstream items the review cited (`citedUpstream`), and for doc bugs the doc repo and doc files.
-- `filing/STATE.md`: the clone locations, today's heads, the tested commits, and the tags created since 2026-08-15 (strapi v5.52.1 on 2026-08-19; documenso v2.17.0 on 2026-08-19 = main head; cal.diy none).
+- `targets/STATE.md`: the clone locations, today's heads, the tested commits, and the tags created since 2026-08-15 (strapi v5.52.1 on 2026-08-19; documenso v2.17.0 on 2026-08-19 = main head; cal.diy none).
 - `<repo>/<scenario-id>.json`: the original review of the failure (verdict, docClaim quote + doc path, observed, rootCause file:lines + explanation, introducedBy, upstream issues/prs/queries, fixedAfter, notes). Read the whole file for each of your findings; for multi-defect files read the `additionalDefects[]` entry named by `reviewPart`.
-- The report tables in `../strapi-documenso-caldiy.md` (one level up) for the one-line defect statements.
+- The report tables in the target's `report.md` for the one-line defect statements.
 - Source clones (see STATE.md for heads):
   - strapi: `src/strapi` (origin/develop, today) and `src/strapi-tested` (worktree at the tested commit). The Strapi user docs are a separate repo: `src2/strapi-documentation` (origin/main, refreshed today; doc files under `docusaurus/docs/cms/...`).
   - documenso: `src/documenso` (origin/main = v2.17.0) and `src/documenso-tested` (v2.16.0). Docs live in `apps/docs/content/docs/...` of the same repo.

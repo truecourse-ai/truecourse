@@ -3,7 +3,7 @@
 **A sent (PENDING) document accepts new recipients, recipient edits, recipient deletes, field creates, field updates, field deletes and a title change.**
 
 - Date: 2026-08-19
-- Build: `documenso/documenso` `main` @ `75330166cc00b29c14399bc2e391e4b4d8080c00`, commit date 2026-08-19 20:34:18 +1000, tag **v2.17.0**. Same sha as `filing/STATE.md`.
+- Build: `documenso/documenso` `main` @ `75330166cc00b29c14399bc2e391e4b4d8080c00`, commit date 2026-08-19 20:34:18 +1000, tag **v2.17.0**. Same sha as `targets/STATE.md`.
 - Started: `npm ci` then `npx turbo run build --filter=@documenso/remix`, then `npm run start -w @documenso/remix` with `PORT=3347`, database `tc_reverify_documenso` on the local Postgres 17.4. Health `GET /api/health` -> 200.
 - Seeded by hand: owner `guard-owner@documenso.test` with team `guard-owner` and an API token, plus a source TEMPLATE envelope ("Guard Source Template", `internalVersion: 2`) holding `assets/example.pdf`, so `POST /api/v2/envelope/use` can mint a PDF-bearing envelope the way the scenario does.
 - Auth on every call: `Authorization: <owner api token>` (verbatim, no `Bearer`). Redacted in the captures.

@@ -1,5 +1,5 @@
 {
-  "_note": "Finding ids are the S/D/C numbers of docs/findings/strapi-documenso-caldiy.md. reviewJson paths are relative to docs/findings/strapi-documenso-caldiy/. culpritFiles are the files to git-log between the tested commit and today's default branch (rootCause.file plus the siblings the report names). liveMinimum marks the findings the plan requires to be re-run live.",
+  "_note": "Finding ids are the S/D/C numbers of docs/findings/targets/<target>/report.md. reviewJson paths are relative to docs/findings/targets/. culpritFiles are the files to git-log between the tested commit and today's default branch (rootCause.file plus the siblings the report names). liveMinimum marks the findings the plan requires to be re-run live.",
   "strapi": {
     "tested": "c43e9ee1e20f613b63f8f10d9e52be062a8b4a72",
     "default": "origin/develop",

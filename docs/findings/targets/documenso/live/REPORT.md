@@ -1,6 +1,6 @@
 # Documenso live re-verification report
 
-Date: 2026-08-19. Build: `documenso/documenso` `main` @ **`75330166cc00b29c14399bc2e391e4b4d8080c00`**, commit date 2026-08-19 20:34:18 +1000, tag **v2.17.0**. This is the sha recorded in `filing/STATE.md`; upstream has not moved since.
+Date: 2026-08-19. Build: `documenso/documenso` `main` @ **`75330166cc00b29c14399bc2e391e4b4d8080c00`**, commit date 2026-08-19 20:34:18 +1000, tag **v2.17.0**. This is the sha recorded in `targets/STATE.md`; upstream has not moved since.
 
 The findings were recorded against v2.16.0 (`3cf2963cd03d8b24770b7490bdb20e596baa5d65`). Everything below was reproduced by hand against a fresh local build of v2.17.0, not by re-running the guard.
 

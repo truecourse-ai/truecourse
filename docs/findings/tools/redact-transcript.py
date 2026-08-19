@@ -2,8 +2,8 @@
 """Redact credentials from a guard evidence transcript so it can be published.
 
 Usage:
-  python3 filing/tools/redact-transcript.py <transcript.txt> [more.txt ...] -o <outdir>
-  python3 filing/tools/redact-transcript.py <transcript.txt> --check   # report only, write nothing
+  python3 tools/redact-transcript.py <transcript.txt> [more.txt ...] -o <outdir>
+  python3 tools/redact-transcript.py <transcript.txt> --check   # report only, write nothing
 
 Redacts, in place of the secret value, a stable placeholder that keeps the shape
 readable (<REDACTED:admin-jwt>, <REDACTED:access-key>, ...). The same secret always

@@ -1,12 +1,12 @@
 # Live re-verification brief (plan step 3)
 
-You are re-verifying findings from `docs/findings/strapi-documenso-caldiy.md` against a FRESH instance of the product built from today's default branch. The original guard run's seed scripts are not on this machine, so this is a manual reproduction: build the product, seed what the scenarios need by hand, replay the scenario's requests (curl / a small node script for API scenarios, playwright-core for web scenarios), capture request + response as evidence, compare with the original transcript, and record a verdict per finding. You file nothing upstream. You do not touch any live production service.
+You are re-verifying findings from `docs/findings/targets/<target>/report.md` against a FRESH instance of the product built from today's default branch. The original guard run's seed scripts are not on this machine, so this is a manual reproduction: build the product, seed what the scenarios need by hand, replay the scenario's requests (curl / a small node script for API scenarios, playwright-core for web scenarios), capture request + response as evidence, compare with the original transcript, and record a verdict per finding. You file nothing upstream. You do not touch any live production service.
 
-All paths are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/docs/findings/strapi-documenso-caldiy/`.
+All paths are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/docs/findings/targets/`.
 
 ## Ground rules
 
-- Work dir for the build: `/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/<repo>`. Clone fresh and shallow from GitHub (`git clone --depth 1 --branch <default> https://github.com/<owner>/<repo>.git`), record `git rev-parse HEAD` and the commit date, and confirm the sha matches `filing/STATE.md` (if upstream moved since, that is fine, record the new sha and tell me).
+- Work dir for the build: `/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/<repo>`. Clone fresh and shallow from GitHub (`git clone --depth 1 --branch <default> https://github.com/<owner>/<repo>.git`), record `git rev-parse HEAD` and the commit date, and confirm the sha matches `targets/STATE.md` (if upstream moved since, that is fine, record the new sha and tell me).
 - **Disk is scarce: about 10 GB free on this machine.** Run `df -h /System/Volumes/Data` before installing and after building. If free space drops under 2 GB, stop and report rather than filling the disk. When you are completely done (evidence written, report written), delete the build dir's `node_modules`, build outputs and the clone itself (`rm -rf .../build/<repo>`), and leave the database you created (it is tiny) but note its name. Never delete anything outside your build dir, the databases you created, and your own temp files.
 - Do NOT start, stop or restart any service you did not start yourself (the user's `pnpm dev`, Docker, the homebrew Postgres/Redis). Postgres 17 is already running on 127.0.0.1:5432 (superuser `postgres`; try `psql -h 127.0.0.1 -U postgres -c 'select 1'`; if it needs a password check `~/.pgpass` or ask for a role you can create a database with, and if you cannot connect at all, report and stop rather than installing another Postgres). Redis is running on 127.0.0.1:6379. Docker is NOT running; do not start it. Create your own databases with distinct names (e.g. `tc_reverify_documenso`, `tc_reverify_caldiy`) so nothing else is touched.
 - Use ports nobody else uses (Strapi 1347, Documenso 3347, Cal.diy API 5347 / web 3348). Check with `lsof -i :<port>` first.
@@ -18,13 +18,13 @@ All paths are absolute or relative to `/Users/musheghgevorgyan/repos/truecourse/
 
 ## Inputs
 
-- `filing/FINDINGS-INDEX.json`: finding id -> scenario ids, review JSON, culprit files, `liveMinimum` (the set you MUST attempt), `liveNote` (extra things to exercise).
+- `targets/FINDINGS-INDEX.json`: finding id -> scenario ids, review JSON, culprit files, `liveMinimum` (the set you MUST attempt), `liveNote` (extra things to exercise).
 - `<repo>/<scenario-id>.json` (review JSON): what failed, the doc claim, `observed`, root cause, notes (often contains a reproduction recipe for maintainers).
 - Guard store for the repo: `/Users/musheghgevorgyan/repos/<strapi|documenso|cal.diy>/.truecourse/`:
   - `scenarios/<area>/<scenario-id>.yaml`: the exact steps (method, path, headers, json body, expect). `{{fixture:...}}` / `{{cred:...}}` are seed-provided values: substitute your own. `${name}` are captures from earlier steps. `${unique}` is a per-run random suffix.
   - `guard/LATEST.json` -> `scenarios[].evidencePath` gives the evidence dir; `transcript.txt` inside is the original step-by-step log with requests, responses and verdicts. Read it before reproducing: it tells you what the product did and the bodies that were sent. `invocation.json` is the failing step's request, `response.txt` the failing response. Web scenarios have `step-N.png` screenshots.
   - `scenarios/recipe.json`: how the original run built and served the product (install, build, serve, env). Follow it unless the section below says otherwise.
-- `filing/STATE.md`: heads and tags as of today.
+- `targets/STATE.md`: heads and tags as of today.
 
 ## Per finding, record
 

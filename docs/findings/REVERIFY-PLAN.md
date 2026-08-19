@@ -4,9 +4,9 @@ Goal: before any issue is opened on strapi/strapi, documenso/documenso or calcom
 
 ## Inputs (all local, all untracked)
 
-- `docs/findings/strapi-documenso-caldiy.md` — the report. The S1-S17, D1-D17, C1-C16 ids used below come from its tables.
-- `docs/findings/strapi-documenso-caldiy/<repo>/<scenario-id>.json` — one file per reviewed failure (117). Each has: `docClaim` (quote + doc path), `observed`, `rootCause` (file, lines, explanation), `introducedBy` (commit, PR, date), `upstream` (issues, PRs, queries used), `fixedAfter`, `colleagueFinding`, `notes`. Multi-defect scenarios carry `additionalDefects[]`.
-- `docs/findings/strapi-documenso-caldiy/REVIEW-BRIEF.md` — how the review was done (verdict vocabulary, what "fixed after" meant, the Cal.diy edition caveat).
+- `docs/findings/targets/<target>/report.md` — the report. The S1-S17, D1-D17, C1-C16 ids used below come from its tables.
+- `docs/findings/targets/<repo>/<scenario-id>.json` — one file per reviewed failure (117). Each has: `docClaim` (quote + doc path), `observed`, `rootCause` (file, lines, explanation), `introducedBy` (commit, PR, date), `upstream` (issues, PRs, queries used), `fixedAfter`, `colleagueFinding`, `notes`. Multi-defect scenarios carry `additionalDefects[]`.
+- `docs/findings/REVIEW-BRIEF.md` — how the review was done (verdict vocabulary, what "fixed after" meant, the Cal.diy edition caveat).
 - The guard stores with scenarios and evidence:
   - `/Users/musheghgevorgyan/repos/strapi/.truecourse/` (run `2026-08-14T15-21-47Z_9ac34d71`, tested `develop` @ `c43e9ee1e20f613b63f8f10d9e52be062a8b4a72`, Strapi 5.52.0)
   - `/Users/musheghgevorgyan/repos/documenso/.truecourse/` (run `2026-08-14T20-05-03Z_30d3cfc5`, tested tag `v2.16.0` = `3cf2963cd03d8b24770b7490bdb20e596baa5d65`)
@@ -16,7 +16,7 @@ Goal: before any issue is opened on strapi/strapi, documenso/documenso or calcom
 
 ## What to produce
 
-`docs/findings/strapi-documenso-caldiy/filing/` (untracked):
+`docs/findings/targets/` (untracked):
 - `FILING-TABLE.md`: one row per finding: id, repo, title, still present on default branch today (yes/no/changed, with the commit that changed it), new upstream report since 2026-08-15 (issue/PR or none), route (public issue / security disclosure / docs repo issue / skip: fixed / skip: reported), confidence, notes.
 - `issues/<repo>/<id>-<slug>.md`: the drafted issue text, one file each, ready to paste or to `gh issue create --body-file`.
 
@@ -56,7 +56,7 @@ Read each repo's `SECURITY.md` / security policy and `CONTRIBUTING.md` first. Th
 
 ### 5. Draft the issues
 
-One file per finding under `filing/issues/<repo>/`. Shape: title; one-paragraph summary; "Docs" (the sentence, page URL); "Reproduce" (numbered steps with exact requests/bodies from the scenario, the build tested); "Observed" vs "Expected" (from the transcript); "Cause" (file:line permalink at the tested commit, one paragraph, the introducing PR); one closing line that it was found by TrueCourse reading the docs against a live instance and that the full transcript is available. No em dashes. Plain, no selling. Use the tone approved in the session (see the three samples the coordinator showed for S1, D1, C1).
+One file per finding under `targets/<target>/issues/<repo>/`. Shape: title; one-paragraph summary; "Docs" (the sentence, page URL); "Reproduce" (numbered steps with exact requests/bodies from the scenario, the build tested); "Observed" vs "Expected" (from the transcript); "Cause" (file:line permalink at the tested commit, one paragraph, the introducing PR); one closing line that it was found by TrueCourse reading the docs against a live instance and that the full transcript is available. No em dashes. Plain, no selling. Use the tone approved in the session (see the three samples the coordinator showed for S1, D1, C1).
 
 For multi-defect scenarios, file one issue per defect (S2, S3, S4 are three issues; D2 is two: coordinate no-op and fieldMeta wipe).
 

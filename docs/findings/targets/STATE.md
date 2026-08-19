@@ -59,7 +59,7 @@ Root: /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/2bf12aed-
 
 - Strapi live: DONE. develop c7dbadd4fe (5.52.1). S1-S11, S15, S16 all still reproduce; S11 escalation confirmed live -> security disclosure. Build cleaned up.
 - Documenso live: DONE. main = v2.17.0 (75330166cc). D1-D5, D7-D11, D14, D15 still reproduce; D6 and D13 confirmed FIXED live. D8's unobserved half (missing accessible name + "12 months" vs "1 year") confirmed. D16 not re-run live (source+doc re-checked). Build cleaned up. Drafts updated with verdicts.
-- Cal.diy live: BLOCKED ON DISK. Clone built and `yarn install` completed (node_modules 3.3 GB) but the machine hit 567 MB free during install; api-v2 was never built or served, so NO Cal.diy finding was settled live. Clone preserved at scratchpad/build/caldiy (4.1 GB) + empty db tc_reverify_caldiy for resume. See filing/live/caldiy/STATUS.md. C1, C9, C10 (medium confidence) remain gated on this run and are marked so in their drafts. To resume: free ~10 GB, then prisma generate + db-deploy, build api-v2, seed (adapt .truecourse_backup/scenarios/guard-seed.mjs), replay the api findings (C2,C3,C4,C5,C6,C7,C8,C9,C14,C15) and the web findings (C1,C10,C11,C12,C13).
+- Cal.diy live: BLOCKED ON DISK. Clone built and `yarn install` completed (node_modules 3.3 GB) but the machine hit 567 MB free during install; api-v2 was never built or served, so NO Cal.diy finding was settled live. Clone preserved at scratchpad/build/caldiy (4.1 GB) + empty db tc_reverify_caldiy for resume. See targets/caldiy/live/STATUS.md. C1, C9, C10 (medium confidence) remain gated on this run and are marked so in their drafts. To resume: free ~10 GB, then prisma generate + db-deploy, build api-v2, seed (adapt .truecourse_backup/scenarios/guard-seed.mjs), replay the api findings (C2,C3,C4,C5,C6,C7,C8,C9,C14,C15) and the web findings (C1,C10,C11,C12,C13).
 
 ## Filed (issue URLs)
 
@@ -120,6 +120,6 @@ Briefly tried publishing a redacted evidence gist per finding and linking it fro
 - it adds a redaction surface that has to be perfect every time, and the tooling nearly leaked a live 256-character admin key on its very first run (escaped-JSON key/value pairs the patterns did not match);
 - the issue body already carries the exact requests and responses needed to reproduce, so the gist mostly duplicated it.
 
-The drafts' existing closing line, offering the full transcript on request, is the policy. `filing/tools/redact-transcript.py` stays in the tree for the case where a maintainer actually asks.
+The drafts' existing closing line, offering the full transcript on request, is the policy. `tools/redact-transcript.py` stays in the tree for the case where a maintainer actually asks.
 
 Rollback performed: gist deleted, and the comment linking it removed from strapi issue 27418 (issue comments delete cleanly and vanish from the timeline, unlike push-generated reference events).
