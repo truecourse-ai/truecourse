@@ -1,0 +1,15 @@
+{
+  "envelopeId": "envelope_mynwzrxyyiddmdfv",
+  "rejectReturnedAt": "2026-08-19T19:16:33.190Z",
+  "firstRejectedObservedAtMs": 52,
+  "rows": [
+    {
+      "msSinceRejectReturned": 12,
+      "envelopeStatus": "PENDING"
+    },
+    {
+      "msSinceRejectReturned": 52,
+      "envelopeStatus": "REJECTED"
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "id": "C8",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/packages/platform/libraries/index.ts#L125-L150",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/packages/platform/libraries/index.ts#L125-L150",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. At head lines 123-150 still read \"// === Stubs for deleted EE features still imported by API v2 ===\", \"// Round-robin reassignment removed (EE feature) - stubs for API v2\", and both roundRobinManualReassignment (126-138) and roundRobinReassignment (140-150) still have `// No-op in community edition` as their entire body, while the four sibling stubs below them (createApiKeyHandler at 153 onward) still throw \"not available in community edition\"."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#25920",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "\"RR reassignment with Host Groups\", created 2025-12-16, last updated 2026-01-21, 1 comment. Pre-fork issue about round-robin reassignment semantics, not about the community-edition no-op. Unchanged."
+      },
+      {
+        "ref": "calcom/cal.diy#20755",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-04-17T15:50:17Z",
+        "mergeCommit": "880fe151c079",
+        "baseRef": "main",
+        "note": "Pre-fork work on the auto-reassign error envelope, i.e. the error path the no-op stub now bypasses. Unchanged."
+      },
+      {
+        "ref": "calcom/cal.diy#17460",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-11-08T12:43:00Z",
+        "mergeCommit": "25d39b42738d",
+        "baseRef": "main",
+        "note": "\"feat: api v2 reassign\": introduced both routes, the {bookingUid, reassignedTo} data class and the same-name envelope class that empties the published OpenAPI schema. Unchanged."
+      },
+      {
+        "ref": "calcom/cal.diy#17401",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "[CAL-4646] the Linear-synced request that produced the endpoints, closed 2025-04-17, 0 comments. Unchanged."
+      },
+      {
+        "ref": "calcom/cal.diy#21485",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "\"docs: document that reassign is only for round robin\", closed 2025-05-23. About the round-robin-only restriction, not the response schema or the no-op. Unchanged."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 30 --updated '>2026-04-15' 'reassign'  (11 hits, all other subjects: calendar credential removal #29978, oauth open redirect #29681, calcom/help#151 reassignment-notification docs, RR idempotency key #26031, host groups #26519, signup refactors; none about the community-edition no-op or the reassign response)",
+      "gh search issues --owner calcom --include-prs --limit 30 '\"community edition\"'  (6 hits, none about the EE stubs: cal.diy#29898, cal.diy#29688, cal.diy#28888 self-hosting docs, cal.diy#1172, cal.diy#6221, calcom/docker#156)"
+    ]
+  },
+  "reevaluation": "Stands unchanged, high confidence. packages/platform/libraries/index.ts is untouched, so both reassign routes still await an empty async function and still answer 200 {status: success, data: {bookingUid, reassignedTo}} naming the host the booking already had, for every booking, in about 20 to 30 ms with no log line and no email. No one has reported it: nothing about the EE stubs or the reassign endpoints has appeared since the fork. The one thing re-check does not change, and which the filer MUST carry over, is the review's correction of the scenario's premise. The scenario reassignment-refuses-a-non-round-robin-booking asserts that a non-round-robin booking must be refused; the pre-fork implementation had no schedulingType gate at all and would have accepted that same call, so \"the docs say non-round-robin must be refused\" is not a supportable claim. The defect is the other one: on Cal.diy the endpoint can never do anything, for any booking, and reports success anyway, which contradicts the tested tree's own @ApiOperation and its ReassignBookingOutput DTO, and breaks the fork's own convention, since the four sibling stubs in the same file throw \"not available in community edition\".",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/config.yml sets `blank_issues_enabled: false`, so a bug must go through bug_report.md (Issue Summary / Steps to Reproduce / Actual Results / Expected Results / Technical details / Evidence, the last called \"quite mandatory in terms of bugs\"); CONTRIBUTING.md: \"For bugs, security, performance, documentation, etc., you can start coding immediately, even if the `needs approval` label is present\", so no discussion-first gate applies.",
+  "confidence": "high",
+  "notes": "This is a Cal.diy-only defect created by the fork commit ab21c7f805 (PR #28903 \"refactor: Cal.diy\"), so it must be filed on calcom/cal.diy and must NOT be phrased as a cal.com bug: the commercial product still ships the real round-robin engine. The one-line ask is to make the two stubs throw like their four siblings (or unregister the routes / answer 501), never to return success. Of the two scenarios behind this finding only reassignment-refuses-a-non-round-robin-booking.api.1 carries it; the sibling reassign-a-round-robin-booking.api.1 was ruled test-defect (it asserted data.uid and data.hosts[0].id, fields no schema on either doc page defines) and must not be cited as evidence. That sibling did surface a separate, genuine DOC defect worth a second issue: the NestJS envelope class and the platform-types data class are both named ReassignBookingOutput_2024_08_13, so Nest's Swagger plugin collapses them and the published OpenAPI $refs the envelope from its own data property, leaving the reassign pages documenting zero response fields, and the prose still names ReassignAutoBookingOutput / ReassignManualBookingOutput, which exist nowhere in the codebase. Step 3 (the auto route) never ran, but roundRobinReassignment is the identical no-op. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

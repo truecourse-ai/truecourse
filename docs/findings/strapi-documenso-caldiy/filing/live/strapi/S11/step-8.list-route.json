@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "anyAccessKeyInList": false,
+  "sampleKeys": [
+    "id",
+    "kind",
+    "name",
+    "description",
+    "lastUsedAt",
+    "type",
+    "lifespan",
+    "expiresAt",
+    "createdAt",
+    "updatedAt",
+    "adminPermissions",
+    "adminUserOwner"
+  ]
+}

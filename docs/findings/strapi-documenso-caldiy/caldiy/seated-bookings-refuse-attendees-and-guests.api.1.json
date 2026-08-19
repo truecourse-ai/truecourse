@@ -1,0 +1,59 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "seated-bookings-refuse-attendees-and-guests.api.1",
+  "flowId": "seated-bookings-refuse-attendees-and-guests",
+  "failingStep": 2,
+  "whatFailed": "POST /v2/bookings/{bookingUid}/attendees on a seated booking (event type 102, seatsPerTimeSlot 10) returned 201 and created attendee id 79 on booking 73, instead of the 400 refusal the endpoint's own published reference promises for seated events.",
+  "docClaim": {
+    "quote": "This endpoint does not support seated event bookings. For seated events, each attendee must be added by creating a new booking for the same event type and time slot via `POST /v2/bookings`. Attempting to add an attendee to a seated event booking will return a 400 error.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings-attendees/add-an-attendee-to-a-booking.md",
+    "section": "add-an-attendee-to-a-booking (page body and the identical text in the OpenAPI description of POST /v2/bookings/{bookingUid}/attendees)"
+  },
+  "observed": "Step 1 created a seated booking: uid ptL2busPDT5RbZRbp5Pmi9, id 73, one attendee with seatUid 0943a86d-690b-48ad-87b9-3306c7266b09, and server.stdout.txt line 300 records eventType {id:102, seatsPerTimeSlot:10}. Step 2 posted a plain attendee body to /v2/bookings/ptL2busPDT5RbZRbp5Pmi9/attendees with cal-api-version 2024-08-13 and got HTTP 201 in 55 ms with {\"status\":\"success\",\"data\":{\"name\":\"Late Arrival\",...,\"id\":79,\"bookingId\":73}}. server.stdout.txt lines 310-312 show the same 201; nothing in server.stderr.txt relates to the add (the only stderr noise is SMTP ECONNREFUSED on port 1025 and a Daily video api_key ZodError, both from step 1's booking creation). The scenario aborted at step 2, so step 3 (the guests refusal) and step 4 (the documented alternative, a second booking) never ran.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "An integrator following the published reference is told the call is refused; instead it silently attaches a seat-less Attendee row to a seated booking, which breaks Cal.diy's own seated contract and its seat arithmetic (display path counts the row, the booking gate does not).",
+  "rootCause": {
+    "file": "apps/api/v2/src/platform/bookings/2024-08-13/services/booking-attendees.service.ts",
+    "lines": "71-120",
+    "explanation": "addAttendee loads the booking with getByUidWithEventType, checks only that the booking exists, then hands straight off to the shared BookingAttendeesService. There is no read of eventType.seatsPerTimeSlot and no BadRequestException anywhere on the path, so a seated booking is treated exactly like a normal one. The shared service it delegates to, packages/features/bookings/services/BookingAttendeesService.ts:89-149, is equally seat-blind: it runs validateUserPermissions, validateGuestsFieldEnabled and sanitizeAndFilterGuests (none of which look at seats), then updateBookingAttendees, so the new row is created with no BookingSeat. The whole tested tree contains no occurrence of the string 'does not support seated' in any .ts/.tsx/.json/.md file, and the controller's own @ApiOperation description at booking-attendees.controller.ts:106-120 has no 'Seated Events' paragraph at all, while the published cal.com OpenAPI for the same operationId does. The corruption this creates is visible in Cal.diy source in three places: apps/api/v2/src/platform/bookings/2024-08-13/services/output.service.ts:389 emits seatUid: attendee.bookingSeat?.referenceUid, so a later read of booking 73 returns a SeatedAttendee missing the seatUid the schema marks required; packages/features/bookings/lib/handleSeats/create/createNewSeat.ts:68-76 gates new seats on attendees.filter(a => !!a.bookingSeat).length, so the seat-less row does not consume a seat and 10 more real seats can still be sold; but apps/web/modules/bookings/components/BookingDetailsSheet.tsx:801-802 (takenSeats = booking.attendees.length), packages/trpc/server/routers/viewer/slots/util.ts:1261 (attendees: booking._count.attendees) and apps/web/modules/bookings/components/AvailableTimes.tsx:118-120 (bookingFull when slot.attendees >= seatsPerTimeSlot) all count raw Attendee rows. The two counters therefore drift apart in opposite directions after every such call. The guests endpoint has the same hole: booking-guests.service.ts:22-60 only enforces a 30 guest ceiling and packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts has no seats guard, so step 3 would have failed the same way had the run reached it."
+  },
+  "introducedBy": {
+    "commit": "b1eb5a28091561224be3898e5b1f98c78a867b09",
+    "date": "2026-02-18",
+    "pr": "#27759",
+    "title": "feat: api v2 `POST` booking attendees endpoint",
+    "note": "git blame -L 71,105 on the tested worktree attributes the whole addAttendee body to this commit by Rajiv Sahal (the file was at apps/api/v2/src/ee/bookings/... then; ab21c7f805 'refactor: Cal.diy (#28903)', 2026-04-15, only moved it to platform/). The endpoint shipped without a seats check on day one: git show on all four commits that ever touched the file (b1eb5a2809, 5a7e783a0a, 3c57960b7d, ab21c7f805) contains no seat guard. Seated bookings and the BookingSeat model are far older, so this is new code colliding with old data model invariants, not a regression in the seats code."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 27759,
+        "url": "https://github.com/calcom/cal.diy/pull/27759",
+        "state": "merged",
+        "title": "feat: api v2 `POST` booking attendees endpoint",
+        "relation": "related",
+        "note": "The PR that introduced the endpoint without the seated guard. Not a report of the bug."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"seated attendee\" --include-prs --limit 30 (30 hits, all unrelated: office365 seat cancellation #28986/#29493, createdAt-on-seat #27785/#27789/#29962, seat leak #17246, paid seat refund #29684, none about add-attendee on seated bookings)",
+      "gh search issues --owner calcom \"add attendee booking seats\" --include-prs --limit 30 (0 hits)",
+      "gh search issues --owner calcom \"seats overbooked seated\" --include-prs --limit 30 (0 hits)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. git log 038381aeca..origin/main touches none of booking-attendees.controller.ts, booking-attendees.service.ts (both v2 and packages/features), or booking-guests.service.ts; only 4 commits landed on cal.diy main since the tested commit, and origin/main (176037d0af, 2026-08-08) still has the seat-blind addAttendee. in cal.com: not verifiable from source. The public calcom/cal.com main is the same commit and tree as calcom/cal.diy main, so it is a mirror, and the commercial source is private. The only public signal that the commercial product behaves differently is the docs snapshot itself: the published OpenAPI description for operationId BookingAttendeesController_2024_08_13_addAttendee carries a 'Seated Events' paragraph that the Cal.diy controller's @ApiOperation does not, which means the commercial controller was edited after the April 2026 split. calcom/docs is public but was last pushed 2024-10-09, so it does not carry the current text and cannot date the change. No public PR, issue or changelog entry found for the guard."
+  },
+  "colleagueFinding": {
+    "ref": "caldiy #4",
+    "agreement": "refines",
+    "note": "Agrees on the first half and cannot confirm the second half from this scenario. Proven here: the add is accepted (201) instead of refused, on a 10-seat event type. NOT shown here: any seat count. The scenario stops at the failing step 2, so nothing re-reads booking 73, the slots feed, the booking details sheet or the public booker page; the response body of the accepted add has no seat field at all (the AddAttendeeOutput schema has none). The only seat numbers anywhere in the transcript are from step 1 and both predate the add: the first booker's own seatUid 0943a86d-690b-48ad-87b9-3306c7266b09, and the availability snapshot's currentSeats [{uid: m11BzNjjqmiSpV22h8txUV, startTime 2050-09-08T14:30:00.000Z, _count: {attendees: 1}}], which is a sibling booking at 14:30, not ours at 14:00. So 'negative seats left', 'oversold' and '13 people in a 10-seat workshop' are not evidenced by this run. They are, however, supported by source: the display path counts raw Attendee rows and the seat gate counts only rows with a BookingSeat (file and line refs in rootCause), which is exactly the two-directional drift the write-up describes. Treat the seat-count half as reproduced by hand elsewhere, not by this scenario."
+  },
+  "notes": "Not an instance of the two known Cal.diy systemic causes. The scenario sends cal-api-version 2024-08-13, which the tested tree does support (packages/platform/constants/api.ts lists VERSION_2024_08_13 in API_VERSIONS), and step 1 on the same header created a correct seated booking, so no version downgrade is involved; this is an api scenario, so the web sandbox saturation and slot contention causes do not apply either. I considered edition-mismatch and rejected it: Cal.diy ships the endpoint, ships seats, and the harm (a seat-less Attendee row that breaks its own GetSeatedBookingOutput required seatUid and its own seat arithmetic) is entirely inside Cal.diy code, which is the brief's stated tiebreaker for real-defect. The edition angle is still worth recording for the maintainer: the refusal and its doc paragraph exist only on the commercial side, so this is most likely a guard added in calcom/cal after the fork and never ported, and Cal.diy users read the cal.com reference because Cal.diy publishes no API reference of its own. Two secondary contract breaks a maintainer should fix in the same patch: (a) the guests endpoint is equally unguarded, so the second documented refusal is also false; (b) even without the seated guard, POST attendees on a seated booking should not be able to produce an attendee with no BookingSeat, since output.service.ts:389 and the SeatedAttendee schema both assume every seated attendee has one. If the intended Cal.diy behavior is to allow the call, the fix is to create a BookingSeat and honour seatsPerTimeSlot, not to leave the row seat-less. Reproducing the seat-count half needs three extra calls this scenario never made: GET /v2/bookings/{uid} after the add (expect an attendee with no seatUid), the slots feed for 2050-09-08 (expect attendees 2 of 10 though only 1 seat is taken), and enough real bookings to hit seat 10 (expect 11 attendee rows on a 10 seat event)."
+}

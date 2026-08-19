@@ -1,0 +1,49 @@
+{
+  "id": "S16",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/core/src/core-api/controller/transform.ts#L39-L71",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/core/src/core-api/controller/transform.ts#L39-L71",
+    "howDecided": "git log c43e9ee1e2..origin/develop -- packages/core/core/src/core-api/controller/transform.ts packages/core/core/src/core-api/controller/collection-type.ts returns zero commits. Read transform.ts at today's head: transformResponse (lines 39-71) takes meta with a default of {} at line 41 and returns exactly { data, meta } at lines 67-70, with data being either the sanitized flattened entity or, under the deprecated v4 response-format header, transformEntry's { id, documentId, attributes }. Neither branch has ever attached a meta key to an entry, so the documented per-document meta key is unreachable on today's develop too and the failure would reproduce identically."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "docusaurus/docs/cms/api/rest.md",
+    "lineToday": 118,
+    "permalink": "https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/api/rest.md#L113-L122",
+    "publishedUrl": "https://docs.strapi.io/cms/api/rest",
+    "commitsSinceReview": [],
+    "note": "git log c768c7bf..origin/main -- docusaurus/docs/cms/api/rest.md is empty. The misplaced bullet is still at line 118, indented four spaces under 'a single document, as an object with the following keys:' (line 114), alongside id (115), documentId (116) and the attributes (117). The correctly placed sibling bullet is four lines below at line 122: '- `meta` (object): information about pagination, publication state, available locales, etc.' So the page documents meta twice, once wrongly nested inside the document object and once correctly as a sibling of data. Same line numbers the review recorded."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "strapi/documentation#924",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2022-07-04)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'[Bug]: No meta object in GET response'. Created 2022-06-03, last updated 2022-07-04, no activity since. Same family of confusion but about the top-level pagination meta on a v4 GET, not the misplaced per-document bullet. Still only related, not a duplicate."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/documentation --include-prs --limit 30 'meta object response document keys' -> 0 results",
+      "gh search issues --repo strapi/documentation --include-prs --limit 30 --match title 'meta' -> 8 hits (#1948, #1940, #1941, #1130, #924, #773, #385, #362), the same set the review found, only #924 relevant and it is closed since 2022",
+      "non-search enumeration: gh api 'repos/strapi/documentation/issues?state=all&since=2026-08-01T00:00:00Z&per_page=100' -> 40 items, all PRs, none touching docusaurus/docs/cms/api/rest.md; the open ones are self-healing doc PRs on Media Library, proxy IP headers, concurrentUploadRequests, AI metadata and releases"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. The product side has not moved (no commit in the core-api controller directory since the tested build, so responses are still shaped { data, meta } with meta a sibling of data), and the misplaced bullet is verbatim at rest.md line 118 on strapi/documentation main. The single cited item, strapi/documentation#924, is in exactly the state the review recorded and has had no activity since 2022. No new issue or PR reports the misplaced bullet. Verdict doc-bug, confidence high, scope one line. The fix remains trivial: de-indent line 118 to the top level or delete it, since line 122 already documents meta correctly. Worth carrying the review's broader observation into the issue body, that the same list survived the v4-to-v5 rewrite unaudited and the whole Requests section deserves a pass against a live Strapi 5 response.",
+  "routeSuggestion": "docs repo issue",
+  "policyBasis": "strapi/documentation .github/ISSUE_TEMPLATE/config.yml: 'blank_issues_enabled: false' with the sole contact link 'Strapi Project Issues ... Please use the strapi/strapi repo for these issues'. The product is correct here, so this is purely a docs bug; file in strapi/documentation via .github/ISSUE_TEMPLATE/BUG_REPORT.yml ('Documentation Bug Report', title prefix '[Bug]: ', label 'type: bug'), required fields 'Link to the documentation page or resource' and 'Describe the bug'.",
+  "confidence": "high",
+  "notes": "One-line fix at docusaurus/docs/cms/api/rest.md:118. The page's own JSON examples already agree with the product (meta always appears beside data, never inside a document), which makes this an easy, low-controversy docs issue. S15's rest.md edit (the 404 message at line 297) is in the same file, so a filer may want to open one strapi/documentation issue covering both rest.md defects; keep them as separate numbered items in the body since they have different causes. Cite strapi/documentation#924 under 'Related issue(s)/PR(s)' only as context, not as a duplicate."
+}

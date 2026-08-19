@@ -1,0 +1,66 @@
+{
+  "step": 2,
+  "label": "PREP two signers",
+  "at": "2026-08-19T19:16:10.780Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "894",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:10 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "998",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "9f060211-340d-4890-a293-ef9cf37e8242"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 10,
+        "email": "tcref-declines-1f36da77c3@documenso.test",
+        "name": "TCRef Decliner",
+        "token": "zkg6-gbbQJID09CoU63yn",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      },
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 11,
+        "email": "tcref-other-1f36da77c3@documenso.test",
+        "name": "TCRef Other",
+        "token": "OeEMKBoGkqY7rqBDN3lg7",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

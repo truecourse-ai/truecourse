@@ -1,0 +1,37 @@
+- main:
+  - link "Documents":
+    - /url: /t/guard-owner/documents
+  - heading "tc-nomail2-79771c8411.pdf" [level=1]
+  - text: Pending
+  - button "1 Recipient"
+  - paragraph: Page 1 of 1
+  - heading "Document pending" [level=3]
+  - button
+  - paragraph: Waiting on 1 recipient
+  - link "Edit":
+    - /url: /t/guard-owner/documents/envelope_iscshkwxwlwnnsek/edit
+  - heading "Information" [level=1]
+  - list:
+    - listitem: Uploaded by You
+    - listitem: Created August 19, 2026
+    - listitem: Last modified 0 seconds ago
+    - listitem: Document ID (Legacy) 15
+  - heading "Recipients" [level=1]
+  - link "Modify recipients":
+    - /url: /t/guard-owner/documents/envelope_iscshkwxwlwnnsek/edit?step=signers
+  - list:
+    - listitem:
+      - text: "7"
+      - paragraph: 79771c8411@documenso.test
+      - paragraph: Viewer
+      - button:
+        - status: Pending
+      - button
+  - heading "Recent activity" [level=1]
+  - list:
+    - listitem:
+      - paragraph: You created the document
+      - time: 3 sec. ago
+    - listitem:
+      - paragraph: You sent the document
+      - time: 0 sec. ago

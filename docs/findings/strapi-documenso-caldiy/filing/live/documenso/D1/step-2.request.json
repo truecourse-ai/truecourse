@@ -1,0 +1,12 @@
+{
+  "step": 2,
+  "label": "draft accepts its settings",
+  "at": "2026-08-19T19:15:07.230Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/update",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_zxidtommuuvcurfz\",\"meta\":{\"signingOrder\":\"SEQUENTIAL\",\"timezone\":\"Etc/UTC\",\"dateFormat\":\"yyyy-MM-dd hh:mm a\",\"language\":\"en\"}}"
+}

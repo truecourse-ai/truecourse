@@ -1,0 +1,31 @@
+{
+  "step": 11,
+  "label": "STEP11 delete the PDF item of the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.364Z",
+  "status": 400,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "235",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "989",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "c1124674-8f92-4245-bb6c-d31865f05fcf"
+  },
+  "body": {
+    "message": "Envelope item is not editable",
+    "code": "INTERNAL_SERVER_ERROR",
+    "data": {
+      "code": "INVALID_REQUEST",
+      "httpStatus": 400,
+      "path": "envelope.item.delete",
+      "appError": {
+        "code": "INVALID_REQUEST",
+        "message": "Envelope item is not editable"
+      }
+    }
+  }
+}

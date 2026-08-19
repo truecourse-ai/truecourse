@@ -1,0 +1,98 @@
+{
+  "repo": "strapi",
+  "build": {
+    "sha": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+    "date": "2026-08-19T17:01:14+02:00",
+    "tag": null,
+    "branch": "develop",
+    "reportedVersion": "5.52.1",
+    "node": "v24.14.1",
+    "note": "Same head STATE.md recorded on 2026-08-19. Upstream has not moved. The original guard run tested 5.52.0 @ c43e9ee1e2, 14 commits earlier."
+  },
+  "checkedAt": "2026-08-19",
+  "findings": {
+    "S1": {
+      "verdict": "still reproduces",
+      "evidence": "S1/",
+      "note": "tools/list returned [\"list_article\",\"get_article\"] before the restart and [] after it, with nothing else changed. GET /admin/admin-tokens/5 after the restart shows adminPermissions: [], so the permission row is deleted rather than the ability being derived differently. The token still authenticates (tools/call answers 'Tool list_article disabled', not an auth error). No warning or log line accompanies the deletion."
+    },
+    "S2": {
+      "verdict": "still reproduces",
+      "evidence": "S2/",
+      "note": "update_article with categories {set:[cat1], connect:[cat2]} answered 200 with no isError and updatedAt advanced. The get_article read-back, which the original run never reached, holds cat1 only, confirming connect was silently discarded."
+    },
+    "S3": {
+      "verdict": "still reproduces",
+      "evidence": "S3/",
+      "note": "categories {set: null} answered 200 with no isError and updatedAt advanced by 71 ms, and the read-back still returns the category. Matches the sibling run 2026-08-14T15-15-28Z_32215874 on every observable."
+    },
+    "S4": {
+      "verdict": "still reproduces",
+      "evidence": "S4/",
+      "note": "Three consecutive update_article replies all report \"categories\":[] while get_article at the identical updatedAt returns one category. Every write reply observed in the session was false."
+    },
+    "S5": {
+      "verdict": "still reproduces",
+      "evidence": "S5/",
+      "note": "$null:true and $notNull:true both rejected with MCP error -32602 'Invalid input at filters.$and[1].authorName'. The $notNull half, never executed by the original run, fails identically. $null:null, which the advertised schema does accept, returned the two documents that HAVE an author name, the exact complement of what was asked, with no error."
+    },
+    "S6": {
+      "verdict": "still reproduces",
+      "evidence": "S6/",
+      "note": "With a BEGIN IMMEDIATE lock held on the sqlite file from a second process, MCP create_article returned the full insert statement with every bound value plus 'database is locked'. The same failure through POST /api/articles returned a scrubbed 500 with no SQL, which localises the fix to the MCP boundary."
+    },
+    "S7": {
+      "verdict": "still reproduces",
+      "evidence": "S7/",
+      "note": "list_article with no pagination arguments returned pagination {page:1,pageSize:10,pageCount:1,total:3}, while the same server's tools/list advertises pageSize 'default: 25, max: 100' and REST on the same instance answers pageSize 25."
+    },
+    "S8": {
+      "verdict": "still reproduces",
+      "evidence": "S8/",
+      "note": "DELETE ?status=draft answered 500 with 'Cannot delete a draft document' logged at repository.js:273 and the document intact. The ?status=published half, inferred from source in the review and observed here for the first time, answered 204 and left both the draft and the published version 404."
+    },
+    "S9": {
+      "verdict": "still reproduces",
+      "evidence": "S9/",
+      "note": "DELETE and POST on an unrouted path both answer 405 with Allow: HEAD, GET and a text/plain 'Method Not Allowed', while GET on the same path answers 404 with the documented JSON envelope. DELETE /api/articles answers 405 with a truthful Allow: HEAD, GET, POST, which supports the review's note about step 4 of the yaml."
+    },
+    "S10": {
+      "verdict": "still reproduces",
+      "evidence": "S10/",
+      "note": "The bulk-unpublish alertdialog reads 'Confirmation' / 'Are you sure you want to unpublish these entries?' with buttons Cancel and Confirm and zero buttons named Unpublish. Clicking Confirm does unpublish both entries, so the defect is label-only. The bulk-publish dialog does end on a button named Publish. A guided-tour popover on a fresh admin user had to be dismissed first."
+    },
+    "S11": {
+      "verdict": "still reproduces",
+      "evidence": "S11/",
+      "note": "Wider than filed. The plaintext accessKey comes back on every GET /admin/admin-tokens/:id, and the escalation the review flagged as unexercised is confirmed: an admin token whose only permission is admin::admin-tokens.read read a sibling token's full 256-character key, then served six content-manager MCP tools it had none of and created an article. Recommend re-routing as a security report."
+    },
+    "S15": {
+      "verdict": "still reproduces",
+      "evidence": "S15/",
+      "note": "GET an unknown documentId answers {\"status\":404,\"name\":\"NotFoundError\",\"message\":\"Not Found\",\"details\":{}} where the docs print 'Document not found'. A write with the read-only token answers message 'Forbidden' where the docs promise 'Forbidden access'. An anonymous read answers the same 403 body, so the docs' Unauthorized/Forbidden split matches neither case."
+    },
+    "S16": {
+      "verdict": "still reproduces",
+      "evidence": "S16/",
+      "note": "GET /api/articles/:documentId returns data keys id, documentId and the flattened attributes only. meta appears exactly once, as a sibling of data, and is {}."
+    }
+  },
+  "notAttempted": {
+    "S12": "liveMinimum false, not in the cheap-extras list",
+    "S13": "liveMinimum false, not in the cheap-extras list",
+    "S14": "liveMinimum false, not in the cheap-extras list; the underlying 403 ForbiddenError body is nevertheless captured in S15/step-2 and step-4",
+    "S17": "routed as an environment artifact, skip"
+  },
+  "disk": {
+    "beforeInstall": "9.5 GB free",
+    "afterInstall": "6.2 GB free",
+    "lowestDuringBuild": "1.7 GB free",
+    "afterBuild": "3.0 GB free",
+    "afterCleanup": "6.7 GB free"
+  },
+  "cleanup": {
+    "buildDirRemoved": true,
+    "databasesCreated": [],
+    "databaseNote": "sqlite only, at examples/getstarted/.tmp/data.db inside the build dir, removed with it. No database was created on the shared Postgres."
+  }
+}

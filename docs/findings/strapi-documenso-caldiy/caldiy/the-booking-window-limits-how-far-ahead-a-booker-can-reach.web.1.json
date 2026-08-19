@@ -1,0 +1,66 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "the-booking-window-limits-how-far-ahead-a-booker-can-reach.web.1",
+  "flowId": "the-booking-window-limits-how-far-ahead-a-booker-can-reach",
+  "failingStep": 3,
+  "whatFailed": "The scenario asserted that day button \"15\" of the out-of-window month is present and disabled, but on a month with zero bookable days Cal.diy auto-opens a modal \"No availability in October\" dialog, and a modal Radix dialog hides the rest of the page from the accessibility tree, so the day buttons (which are in the DOM, rendered and disabled) are not findable by role at all.",
+  "docClaim": {
+    "quote": "You can select how many calendar/business days will be displayed on your booking page as available for booking, or you can select a date range after there will be no slots showing. ... select a number of days for how far into the future an invitee can book an event with you and set it to 14 calendar days. Now, bookers can only book you for two weeks ahead at any point in time.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/limit-future-bookings.md",
+    "section": "limit-future-bookings"
+  },
+  "observed": "Run date 2026-08-13, event type window-14-calendar seeded ROLLING / 14 / calendar days. The browser console logs the product's own decision: isTimeViolatingFutureLimit, \"Booking is out of bounds due to rolling period end day\", endOfRollingPeriodEndDayTs 1787875199999 = 2026-08-27T23:59:59.999Z, which is exactly 2026-08-13 plus 14 calendar days. On the October 2026 page the calendar grid renders days 1 to 31 (all present in the extracted page text and in step-3.png), every one of them disabled because getAvailableDatesInMonth returned an empty set, and on top of it a modal dialog reads \"No availability in October / Scheduling is only available up to 14 calendar days in advance. Please check again soon.\" The product therefore did precisely what the doc promises. The step nevertheless failed because the driver's role query getByRole(button, name \"15\", exact) returned nothing: the modal is a Radix DialogPrimitive.Root with no modal prop, so modal defaults to true and Radix applies aria-hidden to everything outside the dialog portal, removing the day buttons from the accessibility tree. The step ran the full 10.1 s budget re-polling and never saw the button. The visual judge annotation says the same thing in other words: the refusal message is present under different wording, but the button's own disabled state cannot be read from the screenshot.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None to users. The horizon is enforced and explained on screen exactly as documented; only the scenario's chosen observation point is unreachable.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 9153,
+        "url": "https://github.com/calcom/cal.diy/issues/9153",
+        "state": "closed",
+        "title": "[CAL-3885] Default to showing the next month with availability (instead of showing an empty state)",
+        "relation": "related",
+        "note": "Background on why an empty month gets its own explicit empty state rather than just a grid of greyed days. Not the failure."
+      }
+    ],
+    "prs": [
+      {
+        "number": 20451,
+        "url": "https://github.com/calcom/cal.diy/pull/20451",
+        "state": "merged",
+        "title": "fix: Improves dialog window that appears when there is no availability in a month. Adding a description to clarify limits when rolling or range period types are in use.",
+        "relation": "related",
+        "note": "Merged 2025-04-15. This is the PR that added the exact sentence the run observed, \"Scheduling is only available up to N calendar days in advance\", for ROLLING and RANGE period types. Direct evidence that the modal is the intended way the product states the horizon, so the behavior the scenario tripped over is deliberate."
+      },
+      {
+        "number": 23052,
+        "url": "https://github.com/calcom/cal.diy/pull/23052",
+        "state": "merged",
+        "title": "feat: add toggle for no availability dialog",
+        "relation": "related",
+        "note": "Merged 2025-08-13, merge commit fc2e81e89a6, which git blame names as the author of the render condition at packages/features/calendars/components/DatePicker.tsx:350-361. It added the showNoAvailabilityDialog prop, default true, so the dialog opens on every zero-availability month unless a caller opts out."
+      }
+    ],
+    "queries": [
+      "gh search issues 'no availability dialog' --owner calcom",
+      "gh search issues '\"No availability in\"' --owner calcom",
+      "gh search prs 'NoAvailabilityDialog' --owner calcom"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: nothing to fix, the product behaved as documented. Only 4 commits landed on origin/main after the tested commit 038381aeca and git log 038381aeca..origin/main touches none of packages/features/calendars/components/DatePicker.tsx, packages/features/calendars/components/NoAvailabilityDialog.tsx or packages/ui/components/dialog/Dialog.tsx, so the modal behavior is unchanged on main and a re-run today would fail the same way. in cal.com: not verifiable from source, and not applicable since there is no defect to fix."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (OOO ignored on date overrides, zero-length team slots, dropped 9:10 slot, seated-booking oversell, unauthenticated hold mutation) touch the booking window or the no-availability dialog. This failure is outside the researcher's subset."
+  },
+  "notes": "Not one of the three established systemic causes: the page was fully rendered inside the budget (no first-wave timeout, no skeleton at the deadline), no cal-api-version is involved (web scenario), and no hardcoded slot label was clicked. This is a fourth, distinct web-driver pitfall worth adding to the list: a modal dialog removes the whole page behind it from the accessibility tree, so any role-based assertion on background content silently reports \"no such element\" rather than the state it wanted. Evidence trail, all in the tested worktree: the day cell is a real button carrying the bare date number as its accessible name and the disabled attribute (packages/features/calendars/components/DatePicker.tsx:83-105, data-testid=\"day\", data-disabled, disabled={disabled}); the dialog is rendered whenever the month has zero included dates (same file, lines 350-361); its copy is built from the period type (packages/features/calendars/components/NoAvailabilityDialog.tsx:33-48, no_availability_rolling / no_availability_range) and it self-opens with useState(true) at line 64; the dialog wrapper passes no modal prop to Radix (packages/ui/components/dialog/Dialog.tsx:35-38, @radix-ui/react-dialog 1.0.4 per packages/ui/package.json:91), so modal is true and Radix hides the siblings of the portal. Three consequences for the scenario author. (a) The same trap disarms steps 6 and 8 of this same file, which assert the identical \"15 is disabled\" shape on the business-day variant and on the month past the range end, both of which are also zero-availability months, so fixing only step 3 would move the failure two steps down. Step 7 (window-range, month=2027-03, inside the range, 15 enabled) is the one horizon step that should pass, because a month with availability draws no dialog. (b) The step 3 note's premise, \"the day is drawn either way and only its state says whether it can be reached\", is true of the DOM and false of the accessibility tree; the scenario needs either to close the dialog first (there is a Close button, data-testid close_dialog_button) or to assert on the dialog itself, which is the product's own richer statement of the claim and quotes the horizon back verbatim. (c) Asserting on the dialog would additionally distinguish the calendar-day from the business-day variant that step 6's note reports as a gap, since NoAvailabilityDialog.tsx:38-41 renders the words \"calendar days\" or \"business days\" from periodCountCalendarDays, which is the discriminator the note said had no falsifiable form in this vocabulary. Also note step 2's screenshot is a skeleton grid: the September page was still loading when captured, which is why no dialog was up there and the second forward click could proceed at all; had September finished rendering, the click on \"View next month\" in step 3 would itself have been blocked by the same modal, since September 2026 is equally past the 2026-08-27 horizon. That makes this scenario's ability to reach step 3 a race, and it is worth designing the fix so it does not depend on losing that race. Finally, the doc claim is fully evidenced by this run despite the red verdict: 2026-08-13 plus 14 calendar days, out-of-bounds logging, an empty October and an on-screen sentence naming the limit."
+}

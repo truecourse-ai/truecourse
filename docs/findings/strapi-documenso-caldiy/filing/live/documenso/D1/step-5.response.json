@@ -1,0 +1,33 @@
+{
+  "step": 5,
+  "label": "PREP send (distributionMethod NONE)",
+  "at": "2026-08-19T19:15:07.292Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "273",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "995",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "4202f17d-111e-434a-aa64-0e25ba46e441"
+  },
+  "body": {
+    "success": true,
+    "id": "envelope_zxidtommuuvcurfz",
+    "recipients": [
+      {
+        "id": 4,
+        "name": "TCRef Frozen",
+        "email": "tcref-frozen-e095c05f33@documenso.test",
+        "token": "f1sutPnzPFPjOaCKT0jZd",
+        "role": "SIGNER",
+        "signingOrder": 1,
+        "signingUrl": "http://localhost:3347/sign/f1sutPnzPFPjOaCKT0jZd"
+      }
+    ]
+  }
+}

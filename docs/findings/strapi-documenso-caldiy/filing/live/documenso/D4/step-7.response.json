@@ -1,0 +1,184 @@
+{
+  "step": 7,
+  "label": "POLL at ~500 ms after the 200 from reject",
+  "at": "2026-08-19T19:16:12.015Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "3253",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:12 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "993",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "1118d876-bbc7-4fb9-ab5c-0e2b47154757"
+  },
+  "body": {
+    "internalVersion": 2,
+    "type": "DOCUMENT",
+    "status": "REJECTED",
+    "source": "TEMPLATE",
+    "visibility": "EVERYONE",
+    "templateType": "PRIVATE",
+    "id": "envelope_nfbbhctvneaaadxv",
+    "secondaryId": "document_8",
+    "externalId": "tcref-reject-1f36da77c3",
+    "createdAt": "2026-08-19T19:16:10.743Z",
+    "updatedAt": "2026-08-19T19:16:11.511Z",
+    "completedAt": "2026-08-19T19:16:11.511Z",
+    "deletedAt": null,
+    "title": "Guard Source Template",
+    "authOptions": {
+      "globalAccessAuth": [],
+      "globalActionAuth": []
+    },
+    "formValues": null,
+    "publicTitle": "",
+    "publicDescription": "",
+    "userId": 3,
+    "teamId": 3,
+    "folderId": null,
+    "templateId": 1,
+    "documentMeta": {
+      "signingOrder": "PARALLEL",
+      "distributionMethod": "NONE",
+      "id": "cmt0h2k51002rhoeojor9plth",
+      "subject": null,
+      "message": null,
+      "timezone": "Etc/UTC",
+      "dateFormat": "yyyy-MM-dd hh:mm a",
+      "redirectUrl": null,
+      "typedSignatureEnabled": true,
+      "uploadSignatureEnabled": true,
+      "drawSignatureEnabled": true,
+      "allowDictateNextSigner": false,
+      "language": "en",
+      "emailSettings": {
+        "recipientSigningRequest": true,
+        "recipientRemoved": true,
+        "recipientSigned": true,
+        "documentPending": true,
+        "documentCompleted": true,
+        "documentDeleted": true,
+        "ownerDocumentCompleted": true,
+        "ownerRecipientExpired": true,
+        "ownerDocumentCreated": true
+      },
+      "emailId": null,
+      "emailReplyTo": null,
+      "envelopeExpirationPeriod": {
+        "unit": "month",
+        "amount": 3
+      }
+    },
+    "recipients": [
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "REJECTED",
+        "sendStatus": "NOT_SENT",
+        "id": 10,
+        "email": "tcref-declines-1f36da77c3@documenso.test",
+        "name": "TCRef Decliner",
+        "token": "zkg6-gbbQJID09CoU63yn",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": "2026-11-17T19:16:10.854Z",
+        "expirationNotifiedAt": null,
+        "signedAt": "2026-08-19T19:16:10.877Z",
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": "tcref declined 1f36da77c3"
+      },
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 11,
+        "email": "tcref-other-1f36da77c3@documenso.test",
+        "name": "TCRef Other",
+        "token": "OeEMKBoGkqY7rqBDN3lg7",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": "2026-11-17T19:16:10.854Z",
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      }
+    ],
+    "fields": [
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "envelopeItemId": "envelope_item_rfurxxfnzmanxacn",
+        "type": "SIGNATURE",
+        "id": 8,
+        "secondaryId": "cmt0h2k6m002yhoeoaqbgdr03",
+        "recipientId": 10,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "70",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        }
+      },
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "envelopeItemId": "envelope_item_rfurxxfnzmanxacn",
+        "type": "SIGNATURE",
+        "id": 9,
+        "secondaryId": "cmt0h2k6m002zhoeoowxvkyd5",
+        "recipientId": 11,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "80",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        }
+      }
+    ],
+    "envelopeItems": [
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "documentDataId": "cmt0h2kpg003bhoeon9b77ll4",
+        "id": "envelope_item_rfurxxfnzmanxacn",
+        "title": "Guard Source Template",
+        "order": 1
+      }
+    ],
+    "directLink": null,
+    "team": {
+      "id": 3,
+      "url": "guard-owner"
+    },
+    "user": {
+      "id": 3,
+      "name": "Guard Owner",
+      "email": "guard-owner@documenso.test"
+    }
+  }
+}

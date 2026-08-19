@@ -1,0 +1,121 @@
+{
+  "step": 7,
+  "label": "read back the PARALLEL envelope with its ASSISTANT",
+  "at": "2026-08-19T19:15:50.283Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "2020",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:50 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "962",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "8c7088ac-27fa-4a70-b62f-122738479508"
+  },
+  "body": {
+    "internalVersion": 2,
+    "type": "DOCUMENT",
+    "status": "DRAFT",
+    "source": "TEMPLATE",
+    "visibility": "EVERYONE",
+    "templateType": "PRIVATE",
+    "id": "envelope_fteuhazrouxlatwn",
+    "secondaryId": "document_7",
+    "externalId": "tcref-assistant2-bb15bb7b7e",
+    "createdAt": "2026-08-19T19:15:50.231Z",
+    "updatedAt": "2026-08-19T19:15:50.249Z",
+    "completedAt": null,
+    "deletedAt": null,
+    "title": "Guard Source Template",
+    "authOptions": {
+      "globalAccessAuth": [],
+      "globalActionAuth": []
+    },
+    "formValues": null,
+    "publicTitle": "",
+    "publicDescription": "",
+    "userId": 3,
+    "teamId": 3,
+    "folderId": null,
+    "templateId": 1,
+    "documentMeta": {
+      "signingOrder": "PARALLEL",
+      "distributionMethod": "EMAIL",
+      "id": "cmt0h24b9002khoeo9y1ayoju",
+      "subject": null,
+      "message": null,
+      "timezone": "Etc/UTC",
+      "dateFormat": "yyyy-MM-dd hh:mm a",
+      "redirectUrl": null,
+      "typedSignatureEnabled": true,
+      "uploadSignatureEnabled": true,
+      "drawSignatureEnabled": true,
+      "allowDictateNextSigner": false,
+      "language": "en",
+      "emailSettings": {
+        "recipientSigningRequest": true,
+        "recipientRemoved": true,
+        "recipientSigned": true,
+        "documentPending": true,
+        "documentCompleted": true,
+        "documentDeleted": true,
+        "ownerDocumentCompleted": true,
+        "ownerRecipientExpired": true,
+        "ownerDocumentCreated": true
+      },
+      "emailId": null,
+      "emailReplyTo": null,
+      "envelopeExpirationPeriod": {
+        "unit": "month",
+        "amount": 3
+      }
+    },
+    "recipients": [
+      {
+        "envelopeId": "envelope_fteuhazrouxlatwn",
+        "role": "ASSISTANT",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 9,
+        "email": "tcref-asst2-bb15bb7b7e@documenso.test",
+        "name": "TCRef Assistant 2",
+        "token": "1vSbCfk6CVHuk3FZKT3MB",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      }
+    ],
+    "fields": [],
+    "envelopeItems": [
+      {
+        "envelopeId": "envelope_fteuhazrouxlatwn",
+        "documentDataId": "cmt0h24b2002jhoeoyl1tp238",
+        "id": "envelope_item_hmhanoxitmubrtec",
+        "title": "Guard Source Template",
+        "order": 1
+      }
+    ],
+    "directLink": null,
+    "team": {
+      "id": 3,
+      "url": "guard-owner"
+    },
+    "user": {
+      "id": 3,
+      "name": "Guard Owner",
+      "email": "guard-owner@documenso.test"
+    }
+  }
+}

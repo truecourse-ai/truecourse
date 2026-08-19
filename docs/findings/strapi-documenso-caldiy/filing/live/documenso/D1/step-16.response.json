@@ -1,0 +1,44 @@
+{
+  "step": 16,
+  "label": "PASS2 PREP settings",
+  "at": "2026-08-19T19:15:07.544Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "527",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "984",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "a278b614-416b-4ba1-a6db-d058dc7e6a5e"
+  },
+  "body": {
+    "internalVersion": 2,
+    "type": "DOCUMENT",
+    "status": "DRAFT",
+    "source": "TEMPLATE",
+    "visibility": "EVERYONE",
+    "templateType": "PRIVATE",
+    "id": "envelope_daillesxfetczrhd",
+    "secondaryId": "document_4",
+    "externalId": "tcref-frozen2-c373a968c2",
+    "createdAt": "2026-08-19T19:15:07.521Z",
+    "updatedAt": "2026-08-19T19:15:07.541Z",
+    "completedAt": null,
+    "deletedAt": null,
+    "title": "Guard Source Template",
+    "authOptions": {
+      "globalAccessAuth": [],
+      "globalActionAuth": []
+    },
+    "formValues": null,
+    "publicTitle": "",
+    "publicDescription": "",
+    "userId": 3,
+    "teamId": 3,
+    "folderId": null
+  }
+}

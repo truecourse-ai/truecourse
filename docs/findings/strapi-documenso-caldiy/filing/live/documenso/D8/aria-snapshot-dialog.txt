@@ -1,0 +1,12 @@
+- dialog "Create API token":
+  - heading "Create API token" [level=2]
+  - paragraph: Use API tokens to authenticate with the Documenso API.
+  - group:
+    - text: Name *
+    - textbox "Name *"
+    - paragraph: A name to help you identify this token later.
+    - text: Expires in
+    - combobox: 3 months
+    - button "Cancel"
+    - button "Create token"
+  - button "Close"

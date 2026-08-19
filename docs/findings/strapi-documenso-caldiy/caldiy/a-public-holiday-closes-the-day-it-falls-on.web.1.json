@@ -1,0 +1,38 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-public-holiday-closes-the-day-it-falls-on.web.1",
+  "flowId": "a-public-holiday-closes-the-day-it-falls-on",
+  "failingStep": 1,
+  "whatFailed": "The scenario never reached an assertion: page.goto(\"/reference-host/holiday-check\") exceeded the harness's 10s navigation ceiling while 17 web scenarios were navigating the freshly started Next server at the same instant, so nothing about holiday blocking was actually tested.",
+  "docClaim": {
+    "quote": "The Holidays tab lets you select a country and automatically block bookings on its public holidays - no need to create a date override or out of office entry for each one.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/availabilities/holidays.md",
+    "section": "holidays"
+  },
+  "observed": "step 1 errored after 12,935 ms with 'page.goto: Timeout 10000ms exceeded'; step-1.png is a uniform blank page background with no rendered content, the transcript records page text as empty, and session.webm is 21 KB against ~450-510 KB for web scenarios that did render, i.e. the viewport stayed blank for the whole attempt. stdout/stderr in the evidence dir are 0 bytes, but so are they in EVERY web evidence dir in this run (the web driver does not capture the long-lived Next server's output at all), so the missing server log is not evidence of a silent server. The product was never observed doing anything wrong here.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "None for users. Cost is lost coverage: the holidays claim (holidays-tab-blocks-bookings-on-selected-country-holidays) is unproven in this run, as are the two other error scenarios that timed out in the same wave.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "none run on purpose: the symptom is a harness-side navigation timeout with no observed product behavior to search for, and the GitHub search budget is shared with reviewers whose verdicts depend on it"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable: there is no product change to track for a sandbox timeout. For completeness: in cal.diy, only four commits landed on main after the tested 038381aeca (176037d0af, b2c28a23ab, 5e3fe3cbe6, 8418db70c7) and `git log 038381aeca..origin/main` over packages/lib/holidays, packages/features/holidays, packages/features/availability/lib/getUserAvailability.ts and packages/features/calendars/DatePicker.tsx is empty, so the holiday path is byte-identical to the tested build. In cal.com, the same feature exists on main (packages/lib/holidays with GoogleCalendarClient.ts, HolidayService.ts, HolidayServiceCachingProxy.ts and packages/features/holidays), so nothing was ported away or fixed there either."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The Cal.diy researcher write-up was not available."
+  },
+  "notes": "Why environment and not real-defect, from the run data itself. Reconstructing each web scenario's start time (evidence transcript mtime minus the scenario duration in guard/LATEST.json) shows the runner launched 17 web scenarios simultaneously at 03:48:59-03:49:00 local and the rest in later waves. First-navigate duration for that first wave: median 12,935 ms, max 18,594 ms, n=17. Later waves: median 4,032 ms, max 10,070 ms, n=25. All three `error` outcomes in the run (this one, a-dynamic-group-link-books-two-hosts-at-once.web.1 at 15,082 ms, out-of-office-notes-shown-publicly-reach-the-booker.web.1 at 14,679 ms) are in that first wave, and they are simply the members of it that landed above the 10s page.goto ceiling; wave-1 siblings at 16-18 s got past navigation only because the ceiling applies to goto while the step total includes the expectation wait. Total scenario time in the run sums to ~1,988 s of work compressed into ~126 s of wall clock, about 16x oversubscription on one machine also running Postgres, Redis, the NestJS API and 17 Chromium instances, against a Prisma pool pinned to `connection_limit=3&pool_timeout=60` by recipe.json. The page type is not implicated: /reference-host+opted-out-host (the same dynamic-group renderer) and /reference-host/ooo-consult both rendered fine in later waves.\n\nNot an edition mismatch. Cal.diy ships the whole holidays feature at the tested commit: packages/lib/holidays/{HolidayService,HolidayServiceCachingProxy,GoogleCalendarClient,getHolidayEmoji}.ts, packages/features/holidays/repositories/, the 20251202181340_add_user_holiday_settings and 20251203000000_add_holiday_cache migrations, apps/web/modules/settings/my-account/holidays-view.tsx, the viewer.holidays tRPC router, and the booking-side hook getUserAvailability.ts:476 calling calculateHolidayBlockedDates (defined at 822-880). So the doc claim is in scope for cal.diy and the scenario deserves a clean re-run.\n\nWhat would settle it: re-run just this scenario (or the three error scenarios) against an already warm server with no other web scenario in flight, or raise the web driver's page.goto timeout above ~20s and cap web concurrency. If it then still blanks, it is a product problem; on this evidence it is not.\n\nOne landmine to expect on that re-run, unrelated to the timeout. packages/lib/holidays/GoogleCalendarClient.ts:38-42 throws 'GOOGLE_CALENDAR_API_KEY environment variable is not set' in its constructor, and HolidayServiceCachingProxy constructs the client eagerly (HolidayServiceCachingProxy.ts:23-25), so getHolidayService() throws for any user whose holiday countryCode is set, before the DB cache is ever consulted and outside the try/catch that guards refreshCache (lines 45-62). recipe.json declares no GOOGLE_CALENDAR_API_KEY and the setup snapshot lists googleapis as an undeclarable external, so unless the checkout's own .env supplies the key, calculateHolidayBlockedDates will throw inside the availability computation rather than fall back to the seeded holiday cache. That is a self-host robustness issue worth its own look (a cached-holidays instance with no Google key cannot compute availability for a host who picked a country), but it is on the slots query, not on page.goto, so it is not what failed here."
+}

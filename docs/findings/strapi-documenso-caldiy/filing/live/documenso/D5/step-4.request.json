@@ -1,0 +1,12 @@
+{
+  "step": 4,
+  "label": "readOnly TEXT with no default text (expected 400)",
+  "at": "2026-08-19T19:16:54.248Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_urlxhxhbndxwvbvu\",\"data\":[{\"type\":\"TEXT\",\"recipientId\":14,\"page\":1,\"positionX\":5,\"positionY\":20,\"width\":20,\"height\":5,\"fieldMeta\":{\"type\":\"text\",\"readOnly\":true}}]}"
+}

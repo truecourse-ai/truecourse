@@ -1,0 +1,60 @@
+{
+  "id": "S13",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/content-manager/admin/src/pages/EditView/components/Header.tsx#L719-L725",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/content-manager/admin/src/pages/EditView/components/Header.tsx#L719-L725",
+    "howDecided": "git log c43e9ee1e2..origin/develop over Header.tsx, packages/plugins/i18n/admin/src/components/CMHeaderActions.tsx and both en.json catalogs returns zero commits. Read all four at today's head: Header.tsx lines 719-725 still build the label from id 'content-manager.actions.delete.label' with defaultMessage 'Delete entry{isLocalized, select, true { (all locales)} other {}}', and line 791 still declares position: ['header', 'table-row'] so the same action renders in both the edit-view header and the list-view row menu; CMHeaderActions.tsx lines 655-661 still build 'Delete entry ({locale})' with position: ['header', 'table-row'] at line 654; packages/core/content-manager/admin/src/translations/en.json line 7 and packages/plugins/i18n/admin/src/translations/en.json line 2 carry the same defaults. So today's develop still renders 'Delete entry (all locales)' and 'Delete entry (English (en))', exactly what the two web scenarios observed. Second permalink for the locale-scoped label: https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/plugins/i18n/admin/src/components/CMHeaderActions.tsx#L655-L661"
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "docusaurus/docs/cms/features/content-manager.md",
+    "lineToday": 547,
+    "permalink": "https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/features/content-manager.md#L547",
+    "publishedUrl": "https://docs.strapi.io/cms/features/content-manager",
+    "commitsSinceReview": [],
+    "note": "git log c768c7bf..origin/main -- docusaurus/docs/cms/features/content-manager.md is empty; the file has not been touched since the review. Three stale spots today, all at the line numbers the review recorded. Line 547 (edit view, numbered step): 'click the **Delete document** button.<br/>If Internationalization is enabled for the content-type, you can also choose to delete only the currently selected locale by clicking on the **Delete locale** button.' Line 559 (list view, tip): 'then choosing the <Icon name=\"trash\"/> **Delete document** button.<br/>If Internationalization is enabled for the content-type, **Delete document** deletes all locales while **Delete locale** only deletes the currently listed locale.' Line 86 (list-view bullet list) still refers to a 'Delete locale icon'. Permalinks: #L547, #L559, #L86 on the same blob."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#20812",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2024-10-14)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'[Design] In the edit view, the labels of \"Delete locale\" and \"Delete document\" are not the right ones'. Created 2024-07-16, last updated 2024-10-14, no activity since. This is the design ticket that ASKED for the rename, so it confirms the product side is deliberate; it is not a tracker for the doc drift."
+      },
+      {
+        "ref": "strapi/strapi#21182",
+        "kind": "pr",
+        "stateAtReview": "merged (2024-09-09)",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-09-09",
+        "mergeCommit": "29afb2b983",
+        "baseRef": "v5/main",
+        "note": "'fix: delete document actions labels', the rename itself. merge_commit_sha 29afb2b983 matches the introducedBy commit the review recorded. Base branch was v5/main (pre-develop naming). No companion documentation PR was ever opened."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner strapi --include-prs --limit 25 '\"Delete document\" label content manager' -> 0 results",
+      "gh search issues --repo strapi/documentation --include-prs --limit 25 'Deleting content delete entry locales' -> 0 results",
+      "non-search enumeration: gh api 'repos/strapi/documentation/issues?state=all&since=2026-08-01T00:00:00Z&per_page=100' -> 40 items, all PRs, none touching content-manager.md (open ones are self-healing PRs about Media Library folders/actions, proxy IP headers, concurrentUploadRequests, AI metadata, release snapshots, an admonition contrast fix)"
+    ]
+  },
+  "reevaluation": "The finding stands, unchanged on both sides. The admin UI still renders 'Delete entry (all locales)' and 'Delete entry ({locale})' on today's develop (no commit touched either component or either en.json since the tested build), and strapi/documentation main still instructs the reader to click 'Delete document' and 'Delete locale' at lines 547 and 559, now roughly 23 months after PR #21182 renamed them. Both cited upstream items are in exactly the state the review recorded and neither has had activity since. Nothing changes the verdict (doc-bug), the confidence (high) or the scope. One scope note the filer should carry forward: this is ONE doc bug with two evidenced surfaces, the edit-view header menu (scenario the-edit-view-menu-has-no-delete-document-button.web.1, step 8) and the list-view row menu (the-list-row-menu-has-no-delete-document-button.web.1, step 6), because DeleteAction declares position: ['header', 'table-row'] and renders in both. A single docs issue with both screenshots covers it.",
+  "routeSuggestion": "docs repo issue",
+  "policyBasis": "strapi/documentation .github/ISSUE_TEMPLATE/config.yml: 'blank_issues_enabled: false' and the sole contact link 'Strapi Project Issues ... Please use the strapi/strapi repo for these issues' means product bugs go to strapi/strapi and doc-text bugs stay here; file via .github/ISSUE_TEMPLATE/BUG_REPORT.yml ('Documentation Bug Report', title prefix '[Bug]: ', label 'type: bug'), required fields 'Link to the documentation page or resource' and 'Describe the bug'.",
+  "confidence": "high",
+  "notes": "The 'Link to the documentation page' field should be https://docs.strapi.io/cms/features/content-manager (Deleting content section). Fix is three spots in one file: line 547 and line 559 ('Delete document' -> 'Delete entry (all locales)', 'Delete locale' -> 'Delete entry (<locale name>)'), plus line 86's 'Delete locale icon' in the list-view bullet list. Mention that without i18n on the content type the ICU 'other' branch renders plain 'Delete entry', which is why the label is conditional. Cite strapi/strapi#20812 and #21182 in the 'Related issue(s)/PR(s)' field as the paper trail for the rename. Caveat unchanged from the review: only the English bundle was inspected, so localized admin translations may still carry the old strings (that would be a separate strapi/strapi issue, not a docs one)."
+}

@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:1347/admin/admin-tokens/8",
+    "headers": {
+      "Authorization": "Bearer 7d21038...<redacted>"
+    },
+    "body": null
+  },
+  "status": 200,
+  "accessKeyMasked": "7d21038e...f8a3e6 (len 256)",
+  "matchesIssuedKey": true,
+  "dataKeys": [
+    "id",
+    "kind",
+    "name",
+    "description",
+    "lastUsedAt",
+    "lifespan",
+    "expiresAt",
+    "createdAt",
+    "updatedAt",
+    "adminPermissions",
+    "adminUserOwner",
+    "accessKey"
+  ]
+}

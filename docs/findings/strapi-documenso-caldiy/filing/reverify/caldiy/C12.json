@@ -1,0 +1,77 @@
+{
+  "id": "C12",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "fixed",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "5e3fe3cbe60e529b7f0d9d18065fd094c4d2152a",
+        "date": "2026-08-05",
+        "title": "fix(bookings): provide stable country fallback for phone input",
+        "pr": "#29740",
+        "touchesCulpritLines": true,
+        "effect": "Replaces country={value ? undefined : defaultCountry} with a stable country={defaultCountry}, so the country prop no longer changes on the async prefill update and react-phone-input-2's componentDidUpdate takes the value branch (updateFormattedNumber) instead of the country branch."
+      }
+    ],
+    "fix": {
+      "sha": "5e3fe3cbe60e529b7f0d9d18065fd094c4d2152a",
+      "pr": "#29740",
+      "date": "2026-08-05",
+      "inRelease": "none",
+      "releaseDate": null,
+      "note": "Merged 2026-08-05T06:29:34Z into base main, merge_commit_sha 5e3fe3cbe60e529b7f0d9d18065fd094c4d2152a, which is one of the four commits in 038381aeca..origin/main. git tag --contains 5e3fe3cbe6 is EMPTY and the newest tag in the repo is v6.2.0 (2026-03-01), so no released version of cal.diy contains this fix; it exists only on main."
+    },
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/web/components/phone-input/PhoneInput.tsx#L117-L121",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/web/components/phone-input/PhoneInput.tsx#L117-L123",
+    "howDecided": "git log 038381aeca..origin/main -- PhoneInput.tsx names exactly one commit, and git diff over that file shows a single functional line change plus a 3-line explanatory comment. At origin/main line 123 reads country={defaultCountry}; at the tested commit line 120 read country={value ? undefined : defaultCountry}. That is precisely the prop flip the review's root cause identified, so the mechanism it described (both value and country changing on the same async update, with the country branch of componentDidUpdate winning and updateFormattedNumber never running) can no longer occur. gh api repos/calcom/cal.diy/pulls/29740 confirms merged=true, merged_at 2026-08-05T06:29:34Z, base main, merge_commit_sha 5e3fe3cbe60e529b7f0d9d18065fd094c4d2152a. git tag --contains on that sha returns nothing and git tag --sort=-creatordate tops out at v6.2.0."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#29739",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: closed/completed, last updated 2026-08-05, the day #29740 merged. Still the exact-match report ('attendeePhoneNumber in params can't parse country phone code')."
+      },
+      {
+        "ref": "calcom/cal.diy#29740",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-08-05T06:29:34Z",
+        "mergeCommit": "5e3fe3cbe60e529b7f0d9d18065fd094c4d2152a",
+        "baseRef": "main",
+        "note": "Confirmed merged into main. I read the diff: it is the one-line country-prop change the review described, and it fixes the prefill half of the failing step and nothing else."
+      },
+      {
+        "ref": "calcom/cal.diy#22992",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2025-09-01."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"attendeePhoneNumber\" --include-prs --limit 30  (30 hits; the newest are #29739 and #29740 themselves. No item created after 2026-07-13 reports the prefill still failing, so there is no public signal that #29740 was insufficient.)"
+    ]
+  },
+  "reevaluation": "Confirmed fixed on main and NOT in any release. The review's 'partial' fixedAfter is exactly right and nothing has changed it: PR #29740 merged 2026-08-05 as 5e3fe3cbe6 into base main, the merge commit is on origin/main today, and the culprit line now reads country={defaultCountry} at PhoneInput.tsx:123. The one correction a filer must carry is that 'fixed' here does NOT mean 'shipped': git tag --contains 5e3fe3cbe6 is empty and the newest cal.diy tag is v6.2.0 from 2026-03-01, so every tagged cal.diy release still carries the bug, and self-hosters on a tag are unaffected by the fix. Whether hosted cal.com picked it up is not verifiable from source (the commercial tree is private), and the only public signal remains the timing of issue #29739's closure on the day the PR merged; that is suggestive, not proof, and should not be reported as 'fixed in cal.com'. No new tracker item since. The one thing to guard against is scope creep in the other direction: this scenario's step also failed for the accessible-name reason (finding C11), which #29740 did not touch, so the scenario will still not go green on main.",
+  "routeSuggestion": "skip: fixed (on main at 5e3fe3cbe6 / PR #29740; contained in NO tag, newest release v6.2.0 predates it)",
+  "policyBasis": null,
+  "confidence": "high",
+  "notes": "Do not file. Two things the filer must not lose: (1) 'fixed' means fixed on the default branch only, so if any downstream artifact of this review says 'fixed in a release' it is wrong; nothing tags this commit. (2) The scenario prefill-the-attendee-phone-number-either-way-it-is-asked.web.1 will still fail on main, because the second, independent defect on the same step (C11, the phone control has no accessible name) is untouched by #29740; a live re-run that comes back red must not be read as '#29740 did not work'. The right live check is to read the input's VALUE via input[name=\"attendeePhoneNumber\"] rather than by role and name, which isolates the prefill half from the a11y half."
+}

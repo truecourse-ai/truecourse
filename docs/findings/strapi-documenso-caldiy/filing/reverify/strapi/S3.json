@@ -1,0 +1,70 @@
+{
+  "id": "S3",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/database/src/entity-manager/index.ts#L149-L180",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/database/src/entity-manager/index.ts#L149-L180",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for packages/core/database/src/entity-manager/index.ts or for the MCP data-schema.ts. On origin/develop the truthiness test is still 'if (data?.set)' at line 162 inside toAssocs (line 149), and the consumer is unchanged too: updateRelations still branches on isNull(cleanRelationData.set) at line 1195 and computes isPartialUpdate = !has('set', cleanRelationData) at line 1198. So { set: null } still loses its key in toAssocs and is then treated as a partial update with empty connect and disconnect arrays, i.e. a no-op. Same line numbers as the tested build (file byte-identical)."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 27395,
+        "url": "https://github.com/strapi/strapi/issues/27395",
+        "state": "open",
+        "title": "MCP `tools/list` advertises draft-07 JSON Schema, making all tools uncallable from strict 2020-12 clients",
+        "createdAt": "2026-08-17",
+        "relation": "related",
+        "note": "New since the review. A different MCP schema defect (dialect of the advertised tool schemas), not this one. Useful precedent: labelled severity: high and status: confirmed within a day, which shows maintainers accept MCP contract bugs as public issues."
+      },
+      {
+        "number": 27115,
+        "url": "https://github.com/strapi/strapi/pull/27115",
+        "state": "open",
+        "title": "fix(content-manager): align MCP draft write schemas with admin draft leniency",
+        "createdAt": "2026-07-23",
+        "relation": "related",
+        "note": "Open PR, base develop, last pushed 2026-08-18. It edits the same file data-schema.ts but only the scalar/component required-field projection; gh pr diff shows no hunk covering the to-many relation object (no occurrence of 'Mutually exclusive'), so it changes nothing here."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#26371",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-05-27",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "feat(*): introduce MCP server. Closed/merged 2026-05-27, last touched 2026-05-27. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#26990",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "develop",
+        "note": "Still open, not merged, base develop, head feat/mcp-read-populate-depth, 11 commits / 17 files. Updated 2026-08-18 (after the review's 2026-08-15 snapshot), no new comments since 2026-08-15. I re-read the current diff: it does NOT fix any finding here (details in the per-finding reevaluation)."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi mcp --include-prs --limit 60 --updated \">2026-08-10\"",
+      "gh search issues --repo strapi/strapi \"relations connect set silently\" --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "reevaluation": "Stands unchanged. The 2022-era truthiness check and its consumer are byte-identical to the tested build, so 'categories: { set: null }' still returns success, still bumps updatedAt and still clears nothing. No new issue or PR touches it. The review's fixedAfter 'no' is correct. Its two caveats still hold and matter for filing: the blame is the database package (PR #14327, 2022), not the MCP schema, so the fix also repairs the plain document-service API; and the evidence is NOT in the transcript the findings index points at (run 2026-08-14T15-18-58Z_4e4c9455 aborted at step 21 on the mutual-exclusivity step). The proof is the sibling run 2026-08-14T15-15-28Z_32215874, steps 21 and 22. A filer must pull the reproduction from that run or reproduce it fresh, otherwise the cited transcript does not show the defect.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "high",
+  "notes": "Best filed as one issue with S2 (both are toAssocs, lines 162 and 149-180). Frame it as a document-service bug surfaced by MCP, not an MCP bug: the same no-op hits any caller passing { set: null } to the Document Service API, and the asymmetry is worth quoting, since 'categories: null' DOES clear (line 158 yields { set: null }) while 'categories: { set: null }' does not. The one-line fix (if ('set' in data) instead of if (data?.set)) is load-bearing since v4 and needs regression tests; say so rather than presenting it as safe. Also note S4 compounds this: the write reply reports categories as [] anyway, so the success confirmation agrees with the caller's wrong belief that the field is now empty."
+}

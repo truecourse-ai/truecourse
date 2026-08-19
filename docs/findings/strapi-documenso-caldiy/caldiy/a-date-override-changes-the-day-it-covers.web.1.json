@@ -1,0 +1,84 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-date-override-changes-the-day-it-covers.web.1",
+  "flowId": "a-date-override-changes-the-day-it-covers",
+  "failingStep": 2,
+  "whatFailed": "On the day narrowed by a 09:10-10:10 date override the booking page offered a single 9:30am slot, while the scenario demanded slot start minutes of :10 and :40 and no :00 or :30, so the regex expectation failed.",
+  "docClaim": {
+    "quote": "With availability date overrides, you can now pick any date that you're currently available and set specific hours for availability on that day or mark yourself entirely unavailable.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/availabilities/date-overrides.md (upstream: cal.com/help/availabilities/date-overrides, Mintlify help site, not a file in the cal.diy repo)",
+    "section": "date-overrides"
+  },
+  "observed": "Step 1 passed: day 16 rendered as a disabled day button, so the whole-day override was honoured. Step 2 clicked day 15 and the slot column showed exactly one time, 9:30am (transcript.txt lines 68-71 and 128-131, step-2.png, visual judge confirms one visible time). No 9:00am and no 10:00am appeared, so nothing outside the 09:10-10:10 override window was offered; the override was applied. What the scenario wanted, 9:10am and 9:40am, is the output cal.com produces only with the per-event-type Optimized Slots toggle on, which defaults to false and was not set by the seed.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for a user following the docs: the override was honoured and only in-window time was offered. The scenario over-specified the assertion, requiring off-grid slot start minutes that cal.com documents it does not produce by default. Secondary, documented and opt-in: on the default grid an off-grid override window can yield fewer bookable slots than the raw window would allow (here one 30m slot instead of two).",
+  "rootCause": {
+    "file": "packages/features/schedules/lib/slots.ts",
+    "lines": "113-121, 127-147, 27-69",
+    "explanation": "This is the mechanism, not a defect. buildSlotsWithDateRanges derives interval from frequency (packages/trpc/server/routers/viewer/slots/util.ts:1097 sets frequency = eventType.slotInterval || duration || eventType.length = 30 for this 30m event), and picks the largest of [60,30,20,15,10,5] that divides it, so interval = 30. For each date range it takes slotStartTime = range.start = 09:10; because 10 % 30 !== 0 it calls getCorrectedSlotStartTime, and with showOptimizedSlots falsy that function returns slotStartTime.startOf('hour').add(Math.ceil(minute/interval)*interval, 'minute') = 09:00 + 30m = 09:30 (line 68). The emit loop then produces 09:30 (ends 10:00, inside the range) and stops at 10:00 (would end 10:30, past 10:10). Exactly one slot, 9:30am, which is what the page rendered. With showOptimizedSlots true the same input yields 09:10 and 09:40: extraMinutesAvailable = 60 % 30 = 0, which is below all three step thresholds, so the start is left un-rounded (lines 44-65). The event-type field showOptimizedSlots is Boolean? @default(false) in packages/prisma/schema.prisma:224 and is surfaced as an opt-in toggle in apps/web/modules/event-types/components/tabs/advanced/EventAdvancedTab.tsx:1431-1449, whose description links to cal.com/help/event-types/optimized-slots. The behaviour is locked in by unit tests in packages/features/schedules/lib/slots.test.ts:402-700, which assert paired showOptimizedSlots true/false expectations (for example 4 slots with the toggle on versus 3 with it off for the same availability)."
+  },
+  "introducedBy": {
+    "commit": "2f6b5ced04dcf6386852840837863dbad5419d80",
+    "date": "2023-07-10",
+    "pr": null,
+    "title": "fix: better slot starting times",
+    "note": "git blame in the tested worktree attributes the current grid-rounding expression to 0bcb81bedd532f717656c5d3a87c7ff319e40319 (2025-08-30, PR #16579 'feat: to enable optimized slots', author Vijay), but that commit only lifted the pre-existing expression into getCorrectedSlotStartTime and added the opt-in optimized branch around it. git log -S on 'Math.ceil(slotStartTime.minute() / interval)' traces the rounding itself back to 2f6b5ced04 (2023-07-10, 'fix: better slot starting times'), which has no PR number in its subject. So: old intentional behaviour (2023), newer opt-out (2025). Nothing here was introduced as a bug."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 25011,
+        "url": "https://github.com/calcom/cal.diy/issues/25011",
+        "state": "closed",
+        "title": "Availability algorithm starts scheduling based on ending hour instead of starting hour",
+        "relation": "exact",
+        "note": "Same symptom, different numbers: availability 17:30-22:00 with 1h slots produced 18:00, 19:00, 20:00, 21:00 instead of starting at 17:30. Filed 2025-11-08, closed completed 2025-11-10. Cal.com core maintainer CarinaWolli closed it as intended behaviour and, when the reporter pushed back on 2025-11-16, replied on 2025-11-17: 'We always prefer 1 hour events to start at full hours. With optimized slots we make sure you don't loose any slots because of that. But in your case your aren't losing a slot and because of that we still use the preferred full hour starting time. At the moment we don't plan to change that behaviour.' An earlier comment pointed the reporter at the Optimized Slots toggle and the cal.com/help/event-types/optimized-slots page. This is a maintainer statement that the observed behaviour is by design."
+      },
+      {
+        "number": 26220,
+        "url": "https://github.com/calcom/cal.diy/issues/26220",
+        "state": "open",
+        "title": "Booking Slot Start Times",
+        "relation": "related",
+        "note": "The inverse request: a user asking for an option that FORCES slots onto interval boundaries because off-grid gaps produce non-standard start times. Reinforces that grid alignment is the preferred default, not an accident."
+      },
+      {
+        "number": 24147,
+        "url": "https://github.com/calcom/cal.diy/issues/24147",
+        "state": "open",
+        "title": "Booking Slots with Consistent Start Times",
+        "relation": "related",
+        "note": "Another user wanting slot start times pinned to their configured windows rather than the computed grid; explicitly asks that it interoperate with the Optimized Slots feature."
+      }
+    ],
+    "prs": [
+      {
+        "number": 16579,
+        "url": "https://github.com/calcom/cal.diy/pull/16579",
+        "state": "merged",
+        "title": "feat: to enable optimized slots",
+        "relation": "exact",
+        "note": "Merged as 0bcb81bedd5 on 2025-08-30. Adds the per-event-type showOptimizedSlots opt-in that produces exactly the 9:10 / 9:40 slots this scenario expected. Present and functional in the tested cal.diy checkout; it is off by default."
+      }
+    ],
+    "queries": [
+      "gh search issues \"date override slots\" --owner calcom (0 results)",
+      "gh search issues \"slots not showing availability interval\" --owner calcom (0 results)",
+      "gh search issues \"optimized slots\" --owner calcom --include-prs (25 results; all hits live in calcom/cal.diy, the repo that carries the shared issue tracker, none in calcom/cal.com)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: packages/features/schedules/lib/slots.ts is byte-identical between the tested commit 038381aeca and origin/main 176037d0af (blob a8733fecf95932ca128e27a7770a025dc021c88b); git log 038381aeca..origin/main on that file returns no commits. in cal.com: origin/main resolves to the same commit 176037d0af and the same blob, and the newest change to that file on cal.com main is 68e670ae0 (2025-12-19, 'fix: hide OOO slots across timezones', unrelated), which predates the tested commit. showOptimizedSlots is still Boolean? @default(false) on cal.com main (packages/prisma/schema.prisma:224). Nothing to fix: maintainers closed the matching report as working as intended and said they do not plan to change it."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Per the brief, no researcher write-up exists yet for Cal.diy. See the notes field for an unsolicited draft found in the working tree that reaches the opposite conclusion."
+  },
+  "notes": "Not an edition-mismatch. The Optimized Slots code path, the prisma column, the event-type UI toggle and the unit tests are all present in the cal.diy tested worktree, and slots.ts is byte-identical to calcom/cal.com main. Nothing was removed from the fork here.\n\nWhy this is a test defect rather than a product defect. Two of the three relevant help pages, one of them bound by the scenario, document the grid alignment explicitly:\n- .truecourse/specs/sources/cal.com-help/help/event-types/display-issues.md, 'Adjust Time Intervals' step: 'If your availability starts or ends at non-standard intervals (e.g., 8:15 - 11:30), adjust the time intervals accordingly. By default, cal.com displays slots starting on the hour only. Increasing intervals to 30 or 15-minute increments will display additional slots.' The scenario binds this page and then asserts the opposite of what it says.\n- .truecourse/specs/sources/cal.com-help/help/event-types/optimized-slots.md, present in the same snapshotted corpus and not bound: 'By default, event slots are generated at predefined intervals ... booking options follow a fixed slot grid, not necessarily the exact start of someone's availability', with the worked example 'if availability starts at 8:45 and the event length is 60 minutes, the first visible slot may appear at 9:00' and the bullet '30-minute intervals start on the hour and half-hour (9:00, 9:30, 10:00...)'. That is a literal description of the observed 9:30am.\nThe date-overrides page the scenario leans on promises only that an override sets the day's hours or closes the day. Both of that page's promises held: day 16 was closed, and on day 15 only in-window time was offered. The scenario's step-2 note states its own assumption, that a 30-minute event on a 30-minute grid inside a 09:10-10:10 window must start at :10 and :40. That assumption is the defect; it silently presumes Optimized Slots semantics.\n\nHow to repair the scenario, two options:\n1. Keep the default configuration and make the override window grid-aligned but distinct from the regular schedule, for example override day 15 to 13:00-14:00 while the weekly schedule is 09:00-17:00, then assert the page shows 1:00pm and 1:30pm and does NOT show 9:00am. Falsifiable, and immune to the slot grid.\n2. Keep the off-grid 09:10-10:10 window but have the seed set showOptimizedSlots: true on the override-check event type, and bind the scenario to help/event-types/optimized-slots.md as well. Then :10 and :40 is the documented expectation and the current regex is correct.\nOption 1 is the better probe for a date-override claim, since option 2 tests the slot engine rather than overrides.\n\nSecondary robustness problem in the assertion, worth fixing either way: the negative lookaheads run against the whole page text, not just the slot column. Any unrelated rendered ':00' or ':30' anywhere on the booking page, in an overlay, a tooltip or a future footer, would fail the step for reasons unrelated to the claim. Scope the match to the slot list.\n\nAn untracked file /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md exists in the working tree and its item 3, 'Odd opening hours get partly thrown away', writes this same failure up as a product defect on the grounds that 'the docs promise: pick any date and set specific hours for that day'. My evidence contradicts that framing: the cal.com help site documents the slot grid on two pages, ships an opt-in toggle for the exact behaviour requested, and a Cal.com maintainer closed the identical report (cal.diy#25011) as intended with 'At the moment we don't plan to change that behaviour.' Filing item 3 upstream as a bug would very likely be closed the same way. If it is worth raising at all, raise it as a documentation request against the date-overrides help page, which today says 'set specific hours' with no cross-link to the slot-grid caveat or to Optimized Slots, so a host setting a 9:10-10:10 override has no way to learn from that page that they will be shown one slot instead of two."
+}

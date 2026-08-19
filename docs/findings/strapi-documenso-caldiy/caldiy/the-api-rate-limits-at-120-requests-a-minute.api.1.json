@@ -1,0 +1,108 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "the-api-rate-limits-at-120-requests-a-minute.api.1",
+  "flowId": "the-api-rate-limits-at-120-requests-a-minute",
+  "failingStep": 2,
+  "whatFailed": "The 121st GET /v2/bookings made with one API key inside a single minute returned 200 instead of 429: the documented, and code-configured, 120 requests per minute per API key was not enforced at all.",
+  "docClaim": {
+    "quote": "There are three authentication methods for the API, and each of them has the following rate limits:\n\n1. API Key - 120 requests per minute. This can be increased to a reasonable amount, such as 200 requests per minute. If you require a higher rate limit, such as 800 requests per minute, it is possible, but it may involve extra charges. To request this, please contact support.\n\nIf no authentication method is provided, the default rate limit is 120 requests per minute.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/introduction.md",
+    "section": "introduction-to-api-v2/rate-limits (lines 56-62)"
+  },
+  "observed": "The API server's own HTTP log (server.stdout.txt in the evidence dir) records exactly 121 GET /v2/bookings requests, all with the same Authorization credential and all answered 200, between 2026-08-13 10:49:06.446 and 10:49:14.810, i.e. 121 requests inside 8.4 seconds of one minute. No 429 and no ThrottlerException appears anywhere: grepping the whole run evidence tree (100+ scenario dirs) for the guard's own message 'Too many requests' returns nothing. Redis was up and reached: 'IoRedis connected!' is logged at 10:49:05.845, before the first request. Steps 3 and 4, which assert the same 120/minute default for an unauthenticated caller on /v2/slots, never ran because the scenario aborted at step 2, so the unauthenticated half of the claim was never exercised.",
+  "verdict": "real-defect",
+  "confidence": "medium",
+  "impact": "Security control silently absent: an operator of this build who reads the API docs believes every API key and every anonymous caller is capped at 120 requests/minute, while the API answered 121 requests in 8 seconds and never throttled once in the entire run. Scraping, credential brute force and simple flooding of the v2 API are unbounded, and the documented X-RateLimit-* response headers a client would use to back off are not evidenced either.",
+  "rootCause": {
+    "file": "apps/api/v2/src/lib/throttler-guard.ts",
+    "lines": "30-96, 179-211",
+    "explanation": "CustomThrottlerGuard is the only thing that enforces the documented limit, and it is wired as a global APP_GUARD in apps/api/v2/src/app.module.ts:80-83 with the dummy throttler entry the module comment says is required (app.module.ts:40-57). Read end to end, the path should have refused the 121st call: getTracker (lines 213-236) turns 'Bearer cal_<secret>' into api_key_<sha256(secret)> via lib/api-key/index.ts, handleApiKeyRequest (80-96) looks the key up, finds no RateLimit rows (the seed inserts only into ApiKey, and no migration inserts RateLimit rows), falls back to the default {limit: 120, ttl: 60000, blockDuration: 60000} from getDefaultRateLimit (112-119) with RATE_LIMIT_* unset (no .env file exists in the repo and the guard recipe sets none), and incrementRateLimit (179-211) delegates to ThrottlerStorageRedisService.increment, whose isBlocked is true once totalHits exceeds limit. Every precondition held in the run and the call still returned 200, so one link in that chain failed open in this build. I could not isolate WHICH link from the captured evidence, and I am not guessing: the two candidates are (a) the guard never being invoked for the route and (b) the Redis storage never reporting isBlocked. Note that every this.logger.verbose call inside this file is commented out (lines 100-102, 146-148, 170-171, 200-208), so a running server emits zero throttler diagnostics, which is itself why this cannot be settled from the logs. The repo's own e2e test (apps/api/v2/src/app.e2e-spec.ts:134-175) asserts 429 at limit+1 against real Redis with the same guard, so the mechanism is expected to work and this run contradicts it."
+  },
+  "introducedBy": {
+    "commit": "4b6a389212f95f2be73fc3e58d382365865f51ce",
+    "date": "2024-10-01",
+    "pr": "#16882",
+    "title": "feat: v2 rate limiting",
+    "note": "git blame in the tested worktree attributes the whole enforcement path (handleApiKeyRequest 80-96, incrementRateLimit 179-211, getDefaultRateLimit 112-119) to this commit by Lauris Skraucis; only the exception message on line 92 is newer (7f02464fed, 2025-04-22, PR #20794). The code is therefore old and was working when written (its e2e test dates from the same PR). If the failure is an interaction with newer code, the newer sides are the tracker rewrite d1bd05a791 'chore: hash rate limit trackers api v2' (#22767, 2025-07-30), which changed getTracker to hash the key and made getRateLimitsForApiKeyTracker look the DB up by the hashed tracker, and the pinned dependency pair @nestjs/throttler 6.2.1 + @nest-lab/throttler-storage-redis 1.0.0 (apps/api/v2/package.json:50,60), which owns the isBlocked decision. Do not read this blame as 'PR #16882 is the bug'."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 12306,
+        "url": "https://github.com/calcom/cal.diy/issues/12306",
+        "state": "open",
+        "title": "Documented rate limit headers do not appear in any responses",
+        "relation": "related",
+        "note": "Filed 2023-11-09 against the live cal.com API (v1 era, links the enterprise rate-limits doc), still open. Same family of symptom: the documented rate limiting is not observable to a client. Not the same code path as the v2 Nest throttler, and it complains about missing headers rather than a missing 429."
+      },
+      {
+        "number": 29367,
+        "url": "https://github.com/calcom/cal.diy/issues/29367",
+        "state": "open",
+        "title": "fix(security): rate limiter fails open + tRPC rate limiting disabled",
+        "relation": "related",
+        "note": "Opened 2026-05-17, now labelled Stale. Reports the SAME failure mode (rate limiting silently fails open) but in the other limiter: packages/lib/rateLimit.ts:36-41 returns success when UNKEY_ROOT_KEY is missing, and the tRPC middleware is commented out. It does not cover apps/api/v2's CustomThrottlerGuard, which is what serves /v2/bookings, so our failure is NOT this issue."
+      },
+      {
+        "number": 24963,
+        "url": "https://github.com/calcom/cal.diy/issues/24963",
+        "state": "closed",
+        "title": "docs: add rate limit section for v2",
+        "relation": "related",
+        "note": "This is the origin of the exact doc section the scenario binds to (opened 2025-11-06, closed 2025-11-11). Its text asks for '1. api key - 120 requests / minute ... 4. default rate limit if no auth provided - 120 requests / minute', which matches the code defaults in throttler-guard.ts:36-39. Useful evidence that the doc number is intended and current, not stale, so this failure cannot be written off as a doc-bug."
+      },
+      {
+        "number": 16824,
+        "url": "https://github.com/calcom/cal.diy/issues/16824",
+        "state": "closed",
+        "title": "[CAL-4413] platform - rate limiting",
+        "relation": "related",
+        "note": "The tracking issue behind PR #16882, the commit that introduced the guard blamed above."
+      }
+    ],
+    "prs": [
+      {
+        "number": 29381,
+        "url": "https://github.com/calcom/cal.diy/pull/29381",
+        "state": "closed",
+        "title": "fix(security): enforce CORS restrictions and enable rate limiting",
+        "relation": "related",
+        "note": "Community PR for issue #29367, closed unmerged. Its file list (apps/api/v2/src/bootstrap.ts for CORS only, packages/lib/rateLimit.ts, packages/lib/default-cookies.ts, packages/trpc/.../authedProcedure.ts) does not touch apps/api/v2/src/lib/throttler-guard.ts, so it would not have changed this outcome. Its body does claim 'Self-hosted instances had zero rate limiting (fail-open)', which is the same headline a maintainer would draw from our evidence."
+      },
+      {
+        "number": 29395,
+        "url": "https://github.com/calcom/cal.diy/pull/29395",
+        "state": "closed",
+        "title": "fix: fail closed when rate limiter is unavailable",
+        "relation": "related",
+        "note": "Second community attempt at #29367, also closed unmerged, also the Unkey limiter rather than the v2 throttler."
+      },
+      {
+        "number": 16882,
+        "url": "https://github.com/calcom/cal.diy/pull/16882",
+        "state": "merged",
+        "title": "feat: v2 rate limiting",
+        "relation": "related",
+        "note": "The PR that introduced CustomThrottlerGuard and its 120/min API-key default, i.e. the code that should have produced the 429."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"rate limit\" --limit 40",
+      "gh search prs --owner calcom \"rate limit\" --limit 30",
+      "(non-search follow-ups, not counted: gh issue view 29367/12306/24963 --repo calcom/cal.diy, gh pr view 29381 --repo calcom/cal.diy)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "In cal.diy: no. Only 4 commits landed on origin/main between the tested commit 038381aeca and the 2026-08-15 fetch, and `git log 038381aeca..origin/main -- apps/api/v2` is empty, as is the same query restricted to apps/api/v2/src/lib/throttler-guard.ts, apps/api/v2/src/app.module.ts and apps/api/v2/src/modules/redis/. The file is byte-identical on main. In cal.com: not verifiable from source, since the public calcom/cal.com main is the same commit and tree as calcom/cal.diy main and the commercial source is private. No public PR, issue or changelog entry found that changes the v2 throttler after the tested date; the only rate-limiting activity in the public tracker (#29367, #29381, #29395) is on the separate Unkey limiter and is unmerged."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, the dropped 9:10 override slot, seated-booking oversell, unauthenticated slot-hold mutation). The write-up contains no rate-limit or 429 finding at all, so this is an additional item, not a refinement of theirs."
+  },
+  "notes": "Not an edition mismatch: unlike the version-header family, Cal.diy does ship this feature, with exactly the documented number. apps/api/v2/src/lib/throttler-guard.ts:36 sets RATE_LIMIT_DEFAULT_LIMIT_API_KEY to 120 and line 39 sets the no-auth default to 120, matching both doc sentences, and issue #24963 shows the docs were written from those code defaults. Environment was ruled out as far as the evidence allows: the guard compose file (.truecourse_backup/scenarios/docker-compose.guard.yml) brings up a real redis:7-alpine on 6379, the server logged 'IoRedis connected!' before the first request, the repo has no .env file so no RATE_LIMIT_* override existed, no migration seeds RateLimit rows and the seed only inserts into ApiKey, there is no @SkipThrottle anywhere in apps/api/v2/src, and only one APP_GUARD is registered. The request was also authenticated successfully as userId 1, which proves the same 'cal_' prefix logic the tracker uses (lib/api-key/index.ts, shared with api-auth.strategy.ts) classified the credential as an API key rather than an access token, so the 500/min access-token branch is not the explanation. What would settle the remaining mechanism question, cheaply: re-run one burst with the response headers captured. If X-RateLimit-Limit-Default / X-RateLimit-Remaining-Default are absent, the guard never ran on the route; if they are present and Remaining counts down to 0 without a 429, ThrottlerStorageRedisService.increment is not returning isBlocked and the @nestjs/throttler 6.2.1 + @nest-lab/throttler-storage-redis 1.0.0 pair is the culprit. Uncommenting the four logger.verbose blocks in throttler-guard.ts, or running the existing apps/api/v2 e2e rate-limiting suite against this checkout, does the same job. Separately, and worth sending to whoever owns calcom/docs: the bound section is internally incoherent. It opens 'There are three authentication methods for the API, and each of them has the following rate limits:' and then lists exactly one, because the OAuth-client and managed-user entries (500/min each per issue #24963, and per throttler-guard.ts:37-38) were moved under the 'Deprecated & Maintenance for existing users only' heading without their numbers. A reader cannot learn the OAuth or access-token limit from this page. That is a doc defect independent of the failure above, and the scenario did not bind it. Finally, the scenario itself is faithful: it spends exactly the documented allowance and asserts the next call fails, which is the same boundary the code implements (isBlocked when totalHits exceeds limit), so there is no off-by-one in the test."
+}

@@ -1,0 +1,66 @@
+{
+  "step": 3,
+  "label": "PREP a signature field each",
+  "at": "2026-08-19T19:16:10.801Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "766",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:10 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "997",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "9fba0936-0c86-4727-82db-6461ec5d75a3"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "envelopeItemId": "envelope_item_rfurxxfnzmanxacn",
+        "type": "SIGNATURE",
+        "id": 8,
+        "secondaryId": "cmt0h2k6m002yhoeoaqbgdr03",
+        "recipientId": 10,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "70",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        },
+        "documentId": 8,
+        "templateId": null
+      },
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "envelopeItemId": "envelope_item_rfurxxfnzmanxacn",
+        "type": "SIGNATURE",
+        "id": 9,
+        "secondaryId": "cmt0h2k6m002zhoeoowxvkyd5",
+        "recipientId": 11,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "80",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        },
+        "documentId": 8,
+        "templateId": null
+      }
+    ]
+  }
+}

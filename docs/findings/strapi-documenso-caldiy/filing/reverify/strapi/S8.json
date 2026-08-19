@@ -1,0 +1,28 @@
+{
+  "id": "S8",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/core/src/services/document-service/repository.ts#L369-L390",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/core/src/services/document-service/repository.ts#L369-L390",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for packages/core/core/src/services/document-service/repository.ts. On origin/develop, deleteDocument still opens at line 369, still builds both its lookup and its selection query through omit('status') at lines 374 and 383, and still throws the bare Error at 388-390: \"if (hasDraftAndPublish && params.status === 'draft') { throw new Error('Cannot delete a draft document'); }\", with the entriesToDelete query following at 392. Same line numbers as the tested build (file byte-identical). The doc side is unchanged too: strapi/documentation origin/main still has 'Draft or published content can be requested, created, updated, and deleted using the `status` parameter' at docusaurus/docs/cms/features/draft-and-publish.md line 197."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --repo strapi/strapi \"Cannot delete a draft document\" --include-prs --limit 30 (0 results)",
+      "gh search issues --repo strapi/strapi \"delete status draft published\" --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "reevaluation": "Stands unchanged. The bare Error is still there, the omit('status') on both queries is still there, and nobody has filed either half. The review's fixedAfter 'no' is correct, and its claim that the string 'Cannot delete a draft document' appears exactly once in the tree (the source line, no test) still holds on develop. The finding has two separable parts and a filer should keep them apart, because they have different severities: the 500-instead-of-400 is a wrong error type (nine sibling guards in the same file throw errors.ValidationError), while status=published silently deleting the draft too is the data-affecting half and is the one that will get attention. Only the first was observed in the run; the second is a code-path reading (omit('status') at 374/383 plus transform/query.ts adding no publishedAt condition) and should be reproduced before it goes in the report.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "high",
+  "notes": "There is a docs half too, but it belongs to whoever files S11-S16 style doc issues, not in the same report: docusaurus/docs/cms/features/draft-and-publish.md:197 promises status can scope a delete, and it cannot (draft throws, published is dropped by omit('status') so every version goes). The product's own detailed pages agree with the code, not with that sentence, so the doc fix is to drop 'and deleted' or to spell out that a delete always removes every version. Keep the product issue about the code: status is Picked into the Delete params type (packages/core/types/src/modules/documents/params/document-engine.ts:51-63) and passes validateQuery + sanitizeQuery in the collection-type controller, so the product accepts the parameter at the edge and then 500s on one of its two legal values. No data was lost in the observed run because the throw precedes the query."
+}

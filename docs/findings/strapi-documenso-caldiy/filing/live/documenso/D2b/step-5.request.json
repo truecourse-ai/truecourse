@@ -1,0 +1,11 @@
+{
+  "step": 5,
+  "label": "read the field back off the envelope",
+  "at": "2026-08-19T19:15:29.291Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_bxwelneerccdovmc",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

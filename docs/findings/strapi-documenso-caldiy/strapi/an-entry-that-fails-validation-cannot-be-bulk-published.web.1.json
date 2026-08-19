@@ -1,0 +1,50 @@
+{
+  "repo": "strapi",
+  "scenarioId": "an-entry-that-fails-validation-cannot-be-bulk-published.web.1",
+  "flowId": "an-entry-that-fails-validation-cannot-be-bulk-published",
+  "failingStep": 12,
+  "whatFailed": "After ticking 'Select all entries' in the Content Manager list view the row was selected and the bar read '1 entry selected', but the bulk-action buttons (Publish, Delete) did not render for the step's whole 10 second budget, so the scenario never reached the Publish entries dialog it was written to inspect.",
+  "docClaim": {
+    "quote": "Selecting multiple entries from the [Content Manager's list view](/cms/features/content-manager#overview) will display additional buttons to publish or unpublish several entries simultaneously. ... 1. From the list view of the Content Manager, select your entries to publish by ticking the box on the left side of the entries' record. 2. Click on the **Publish** button located above the header of the table.",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/draft-and-publish.md (upstream: strapi/documentation, docs/cms/features/draft-and-publish.md)",
+    "section": "Usage > Bulk actions > Bulk publishing drafts (lines 114-135); the scenario's milestone claim is line 132, the '\"[field name] is required\" ... the entry cannot be published' message shape, which step 13 would have asserted"
+  },
+  "observed": "Frame-by-frame from session.webm (25 fps, 28.44 s): the checkbox click lands at t=16.50 s (both checkboxes turn blue, 'N selected' label paints). From t=16.50 to t=26.38 the toolbar shows only the grey '1 entry selected' label with no buttons at all. The Publish and Delete buttons paint between t=26.38 and t=26.42, about 9.9 s after the click and about 0.1 s before the step ended (durationMs 10041). The driver polls the same predicate every 100 ms and returns the moment it holds, so the buttons were still absent at the last poll: diff.txt's role inventory lists only 'GA Guard Admin', 'Search', 'Filters', 'View settings', 'English (en) (default)', 'Row actions', and its body.innerText has no 'Publish'/'Delete'. The screenshot taken immediately after (step-12.png) and the final visibleText both show 'Publish' and 'Delete', i.e. the pending React commit landed exactly when the driver forced the page to do layout/paint work. In the same run, sibling scenario bulk-publishing-the-selected-drafts.web.1 performed the identical click at its step 12 and saw Publish and Delete in 354 ms.",
+  "verdict": "environment",
+  "confidence": "medium",
+  "impact": "None demonstrated for users: the buttons do render and the documented flow works (a sibling scenario in the same run took 354 ms). The cost is to the guard board, a red on a preparation step that hides whether the documented 'title is required' message is actually shown. The residual user risk, unproven here, is that the bulk-action toolbar is committed on an untimed idle callback, so the browser is free to defer it for as long as it likes.",
+  "rootCause": {
+    "file": "packages/core/admin/admin/src/components/DescriptionComponentRenderer.tsx",
+    "lines": "50-66 (with packages/core/content-manager/admin/src/pages/ListView/components/BulkActions/Actions.tsx:51-79 and packages/core/admin/admin/src/components/Table.tsx:252-272)",
+    "explanation": "This is the contributing mechanism, not a proven product defect. Table.ActionBar renders the 'N selected' label straight from table state, then renders its children, which is BulkActionsRenderer. The buttons themselves do NOT come from that render: each bulk action (PublishAction, UnpublishAction, DeleteAction) is run as a hidden Description component that pushes its object out through `update()`, which throttles (60 ms) and then schedules the parent's re-render with `requestIdleCallback(() => forceUpdate())` and NO `timeout` option. `children(states)`, which maps the collected descriptions to DocumentActionButtons, therefore only runs on that idle callback. An idle callback without a timeout has no upper bound, so between the selection and the buttons there is exactly one asynchronous gate and it is one the browser may starve. That is precisely the intermediate state the evidence caught and held for 9.9 s: label present, buttons absent. Why the headless Chromium starved it for that long is not established from the evidence; the run was headless (packages/guard-runner/src/web/browser.ts launches `chromium.launch({ headless: true })`) and the page had no animation to drive frames, and the callback fired at the instant the driver forced DOM reads plus a full-page screenshot. Passing a `timeout` to requestIdleCallback would bound it."
+  },
+  "introducedBy": {
+    "commit": "4f4e3c3acd1204dfba18d7e76014a5eb422976cb",
+    "date": "2024-02-22",
+    "pr": "#19380",
+    "title": "feat(cm): D&P pt2",
+    "note": "git blame in the tested worktree: the whole requestIdleCallback/throttle block (lines 42-80 of DescriptionComponentRenderer.tsx) is from this one commit and has not been touched since. It is old code; nothing about the tested 5.52.0 build changed it. This is the same PR the researcher blames for the discard-tool permission mapping behind their finding 8b."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --repo strapi/strapi \"requestIdleCallback\" --include-prs (0 results)",
+      "gh search issues --repo strapi/strapi \"bulk publish button not\" --include-prs (0 results)",
+      "gh search issues --repo strapi/strapi \"bulk actions\" list view --include-prs (25 results, all Media Library bulk actions, releases bulk actions, or the 2024 'can perform bulk actions even if disabled' issue #21173 / PR #21792; none about the list-view bulk buttons failing to appear or appearing late)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "`git log c43e9ee1e2..origin/develop` (develop HEAD acf0ce2034, 2026-08-14) over DescriptionComponentRenderer.tsx, utils/shims.ts and pages/ListView/components/BulkActions/ returns nothing: the untimed requestIdleCallback and the bulk-action rendering path are byte-identical on develop. Nothing to fix upstream unless the deferral is accepted as a bug."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the researcher's 8 Strapi findings map to this one: all 8 are api scenarios (MCP tools and admin-token auth), and none touches the admin panel's list-view bulk actions. The only overlap is ancestry: their 8b and this failure's contributing code both trace to PR #19380."
+  },
+  "notes": "For the maintainer: nothing here proves Strapi is broken, and no doc text is wrong. The one thing worth their attention is the shape of the mechanism, that the bulk-action toolbar's buttons are committed only on an untimed requestIdleCallback while the 'N selected' label paints immediately, which means the UI has a legitimate intermediate state showing a selection with no actions and no bound on how long it can last. A `timeout` argument on that requestIdleCallback (or committing the descriptions in the normal render path) would remove the unbounded window; it would also make Strapi's own Playwright e2e suite less exposed to the same race. For the scenario author: step 12 is preparation, not the claim, and the assertion it makes is exactly what the doc promises, so the scenario is not at fault, but the run left the milestone dp-invalid-entries-blocked-with-validation-message unexercised, so whether Strapi prints 'title is required' in the Publish entries dialog is still unknown from this run. One latent fragility in the yaml: step 12 targets role=button name='Publish' WITHOUT `exact: true`, and Playwright's non-exact name match is a case-insensitive substring, so 'Unpublish' also matches it. On this fixture the entry is a never-published draft, so only Publish and Delete render and the target stayed unambiguous, but on any fixture where a published or modified entry is selected the same step would fail as '2 elements match'. The sibling scenarios bulk-publishing-the-selected-drafts.web.1 and bulk-unpublishing-the-selected-entries.web.1 both use `exact: true` here. What would settle the remaining unknown: re-run this scenario in a headed browser, or with a build that passes a timeout to requestIdleCallback, or with the idle callback instrumented, and see whether the 9.9 s gap survives. Also note that 4 other web scenarios in the same run ended on a step that burned the same 10 s budget (bulk-unpublishing-the-selected-entries step 16, the-edit-view-menu-has-no-delete-document-button step 8, the-filters-button-narrows-the-list-to-published-entries step 12, the-list-row-menu-has-no-delete-document-button step 6); the two 'Delete document' menu ones look like a different, substantive finding rather than this race, since their final visibleText still does not contain the missing menu item."
+}

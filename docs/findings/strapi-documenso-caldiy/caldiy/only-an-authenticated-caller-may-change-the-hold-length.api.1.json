@@ -1,0 +1,77 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "only-an-authenticated-caller-may-change-the-hold-length.api.1",
+  "flowId": "only-an-authenticated-caller-may-change-the-hold-length",
+  "failingStep": 3,
+  "whatFailed": "An unauthenticated PATCH /v2/slots/reservations/{uid} carrying reservationDuration: 30 was accepted with 200 and set the hold to 30 minutes, although reservationDuration is documented as authenticated-only and POST /v2/slots/reservations rejects the very same field with 401 when no credential is presented.",
+  "docClaim": {
+    "quote": "ONLY for authenticated requests with api key, access token or OAuth credentials (ID + secret).\n\nFor how many minutes the slot should be reserved - for this long time noone else can book this event type at `start` time. If not provided, defaults to 5 minutes.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/slots/update-a-reserved-slot.md",
+    "section": "update-a-reserved-slot/openapi (components.schemas.ReserveSlotInput_2024_09_04.properties.reservationDuration, lines 86-93)"
+  },
+  "observed": "Step 2 created a hold anonymously (201, reservationDuration 5, reservationUntil 2026-08-13T10:56:02.967Z). Step 3 sent PATCH /v2/slots/reservations/0a82208a-c044-4a67-9171-e7e25e94ceff with NO Authorization header (invocation.json requestHeaders carries only cal-api-version: 2024-09-04) and body {eventTypeId, slotStart: 2050-09-30T09:30:00.000Z, reservationDuration: 30}. The API answered 200 with reservationDuration 30 and reservationUntil 2026-08-13T11:21:02.986Z, i.e. the anonymous caller both moved the hold from 09:00 to 09:30 and extended it from 5 to 30 minutes. The runner prints the actual as \"30\" but the wire body has a JSON number 30, so this is runner formatting, not a type mismatch. Step 4 (the authenticated half) never ran.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Any anonymous internet caller can bypass the documented authenticated-only limit on hold length and pin a host's slot for an arbitrary number of minutes (the DTO has @IsInt with no maximum), a cheap availability denial-of-service; the same unguarded route also lets anyone holding a reservation uid move, retarget or extend another booker's hold.",
+  "rootCause": {
+    "file": "apps/api/v2/src/modules/slots/slots-2024-09-04/services/slots.service.ts",
+    "lines": "271-332",
+    "explanation": "The authenticated-only rule is implemented only on the create path. reserveSlot (slots.service.ts:95-117) takes an authUserId, throws UnauthorizedException when input.reservationDuration is present without a user, and then throws ForbiddenException when the authenticated user is neither the event type owner, a member sharing a membership, nor a member of the event type's team or org. Its controller route carries @UseGuards(OptionalApiAuthGuard) and @GetOptionalUser (controllers/slots.controller.ts:271-296) so the user id reaches the service. The update path has none of that: the PATCH route (controllers/slots.controller.ts:314-332) has no guard and no user parameter, and calls this.slotsService.updateReservedSlot(body, uid). updateReservedSlot (slots.service.ts:271-332) has no authUserId parameter at all and at line 319 does `const reservationDuration = input.reservationDuration ?? DEFAULT_RESERVATION_DURATION`, handing the caller-supplied value straight to slotsRepository.updateSlot, which writes releaseAt = now + duration (slots.repository.ts:83-103). The same request DTO object, ReserveSlotInput_2024_09_04 (packages/platform/types/slots/slots-2024-09-04/inputs/reserve-slot.input.ts:25-33), is the body type of both routes and carries the 'ONLY for authenticated requests' description that is generated into the published OpenAPI, so PATCH publishes a rule it never applies. Two further gaps on the same code path: updateReservedSlot never checks that dbSlot belongs to input.eventTypeId, and slots.repository.ts:96-101 writes eventTypeId from the body, so an anonymous caller can also move a hold onto a different event type; and reservationDuration has no upper bound anywhere, so the accepted value can be arbitrarily large. GET /reservations/:uid (controller 298-312) and DELETE /reservations/:uid (controller 334-355) are likewise unguarded and do no ownership check, which is the read/cancel half of the same exposure, although the docs do not promise authentication for those two.",
+    "note": "Verified by reading the code, not inferred: the guard decorator is present on @Post(\"/reservations\") and absent on @Patch(\"/reservations/:uid\") in the tested worktree."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version",
+    "note": "git blame in caldiy-tested attributes all of it to this single commit: the PATCH route and its missing guard (controllers/slots.controller.ts:314-332), updateReservedSlot including line 319 (services/slots.service.ts:271-332, only lines 287-288, 296-299 and 321 were later touched by 81021929872 2025-03-19, c3add4bae8a 2025-05-29 and 3a9e353443a 2025-05-08, none auth related), the POST enforcement it should mirror (services/slots.service.ts:95-117), and the doc sentence itself (packages/platform/types/slots/.../reserve-slot.input.ts:25-33). So the rule, its create-path enforcement and its update-path gap all shipped together in one PR; this is an original omission, not a regression. The asymmetry is visible in the upstream e2e suite too: apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/e2e/user-event-type-slots.controller.e2e-spec.ts asserts 401 for an unauthenticated POST with reservationDuration (line 650) and 403 for an unrelated authenticated user (line 663), while the only PATCH test (line 563) sends no reservationDuration at all and just asserts the default 5."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 29383,
+        "url": "https://github.com/calcom/cal.diy/pull/29383",
+        "state": "closed",
+        "title": "fix(security): add ownership validation to prevent IDOR vulnerabilities",
+        "relation": "related",
+        "note": "Same class of bug on a different code path: it patches the tRPC slots router (packages/trpc/server/routers/viewer/slots/_router.tsx removeSelectedSlotMark) so a caller cannot delete someone else's slot reservation with an arbitrary uid, and its body names exactly that ('Users to delete others' slot reservations by providing arbitrary UIDs'). It does not touch apps/api/v2 at all, so the REST PATCH/GET/DELETE gap is untouched. Opened 2026-05-17 by a community contributor, closed unmerged 2026-05-18."
+      },
+      {
+        "number": 18758,
+        "url": "https://github.com/calcom/cal.diy/pull/18758",
+        "state": "merged",
+        "title": "feat: v2 slots new version",
+        "relation": "exact",
+        "note": "The PR that introduced the endpoint set, the authenticated-only rule, its POST enforcement and the unguarded PATCH. Merged 2025-02-13."
+      },
+      {
+        "number": 23222,
+        "url": "https://github.com/calcom/cal.diy/pull/23222",
+        "state": "merged",
+        "title": "fix: api v2 logic for slots reservation endpoint",
+        "relation": "related",
+        "note": "Only other merged PR that reworks this service; it is about round-robin reservation overlap logic, nothing to do with auth. Merged 2025-10-10, already in the tested tree."
+      }
+    ],
+    "queries": [
+      "gh search issues \"reservationDuration\" --owner calcom --include-prs (3 hits: PRs 23222, 18758, issue 21589; no auth-gap report)",
+      "gh search issues \"slots/reservations\" --owner calcom --include-prs (25 hits; only 29383 is auth/IDOR related and it is the tRPC path)",
+      "gh search issues \"OptionalApiAuthGuard\" --owner calcom --include-prs (13 hits, all other endpoints; none adds the guard to the slots PATCH route)"
+    ],
+    "note": "none found for the exact symptom: no open or closed issue or PR in calcom/cal.diy or calcom/cal.com reports that PATCH /v2/slots/reservations/{uid} accepts reservationDuration without authentication."
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main between the tested 038381aeca (2026-07-31) and head 176037d0af (2026-08-08), and `git log 038381aeca..origin/main -- apps/api/v2/src/modules/slots/ packages/platform/types/slots/` is empty, so the PATCH route is still unguarded on main. in cal.com: not verifiable from source (the commercial tree is private; the public calcom/cal.com main is the same commit and tree as calcom/cal.diy main). No public PR, issue or changelog entry was found that adds authentication or an ownership check to PATCH /v2/slots/reservations/{uid}."
+  },
+  "colleagueFinding": {
+    "ref": "caldiy #5",
+    "agreement": "refines",
+    "note": "The mechanism is confirmed in source and the exposure is real, but the doc premise is overstated. Finding #5 says 'The docs promise: changing a hold is only for authenticated callers.' The docs promise no such thing for the endpoints: update-a-reserved-slot.md, get-reserved-slot.md and delete-a-reserved-slot.md all carry `security: []` and, unlike reserve-a-slot.md (which does list Authorization and x-cal-client-id header parameters), declare no auth header at all, and the upstream e2e suite deliberately exercises anonymous PATCH and DELETE because the anonymous booker flow depends on being able to move and release its own hold. What the docs DO promise, in the request schema shared by POST and PATCH, is that the reservationDuration FIELD is 'ONLY for authenticated requests'. So the verified, doc-backed defect is narrower and sharper than #5 states: the authenticated-only rule on reservationDuration, which POST enforces with 401 and 403 and covers with tests, is entirely unenforced on PATCH, letting anyone reserve anonymously at the 5 minute default and immediately PATCH the hold to any length. The rest of #5 (read, move, cancel by uid with no auth) is confirmed in code as a genuine IDOR on GET, PATCH and DELETE, including the ability to move the hold to a different eventTypeId, but it violates no published sentence, so it should be filed as a security report rather than a docs-contradiction finding."
+  },
+  "notes": "Not an edition mismatch: the documented sentence is generated from the tested tree's own DTO (packages/platform/types/slots/slots-2024-09-04/inputs/reserve-slot.input.ts:29) and the enforcement code exists in the tested tree on the sibling POST route, so this is Cal.diy's own contract being broken, not a Cal.com-only feature. The 2024-09-04 version header was sent and honoured, so systemic cause 1 (API version drift) does not apply here. One caveat on the scenario as written: it expects an unauthenticated PATCH to silently fall back to 5, but the product's own create path enforces the same rule with a 401, so a correct fix that returns 401 would also make step 3 red as encoded; the assertion is directionally doc-faithful (the 30 must not land) but the expected shape is a guess. Step 4, the authenticated half, never ran; from source it would have returned 30 and passed, but for the wrong reason, since the PATCH route has no guard and ignores the Authorization header entirely. Suggested minimal fix for a maintainer: put @UseGuards(OptionalApiAuthGuard) and @GetOptionalUser on the PATCH route, thread the user id into updateReservedSlot, and reuse the existing reserveSlot checks (the 401 branch plus canSpecifyCustomReservationDuration); separately, verify dbSlot.eventTypeId matches input.eventTypeId and add an upper bound to reservationDuration."
+}

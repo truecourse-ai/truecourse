@@ -1,0 +1,38 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "an-email-domain-restriction-refuses-a-booker-from-the-wrong-domain.web.1",
+  "flowId": "an-email-domain-restriction-refuses-a-booker-from-the-wrong-domain",
+  "failingStep": 2,
+  "whatFailed": "On /reference-host/domain-restricted for 2030-06-12 the slot list started at 9:30am, so the walk step that clicks the hard-coded '9:00am' button never found it and the scenario died two steps before it could exercise the email domain rule at all.",
+  "docClaim": {
+    "quote": "The **Email** field in Cal.com's booking questions supports **domain-level restrictions**, allowing you to control who can (or can't) book time with you based on their email address.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/email-bookingq.md",
+    "section": "require-exclude-email-domains-booking-question"
+  },
+  "observed": "step-1.png and step-2.png show the June 2030 booking page for 'Domain Restricted' with Wed 12 selected and exactly five slots: 9:30am, 10:00am, 10:30am, 11:00am, 11:30am. The seeded window for these reference-host event types is 09:00-12:00 UTC (six 30m slots), and three sibling scenarios on the same host and the same day did see 9:00am: a-timezone-locked (page loaded 03:49:57), a-seated-event-type (03:49:54) and a-short-notice (03:50:00). The 9:00am slot disappears for every scenario whose page loaded after 03:50:00: a-split-name (03:50:02), a-usage-limited-private-link (03:50:03), this one (03:50:08), an-event-type-with-guests-disabled (03:50:12), custom-booking-questions (03:50:14) and event-buffers (03:50:18, which loses 9:30am too because that event type carries buffers). The cause is visible in the seated scenario's own transcript: at 03:49:57 it booked slot 2030-06-12T09:00:00.000Z on /reference-host/seated-consult and landed on /booking/8wV2ymqoY85KTwkDJPfpuj, and it booked a second seat in the same slot at 03:50:04. From that moment reference-host has an ACCEPTED booking at 09:00-09:30 UTC on 2030-06-12, so every OTHER event type of that host correctly stops offering 9:00am.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None to users. The product behaved correctly; the run simply proved nothing about the email domain restriction, so the claim 'email-question-supports-domain-level-restrictions' is unverified rather than refuted.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"seated booking blocks slots other event types\" (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable: there is no product bug to fix. in cal.diy: neither packages/features/busyTimes/services/getBusyTimes.ts nor packages/features/bookings/lib/getBookingResponsesSchema.ts changed between the tested commit 038381aeca and origin/main (only 4 commits landed on cal.diy main in that span). in cal.com: neither file has changed on main since 2026-07-31 either, and both carry the same logic, so this is not an edition mismatch."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Why the product is right: packages/features/busyTimes/services/getBusyTimes.ts:118-148 fetches busy times through BookingRepository.findAllExistingBookingsForEventTypeBetween, whose query (packages/features/bookings/repositories/BookingRepository.ts:686-756) selects every ACCEPTED booking of the user in the window, not just bookings of the event type being viewed. Seat references are the one exception, and the code comment states the rule explicitly at lines 142-147: 'Seat references on the current event are non-blocking until the event is fully booked' and 'this is the seated event, other event types should be blocked'. That is exactly the asymmetry the evidence shows: seated-consult kept offering 9:00am to a second seat while domain-restricted, split-name, no-guests and custom-questions all lost it.\n\nWhy this is a test defect and not an environment one: the scenario names an absolute slot label ('9:00am') that it never reserves, on a calendar it shares with 42 other web scenarios that the harness runs concurrently (43 web scenarios finished inside 93 seconds while this one alone took 15.6s, and the per-step timeline above reconstructs the overlap). Several sibling scenarios in the same corpus already use the resilient form, clicking 'first button \":00\"' (a-custom-event-name, a-hidden-event-type), and those passed. Three fixes, any one of which is sufficient: (a) select the first offered slot instead of a named one, (b) give each web flow its own seeded host or its own date so no two flows compete for one slot, or (c) serialize flows that book against a shared host.\n\nThe claim is still worth re-running: the feature does ship in Cal.diy, so this is not an edition mismatch. packages/features/bookings/lib/getBookingResponsesSchema.ts:125-160 enforces both requireEmails and excludeEmails on the booking response, raising 'require_emails_no_match_found_error_message' when the booker's address matches no required entry, which is a field-level validation error that keeps the booker on the booking page with the Confirm button intact, exactly the shape the scenario's step 6 asserts. So a re-run on an uncontested slot has a good chance of passing.\n\nSecondary observation for the harness owners, outside this failure's scope: a-short-notice loaded its page at 03:50:00 and clicked 9:00am at 03:50:03, after the seated booking at 09:00 had already committed, and its Confirm step still went through. That points at a stale slot list plus an accepted double booking on the same host, and would be worth a dedicated, serialized scenario before anyone reports it as a product defect."
+}

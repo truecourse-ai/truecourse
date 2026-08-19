@@ -1,0 +1,147 @@
+{
+  "step": 24,
+  "label": "PASS2 final read",
+  "at": "2026-08-19T19:15:07.664Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "2441",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "976",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "2b9c22a7-c625-4573-833f-cc267c9e8a14"
+  },
+  "body": {
+    "internalVersion": 2,
+    "type": "DOCUMENT",
+    "status": "PENDING",
+    "source": "TEMPLATE",
+    "visibility": "EVERYONE",
+    "templateType": "PRIVATE",
+    "id": "envelope_daillesxfetczrhd",
+    "secondaryId": "document_4",
+    "externalId": "tcref-frozen2-c373a968c2",
+    "createdAt": "2026-08-19T19:15:07.521Z",
+    "updatedAt": "2026-08-19T19:15:07.600Z",
+    "completedAt": null,
+    "deletedAt": null,
+    "title": "Guard Source Template",
+    "authOptions": {
+      "globalAccessAuth": [],
+      "globalActionAuth": []
+    },
+    "formValues": null,
+    "publicTitle": "",
+    "publicDescription": "",
+    "userId": 3,
+    "teamId": 3,
+    "folderId": null,
+    "templateId": 1,
+    "documentMeta": {
+      "signingOrder": "SEQUENTIAL",
+      "distributionMethod": "NONE",
+      "id": "cmt0h17cv001nhoeoilmaxi17",
+      "subject": null,
+      "message": null,
+      "timezone": "Etc/UTC",
+      "dateFormat": "yyyy-MM-dd hh:mm a",
+      "redirectUrl": null,
+      "typedSignatureEnabled": true,
+      "uploadSignatureEnabled": true,
+      "drawSignatureEnabled": true,
+      "allowDictateNextSigner": false,
+      "language": "en",
+      "emailSettings": {
+        "recipientSigningRequest": true,
+        "recipientRemoved": true,
+        "recipientSigned": true,
+        "documentPending": true,
+        "documentCompleted": true,
+        "documentDeleted": true,
+        "ownerDocumentCompleted": true,
+        "ownerRecipientExpired": true,
+        "ownerDocumentCreated": true
+      },
+      "emailId": null,
+      "emailReplyTo": null,
+      "envelopeExpirationPeriod": {
+        "unit": "month",
+        "amount": 3
+      }
+    },
+    "recipients": [
+      {
+        "envelopeId": "envelope_daillesxfetczrhd",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 6,
+        "email": "tcref-frozen2-c373a968c2@documenso.test",
+        "name": "TCRef Frozen 2",
+        "token": "_2ugaf5-q2upXODbI9QlD",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": "2026-11-17T19:15:07.598Z",
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": 1,
+        "rejectionReason": null
+      }
+    ],
+    "fields": [
+      {
+        "envelopeId": "envelope_daillesxfetczrhd",
+        "envelopeItemId": "envelope_item_yuhbxnasvuibzhhu",
+        "type": "TEXT",
+        "id": 6,
+        "secondaryId": "cmt0h17fs001yhoeohd8g7rk4",
+        "recipientId": 6,
+        "page": 1,
+        "positionX": "40",
+        "positionY": "40",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "label": "",
+          "placeholder": "",
+          "required": false,
+          "readOnly": false,
+          "fontSize": 12,
+          "type": "text",
+          "text": "",
+          "textAlign": "left"
+        }
+      }
+    ],
+    "envelopeItems": [
+      {
+        "envelopeId": "envelope_daillesxfetczrhd",
+        "documentDataId": "cmt0h17ck001mhoeo7oqfh8hm",
+        "id": "envelope_item_yuhbxnasvuibzhhu",
+        "title": "Guard Source Template",
+        "order": 1
+      }
+    ],
+    "directLink": null,
+    "team": {
+      "id": 3,
+      "url": "guard-owner"
+    },
+    "user": {
+      "id": 3,
+      "name": "Guard Owner",
+      "email": "guard-owner@documenso.test"
+    }
+  }
+}

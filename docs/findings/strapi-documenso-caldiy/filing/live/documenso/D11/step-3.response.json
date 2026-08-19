@@ -1,0 +1,44 @@
+{
+  "step": 3,
+  "label": "a field created with NUMBER coordinates; read the types back",
+  "at": "2026-08-19T19:17:28.512Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "392",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "988",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "16b7753b-a32c-4ceb-aa7f-64462a253c56"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_bkaasmlwcbywltkb",
+        "envelopeItemId": "envelope_item_lemiadorzxatlent",
+        "type": "SIGNATURE",
+        "id": 21,
+        "secondaryId": "cmt0h485a0054hoeozkng5sus",
+        "recipientId": 15,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "80",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "required": true,
+          "overflow": "auto",
+          "type": "signature"
+        },
+        "documentId": 12,
+        "templateId": null
+      }
+    ]
+  }
+}

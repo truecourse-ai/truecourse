@@ -1,0 +1,125 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:1347/mcp",
+    "headers": {
+      "Authorization": "Bearer 2d6e1e6...<redacted>",
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 212,
+      "method": "tools/call",
+      "params": {
+        "name": "list_article",
+        "arguments": {
+          "filters": {
+            "$and": [
+              {
+                "title": {
+                  "$contains": "opmt0g6lmy"
+                }
+              },
+              {
+                "authorName": {
+                  "$null": null
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "status": 200,
+  "rpc": {
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"results\":[{\"id\":2,\"documentId\":\"sl1jro25co3k3nm1khk65xtz\",\"title\":\"tcref-opmt0g6lmy-alpha\",\"blocksContent\":null,\"markdownContent\":null,\"authorName\":\"TCRef-Writer\",\"slug\":null,\"createdAt\":\"2026-08-19T18:51:19.756Z\",\"updatedAt\":\"2026-08-19T18:51:19.756Z\",\"publishedAt\":null,\"locale\":\"en\",\"categories\":[],\"createdBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"updatedBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"localizations\":[],\"cover\":null,\"status\":\"draft\"},{\"id\":3,\"documentId\":\"dhb4ybhw8k6p80ucfld2l6xy\",\"title\":\"tcref-opmt0g6lmy-beta\",\"blocksContent\":null,\"markdownContent\":null,\"authorName\":\"tcref-writer\",\"slug\":null,\"createdAt\":\"2026-08-19T18:51:19.821Z\",\"updatedAt\":\"2026-08-19T18:51:19.821Z\",\"publishedAt\":null,\"locale\":\"en\",\"categories\":[],\"createdBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"updatedBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"localizations\":[],\"cover\":null,\"status\":\"draft\"}],\"pagination\":{\"page\":1,\"pageSize\":10,\"pageCount\":1,\"total\":2}}"
+        }
+      ],
+      "structuredContent": {
+        "results": [
+          {
+            "id": 2,
+            "documentId": "sl1jro25co3k3nm1khk65xtz",
+            "title": "tcref-opmt0g6lmy-alpha",
+            "blocksContent": null,
+            "markdownContent": null,
+            "authorName": "TCRef-Writer",
+            "slug": null,
+            "createdAt": "2026-08-19T18:51:19.756Z",
+            "updatedAt": "2026-08-19T18:51:19.756Z",
+            "publishedAt": null,
+            "locale": "en",
+            "categories": [],
+            "createdBy": {
+              "id": 1,
+              "firstname": "TC",
+              "lastname": "Reverify",
+              "username": null,
+              "email": "tc-reverify@example.com",
+              "isActive": true
+            },
+            "updatedBy": {
+              "id": 1,
+              "firstname": "TC",
+              "lastname": "Reverify",
+              "username": null,
+              "email": "tc-reverify@example.com",
+              "isActive": true
+            },
+            "localizations": [],
+            "cover": null,
+            "status": "draft"
+          },
+          {
+            "id": 3,
+            "documentId": "dhb4ybhw8k6p80ucfld2l6xy",
+            "title": "tcref-opmt0g6lmy-beta",
+            "blocksContent": null,
+            "markdownContent": null,
+            "authorName": "tcref-writer",
+            "slug": null,
+            "createdAt": "2026-08-19T18:51:19.821Z",
+            "updatedAt": "2026-08-19T18:51:19.821Z",
+            "publishedAt": null,
+            "locale": "en",
+            "categories": [],
+            "createdBy": {
+              "id": 1,
+              "firstname": "TC",
+              "lastname": "Reverify",
+              "username": null,
+              "email": "tc-reverify@example.com",
+              "isActive": true
+            },
+            "updatedBy": {
+              "id": 1,
+              "firstname": "TC",
+              "lastname": "Reverify",
+              "username": null,
+              "email": "tc-reverify@example.com",
+              "isActive": true
+            },
+            "localizations": [],
+            "cover": null,
+            "status": "draft"
+          }
+        ],
+        "pagination": {
+          "page": 1,
+          "pageSize": 10,
+          "pageCount": 1,
+          "total": 2
+        }
+      }
+    },
+    "jsonrpc": "2.0",
+    "id": 212
+  },
+  "toolText": "{\"results\":[{\"id\":2,\"documentId\":\"sl1jro25co3k3nm1khk65xtz\",\"title\":\"tcref-opmt0g6lmy-alpha\",\"blocksContent\":null,\"markdownContent\":null,\"authorName\":\"TCRef-Writer\",\"slug\":null,\"createdAt\":\"2026-08-19T18:51:19.756Z\",\"updatedAt\":\"2026-08-19T18:51:19.756Z\",\"publishedAt\":null,\"locale\":\"en\",\"categories\":[],\"createdBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"updatedBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"localizations\":[],\"cover\":null,\"status\":\"draft\"},{\"id\":3,\"documentId\":\"dhb4ybhw8k6p80ucfld2l6xy\",\"title\":\"tcref-opmt0g6lmy-beta\",\"blocksContent\":null,\"markdownContent\":null,\"authorName\":\"tcref-writer\",\"slug\":null,\"createdAt\":\"2026-08-19T18:51:19.821Z\",\"updatedAt\":\"2026-08-19T18:51:19.821Z\",\"publishedAt\":null,\"locale\":\"en\",\"categories\":[],\"createdBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"updatedBy\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\",\"isActive\":true},\"localizations\":[],\"cover\":null,\"status\":\"draft\"}],\"pagination\":{\"page\":1,\"pageSize\":10,\"pageCount\":1,\"total\":2}}"
+}

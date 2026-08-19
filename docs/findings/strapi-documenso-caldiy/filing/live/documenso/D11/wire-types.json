@@ -1,0 +1,12 @@
+{
+  "envelopeId": "envelope_bkaasmlwcbywltkb",
+  "fieldId": 21,
+  "wireTypes": {
+    "page": "number 1",
+    "positionX": "string \"10\"",
+    "positionY": "string \"80\"",
+    "width": "string \"20\"",
+    "height": "string \"5\""
+  },
+  "note": "the docs type positionX/positionY/width/height as number; the wire sends JSON strings. page is a real number."
+}

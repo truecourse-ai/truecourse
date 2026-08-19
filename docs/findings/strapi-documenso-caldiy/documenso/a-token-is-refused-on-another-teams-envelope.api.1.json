@@ -1,0 +1,50 @@
+{
+  "repo": "documenso",
+  "scenarioId": "a-token-is-refused-on-another-teams-envelope.api.1",
+  "flowId": "a-token-is-refused-on-another-teams-envelope",
+  "failingStep": 2,
+  "whatFailed": "GET /api/v2/envelope/{envelopeId} with a valid API token belonging to a different account answered 404 NOT_FOUND (\"Envelope could not be found\") where the authentication doc's troubleshooting entry says a token that lacks access to a resource gets 403 Forbidden.",
+  "docClaim": {
+    "quote": "403 Forbidden - Token doesn't have access to the resource / Ensure you're accessing resources owned by the token's account. (second bound page: `FORBIDDEN` | Access to the resource is denied (403). | Ensure your API key or user account has the necessary permissions and roles to execute this specific action.)",
+    "doc": "apps/docs/content/docs/developers/getting-started/authentication.mdx (lines 194-196); apps/docs/content/docs/developers/api/common-errors.mdx (FORBIDDEN row)",
+    "section": "Troubleshooting (authentication.mdx) and Application Error Codes (common-errors.mdx)"
+  },
+  "observed": "The outsider token authenticated successfully: the response carries `path: \"envelope.get\"`, so the request passed the API-token middleware and reached the route, then returned HTTP 404 with body {\"message\":\"Envelope could not be found\",\"code\":\"INTERNAL_SERVER_ERROR\",\"data\":{\"code\":\"NOT_FOUND\",\"httpStatus\":404,\"path\":\"envelope.get\",\"appError\":{\"code\":\"NOT_FOUND\",\"message\":\"Envelope could not be found\"}}}. No envelope data leaked: the refusal itself is correct, only the status code and error code differ from the doc.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Low. No data exposure and no unauthorised access: the outsider is refused. An integrator who follows the authentication doc and branches on 403 for permission problems will instead see 404 and is likely to conclude the envelope was deleted or the ID is wrong, so cross-tenant misconfiguration is harder to diagnose.",
+  "rootCause": {
+    "file": "apps/docs/content/docs/developers/getting-started/authentication.mdx",
+    "lines": "194-196",
+    "explanation": "The doc text is wrong, not the product. Documenso resolves an API token to its own user and team (packages/trpc/server/trpc.ts lines 98-135: ctx.user = apiToken.user, ctx.teamId = apiToken.teamId), and every envelope read goes through getEnvelopeWhereInput (packages/lib/server-only/envelope/get-envelope-by-id.ts lines 128-192), which ANDs the envelope id with an OR of `userId = caller` / `teamId = caller's validated team with a matching visibility` / `sent from the team email`. A caller outside that set simply does not match the where clause, so `prisma.envelope.findFirst` returns null and lines 82-86 throw AppError NOT_FOUND, which app-error.ts maps to HTTP 404. Cross-tenant access is therefore deliberately indistinguishable from nonexistence, which is the standard defence against resource-existence disclosure, and the function carries an explicit 'Be extremely careful when modifying this function. Needs at minimum two reviewers' warning, so it is intentional. AppErrorCode.FORBIDDEN (app-error.ts line 82, status 403) has exactly one producer in the whole repo, packages/lib/server-only/license/assert-licensed-for.ts line 36, which gates licensed features. There is no code path in the v2 API that returns 403 for resource ownership, so the documented 403 is unreachable for the case the doc describes."
+  },
+  "introducedBy": {
+    "commit": "b92c53dbb23b89d3cfd89a6b38d2282cf273dfba",
+    "date": "2026-02-27",
+    "pr": "#2460",
+    "title": "feat: docs v2",
+    "note": "git blame of authentication.mdx lines 192-196 in the tested worktree; the whole Troubleshooting accordion, including the 403 entry, was written in this docs rewrite. The second bound page's FORBIDDEN row came later, in 7c0031679a370300324e2b3374430eae733e0c06 'docs: implement global error handling and troubleshooting matrix (#2784)', 2026-05-26. The product behaviour is the older half of the interaction: the NOT_FOUND throw blames to 7f09ba72f45af3ae361774c077f1be082c1fb0fb 'feat: add envelopes (#2025)', 2025-10-14, and that commit carried the ownership-scoped-query pattern over from the pre-envelope document code. So new doc text describes old, unchanged behaviour."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"403 forbidden token access\" --include-prs (only hit was PR #403 'feat: single player mode', matched on the number, unrelated)",
+      "gh search issues --repo documenso/documenso \"403\" --match title --include-prs (empty)",
+      "gh search issues --repo documenso/documenso \"FORBIDDEN\" --include-prs (8 hits, all unrelated: #2978, #2075, #1407, #1416, #1217, #1494, #1419, #259)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Neither side changed after the tested tag. `git log 3cf2963cd0..origin/main` touches authentication.mdx exactly once, 26f0c4c5b7a1f9106415cd43a2591e5e6f320fd4 'chore: deprecate endpoints (#3022)', 2026-07-23, and that commit only inserts an <EnvelopeWarning /> banner; the 403 accordion is still present verbatim on origin/main (688ef2fd, 2026-08-14) at line 196. common-errors.mdx has no post-tag commits. get-envelope-by-id.ts is untouched since the tag and still throws AppErrorCode.NOT_FOUND on the miss."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the eight itemised Documenso findings, nor to the coordinator's rate-limit item. It does independently corroborate their finding 5: this response body shows the top-level `code` as INTERNAL_SERVER_ERROR with the real code (NOT_FOUND) nested one level down under `data.code` / `data.appError.code`, exactly the envelope-shape defect they filed under the-documented-error-envelope-on-an-unknown-envelope.api.1. That is a separate defect from the 403-vs-404 question judged here."
+  },
+  "notes": "The docs contradict themselves, which is the strongest argument that the 403 line is the error rather than the behaviour: the per-endpoint status tables list only 400/401/404/429/500 and never mention 403 (apps/docs/content/docs/developers/api/fields.mdx '404 | Document, recipient, or field not found', api/recipients.mdx '404 | Envelope or recipient not found', getting-started/first-api-call.mdx '404 | Not found - resource doesn't exist', and the error-handling switch in examples/common-workflows.mdx handles 400/401/404/429 with no 403 branch). Only the authentication troubleshooting accordion and the common-errors FORBIDDEN row promise 403. Suggested doc fix: change the accordion to '404 Not Found - the token's account has no access to that resource', and add a line to common-errors.mdx saying that resources outside the token's user or team are reported as NOT_FOUND rather than FORBIDDEN so existence is not disclosed; leave the FORBIDDEN row but scope it to licence-gated features, which is its only producer. Also worth noting for the test author: the generated scenario faithfully encoded the doc sentence (milestones au-403-token-lacks-access-to-the-resource and ce-forbidden-403), and the run's own seed description already recorded the real behaviour ('Proven: it answers 404 on the owner's envelopes'), so the assertion was doc-driven, not environment drift. The bound doc snapshots render the accordion title with an em dash; it is reproduced here with a plain hyphen."
+}

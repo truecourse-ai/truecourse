@@ -1,0 +1,59 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "check-and-verify-an-email-before-booking.api.1",
+  "flowId": "check-and-verify-an-email-before-booking",
+  "failingStep": 1,
+  "whatFailed": "GET /v2/bookings/verification/email/check?email=... returned 404 NotFoundException because Cal.diy's API v2 does not mount any /v2/bookings/verification/* route at all; the whole documented 'Bookings - Email Verification' endpoint group is absent from the fork.",
+  "docClaim": {
+    "quote": "# Check if email verification is required\n\n> Checks whether email verification is required for the given email. Returns true if verification is needed.\n\n  /v2/bookings/verification/email/check:\n    get:\n      tags:\n        - Bookings - Email Verification\n      summary: Check if email verification is required\n      operationId: BookingsVerificationController_checkEmailVerificationRequired\n      parameters:\n        - name: email\n          required: true\n          in: query\n        - name: userSessionEmail\n          required: false\n          in: query\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                type: object",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings--email-verification/check-if-email-verification-is-required.md",
+    "section": "check-if-email-verification-is-required/openapi (lines 5-52). The two sibling pages make the same promise for the other two routes: send-email-verification-code.md line 24 declares POST /v2/bookings/verification/email/send-code with operationId BookingsVerificationController_sendEmailVerificationCode, and verify-email-with-code.md line 24 declares POST /v2/bookings/verification/email/verify-code with operationId BookingsVerificationController_verifyEmailCode. All three name the same controller class, BookingsVerificationController, which does not exist anywhere in Cal.diy."
+  },
+  "observed": "HTTP 404 in 13 ms with body {\"status\":\"error\",...,\"error\":{\"code\":\"NotFoundException\",\"message\":\"Cannot GET /v2/bookings/verification/email/check?email=guard-verify@example.com\"}} (evidence response.txt, diff.txt). The NestJS boot log in the same evidence dir (server.stdout.txt lines 243-246) enumerates every mapped route and shows the email-verification handlers live somewhere else entirely: 'Mapped {/v2/atoms/verification/email/send-code, POST}', 'Mapped {/v2/atoms/verification/email/check, GET}', 'Mapped {/v2/atoms/verification/email/verify-code, POST}', 'Mapped {/v2/atoms/verification/email/verify-code-authenticated, POST}'. Grepping the 177 mapped routes for /v2/bookings returns the full bookings surface (create, cancel, reschedule, attendees, guests, location, seats, ...) with no verification child route at any cal-api-version. A single unauthenticated read-only GET against the hosted commercial product on 2026-08-15, https://api.cal.com/v2/bookings/verification/email/check?email=guard-probe@example.invalid, answered HTTP 200 with exactly the documented envelope {\"data\":false,\"status\":\"success\"}, so the documented route is live in Cal.com and simply not present in Cal.diy.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "A self-hosted Cal.diy operator following the public Cal.com API v2 reference gets a hard 404 on all three documented booker email-verification endpoints, so the documented pre-booking email gate cannot be driven from the API at all. The capability is not actually missing, it is reachable at /v2/atoms/verification/email/*, but that path is marked @ApiExcludeController so it appears in no published reference: the feature is undiscoverable rather than absent. No data loss, no info disclosure.",
+  "rootCause": {
+    "file": "apps/api/v2/src/modules/atoms/controllers/atoms.verification.controller.ts",
+    "lines": "32-91",
+    "explanation": "In the tested Cal.diy tree the three documented handlers exist verbatim (checkEmailVerificationRequired at lines 61-76, sendEmailVerificationCode at 41-59, verifyEmailCode at 78-91) and even return the documented shapes: {data: boolean, status: SUCCESS_STATUS} for check, {data:{sent}, status} for send-code, {data:{verified}, status} for verify-code. But the class is AtomsVerificationController, decorated @Controller({ path: \"/v2/atoms\", version: API_VERSIONS_VALUES }) at lines 32-35, so the routes resolve to /v2/atoms/verification/email/*, and line 37 marks the class @DocsExcludeController(true) so Cal.diy's own generated OpenAPI advertises none of them. The docs the scenario binds to describe a different controller, BookingsVerificationController, mounted under /v2/bookings, which exists in the commercial Cal.com (confirmed live at api.cal.com) and appears nowhere in the Cal.diy source: `git grep BookingsVerification` and `git grep bookings/verification` are both empty in the tested worktree AND in caldiy origin/main. So the route Nest never mapped is the whole cause; there is no misbehaving handler to blame."
+  },
+  "introducedBy": {
+    "commit": "09cf8885cf5e88fc0911edaf7e43f5c1c2d64923",
+    "date": "2025-08-21",
+    "pr": "#23074",
+    "title": "feat: add send & verify code flow to booker atom when email verification is turned on",
+    "note": "This is the commit that created the OSS-side endpoints, and git blame puts every relevant line on it: the @Controller path \"/v2/atoms\" (lines 32-35) and the @Get(\"/verification/email/check\") route (line 61). Its own message says the intent was atoms-only: 'Add v2 endpoints: /atoms/verification/email/send-code, /atoms/verification/email/verify-code, /atoms/verification/email/verify-code-authenticated'. It is therefore not a bug commit; the OSS fork has only ever exposed this under /v2/atoms. The /v2/bookings/verification/* public surface named by the docs is a later commercial-side addition that has no trace in the public history: `git log --all -S BookingsVerificationController` finds nothing in the calcom/cal.diy clone."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "related",
+        "note": "Same underlying theme, the published Cal.com API reference drifting from what the open-source tree actually serves, and it is the public trace the coordinator cites for the cal-api-version half of that drift. It is NOT the cause here: this failure carries no version header, the Cal.diy handler is @Version(VERSION_NEUTRAL), and the path is unmapped at every version, so the 404 is a missing route rather than a downgraded version."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 25 'bookings/verification/email'  (25 hits, all unrelated bookings work, no match)",
+      "gh search issues --owner calcom --include-prs --limit 20 'BookingsVerificationController'  (0 hits)",
+      "gh search issues --owner calcom --include-prs --limit 20 --match title 'email verification api v2'  (0 hits)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. `git grep bookings/verification origin/main` and `git grep BookingsVerification origin/main` are both empty on the fetched 2026-08-15 head 176037d0af, and only four commits landed between the tested 038381aeca (2026-07-31) and that head (#29940 emails customReplyToEmail, #29901 language update, #29740 phone-input country fallback, #29819 Clara app), none touching apps/api/v2 verification. `git log 038381aeca..origin/main -- apps/api/v2/src/modules/atoms/controllers/atoms.verification.controller.ts` is empty. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a byte-identical mirror of cal.diy main. What IS verifiable is that the documented route is live and correct in the hosted product right now: a single read-only GET to https://api.cal.com/v2/bookings/verification/email/check on 2026-08-15 returned 200 {\"data\":false,\"status\":\"success\"}. So there is nothing to fix in Cal.com; the gap is a port that never happened into Cal.diy."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Maps to none of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (#1 OOO ignored under date overrides, #2 zero-length team slots, #3 dropped 9:10 slot, #4 seated-booking attendee oversell, #5 unauthenticated hold mutation). The researcher's write-up covers behavioral defects in shipped endpoints; this is a documented endpoint group that the fork does not expose. It is also not one of the two systemic causes: cause 1 (unsupported cal-api-version header) does not apply because the scenario sends no version header and the route is unmapped at every version, and cause 2 (run-start web saturation) does not apply because this is an API scenario that answered in 13 ms."
+  },
+  "notes": "Three things worth passing on. First, the failure is total for this flow, not just step 1: all three documented paths are unmapped, so steps 3, 4, 5, 6, 7 and 8 would each have 404ed as well, and the two negative steps (2, 4, 7) that expect a 400 would have failed too since Nest returns 404 for the unmapped path before any validation runs. Regenerating the scenario against /v2/atoms/verification/email/* would exercise the real code, though those routes are deliberately doc-excluded and are not a contract Cal.diy publishes. Second, a latent test-defect sits behind the route problem and would surface the moment the path is corrected: step 1 asserts data equals true on the grounds that the address is 'one the seeded gated event type requires verification for', but the handler at packages/trpc/server/routers/publicViewer/checkIfUserEmailVerificationRequired.handler.ts:14-46 is not event-type scoped at all. It returns true only when the address is in BLACKLISTED_GUEST_EMAILS, or when a USER row for that address has requiresBookerEmailVerification set and it differs from userSessionEmail; otherwise false. The endpoint takes only email and userSessionEmail, so it cannot see an event type, and the docs never claim it can. The seed script that would settle whether guard-verify@example.com was created as such a user is not present in the repo (nothing outside .truecourse/ mentions the address), so I cannot confirm which way step 1 would go, but the note's stated rationale is wrong regardless of the outcome. The live probe returning data:false for an unknown address matches the handler I read. Third, for the doc author: the three pages are generated from the commercial controller and give a self-hosted reader no signal that the route is hosted-only, which is the same class of trap as the cal-api-version drift in issue #28762."
+}

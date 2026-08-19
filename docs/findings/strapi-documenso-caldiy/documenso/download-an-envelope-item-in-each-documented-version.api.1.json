@@ -1,0 +1,57 @@
+{
+  "repo": "documenso",
+  "scenarioId": "download-an-envelope-item-in-each-documented-version.api.1",
+  "flowId": "download-an-envelope-item-in-each-documented-version",
+  "failingStep": 8,
+  "whatFailed": "Step 8 asserted that GET /api/v2/envelope/item/{itemId}/download?version=signed on a PENDING envelope returns something that is NOT a PDF, and the server returned 200 with the original PDF, which is exactly what the product's own download docs say happens.",
+  "docClaim": {
+    "quote": "The API cannot: ... Retrieve the signed PDF until all recipients have completed signing",
+    "doc": "apps/docs/content/docs/developers/getting-started/first-api-call.mdx",
+    "section": "Limitations (line 29 in the tested worktree)"
+  },
+  "observed": "200 with Content-Type application/pdf and a 629-byte body beginning %PDF-1.7. The bytes are byte-identical to the version=original download taken in step 6 (same /ID and same @libpdf/core producer block), so the endpoint served the unsigned original upload, not a signed PDF. Steps 6 and 7 both passed; only step 8, which asserts the negation of step 7 about the same request, failed. server.stderr.txt is empty and server.stdout.txt shows no error for the call.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None. The product behaved as documented; the scenario encodes two mutually exclusive assertions about one request, so one of them fails by construction.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3169,
+        "url": "https://github.com/documenso/documenso/pull/3169",
+        "state": "open",
+        "title": "feat: add pending signed pdf downloads for recipients",
+        "relation": "related",
+        "note": "Opened 2026-08-11, unmerged as of 2026-08-15. Extends the recipient token download route to accept version=pending so a recipient can fetch a partially signed copy before completion. Adjacent to this area (what you can download before completion) but it does not touch the API-token route or the signed/original branch that this scenario exercises."
+      },
+      {
+        "number": 3096,
+        "url": "https://github.com/documenso/documenso/issues/3096",
+        "state": "open",
+        "title": "Document download filename uses the envelope item title (template name) instead of the document title",
+        "relation": "related",
+        "note": "Same handler (handleStaticFileRequest builds the Content-Disposition filename). Relevant only to the secondary observation in notes about the _signed.pdf suffix."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"download signed version completed\" --include-prs (0 results)",
+      "gh search issues --repo documenso/documenso \"version=signed\" --include-prs (20 results, none about downloading signed before completion)",
+      "gh search issues --repo documenso/documenso \"download original before completion\" --include-prs (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix: the behavior is intentional and unchanged. git log 3cf2963cd0..origin/main -- apps/remix/server/api/files/ apps/remix/server/api/download/ is empty, so the download path is byte-identical on main as of 688ef2fd (2026-08-15). The two bound doc pages are also unchanged on main: first-api-call.mdx line 31 still reads 'Retrieve the signed PDF until all recipients have completed signing' and common-workflows.mdx lines 964-968 still carry the 'Attempting to download before completion returns the original document without signatures' callout. The only commits touching those doc files since the tag (26f0c4c5 'chore: deprecate endpoints (#3022)', 7f85388e 'fix: increase global API rate limits to 1000/min (#3081)') did not touch these sentences."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the 8 itemized Documenso findings. The researcher's list covers field update-many, radio/checkbox option resets, PENDING recipient mutation, coordinate stringification, the error envelope, async rejection, and two web UI findings; none of them is the download endpoint."
+  },
+  "notes": "The two doc pages do not actually conflict, which is where the scenario went wrong. first-api-call.mdx says the API cannot retrieve THE SIGNED PDF before completion, which is true: no signed PDF exists yet, because sealing is what produces it. common-workflows.mdx says what the endpoint returns instead, which is the original. The scenario's step 8 note converts 'cannot retrieve the signed PDF' into the much stronger and unpromised 'no PDF comes back at all', then asserts it against the same request step 7 asserts the opposite of. The right corpus action is a conflictResolution on this dispute in favor of common-workflows.md and dropping the fc-api-cannot-retrieve-signed-pdf-before-completion milestone's falsifiable form, not a bug report.\n\nCode confirmation (read, not inferred), tested worktree v2.16.0: apps/remix/server/api/download/download.ts lines 55-128 route version signed/original to handleEnvelopeItemFileRequest, and apps/remix/server/api/files/files.helpers.ts line 112 does `const documentDataToUse = version === 'signed' ? documentData.data : documentData.initialData;`. Before completion documentData.data is still the uploaded original: packages/lib/jobs/definitions/internal/seal-document.handler.ts lines 277-300 create a NEW documentData row for the sealed PDF and repoint envelopeItem.documentDataId at it inside the completion transaction. That is why steps 6 and 7 returned identical bytes. Blame on files.helpers.ts:112 is d05bfa9fe (David Nguyen, 2025-11-07); the surrounding function signature was reshaped by 8c0e029b1 (Ephraim Duncan, 2026-05-05). Both predate the tested tag and neither is a defect.\n\nOne genuine, minor observation for a maintainer, not the cause of this failure: on the version=signed path handleStaticFileRequest still sets Content-Disposition to `<title>_signed.pdf` (files.helpers.ts lines 144-150) even when the served bytes are the unsigned original. A caller who trusts the filename rather than checking envelope.status can persist an unsigned PDF under a _signed name. The docs warn about the substitution, so this is a naming wart rather than a contract break; a 200 with the original named `_signed.pdf` and no distinguishing header is the only part of this behavior a doc reader could be surprised by."
+}

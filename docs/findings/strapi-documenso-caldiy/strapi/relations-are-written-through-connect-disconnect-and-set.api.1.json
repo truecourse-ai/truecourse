@@ -1,0 +1,164 @@
+{
+  "repo": "strapi",
+  "scenarioId": "relations-are-written-through-connect-disconnect-and-set.api.1",
+  "flowId": "relations-are-written-through-connect-disconnect-and-set",
+  "failingStep": 21,
+  "whatFailed": "update_article accepted a to-many relation object carrying both `set` and `connect`, a combination the docs and the tool's own field description call mutually exclusive, and answered with a normal success result instead of an input validation error, while the `connect` operation was silently discarded before it reached the database.",
+  "docClaim": {
+    "quote": "| `set` | Replace all existing relations with the provided array. Pass `null` to clear all relations. Mutually exclusive with `connect`/`disconnect`. |",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/strapi-mcp-server.md (line 306; upstream source lives in the separate strapi/documentation repo)",
+    "section": "MCP server > Usage > Content management through prompts > Relations (to-many relation keys table)"
+  },
+  "observed": "Step 21 sent tools/call update_article with data.categories = { set: [cat1], connect: [cat2] }. The server answered HTTP 200 with an SSE tool result, no isError, updatedAt advanced from 2026-08-14T15:19:01.523Z to .573Z, so the write was executed rather than refused. The scenario aborted at this step, so the run has no read-back of the resulting relation set; the code path (see rootCause) discards `connect` whenever `set` is present, so only cat1 is written. Nothing was logged: server.stderr.txt is empty and server.stdout.txt shows only `POST /mcp ... 200`.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "An MCP client (in practice an LLM) that emits the forbidden combination gets a success confirmation with one of its two requested relation writes silently dropped: no error, no warning, no trace in the reply. The one place the rule could be enforced cheaply, the strict zod tool schema, states the rule in prose and does not check it.",
+  "rootCause": {
+    "file": "packages/core/content-manager/server/src/mcp/schemas/data-schema.ts",
+    "lines": "235-256",
+    "explanation": "The to-many relation input schema is `z.object({ connect, disconnect, set }).strict()` with all three keys independently `.optional()`. There is no `.refine()`/`.superRefine()` tying them together, so `{ set, connect }` validates. The `set` key's own `.describe()` string (line 253) literally reads 'Mutually exclusive with connect/disconnect', so the rule is documented inside the schema and never enforced by it. Nothing downstream enforces it either: the document service relation transform keeps all three keys (packages/core/core/src/services/document-service/transform/relations/utils/map-relation.ts:75-98), and the database layer then resolves the conflict by preferring `set`: `toAssocs` in packages/core/database/src/entity-manager/index.ts:149-180 returns `{ set: [...] }` and drops `connect` and `disconnect` entirely as soon as `data.set` is truthy. The generated REST routes never expose these keys at all (packages/core/core/src/core-api/routes/validation/attributes.ts:639-649 maps a relation input to a bare array of uuids), so the MCP tool schema is the only boundary where the rule could bite."
+  },
+  "introducedBy": {
+    "commit": "d6f693da85c71a5d875c58617a9f25d7021b492f",
+    "date": "2026-05-27",
+    "pr": "#26371",
+    "title": "feat(*): introduce MCP server",
+    "note": "This commit wrote the unenforced schema (blame of data-schema.ts:235-256 is 100 percent this commit). The silent drop it exposes is much older: `toAssocs`'s `if (data?.set)` short circuit is c1d82b6f9ed29f14a861e3475ee06e1f4a44c44a 'use set format' (2022-09-19, merged 2022-09-30 as PR #14327, Strapi v4). Old engine behavior, new interaction: #26371 is the first surface that lets a caller send `set` and `connect` in one payload and documents them as mutually exclusive."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 26560,
+        "url": "https://github.com/strapi/strapi/pull/26560",
+        "state": "merged",
+        "title": "fix(content-manager): reduce MCP relation output to identity-only shape",
+        "relation": "related",
+        "note": "The only MCP relation issue or PR the searches surfaced. It does not touch input validation; it is the PR that introduced additional defect 1 below."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi --include-prs \"mcp relation\" (1 hit: PR #26560)",
+      "gh search issues --repo strapi/strapi --include-prs \"clear all relations set null\" (0 hits)",
+      "gh search issues --repo strapi/strapi --include-prs \"relation disconnect connect not working update\" (0 hits)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "develop tip acf0ce2034 (fetched 2026-08-15) is only 4 commits ahead of the tested c43e9ee1e2. The single commit touching MCP in that range is 4c2f51a5d2 'fix(content-manager): deduplicate MCP tool names when an api has multiple content types (#27357)' (2026-08-14), which edits mcp/utils.ts tool naming only. data-schema.ts, shape-relations.ts, collection-handlers.ts and database/entity-manager/index.ts are unchanged since the tested build."
+  },
+  "colleagueFinding": {
+    "ref": "strapi #3",
+    "agreement": "refines",
+    "note": "Agrees that two mutually exclusive ops in one call are accepted and one is silently dropped, and agrees the schema gap is data-schema.ts from PR #26371. Refinement: which op is dropped is decided in the 2022-era database layer, not in the MCP code. `toAssocs` (entity-manager/index.ts:162) prefers `set` and throws away `connect` and `disconnect`, so `set` always wins. Second refinement: the docs state the constraint but never promise a particular error, so the scenario's exact expected string ('Input validation error: Invalid arguments for tool update_article') is the test's own choice; the defect is the silent acceptance plus the dropped write, not the wording."
+  },
+  "notes": "The rest of the flow passed and confirms the documented relation semantics do work: connect adds (steps 10 to 11), connect accepts both the bare documentId string and the { documentId } object (steps 12 to 13), disconnect removes in both shapes (steps 14 to 17) and set replaces all (steps 18 to 20). Two further distinct defects are visible in the same evidence and are recorded in additionalDefects below: the update reply always reports to-many relations as empty, and `set: null` is a no-op. Only the first failing step is recorded by the runner, so the run aborted at step 21 and never executed this scenario's last two steps (the `set: null` write and its read-back); the sibling run 2026-08-14T15-15-28Z_32215874 of the same scenario did execute them and is cited below.",
+  "additionalDefects": [
+    {
+      "ref": "additional defect 1",
+      "step": "visible in the failing run at steps 10, 12, 14, 16, 18, 19 and 21 (every update_article reply)",
+      "whatFailed": "Every update_article (and create_article) reply reports the to-many `categories` relation as an empty array, no matter what the document actually holds; the write itself is applied correctly.",
+      "docClaim": {
+        "quote": "| `connect` | Add relations. ... | `disconnect` | Remove relations. ... | `set` | Replace all existing relations with the provided array. ...",
+        "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/strapi-mcp-server.md (lines 300-306)",
+        "section": "MCP server > Usage > Content management through prompts > Relations"
+      },
+      "observed": "Step 14 disconnected cat1 and the reply said \"categories\":[] , yet the read-back at step 15 showed the surviving cat2. Step 19 set [cat2] and the reply said \"categories\":[] , yet the read-back at step 20 showed cat2. Same in steps 10, 12, 16, 18 and 21. get_article, by contrast, returns the truthful identity-only array [{documentId, locale}]. The registered output schema types the field as an array of identity objects, so the reply is schema-valid and simply false.",
+      "verdict": "real-defect",
+      "confidence": "high",
+      "impact": "Wrong confirmation. An agent that trusts the write reply concludes the document has no categories and can 'repair' it by re-connecting, or report to the user that a relation write produced an empty field. This is the reply an LLM sees immediately after its own write, so it is the reply it is most likely to act on.",
+      "rootCause": {
+        "file": "packages/core/content-manager/server/src/mcp/sanitizers/shape-relations.ts + packages/core/content-manager/server/src/mcp/handlers/collection-handlers.ts",
+        "lines": "shape-relations.ts:73-98 and collection-handlers.ts:317-325 (also 240-251, 428-441)",
+        "explanation": "The MCP collection update handler calls `documentManager.update(...)` without a `populate` option (the populate it builds at lines 280-282 is used only for the pre-read `findOne`). `documentManager.update` then falls back to `buildDeepPopulate(uid)` (services/document-manager.ts:100 and services/utils/populate.ts:441-455), which is `populateDeep(Infinity).countRelations()`, so every to-many relation comes back as `{ count: N }`, the shape the admin panel wants. `reduceToIdentity` (shape-relations.ts:79-85) then maps any non-array value, `{ count: N }` included, to `[]` under a comment calling it 'defensive'. Net effect: 1 related document is rendered as zero. PR #26560 removed `.countRelations()` from the list and get handlers, which build their own populate, but the create, update, publish, unpublish and discard_draft handlers take the document-manager default and were left on the count shape. Single types are unaffected: their write handler passes an explicit populate (mcp/handlers/single-type-handlers.ts:116-118)."
+      },
+      "introducedBy": {
+        "commit": "00da31ed44b3477c61b3aa70d8eb169722e6b028",
+        "date": "2026-06-19",
+        "pr": "#26560",
+        "title": "fix(content-manager): reduce MCP relation output to identity-only shape",
+        "note": "Before this commit the update reply carried `categories: {count: 1}`, odd but truthful. This commit added `reduceToIdentity`'s non-array to `[]` coercion and dropped `.countRelations()` only from the two handlers that build their own populate. Its api tests (tests/api/core/mcp/mcp-content-manager-shaping.test.api.ts) cover only the get and list tools, which is why the write replies were missed."
+      },
+      "upstream": {
+        "issues": [],
+        "prs": [
+          {
+            "number": 26560,
+            "url": "https://github.com/strapi/strapi/pull/26560",
+            "state": "merged",
+            "title": "fix(content-manager): reduce MCP relation output to identity-only shape",
+            "relation": "exact",
+            "note": "The PR that introduced the misreport. No follow-up issue or PR found."
+          }
+        ],
+        "queries": [
+          "same three searches as the primary defect"
+        ]
+      },
+      "fixedAfter": {
+        "status": "no",
+        "by": null,
+        "date": null,
+        "inTag": null,
+        "note": "shape-relations.ts and collection-handlers.ts are untouched between c43e9ee1e2 and develop tip acf0ce2034 (2026-08-15)."
+      },
+      "colleagueFinding": {
+        "ref": "strapi #5",
+        "agreement": "refines",
+        "note": "Agrees with the symptom and with the blame on PR #26560. Refines the mechanism: it is not that the update handler forgets to populate, it is that the document-manager default populate is count-shaped and the new identity shaper turns `{count: N}` into `[]`. Also broader than the researcher's write-up says: the same path is used by create, publish, unpublish and discard_draft on collection types, not only update."
+      },
+      "notes": "The minimal upstream fix is to pass `relationsAsIdentity`-style populate (or any non-count populate) from the MCP write handlers, or to make `reduceToIdentity` refuse to translate `{count: N}` into `[]`."
+    },
+    {
+      "ref": "additional defect 2",
+      "step": "not reached in the reviewed run (aborted at step 21); executed and failed as step 22 in the sibling run 2026-08-14T15-15-28Z_32215874 of the same scenario",
+      "whatFailed": "`categories: { set: null }`, documented as 'clear all relations', returns a success result and changes nothing.",
+      "docClaim": {
+        "quote": "| `set` | Replace all existing relations with the provided array. Pass `null` to clear all relations. Mutually exclusive with `connect`/`disconnect`. |",
+        "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/strapi-mcp-server.md (line 306)",
+        "section": "MCP server > Usage > Content management through prompts > Relations"
+      },
+      "observed": "In run 2026-08-14T15-15-28Z_32215874, step 21 sent update_article with data.categories = { set: null }: HTTP 200, no isError, updatedAt advanced from 15:15:31.635Z to .682Z. The read-back at step 22 still returned categories: [{documentId: dima4a0q16kvqd5l56t6hnza, locale: en}]. The relation was never cleared. The reviewed run 2026-08-14T15-18-58Z_4e4c9455 never got there because it aborted on the mutual-exclusivity step, so this defect is NOT observable in the transcript named in this brief.",
+      "verdict": "real-defect",
+      "confidence": "high",
+      "impact": "Silent no-op on a destructive intent. A caller that clears a relation the documented way gets a 200 and a bumped updatedAt, and the relation survives. The identity-only reply also shows `categories: []` (additional defect 1), so the confirmation actively agrees with the caller's wrong belief that the field is now empty.",
+      "rootCause": {
+        "file": "packages/core/database/src/entity-manager/index.ts",
+        "lines": "149-180 (and the consumer at 1195-1206)",
+        "explanation": "`toAssocs` tests `if (data?.set)` by truthiness at line 162. `{ set: null }` fails that test, so it falls through to the partial-update branch and becomes `{ options, connect: [], disconnect: [] }`; the `set` key is gone. In `updateRelations` (line 1195) the clear-everything branch is `if (isNull(cleanRelationData.set)) deleteRelations({ relIdsToDelete: 'all' })`, and line 1198 computes `isPartialUpdate = !has('set', cleanRelationData)`. Because `toAssocs` already deleted the key, the update is treated as a partial one with an empty connect and an empty disconnect: nothing is added, nothing is deleted. The null intent is preserved on the other route through the same function, line 158, where a relation value that is itself null yields `{ set: null }`, so `categories: null` does clear while `categories: { set: null }` does not. The MCP layer passes the payload through untouched: map-relation.ts:75 sends `{set: null}` to the default visitor, which returns it unchanged."
+      },
+      "introducedBy": {
+        "commit": "c1d82b6f9ed29f14a861e3475ee06e1f4a44c44a",
+        "date": "2022-09-19",
+        "pr": "#14327",
+        "title": "use set format (merged 2022-09-30 in 'add first base for reordering')",
+        "note": "Old engine bug, new promise. Any document-service caller passing `{ set: null }` has hit this since Strapi v4. What makes it a user-visible defect here is PR #26371 (d6f693da85c, 2026-05-27), which added the MCP to-many schema whose `set` key accepts `z.null()` and describes it as 'null clears all', and the published MCP doc that repeats it."
+      },
+      "upstream": {
+        "issues": [],
+        "prs": [],
+        "queries": [
+          "gh search issues --repo strapi/strapi --include-prs \"clear all relations set null\" (0 hits)",
+          "gh search issues --repo strapi/strapi --include-prs \"relation disconnect connect not working update\" (0 hits)",
+          "gh search issues --repo strapi/strapi --include-prs \"mcp relation\" (only PR #26560)"
+        ]
+      },
+      "fixedAfter": {
+        "status": "no",
+        "by": null,
+        "date": null,
+        "inTag": null,
+        "note": "packages/core/database/src/entity-manager/index.ts is unchanged between c43e9ee1e2 and develop tip acf0ce2034 (2026-08-15)."
+      },
+      "colleagueFinding": {
+        "ref": "strapi #2",
+        "agreement": "refines",
+        "note": "Agrees the behavior is a silent no-op behind a success. Two refinements. First, the blame is not data-schema.ts / PR #26371: the schema correctly accepts null and the drop happens in `toAssocs` in the database package, unchanged since 2022 (PR #14327), so the fix belongs there and also repairs the plain document-service API. Second, the evidence is not in the transcript this brief points at: that run aborted on the mutual-exclusivity step before reaching `set: null`. The proof is the sibling run 2026-08-14T15-15-28Z_32215874, steps 21 and 22."
+      },
+      "notes": "A one-line fix, `if (data?.set !== undefined)` or `if ('set' in data)` instead of `if (data?.set)`, restores the documented behavior, but it must be regression-tested: the truthiness check has been load-bearing since v4 and `set: []` (already truthy) is the current way to clear."
+    }
+  ]
+}

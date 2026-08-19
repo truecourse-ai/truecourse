@@ -1,0 +1,99 @@
+{
+  "id": "C10",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/web/server/lib/%5Buser%5D/%5Btype%5D/getServerSideProps.ts#L114-L166",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/web/server/lib/%5Buser%5D/%5Btype%5D/getServerSideProps.ts#L114-L166",
+    "howDecided": "git log 038381aeca..origin/main over apps/web/server/lib/[user]/[type]/getServerSideProps.ts, apps/web/server/lib/[user]/getServerSideProps.ts and packages/features/eventtypes/lib/getPublicEvent.ts returns nothing, so all three are byte-identical to the tested tree. I re-read the file at origin/main: getDynamicGroupPageProps still starts at line 114, still calls userRepo.findUsersByUsername at 136, still returns notFound only on the empty-users branch (145) and the missing-event branch (164), and grep for 'allowDynamicBooking' over the whole file at origin/main returns ZERO hits, so the opt-out flag is still never inspected on the page path. The stale contract comment is still there verbatim at lines 312-313 ('Booker page fetches a tiny bit of data server side, to determine early whether the page should show an away state or dynamic booking not allowed'), and the file is still 319 lines, so every cited line number is current."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 28688,
+        "url": "https://github.com/calcom/cal.diy/pull/28688",
+        "state": "open",
+        "title": "fix: preserve array query params in redirect URL serialization",
+        "createdAt": "2026-03-31",
+        "relation": "related",
+        "note": "Open, base main, touches exactly one file: apps/web/server/lib/[user]/getServerSideProps.ts, the sibling redirect the review flagged as also missing the allowDynamicBooking check. It fixes query-param serialization on the dynamic-group redirect, not the opt-out gate, so it neither fixes nor conflicts with this finding, but a maintainer looking at this file will see it."
+      },
+      {
+        "number": 28734,
+        "url": "https://github.com/calcom/cal.diy/pull/28734",
+        "state": "open",
+        "title": "fix: preserve array query parameters in redirect logic",
+        "createdAt": "2026-04-04",
+        "relation": "related",
+        "note": "Second open community PR on the same single file with the same intent as #28688. Same relation: adjacent, not overlapping."
+      },
+      {
+        "number": 28789,
+        "url": "https://github.com/calcom/cal.diy/pull/28789",
+        "state": "closed",
+        "title": "fix: preserve array query parameters during dynamic group redirect",
+        "createdAt": "2026-04-08",
+        "relation": "related",
+        "note": "Third attempt at the same query-param problem, closed unmerged. Shows the dynamic-group redirect path has active but unmerged community attention."
+      },
+      {
+        "number": 29273,
+        "url": "https://github.com/calcom/cal.diy/pull/29273",
+        "state": "closed",
+        "title": "fix(web): preserve repeated query params in redirects",
+        "createdAt": "2026-05-05",
+        "relation": "related",
+        "note": "Fourth attempt, closed unmerged."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#9060",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2023-05-30. Cited in FINDINGS-INDEX as calcom/cal.com#9060; calcom/cal.com now redirects to calcom/cal.diy so the number resolves there. Still the toggle-restoration issue, not the booker-facing gate."
+      },
+      {
+        "ref": "calcom/cal.diy#3755",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2022-08-25."
+      },
+      {
+        "ref": "calcom/cal.diy#10053",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2023-07-11T11:31:56Z",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. The PR the review blames for removing the page-level gate."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"allowDynamicBooking\" --include-prs --limit 30  (23 hits, none about the missing booker-facing gate; the closest are settings-toggle latency reports #28283/#28330 and Booker-atom work #25481, all unrelated to whether the public group page refuses the link)",
+      "gh search issues --owner calcom \"dynamic group\" --include-prs --limit 30 --updated \">=2026-06-01\"  (5 hits: #28688, #28734, #28789, #29273 all about preserving array query params on the dynamic-group redirect, plus #26026 about timezone slot refresh. No report of the opt-out being ignored.)"
+    ]
+  },
+  "reevaluation": "The finding stands exactly as written. All three culprit files are byte-identical to the tested tree at today's head, and the decisive check is unambiguous: 'allowDynamicBooking' does not appear anywhere in apps/web/server/lib/[user]/[type]/getServerSideProps.ts on main, so the documented opt-in setting still has no effect on what the public group page renders, while the stale comment at lines 312-313 still claims the page determines 'dynamic booking not allowed' server side. Nobody has reported it: two searches covering allowDynamicBooking and dynamic-group activity since 2026-06-01 surfaced only four community PRs about query-param serialization on the sibling redirect file, none of which touches the gate. The review's cited items are all unchanged. The one caveat that survives and must travel with the filing is the review's own: the scenario asserts the literal string '404', but the product's historical intended state was a 200 page reading 'Unavailable / Some of the users in the group have currently disabled dynamic group bookings', so the correct fix would still fail the scenario as encoded. That is a scenario-encoding note, not a reason to doubt the defect; confidence stays medium only because the right REMEDY (notFound vs a booker-facing notice) is a product decision, not because the observation is in doubt.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/bug_report.md requires 'Issue Summary', 'Steps to Reproduce', 'Actual Results', 'Expected Results', 'Technical details' and 'Evidence' ('Providing evidence of your testing with screenshots or/and videos is an amazing way to prove the bug'), and config.yml sets blank_issues_enabled: false, so the bug template must be used. Not a security report: enforcement holds downstream (slots 401, booking POST 400), so nothing bookable leaks.",
+  "confidence": "medium",
+  "notes": "File it as 'the opt-out has no effect on the public page', not as 'the link should 404'. The strongest single line of evidence for a maintainer is that the product still ships the string user_dynamic_booking_disabled in packages/i18n/locales/en/common.json referenced by no source file, next to the stale comment at getServerSideProps.ts:312-313 promising exactly that behavior. Mention that apps/web/server/lib/[user]/getServerSideProps.ts has the same gap and currently has four competing community PRs open or closed on it (#28688, #28734 open; #28789, #29273 closed) for an unrelated query-param bug, so a fix there will collide."
+}

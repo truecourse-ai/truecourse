@@ -1,0 +1,106 @@
+{
+  "id": "C9",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/lib/throttler-guard.ts#L30-L96",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/lib/throttler-guard.ts#L30-L96",
+    "howDecided": "git log 038381aeca..origin/main over apps/api/v2/src/lib/throttler-guard.ts, apps/api/v2/src/modules/redis/redis.service.ts and apps/api/v2/src/app.module.ts returns nothing, and git diff 038381aeca origin/main over the two culprit files is empty, so both files are byte-identical to the tested tree. I re-read the file at origin/main: the defaults are still defaultLimitApiKey = getEnv('RATE_LIMIT_DEFAULT_LIMIT_API_KEY', 120) at line 36 and defaultLimit = getEnv('RATE_LIMIT_DEFAULT_LIMIT', 120) at line 39, matching both documented numbers; incrementRateLimit still lives at lines 179-211, still delegates the block decision to this.storageService.increment (184-190), still sets the X-RateLimit-Limit/Remaining/Reset headers (193-198) and its four logger.verbose blocks are still commented out (200-208), so a running server still emits zero throttler diagnostics. Line numbers are unchanged from the tested commit. I also confirmed with git ls-remote that origin/main is still 176037d0af right now, so nothing landed after the 2026-08-19 fetch. The second permalink range for the same finding is apps/api/v2/src/lib/throttler-guard.ts#L179-L211 at both commits."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#29367",
+        "kind": "issue",
+        "stateAtReview": "open (labelled Stale)",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Still open, still labelled Stale, last updated 2026-07-28, i.e. before the review. Its only comment is the 2026-05-17 volunteer note. Still about packages/lib/rateLimit.ts and the commented-out tRPC middleware, not apps/api/v2's CustomThrottlerGuard, so it still does not cover this finding."
+      },
+      {
+        "ref": "calcom/cal.diy#29381",
+        "kind": "pr",
+        "stateAtReview": "closed unmerged",
+        "stateToday": "closed unmerged",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Last updated 2026-05-18. Never merged, so the CORS + Unkey changes it proposed are not on main and could not have changed this outcome."
+      },
+      {
+        "ref": "calcom/cal.diy#29395",
+        "kind": "pr",
+        "stateAtReview": "closed unmerged",
+        "stateToday": "closed unmerged",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Last updated 2026-06-09. Never merged."
+      },
+      {
+        "ref": "calcom/cal.diy#12306",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Still open, untouched since 2024-01-25. Missing X-RateLimit-* headers on the v1-era API, same symptom family, different code path."
+      },
+      {
+        "ref": "calcom/cal.diy#24963",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. Still the origin of the bound doc section, so the 120/min number is intended and current."
+      },
+      {
+        "ref": "calcom/cal.diy#16824",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged tracking issue behind PR #16882."
+      },
+      {
+        "ref": "calcom/cal.diy#16882",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-10-01T12:01:57Z",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. The PR that introduced CustomThrottlerGuard and the 120/min default."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"rate limit\" --include-prs --limit 40 --updated \">=2026-08-01\"  (5 hits, all unrelated: #29764 Stripe customers, #29930 Google Calendar retryConfig, #29761 duplicate phone fields, #25856 booking-page coupons, #14943 workflowReminder retryCount; nothing about the v2 throttler)",
+      "gh search prs --owner calcom \"throttler\" --limit 30  (30 hits, newest is #29335 'docs: Document endpoint-throttler-decorator.ts', created 2026-05-13, closed unmerged; the newest MERGED throttler work is #22767 'chore: hash rate limit trackers api v2' from 2025-07-28, which the review already accounts for. No throttler PR merged after the tested commit.)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Both culprit files are byte-identical to the tested tree at today's head 176037d0af, which git ls-remote confirms is still origin/main, so nothing has been fixed and no rate-limiting work has merged since. The tracker is also unchanged: the only public rate-limit thread, #29367, is still open, still labelled Stale, last touched 2026-07-28, and still concerns the separate Unkey limiter in packages/lib/rateLimit.ts rather than apps/api/v2's CustomThrottlerGuard, so this is not a duplicate of it. The review's fixedAfter 'no' and its upstream claims are all still accurate. The one thing that has not moved is the review's own open question: it could not isolate whether the guard never runs on the route or whether ThrottlerStorageRedisService.increment never reports isBlocked, and nothing in the source or the tracker settles that. The live re-verify step is what settles it, exactly as the review said: capture X-RateLimit-Limit-Default / X-RateLimit-Remaining-Default on a burst. Absent headers means the guard did not run; headers counting down to 0 with no 429 means the @nestjs/throttler 6.2.1 + @nest-lab/throttler-storage-redis 1.0.0 pair is the culprit. Confidence therefore stays medium: the absence of enforcement is well evidenced (121 requests, all 200, no 429 anywhere in the run), the mechanism is not.",
+  "routeSuggestion": "security disclosure",
+  "policyBasis": "calcom/cal.diy SECURITY.md, 'Please do the following': 'E-mail your findings to security@cal.com.' The 'Out of scope vulnerabilities' list does not exclude a missing rate limit; its nearest entry, 'Any activity that could lead to the disruption of our service (DoS)', excludes ATTACKING their infrastructure, not reporting an absent control, and this report is source-level plus a local reproduction, with no traffic sent to cal.com.",
+  "confidence": "medium",
+  "notes": "A filer must carry the review's own uncertainty into the report: the evidence proves the documented 120/min was not enforced, it does not prove WHICH link failed open, and the report should say so and hand over the two-way header test rather than assert a cause. Do not file this as a duplicate of #29367: that issue is the Unkey limiter and the tRPC middleware, this is apps/api/v2/src/lib/throttler-guard.ts, and conflating them is what let the earlier reports be closed unmerged. Worth including in the same disclosure, because it is what makes the failure invisible to an operator: every logger.verbose in throttler-guard.ts is commented out (lines 200-208 and three earlier blocks), so a self-hoster gets no signal at all. Separately, and NOT part of the security report, the bound doc section is internally incoherent (it promises 'three authentication methods ... each of them has the following rate limits' and then lists one); that is a docs item for calcom/docs and should not be mixed into a security email. Delivery channel: the caldiy POLICY.md written for this round recommends the GitHub private advisory form at https://github.com/calcom/cal.diy/security/advisories/new AND a cc to security@cal.com, because security@cal.com is the commercial company's address and a self-host finding sent there alone may land with a team that does not own the fork; follow that rather than email alone."
+}

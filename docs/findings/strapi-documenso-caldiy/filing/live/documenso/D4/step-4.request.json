@@ -1,0 +1,12 @@
+{
+  "step": 4,
+  "label": "PREP send NONE",
+  "at": "2026-08-19T19:16:10.802Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/distribute",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_nfbbhctvneaaadxv\",\"meta\":{\"distributionMethod\":\"NONE\"}}"
+}

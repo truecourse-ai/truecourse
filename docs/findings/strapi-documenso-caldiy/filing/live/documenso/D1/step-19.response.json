@@ -1,0 +1,33 @@
+{
+  "step": 19,
+  "label": "PASS2 PREP send NONE",
+  "at": "2026-08-19T19:15:07.603Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "276",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "981",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "92b9bf78-d025-4e5b-b83e-a6b2baba8f30"
+  },
+  "body": {
+    "success": true,
+    "id": "envelope_daillesxfetczrhd",
+    "recipients": [
+      {
+        "id": 6,
+        "name": "TCRef Frozen 2",
+        "email": "tcref-frozen2-c373a968c2@documenso.test",
+        "token": "_2ugaf5-q2upXODbI9QlD",
+        "role": "SIGNER",
+        "signingOrder": 1,
+        "signingUrl": "http://localhost:3347/sign/_2ugaf5-q2upXODbI9QlD"
+      }
+    ]
+  }
+}

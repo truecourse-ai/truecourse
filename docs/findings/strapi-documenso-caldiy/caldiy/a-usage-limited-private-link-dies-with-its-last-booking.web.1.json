@@ -1,0 +1,39 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-usage-limited-private-link-dies-with-its-last-booking.web.1",
+  "flowId": "a-usage-limited-private-link-dies-with-its-last-booking",
+  "failingStep": 2,
+  "whatFailed": "After opening the private link /d/ref-private-link-once/private-consult and clicking day 12 of June 2030, the scenario asserted a slot button named \"9:00am\", but that day's first offered slot was 9:30am, so the walk stopped at step 2 and the private-link expiry claims at step 7 were never exercised.",
+  "docClaim": {
+    "quote": "If a private link has  usage limit, it will expire **after the set number of bookings are made using the link**. ... Once expired, the link will: No longer be accessible / Show 404 error page if opened",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/private-links.md",
+    "section": "private-links/what-to-expect (plus private-links/key-features, \"Usage-Based Expiry\"). Neither bound section, nor any other doc page, says anything about which clock times a host offers, so the failing assertion at step 2 is not backed by a doc claim. The scenario yaml itself marks step 2 as a walk step: \"it proves no claim of its own\", and the runner recorded the scenario with blockedPrecondition: true."
+  },
+  "observed": "Step 1 rendered the hashed private link's booking page correctly (Reference Host / Private Consult / 30m, June 2030 grid, day 12 clickable), proving the link was live and unexpired. Step 2 selected 2030-06-12 and the slot column rendered exactly five buttons: 9:30am, 10:00am, 10:30am, 11:00am, 11:30am (screenshot step-2.png, no scroll, empty space below). No page error, no server output (stdout/stderr empty), console only carries the usual markdownToSafeHTML / zustand / react-i18next warnings. The 9:00am slot was absent because earlier in the SAME run the scenario a-seated-event-type-takes-a-second-booker-into-the-same-slot.web.1 created an ACCEPTED booking for the same host at /reference-host/seated-consult, slot=2030-06-12T09:00:00.000Z, booking uid 8wV2ymqoY85KTwkDJPfpuj. From that moment the reference host is busy 09:00-09:30 UTC on 2030-06-12 and every OTHER event type of that host loses its 9:00am slot on that day. The evidence shows exactly that signature: on 2030-06-12 the non-seated event types private-consult, split-name and domain-restricted all start at 9:30am, while seated-consult still shows 9:00am (the seats carve-out only exempts the seated event type from its own booking). The other scenario that booked 2030-06-12T09:00 (a-short-notice-booking-is-the-only-one-that-needs-confirming.web.1 on notice-confirm) left the booking PENDING (\"Reference Host still needs to confirm or reject the booking\"), and pending bookings do not create busy time, so the seated booking is the blocker. Timing agrees: seated finished at 03:50:08 (26.3s run), this scenario read the slots between roughly 03:50:04 and 03:50:21 (36.0s run).",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "No user harm. Cal.diy behaved as designed: a host already booked at 09:00 is not offered at 09:00 on their other event types. The cost is lost coverage: the four private-link milestones (usage-based expiry, expiry after the set number of bookings, the link no longer being accessible, and the 404 page) were never reached, so this run says nothing about whether cal.diy honours them.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues \"private link usage limit\" --owner calcom  (0 results)",
+      "gh search issues \"hashed link expired 404\" --owner calcom  (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable: there is no product defect to fix. in cal.diy: the busy-time code the failure depends on is unchanged since the tested commit (git log 038381aeca..origin/main touches neither packages/features/busyTimes/services/getBusyTimes.ts nor packages/features/bookings/repositories/BookingRepository.ts; only 4 commits landed on main at all). in cal.com: the same file carries the identical seats carve-out (packages/features/busyTimes/services/getBusyTimes.ts:146, \"and this is the seated event, other event types should be blocked\"), so the commercial upstream behaves the same way and there is nothing to port."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Not an edition mismatch: cal.diy ships the private-link usage-limit feature (packages/prisma/schema.prisma:1211-1212, HashedLink.maxUsageCount default 1 and usageCount default 0), so the doc claim is in scope for this fork and only failed to be reached.\n\nWhy the product is right: only ACCEPTED bookings create busy time. BookingRepository.findAllExistingBookingsForEventTypeBetween filters status: { in: [BookingStatus.ACCEPTED] } (packages/features/bookings/repositories/BookingRepository.ts around lines 688-730), and getBusyTimes exempts a seated event type from its own seat bookings only while seats remain AND eventTypeId === eventType.id (packages/features/busyTimes/services/getBusyTimes.ts:130-170). That is exactly the pattern the run shows.\n\nTwo generator problems to fix, both in the scenario rather than the product:\n1. The web/pick-a-time-slot interface takes a literal {time} argument and the generator filled it with a guessed \"9:00am\" instead of picking whatever slot the page actually offers first. Any scenario that hardcodes a clock time on a shared host is one earlier booking away from breaking, and it is also not re-runnable: the seated booking persists in the database, so a second run against the same instance would fail the same way even if run serially.\n2. The run books many scenarios onto ONE seeded host (reference-host) on a small set of shared far-future days (2030-06-12 recurs across at least five web scenarios), and the scenarios run concurrently. Availability is host-global, so any accepted booking silently changes what every other scenario sees. Either give each flow its own host or its own day, or reserve the slot the scenario intends to click.\n\nWhat would settle it beyond doubt: re-run this one scenario alone against a fresh seeded database, or query the slots endpoint for private-consult on 2030-06-12 before and after deleting booking 8wV2ymqoY85KTwkDJPfpuj. Neither was done here because the three-event-type signature (9:00am gone everywhere except the seated event) plus the ACCEPTED-only busy-time filter already explain the observation without any product bug.\n\nSide observation for whoever triages the sibling scenario: a-private-link-books-without-appearing-anywhere-public.web.1 fails the same shape of walk assertion (button \"15\" on 2026-09-15), and there too the page rendered fine, so it is very likely the same class of generated-scenario problem."
+}

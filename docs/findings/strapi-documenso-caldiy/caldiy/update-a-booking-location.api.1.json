@@ -1,0 +1,49 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "update-a-booking-location.api.1",
+  "flowId": "update-a-booking-location",
+  "failingStep": 5,
+  "whatFailed": "The attendeePhone step sent phone \"+19876543210\", which libphonenumber does not recognise as a valid number (NANP area code 987 is unassigned), so PATCH /v2/bookings/{uid}/location returned 400 \"phone must be a valid phone number\" instead of the asserted 200.",
+  "docClaim": {
+    "quote": "UpdateBookingInputAttendeePhoneLocation_2024_08_13: type: object, properties: type: {type: string, example: attendeePhone, description: only allowed value for type is `attendeePhone`}, phone: {type: string, example: '+37120993151'}, required: [type, phone]",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/update-booking-location-for-an-existing-booking.md",
+    "section": "update-booking-location-for-an-existing-booking/openapi (components.schemas.UpdateBookingInputAttendeePhoneLocation_2024_08_13)"
+  },
+  "observed": "Steps 1-4 all succeeded: the booking was created (uid k37a2PMNrLCsKh29BfiQ5F, eventTypeId 115) and address, attendeeAddress and attendeeDefined each returned 200 with data.location echoing the new value. Step 5 returned 400 in 13 ms with {\"error\":{\"code\":\"BadRequestException\",\"details\":{\"errors\":[{\"property\":\"location\",\"constraints\":{\"ValidateUpdateLocation\":\"UpdateBookingInputLocationValidator_2024_08_13 - Validation failed for attendeePhone location: phone must be a valid phone number\"}}]}}}. The scenario stopped there, so the link, phone, string-rejection, integration-enum, empty-body and missing-uid steps were never exercised.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users. The scenario fabricated a phone number that is not dialable; a caller following the documented example (+37120993151) or any real E.164 number gets a 200. The only cost is that one legitimate doc claim (update-location-attendee-phone-type) plus the five later steps in the flow went unverified.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 26874,
+        "url": "https://github.com/calcom/cal.diy/issues/26874",
+        "state": "open",
+        "title": "Bookings \"list\" endpoints to support filtering by phone number",
+        "relation": "related",
+        "note": "Only phone-and-bookings hit in the org; a feature request about filtering, unrelated to location input validation. No issue or PR anywhere in calcom about attendeePhone or phone location validation rejecting input."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"valid phone number location booking\" (0 results)",
+      "gh search issues --owner calcom \"attendeePhone\" (2 results, both unrelated)",
+      "gh search prs --owner calcom \"update booking location phone validation\" (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: nothing to fix, and nothing changed anyway. `git log 038381aeca..origin/main` on packages/platform/types/bookings/2024-08-13/inputs/{location,update-location}.input.ts and apps/api/v2/src/platform/bookings/2024-08-13/services/booking-location.service.ts returns no commits (only 4 commits landed on cal.diy main since the tested build). in cal.com: not verifiable from source; no public issue, PR or changelog entry touches this validation."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5. The researcher's write-up (/Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md) covers out-of-office vs date overrides, zero-length team slots, a dropped 9:10 slot, seated-booking oversell and unauthenticated slot holds; the word 'location' does not appear in it."
+  },
+  "notes": "Verification trail. (a) The validator: packages/platform/types/bookings/2024-08-13/inputs/update-location.input.ts:58-102 resolves location.type through classTypeMap, plainToInstance's it into UpdateBookingInputAttendeePhoneLocation_2024_08_13 (line 31, which extends the base class unchanged) and runs class-validator; the base class at packages/platform/types/bookings/2024-08-13/inputs/location.input.ts:111-119 decorates phone with @IsPhoneNumber(). class-validator 0.14.3 delegates that to libphonenumber-js 1.12.38 (yarn.lock:28692; the repo's .yarn/patches/libphonenumber-js+1.12.38.patch only unsets the CommonJS default export, it does not touch metadata). (b) The number: running libphonenumber-js against the four values, +19876543210 -> isValid() false, country undefined; +441234567890 -> true GB; +37120993151 -> true LV; +12125551234 -> true US. So the rejection is correct, not a validator bug: 987 is not an assigned NANP area code. (c) The code path works: cal.diy's own e2e test apps/api/v2/src/platform/bookings/2024-08-13/controllers/e2e/update-booking-location.e2e-spec.ts:332-359 (\"can update location to type attendeePhone\") posts +37120993151 and asserts 200 with data.location equal to the phone; booking-location.service.ts:178 returns loc.phone for attendeePhone. The scenario would almost certainly have passed with a real number.\n\nFix for the scenario: replace +19876543210 with the documented example +37120993151 (or any valid E.164 number). Note the same scenario's later organizer-phone step already uses +441234567890, which IS valid, so only step 5 is affected.\n\nSecondary, worth reporting to the doc author even though it does not change the verdict: the published OpenAPI under-specifies phone. Both UpdateBookingInputAttendeePhoneLocation_2024_08_13.phone and UpdateBookingInputPhoneLocation_2024_08_13.phone render as bare `type: string` with an example and no `format` or `pattern`, because @IsPhoneNumber() is a class-validator decorator that @nestjs/swagger does not reflect into the schema (@DocsProperty supplies only the example). A client generating a strict client from the spec has no way to know an E.164-valid number is required, and the endpoint description says nothing about it either. Adding `format: phone` / a pattern, or a sentence to the description, would close the gap. That is a docs-generation issue in cal.diy's decorators (which feed cal.com/docs api-reference/v2/openapi.json), not a behavior bug.\n\nNot an edition mismatch: the scenario uses cal-api-version 2024-08-13, which the tested tree does support (packages/platform/constants/api.ts tops out at 2024-09-04), and steps 1-4 got real 200/201 responses, so systemic cause 1 in the brief does not apply here.\n\nEnvironment noise that is NOT the cause: server.stderr.txt is full of `connect ECONNREFUSED ::1:1025` from the mail transport (no SMTP sink in the sandbox, including for the \"Location Changed\" notification the docs mention). Those are logged and swallowed; the successful steps 2-4 returned 200 despite them, and step 5 failed at input validation 13 ms in, before any mail was attempted.\n\nBlame for the validation, informational only since it is not a defect: packages/platform/types/bookings/2024-08-13/inputs/location.input.ts:116 @IsPhoneNumber() traces to a31242cdc53cf1a45c9e83fb54317c6d461e486a, 2025-03-12, \"refactor: v2 booking locations (#19613)\" by Lauris Skraucis. The update-location input file was last touched by 089a39f59f39, 2026-03-17, \"feat: add integration options for API v2 update booking location endpoint (#26363)\"."
+}

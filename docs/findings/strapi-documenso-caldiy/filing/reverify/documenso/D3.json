@@ -1,0 +1,65 @@
+{
+  "id": "D3",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/server-only/recipient/create-envelope-recipients.ts#L62-L97",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/recipient/create-envelope-recipients.ts#L62-L97",
+    "howDecided": "git log 3cf2963cd0..origin/main returns zero commits for packages/lib/server-only/recipient/create-envelope-recipients.ts, and the blob is byte-identical between v2.16.0 and v2.17.0 (58d5e68bd1 at both), so line numbers have not drifted. Read the region at origin/main: the only per-recipient assertion is still the loop at lines 87-92, `for (const recipient of recipientsToCreate) { assertCompatibleRecipientRole({ signatureLevel: envelope.signatureLevel, role: recipient.role }); }`, which keys on signatureLevel alone. Nothing between lines 62 and 97 reads envelope.documentMeta.signingOrder, and no PARALLEL or SEQUENTIAL comparison appears anywhere in the file. The bound docs are also byte-identical to the tested revision: apps/docs/content/docs/concepts/recipient-roles.mdx and apps/docs/content/docs/users/documents/add-recipients.mdx both hash the same at v2.16.0 and v2.17.0, so the restriction is still published verbatim at the same line numbers the review cited."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#2973",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: open, created 2026-06-10, last updated 2026-06-13, no activity since. Still argues for dropping the restriction (make the assistant always act first) rather than enforcing it, so it is the strategic fork a maintainer faces, not a report of this bug."
+      },
+      {
+        "ref": "documenso/documenso#2995",
+        "kind": "pr",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "Unchanged: closed unmerged 2026-06-22 (merged=false), base main, head fix/assistant-always-first, 6 files +82/-38. Never landed, so the docs still forbid the combination while the API still allows it."
+      },
+      {
+        "ref": "documenso/documenso#1588",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-02-01T03:31:18Z",
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "Unchanged. Origin of the role and of the UI-only enforcement."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"assistant parallel signing\" --limit 25 (0 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"assistant\" --limit 30 (24 results; the only role-relevant ones are the already-cited #2973, #2995, #1588 plus merged plumbing PRs #2753, #1854. Nothing reports that the API accepts ASSISTANT on a PARALLEL envelope.)"
+    ]
+  },
+  "reevaluation": "The finding stands, unchanged in every respect. The culprit file is byte-identical between the tested tag and v2.17.0, the two doc pages that state the restriction are byte-identical too, and both cited upstream items are in exactly the state the review recorded (#2973 open and untouched since 2026-06-13, #2995 closed unmerged). Nothing among the 135 issues and PRs opened between 2026-08-01 and 2026-08-19 touches the assistant role or signing order, and a direct 'assistant' search over the whole tracker surfaces no report of the API accepting the combination. The review's fixedAfter claim ('live on main as of 2026-08-15') is still true one release later. No change to verdict, confidence or scope.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: 'The most useful contribution is a detailed issue. Treat it like a spec. The more detail, the better: the problem you're trying to solve, and who it affects; how you expect the feature or change to behave; edge cases, constraints...'. Nothing in SECURITY.md applies; this is an unenforced product rule, not a vulnerability.",
+  "confidence": "high",
+  "notes": "Frame the issue as 'no refusal at all, the recipient is created', not as 'wrong status code': no doc page publishes a status for this refusal, and the scenario's expected 400 was the test's inference. Cross-link #2973 in the body and say plainly that there are two acceptable resolutions, enforce the documented rule server-side or change the docs and the workflow the way #2973 asks, because a maintainer reading this cold will otherwise think the two conflict. Two extra facts worth including because they raise the stakes beyond a contract violation: with signingOrder PARALLEL, send-document.ts notifies everyone at once so signers can act before the assistant, and getRecipientsForAssistant and getFieldsForToken filter on `signingOrder: { gte: assistant.signingOrder ?? 0 }`, which is NULL-false in SQL for the null signingOrder an API-created parallel recipient carries, so the assistant's own view comes back empty. Also state that a complete fix must cover update-envelope-recipients and the envelope-meta path, since flipping an envelope back to PARALLEL while an ASSISTANT exists reaches the same illegal state from the other side."
+}

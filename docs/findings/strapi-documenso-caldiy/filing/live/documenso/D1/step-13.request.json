@@ -1,0 +1,12 @@
+{
+  "step": 13,
+  "label": "EXTRA field/update-many on the PENDING envelope",
+  "at": "2026-08-19T19:15:07.379Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/update-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_zxidtommuuvcurfz\",\"data\":[{\"id\":4,\"type\":\"SIGNATURE\",\"positionY\":30}]}"
+}

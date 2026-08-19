@@ -1,0 +1,101 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "guest-limits-are-enforced.api.1",
+  "flowId": "guest-limits-are-enforced",
+  "failingStep": 1,
+  "whatFailed": "The scenario's setup step, POST /v2/bookings sent with the documented header cal-api-version: 2026-02-25, returned 400 instead of 201 because Cal.diy has no 2026-02-25 booking API version and silently validated the request against the 2024-04-15 input shape, so the scenario never reached any of the three guest-limit assertions it exists to prove.",
+  "docClaim": {
+    "quote": "Add one or more guests to an existing booking. Maximum 10 guests per request, with a limit of 30 total guests per booking. **Rate Limiting:** This endpoint is rate limited to 5 requests per minute to prevent abuse.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings-guests/add-guests-to-an-existing-booking.md",
+    "section": "add-guests-to-an-existing-booking (lines 7-10; identical text repeated in the embedded OpenAPI description at lines 50-54)"
+  },
+  "observed": "Step 1 POST /v2/bookings with headers cal-api-version: 2026-02-25 and a body of {start, attendee:{name,timeZone,email}, eventTypeId} got HTTP 400 in 18 ms: {\"status\":\"error\",\"path\":\"/v2/bookings\",\"error\":{\"code\":\"BadRequestException\",\"message\":\"Bad Request Exception\",\"details\":{\"errors\":[timeZone must be a valid IANA time-zone, language must be a string, metadata must be an object]}}}. The echoed validation `target` is {\"start\":\"2051-01-14T09:00:00.000Z\",\"eventTypeId\":100}: the whole `attendee` object had already been stripped by the whitelisting ValidationPipe, which is the fingerprint of the 2024-04-15 DTO being used. Steps 2 to 7, which carry the correct and supported cal-api-version: 2024-08-13, never ran.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "None for the product's guest limits, which are all present and correct in Cal.diy; the harm is to anyone following cal.com's public API reference against a self-hosted Cal.diy: the documented create-booking version does not exist, the request is silently downgraded two API generations rather than rejected as an unknown version, and the resulting 400 blames three fields the caller was never told to send.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "The NestJS custom version extractor reads the cal-api-version header and returns it only if it is a member of API_VERSIONS; otherwise it returns VERSION_2024_04_15. packages/platform/constants/api.ts:56-68 in the tested tree defines exactly five versions, 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13 and 2024-09-04, so 2026-02-25 is unknown and is silently downgraded rather than refused. The request is then routed to BookingsController_2024_04_15 and validated against CreateBookingInput_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts:91-146), which declares required top-level timeZone (@IsTimeZone, line 122-124), language (@IsString, 135-137) and metadata (@IsObject, 144-146) and has no `attendee` property at all. bootstrap.ts:59-60 configures ValidationPipe with whitelist: true, so `attendee` is stripped before validation, which is why the error target contains only start and eventTypeId. There is no 2026-02-25 code anywhere in the tested tree: grep for '2026-02-25' and '2026_02_25' across apps/api/v2/src and packages/platform returns nothing, and apps/api/v2/src/platform/bookings/ contains only 2024-04-15, 2024-08-13 and shared. The documented endpoint is Cal.com's BookingsController_2026_02_25_createBooking (cal.com-docs .../bookings/create-a-booking.md:82-91, 'Must be set to 2026-02-25'), which Cal.diy does not ship. This is systemic cause 1 from the brief."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version",
+    "note": "Nothing was 'introduced' in the defect sense; the mismatch is that the open-source version list stopped advancing. git blame on packages/platform/constants/api.ts:56-68 shows the last entry, VERSION_2024_09_04, added by this commit; the list itself is 0eabe7f28bc 'refactor: v2 bookings (#16200)', 2024-09-23. The silent-downgrade extractor at bootstrap.ts:31-41 was last moved by 9ad8aa981ac 'chore: deploy api v2 on vercel (#26735)', 2026-01-13, and traces back to 0a15483c461 (apps/api/v2/src/app.ts, 2024-03-20). The newer half of the interaction is the docs: cal.com's published reference now mandates 2026-02-25 for POST /v2/bookings, a version that only exists in the closed commercial tree."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "exact",
+        "note": "The established public trace for systemic cause 1: names the drift between the versions the docs advertise (2026-02-25) and the versions the open-source tree serves (tops out at 2024-08-13/2024-09-04). Opened 2026-04-06, still open."
+      },
+      {
+        "number": 29785,
+        "url": "https://github.com/calcom/cal.diy/issues/29785",
+        "state": "open",
+        "title": "Improve Maintainability of cal-api-version",
+        "relation": "related",
+        "note": "Opened 2026-07-16, still open. Asks for the version machinery to stop being hand-maintained; the silent downgrade to 2024-04-15 is the concrete failure mode."
+      },
+      {
+        "number": 23136,
+        "url": "https://github.com/calcom/cal.diy/issues/23136",
+        "state": "open",
+        "title": "Kept getting bad request exception when making curl calls",
+        "relation": "related",
+        "note": "Same signature from a real user: an unrecognized cal-api-version (they sent 'v2') on POST /v2/bookings yields exactly this 400 naming timeZone and language, with the attendee object stripped from the echoed target. Open since 2025-08-16, unanswered, which is direct evidence that the silent downgrade is a usability trap and not just a test artifact."
+      },
+      {
+        "number": 20965,
+        "url": "https://github.com/calcom/cal.diy/issues/20965",
+        "state": "closed",
+        "title": "Error by Create a booking",
+        "relation": "related",
+        "note": "Older instance of the same 400 (2025-04-25) from a caller whose header/casing was wrong; closed without a code change."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28561,
+        "url": "https://github.com/calcom/cal.diy/pull/28561",
+        "state": "closed",
+        "title": "fix(bookings): map cal-api-version 2026-02-25 to latest supported version",
+        "relation": "exact",
+        "note": "The proposed fix for precisely this step: map the documented 2026-02-25 onto a version the tree has. Opened 2026-03-24, closed unmerged. So the downgrade behavior is known and was declined, not overlooked."
+      },
+      {
+        "number": 27494,
+        "url": "https://github.com/calcom/cal.diy/pull/27494",
+        "state": "merged",
+        "title": "fix: add guest limits and rate limiting to booking-guests endpoint",
+        "relation": "related",
+        "note": "Merged 2026-02-02 as d29c8a4fa2e. This is the PR that put all three limits the scenario asserts into the open-source tree: @ArrayMaxSize(10), the 30-attendee service check and @Throttle({limit:5, ttl:60000}). Relevant because it shows the bound doc claim IS implemented in Cal.diy, so the failure is purely the setup step."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"add guests to booking limit\" (0 results)",
+      "gh search issues --owner calcom \"2026-02-25 api version\" (0 results)",
+      "gh search issues \"timeZone must be a valid IANA time-zone\" (hit calcom/cal.diy#23136 and #20965)",
+      "direct lookups, not searches: gh api repos/calcom/cal.com/issues/{28762,28561,29785,28512,27494}; note calcom/cal.com redirects to calcom/cal.diy, they are the same repo"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main between the tested commit 038381aeca (2026-07-31) and the fetch head 176037d0af (2026-08-08), and `git log 038381aeca..origin/main` on packages/platform/constants/api.ts, apps/api/v2/src/bootstrap.ts, the booking-guests controller and service, and packages/platform/types/bookings/2024-08-13/inputs/add-guests.input.ts is empty. API_VERSIONS still tops out at 2024-09-04 and the extractor still downgrades silently. PR #28561, which proposed the mapping, was closed unmerged on 2026-03-24. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com clone is a byte-identical mirror of cal.diy main; the public docs continue to document 2026-02-25 as the required version for POST /v2/bookings, which is the only public signal that the commercial product serves it."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (OOO vs date overrides, zero-length team slots, the dropped 9:10 override slot, seated-booking oversell, unauthenticated hold mutation). None touches the guests endpoint or the cal-api-version header."
+  },
+  "notes": "(a) Would the scenario also fail on a version Cal.diy has? Almost certainly not. Steps 2 through 7 already send cal-api-version: 2024-08-13, which Cal.diy supports; only the setup step used 2026-02-25. CreateBookingInput_2024_08_13 (packages/platform/types/bookings/2024-08-13/inputs/create-booking.input.ts:222-267) accepts exactly the body the scenario sent, required `start` and nested `attendee` plus optional `eventTypeId`, and the 2024-08-13 createBooking handler has no @HttpCode override so NestJS answers 201. Reading the code, each remaining assertion then holds: step 2 (11 guests) trips @ArrayMaxSize(10, 'Cannot add more than 10 guests at a time') in add-guests.input.ts:70-71 for a 400; steps 3 to 5 (10+10+9) stay at or under the ceiling because guests are written as real Attendee rows by updateBookingAttendees in packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts:72, and the controller carries @HttpCode(HttpStatus.OK) so they answer 200; step 6 (the 31st attendee) trips the MAX_TOTAL_GUESTS_PER_BOOKING check in booking-guests.service.ts:10 and 32-38 for a 400; step 7 trips @Throttle({limit:5, ttl:60000, name:'booking_guests_add'}) on booking-guests.controller.ts:39-44 for a 429. The throttler needs Redis and Redis was up in this run (server.stdout.txt: 'IoRedis connected!' five times at 10:50:34.830), so the 429 would have been real. Re-running this scenario with 2024-08-13 on step 1 is the cheap way to confirm all three milestones.\n\n(b) Cal.diy-side problems with the bound claim itself, independent of the version header. Two, both worth a doc fix rather than a code fix:\n  1. The published page contradicts itself on the per-request ceiling. The prose and the operation description say 'Maximum 10 guests per request' (lines 7 and 50-51), but the embedded OpenAPI schema for AddGuestsInput_2024_08_13.guests says 'Maximum 100 guests per request' (lines 117-119) and carries minItems: 1 with no maxItems at all. Cal.diy enforces 10, and Cal.diy's own committed docs/api-reference/v2/openapi.json says 10, so a client generated from cal.com's published spec would happily send 11 to 100 guests and be refused. Since the published spec has minItems but no maxItems while the tested tree has neither, the published block is not merely stale, it is a different build; that difference is commercial-side and not verifiable from source.\n  2. The 30 limit is documented as 'a limit of 30 total guests per booking' but the code compares booking.attendees.length + guests.length against 30 (booking-guests.service.ts:28-38), and the booker is an Attendee row. So a fresh one-attendee booking accepts only 29 guests, not 30, and the refusal message says 'This booking already has N attendees' while the doc says guests. The scenario happens to use the code's reading (its step 5 note says 'thirty attendees exactly, its booker plus twenty-nine guests'), so this off-by-one would not have failed the run, but the doc sentence is wrong by one for every booking.\n\nThe doc's other promise on this page is honored: '<Note>The cal-api-version header is required for this endpoint. Without it, the request will fail with a 404 error.' A missing header falls back to 2024-04-15 and the guests controller is registered only under VERSION_2024_08_13_VALUE, so 404 is what a caller gets.\n\nFor the guard engine: the setup step of this scenario picked its header from a different doc page (create-a-booking.md) than the one the flow binds to, and that page's version does not exist in the product under test. A scenario whose non-milestone setup step depends on an unsupported API version burns the whole flow; using the lowest version that satisfies the setup contract, or reusing the bound endpoint's own version, would have salvaged all three milestones here."
+}

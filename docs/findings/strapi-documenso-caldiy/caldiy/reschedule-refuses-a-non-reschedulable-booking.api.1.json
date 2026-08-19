@@ -1,0 +1,50 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "reschedule-refuses-a-non-reschedulable-booking.api.1",
+  "flowId": "reschedule-refuses-a-non-reschedulable-booking",
+  "failingStep": 9,
+  "whatFailed": "POST /v2/bookings/{uid}/reschedule on a booking the host had just declined (status rejected) answered 404 \"Could not find original booking\" instead of the documented 400, even though the same API had returned that exact booking 45 ms earlier.",
+  "docClaim": {
+    "quote": "Non-reschedulable booking statuses (endpoint responds with `400 Bad Request`): - `cancelled` - the booking has already been cancelled. If it was cancelled because it was previously rescheduled, the error message includes the UID of the booking it was rescheduled to. - `rejected` - the host declined the original confirmation-required request. Create a new booking instead. - `awaiting_host` - an instant meeting that is live and waiting for a host to join. Create a new booking instead.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/reschedule-a-booking.md",
+    "section": "reschedule-a-booking (page body and the identical OpenAPI description for post /v2/bookings/{bookingUid}/reschedule)"
+  },
+  "observed": "Steps 1-8 all passed, including both documented `cancelled` refusals: step 3 got 400 \"Can't reschedule booking with uid=... because it has been cancelled...\" and step 6 got 400 naming the successor uid. Step 7 created a pending booking on the requires-confirmation event type, step 8 declined it and the API read it back as status \"rejected\" (uid 5nYuQT6CWvEiGY2Ua9iCWn, id 72). Step 9 rescheduled that uid and got HTTP 404 with the raw body {\"statusCode\":404,\"message\":\"Could not find original booking\"} - not the v2 error envelope every other error in the run used. server.stdout.txt line 403 logs the stack: HttpError thrown by getOriginalRescheduledBooking, called from validateRescheduleRestrictions inside RegularBookingService.handler, reached through BookingsService_2024_08_13.rescheduleBooking. There is no \"Outgoing Response\" log line for it, because the throw is not a Nest HttpException and so bypasses HttpExceptionFilter.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Any API client rescheduling a declined booking gets a 404 claiming the booking does not exist, so it cannot tell a bad uid from a non-reschedulable status; the same call also skips the documented v2 error envelope, so generic client error parsers see an unrecognised body. No data loss.",
+  "rootCause": {
+    "file": "apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts",
+    "lines": "824-841",
+    "explanation": "canRescheduleBooking is the guard that produces the documented 400s, and it only tests booking.status === \"CANCELLED\" (twice: with and without booking.rescheduled). REJECTED and AWAITING_HOST are never tested, so a declined booking sails past the guard into regularBookingService.createBooking. That path calls validateRescheduleRestrictions (packages/features/bookings/lib/service/RegularBookingService.ts:435-484) and then again at line 660 getOriginalRescheduledBooking (packages/features/bookings/lib/handleNewBooking/originalRescheduledBookingUtils.ts:8-21), which delegates to BookingRepository.findOriginalRescheduledBooking (packages/features/bookings/repositories/BookingRepository.ts:1170-1177). That query filters status in [ACCEPTED, CANCELLED, PENDING] - REJECTED and AWAITING_HOST are absent from the list even though both are real BookingStatus values (packages/prisma/schema.prisma:843-849), so findFirst returns null for a booking that exists and the util throws HttpError 404 \"Could not find original booking\". Two secondary points verified in code: (a) the catch block at RegularBookingService.ts:476-483 carries the comment \"For other errors (like booking not found), let the service handle it later\" but re-throws anything that is an HttpError, and the 404 IS an HttpError, so the early validation surfaces it - though line 660 would throw the identical 404 a moment later anyway; (b) @calcom/lib HttpError is not a Nest HttpException, so HttpExceptionFilter (apps/api/v2/src/filters/http-exception.filter.ts:31-36, the source of the {status,timestamp,path,error:{code,message,details}} envelope) never sees it and Nest's built-in unknown-error handler duck-types it into the raw {statusCode,message} body observed on the wire."
+  },
+  "introducedBy": {
+    "commit": "a2c13e576e145300dc688d22d1f43f6668d105bd",
+    "date": "2025-05-30",
+    "pr": "#21643",
+    "title": "refactor: v2 dont allow rescheduling cancelled,rescheduled bookings",
+    "note": "This is the commit that added canRescheduleBooking (blame of lines 824-841, then at apps/api/v2/src/ee/bookings/2024-08-13/services/bookings.service.ts). It implemented exactly the two `cancelled` bullets the docs list and never covered `rejected` or `awaiting_host`, which is why 3 of the 5 documented statuses behave and this one does not. The 404 it falls through to is older code: the status filter at BookingRepository.ts:1170-1177 blames to b4f1b5aebe195b81bac545981883788674c632ee, 2024-10-02, PR #15673 \"refactor: handleNewBooking #4\", and that commit's stat shows it MOVED the query out of packages/features/bookings/lib/handleNewBooking/getOriginalRescheduledBooking.ts (-59 lines) into the repository (+53), so the REJECTED exclusion itself predates it. The early re-throw path came later still, b46fb82695ae58ec83985319de133b81cf062596, 2025-12-12, PR #25575 \"feat: minium reschedule notice on events\". All three predate the cal.diy fork, so none of this is fork-specific."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues \"Could not find original booking\" --owner calcom --include-prs --limit 30  (1 hit, calcom/cal.diy#7399 \"send reschedule emails to attendees of the old booking\", closed, unrelated)",
+      "gh search issues \"rejected reschedule\" --owner calcom --match title --include-prs --limit 30  (0 hits)",
+      "gh search issues \"reschedule rejected booking status 400\" --owner calcom --include-prs --limit 30  (1 hit, calcom/cal.diy#400 \"Restyling\", unrelated)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only four commits landed between the tested 038381aeca (2026-08-01) and origin/main 176037d0af (2026-08-08) - #29940, #29901, #29740, #29819 - and git log 038381aeca..origin/main touches none of BookingRepository.ts, originalRescheduledBookingUtils.ts or the 2024-08-13 bookings.service.ts. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a byte-identical mirror of cal.diy main; no public issue, PR or changelog entry found for this symptom."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, dropped 9:10 slot, seated-booking overselling, unauthenticated hold mutation). None of those touch the reschedule status guard."
+  },
+  "notes": "Why this is real-defect and not edition-mismatch: the bound doc page is generated from the commercial 2026-02-25 controller (operationId BookingsController_2026_02_25_rescheduleBooking, and the header parameter says \"Must be set to 2026-02-25\"), a version cal.diy does not ship - apps/api/v2/src/platform/bookings/ holds only 2024-04-15, 2024-08-13 and shared, and packages/platform/constants/api.ts tops out at 2024-09-04. But the scenario did NOT trip systemic cause #1: it sent cal-api-version: 2024-08-13, a version cal.diy really has, so no silent downgrade happened and every other step ran the real shipped path. Cal.diy has this endpoint and this guard, and the guard honours 3 of the 5 documented status bullets, so the two missing bullets are a gap in shipped code, not removed EE code. The 404 is also wrong on its own terms independent of any doc version: the booking exists, the API returned it in the previous step, and an error body saying it cannot be found is a false statement that no client can act on. Answering the brief's question (a): yes, the scenario fails on a version cal.diy actually has. Note for whoever fixes it: `awaiting_host` has the same hole - it is a real BookingStatus, is missing from both canRescheduleBooking and the findOriginalRescheduledBooking filter, and would produce the same 404; the scenario never exercised it because instant meetings were not seeded. Two independent fixes are wanted: extend canRescheduleBooking to REJECTED and AWAITING_HOST with a 400 in the documented style, and make the @calcom/lib HttpError path go through the v2 error envelope (a @Catch(HttpError) filter alongside the existing five in apps/api/v2/src/bootstrap.ts:72-76) so no v2 route can answer with a raw {statusCode,message} body. For the doc side, if commercial Cal.com genuinely returns 400 for rejected, the cal.diy divergence should be recorded; that cannot be checked from source here."
+}

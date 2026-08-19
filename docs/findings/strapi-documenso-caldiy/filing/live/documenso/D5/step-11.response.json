@@ -1,0 +1,44 @@
+{
+  "step": 11,
+  "label": "NUMBER default below its minimum (expected 400)",
+  "at": "2026-08-19T19:16:54.356Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "377",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:54 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "973",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "66ed4759-e3c6-4bb4-8035-ccfa77fd098e"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_urlxhxhbndxwvbvu",
+        "envelopeItemId": "envelope_item_mtahtmyhhvvlchci",
+        "type": "NUMBER",
+        "id": 20,
+        "secondaryId": "cmt0h3hsj004qhoeo2kw8qba8",
+        "recipientId": 14,
+        "page": 1,
+        "positionX": "5",
+        "positionY": "90",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "type": "number",
+          "value": "1",
+          "minValue": 10
+        },
+        "documentId": 10,
+        "templateId": null
+      }
+    ]
+  }
+}

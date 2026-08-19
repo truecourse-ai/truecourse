@@ -1,0 +1,42 @@
+{
+  "step": 4,
+  "label": "PREP send NONE",
+  "at": "2026-08-19T19:16:10.862Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "492",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:10 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "996",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "164a2a7d-241a-4048-993f-4cf0517e8172"
+  },
+  "body": {
+    "success": true,
+    "id": "envelope_nfbbhctvneaaadxv",
+    "recipients": [
+      {
+        "id": 10,
+        "name": "TCRef Decliner",
+        "email": "tcref-declines-1f36da77c3@documenso.test",
+        "token": "zkg6-gbbQJID09CoU63yn",
+        "role": "SIGNER",
+        "signingOrder": null,
+        "signingUrl": "http://localhost:3347/sign/zkg6-gbbQJID09CoU63yn"
+      },
+      {
+        "id": 11,
+        "name": "TCRef Other",
+        "email": "tcref-other-1f36da77c3@documenso.test",
+        "token": "OeEMKBoGkqY7rqBDN3lg7",
+        "role": "SIGNER",
+        "signingOrder": null,
+        "signingUrl": "http://localhost:3347/sign/OeEMKBoGkqY7rqBDN3lg7"
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-booking-frequency-limit-empties-the-day-once-it-is-reached.web.1",
+  "flowId": "a-booking-frequency-limit-empties-the-day-once-it-is-reached",
+  "failingStep": 1,
+  "whatFailed": "Step 1 asserted that /reference-host/daily-limit renders day button \"15\" in a disabled state, but the role query found no button named \"15\": the step gave up at 18.6s while the calendar was still a loading skeleton, and about two seconds later the page finished rendering September with a modal \"No availability in September\" dialog that takes the whole day grid out of the accessibility tree.",
+  "docClaim": {
+    "quote": "If you don't want more than five bookings of any specific event per day so you can focus on other things or control stress and burnout through certain events, you can do just that with this feature. ... [user-booking-limits.md] If you have already reached your limit, the slot is removed from your booking page so no one can book you.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/booking-frequency.md (plus .truecourse/specs/sources/cal.com-help/help/event-types/user-booking-limits.md and .../display-issues.md)",
+    "section": "booking-frequency; user-level-booking-limits / How it works; event-type-slot-display-issues / If Booking Slots Are Unavailable When You Are Available"
+  },
+  "observed": "session.webm decoded frame by frame settles this. t≈16s: the page is still on August 2026 with every day cell a skeleton placeholder (the August getSchedule call had not returned). t≈19s: August resolved empty, the booker auto-advanced to ?month=2026-09, and the September cells are skeletons again while the second getSchedule call runs. This t≈19s state is exactly what step-1.png and the transcript captured, which is why the driver reported \"the page has no button elements at all\". t≈21s: the September call returns, all thirty day buttons render (day 1 selected-styled, the rest greyed out and disabled) and cal.diy pops the modal dialog \"No availability in September\" with Close and View next month. So the product did close the limited day, and in fact reported the whole month as unbookable, which is the expected outcome when the seeded schedule opens only the capped day. Two sibling scenarios in the same run prove the assertion could not have passed even with a longer wait: a-before-buffer-an-after-buffer-and-both-withhold-different-windows.web.1 and the-booking-window-limits-how-far-ahead-a-booker-can-reach.web.1 both reached a fully rendered calendar whose page text contains the day numbers 1..30/31 plus \"No availability in <month>\", and the driver still answered \"no button named \\\"15\\\" is on the page\" / \"the page has no button elements at all\", because the Radix modal marks everything outside the dialog aria-hidden.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for real users. Cal.diy behaved the way the help pages promise: the event type at its per-day booking-frequency cap offered nothing on the capped day. Only the generated scenario was unable to observe it.",
+  "rootCause": {
+    "file": "packages/features/calendars/components/DatePicker.tsx",
+    "lines": "322-329, 350-360",
+    "explanation": "Two pieces of correct product behavior defeat the scenario's encoding. First, lines 322-329: while props.isLoading is true every day cell renders as a disabled SkeletonText button with no accessible name, and isLoading is wired straight to schedule.isPending (apps/web/modules/bookings/components/Booker.tsx:471-478, apps/web/modules/bookings/components/DatePicker.tsx:142). Because the scenario navigates without a month, the booker first fetches the current month, finds it empty, calls moveToNextMonthOnNoAvailability (apps/web/modules/bookings/components/DatePicker.tsx:40-49, 111) and then fetches the next month, so the day grid is unnamed for the duration of two sequential getSchedule round trips. In this sandbox that took about 21 seconds and the step's wait was 18.6 seconds. Second, lines 350-360: once the fetch lands with includedDates.length === 0, DatePicker renders NoAvailabilityDialog, whose isOpenDialog state defaults to true (NoAvailabilityDialog.tsx:64) and whose Dialog is a bare DialogPrimitive.Root (packages/ui/components/dialog/Dialog.tsx:37), i.e. Radix modal mode, which sets aria-hidden on everything outside the portal. The day buttons therefore stay out of the accessibility tree, and a getByRole('button', { name: '15' }) query keeps returning nothing no matter how long the driver waits. This is standard, correct modal semantics, not a defect."
+  },
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom '\"no availability\" dialog booker' (0 results)",
+      "gh search issues --owner calcom 'no availability dialog' (0 results)",
+      "gh search issues --repo calcom/cal.com 'no availability in month' (GitHub answered that the repository cannot be searched with this token, so code search over the trackers could not be completed)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix, and nothing changed regardless. In cal.diy: only four commits landed between the tested 038381aeca (2026-07-31) and origin/main 176037d0af (2026-08-08), and none of them touch packages/features/calendars/components/DatePicker.tsx, packages/features/calendars/components/NoAvailabilityDialog.tsx, apps/web/modules/bookings/components/DatePicker.tsx or apps/web/modules/schedules/hooks/useSchedule.ts. In cal.com: main (also 176037d0a, 2026-08-08) ships the identical NoAvailabilityDialog, still auto-opened with useState(true) on a default-modal Radix Dialog, and the identical DatePicker skeleton path. The auto-opening dialog itself came in with fc2e81e89a6, 'feat: add toggle for no availability dialog (#23052)', 2025-08-13, long before the tested build. Not an edition mismatch: the code is present and identical on both sides."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "For the scenario generator: an assertion on a calendar day button is unreachable whenever the month it lands on has zero bookable days, because that is precisely when cal.com/cal.diy throws a modal over the calendar. The scenario should either dismiss it first (the Close control carries data-testid=\"close_dialog_button\", View next month carries data-testid=\"view_next_month\") or, better, assert on the dialog itself, since \"No availability in September\" is a stronger and more direct proof of the doc claim than a disabled day button. The same pattern is the sole cause of at least two more failures in this run (a-before-buffer-an-after-buffer-and-both-withhold-different-windows.web.1 step 1, the-booking-window-limits-how-far-ahead-a-booker-can-reach.web.1 step 3) and contributes to a-user-who-left-dynamic-group-links-cannot-be-added-to-one.web.1, so one generator fix clears a family. Second, the step wait needs to exceed the booker's settle time on the no-month path, which is two sequential getSchedule calls, not one; pinning ?month= in the navigate step (as the passing stacked-buffers and custom-title scenarios do) removes the auto-advance entirely and is the cheaper fix. The slowness itself looks environmental rather than a product characteristic: the recipe points both the Next.js web app and the NestJS API at one Postgres with connection_limit=3, per-day booking limits are counted in memory (packages/features/busyTimes/lib/getBusyTimesFromLimits.ts:144-162) with no per-day query, and the same event-type pages answered quickly in other scenarios in this same run. Only 3 of 42 web scenarios were caught mid-skeleton. Two things a maintainer may still want to hear, neither of them this failure: the day grid renders unnamed skeleton buttons rather than keeping the date labels, so nothing on the page is addressable while slots load; and because the DatePicker only looks at includedDates.length === 0, a getSchedule call that fails outright is presented to the booker as a confident \"No availability in <month>\", indistinguishable from a genuinely empty month."
+}

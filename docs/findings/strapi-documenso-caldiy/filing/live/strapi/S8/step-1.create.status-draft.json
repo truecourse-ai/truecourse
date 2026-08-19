@@ -1,0 +1,53 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:1347/api/articles?status=draft",
+    "headers": {
+      "Authorization": "Bearer 993cab8...<redacted>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "data": {
+        "title": "DP API Status mt0g8fky",
+        "slug": "dp-api-status-mt0g8fky"
+      }
+    }
+  },
+  "status": 201,
+  "headers": {
+    "access-control-allow-credentials": "true",
+    "access-control-allow-origin": "",
+    "connection": "keep-alive",
+    "content-length": "305",
+    "content-security-policy": "frame-src 'self';script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;connect-src 'self' https:;img-src 'self' data: blob: https://market-assets.strapi.io;media-src 'self' data: blob:;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Wed, 19 Aug 2026 18:52:45 GMT",
+    "keep-alive": "timeout=5",
+    "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-dns-prefetch-control": "off",
+    "x-download-options": "noopen",
+    "x-frame-options": "SAMEORIGIN",
+    "x-permitted-cross-domain-policies": "none",
+    "x-powered-by": "Strapi <strapi.io>"
+  },
+  "text": "{\"data\":{\"id\":5,\"documentId\":\"qbod5ch6zve5z4o91xom1gce\",\"title\":\"DP API Status mt0g8fky\",\"blocksContent\":null,\"markdownContent\":null,\"authorName\":null,\"slug\":\"dp-api-status-mt0g8fky\",\"createdAt\":\"2026-08-19T18:52:45.202Z\",\"updatedAt\":\"2026-08-19T18:52:45.202Z\",\"publishedAt\":null,\"locale\":\"en\"},\"meta\":{}}",
+  "json": {
+    "data": {
+      "id": 5,
+      "documentId": "qbod5ch6zve5z4o91xom1gce",
+      "title": "DP API Status mt0g8fky",
+      "blocksContent": null,
+      "markdownContent": null,
+      "authorName": null,
+      "slug": "dp-api-status-mt0g8fky",
+      "createdAt": "2026-08-19T18:52:45.202Z",
+      "updatedAt": "2026-08-19T18:52:45.202Z",
+      "publishedAt": null,
+      "locale": "en"
+    },
+    "meta": {}
+  }
+}

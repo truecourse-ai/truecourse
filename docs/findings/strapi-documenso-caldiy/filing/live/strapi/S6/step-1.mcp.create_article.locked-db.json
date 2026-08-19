@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:1347/mcp",
+    "headers": {
+      "Authorization": "Bearer 2d6e1e6...<redacted>",
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 300,
+      "method": "tools/call",
+      "params": {
+        "name": "create_article",
+        "arguments": {
+          "data": {
+            "title": "tcref-lockmt0g7u7e-mcp"
+          }
+        }
+      }
+    }
+  },
+  "status": 200,
+  "rpc": {
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Tool \"create_article\" execution failed: insert into `articles` (`created_at`, `created_by_id`, `document_id`, `locale`, `published_at`, `title`, `updated_at`, `updated_by_id`) values ('2026-08-19 11:52:17.567', 1, 'cyimpmcud8qivqx73f5su8mv', 'en', NULL, 'tcref-lockmt0g7u7e-mcp', '2026-08-19 11:52:17.567', 1) returning `id` - database is locked"
+        }
+      ],
+      "isError": true
+    },
+    "jsonrpc": "2.0",
+    "id": 300
+  },
+  "toolText": "Tool \"create_article\" execution failed: insert into `articles` (`created_at`, `created_by_id`, `document_id`, `locale`, `published_at`, `title`, `updated_at`, `updated_by_id`) values ('2026-08-19 11:52:17.567', 1, 'cyimpmcud8qivqx73f5su8mv', 'en', NULL, 'tcref-lockmt0g7u7e-mcp', '2026-08-19 11:52:17.567', 1) returning `id` - database is locked"
+}

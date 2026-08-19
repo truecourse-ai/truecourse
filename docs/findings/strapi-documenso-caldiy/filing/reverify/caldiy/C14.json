@@ -1,0 +1,48 @@
+{
+  "id": "C14",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L202-L229",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L202-L229",
+    "howDecided": "git log 038381aeca..origin/main over apps/api/v2/src/modules/slots/, docs/api-reference/v2/openapi.json and packages/platform/types/slots/ returns nothing, so every artifact is byte-identical to the tested tree. Both wrong strings are still at their recorded line numbers at origin/main. slots.controller.ts:89 still reads 'format: Format of the slots. By default return is an object where each key is date and value is array of slots as string.' and the hand-written @DocsResponse schema still declares, at lines 212-215, additionalProperties: { type: \"array\", items: { type: \"string\" } } for the default-format branch, three lines above its own example at 216-228 which shows { start: \"2050-09-05T09:00:00.000+02:00\" } objects and contradicts it. The generated docs/api-reference/v2/openapi.json still carries both: the prose inside the operation description at line 5296 and the items: { type: string } at lines 5439-5444."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts (source of the text) and docs/api-reference/v2/openapi.json (generated)",
+    "lineToday": 89,
+    "permalink": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L89",
+    "publishedUrl": "https://cal.com/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type",
+    "commitsSinceReview": [],
+    "note": "Verified live today, not only in the repo. One unauthenticated GET of https://cal.com/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type.md returned HTTP 200 and still carries 'value is array of slots as string' at lines 33 and 86 of the served markdown, and the 200-response schema still declares additionalProperties.items.type: string at lines 245-248 (the range branch immediately below, lines 260-263, correctly says type: object). So the published contract a client generator reads is still wrong for hosted Cal.com as of 2026-08-19. The second in-repo permalink is https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/docs/api-reference/v2/openapi.json#L5439-L5444."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#21196",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-05-14T06:57:42Z",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. Still the PR that edited this exact sentence in 2025 and fixed only the parameter name (slotFormat to format), leaving 'array of slots as string' in place. It is the nearest thing to prior art and it is not a report of this defect."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"slots format documentation\" --include-prs --limit 25  (0 results)",
+      "gh search issues --owner calcom \"openapi slots schema\" --include-prs --limit 25  (0 results)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged, and it is now confirmed live rather than only in the snapshot: the served cal.com docs page still prints both the wrong sentence and the items: string schema today, and the in-repo source of that text is byte-identical to the tested tree. Nobody has filed it. I must be honest about the strength of that last claim: both of my searches returned zero results, and the review already observed that multi-term zero-result queries in this org are weak evidence, since a query whose terms match PR #21196's own title also returned nothing. So 'not reported' is a reasonable inference from four zero-result queries across two agents, not a proven negative; a body-text search on calcom/cal.diy for the literal 'slots as string' would settle it. Nothing has changed the verdict (doc-bug, high confidence) or the scope: the shipped behavior is correct and pinned by the repo's own e2e fixtures, the documentation is the wrong artifact, and the fault is in the product repo, not in a docs repo.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/bug_report.md is the only bug path (config.yml sets blank_issues_enabled: false) and requires 'Issue Summary', 'Steps to Reproduce', 'Actual Results', 'Expected Results' and 'Evidence'. The wrong text lives in the product repo's own source (slots.controller.ts decorators, exported to docs/api-reference/v2/openapi.json), so this belongs on calcom/cal.diy and not on calcom/docs or calcom/help.",
+  "confidence": "high",
+  "notes": "File C14 and C15 as ONE issue (or one PR): both wrong strings live in the same @DocsResponse decorator on the same method of the same file, lines 202-229 and 205 respectively, and the real fix for both is the same structural one, point the DocsResponse schema at the existing Slot_2024_09_04 / SeatedSlot_2024_09_04 / SeatedRangeSlot_2024_09_04 DTOs instead of hand-writing it, which is what let the schema drift from the code in the first place. Splitting them invites two half-fixes. Two supporting facts worth quoting: the decorator's own inline example at lines 216-228 already contradicts its own schema, and the repo's e2e fixtures (apps/api/v2/.../e2e/expected-slots.ts) pin the object shape, so no behavior change is being requested. Note also that scenario step 5 of list-the-available-slots-of-an-event-type.api.1 encodes the same false premise (format=time entries must have no start property) and must be regenerated together with the doc fix."
+}

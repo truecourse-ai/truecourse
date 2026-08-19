@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:1347/api/articles/wfda6zuz7v941k6scpzzf47l",
+    "headers": {
+      "Authorization": "Bearer 993cab8...<redacted>"
+    },
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "data": {
+      "id": 9,
+      "documentId": "wfda6zuz7v941k6scpzzf47l",
+      "title": "TC Live mt0g95gm",
+      "blocksContent": null,
+      "markdownContent": null,
+      "authorName": null,
+      "slug": "tc-live-mt0g95gm",
+      "createdAt": "2026-08-19T18:53:18.739Z",
+      "updatedAt": "2026-08-19T18:53:18.739Z",
+      "publishedAt": "2026-08-19T18:53:18.742Z",
+      "locale": "en"
+    },
+    "meta": {}
+  }
+}

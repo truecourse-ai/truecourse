@@ -1,0 +1,7 @@
+- alertdialog "Confirmation":
+  - heading "Confirmation" [level=2]
+  - img
+  - text: Are you sure you want to unpublish these entries?
+  - contentinfo:
+    - button "Cancel"
+    - button "Confirm"

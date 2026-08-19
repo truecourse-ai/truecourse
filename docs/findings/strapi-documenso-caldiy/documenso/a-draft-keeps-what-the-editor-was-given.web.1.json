@@ -1,0 +1,50 @@
+{
+  "repo": "documenso",
+  "scenarioId": "a-draft-keeps-what-the-editor-was-given.web.1",
+  "flowId": "a-draft-keeps-what-the-editor-was-given",
+  "failingStep": 13,
+  "whatFailed": "Clicking a document's title in the Documents dashboard, which the docs say opens the document editor, lands on the document DETAIL page (/t/guard-owner/documents/envelope_yfmooatberybzovc) instead of the editor (.../edit), so the address never matches /edit$.",
+  "docClaim": {
+    "quote": "You can access the document editor by clicking on a document in your Documents dashboard.",
+    "doc": "apps/docs/content/docs/users/documents/add-recipients.mdx",
+    "section": "Add a Recipient > Step 1: Open the document editor (snapshot: .truecourse/specs/sources/docs.documenso.com/docs/users/documents/add-recipients.md line 19)"
+  },
+  "observed": "Step 11 found the draft's row by search; step 12 clicked the row's title link and the browser went to /t/guard-owner/documents/envelope_yfmooatberybzovc, the read-only document page (screenshot step-13.png shows the title, a 'Document draft / This document is currently a draft and has not been sent' panel, an Information card, the Recipients card and Recent activity, with a single green 'Edit' button as the way into the editor). Step 13 re-checked the address and it was still the detail URL, with no /edit suffix and no redirect. The rest of the scenario passed: the unnamed recipient 5a3d5582fb@documenso.test survived a page load with no explicit save (milestones up-drafts-saved-automatically and ar-name-is-optional both green at step 12), and the email is shown in place of the missing name exactly as add-recipients.md promises.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Low: a reader following the Add Recipients steps literally lands on the document page, where the doc's next instruction ('In the Recipients section, click + Add Signer') has nothing to click; one extra click on 'Edit' (in the row or on the document page) reaches the editor. Navigational friction and stale instructions, no data loss.",
+  "rootCause": {
+    "file": "apps/docs/content/docs/users/documents/add-recipients.mdx",
+    "lines": "17-17",
+    "explanation": "The doc sentence describes navigation the product has never had. In the tested worktree the dashboard row title is rendered by apps/remix/app/components/tables/documents-table-title.tsx:36-44, which for the owner (or a current-team document) links to `${documentsPath}/${row.envelopeId}`, the document detail route apps/remix/app/routes/_authenticated+/t.$teamUrl+/documents.$id._index.tsx. That route is a deliberately designed read-only page: lines 214-250 render the status heading, the DRAFT copy 'This document is currently a draft and has not been sent', and a DocumentPageViewButton whose draft branch links to `${documentsPath}/${envelope.id}/edit` (apps/remix/app/components/general/document/document-page-view-button.tsx:30,67). The editor is reached only through that button or through the row's own 'Edit' action button (apps/remix/app/components/tables/documents-table-action-button.tsx:42,59-66, which builds `${documentsPath}/${row.envelopeId}/edit` for drafts). The layout loader documents.$id._layout.tsx only redirects a legacy numeric id to the envelope id (lines 31,60); there is no draft-to-editor redirect anywhere. So the behavior is intentional and coherent, and the doc text is the wrong half."
+  },
+  "introducedBy": {
+    "commit": "b92c53dbb23b89d3cfd89a6b38d2282cf273dfba",
+    "date": "2026-02-27",
+    "pr": "#2460",
+    "title": "feat: docs v2",
+    "note": "git blame of add-recipients.mdx line 17 in the tested worktree: the sentence was written by the docs v2 rewrite and was already inaccurate the day it landed. The code it describes is much older: the title link has pointed at the document detail page since a849c6431f6bd369a01f0a83ea9307c6b4446729 'fix: data table links for recipients' (2023-09-12, href=`/documents/${row.id}`); 7f09ba72 'feat: add envelopes (#2025)' (2025-10-14) only swapped row.id for row.envelopeId. This is a doc regression against long-stable code, not a code change that broke the doc."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"document editor clicking dashboard\"",
+      "gh search issues --repo documenso/documenso \"add-recipients docs editor\"",
+      "gh search prs --repo documenso/documenso \"docs add recipients editor\""
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log 3cf2963cd0..main on both apps/docs/content/docs/users/documents/add-recipients.mdx and apps/remix/app/components/tables/documents-table-title.tsx returns nothing (upstream main fetched 2026-08-15). main still carries the same sentence and the title link still resolves to `${documentsPath}/${row.envelopeId}`, so neither side has moved since v2.16.0."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the researcher's 8 itemized Documenso findings covers this scenario. Their two web items are #7 (a-none-distribution-send-offers-the-signing-links.web.1) and #8 (missing accessible names on the token-expiry selector and Copy Signing Links), both different surfaces. This failure is a fresh, small docs finding."
+  },
+  "notes": "The scenario's own step note flags this step as a DELIBERATE RED and it behaved as designed: the failure is real and reproducible, it is just the doc that is wrong. Suggested doc fix in apps/docs/content/docs/users/documents/add-recipients.mdx: 'Open the editor by clicking Edit on the document's row in your Documents dashboard, or by opening the document and clicking Edit.' The same page's second step ('In the Recipients section, click + Add Signer') is unreachable until that correction, so the two lines should be fixed together. Worth checking sibling pages for the same phrasing before shipping a patch. Nothing else in the scenario is at issue: the automatic-save claim (upload.md, 'draft documents are saved automatically') and the optional-name claim (add-recipients.mdx, 'If you leave the name blank, the email address is displayed instead') both held, verified across a full page reload with no save control pressed. Incidental environment noise in the transcript, not part of this verdict: the dev instance logged uncompiled-lingui-catalog warnings and CSP style-src-elem violations on the editor page."
+}

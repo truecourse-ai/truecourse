@@ -1,0 +1,39 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-before-buffer-an-after-buffer-and-both-withhold-different-windows.web.1",
+  "flowId": "a-before-buffer-an-after-buffer-and-both-withhold-different-windows",
+  "failingStep": 1,
+  "whatFailed": "The scenario's first (precondition) step opened /reference-host/buffer-before without naming a month, the booking page auto-advanced exactly one month to September 2026, and the seeded event type has no bookable day anywhere in that month, so no day button named 15 existed and the walk stopped before any buffer behaviour was exercised.",
+  "docClaim": {
+    "quote": "You can either set a before event buffer time, an after event buffer time, or both. ... You can configure buffers per event type.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/event-buffer.md",
+    "section": "event-buffers/how-to-set-a-buffer-time (first sentence) and event-buffers (second sentence)"
+  },
+  "observed": "The page loaded (title 'Buffer Before', '20m', host 'Reference Host'), so the three buffer event types were seeded and the app served them. The address settled at /reference-host/buffer-before?month=2026-09: the product hopped from the run month (August 2026) to the next one because August had no bookable day. September 2026 then resolved to zero bookable days: session.webm shows the booker first painting at about 15s as August with skeleton day cells, and at about 17s as September 2026 with every day number rendered grey/disabled plus the modal 'No availability in September' offering 'Close' and 'View next month'. That modal only renders after loading finishes and when includedDates.length === 0 (packages/features/calendars/components/DatePicker.tsx:350-361), so the slots response for September really was empty rather than pending. The captured step-1.png is the intermediate skeleton frame (day cells render as disabled buttons containing only a SkeletonText, DatePicker.tsx:322-329), which is why the deterministic check and the visual judge both saw no day numbers. Secondary detail: once the modal is open, Radix marks the rest of the page aria-hidden, so even the disabled day buttons drop out of the accessibility tree, which is why the runner says 'no button named 15 is on the page' rather than 'button 15 is disabled'. The run snapshot itself flags the step blockedPrecondition: true, and the step carries no milestone, so no doc claim was put to the test.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users. The red result says nothing about buffers: both milestones (buffer set before/after/both, buffers configured per event type) remain unproven, and the scenario is unrunnable on any date until it names the month it needs.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues 'booking page only advances one month no availability' --owner calcom --limit 8 (no results)",
+      "gh search issues '\"no availability\" month calendar skip' --owner calcom --include-prs --limit 10 (no results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in the product. in cal.diy: none of the 4 commits between the tested 038381aeca and origin/main (176037d0af, 2026-08-08) touch apps/web/modules/bookings/components/DatePicker.tsx, packages/features/calendars/components/DatePicker.tsx or NoAvailabilityDialog.tsx. in cal.com: origin/main carries a byte-identical useMoveToNextMonthOnNoAvailability hook (apps/web/modules/bookings/components/DatePicker.tsx:17-52), so there is no ported-vs-unported difference and no edition mismatch here; the single-hop advance is upstream behaviour introduced by 0772e1d168 'fix: skip when browsing month has no available slots (#19626)', 2025-03-25, and unchanged since."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Why test-defect and not environment or real-defect. (1) The product is fine: buffers are applied only to busy times (getUserAvailability passes beforeEventBuffer/afterEventBuffer into getBusyTimes, packages/features/availability/lib/getUserAvailability.ts:585-605), so an event type's own buffer cannot empty an otherwise open schedule, and no booking existed yet at step 1. The empty month is seeded state, not computed behaviour. (2) The scenario is built on a premise it never verified. Its step-1 note claims 'the seeded schedule closes the whole run month and opens only the named days of the month after it, so the booking page moves itself to that month on load (DatePicker.tsx:39-49: a current month with no bookable day advances)'. The cited lines are prop declarations; the real code is useMoveToNextMonthOnNoAvailability in apps/web/modules/bookings/components/DatePicker.tsx:17-52, called at line 109, and it hops ONE month and only when the browsing month is the current month. So this addressing trick can only ever reach run-month + 1, whatever the seed chose. (3) The sandbox is not broken: the same convention worked in the same run for /reference-host/phone-only, whose transcript settles at ?month=2026-09&date=2026-09-15 with a 10:00 slot and the form headed 'Tuesday, September 15, 2026'. The seed can and did open 2026-09-15 for some event types; it did not for the buffer trio. Other no-month scenarios failed identically (limit-one, split-day, daily-limit, interval-default), while the corpus's other two buffer scenarios pin the month explicitly (/reference-host/buffered-a?month=2027-03 in stacked-buffers..., which PASSES, and /reference-host/buffered-consult?month=2030-06 in event-buffers-withhold-the-time-around-a-booking). The generated corpus mixes a clock-relative convention with a fixed-date seed and the two did not line up. (4) Fix for the scenario: pin the month (and ideally the date) in the navigate URL exactly as its siblings do, and seed the buffer trio's one-hour window on that fixed day; do not rely on the auto-advance. What would settle the residual question of which month the buffer trio actually holds: the seed script reference/seed/guard-seed.mjs (not retained anywhere on disk after the run) or a read of the Schedule/Availability rows for buffer-before; the postgres on localhost:5450 is down and Docker is not running, so neither is reachable now. Contributing but not causal: this page took about 15s to first paint (cold Next.js route) and the step's expectation window closed at 16.5s, before the resolved state appeared, so the assertion never saw the final DOM; the final DOM would have failed it anyway."
+}

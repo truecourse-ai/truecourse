@@ -1,0 +1,50 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:1347/mcp",
+    "headers": {
+      "Authorization": "Bearer 2d6e1e6...<redacted>",
+      "Accept": "application/json, text/event-stream",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 211,
+      "method": "tools/call",
+      "params": {
+        "name": "list_article",
+        "arguments": {
+          "filters": {
+            "$and": [
+              {
+                "title": {
+                  "$contains": "opmt0g6lmy"
+                }
+              },
+              {
+                "authorName": {
+                  "$notNull": true
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "status": 200,
+  "rpc": {
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "MCP error -32602: Input validation error: Invalid arguments for tool list_article: Invalid input at filters.$and[1].authorName"
+        }
+      ],
+      "isError": true
+    },
+    "jsonrpc": "2.0",
+    "id": 211
+  },
+  "toolText": "MCP error -32602: Input validation error: Invalid arguments for tool list_article: Invalid input at filters.$and[1].authorName"
+}

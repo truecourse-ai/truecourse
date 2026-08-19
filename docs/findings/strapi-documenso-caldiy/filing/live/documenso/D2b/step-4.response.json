@@ -1,0 +1,49 @@
+{
+  "step": 4,
+  "label": "THE MOVE: update-many with positionY 60 (docs say the field moves)",
+  "at": "2026-08-19T19:15:29.291Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "450",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:29 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "972",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "b089357b-2a6d-4d2e-8024-d1bb262e40ad"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_bxwelneerccdovmc",
+        "envelopeItemId": "envelope_item_kiywmastvdzcosci",
+        "type": "TEXT",
+        "id": 7,
+        "secondaryId": "cmt0h1o540029hoeo4e8zzpqi",
+        "recipientId": 7,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "20",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "label": "",
+          "placeholder": "",
+          "required": false,
+          "readOnly": false,
+          "fontSize": 12,
+          "type": "text",
+          "text": "",
+          "textAlign": "left"
+        },
+        "documentId": 5,
+        "templateId": null
+      }
+    ]
+  }
+}

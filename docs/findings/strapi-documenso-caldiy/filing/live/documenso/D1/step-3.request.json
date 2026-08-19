@@ -1,0 +1,12 @@
+{
+  "step": 3,
+  "label": "PREP recipient on the draft",
+  "at": "2026-08-19T19:15:07.246Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_zxidtommuuvcurfz\",\"data\":[{\"email\":\"tcref-frozen-e095c05f33@documenso.test\",\"name\":\"TCRef Frozen\",\"role\":\"SIGNER\",\"signingOrder\":1}]}"
+}

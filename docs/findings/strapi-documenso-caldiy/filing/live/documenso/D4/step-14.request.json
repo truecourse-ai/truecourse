@@ -1,0 +1,12 @@
+{
+  "step": 14,
+  "label": "PASS2 REJECT",
+  "at": "2026-08-19T19:16:32.851Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/12/reject",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_mynwzrxyyiddmdfv\",\"recipientId\":12,\"reason\":\"tcref declined 9c11313f6e\"}"
+}

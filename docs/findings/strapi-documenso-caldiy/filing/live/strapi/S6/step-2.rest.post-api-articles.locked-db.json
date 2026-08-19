@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:1347/api/articles",
+    "headers": {
+      "Authorization": "Bearer 993cab8...<redacted>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "data": {
+        "title": "tcref-lockmt0g7u7e-rest"
+      }
+    }
+  },
+  "status": 500,
+  "body": {
+    "data": null,
+    "error": {
+      "status": 500,
+      "name": "InternalServerError",
+      "message": "Internal Server Error"
+    }
+  }
+}

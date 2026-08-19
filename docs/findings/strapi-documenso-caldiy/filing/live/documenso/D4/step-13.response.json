@@ -1,0 +1,42 @@
+{
+  "step": 13,
+  "label": "PASS2 PREP send NONE",
+  "at": "2026-08-19T19:16:32.850Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "498",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:32 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "987",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "3ab4131e-54ba-4bc5-996d-ea2a152d84cf"
+  },
+  "body": {
+    "success": true,
+    "id": "envelope_mynwzrxyyiddmdfv",
+    "recipients": [
+      {
+        "id": 12,
+        "name": "TCRef Decliner 2",
+        "email": "tcref-declines2-9c11313f6e@documenso.test",
+        "token": "ky0DRp98n5FEd7w0VrBEo",
+        "role": "SIGNER",
+        "signingOrder": null,
+        "signingUrl": "http://localhost:3347/sign/ky0DRp98n5FEd7w0VrBEo"
+      },
+      {
+        "id": 13,
+        "name": "TCRef Other 2",
+        "email": "tcref-other2-9c11313f6e@documenso.test",
+        "token": "f1SZflLAG5DvXoMulK1y8",
+        "role": "SIGNER",
+        "signingOrder": null,
+        "signingUrl": "http://localhost:3347/sign/f1SZflLAG5DvXoMulK1y8"
+      }
+    ]
+  }
+}

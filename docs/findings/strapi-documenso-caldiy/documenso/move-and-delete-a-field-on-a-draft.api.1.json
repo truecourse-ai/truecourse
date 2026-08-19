@@ -1,0 +1,98 @@
+{
+  "repo": "documenso",
+  "scenarioId": "move-and-delete-a-field-on-a-draft.api.1",
+  "flowId": "move-and-delete-a-field-on-a-draft",
+  "failingStep": 4,
+  "whatFailed": "POST /api/v2/envelope/field/update-many answered 200 with the field unmoved (positionY still 20, not the requested 60) and, in the same call, replaced the field's stored fieldMeta with the type's default metadata, so a documented one-property update is both a silent no-op for the coordinate and silent data loss for the field configuration.",
+  "docClaim": {
+    "quote": "Update Fields [#update-fields] / Update one or more fields in a single request. / POST /envelope/field/update-many ... Response: { \"fields\": [ { \"id\": 101, \"type\": \"SIGNATURE\", \"positionY\": 85 }, { \"id\": 102, \"type\": \"DATE\", \"positionY\": 85 } ] }",
+    "doc": "apps/docs/content/docs/developers/api/fields.mdx (snapshot: .truecourse/specs/sources/docs.documenso.com/docs/developers/api/fields.md, lines 290-366)",
+    "section": "fields-api / Update Fields (#update-fields)"
+  },
+  "observed": "Step 3 created a TEXT field at positionX 10 / positionY 20 with fieldMeta {label: 'Job Title', placeholder: 'Enter your job title', required: true, characterLimit: 40, textAlign: 'left'} and the create response echoed all of it. Step 4 sent {envelopeId, data: [{id: 300, type: 'TEXT', positionY: 60}]} and got HTTP 200 whose data[0] shows positionX \"10\", positionY \"20\" (unchanged) and fieldMeta {label: '', placeholder: '', required: false, readOnly: false, fontSize: 12, type: 'text', text: '', textAlign: 'left'}, which is byte-for-byte FIELD_TEXT_META_DEFAULT_VALUES. The response is built from the row after prisma.field.update, so both the no-op and the reset are what is now persisted. server.stderr.txt is empty and server.stdout.txt logs the envelope.field.updateMany call with no error.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Silent data loss and a silent no-op on the API's recommended field-editing endpoint: an integrator following the docs moves nothing while wiping the field's label, placeholder, required flag, character limit (and, for RADIO/CHECKBOX/DROPDOWN, the whole option list) behind a 200 that echoes the wiped state as if it were the update result.",
+  "rootCause": {
+    "file": "packages/lib/server-only/field/update-envelope-fields.ts",
+    "lines": "125-139",
+    "explanation": "Two independent faults meet in one call. (1) Name mismatch: the v2 envelope route validates its input with ZUpdateEnvelopeFieldsRequestSchema, whose position half is ZCoordinatePositionSchema.partial() = {page, positionX, positionY, width, height} (packages/trpc/server/envelope-router/envelope-fields/update-envelope-fields.types.ts:37, create-envelope-fields.types.ts:39-45), and passes the parsed array straight through (update-envelope-fields.ts:24-34). The service writes data: {page: updateData.pageNumber, positionX: updateData.pageX, positionY: updateData.pageY, width: updateData.width, height: updateData.height} (update-envelope-fields.ts:131-135), i.e. it reads the legacy v1 names pageNumber/pageX/pageY. Those keys are never present, so Prisma receives undefined and skips the columns; page/positionX/positionY can never be changed through /envelope/field/update-many. width and height happen to share a name, so a combined move-and-resize resizes but does not move. TypeScript does not catch it because UpdateEnvelopeFieldsOptions.fields declares every position key optional and the router passes a variable, not a fresh object literal, so no excess-property check fires. (2) Destructive default: the same route's base schema is ZEnvelopeFieldAndMetaSchema (update-envelope-fields.types.ts:18), whose per-type members are fieldMeta: Z<Type>FieldMeta.optional().default(FIELD_<TYPE>_META_DEFAULT_VALUES) (packages/lib/types/field-meta.ts:403-449). type is the discriminator and is therefore mandatory on an update, so omitting fieldMeta does not leave it undefined: zod materialises the full default object, and line 136 writes it unconditionally over the stored JSON. The deprecated /document/field/update-many path is unaffected on both counts: its ZUpdateFieldSchema uses pageNumber/pageX/pageY and the plain ZFieldAndMetaSchema with no defaults (packages/trpc/server/field-router/schema.ts:25-33)."
+  },
+  "introducedBy": {
+    "commit": "d05bfa9fed5ca4a1d21910d78b9c337fdfebd376",
+    "date": "2025-11-07",
+    "pr": "#2105",
+    "title": "feat: add envelopes api",
+    "note": "The service write block itself is old and correct for its original callers: ebbe922982a33e00280965827d3b8241bf1ff999 (#1572, 2025-01-11, 'feat: add template and field endpoints') introduced page: updateData.pageNumber / positionX: updateData.pageX / positionY: updateData.pageY. d05bfa9fe created the new envelope route with the public names page/positionX/positionY and wired it to that unchanged service, which is where the coordinate no-op is born. The second defect has its own origin: 2802813c76d7942d07018e17bab911344712b3a4 (#2181, 2025-11-12, 'fix: add default values for envelope field meta') swapped the update route from ZFieldAndMetaSchema to ZEnvelopeFieldAndMetaSchema, importing create-time defaults into an update path. 9a66d0ebf6117172fd26e79f775292e718d76cfc (#2503, 2026-02-18, 'fix: simplify openapi field schemas to fix SDK generation') refactored the position half into ZCoordinatePositionSchema.partial() but kept the mismatched names."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3136,
+        "url": "https://github.com/documenso/documenso/pull/3136",
+        "state": "open",
+        "title": "fix(trpc): v2 field position updates silently dropped; rewrite fields API docs",
+        "relation": "exact",
+        "note": "Community PR by ephraimduncan, opened 2026-07-30, last updated 2026-08-03, still OPEN as of 2026-08-15, not merged and not closed. 2 files, +204/-89. The code half is a 11-line change in packages/trpc/server/envelope-router/envelope-fields/update-envelope-fields.ts that maps the public names onto the service names (pageNumber: field.page, pageX: field.positionX, pageY: field.positionY), which fixes the coordinate no-op exactly. IMPORTANT: it does NOT fix the fieldMeta reset: it still forwards fieldMeta: field.fieldMeta, i.e. the zod-defaulted object, so with this PR applied a move would work and would still wipe the field's configuration. Second caveat: baseRefName is docs/documents-cancel-get-many, not main, so it is stacked on another unmerged branch and cannot land on its own. The rest of the PR is the docs rewrite of apps/docs/content/docs/developers/api/fields.mdx (envelopeId/data schema, Decimal coordinates shown as strings, defaulted fieldMeta shown in responses)."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs \"fieldMeta\" --limit 40",
+      "gh search issues --repo documenso/documenso --include-prs \"update-many\" --limit 40",
+      "gh search issues --repo documenso/documenso --include-prs \"update field resets default values API\" --limit 30"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log 3cf2963cd0..origin/main -- packages/lib/server-only/field/update-envelope-fields.ts packages/trpc/server/envelope-router/envelope-fields/ packages/lib/types/field-meta.ts returns nothing: not one commit has touched any culprit file since the v2.16.0 tag. origin/main head 688ef2fd (2026-08-14) still has positionX: updateData.pageX / positionY: updateData.pageY in the service, still passes fields straight through in the route, and still uses ZEnvelopeFieldAndMetaSchema with the defaults. v2.16.0 is the newest tag, so both defects are live on main and in the newest release. The only fix in flight is PR #3136, unmerged for 16 days, and it addresses only the coordinate half."
+  },
+  "colleagueFinding": {
+    "ref": "documenso #1",
+    "agreement": "refines",
+    "note": "Agrees with their #1 (update-many returns 200 and moves nothing; route reads one set of coordinate names, service writes another; community PR #3136 fixes it, unmerged, still broken on main) and confirms every claim independently. Refinements: (a) the mismatch spares width and height, which share a name, so an update that moves and resizes applies the resize and drops the move, which is a nastier partial-write than a pure no-op; (b) #3136 is based on docs/documents-cancel-get-many, not main, so it is a stacked PR that cannot merge alone; (c) their #2 (fieldMeta reset) is not a separate scenario, it fires in this very step and is visible in the same response, and it is NOT limited to radio/checkbox/dropdown option lists: the defaults are attached per type in ZEnvelopeFieldAndMetaSchema for all ten field types with fieldMeta, and this transcript shows a TEXT field losing its label, placeholder, required flag and characterLimit; (d) #3136 does not fix that second defect, so calling #3136 'the fix' for this endpoint would be wrong; (e) their #4 (coordinates on the wire as strings) is also visible here, in the create response as well as the update response."
+  },
+  "additionalDefects": [
+    {
+      "id": "A",
+      "title": "Omitting fieldMeta on update-many resets the field's whole configuration to type defaults",
+      "verdict": "real-defect",
+      "confidence": "high",
+      "evidence": "Step 4 sent no fieldMeta; the stored meta went from {label: 'Job Title', placeholder: 'Enter your job title', required: true, characterLimit: 40, textAlign: 'left'} to {label: '', placeholder: '', required: false, readOnly: false, fontSize: 12, type: 'text', text: '', textAlign: 'left'}, identical to FIELD_TEXT_META_DEFAULT_VALUES in packages/lib/types/field-meta.ts:302-312.",
+      "rootCause": "packages/lib/types/field-meta.ts:403-449 (ZEnvelopeFieldAndMetaSchema, fieldMeta: Z<Type>FieldMeta.optional().default(FIELD_<TYPE>_META_DEFAULT_VALUES)) consumed by packages/trpc/server/envelope-router/envelope-fields/update-envelope-fields.types.ts:18 and written unconditionally at packages/lib/server-only/field/update-envelope-fields.ts:136. There is no way to avoid it: type is the union discriminator and therefore required, so any update-many call that does not resend the complete fieldMeta destroys it. The docs' own update example ({ id, type, pageY }) is exactly that call.",
+      "introducedBy": "2802813c76d7942d07018e17bab911344712b3a4 (#2181, 2025-11-12, 'fix: add default values for envelope field meta'), which switched update-envelope-fields.types.ts from ZFieldAndMetaSchema to ZEnvelopeFieldAndMetaSchema; the defaults are right for create (create-envelope-fields.types.ts, create-envelope.types.ts) and wrong for update.",
+      "blastRadius": "All ten field types that carry fieldMeta. For RADIO the default is values: [{id: 1, checked: false, value: ''}], for CHECKBOX the same plus validationRule '' and validationLength 0, for DROPDOWN values: [{value: 'Option 1'}] and defaultValue '' , so the user's option list is replaced by a single blank/placeholder option. TEXT and NUMBER lose label, placeholder, text/value, characterLimit and min/max. Same envelope endpoint, so it also hits every SDK generated from the v2 OpenAPI document.",
+      "upstream": "none found (queries listed above; #3136 does not address it and no issue mentions it)",
+      "fixedAfter": "no; unchanged on origin/main as of 688ef2fd, 2026-08-14",
+      "colleagueRef": "documenso #2, refined: the researcher scoped it to radio/checkbox/dropdown options, the evidence shows it applies to every fieldMeta-bearing type, TEXT included"
+    },
+    {
+      "id": "B",
+      "title": "Coordinates are documented and accepted as numbers and returned as JSON strings",
+      "verdict": "real-defect",
+      "confidence": "high",
+      "evidence": "Both the create response (step 3) and the update response (step 4) carry positionX \"10\", positionY \"20\", width \"20\", height \"5\" as strings, while the doc's Field Object table (fields.md lines 24-27) types all four as number and the example object shows unquoted numbers. The request schema also demands numbers (ZClampedFieldPositionYSchema = z.number().min(0).max(100)).",
+      "rootCause": "Field.positionX/positionY/width/height are Prisma Decimal columns (packages/prisma/schema.prisma:696-699); ZFieldSchema picks them straight off the generated FieldSchema (packages/lib/types/field.ts:31-48), and Decimal serialises to a JSON string. Asymmetric contract: numbers in, strings out.",
+      "introducedBy": "not blamed here; it is the response-shape half of the researcher's finding #4 and is bound to place-fields-on-a-draft.api.1, which owns that assertion",
+      "upstream": "PR #3136 patches the docs only, showing the responses with string coordinates rather than making the wire match the schema",
+      "fixedAfter": "no",
+      "colleagueRef": "documenso #4, agrees; noted here only because this transcript shows it too"
+    },
+    {
+      "id": "C",
+      "title": "The published Fields API guide documents a request shape the endpoint rejects",
+      "verdict": "doc-bug",
+      "confidence": "high",
+      "evidence": "fields.md documents POST /envelope/field/create-many and POST /envelope/field/update-many with a body of { documentId, fields: [{ ..., pageNumber, pageX, pageY }] } (lines 135-188 and 298-355) and responses wrapped in { fields: [...] }. The live v2 envelope endpoints take { envelopeId: string, data: [...] } with page/positionX/positionY and answer { data: [...] }. documentId/fields/pageY are the shape of the deprecated /document/field/* routes, not the envelope ones.",
+      "rootCause": "apps/docs/content/docs/developers/api/fields.mdx in this same repo (documenso/documenso), stale after the envelope API landed in #2105. A reader who copies the curl example verbatim gets a 400 on the path they were told to call.",
+      "introducedBy": "not blamed; the guide predates the envelope rename",
+      "upstream": "PR #3136 rewrites this page to the real schema, open since 2026-07-30",
+      "fixedAfter": "no",
+      "colleagueRef": "not itemised by the researcher; it is why the scenario had to send the real schema rather than the documented one, and it means the update-many no-op is unreachable by anyone copying the docs literally, they hit a 400 first"
+    }
+  ],
+  "notes": "The scenario is sound: it sent the real, schema-valid body ({envelopeId, data: [{id, type, positionY}]}) rather than the doc's stale one, and asserted only what the page promises for an update, that the new position comes back on the stored row. Sending the documented pageY inside data[] would not help either: ZUpdateFieldSchema is a non-strict zod intersection, so pageY is stripped and the call still returns a 200 no-op. Steps 5 and 6 (delete the field, then confirm the envelope no longer carries it) never ran because the run stops at the first failing step, so the delete path in this flow is untested, not passing. Two smaller consequences worth telling a maintainer: the audit log written by diffFieldChanges records the fieldMeta reset but never a field move, so the move loss is invisible in the audit trail too; and the working path for moving a field is /document/field/update-many, which #3022 deprecated, while the recommended envelope path is the broken one. A complete fix needs both halves: map page/positionX/positionY onto the service names (PR #3136's patch, or better, rename the service parameters), and give the update route a schema whose fieldMeta is optional with no default so an omitted fieldMeta leaves the column untouched."
+}

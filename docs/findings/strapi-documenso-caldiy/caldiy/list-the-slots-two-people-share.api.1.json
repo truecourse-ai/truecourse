@@ -1,0 +1,52 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "list-the-slots-two-people-share.api.1",
+  "flowId": "list-the-slots-two-people-share",
+  "failingStep": 1,
+  "whatFailed": "GET /v2/slots with usernames + organizationSlug + format=range returns every dynamic-event slot with end equal to start (zero-length), instead of the documented 30 minutes.",
+  "docClaim": {
+    "quote": "- duration: Only use for event types that allow multiple durations or for dynamic event types. If not passed for multiple duration event types defaults to default duration. For dynamic event types defaults to 30 aka each returned slot is 30 minutes long. So duration=60 means that returned slots will be each 60 minutes long. ... If format=range is specified, each slot will be an object with start and end properties denoting start and end of the slot.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type.md",
+    "section": "get-available-time-slots-for-an-event-type (query parameter notes, lines 32-33 and 210-217) and get-available-time-slots-for-an-event-type/openapi (200 response description, lines 232-236, plus the 'Range format (when format=range)' example at lines 258-281 where every end is start plus the slot length)"
+  },
+  "observed": "HTTP 200, status success, data['2050-09-28'] = 8 slots on a 30-minute grid (13:00, 13:30, 14:00 ... 16:30) where every object has end === start, e.g. {\"start\":\"2050-09-28T13:00:00.000Z\",\"end\":\"2050-09-28T13:00:00.000Z\"}. The server log for the request (server.stdout.txt line 299) shows the internal query the API built: {\"isTeamEvent\":false,...,\"eventTypeId\":0,\"eventTypeSlug\":\"dynamic\",\"usernameList\":[\"reference-org-member\",\"reference-org-member-2\"],\"orgSlug\":\"reference-org\"}. No error or warning was logged. The 30-minute spacing of the grid proves the availability engine did use dynamicEvent.length = 30; only the range serialization lost it. Control from the same run: scenario ask-for-a-particular-slot-length.api.1 (passing) hit the same endpoint with format=range against a real eventTypeId=116 and got correct ends both with duration=60 (15:00-16:00) and with no duration (15:00-15:30), so format=range itself works and the defect is confined to the dynamic (usernames) path.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Any integrator asking 'when are these people all free' with format=range gets zero-minute meetings: a booking UI that renders end-start shows empty slots, and a downstream booking window built from the range is invalid. Silent, HTTP 200, no warning.",
+  "rootCause": {
+    "file": "apps/api/v2/src/modules/slots/slots-2024-09-04/services/slots-output.service.ts",
+    "lines": "106-176 (the defect is at 112-114 and 130-131/153)",
+    "explanation": "For the dynamic (usernames) form, SlotsInputService_2024_09_04.getEventType (slots-input.service.ts:115) returns the synthetic `dynamicEvent` object from packages/features/eventtypes/lib/defaultEvents.ts, which has length 30 (line 161) but id 0 (inherited from `commons`, line 99). transformGetSlotsQuery then keeps only `eventTypeId = eventType.id` (0) and `duration = query.duration` (undefined here) and throws the resolved 30 away. SlotsOutputService_2024_09_04.getAvailableRangeSlots re-derives the length by going back to the database: `const eventType = await this.eventTypesRepository.getEventTypeById(eventTypeId)` with id 0, which is prisma.eventType.findUnique({where:{id:0}}) and returns null because no row has id 0. So `const slotDuration = duration ?? eventType?.length` is undefined, and the end is computed as `DateTime.fromISO(slot.time,{zone:'utc'}).plus({ minutes: slotDuration }).toISO()`. Luxon's normalizeObject skips undefined units, so plus({minutes: undefined}) is a no-op that still yields a valid DateTime: end === start, and the `if (!start || !end) throw new BadRequestException(...)` guard at line 155 never fires. Verified empirically with luxon (DateTime.fromISO('2050-09-28T13:00:00.000Z',{zone:'utc'}).plus({minutes: undefined}).toISO() === '2050-09-28T13:00:00.000Z'; apps/api/v2 pins luxon 3.4.4, the normalizeObject skip-undefined behaviour is unchanged in the 3.x line). The default format=time path is unaffected because it never needs a length, and real event types are unaffected because the id lookup succeeds. Passing an explicit &duration=N on the dynamic query works around it, since `duration` short-circuits the lookup.",
+    "note": "The same undefined slotDuration also reaches the timeZone branch at lines 130-133, so the bug is independent of the timeZone parameter."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version (#18758)",
+    "note": "git blame in the tested worktree puts both halves of the defect in this one commit: slots-output.service.ts:112-114 (re-fetch the event type by id, fall back to undefined) and slots-input.service.ts:115 (return the synthetic dynamicEvent whose id is 0). Author Lauris Skraucis. Pre-fork calcom history, now carried in calcom/cal.diy. Later touches to the surrounding lines (0965fad72a0, 2025-04-02, the `away` filter; 7ef10509469, 2025-04-16, the by-team-slug branch) did not change the duration logic."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner=calcom --include-prs \"format=range slots\" --limit=30  (0 results)",
+      "gh search issues --owner=calcom --include-prs \"slots dynamic usernames\" --limit=30  (0 results)",
+      "gh search issues --owner=calcom --include-prs \"slots range\" --limit=40  (3 results, all unrelated: calcom/cal.diy#28939 'fix(api-v2): respect requested slot range for rolling windows' closed, calcom/cal.diy#29550 'fix: include buffer-overlapping bookings when prefetching bookings for slots' closed, calcom/cal.diy#13746 '[CAL-3172] Make more options available for durations.' closed)"
+    ],
+    "note": "none found. The third query proves the search path works and reaches calcom/cal.diy, so the two empty results are real, not a tooling artefact. Search budget of 3 exhausted."
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main between the tested commit 038381aeca (2026-07-31) and the fetched head 176037d0af (2026-08-08), and `git log 038381aeca..origin/main -- apps/api/v2/src/modules/slots/ packages/features/eventtypes/lib/defaultEvents.ts` is empty, so the culprit code is byte-identical on main. in cal.com: not verifiable from source (the commercial tree is private and the public calcom/cal.com mirror is the same commit as cal.diy main); no public issue, PR or changelog entry surfaced by the three searches, so unknown there."
+  },
+  "colleagueFinding": {
+    "ref": "caldiy #2",
+    "agreement": "refines",
+    "note": "Agrees on the symptom and on the doc promise. Refines it in three ways. (1) Scope: it is not team availability generally, it is only the dynamic no-event-type form (usernames=a,b) and only with format=range. A real team or user event type asked with format=range returns correct ends, proven by the passing sibling scenario ask-for-a-particular-slot-length.api.1 in the same run. The default format=time output for the dynamic form is also fine, since it never emits an end. (2) Root cause and blame, which the write-up does not give: slots-output.service.ts:112-114 looks the length up by event type id, and the dynamic pseudo-event has id 0, so the lookup misses and luxon silently adds nothing; introduced by PR #18758 (2025-02-13). (3) Workaround: sending &duration=30 (or any duration) on the same dynamic request returns correct ends, because duration short-circuits the failed lookup. The write-up's 'reproduced by hand' claim is consistent with the captured evidence."
+  },
+  "notes": "Not a version-header (edition-mismatch) case: the scenario sent cal-api-version: 2024-09-04, which packages/platform/constants/api.ts:56-68 does list in the tested tree, the request routed to SlotsController_2024_09_04, and the endpoint answered 200 with real slots for both org members. The dynamic-usernames endpoint and organizationSlug resolution are present and working in Cal.diy, so the failure is shipped-code behaviour, not removed commercial code. Steps 2 and 3 of the scenario never ran (fail-fast on step 1), so the doc claims 'usernames must contain at least 2' and 'organizationSlug is required to resolve the users' were not exercised by this run and remain untested. Suggested fix for a maintainer: stop re-deriving the length from the database in the output service. transformGetSlotsQuery already holds the resolved event type (real row or dynamicEvent with the right length), so carry that length through InternalGetSlotsQuery and use it, or at minimum make slotDuration fall back to dynamicEvent.length and make the undefined case loud instead of emitting a zero-length range. Two smells worth fixing alongside: the `if (!start || !end)` guard at slots-output.service.ts:155 cannot catch a missing duration because luxon turns plus({minutes: undefined}) into a no-op rather than an Invalid DateTime, and getAvailableRangeSlotSeated is declared with eventTypeSeatsPerTimeslot: number but called with `eventType.seatsPerTimeSlot ?? undefined` at lines 148 and 166."
+}

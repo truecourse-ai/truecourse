@@ -1,0 +1,163 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-filter-operators-the-docs-enumerate.api.1",
+  "flowId": "the-filter-operators-the-docs-enumerate",
+  "failingStep": 13,
+  "whatFailed": "The MCP list_article tool refuses the documented $null filter operator: filters {\"authorName\":{\"$null\":true}} comes back as MCP error -32602 \"Invalid input at filters.$and[1].authorName\" instead of returning the one article created without an author name.",
+  "docClaim": {
+    "quote": "The `list` tool accepts a `filters` parameter using Strapi's filter syntax: - **Field operators**: `$eq`, `$ne`, `$in`, `$notIn`, `$lt`, `$lte`, `$gt`, `$gte`, `$between`, `$contains`, `$notContains`, `$startsWith`, `$endsWith`, `$null`, `$notNull`, and their case-insensitive variants (`$eqi`, `$nei`, `$containsi`, `$notContainsi`, `$startsWithi`, `$endsWithi`).",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/strapi-mcp-server.md (lines 277-285); upstream source lives in the separate strapi/documentation repo, page cms/features/strapi-mcp-server",
+    "section": "MCP server > Usage > Content management through prompts > Filtering"
+  },
+  "observed": "Steps 7 to 12 of the transcript prove 19 of the 21 enumerated operators work through MCP ($eq, $ne, $in, $notIn, $lt, $lte, $gt, $gte, $between, $contains, $notContains, $startsWith, $endsWith and all six case-insensitive variants all return the exact expected totals). Step 13 sends the same shape Strapi uses everywhere else for nullity, {\"authorName\":{\"$null\":true}}, and the MCP boundary rejects it before the query runs: text \"MCP error -32602: Input validation error: Invalid arguments for tool list_article: Invalid input at filters.$and[1].authorName\", isError true, HTTP 200. Step 14, the $notNull half, never ran because the run stops at the first failing step, but it fails identically for the same reason (evidence run 2026-08-14T15-19-25Z_1a26996e recorded the same -32602 on the $notNull step).",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Two of the fifteen documented field operators are unusable from the MCP server on every non-boolean field, which is nearly every field. An AI client following the docs cannot ask \"which entries have no author / have an author\" at all, and the tool's advertised JSON schema instead offers a value type that silently inverts the operator when the client passes null.",
+  "rootCause": {
+    "file": "packages/core/content-manager/server/src/mcp/schemas/filters-schema.ts",
+    "lines": "9-32, 84-92",
+    "explanation": "buildFiltersSchema derives one value schema per field from the field's own attribute type (attributeTypeToFilterValue, lines 9-32: a string/text/uid/date attribute yields z.union([z.string(), z.array(z.string()), z.null()])), then at lines 87-89 maps EVERY entry of FILTER_OPERATORS onto that same value schema: Object.fromEntries(FILTER_OPERATORS.map((op) => [op, valueSchema.optional()])). $null and $notNull are not value comparisons, they are boolean flags, and the rest of Strapi types them that way: packages/core/utils/src/convert-query-params.ts line 738 runs parseType({ type: 'boolean', value, forceCast: true }) on them, packages/core/database/src/query/helpers/where.ts lines 315-330 branches on truthiness, and Strapi's own suite writes { $null: true } on string and datetime fields (tests/api/core/strapi/filtering.test.api.js line 378, tests/api/core/strapi/document-service/publish.test.api.ts line 59). Because authorName is a string attribute, the operator object types $null as string | string[] | null, so the boolean true is a Zod type error and the MCP SDK rejects the call with -32602 before any query is built. The operators only happen to work on boolean-typed attributes, where valueSchema is z.boolean(). Two secondary consequences of the same line: the schema advertises string | string[] | null for $null, and the only non-string member of that union, null, is force-cast to false by parseType, so a client that reads the advertised schema and sends {\"$null\": null} gets whereNotNull, the exact opposite of what it asked for, with no error; conversely the loose typing lets $eq and $contains take arrays and $in and $between take bare scalars."
+  },
+  "introducedBy": {
+    "commit": "d6f693da85c71a5d875c58617a9f25d7021b492f",
+    "date": "2026-05-27",
+    "pr": "#26371",
+    "title": "feat(*): introduce MCP server",
+    "note": "git blame in the tested worktree puts every line of filters-schema.ts, including the operator-to-value mapping at 87-89 and the string value union at line 30, on this commit. The file was born with the defect; there is no older interacting code. The boolean contract it violates is much older (the $null/$notNull cast in convert-query-params and the where helper predate the MCP server by years)."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 26990,
+        "url": "https://github.com/strapi/strapi/pull/26990",
+        "state": "open",
+        "title": "feat(content-manager): add populate/fields/filters + depth guard to MCP read tools",
+        "relation": "related",
+        "note": "Open since 2026-07-12, last touched 2026-08-06, not merged. It is the only upstream item that edits the culprit file. It refactors the per-field builder into buildScalarFieldFilter and extends filters to nested component fields, but it carries the defect forward verbatim: the new helper still does FILTER_OPERATORS.map((op) => [op, valueSchema.optional()]). Merging it would not fix $null/$notNull."
+      },
+      {
+        "number": 27357,
+        "url": "https://github.com/strapi/strapi/pull/27357",
+        "state": "merged",
+        "title": "fix(content-manager): deduplicate MCP tool names when an api has multiple content types",
+        "relation": "related",
+        "note": "The only MCP change merged to develop after the tested commit. Unrelated to filters."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi --include-prs 'MCP filters $null' (0 results)",
+      "gh search issues --repo strapi/strapi --include-prs 'MCP filters' (0 results)",
+      "gh search issues --repo strapi/strapi --include-prs --limit 50 'mcp' (50 results, reviewed; no item reports a filter-operator or error-message-leak symptom)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git diff c43e9ee1e2 origin/develop -- packages/core/content-manager/server/src/mcp/schemas/filters-schema.ts is empty: the file is byte-identical between the tested commit and origin/develop at acf0ce20345e (2026-08-14). git log over the whole MCP tree in that range returns exactly one commit, 4c2f51a5d2 / PR #27357 (tool name dedupe). Still broken on develop."
+  },
+  "colleagueFinding": {
+    "ref": "strapi #4",
+    "agreement": "refines",
+    "note": "Agrees on the substance and on the blame (PR #26371, filters-schema.ts, every operator inheriting the field's value type) and I confirmed both from source. Two refinements. First, the count: they say two operators reject the input, which is right for a string field, but the scope is per attribute type. For integer/decimal fields the value schema is number | number[], so $null/$notNull are rejected there too; for boolean fields they are accepted. So the operators are broken on every scalar type except boolean, not just on this fixture's field. Second, the workaround. The plain string workaround is NOT mis-handled: {\"$null\": \"true\"} and {\"$null\": \"false\"} pass Zod and are coerced correctly by parseType (TRUTHY_INPUTS / FALSY_INPUTS in packages/core/utils/src/parse-type.ts, and Strapi's own filtering.test.api.js asserts exactly that table). What IS mis-handled is the other value the advertised schema allows: {\"$null\": null} force-casts to false and silently runs whereNotNull, the inverse of the request. No evidence file in any of the ten runs exercises either workaround, so both statements here are code-path readings, not observed behavior."
+  },
+  "notes": "The scenario itself is sound: it creates its own three documents, the authorless one exists (step 6 returns authorName null), and the assertion names tcref-op-gamma rather than merely counting. The scenario's own step 11 note already records that a $notNull guard was removed after an earlier run hit this same rejection, so the flow is self-consistent. Strapi has no unit test over buildFiltersSchema at the tested commit (packages/core/content-manager/server/src/mcp/schemas/__tests__/ contains only output-schemas.test.ts), which is why a 21-operator schema shipped with two operators typed wrong. A minimal fix is to special-case $null and $notNull to z.boolean() in the FILTER_OPERATORS map rather than giving them the field's value schema.",
+  "additionalDefects": [
+    {
+      "id": "raw-sql-and-bound-values-echoed-to-the-mcp-client-on-a-tool-error",
+      "failingStep": 6,
+      "evidence": "/Users/musheghgevorgyan/repos/strapi/.truecourse/guard/evidence/2026-08-14T15-07-53Z_74b6e3f2/the-filter-operators-the-docs-enumerate.api.1/transcript.txt (an earlier run of this same scenario; the recorded run 2026-08-14T15-21-47Z_9ac34d71 does not reach a write error)",
+      "whatFailed": "When a create_article tool call fails inside Strapi, the MCP server hands the client the database driver's raw error message, which is the full SQL statement with its bound values.",
+      "docClaim": {
+        "quote": "Errors are: - Logged with full detail (message + stack) via Strapi's logger - Returned to the MCP client as a safe error response (no stack trace leak)",
+        "doc": "packages/core/core/src/services/mcp/utils/safeHandlerWrapper.ts lines 5-12 (the code's own contract; the published MCP doc page makes no error-shape promise)",
+        "section": "wrapSafeHandler docblock"
+      },
+      "observed": "Step 6 returned HTTP 200 with isError true and text: Tool \"create_article\" execution failed: insert into `articles` (`created_at`, `created_by_id`, `document_id`, `locale`, `published_at`, `title`, `updated_at`, `updated_by_id`) values ('2026-08-14 15:09:10.320', 2, 'nez829w0fwk50nas8b6n5df9', 'en', NULL, 'tcref-op-gamma-3d73b4faba', '2026-08-14 15:09:10.320', 2) returning `id` - database is locked. The underlying trigger (sqlite \"database is locked\") is a sandbox condition, but the disclosure is not: any knex error on any driver carries the statement and its bindings in error.message.",
+      "verdict": "real-defect",
+      "confidence": "high",
+      "impact": "Information disclosure to every MCP client. The holder of a read-only admin token learns physical table and column names, the internal numeric user id, and the literal parameter values of the failing statement, none of which the same failure would reveal over REST. On a UPDATE or a unique-constraint violation the bound values can include other records' data.",
+      "rootCause": {
+        "file": "packages/core/core/src/services/mcp/tool-registry.ts",
+        "lines": "104-113",
+        "explanation": "createErrorResult interpolates error.message verbatim into the tool result text, with no check for whether the error is an errors.ApplicationError (a message meant for clients) or an internal one. wrapSafeHandler (utils/safeHandlerWrapper.ts lines 27-38) already logs the message and stack server-side and its docblock states the client gets a safe response, so the registry defeats its own wrapper's contract. Strapi's REST path does the opposite for the identical error: middlewares/errors.ts falls through to formatInternalError, and services/errors.ts lines 64-76 replaces any non-exposed error with createError(status || 500), so the raw driver message never leaves the server. prompt-registry.ts line 91 and resource-registry.ts line 93 have the same verbatim echo, so all three MCP capability kinds leak."
+      },
+      "introducedBy": {
+        "commit": "9247b9b093694700e66aa0d25e27a09b9b5618e1",
+        "date": "2026-05-27",
+        "pr": "#26371",
+        "title": "feat(*): introduce MCP server",
+        "note": "git blame puts lines 104-113 of tool-registry.ts on this commit, the second of the two commits that landed the MCP server. Same PR as the filters defect."
+      },
+      "upstream": {
+        "issues": [],
+        "prs": [],
+        "queries": [
+          "gh search issues --repo strapi/strapi --include-prs --limit 50 'mcp' (reviewed all 50; nothing about MCP error message content or SQL in tool errors)"
+        ]
+      },
+      "fixedAfter": {
+        "status": "no",
+        "by": null,
+        "date": null,
+        "inTag": null,
+        "note": "git diff c43e9ee1e2 origin/develop -- packages/core/core/src/services/mcp/tool-registry.ts is empty. Unchanged on develop as of acf0ce20345e (2026-08-14)."
+      },
+      "colleagueFinding": {
+        "ref": "strapi #7",
+        "agreement": "agrees",
+        "note": "Confirms their finding and their blame (tool-registry.ts echoing the raw error verbatim, PR #26371). Adds two things they did not state: the same verbatim echo exists in prompt-registry.ts and resource-registry.ts, and the wrapper directly above it documents the opposite behavior, which makes this a self-contradiction rather than an oversight of an unstated policy. Suggested fix: pass error.message only for errors.ApplicationError instances and substitute a generic string otherwise, mirroring formatInternalError."
+      },
+      "notes": "The recorded run for this scenario never reaches a write error, so this defect is only visible in the earlier evidence directory of the same scenario. A maintainer reproducing it needs any tool call that raises a non-ApplicationError, for example a unique-constraint violation on create."
+    },
+    {
+      "id": "list-tool-default-page-size-is-10-while-its-own-schema-and-the-docs-say-25",
+      "failingStep": null,
+      "evidence": "Visible in the recorded transcript, steps 7 through 12: every list_article response carries \"pagination\":{\"page\":1,\"pageSize\":10,...} although no step passed pageSize.",
+      "whatFailed": "list_article defaults to 10 items per page while both the bound doc page and the tool's own advertised input schema say the default is 25.",
+      "docClaim": {
+        "quote": "The `list` tool also accepts `page` (1-indexed, default: 1) and `pageSize` (default: 25, max: 100) parameters.",
+        "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/strapi-mcp-server.md (line 289)",
+        "section": "MCP server > Usage > Content management through prompts > Pagination"
+      },
+      "observed": "pageSize 10 in all six list responses of the recorded run, and in every list response of the three earlier runs of this scenario.",
+      "verdict": "real-defect",
+      "confidence": "high",
+      "impact": "An AI client that trusts the advertised schema silently sees 10 of the first 25 entries and can conclude a collection is smaller than it is. The mismatch is with the product's own machine-readable schema, not only with prose, so it is a contract mismatch.",
+      "rootCause": {
+        "file": "packages/core/content-manager/server/src/services/document-manager.ts",
+        "lines": "70-73",
+        "explanation": "The MCP list handler (mcp/handlers/collection-handlers.ts line 114) calls documentManager.findPage, which calls pagination.withDefaultPagination(opts, { maxLimit: 1000 }) and passes no defaultLimit, so the util's built-in default wins: packages/core/utils/src/pagination.ts lines 32-36 and 171 hard-code pageSize 10. Meanwhile the tool's own Zod description, packages/core/content-manager/server/src/mcp/schemas/input-schemas.ts lines 27-34, tells clients \"Items per page (default: 25, max: 100)\". The 25 in the docs matches REST, which supplies api.rest.defaultLimit; the MCP path never does."
+      },
+      "introducedBy": {
+        "commit": "d6f693da85c71a5d875c58617a9f25d7021b492f",
+        "date": "2026-05-27",
+        "pr": "#26371",
+        "title": "feat(*): introduce MCP server",
+        "note": "The pageSize description in input-schemas.ts is from the MCP server PR. document-manager.findPage and the pagination util default of 10 are much older content-manager code; the defect is the interaction, the new schema text asserting a default the old call path does not produce."
+      },
+      "upstream": {
+        "issues": [],
+        "prs": [],
+        "queries": [
+          "gh search issues --repo strapi/strapi --include-prs --limit 50 'mcp' (reviewed all 50; nothing on MCP pagination defaults)"
+        ]
+      },
+      "fixedAfter": {
+        "status": "no",
+        "by": null,
+        "date": null,
+        "inTag": null,
+        "note": "Neither input-schemas.ts nor document-manager.ts changed between c43e9ee1e2 and origin/develop."
+      },
+      "colleagueFinding": {
+        "ref": "strapi #6",
+        "agreement": "agrees",
+        "note": "Independently visible in this scenario's transcript and it matches their finding #6 exactly, including their note that REST returns 25. Their dedicated scenario the-list-tool-paginates-its-results.api.1 owns it; recorded here only because the brief asked for every distinct defect this transcript shows. I add the precise root cause: the missing defaultLimit in the withDefaultPagination call at document-manager.ts lines 70-73."
+      },
+      "notes": "Either fix direction is defensible (pass defaultLimit 25 to match the schema and REST, or correct the schema description and the doc to 10), but the schema and the behavior must agree."
+    }
+  ]
+}

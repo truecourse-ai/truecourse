@@ -1,0 +1,12 @@
+{
+  "step": 17,
+  "label": "PASS2 PREP recipient",
+  "at": "2026-08-19T19:15:07.545Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_daillesxfetczrhd\",\"data\":[{\"email\":\"tcref-frozen2-c373a968c2@documenso.test\",\"name\":\"TCRef Frozen 2\",\"role\":\"SIGNER\",\"signingOrder\":1}]}"
+}

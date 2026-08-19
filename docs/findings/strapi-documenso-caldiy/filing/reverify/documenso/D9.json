@@ -1,0 +1,74 @@
+{
+  "id": "D9",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/ui/components/common/copy-text-button.tsx#L40-L71",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/ui/components/common/copy-text-button.tsx#L40-L71",
+    "howDecided": "git log 3cf2963cd0..origin/main returns zero commits for packages/ui/components/common/copy-text-button.tsx, apps/remix/app/components/general/document/document-page-view-recipients.tsx and apps/remix/app/components/general/document/document-page-view-dropdown.tsx; all three blobs are byte-identical between v2.16.0 and v2.17.0, and #3107 'feat: migrate to react 19' (2026-08-17) did not touch any of them. Read them at origin/main: CopyTextButton still returns <Button type=\"button\" variant=\"none\" className=... onClick=...> at lines 41-46 whose only content is the lucide <CopyIcon> / <CheckSquareIcon> at line 66, with no aria-label, no title and no visually hidden text, so its accessible name is empty. The words 'Copy Signing Links' still exist only as Radix <TooltipContent> at document-page-view-recipients.tsx lines 217-220, attached to the wrapping <div> TooltipTrigger at line 200 rather than to the button, and Radix wires TooltipContent as aria-describedby, a description and not a name. document-page-view-dropdown.tsx lines 72-75 still read <DropdownMenu><DropdownMenuTrigger data-testid=\"document-page-view-action-btn\"><MoreHorizontal className=\"h-5 w-5 text-muted-foreground\" /></DropdownMenuTrigger>, and data-testid is not an accessible name. That trigger still holds the only textually named route to the links, the 'Signing Links' item further down the same file. Second permalink: https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/remix/app/components/general/document/document-page-view-dropdown.tsx#L72-L75."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 3201,
+        "url": "https://github.com/documenso/documenso/issues/3201",
+        "state": "open",
+        "title": "Multiselect remove/clear buttons lack type=\"button\" and submit the surrounding form",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "Nearest new neighbour: a shared-primitive markup bug filed as an ordinary issue and already picked up by two competing PRs (#3236, #3256). Different defect (form semantics, not accessible naming) but useful precedent that this class is accepted, and useful evidence that shared-primitive fixes here attract duplicate PRs."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#1449",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-11-06T12:34:06Z",
+        "mergeCommit": "efbe94aea8",
+        "baseRef": "main",
+        "note": "Unchanged. Created CopyTextButton without an accessible name; it has never had one."
+      },
+      {
+        "ref": "documenso/documenso#2102",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-10-27T05:11:10Z",
+        "mergeCommit": "5cdd7f8623",
+        "baseRef": "main",
+        "note": "Unchanged. Added the pulse-and-tooltip handling around the unnamed button."
+      },
+      {
+        "ref": "documenso/documenso#2490",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: closed as stale 2026-08-03. A user who could not get a URL out of this exact control."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"accessibility\" --limit 25 (25 results; not one concerns an accessible name, aria-label or an unlabeled control. The nearest is #3201 \"Multiselect remove/clear buttons lack type='button' and submit the surrounding form\", a form-semantics bug, not a naming one. Confirms the review's \"unreported\".)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. All three culprit files are byte-identical between v2.16.0 and v2.17.0, so both unnamed controls ship in the newest release, and the react 19 migration that landed in this window did not touch them. No upstream item reports an accessible-name defect anywhere in the app. One scope caveat inherited from the review and still true: this finding was confirmed IN SOURCE, not executed, because scenario step 16 never ran (step 15, which is D7, failed first). The evidence is therefore a code reading plus the run's page-text observation that 'Copy Signing Links' appears twice as tooltip text rather than as a control label. If the live re-run reaches step 16 it will convert this to observed; until then the issue body should not claim a screen-reader test was performed.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: 'The most useful contribution is a detailed issue. Treat it like a spec.' plus #3026: 'Most new PRs will be closed with a request to open an issue instead.' Note the precedent that a comparable shared-primitive markup issue (#3201) was filed as an issue and then attracted two competing external PRs, both still unmerged, which is exactly the outcome the PR pause predicts.",
+  "confidence": "high",
+  "notes": "Two controls, one issue. (1) CopyTextButton (packages/ui/components/common/copy-text-button.tsx) is icon-only with no aria-label; lucide-react emits a bare <svg> with no <title>, so the accessible name is empty, and the Radix TooltipContent that reads 'Copy Signing Links' is aria-describedby on the wrapping div, a description not a name, and is only force-open for the first recipient. (2) The document page's three-dots DropdownMenuTrigger (document-page-view-dropdown.tsx:73) has only data-testid, which is not an accessible name, and it is the only textually named route to the 'Signing Links' item. Both are one-line fixes (add aria-label, or sr-only text inside the button). Pair this with D7 in the body: the reason the naming gap matters more here than elsewhere is that after a distribution-method None send these two unnamed controls are the ONLY routes to the promised signing links. Do not open a PR even though the fix is trivial."
+}

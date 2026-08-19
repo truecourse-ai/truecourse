@@ -1,0 +1,37 @@
+{
+  "id": "S11",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/admin/server/src/controllers/admin-token.ts#L138-L160",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/admin/server/src/controllers/admin-token.ts#L138-L160",
+    "howDecided": "git log c43e9ee1e2..origin/develop -- packages/core/admin/server/src/controllers/admin-token.ts packages/core/admin/server/src/services/api-token.ts returns zero commits. Only 14 commits landed on develop since the tested build (through v5.52.1, a292a53cfd, 2026-08-19) and none of them touches packages/core/admin/server/src. Read the controller at today's head: line 138 async get, line 148 the non-owner 404 guard, line 153 if (isTokenOwner(ctx.state.user, token)), line 154 apiTokenService.getById(id, { includeDecryptedKey: true }), line 155 ctx.send({ data: withKey ?? token }), line 159 the keyless send for a super-admin reading someone else's token. Byte-identical to the tested build, same line numbers. The escalation path is also unchanged at head: routes/admin-tokens.ts lines 36-45 gate GET /admin-tokens/:id on admin::isAuthenticatedAdmin plus admin::hasPermissions {admin::admin-tokens.read} only, and strategies/admin-token.ts line 24 still assigns ctx.state.user = authResult.user (the token OWNER), so isTokenOwner compares the owner against the REQUESTED token id with no requirement that it be the authenticating token."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "docusaurus/docs/cms/features/admin-tokens.md",
+    "lineToday": 89,
+    "permalink": "https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/features/admin-tokens.md#L88-L90",
+    "publishedUrl": "https://docs.strapi.io/cms/features/admin-tokens",
+    "commitsSinceReview": [],
+    "note": "git log c768c7bf..origin/main -- docusaurus/docs/cms/features/admin-tokens.md is empty; only two commits landed on the docs default branch since the review (9226f905 and 01750c84, both 'Auto-ignore N rejected PRs from self-healing run', touching .github/self-healing-ignore.json only). The caution block is verbatim at lines 88-90: ':::caution' / 'The plaintext token key is shown only once, immediately after creation or regeneration. The `admin.secrets.encryptionKey` configuration that makes Content API token keys persistently viewable does not apply to Admin tokens. Admin token keys are always restricted to the token owner, regardless of encryption configuration.' / ':::'. The secondary contradiction the review flagged is also still there: line 49 tells the reader the encryption key is set via `apiToken.secrets.encryptionKey` while services/encryption.ts reads admin.secrets.encryptionKey."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --owner strapi --include-prs --limit 25 'admin token accessKey' -> 0 results",
+      "gh search issues --owner strapi --include-prs --limit 25 'admin token plaintext key shown once' -> 0 results",
+      "non-search enumeration: gh api 'repos/strapi/documentation/issues?state=all&since=2026-08-01T00:00:00Z&per_page=100' -> 40 items, all PRs, none touching admin-tokens.md (the open ones are self-healing doc PRs about Media Library, proxy IP headers, concurrentUploadRequests, AI metadata, releases); gh api --paginate 'repos/strapi/strapi/issues?state=all&since=2026-08-10T00:00:00Z&per_page=100' -> 239 items, none about admin-token key disclosure"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged on both sides. The product code is byte-identical to the tested build (no commit touched packages/core/admin/server/src at all since 2026-08-13, including through the v5.52.1 release), and the doc caution is verbatim on strapi/documentation main. Every factual claim in the review's fixedAfter block re-verifies today. Nothing changes the verdict, confidence or scope of the doc half: the caution's first two clauses are false in a default install and the third (owner scoping against other admin users) is honored. The one thing that has NOT advanced is the escalation: a token holding only admin::admin-tokens.read reading back a SIBLING token's plaintext key is still established from source only, not exercised. I re-read routes/admin-tokens.ts and strategies/admin-token.ts at today's head and the reasoning holds exactly as written, but reading code is not a proof of concept, and Strapi's SECURITY.md makes a PoC a hard requirement. So the doc half is ready to file now and the security half is not.",
+  "routeSuggestion": "docs repo issue",
+  "policyBasis": "strapi/documentation .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false with a single contact link 'Strapi Project Issues ... Please use the strapi/strapi repo for these issues', so a docs-text bug belongs in strapi/documentation under the 'Documentation Bug Report' template (BUG_REPORT.yml, title prefix '[Bug]: ', label 'type: bug', required fields: link to the documentation page, describe the bug). For the escalation half the operative sentence is strapi/documentation SECURITY.md (identical to strapi/strapi's): 'Please note the following requirements (all are required): ... Proof of Concept (Code samples at minimum, reproduction video optional) - POC must include how the vulnerability can actually access sensitive data, simply triggering an alert popup in a browser is not a security vulnerability', reported via https://github.com/strapi/strapi/security/advisories/new; 'Strapi does not support other reporting platforms'.",
+  "confidence": "high",
+  "notes": "Two-part finding, and only one part is filable today. Part 1 (doc bug, file now): the caution at docusaurus/docs/cms/features/admin-tokens.md line 89 is wrong on both factual clauses, plus the `apiToken.secrets.encryptionKey` typo at line 49 of the same page. Part 2 (security escalation, HOLD): the sibling-token readback is verified in source but was never exercised by the run. The scenario transcript shows token ids 5, 6, 7, 8 and 10 all owned by user id 2, so one request (GET /admin/admin-tokens/6 with the step-2 token's bearer) would settle it. Do not open a security advisory without that request: SECURITY.md requires a PoC showing actual access to sensitive data. Also note strapi/documentation runs an automated 'docs self-healing' pipeline (.github/workflows/docs-self-healing.yml plus .github/prompts/docs-self-healing-{triage,router,drafter}.md) that opens doc PRs and records rejections in .github/self-healing-ignore.json; a filer should expect bot triage on any docs issue."
+}

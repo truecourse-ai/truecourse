@@ -1,0 +1,76 @@
+{
+  "repo": "documenso",
+  "scenarioId": "an-assistant-is-refused-on-a-parallel-envelope.api.1",
+  "flowId": "an-assistant-is-refused-on-a-parallel-envelope",
+  "failingStep": 2,
+  "whatFailed": "POST /api/v2/envelope/recipient/create-many accepted an ASSISTANT recipient on an envelope whose documentMeta.signingOrder is PARALLEL and returned 200 with the persisted recipient, although the docs state the Assistant role cannot be used in parallel signing.",
+  "docClaim": {
+    "quote": "The Assistant role requires sequential signing to be enabled. You cannot use this role when recipients sign in parallel. (recipient-roles, Assistant tab callout). The same tab lists under 'What they cannot do': 'Be used in parallel signing mode', and its intro says 'This role is only available when sequential signing is enabled.' add-recipients repeats it: 'The Assistant role is only available when sequential signing is enabled.' and 'Sequential signing is required to use the Assistant role. Assistants must act before the signers whose fields they pre-fill.'",
+    "doc": "apps/docs/content/docs/concepts/recipient-roles.mdx (snapshot: .truecourse/specs/sources/docs.documenso.com/docs/concepts/recipient-roles.md) and apps/docs/content/docs/users/documents/add-recipients.mdx (snapshot: .truecourse/specs/sources/docs.documenso.com/docs/users/documents/add-recipients.md)",
+    "section": "recipient-roles > Role Details > Assistant, and add-recipients > Assigning Roles / Signing Order"
+  },
+  "observed": "Step 1 minted envelope_uanynwhkkxelvdtm from the seed template. Sibling evidence in the same run (mint-a-document-from-a-template-and-read-it-back.api.1) shows envelopes minted from that template carry documentMeta.signingOrder = PARALLEL, and 30 of the 31 signingOrder readings across the run's evidence are PARALLEL. Step 2 posted one recipient with role ASSISTANT and no signingOrder. The server answered 200 with {\"data\":[{...\"role\":\"ASSISTANT\"...,\"id\":349,\"signingOrder\":null...}]}, so the recipient was created and persisted. server.stdout.txt logs the envelope.recipient.createMany procedure running normally with no warning or error.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "API callers can build the exact configuration three doc pages call impossible: the envelope sends to everyone at once, so signers can sign before the assistant pre-fills anything, and the assistant's own pre-fill view comes back empty. Silent contract violation plus a broken assistant workflow, no error anywhere.",
+  "rootCause": {
+    "file": "packages/lib/server-only/recipient/create-envelope-recipients.ts",
+    "lines": "62-97",
+    "explanation": "createEnvelopeRecipients validates the envelope exists, is mutable, is not complete, and that action auth is permitted, then runs exactly one per-recipient role assertion: assertCompatibleRecipientRole (packages/lib/server-only/signature-level/assert-compatible-recipient-role.ts), which only rejects ASSISTANT on AES/QES (TSP) envelopes and returns early for SES, the default. Nothing reads envelope.documentMeta.signingOrder, so the documented Assistant-requires-sequential rule is never checked. The request schema (packages/trpc/server/envelope-router/envelope-recipients/create-envelope-recipients.types.ts:18-30) accepts z.nativeEnum(RecipientRole) with no refinement, and the route (create-envelope-recipients.ts:10-38) adds nothing. The rule exists only in the two React editor forms: packages/ui/primitives/document-flow/add-signers.tsx:392-402 and apps/remix/app/components/general/envelope-editor/envelope-editor-recipient-form.tsx:401-411 both intercept a role change to ASSISTANT while signingOrder is PARALLEL, flip the form to SEQUENTIAL and toast 'You cannot add assistants when signing order is disabled'. Grepping ASSISTANT across packages/lib/server-only and packages/trpc/server returns no signing-order or PARALLEL check at all, and no such check exists on set-document-recipients, update-envelope-recipients or send-document either. Consequences verified in code: send-document.ts:129-157 notifies every recipient at once when signingOrder is PARALLEL, and get-is-recipient-turn.ts:27-29 returns true for everyone on a non-SEQUENTIAL envelope, so the 'assistant acts first' guarantee the docs rest the restriction on does not hold. Worse, getRecipientsForAssistant (packages/lib/server-only/recipient/get-recipients-for-assistant.ts:23-29) and getFieldsForToken (packages/lib/server-only/field/get-fields-for-token.ts:22-51) filter the assistant's view with signingOrder: { gte: assistant.signingOrder ?? 0 }, which in SQL is NULL-false for the null signingOrder that API-created parallel recipients carry, so the assistant's recipient list comes back empty and they can see no one else's fields."
+  },
+  "introducedBy": {
+    "commit": "c0ae68c28b1e18376ef9d0f4fc25203c87a7cb21",
+    "date": "2025-02-01",
+    "pr": "#1588",
+    "title": "feat: assistant role",
+    "note": "The 52-file commit that added RecipientRole.ASSISTANT put the parallel restriction only in packages/ui/primitives/document-flow/add-signers.tsx; its diff touches no file under packages/lib/server-only/recipient and no trpc router, so the constraint was client-side from birth. Reaching it from the outside is newer: the v2 route POST /envelope/recipient/create-many and packages/lib/server-only/recipient/create-envelope-recipients.ts both arrive with d05bfa9f 'feat: add envelopes api' (#2105, 2025-11-07), which carried the gap forward. Old rule, newer surface."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 2973,
+        "url": "https://github.com/documenso/documenso/issues/2973",
+        "state": "open",
+        "title": "Assistant (Form Filler) Must Always Act Before Signers Without Requiring Workflow Ordering",
+        "relation": "related",
+        "note": "Filed 2026-06-10, still labelled 'status: triage'. It argues the restriction should be dropped and the assistant made a pre-signing blocking role that always goes first, which is the opposite direction from enforcing the documented rule. It does not report that the API currently accepts the combination silently. Useful for a maintainer deciding which way to fix: enforce the docs, or change the docs and the workflow."
+      }
+    ],
+    "prs": [
+      {
+        "number": 2995,
+        "url": "https://github.com/documenso/documenso/pull/2995",
+        "state": "closed",
+        "title": "feat: assistant always acts before signers without requiring sequential signing",
+        "relation": "related",
+        "note": "Community PR for #2973, opened 2026-06-17, closed unmerged 2026-06-22, before the v2.16.0 tag. It would have removed the UI restriction, reordered notifications in send-document.ts and complete-document-with-token.ts, changed get-is-recipient-turn.ts, and updated recipient-roles.mdx. Because it never merged, the docs still forbid the combination while the API still allows it."
+      },
+      {
+        "number": 1588,
+        "url": "https://github.com/documenso/documenso/pull/1588",
+        "state": "merged",
+        "title": "feat: assistant role",
+        "relation": "related",
+        "note": "Origin of both the role and the UI-only enforcement. Not a report of the bug."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"assistant signing order\" --include-prs (0 results)",
+      "gh search issues --repo documenso/documenso \"assistant parallel\" --include-prs (0 results)",
+      "gh search issues --repo documenso/documenso \"assistant role\" --include-prs (5 results, listed above)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log 3cf2963cd0..origin/main over packages/lib/server-only/recipient/ and packages/trpc/server/envelope-router/envelope-recipients/ returns exactly one commit, e4897fa68 'fix: sort CC recipients last' (#2930, 2026-07-24), unrelated. git grep on origin/main for ASSISTANT under packages/lib/server-only and packages/trpc/server still finds no signing-order, PARALLEL or SEQUENTIAL check. The docs are unchanged too: origin/main apps/docs/content/docs/concepts/recipient-roles.mdx:92,104,113 and apps/docs/content/docs/users/documents/add-recipients.mdx:77 still carry the restriction verbatim. So the gap is live on main as of 2026-08-15, and the one PR that would have resolved it either way (#2995) was closed unmerged a month before the tested tag."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Not one of the researcher's 8 itemized Documenso findings. Closest kin is their #3 (docs say recipients cannot change once sent, the API adds a recipient to a PENDING document): same endpoint, same class of missing server-side rule. My read of packages/lib/server-only/envelope/assert-envelope-mutable.ts:64-83 independently corroborates their #3, since assertSnapshotMutable returns immediately for non-TSP envelopes, and SES is the default, so the only mutability gate on createEnvelopeRecipients is inert for ordinary envelopes. This failure is a second, distinct hole in the same validation surface."
+  },
+  "notes": "Two caveats for whoever triages this. First, the 400 the scenario expected is the test's inference: no doc page publishes a status code for this refusal, and the assertion deliberately matched no message. The finding that survives is not 'wrong status code', it is 'no refusal at all, the recipient is created'. A maintainer can settle it with AppErrorCode.INVALID_BODY (which maps to 400 and is exactly what the sibling assertCompatibleRecipientRole throws for the AES/QES case), or by changing the docs and the workflow along the lines of #2973. Second, the codebase already has the shape of the fix: packages/lib/server-only/signature-level/ holds assert-compatible-recipient-role.ts and assert-compatible-signing-order.ts, two asserts that pair a role with a signing order for the TSP case and are called from this same service. The documented assistant rule needs the same treatment, and it must cover the update path (update-envelope-recipients) and the envelope-meta path too, since setting an envelope back to PARALLEL while an ASSISTANT recipient exists is the same illegal state reached from the other side. Also worth noting for the doc author: add-recipients.mdx frames the rule as a UI toggle, but recipient-roles.mdx states it as a product-level property of the role ('Be used in parallel signing mode' under 'What they cannot do'), so the API is bound by it, not just the editor."
+}

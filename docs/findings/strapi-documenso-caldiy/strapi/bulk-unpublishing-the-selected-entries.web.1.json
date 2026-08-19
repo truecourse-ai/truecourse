@@ -1,0 +1,76 @@
+{
+  "repo": "strapi",
+  "scenarioId": "bulk-unpublishing-the-selected-entries.web.1",
+  "flowId": "bulk-unpublishing-the-selected-entries",
+  "failingStep": 16,
+  "whatFailed": "The bulk-unpublish confirmation dialog in the Content Manager list view renders its confirm button as \"Confirm\" instead of the \"Unpublish\" label the docs promise and the component's own code asks for, because the action sets a property name (confirmButton) that no renderer reads.",
+  "docClaim": {
+    "quote": "To unpublish several entries at the same time:\n\n1. From the list view of the Content Manager, select your entries to unpublish by ticking the box on the left side of the entries' record.\n2. Click on the **Unpublish** button located above the header of the table.\n3. In the confirmation dialog box, confirm your choice by clicking again on the **Unpublish** button.",
+    "doc": "strapi/documentation: docusaurus/docs/cms/features/draft-and-publish.md (snapshot: .truecourse/specs/sources/docs.strapi.io/cms/features/draft-and-publish.md, lines 137-143)",
+    "section": "Draft & Publish > Usage > Bulk actions > Bulk unpublishing content (step 3)"
+  },
+  "observed": "Steps 1-15 all passed: login, two articles created and published, the filtered list view shows both as Published, \"Select all entries\" reveals the bulk bar with an exactly-named \"Unpublish\" button, and clicking it opens a dialog titled \"Confirmation\" whose body reads \"Are you sure you want to unpublish these entries?\" (exactly as the code and the docs describe). At step 16 the dialog's only buttons are \"Cancel\" and \"Confirm\" - the runner reported verbatim: 'the button elements on the page are: \"Cancel\", \"Confirm\"'. step-16.png shows the modal with Cancel / Confirm in the footer. The bulk-bar \"Unpublish\" button is still in the DOM behind the modal but is inert/aria-hidden under the Radix dialog, so it is not reachable, which is also what a keyboard or screen-reader user would experience. The doc's step 3 therefore cannot be followed as written.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Low-severity UI/label defect, no data loss: a user following the docs (or a localized UI, or an automated/assistive flow keyed on the documented label) looks for \"Unpublish\" in the confirmation dialog and finds only a generic \"Confirm\"; the dialog's confirm button also loses its localized `app.utils.unpublish` string in every locale and falls back to the generic `app.components.Button.confirm`, and it is inconsistent with the sibling bulk-publish dialog, which does render \"Publish\".",
+  "rootCause": {
+    "file": "packages/core/content-manager/admin/src/pages/ListView/components/BulkActions/Actions.tsx",
+    "lines": "179-207",
+    "explanation": "UnpublishAction returns a bulk-action description whose dialog descriptor sets `confirmButton: formatMessage({ id: 'app.utils.unpublish', defaultMessage: 'Unpublish' })` (lines 203-206). Nothing reads that property. The dialog is rendered by DocumentActionConfirmDialog in packages/core/content-manager/admin/src/pages/EditView/components/DocumentActions.tsx: its DialogOptions interface (lines 100-111) declares the custom-label field as `confirmLabel`, and the footer renders `{confirmLabel ?? formatMessage({ id: 'app.components.Button.confirm', defaultMessage: 'Confirm' })}` (lines 586-592). `confirmButton` is not a member of DialogOptions, NotificationOptions or ModalOptions, so it is silently dropped and the fallback \"Confirm\" is shown. DocumentActionButton spreads `{...action.dialog}` into DocumentActionConfirmDialog (lines 375-382), so renaming the single property at Actions.tsx:203 from `confirmButton` to `confirmLabel` is the whole fix. The typo survives the type checker: the description is returned from an arrow function whose type comes from a contextual annotation (DescriptionComponent<Props, BulkActionDescription>), so the returned object literal loses freshness and TypeScript's excess-property check never runs. I reproduced this on the exact type shape with tsc 5.9.3: a direct `const x: DialogOptions = {..., confirmButton: 'y'}` errors with TS2353, but the same literal returned from `const f: () => Desc = () => ({... dialog: {..., confirmButton: 'y'}})` compiles clean. The action's onConfirm handler is still wired correctly, so clicking \"Confirm\" does perform the unpublish; only the label is wrong. For comparison, the sibling bulk publish flow uses a different renderer, ConfirmBulkActionDialog / ConfirmDialogPublishAll (packages/core/content-manager/admin/src/pages/ListView/components/BulkActions/ConfirmBulkActionDialog.tsx), which passes an explicit `endAction` Button labelled `app.utils.publish` = \"Publish\", exactly matching step 6 of the docs' \"Bulk publishing drafts\". Bulk unpublish is the odd one out."
+  },
+  "introducedBy": {
+    "commit": "11011e9804685054cc7529d0f8bcaec16c820e22",
+    "date": "2024-06-10",
+    "pr": "#20431",
+    "title": "chore: integrate beta.5 of the design-system",
+    "note": "Regression, not an original bug. The `confirmButton: 'Unpublish'` property was written on 2024-05-09 by e1b9d9adee8a418f8a483f0a77449b6530e56012, PR #20235 'enhancement(CM): bulk delete and unpublish migration to v5' (Madhuri Sandbhor), and at that point it WORKED: BulkActions/Actions.tsx still had its own local BulkActionAction + BulkActionConfirmDialog whose footer rendered `{confirmButton ? confirmButton : formatMessage({id: 'app.components.Button.confirm', defaultMessage: 'Confirm'})}`. PR #20431 (Josh, 2024-06-10) deleted that local renderer and repointed BulkActionsRenderer at the shared DocumentActionButton / DocumentActionConfirmDialog, which has no `confirmButton` support; the now-dead property was left behind. `git tag --contains 11011e9804` includes v5.0.0, so the dialog has said \"Confirm\" in every Strapi 5 release, including the tested 5.52.0. A supported `confirmLabel` field was later added to DialogOptions on 2026-06-25 by 2dcf71afcd, PR #26736 'fix(content-manager): warn before publishing with draft relations', but only the draft-relations publish path was migrated to it; bulk unpublish was not. `git blame` on Actions.tsx:203 still points at e1b9d9adee8 because the line itself never changed."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 20235,
+        "url": "https://github.com/strapi/strapi/pull/20235",
+        "state": "merged",
+        "title": "enhancement(CM): bulk delete and unpublish migration to v5",
+        "relation": "related",
+        "note": "Wrote the `confirmButton: 'Unpublish'` line. Correct at the time; the property was honored by the then-local BulkActionConfirmDialog."
+      },
+      {
+        "number": 20431,
+        "url": "https://github.com/strapi/strapi/pull/20431",
+        "state": "merged",
+        "title": "chore: integrate beta.5 of the design-system",
+        "relation": "exact",
+        "note": "The regression. Removed the local BulkActionConfirmDialog that read `confirmButton` and switched bulk actions to the shared DocumentActionConfirmDialog, which does not. No issue or PR appears to have noticed."
+      },
+      {
+        "number": 26736,
+        "url": "https://github.com/strapi/strapi/pull/26736",
+        "state": "merged",
+        "title": "fix(content-manager): warn before publishing with draft relations",
+        "relation": "related",
+        "note": "Added the supported `confirmLabel` field to DialogOptions on 2026-06-25, which is the property bulk unpublish should now use. It did not migrate bulk unpublish."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo=strapi/strapi \"bulk unpublish confirmation button label\" --include-prs (0 results)",
+      "gh search issues --repo=strapi/strapi \"confirmButton\" --include-prs (0 results)",
+      "gh search issues --repo=strapi/strapi \"bulk unpublish\" --include-prs (7 results, none about the dialog label)",
+      "gh search issues --repo=strapi/strapi --match=title \"unpublish\" --include-prs --limit 40 (35 results, none about the confirm button label)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Still broken on origin/develop as of the 2026-08-15 fetch (develop HEAD acf0ce2034, 2026-08-14, 4 commits after the tested c43e9ee1e2). `git log c43e9ee1e2..origin/develop` touches neither BulkActions/Actions.tsx nor EditView/components/DocumentActions.tsx, and `git show origin/develop:.../BulkActions/Actions.tsx` still has `confirmButton:` at line 203."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the researcher's 8 Strapi findings. All 8 are MCP-server or admin-token API findings (permission reaping, set: null no-op, filter operators, page size, SQL leak, doc accuracy); this is the Content Manager web UI. Their finding 8b is the only other docs-adjacent Strapi item and it concerns the discard-tool permission mapping, a different page. This is an additional, independent finding."
+  },
+  "notes": "Fix is one word: change `confirmButton` to `confirmLabel` at packages/core/content-manager/admin/src/pages/ListView/components/BulkActions/Actions.tsx:203. Two things worth doing alongside it. (1) The type checker cannot catch this class of typo in the current shape, verified with tsc 5.9.3: freshness is lost on an object literal returned from a contextually typed arrow function, so excess-property checking is skipped. A cheap guard is to annotate the descriptor explicitly, e.g. `const description: BulkActionDescription = {...}; return description;`, which restores TS2353. Worth auditing the other DescriptionComponent implementations for the same silently dropped keys. (2) While in that block, UnpublishAction hand-rolls its warning icon inside `content` (a Flex + WarningCircle) even though DialogOptions now exposes `bodyIcon: 'danger'` for exactly that; DeleteAction in the same file does the same. Cosmetic, but it is the drift that made the confirmLabel migration easy to miss. Also note the docs are internally consistent and correct here, not stale: the same page's single-entry unpublish section says \"Click **Confirm**\" (which matches that dialog), and the bulk-publish section's step 6 says \"clicking again on the **Publish** button\" (which matches ConfirmDialogPublishAll's actual \"Publish\" button). So the doc author was describing real, per-dialog labels, and only the bulk-unpublish one has since regressed. The scenario correctly stopped at step 16 before proving the unpublish itself landed; from source the onConfirm handler is intact, so the action still works when \"Confirm\" is clicked, and this failure should be read as label-only."
+}

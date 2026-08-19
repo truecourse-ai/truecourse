@@ -1,0 +1,12 @@
+{
+  "step": 8,
+  "label": "readOnly DROPDOWN with no default value (expected 400)",
+  "at": "2026-08-19T19:16:54.314Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_urlxhxhbndxwvbvu\",\"data\":[{\"type\":\"DROPDOWN\",\"recipientId\":14,\"page\":1,\"positionX\":5,\"positionY\":60,\"width\":20,\"height\":5,\"fieldMeta\":{\"type\":\"dropdown\",\"readOnly\":true,\"values\":[{\"value\":\"EU\"}]}}]}"
+}

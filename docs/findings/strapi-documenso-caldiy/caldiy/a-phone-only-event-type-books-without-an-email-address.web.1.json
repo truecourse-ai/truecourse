@@ -1,0 +1,51 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-phone-only-event-type-books-without-an-email-address.web.1",
+  "flowId": "a-phone-only-event-type-books-without-an-email-address",
+  "failingStep": 3,
+  "whatFailed": "On the phone-only booking form the required phone control is rendered and visibly labelled \"Phone number *\", but the input itself has no accessible name, so a role+name locator (and any assistive technology) cannot identify the field the docs say replaces the email field.",
+  "docClaim": {
+    "quote": "That's it. Once you switch to **Phone**, the booking form automatically replaces the email field with a phone number field, so bookers provide their phone number to receive confirmations.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/create-phone-only-event-type.md",
+    "section": "create-a-phone-only-event-type"
+  },
+  "observed": "Step 3 loaded /reference-host/phone-only?...&slot=2026-09-15T10:00:00.000Z. The step's other check passed: the page text carries no \"Email address\", so the email field really is gone. The page text shows \"Your name*\", \"Phone number\", \"*\", \"Additional notes\" and step-3.png shows a phone control with a US flag selector and a \"+1\" value under the label \"Phone number * (i)\". The role query for textbox \"Phone number\" (substring match, so a trailing asterisk would still match) resolved 0 elements, and the visual judge annotated that the field is plainly visible, i.e. the locator, not the page, is what failed. The same run resolves textbox \"Your name\" and textbox \"Email address\" on other booking pages, so the harness's role+name lookup works on this app's other inputs; only the phone control is unnamed. Corroboration from prefill-the-attendee-phone-number-either-way-it-is-asked.web.1: on the phone-LOCATION page textbox \"Phone\" does resolve (value \"+91 99999-99999\"), because that variant is given a placeholder (\"Enter phone number\", from attendeeInputPlaceholder: \"enter_phone_number\"), the only accessible-name source the control has; the attendeePhoneNumber field has no placeholder, hence no name at all. Note: the harness detail line \"the page has no textbox elements at all\" is a harness artifact (its role inventory lists matches by innerText, which is empty for inputs), not evidence that inputs were missing.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Accessibility defect on every public booking page that shows a phone field: the required control has no accessible name, so screen reader and voice control users hear/address an unnamed edit box, and clicking its visible \"Phone number\" label does not focus it (the label's htmlFor points at an id nothing carries). On a phone-only event type that control is the only confirmation channel the booker can supply.",
+  "rootCause": {
+    "file": "apps/web/components/phone-input/PhoneInput.tsx",
+    "lines": "105-132",
+    "explanation": "The booking form renders the phone field through FormBuilderField's WithLabel, which emits <Label htmlFor={field.name}> (apps/web/modules/form-builder/components/FormBuilderField.tsx:174-180, called with htmlFor={field.name} at :277), so for the system field the label declares for=\"attendeePhoneNumber\". Nothing on the page carries that id. Components.tsx gives every other widget an id (email at :210-224 passes id={props.name}, text/textarea/number/address/select likewise), but the phone factory (:192-209) forwards only {...props} to PhoneInput and never passes id. PhoneInput itself declares an id?: string prop (PhoneInput.tsx:17) but never uses it: BasePhoneInputWeb spreads {...rest} onto react-phone-input-2 and builds inputProps={{ name, required, placeholder, autoComplete }} (:124-129). react-phone-input-2 renders its <input type=\"tel\"> from a fixed prop list (className, style, handlers, value, placeholder, disabled, type) plus inputProps only, and drops any top-level id (verified in the published lib bundle, react-phone-input-2 2.15.x; apps/web pins 2.15.1). So the rendered input has name=\"attendeePhoneNumber\" and no id, no aria-label and no aria-labelledby, and its accessible name falls back to the placeholder. attendeePhoneNumber is defined with defaultLabel \"phone_number\" and no defaultPlaceholder (packages/features/bookings/lib/getBookingFields.ts:122-135), so the placeholder is empty and the accessible name is empty. The label is therefore orphaned markup: WCAG 1.3.1/4.1.2, and the label click target is dead."
+  },
+  "introducedBy": {
+    "commit": "28c631e10851e5f80b86a4b5a2407c036fd58630",
+    "date": "2024-09-03",
+    "pr": "#16162",
+    "title": "test: Unit Tests for FormBuilderField and BookingFields components",
+    "note": "This is the commit that added htmlFor={field.name} to WithLabel and id={props.name} to the widget factories (text, textarea, number, email, address, multiemail, select, multiselect). It skipped the phone factory, which is what leaves the phone label pointing at a nonexistent id. The enabling half is older: the inputProps block that decides what reaches the tel input dates to a6330c0fc85 (2023-05-30, PR #8705) and the unused id?: string prop to 517cfde5b8a (2023-03-02), so a caller could not have fixed it by passing an id anyway. The phone-only event type is much newer, so the interaction is: an old unnamed control (2023/2024 form-builder code) surfaced as the primary required field by the newer phone-confirmation feature."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"phone input label accessibility\" (0 results)",
+      "gh search issues --owner calcom \"accessibility label form field\" (0 results)",
+      "gh search issues --repo calcom/cal.com \"phone label\" (returned an API error: 'Invalid search query ... The listed users and repositories cannot be searched', so this third probe is inconclusive rather than a clean negative)",
+      "gh api repos/calcom/cal.com/labels (no a11y/accessibility label exists to enumerate by, so no label-based listing was possible)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: 4 commits landed between the tested 038381aeca (2026-08-01) and origin/main 176037d0af (2026-08-08); the only one touching the culprit files is 5e3fe3cbe6 (2026-08-05, PR #29740, 'fix(bookings): provide stable country fallback for phone input'), which changes the country fallback and leaves inputProps unchanged. FormBuilderField.tsx and Components.tsx are untouched. in cal.com: main at 176037d0a (2026-08-08) is byte-identical on all three sites, PhoneInput.tsx inputProps has no id/aria-label, the phone factory in Components.tsx still passes no id, and WithLabel still emits htmlFor={field.name}. Not an edition mismatch: cal.diy ships the phone-confirmation feature (packages/features/bookings/lib/getBookingFields.ts attendeePhoneNumber, ensureEmailOrPhoneNumberIsPresent in the event-type update handler) and the defect is present identically in the commercial upstream."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "No Cal.diy researcher write-up was available. This is the same class as the colleague's Documenso finding 8 (controls with no accessible name), and here the pattern is a single missing id on one widget factory rather than an app-wide habit: every neighbouring field on the same form is correctly named."
+  },
+  "notes": "The documented user-visible promise is met: the email field really is gone and a phone field really is shown, and the step's email-absence check passed. What the step exposed is an accessibility defect underneath the documented behavior, so the doc text needs no change. Fix is one line: put id into inputProps in apps/web/components/phone-input/PhoneInput.tsx (a top-level id is silently dropped by react-phone-input-2, so passing id={props.name} in the Components.tsx phone factory alone would not be enough), or add aria-label/aria-labelledby there. The second bound doc says the same thing in other words: '.truecourse/specs/sources/cal.com-help/help/event-types/booking-questions.md' section 'Phone-based bookings' - 'With phone-based bookings, you can require a phone number instead, so attendees can book using only their phone number without providing an email.' The run stopped at step 3, so the scenario's headline claim (a booking COMPLETES with a phone and no email) is still unproven; steps 4 to 6 (fill name, fill phone, Confirm, expect /booking/) never ran and should be re-run once the field is reachable. The same root cause also fails prefill-the-attendee-phone-number-either-way-it-is-asked.web.1 step 3; that scenario carries an additional, independent question (the field showed +1 rather than the prefilled +91) which is not assessed here. For a re-encoding that does not wait on the product fix, the field is addressable as input[name=\"attendeePhoneNumber\"]."
+}

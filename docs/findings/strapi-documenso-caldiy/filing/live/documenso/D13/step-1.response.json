@@ -1,0 +1,38 @@
+{
+  "step": 1,
+  "label": "the documented {envelopeIds} body",
+  "at": "2026-08-19T19:17:28.405Z",
+  "status": 400,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "245",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "993",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "44ed197a-9654-43be-85ac-a6f5667fb9ec"
+  },
+  "body": {
+    "message": "Input validation failed",
+    "code": "BAD_REQUEST",
+    "data": {
+      "code": "BAD_REQUEST",
+      "httpStatus": 400,
+      "path": "envelope.getMany"
+    },
+    "issues": [
+      {
+        "code": "invalid_type",
+        "expected": "object",
+        "received": "undefined",
+        "path": [
+          "ids"
+        ],
+        "message": "Required"
+      }
+    ]
+  }
+}

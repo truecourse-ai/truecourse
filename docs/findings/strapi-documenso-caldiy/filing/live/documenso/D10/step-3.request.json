@@ -1,0 +1,11 @@
+{
+  "step": 3,
+  "label": "a 401: the auth error body",
+  "at": "2026-08-19T19:17:28.394Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_doesnotexist0000",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

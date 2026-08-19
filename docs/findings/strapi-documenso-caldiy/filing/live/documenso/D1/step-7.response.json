@@ -1,0 +1,44 @@
+{
+  "step": 7,
+  "label": "STEP7 add a SIGNER to the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.312Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "443",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "993",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "33a10384-6b5e-424d-884f-54c77af56780"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_zxidtommuuvcurfz",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 5,
+        "email": "tcref-late-e095c05f33@documenso.test",
+        "name": "TCRef Late",
+        "token": "6ttkoIAnCaRFrYPO9sM2C",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": 2,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

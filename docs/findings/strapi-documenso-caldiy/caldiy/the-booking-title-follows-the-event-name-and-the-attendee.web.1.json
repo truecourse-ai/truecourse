@@ -1,0 +1,63 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "the-booking-title-follows-the-event-name-and-the-attendee.web.1",
+  "flowId": "the-booking-title-follows-the-event-name-and-the-attendee",
+  "failingStep": 6,
+  "whatFailed": "Clicking Confirm for the hardcoded 2027-03-15T10:00Z slot on /reference-host/weekly-meeting did not reach a /booking/ page: the server answered 409 no_available_users_found_error because a sibling scenario in the same parallel run had already booked the one seeded host at that exact time, so the scenario never got to step 7 where the documented default title would have been read.",
+  "docClaim": {
+    "quote": "Custom event names allow bookings to take in information from the booking and add it to the title. This feature allows the option to breaks away from the default \"Event name\" with \"Attendee\".",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/custom-name.md",
+    "section": "custom-event-name-in-the-booking"
+  },
+  "observed": "Steps 1 to 5 passed: the March 2027 grid rendered, 10:00am was offered on Mon 15, the slot opened the booking form, and the name and email fields were filled. On step 6 the POST behind Confirm returned 409 (console: \"Failed to load resource: the server responded with a status of 409 (Conflict)\") and the form showed \"Could not book the meeting. No available users found. Could you try another time slot?\" (trace_EflpKnxRdeeUrFaP4XLEb). The URL stayed on the booking page, so the url expectation failed after the 10 s step budget (durationMs 10111). Sibling evidence in the same run, same evidence root: stacked-buffers-block-more-than-one-buffer-width.web.1 step 6 booked /reference-host/buffered-a at exactly 2027-03-15T10:00:00.000Z and landed on /booking/cri9AchabGVxTTdxvX3jA5 with the success page reading \"Buffered A between Reference Host and John Doe\". API scenarios authenticate-a-booking-request-with-an-api-key.api.1 and the-api-rate-limits-at-120-requests-a-minute.api.1 had already taken 2027-03-15T16:00Z on the same host, which is why 4:00pm is missing from our own step-1 slot list while 10:00am was still offered.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None to users. Cal.diy behaved correctly: one host, already booked 10:00 to 10:30 on 2027-03-15, so the 409 refusal is right. The cost is a false red on the guard board and a doc claim left unproven by this scenario.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 29532,
+        "url": "https://github.com/calcom/cal.diy/issues/29532",
+        "state": "open",
+        "title": "Users can book slots that will always fail: slot list offers times inside another booking's after-event buffer",
+        "relation": "related",
+        "note": "Same user-visible symptom (a slot is offered, Confirm answers 409 no available users) but a different cause: there the slot list is wrong at fetch time, here the slot was genuinely free when the grid was fetched and became busy 5 s later through a concurrent booking."
+      },
+      {
+        "number": 23391,
+        "url": "https://github.com/calcom/cal.diy/issues/23391",
+        "state": "open",
+        "title": "Booking an appointment in a free slot returns \"The appointment could not be booked. No available users found. Can you try another time slot?\"",
+        "relation": "related",
+        "note": "Generic report of the same 409 message on an apparently free slot; no evidence it is the concurrency case, and not applicable as a defect here."
+      },
+      {
+        "number": 6622,
+        "url": "https://github.com/calcom/cal.diy/issues/6622",
+        "state": "closed",
+        "title": "[CAL-863] No available users found error on confirming booking for an open slot",
+        "relation": "related",
+        "note": "Historical instance of the same message; closed."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"no available users found\" --limit 15"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in the product for this failure. In cal.diy: only 4 commits landed between the tested 038381aeca and origin/main (176037d0af), and none of them touch packages/features/bookings/lib/handleNewBooking/ensureAvailableUsers.ts, packages/features/bookings/repositories/BookingRepository.ts or packages/features/eventtypes/lib/eventNaming.ts, so the availability check and the default naming are unchanged. In cal.com: not verifiable from source (the commercial tree is private and the public calcom/cal.com main is the same commit as cal.diy main)."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (OOO with date overrides, zero-length team slots, the dropped 9:10 slot, seated attendee add, unauthenticated hold changes). It is an instance of the coordinator's systemic cause 3 (cross-scenario slot contention on the single seeded host), in its submit-time variant: the slot label did not vanish from the grid, the booking POST was refused with 409 after the page had already rendered the slot."
+  },
+  "notes": "Product side, verified in the tested worktree: packages/features/bookings/lib/handleNewBooking/ensureAvailableUsers.ts:218-258 drops every user whose buffered busy times conflict with the requested start and throws ErrorCode.NoAvailableUsersFound when none is left; packages/lib/server/getServerErrorFromUnknown.ts:159-168 maps that code to 409. The busy set is host-wide: packages/features/bookings/repositories/BookingRepository.ts:686-795 queries ACCEPTED bookings of the user without an eventTypeId filter, so buffered-a's 10:00 to 10:30 booking blocks weekly-meeting at the same time (and buffered-a's 30 minute after-buffer would block to 11:00 as well). The doc claim itself holds in Cal.diy and is evidenced elsewhere in the very same run: packages/features/eventtypes/lib/eventNaming.ts:31-42 falls back to the i18n key event_between_users when an event type carries no custom eventName, and the run's success pages show exactly that shape (\"Buffered A between Reference Host and John Doe\", \"Pending Consult between Reference Host and Pending Booker\", \"Notice Confirm between Reference Host and Inside Window Booker\", API titles \"Reference Consult between Reference Host and ...\"). So the flow's assertion would have passed had the booking gone through. Corpus fix: the whole web corpus pins every walk to host reference-host on 2027-03-15 and hardcodes 10:00, while sibling scenarios create real bookings at that same host and time in parallel, and nothing reserves the slot. Either give each booking-creating scenario its own seeded host or its own date/slot, reserve the slot before the walk, or have booking-creating scenarios pick the first offered slot instead of a fixed label. Also note the web evidence dir has 0-byte server logs (the web driver does not capture the Next server), so the 409 was read from the console line and the rendered error panel, not from server output.\n\nThis is not the run-start saturation signature (systemic cause 2): step 1 took 4.1 s and every earlier step passed; the failure is a real server refusal, not a timeout on a still-loading page."
+}

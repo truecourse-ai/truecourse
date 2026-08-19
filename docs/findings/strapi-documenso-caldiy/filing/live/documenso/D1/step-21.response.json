@@ -1,0 +1,49 @@
+{
+  "step": 21,
+  "label": "PASS2 STEP10-clean add a TEXT field to the PENDING envelope, recipient alive (expected 400)",
+  "at": "2026-08-19T19:15:07.628Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "450",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "979",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "1a0211ac-9ef1-4928-97fe-d0ba8dcc996d"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_daillesxfetczrhd",
+        "envelopeItemId": "envelope_item_yuhbxnasvuibzhhu",
+        "type": "TEXT",
+        "id": 6,
+        "secondaryId": "cmt0h17fs001yhoeohd8g7rk4",
+        "recipientId": 6,
+        "page": 1,
+        "positionX": "40",
+        "positionY": "40",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "label": "",
+          "placeholder": "",
+          "required": false,
+          "readOnly": false,
+          "fontSize": 12,
+          "type": "text",
+          "text": "",
+          "textAlign": "left"
+        },
+        "documentId": 4,
+        "templateId": null
+      }
+    ]
+  }
+}

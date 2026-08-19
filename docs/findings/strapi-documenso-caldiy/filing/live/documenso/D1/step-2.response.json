@@ -1,0 +1,44 @@
+{
+  "step": 2,
+  "label": "draft accepts its settings",
+  "at": "2026-08-19T19:15:07.246Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "526",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "998",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "8a4e1c80-c138-482c-98d3-7f26e5c8de38"
+  },
+  "body": {
+    "internalVersion": 2,
+    "type": "DOCUMENT",
+    "status": "DRAFT",
+    "source": "TEMPLATE",
+    "visibility": "EVERYONE",
+    "templateType": "PRIVATE",
+    "id": "envelope_zxidtommuuvcurfz",
+    "secondaryId": "document_3",
+    "externalId": "tcref-frozen-e095c05f33",
+    "createdAt": "2026-08-19T19:15:07.220Z",
+    "updatedAt": "2026-08-19T19:15:07.242Z",
+    "completedAt": null,
+    "deletedAt": null,
+    "title": "Guard Source Template",
+    "authOptions": {
+      "globalAccessAuth": [],
+      "globalActionAuth": []
+    },
+    "formValues": null,
+    "publicTitle": "",
+    "publicDescription": "",
+    "userId": 3,
+    "teamId": 3,
+    "folderId": null
+  }
+}

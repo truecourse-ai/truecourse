@@ -1,0 +1,92 @@
+{
+  "id": "C16",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/web/server/lib/%5Buser%5D/%5Btype%5D/getServerSideProps.ts#L212-L259",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/web/server/lib/%5Buser%5D/%5Btype%5D/getServerSideProps.ts#L212-L259",
+    "howDecided": "The product side is the correct, deliberate behavior, so 'unchanged' here means the 404 is still what the documented address produces. git log 038381aeca..origin/main over apps/web/server/lib/[user]/[type]/getServerSideProps.ts returns nothing, and the file is still 319 lines with getUserPageProps at 212, the params parse at 214, the getPublicEvent call at 245-253 keyed on eventSlug: slug (248), and the two notFound returns at 237 and 257. There is still no [user]/book route: nothing in the four commits since the tested one touches apps/web/app or next.config.ts. So /{user}/book still resolves as [user]/[type] with slug 'book', matches no event type, and 404s, exactly as issue #6612 intended when the route was retired in 2023."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "bookings/prefill-fields.mdx (calcom/help), mirrored at pages/core-features/bookings/prefill-fields.mdoc (calcom/docs)",
+    "lineToday": 20,
+    "permalink": "https://github.com/calcom/help/blob/ba04d67b4121ef41fab83a865f6c430ac6792b34/bookings/prefill-fields.mdx#L20",
+    "publishedUrl": "https://cal.com/help/bookings/prefill-fields",
+    "commitsSinceReview": [],
+    "note": "Still present in all three places today. (1) calcom/help main (head ba04d67b41, 2026-08-11): I fetched bookings/prefill-fields.mdx via gh api repos/calcom/help/contents/... (blob sha 806eddaef7, 130 lines) and line 20 still reads ```https://cal.com/johndoe/book?type=12345&duration=30&email=johndoe%40example.com&notes=Test+Notes```. gh api repos/calcom/help/commits?path=bookings/prefill-fields.mdx returns the same four commits the review recorded (60894dae17 2025-02-26, e588e27f2a 2025-06-13, 7bb0b77921 2025-09-08, 91e34c32d0 2025-11-17) and nothing since, so the path has not been touched in nine months. (2) calcom/docs main (head ae458a30e6, a repo whose last commit is 2024-10-09): pages/core-features/bookings/prefill-fields.mdoc still carries the same URL at line 19, single commit e25efd96a1 2024-02-15, permalink https://github.com/calcom/docs/blob/ae458a30e65a70a52208d70933f13f2f33ad23ca/pages/core-features/bookings/prefill-fields.mdoc#L19. (3) Published: one unauthenticated GET of https://cal.com/help/bookings/prefill-fields returned HTTP 200 and the page body still prints johndoe/book?type=12345&duration=30&email=johndoe%40example.com&notes=Test+Notes, so the dead address is live to readers today."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#6612",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2023-05-17. Still the upstream statement of intent ('we should not use a new route and instead just use parameters: before https://cal.com/peer/book?type=50756&... after https://cal.com/peer/30min?type=50756&...'), which is what proves the 404 is deliberate and the doc is stale."
+      },
+      {
+        "ref": "calcom/help#48",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-11-17T05:00:24Z",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. Still the most recent edit to bookings/prefill-fields.mdx, and it left the dead example untouched, so the article was reviewed twenty months after the route was removed and the error survived."
+      },
+      {
+        "ref": "calcom/cal.diy#6529",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2023-04-04."
+      },
+      {
+        "ref": "calcom/cal.diy#2010",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2022-03-01. Historic 404 on the same route from when it still existed."
+      },
+      {
+        "ref": "calcom/cal.diy#10053",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2023-07-11T11:31:56Z",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. The PR that deleted apps/web/pages/[user]/book.tsx and touched no documentation."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"prefill-fields\" --include-prs --limit 25  (25 hits across calcom/cal.diy and calcom/docs; none reports the dead /{user}/book example. calcom/docs#124 is a feature request about locking prefilled fields; the rest are routing-form and embed prefill work.)",
+      "gh search issues --repo calcom/help --repo calcom/docs \"prefill\" --include-prs --limit 25  (3 hits: calcom/docs#124 open feature request, calcom/help#48 and calcom/help#31, both merged doc PRs that added prefill sections and left the dead URL. Nothing proposes correcting it.)"
+    ]
+  },
+  "reevaluation": "The finding stands and is now confirmed on the live help centre, not only in the repo. The product side is unchanged and correct: no [user]/book route exists at today's head, so the printed address still 404s, deliberately, per #6612. The doc side is unchanged in all three places: calcom/help bookings/prefill-fields.mdx line 20 on main (path untouched since 2025-11-17), the calcom/docs mirror line 19 (untouched since 2024-02-15), and the served page at https://cal.com/help/bookings/prefill-fields, which returned 200 today and still prints the URL. No tracker item proposes fixing it. Nothing changes the verdict (doc-bug, high confidence). One correction of emphasis for the filer rather than of fact: the review is right that fixing the path alone is not enough, because type=12345 and duration=30 are inert old-booker parameters on the current booker, so a correct example is closer to https://cal.com/johndoe/30min?email=johndoe%40example.com&notes=Test+Notes.",
+  "routeSuggestion": "docs repo issue",
+  "policyBasis": "calcom/help has issues enabled (has_issues=true) but is overwhelmingly PR-driven: it has only 3 open non-PR issues (#1 and #2 from March 2025, #126 from April 2026) against 40 open items, and every recent item (#153 to #158, July 2026) is a docs PR. There is no ISSUE_TEMPLATE and no CONTRIBUTING in the repo (only .github/workflows), so nothing constrains the report's shape.",
+  "confidence": "high",
+  "notes": "Given calcom/help's practice, a one-line PR against bookings/prefill-fields.mdx will land far faster than an issue; treat 'docs repo issue' as the fallback if a PR is out of scope for this filing round, and say in either that the identical line exists in the calcom/docs mirror (pages/core-features/bookings/prefill-fields.mdoc line 19) so both need the edit. The fix is not a path swap: type=12345 and duration=30 are old-booker parameters that do nothing on the current booker, so propose https://cal.com/johndoe/30min?email=johndoe%40example.com&notes=Test+Notes and point at the sibling page calcom/docs legacy/pages/developer/pre-fill.mdx, which already uses the correct modern shape. Worth including the hazard #6612 itself raised: because 'book' is now an ordinary event-type slug, a host who owns an event type slugged 'book' turns the stale URL into a plausible wrong page with the prefill applied rather than an honest 404."
+}

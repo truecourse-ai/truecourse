@@ -1,0 +1,12 @@
+{
+  "step": 22,
+  "label": "PASS2 field/update-many on the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.628Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/update-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_daillesxfetczrhd\",\"data\":[{\"id\":5,\"type\":\"SIGNATURE\",\"positionY\":30}]}"
+}

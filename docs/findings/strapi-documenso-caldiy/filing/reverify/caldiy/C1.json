@@ -1,0 +1,38 @@
+{
+  "id": "C1",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/packages/features/availability/lib/getUserAvailability.ts#L744-L755",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/packages/features/availability/lib/getUserAvailability.ts#L744-L755",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. Today's head still carries `const flattenDays = Array.from(new Set(availability.flatMap((a) => (\"days\" in a ? a.days : []))))` at lines 744-746 and `if (!flattenDays?.includes(dayNumberOnWeek)) { continue; }` at lines 753-755, and the copy inside calculateHolidayBlockedDates at lines 860 and 870, exactly as the review recorded."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 29951,
+        "url": "https://github.com/calcom/cal.diy/issues/29951",
+        "state": "open",
+        "title": "[Bug]: Out of Office allows saving overlapping date ranges without any warning",
+        "createdAt": "2026-08-12",
+        "relation": "related",
+        "note": "New since the review and it names the SAME function (calculateOutOfOfficeRanges in packages/features/availability/lib/getUserAvailability.ts), but a different defect: two overlapping OutOfOfficeEntry rows collapse into one date-keyed map entry with last-write-wins and no deterministic orderBy. It says nothing about the flattenDays weekday filter and nothing about date overrides. Not a duplicate of C1; the C1 issue should cross-link it because a maintainer will otherwise think they are the same OOO bug."
+      }
+    ],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 40 --updated '>2026-08-01' 'out of office'  (4 hits: cal.diy#29951 open OOO overlap, cal.diy#29870 all-day-events feature request, cal.diy#15632 mobile drawer PR, cal.diy#14740 add-guests PR; only #29951 is even adjacent)",
+      "gh search issues --owner calcom --include-prs --limit 30 'out of office date override bookable'  (0 results)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Cal.diy main has not moved since 2026-08-08 and none of its 4 post-tested commits touches getUserAvailability.ts, date-ranges.ts, slots.ts or DatePicker.tsx, so the flattenDays guard that drops every OOO day when the user's availability rows are date overrides (empty `days` arrays) is still there verbatim at lines 744-755, and so is the copy at lines 860-870 that gives the Holidays feature the same hole. The review's fixedAfter claim (\"not fixed\") is still correct and its two searches were genuinely empty, not a tooling artefact: my org-wide sweep for OOO items updated since 2026-08-01 found only one new item, #29951, which is a different OOO defect in the same function. Verdict and scope are unchanged; confidence stays medium for the reason the review already gave, not for anything new: the seeded OutOfOfficeEntry row and the date-override-only schedule were never read back (the seed script is absent and the sandbox database is gone), so the trigger is inferred from the run's auto-selected-day pattern rather than observed. That is exactly what the planned live reproduction settles, and it is a cheap one: one user, one availability row that is a date override on day D, one OOO entry covering D, then GET the slots for D.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/config.yml sets `blank_issues_enabled: false`, so a bug must go through bug_report.md (Issue Summary / Steps to Reproduce / Actual Results / Expected Results / Technical details / Evidence, the last called \"quite mandatory in terms of bugs\"); CONTRIBUTING.md: \"For bugs, security, performance, documentation, etc., you can start coding immediately, even if the `needs approval` label is present\", so no discussion-first gate applies.",
+  "confidence": "medium",
+  "notes": "Two scenarios back this finding and only one of them is evidence. an-out-of-office-period-closes-the-booking-page.web.1 is the real-defect verdict; out-of-office-notes-shown-publicly-reach-the-booker.web.1 was ruled `environment` (the page never reached DOMContentLoaded inside the harness's 10 s budget), so it proves nothing and must not be cited as a second observation. The public-notes half of the doc claim is untested. The doc claim is a cal.com help-centre page (help/availabilities/out-of-office.md), i.e. it documents the commercial product, but the OOO feature and its whole render path ship in Cal.diy, so the issue belongs on calcom/cal.diy. Worth telling the maintainer: calculateOutOfOfficeRanges has no unit test anywhere in the repo, and the only OOO coverage (date-ranges.test.ts:548) hands buildDateRanges a pre-built outOfOffice map and so drives straight past the buggy filter. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

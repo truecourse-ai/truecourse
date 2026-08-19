@@ -1,0 +1,62 @@
+{
+  "id": "C4",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L314-L332",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L314-L332",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. Confirmed on both culprit files at head. slots.controller.ts still has @UseGuards(OptionalApiAuthGuard) + @GetOptionalUser on @Post(\"/reservations\") (lines 271-296) and NOTHING on @Patch(\"/reservations/:uid\") (lines 314-332), @Get(\"/reservations/:uid\") (298-312) or @Delete(\"/reservations/:uid\") (334-355); updateReservedSlot still takes no user id and still does `const reservationDuration = input.reservationDuration ?? DEFAULT_RESERVATION_DURATION;` at line 319, and still never compares dbSlot.eventTypeId with input.eventTypeId."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#29383",
+        "kind": "pr",
+        "stateAtReview": "closed (unmerged)",
+        "stateToday": "closed (unmerged)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "\"fix(security): add ownership validation to prevent IDOR vulnerabilities\", community author SH20RAJ, opened 2026-05-17, closed 2026-05-18 by sahitya-chandra, still unmerged, last updated 2026-05-18. Its only two comments are the welcome bot and the CLA bot: no maintainer ever reviewed it. It patches the tRPC path (removeSelectedSlotMark) and does not touch apps/api/v2, so it never covered this REST gap, and it is now evidence about the ROUTE: a public security PR here was closed in a day with no human comment."
+      },
+      {
+        "ref": "calcom/cal.diy#18758",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-02-13T14:17:01Z",
+        "mergeCommit": "5dc81e8677c1",
+        "baseRef": "main",
+        "note": "The PR that shipped the endpoint set, the authenticated-only rule, its POST enforcement and the unguarded PATCH in one change. Unchanged."
+      },
+      {
+        "ref": "calcom/cal.diy#23222",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-10-10T10:35:21Z",
+        "mergeCommit": "b286244aab85",
+        "baseRef": "main",
+        "note": "Round-robin reservation overlap logic, nothing auth related, already in the tested tree. Unchanged."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 30 'reservationDuration'  (3 hits, identical to what the review found: cal.diy#23222 merged, cal.diy#18758 merged, cal.diy#21589 closed \"Reservating a time-slot after rescheduling ... does not work\"; no auth-gap report)",
+      "gh search issues --owner calcom --include-prs --limit 30 --updated '>2026-05-01' 'slot reservation IDOR unauthenticated'  (0 results)"
+    ]
+  },
+  "reevaluation": "Stands, unchanged, and the security framing gets sharper on re-check. Nothing under apps/api/v2/src/modules/slots/ or packages/platform/types/slots/ has changed, so PATCH /v2/slots/reservations/{uid} is still guardless while its sibling POST enforces the same documented rule with 401 and 403, and GET and DELETE on the same uid are still unauthenticated with no ownership check. No one has reported it since the review. The review's careful narrowing still holds and the filer must keep it: the docs do NOT promise authentication for the PATCH, GET or DELETE endpoints (all three carry security: [] and the upstream e2e suite deliberately exercises anonymous PATCH and DELETE because the anonymous booker flow needs them); what they promise is that the reservationDuration FIELD is \"ONLY for authenticated requests with api key, access token or OAuth credentials\", and that rule is entirely unenforced on PATCH. So the doc-backed half is the field, and the rest (read, move to another eventTypeId, extend, delete another booker's hold by uid, with no upper bound on the duration) is an unpublished IDOR that is real in code but violates no sentence. The one thing the live step must settle is whether anonymous GET and DELETE really answer (the run only exercised PATCH); the FINDINGS-INDEX liveNote already asks for it.",
+  "routeSuggestion": "security disclosure",
+  "policyBasis": "SECURITY.md, \"Please do the following\": \"E-mail your findings to security@cal.com.\" Private vulnerability reporting is also enabled on calcom/cal.diy (gh api repos/calcom/cal.diy/private-vulnerability-reporting -> {\"enabled\": true}), so the GitHub advisory form at /security/advisories/new is the in-repo equivalent. The out-of-scope bullet \"Any activity that could lead to the disruption of our service (DoS)\" is the one sentence a filer must pre-empt: lead with the authorization gap, not the availability impact.",
+  "confidence": "high",
+  "notes": "Report privately first: https://github.com/calcom/cal.diy/security/advisories/new (private reporting is enabled) and cc security@cal.com. Two policy frictions the filer should know. (1) SECURITY.md still reads as a hosted-service policy (\"our clients\", \"our infrastructure or dashboard\") and its contact is the commercial company's address, on a repo whose own bot says changes here are never deployed to Cal.com, so the report may land with a team that does not own the fork; say plainly in the first line that this is a self-hosted Cal.diy code report. (2) The out-of-scope bullet \"Any activity that could lead to the disruption of our service (DoS)\" will be quoted back if the report leads with \"availability denial by pinning a slot for an unbounded number of minutes\". Lead instead with the missing authorization: an anonymous caller changes state on a resource it does not own, and a documented authenticated-only field is accepted from an anonymous caller. One caveat on the scenario as encoded: it expects the anonymous PATCH to silently fall back to 5 minutes, but the correct fix (401, mirroring POST) would also make that step red; the assertion is directionally right, the expected shape is a guess, so quote the observed 200 + reservationDuration 30 rather than the scenario's expectation. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

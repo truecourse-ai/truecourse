@@ -1,0 +1,28 @@
+{
+  "id": "C6",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts#L824-L841",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts#L824-L841",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. canRescheduleBooking at head still tests only booking.status === \"CANCELLED\" twice (lines 829 and 834) and never REJECTED or AWAITING_HOST; BookingRepository.findOriginalRescheduledBooking still filters `status: { in: [ACCEPTED, CANCELLED, PENDING] }` (lines 1170-1177) and originalRescheduledBookingUtils.ts still throws `new HttpError({ statusCode: 404, message: \"Could not find original booking\" })` at line 13, which is a @calcom/lib HttpError and so still bypasses the v2 HttpExceptionFilter envelope."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 30 '\"Could not find original booking\"'  (1 hit, cal.diy#7399 \"send reschedule emails to attendees of the old booking\", closed 2023, unrelated: same as the review found)",
+      "gh search issues --owner calcom --include-prs --limit 30 'reschedule declined rejected booking 404'  (1 hit, cal.diy#404 \"CAL-206 Added date and time to /booking entries\", a 2021 PR matched on the number, unrelated)"
+    ]
+  },
+  "reevaluation": "Stands unchanged, high confidence, and it is the cleanest of the eight to file because the run proves the contrast itself: steps 3 and 6 got the documented 400 for both cancelled arms, and step 9 got a 404 \"Could not find original booking\" for the rejected arm on a booking the same API had returned 45 ms earlier. None of the three culprit files changed, so 2 of the 5 documented non-reschedulable statuses (rejected, awaiting_host) are still uncovered by canRescheduleBooking and still fall through to a repository query whose status filter omits them. Nothing new in the tracker; both searches reproduce the review's results exactly. The finding is also correct independently of any doc version question (the bound doc page is generated from the commercial 2026-02-25 controller, which Cal.diy does not ship, but the scenario sent 2024-08-13, a version Cal.diy really has, so no silent downgrade occurred), because a 404 saying a booking cannot be found is a false statement about a booking that demonstrably exists.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/config.yml sets `blank_issues_enabled: false`, so a bug must go through bug_report.md (Issue Summary / Steps to Reproduce / Actual Results / Expected Results / Technical details / Evidence, the last called \"quite mandatory in terms of bugs\"); CONTRIBUTING.md: \"For bugs, security, performance, documentation, etc., you can start coding immediately, even if the `needs approval` label is present\", so no discussion-first gate applies.",
+  "confidence": "high",
+  "notes": "Two independent fixes belong in one issue: extend canRescheduleBooking to REJECTED and AWAITING_HOST with a 400 in the same style as the two cancelled branches, and route @calcom/lib HttpError through the v2 error envelope (a @Catch(HttpError) filter alongside the five already registered in apps/api/v2/src/bootstrap.ts) so no v2 route can answer with a raw {statusCode,message} body. awaiting_host has the identical hole and was never exercised because instant meetings were not seeded, so state it as code-derived. Do not claim anything about what commercial Cal.com returns for a rejected booking: that cannot be checked from source. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

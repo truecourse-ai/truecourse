@@ -1,0 +1,99 @@
+{
+  "repo": "documenso",
+  "build": {
+    "sha": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+    "date": "2026-08-19 20:34:18 +1000",
+    "tag": "v2.17.0"
+  },
+  "checkedAt": "2026-08-19",
+  "instance": {
+    "port": 3347,
+    "database": "tc_reverify_documenso on 127.0.0.1:5432",
+    "install": "npm ci",
+    "build": "npx turbo run build --filter=@documenso/remix",
+    "serve": "PORT=3347 npm run start -w @documenso/remix",
+    "notes": "local Postgres 17.4 instead of the recipe's docker compose (Docker not running); a local node SMTP sink on 127.0.0.1:2500 instead of a mail catcher; playwright-core 1.62.1 driving the installed chromium-1194 binary; DANGEROUS_BYPASS_RATE_LIMITS not set except for one deliberate D6 comparison"
+  },
+  "findings": {
+    "D1": {
+      "verdict": "still reproduces",
+      "evidence": "D1/repro.md",
+      "note": "Wider than the original run could show. On a PENDING envelope: recipient create-many 200, recipient update-many 200 (email rewritten, signing token unchanged), recipient delete 200 (cascades the recipient's signature field away), field create-many 200, field update-many 200, field delete 200, envelope update/rename 200. Only envelope/item/delete refuses, with 400 'Envelope item is not editable'. Scenario steps 8-12 executed for the first time; the review's source-level-inference caveat can be dropped."
+    },
+    "D2a": {
+      "verdict": "still reproduces",
+      "evidence": "D2a/repro.md",
+      "note": "update-many with {id, type, positionY: 60} returns 200 with positionY \"20\", and the stored field is unchanged. A control call carrying page, positionX, positionY, width and height together also moves nothing, so the no-op is not confined to partial bodies."
+    },
+    "D2b": {
+      "verdict": "still reproduces",
+      "evidence": "D2b/repro.md",
+      "note": "The same 200 replaces {label:'Job Title', placeholder:'Enter your job title', required:true, characterLimit:40, textAlign:'left'} with the text-type defaults. Same run as D2a; the three relevant captures are copied into D2b/."
+    },
+    "D3": {
+      "verdict": "still reproduces",
+      "evidence": "D3/repro.md",
+      "note": "ASSISTANT accepted with 200 both on the default envelope (whose documentMeta.signingOrder reads PARALLEL) and on one set to PARALLEL explicitly. The created recipient carries signingOrder: null, the value that makes the assistant's own document view come back empty."
+    },
+    "D4": {
+      "verdict": "still reproduces",
+      "evidence": "D4/repro.md",
+      "note": "Reject returns 200 with signingStatus REJECTED on the recipient; the envelope still reads PENDING at 12 ms and at 112 ms after that 200, and flips to REJECTED at 52 ms in one run and 638 ms in another. Window is shorter than the original run's; reframe the finding around the unenforced 'other pending recipients cannot act' promise rather than latency."
+    },
+    "D5": {
+      "verdict": "still reproduces",
+      "evidence": "D5/repro.md",
+      "note": "All nine forbidden fieldMeta configurations return 200 and are persisted (TEXT required+readOnly, readOnly TEXT with no text, readOnly NUMBER with no value, readOnly RADIO with no options, readOnly CHECKBOX with nothing checked, readOnly DROPDOWN with no default, DROPDOWN default not among its options, NUMBER default above max, NUMBER default below min). The original run observed only the first."
+    },
+    "D6": {
+      "verdict": "fixed",
+      "evidence": "D6/repro.md",
+      "note": "v2.17.0 answers x-ratelimit-limit: 1000 with x-ratelimit-remaining decrementing, both without and with DANGEROUS_BYPASS_RATE_LIMITS. PR #3081 is now in a release and #3133 removed the contradictory docs callout, so neither half survives. Do not file."
+    },
+    "D7": {
+      "verdict": "still reproduces",
+      "evidence": "D7/repro.md",
+      "note": "After a distribution-method None send the document page carries no /sign/ in its text, in any anchor href, or in any input value. The redirect carries ?action=copy-links, captured live via a history.pushState hook. The 'Copy Signing Links' dialog behind the unnamed three-dots menu does not display the link either, only a Copy button, which supports the docs-side resolution as well as the code-side one."
+    },
+    "D8": {
+      "verdict": "still reproduces",
+      "evidence": "D8/repro.md",
+      "note": "getByRole('combobox', {name:'Expires in'}).count() = 0; aria snapshot reads 'combobox: 3 months' with no name; the visible label's htmlFor '_r_f_-form-item' resolves to no element. Clicking positionally reveals the six options as 7 days, 1 month, 3 months, 6 months, 12 months, Never, so the previously unobserved '12 months' vs docs '1 year' mismatch is now recorded."
+    },
+    "D9": {
+      "verdict": "still reproduces",
+      "evidence": "D9/repro.md",
+      "note": "Converted from source reading to observation. The recipient-row CopyTextButton and the three-dots trigger (data-testid document-page-view-action-btn) both snapshot as a bare '- button'; 5 of the 9 buttons on the page have an empty accessible name. Inside the dialog the same copy action does get the name 'Copy', which is a clean in-product contrast for a maintainer."
+    },
+    "D10": {
+      "verdict": "still reproduces",
+      "evidence": "D10/repro.md",
+      "note": "404, 400 and 401 bodies captured. None carries a top-level error or statusCode. The AppError-derived 404 and 401 both carry top-level code INTERNAL_SERVER_ERROR; the zod 400 correctly carries BAD_REQUEST. The 401 shows statusCode does exist, nested at data.appError.statusCode."
+    },
+    "D11": {
+      "verdict": "still reproduces",
+      "evidence": "D11/repro.md",
+      "note": "Coordinates sent as JSON numbers come back as strings: positionX \"10\", positionY \"80\", width \"20\", height \"5\"; page stays a number 1. This is the wire capture PR #3136's reviewer asked for."
+    },
+    "D13": {
+      "verdict": "fixed",
+      "evidence": "D13/repro.md",
+      "note": "Product contract unchanged: the documented {envelopeIds} body still returns 400 with issue path ['ids']. The docs shipped in v2.17.0 now publish the real contract {ids:{type,ids}} with the 1-20 cap and the documentId/templateId variants; envelopeIds no longer appears in documents.mdx. Do not file."
+    },
+    "D14": {
+      "verdict": "still reproduces",
+      "evidence": "D14/repro.md",
+      "note": "Scope reduced. The wire has flat counters data/count/currentPage/perPage/totalPages and no pagination object. documents.mdx (the bound page) was corrected by #3135 in v2.17.0, but first-api-call.mdx L81-86 still publishes pagination: {page, perPage, totalPages, totalItems}, as do templates.mdx, teams.mdx and common-workflows.mdx."
+    },
+    "D15": {
+      "verdict": "still reproduces",
+      "evidence": "D15/repro.md",
+      "note": "Outsider token on the owner's envelope answers 404 'Envelope could not be found' where the authentication page documents 403; a control call with the owner token returns 200 on the same envelope, so the 404 is the deliberate anti-enumeration answer rather than a lookup miss."
+    }
+  },
+  "notAttempted": {
+    "D12": "pure doc finding, outside the minimum set and the cheap extras",
+    "D16": "pure doc finding, outside the minimum set and the cheap extras",
+    "D17": "routed as a test defect"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "book-an-instant-team-meeting.api.1",
+  "flowId": "book-an-instant-team-meeting",
+  "failingStep": 1,
+  "whatFailed": "POST /v2/bookings with `cal-api-version: 2026-02-25` and the documented nested `attendee` body returned 400 complaining that the flat `timeZone`, `language` and `metadata` fields are missing, because Cal.diy does not know the 2026-02-25 version and silently downgraded the route to 2024-04-15, whose input shape is a different one.",
+  "docClaim": {
+    "quote": "POST /v2/bookings is used to create regular bookings, recurring bookings and instant bookings. The request bodies for all 3 are almost the same except: ... For team event types it is possible to create instant meeting. To do that just pass `\"instant\": true` to the request body. ... Accepts different types of booking input: Create Booking (Option 1), Create Instant Booking (Option 2), or Create Recurring Booking (Option 3) ... instant: Flag indicating if the booking is an instant booking. Only available for team events. [required: start, attendee, instant] ... `awaiting_host` - an instant meeting that is live and waiting for a host to join. Create a new booking instead.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md (lines 8, 15, 115-126, 290, 442-451) and .truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/reschedule-a-booking.md (lines 16, 51)",
+    "section": "create-a-booking, create-a-booking/openapi, reschedule-a-booking"
+  },
+  "observed": "Step 1, the plain non-instant booking that only sets up the flow, already 400s. Body sent: {start, attendee:{name,timeZone,email}, eventTypeId}. Response: BadRequestException with three class-validator errors, `timeZone must be a valid IANA time-zone`, `language must be a string`, `metadata must be an object`, and a `target` echo of `{start, eventTypeId}` only, i.e. the nested `attendee` object was whitelist-stripped before validation. That is the 2024-04-15 CreateBookingInput contract, not the 2024-08-13 / 2026-02-25 one the docs describe. The scenario aborted at step 1, so the instant steps 2 to 5 never ran.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "Documentation harm, no data loss: a self-hoster following cal.com/docs against Cal.diy gets a 400 on every v2 booking call that sends the documented version header, and the whole subject of this scenario, instant team meetings, cannot be created at all on Cal.diy because the input class, the handler and the web route were deleted by the fork.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "Two independent edition gaps stack here, and the recorded failure is caused by the first. (1) VERSION HEADER. `bootstrap.ts:33-40` installs a CUSTOM versioning extractor that returns the `cal-api-version` header only when it is a member of `API_VERSIONS`, otherwise it falls through to `VERSION_2024_04_15`, and `defaultVersion` is the same. `packages/platform/constants/api.ts:56-68` in the tested tree lists exactly 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04. `2026-02-25` is not there, so the request was routed to the 2024-04-15 BookingsController, whose input is the flat legacy shape requiring `timeZone`, `language` and `metadata` and not accepting a nested `attendee`. There is no 400 for the unknown version, the downgrade is silent, which is what turns a version mismatch into a confusing field-level validation error. (2) INSTANT BOOKINGS ARE GONE. Even on the newest version Cal.diy supports, 2024-08-13, the scenario's instant steps could not pass. `packages/platform/types/bookings/2024-08-13/inputs/create-booking-input.pipe.ts:11-14` declares `CreateBookingInput = CreateBookingInput_2024_08_13 | CreateRecurringBookingInput_2024_08_13`, only two shapes; the documented third, `CreateInstantBookingInput_2024_08_13`, no longer exists in `create-booking.input.ts` (the file goes straight from `CreateBookingInput_2024_08_13` at line 222 to `CreateRecurringBookingInput_2024_08_13` at line 412). The controller's own `@ApiBody` oneOf at `apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts:139-149` lists only Option 1 and Option 2 and its description string says 'Accepts different types of booking input: Create Booking (Option 1) or Create Recurring Booking (Option 2)'. Because both validate branches run with `whitelist: true, forbidNonWhitelisted: true`, sending `instant: true` on 2024-08-13 is rejected as an unknown property, not honoured. Beyond the DTO, `handleInstantMeeting` does not exist anywhere in the tested tree, there is no instant route under `apps/web`, and migration `20260430000000_drop_instant_meeting_webhook_trigger` removes the `INSTANT_MEETING` webhook trigger from the enum. Only vestiges remain: the `instantMeeting*` columns in `packages/prisma/schema.prisma:250-253` and the `AWAITING_HOST` BookingStatus, which no Cal.diy code path can now produce through API v2."
+  },
+  "introducedBy": {
+    "commit": "ab21c7f805a089fa3a11ffd61c4a9aecc349c16c",
+    "date": "2026-04-15",
+    "pr": "#28903",
+    "title": "refactor: Cal.diy (#28903)",
+    "note": "This is the fork commit ('Remove Enterprise Edition (EE) features', 3893 files, 411020 deletions). `git log -S CreateInstantBookingInput_2024_08_13` names it as the commit that deleted the class, and `git show ab21c7f805 -- .../create-booking.input.ts` shows the 10-line removal of `CreateInstantBookingInput_2024_08_13 extends CreateBookingInput_2024_08_13 { instant!: boolean }`; the same commit cut the pipe from 3 shapes to 2. The OTHER half, the version header, is not a regression at all: `git blame` puts the extractor at 9ad8aa981ac (Morgan, 2026-01-13, the app.ts to bootstrap.ts refactor, logic originally 0a15483c461, 2024-03-20) and the newest entry in API_VERSIONS at 5dc81e8677c (Lauris Skraucis, 2025-02-13, adding VERSION_2024_09_04). Old, correct code; what moved is the docs, which now describe versions 2026-02-25 and 2026-05-01 that only the commercial Cal.com serves."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "bookings API version drift (2024-08-13 vs 2026-02-25)",
+        "relation": "exact",
+        "note": "The established public trace for systemic cause 1, the unsupported cal-api-version header. Reused per the brief, not re-researched. Related: #29785, #28512; PR #28561 (map 2026-02-25 to 2024-08-13) closed unmerged 2026-03-25."
+      },
+      {
+        "number": 12034,
+        "url": "https://github.com/calcom/cal.diy/issues/12034",
+        "state": "closed",
+        "title": "[CAL-2637] Instant Meeting",
+        "relation": "related",
+        "note": "One of ~20 pre-fork instant-meeting issues that live in the calcom/cal.diy tracker only because the repo was renamed. All predate the 2026-04 fork and all describe the feature as it existed in Cal.com. None reports its removal from Cal.diy or the docs mismatch."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28903,
+        "url": "https://github.com/calcom/cal.diy/pull/28903",
+        "state": "merged",
+        "title": "refactor: Cal.diy",
+        "relation": "exact",
+        "note": "The fork commit that deleted CreateInstantBookingInput_2024_08_13 and cut the create-booking pipe to two shapes."
+      },
+      {
+        "number": 29022,
+        "url": "https://github.com/calcom/cal.diy/pull/29022",
+        "state": "merged",
+        "title": "cleanup(webhooks): remove instant meeting trigger support",
+        "relation": "exact",
+        "note": "Merged 2026-05-01. Corroborates that instant meetings are being deliberately stripped from Cal.diy after the fork: removes the instant-meeting webhook payload builders, the webhook-form option and the trigger group entry, 'until the schema-level enum cleanup lands'. Pairs with migration 20260430000000_drop_instant_meeting_webhook_trigger in the tested tree."
+      },
+      {
+        "number": 158,
+        "url": "https://github.com/calcom/help/pull/158",
+        "state": "merged",
+        "title": "chore: add instant meeting docs",
+        "relation": "related",
+        "note": "Merged 2026-07-17, three months AFTER the fork removed the feature. The published docs the scenarios were generated from are still actively growing their instant-meeting coverage as a Cal.com feature, which is exactly why the scenario was written."
+      }
+    ],
+    "queries": [
+      "gh search issues \"instant meeting\" --owner calcom --limit 25",
+      "gh search issues \"instant\" --owner calcom --created \">=2026-04-01\" --include-prs --limit 25",
+      "(non-search) gh pr view 29022 --repo calcom/cal.diy"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main between the tested 038381aeca (2026-07-31) and the 2026-08-15 fetch, and `git log 038381aeca..origin/main` on packages/platform/types/bookings/2024-08-13/inputs/, apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts, apps/api/v2/src/bootstrap.ts and packages/platform/constants/api.ts is empty. API_VERSIONS still tops out at 2024-09-04 and CreateInstantBookingInput_2024_08_13 is still absent on main. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a byte-identical mirror of cal.diy main (176037d0af). The public docs still document instant bookings and version 2026-02-25, and calcom/help#158 (2026-07-17) added more instant-meeting docs, so the feature is evidently alive in the commercial product. Nothing to fix there."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5. The researcher's five cover out-of-office vs date overrides (#1), zero-length team slots (#2), a dropped 9:10 override slot (#3), seated-booking attendee oversell (#4) and unauthenticated slot-reservation mutation (#5). None touches instant bookings or the create-booking version contract. It is a clean instance of established systemic cause 1, with a second, independent edition gap underneath it."
+  },
+  "notes": "Answers to the two questions the brief asks for a systemic-cause-1 failure. (a) Would the scenario also fail on a version Cal.diy has? Partly. Step 1 would PASS on 2024-08-13: CreateBookingInput_2024_08_13 requires `start` (IsDateString) and `attendee` (nested CreateBookingAttendee, name plus email or phone, timeZone), with `eventTypeId` optional-but-accepted, which is exactly the body sent, and there are no extra keys for forbidNonWhitelisted to reject. Step 2, the actual subject, would still FAIL, and differently: with `whitelist: true, forbidNonWhitelisted: true` in create-booking-input.pipe.ts, `instant: true` is an unknown property and 400s as 'instant property is wrong', so there is no 201 and no `awaiting_host`. Steps 3 and 4 expect a 400 and would go green for the wrong reason (rejected as an unknown property, not as a missing-attendee or team-only violation), and step 5 is unreachable because no AWAITING_HOST booking can exist. So re-running this scenario with the header corrected would not rescue it. (b) Is there a Cal.diy-side defect in the bound doc claim independent of the version? Two contract inconsistencies, both minor and both cosmetic given the feature is gone. First, the tested controller's own ApiOperation description at bookings.controller.ts:113 still opens with 'POST /v2/bookings is used to create regular bookings, recurring bookings and instant bookings. The request bodies for all 3 are almost the same except:' while its ApiBody oneOf right below advertises only two shapes, so Cal.diy's own generated OpenAPI is self-contradictory. Second, that sentence ends on a dangling 'except:' with the instant clause stripped out, a leftover of the removal. Both are worth a one-line PR to calcom/cal.diy. Two further points for whoever triages this. The scenario's fixture `teamEventTypeInstant` (recipe.json line 463, provides id/slotStart/slotStart2/slotStart3) has no counterpart in the seed script I could find, and teams are removed from Cal.diy per README line 47, so even a version-corrected re-run has no team event type to book, which is a second reason step 2 could not have gone green. And the failure is genuinely NOT the sandbox: the 400 came back in 37 ms from a fully booted API v2 (server.stdout.txt shows the Nest route map completing), server.stderr.txt is empty, so this is a contract refusal, not a timeout or a cold start."
+}

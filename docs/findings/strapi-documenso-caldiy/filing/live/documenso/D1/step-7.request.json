@@ -1,0 +1,12 @@
+{
+  "step": 7,
+  "label": "STEP7 add a SIGNER to the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.302Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_zxidtommuuvcurfz\",\"data\":[{\"email\":\"tcref-late-e095c05f33@documenso.test\",\"name\":\"TCRef Late\",\"role\":\"SIGNER\",\"signingOrder\":2}]}"
+}

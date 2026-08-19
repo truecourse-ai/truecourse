@@ -1,0 +1,2 @@
+The live contract is { ids: { type: "envelopeId" | "documentId" | "templateId", ids: [...] } } (max 20).
+The documented { envelopeIds: [...] } body is rejected with 400.

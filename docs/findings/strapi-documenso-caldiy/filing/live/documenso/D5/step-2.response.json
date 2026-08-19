@@ -1,0 +1,44 @@
+{
+  "step": 2,
+  "label": "PREP recipient",
+  "at": "2026-08-19T19:16:54.225Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "454",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:54 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "982",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "68af15d8-5e0e-4423-a95f-5480dab44cc9"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_urlxhxhbndxwvbvu",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 14,
+        "email": "tcref-metabad-8e267c4132@documenso.test",
+        "name": "TCRef Meta Bad",
+        "token": "vTfPpkWkAGX8OMW4nA7f1",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

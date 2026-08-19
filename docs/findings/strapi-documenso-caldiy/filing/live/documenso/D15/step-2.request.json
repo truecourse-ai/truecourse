@@ -1,0 +1,11 @@
+{
+  "step": 2,
+  "label": "outsider's valid token reading the owner's envelope (docs say 403)",
+  "at": "2026-08-19T19:17:28.353Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_utdishylsahhlhnw",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

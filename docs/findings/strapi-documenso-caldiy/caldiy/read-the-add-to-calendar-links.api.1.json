@@ -1,0 +1,48 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "read-the-add-to-calendar-links.api.1",
+  "flowId": "read-the-add-to-calendar-links",
+  "failingStep": 2,
+  "whatFailed": "The scenario required the fourth calendar link to match /^https?:\\/\\//, but the fourth entry is the ICS download, which the product returns (by design) as a `data:text/calendar,...` URI, so a constraint the scenario invented failed while every documented property of the response held.",
+  "docClaim": {
+    "quote": "Retrieve calendar links for a booking that can be used to add the event to various calendar services. Returns links for Google Calendar, Microsoft Office, Microsoft Outlook, and a downloadable ICS file.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/get-add-to-calendar-links-for-a-booking.md",
+    "section": "get-add-to-calendar-links-for-a-booking + its OpenAPI block (CalendarLink schema)"
+  },
+  "observed": "GET /v2/bookings/uKKLt1MwHGQoZSbb8f4yAq/calendar-links answered 200 in 37 ms with {\"status\":\"success\",\"data\":[...]}: exactly four entries, in the documented order, labelled \"Google Calendar\", \"Microsoft Office\", \"Microsoft Outlook\", \"ICS\", each with a `label` and a `link`. The first three links are https URLs; the fourth is `data:text/calendar,BEGIN%3AVCALENDAR...` (435 chars), a well-formed VCALENDAR for the booked event (SUMMARY \"Reference Consult between Reference Host and Booker booker\", DTSTART 20510116T130000Z, DURATION PT30M). That is produced deliberately by buildICalLink in packages/features/bookings/lib/getCalendarLinks.ts:58, which returns `data:text/calendar,${encodeURIComponent(iCalEvent.value)}`, i.e. the \"downloadable ICS file\" the doc describes rather than a link to a third-party calendar service. Every other assertion in the step passed (status equals success, data exists, data[0].label/link, data[3].label). Step 3 (the 404 without the bookingUid segment) never ran because step 2 aborted the scenario.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "none: the product and the docs agree. The scenario over-constrained the response and reports a healthy endpoint as broken, which costs maintainer triage time and would mask a genuine regression on this route.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 24218,
+        "url": "https://github.com/calcom/cal.diy/issues/24218",
+        "state": "open",
+        "title": "fix: fetching calendar-links for seated events",
+        "relation": "related",
+        "note": "Only open tracker item touching this endpoint. It is about calendar-links failing for seated event types, a different code path; nothing there concerns the ICS entry's URI scheme."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"calendar-links\" --limit 20 (1 related hit, cal.diy#24218; nothing about the ICS link shape)",
+      "gh search issues --owner calcom \"data:text/calendar\" --limit 15 (0 hits, so nobody has complained that the ICS entry is a data URI)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in the product. In cal.diy: packages/features/bookings/lib/getCalendarLinks.ts, apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts and .../outputs/calendar-links.output.ts are all untouched between the tested commit 038381aeca and origin/main (4 commits total landed in that window, none on these files), so the behavior is identical today. In cal.com: not verifiable from source (the public calcom/cal.com main is the same commit as calcom/cal.diy main); the published cal.com docs still describe the fourth entry as \"a downloadable ICS file\", so there is no sign the hosted product returns an https URL there either. The fix belongs in the generated scenario, not in either product."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, dropped 9:10 slot, seated-booking attendee add, unauthenticated slot-reservation mutation). None of them concerns the bookings calendar-links endpoint."
+  },
+  "notes": "How to fix the scenario: the doc enumerates the four services in order and calls the fourth \"a downloadable ICS file\", and the OpenAPI CalendarLink schema types `link` as a bare `string` with the description \"The link to the calendar\", with no format, pattern or scheme constraint anywhere on the page. The correct assertion for data[3].link is therefore `exists: true` plus, if a shape check is wanted, `matches: ^(https?:|data:text/calendar)` or specifically `^data:text/calendar,`. The scenario's own note admits the reasoning that produced the bug: \"The links are asserted as real URLs rather than by their labels, which the page never spells out\" - but the page does spell out the four services in the sentence the scenario binds to, and the fourth of them is explicitly a file download, not a service URL. This is a generator pattern worth fixing generally: substituting a stricter, invented value constraint when the doc gives only a type.\n\nSeparate observations for whoever reads this, none of which caused the failure:\n(1) Doc/edition drift on this very page: the OpenAPI block says the `cal-api-version` header is required and \"Must be set to 2026-02-25\", and names the operation BookingsController_2026_02_25_getCalendarLinks, yet the route exists only on the 2024-08-13 controller in the tested tree (@Controller({ version: VERSION_2024_08_13_VALUE }) at apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts:80-82, handler at :519-538) and the response DTO is named CalendarLinksOutput_2024_08_13 in the docs themselves. packages/platform/constants/api.ts tops out at 2024-09-04 and apps/api/v2/src/bootstrap.ts:31-41 downgrades any unknown version to 2024-04-15, so had this scenario obeyed the doc and sent 2026-02-25 the request would have been routed as 2024-04-15 and would not have matched this handler at all. The scenario passed 2024-08-13 instead, which is why it got a 200; its milestone `calendar-links-cal-api-version-required` was consequently never exercised as documented. This is systemic cause 1 from the brief and is an edition mismatch on the page, tracked by calcom/cal.diy#28762 and friends. If the scenario is re-generated to send the documented 2026-02-25, expect it to fail with a routing error rather than reach this assertion.\n(2) The response carries an undocumented third property per entry, `id` (googleCalendar | microsoftOffice | microsoftOutlook | ics, the CalendarLinkType enum). Additive, so harmless, but the published CalendarLink schema omits it and an integrator would find it useful, since it is the stable key the labels are not.\n(3) Cosmetic product nit visible in the evidence: the Google Calendar `text=` and Microsoft Office `subject=` query values contain unencoded spaces (\"text=Reference Consult between Reference Host and Booker booker\"), while the Microsoft Outlook link is encodeURI'd. The source even carries the TODO: \"Why do we need to encode URI this href but not the google calendar link?\" (packages/features/bookings/lib/getCalendarLinks.ts:104). Browsers tolerate it and no doc claim covers it, so it is not a failure here, but a strict URL parser on the client side would reject two of the three https links, which is a real interoperability risk for an API consumer.\n(4) Provenance of the data URI, for context only: commit b1bcbe9dfb95933cad51a68b3024bd21a9c5e7d2, 2025-03-11, \"feat: calendar-links API (#19777)\" by Hariom Balhara, originally at packages/lib/bookings/getCalendarLinks.ts. The data:text/calendar form predates the v2 endpoint and matches what the web booking-success page has always offered as its ICS download.\n(5) server.stderr.txt for this scenario contains only SMTP connection refusals (ECONNREFUSED ::1:1025, the sandbox has no mail catcher) while sending the booking confirmation. Unrelated to the assertion, and it did not affect the 201 or the 200."
+}

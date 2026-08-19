@@ -1,0 +1,84 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "reschedule-a-round-robin-booking-with-the-same-host.api.1",
+  "flowId": "reschedule-a-round-robin-booking-with-the-same-host",
+  "failingStep": 2,
+  "whatFailed": "POST /v2/bookings/{uid}/reschedule rejects the documented optional body field rescheduleWithSameHost with 400 'property rescheduleWithSameHost should not exist', because Cal.diy's reschedule input DTO has no such property and its validation pipe forbids non-whitelisted keys.",
+  "docClaim": {
+    "quote": "rescheduleWithSameHost: type: boolean, description: Only for round robin event types that let the person rescheduling choose the host. True keeps the original host, false lets round robin pick from the whole team. Ignored for every other event type.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/reschedule-a-booking.md",
+    "section": "reschedule-a-booking/openapi, components.schemas.RescheduleBookingInput_2024_08_13.rescheduleWithSameHost (lines 172-178); the same page's endpoint parameter block (lines 55-64) gives operationId BookingsController_2026_02_25_rescheduleBooking and says cal-api-version 'Must be set to 2026-02-25'."
+  },
+  "observed": "Step 1 succeeded: a booking on the seeded team round robin event type (id 129, 'reference-team-round-robin') was created 201 and round robin assigned host id 6, so team round robin booking itself works in the tested tree. Step 2 sent {start, rescheduleWithSameHost: true} with cal-api-version 2024-08-13 and got 400 in 17 ms: {\"error\":{\"code\":\"BadRequestException\",\"message\":\"rescheduleWithSameHost property is wrong,property rescheduleWithSameHost should not exist \"}}. The run stopped there, so steps 3 and 4 (the 'ignored for every other event type' arm) never executed. Server logs show no exception beyond the validation rejection.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "A self-hoster following cal.com's published API reference gets a hard 400 on a documented optional field, and the keep-the-same-round-robin-host behavior it names does not exist in Cal.diy at all; the related event type toggle is still shown and still writable through API v2 while doing nothing, so the harm is a rejected request plus a silently inert setting.",
+  "rootCause": {
+    "file": "packages/platform/types/bookings/2024-08-13/inputs/reschedule-booking.input.ts",
+    "lines": "8-45",
+    "explanation": "RescheduleBookingInput_2024_08_13 in the tested worktree declares exactly four public properties (start, rescheduledBy, reschedulingReason, emailVerificationCode) plus the hidden rrHostSubsetIds added by PR #27135. There is no rescheduleWithSameHost. RescheduleBookingInputPipe (packages/platform/types/bookings/2024-08-13/inputs/reschedule-booking-input.pipe.ts:39-53) runs validateSync with whitelist: true and forbidNonWhitelisted: true, so any key outside that list is a 400, and formatErrors produces exactly the observed message. The string rescheduleWithSameHost appears nowhere in the tested tree (038381aeca) and nowhere in cal.diy origin/main (176037d0af, 2026-08-08); the tree's own shipped contract, docs/api-reference/v2/openapi.json, lists the same four properties for this schema. The feature behind the field is also gone: commit ab21c7f805 'refactor: Cal.diy (#28903)' deleted packages/features/bookings/lib/host-filtering/filterHostsBySameRoundRobinHost.ts and the whole packages/features/ee/round-robin/ tree, and the repo's own tests state the consequence ('After EE removal, rescheduleWithSameRoundRobinHost logic is gone' at packages/features/bookings/lib/handleNewBooking/test/reschedule.test.ts:2929, 'With EE removal, rescheduleWithSameRoundRobinHost no longer filters to same host' at apps/web/test/lib/getSchedule.test.ts:3543). So the doc describes a Cal.com surface that Cal.diy neither accepts nor implements."
+  },
+  "introducedBy": {
+    "commit": "ab21c7f805",
+    "date": "2026-04-15",
+    "pr": "#28903",
+    "title": "refactor: Cal.diy",
+    "note": "This is the EE strip commit (4080 files) that removed the same-host round robin behavior: it deletes packages/features/bookings/lib/host-filtering/filterHostsBySameRoundRobinHost.ts and packages/features/ee/round-robin/*. The request field itself was never introduced in cal.diy, so there is no commit that removed it: RescheduleBookingInput_2024_08_13 was created by 0eabe7f28b 'refactor: v2 bookings (#16200)' (2024-09-23) and its last property addition is 51976b1eab 'feat: add rrHostSubsetIds to reschedule booking endpoint (#27135)' (2026-01-22); no revision of that file ever carried rescheduleWithSameHost. Old code (the strict pipe, 2024) plus newer absence (the 2026 EE strip and a commercial-only field) is the interaction here."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28085,
+        "url": "https://github.com/calcom/cal.diy/issues/28085",
+        "state": "closed",
+        "title": "When rescheduling, give attendees the option to reschedule with the same round robin member or start fresh via the round-robin again",
+        "relation": "related",
+        "note": "The feature request the documented field expresses. Opened 2026-02-19, closed as completed 2026-08-10 with no implementing commit in the open repo, which is consistent with it shipping in the private commercial product only."
+      },
+      {
+        "number": 17740,
+        "url": "https://github.com/calcom/cal.diy/issues/17740",
+        "state": "closed",
+        "title": "request reschedule for round-robin events with \"reschedule with same round-robin host\" shows no availability if this feature is enabled",
+        "relation": "related",
+        "note": "An older bug against the event type level same-host feature from the era when the fork still shipped it; useful only as evidence the behavior once existed here."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28258,
+        "url": "https://github.com/calcom/cal.diy/pull/28258",
+        "state": "closed",
+        "title": "feat: replace rescheduleWithSameRoundRobinHost boolean with 3-option RoundRobinRescheduleOption",
+        "relation": "related",
+        "note": "Community attempt to implement issue #28085 in the open repo (adds a roundRobinRescheduleOption enum and a per-booking reschedulePreference). Opened 2026-03-04, closed unmerged 2026-03-27, so no per-request same-host control exists in cal.diy."
+      },
+      {
+        "number": 15132,
+        "url": "https://github.com/calcom/cal.diy/pull/15132",
+        "state": "merged",
+        "title": "feat: provide option to allow rescheduling with the same round-robin host",
+        "relation": "related",
+        "note": "The original event type level feature (migration 20240802053512_allow_rescheduling_with_same_round_robin_host). Its behavior was later deleted by the Cal.diy EE strip while the column and the UI toggle stayed."
+      }
+    ],
+    "queries": [
+      "gh search issues --include-prs \"rescheduleWithSameHost\" --owner calcom  (0 results, org wide, so no public issue or PR anywhere in calcom mentions the documented field name)",
+      "gh search issues --include-prs \"rescheduleWithSameRoundRobinHost\" --owner calcom",
+      "gh search issues --include-prs \"reschedule with same round robin host\" --owner calcom"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed between the tested 038381aeca and origin/main 176037d0af (2026-08-08), and git log 038381aeca..origin/main on packages/platform/types/bookings/2024-08-13/inputs/reschedule-booking.input.ts is empty; grepping the main worktree for rescheduleWithSameHost still returns nothing, and packages/features/ee/round-robin/ is still absent. in cal.com: not verifiable from source, the commercial repo is private and the public calcom/cal.com main is byte identical to cal.diy main. The only public trace is issue calcom/cal.diy#28085 closed as completed on 2026-08-10 while the open-source PR for it (#28258) was closed unmerged, which points at a commercial-only implementation."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length group slots, dropped 9:10 override slot, seated overselling, unauthenticated hold manipulation). This failure is on the reschedule endpoint's request contract and is not covered by that write-up."
+  },
+  "notes": "Answers to the two questions the brief asks for an edition mismatch. (a) Would the scenario also fail on the versions Cal.diy has? Yes, and it did: the scenario deliberately sent cal-api-version 2024-08-13, a version Cal.diy actually serves (packages/platform/constants/api.ts lists 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04 only), and still got the 400. The failure is therefore not an artefact of the API version downgrade described in systemic cause 1. Had the scenario obeyed the doc and sent 2026-02-25, bootstrap would have silently downgraded to 2024-04-15, which has no such field either, so every version Cal.diy ships rejects it. (b) Is there a Cal.diy side defect in the bound claim independent of the version? Yes, and it deserves its own report: the event type option rescheduleWithSameRoundRobinHost survives as a Prisma column (packages/prisma/schema.prisma:275), as a live toggle rendered for round robin event types (apps/web/modules/event-types/components/tabs/advanced/EventAdvancedTab.tsx:1460-1479), and as an accepted and returned API v2 field documented as 'Rescheduled events will be assigned to the same host as initially scheduled' (packages/platform/types/event-types/event-types_2024_06_14/inputs/create-event-type.input.ts:707-712, update-event-type.input.ts:621, event-type.output.ts:617), while no code in the booking or slot path reads it any more. Enabling it is a silent no-op. Two further observations. First, the same doc schema documents allowConflicts, allowBookingOutOfBounds and skipBookingLimits, and none of those strings appears anywhere in the tested tree either, so any scenario sending them hits the identical 400; the drift on this page is wider than one field. Second, Cal.diy's own shipped contract agrees with the product: docs/api-reference/v2/openapi.json in the tested tree lists exactly start, rescheduledBy, reschedulingReason and emailVerificationCode for RescheduleBookingInput_2024_08_13, so this is purely cal.com's published reference versus the fork, not an internal contradiction. Also worth recording against the README: teams and round robin are not wholly removed from Cal.diy. Step 1 booked a team round robin event type and round robin picked host id 6, so the endpoint and the feature broadly exist; what was stripped is the EE layer, including same-host reschedule filtering and reassignment. Finally, the scenario's own author note predicted this red twice over (transform gap D5 and product finding P7), so the run is behaving as authored."
+}

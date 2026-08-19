@@ -1,0 +1,112 @@
+{
+  "id": "D14",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "d42254ff52cd6257380f076022c41152b08ef60e",
+        "date": "2026-08-19",
+        "title": "docs(api): document cancel endpoint and fix get-many body shape",
+        "pr": "#3135",
+        "touchesCulpritLines": true,
+        "effect": "Replaces the fabricated pagination wrapper in documents.mdx with the real flat { count, currentPage, perPage, totalPages } on both the response example and the paging loop; it does not touch the other four pages."
+      },
+      {
+        "sha": "26f0c4c5b",
+        "date": "2026-07-23",
+        "title": "chore: deprecate endpoints",
+        "pr": "#3022",
+        "touchesCulpritLines": false,
+        "effect": "Banner only; predates the review."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/apps/docs/content/docs/developers/api/documents.mdx#L198-L203",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/getting-started/first-api-call.mdx#L81-L86",
+    "howDecided": "The wire side is untouched: packages/lib/types/search-params.ts has no commits in 3cf2963cd0..origin/main and ZFindResultResponse at L41-L47 still declares the flat data/count/currentPage/perPage/totalPages, and find-envelopes.ts (one unrelated commit, 6ec67d1c4 #2889, rejected/expired filters) still returns currentPage/totalPages on both paths at L262-L264 and L302-L304. On the docs side git grep 'pagination|totalItems' over apps/docs/content on origin/main now returns five hits in four files: first-api-call.mdx L81-L85, templates.mdx L142-L143 and L184-L188, teams.mdx L177-L178 and L344-L345, examples/common-workflows.mdx L894 and L908. documents.mdx, the review's rootCause file, is clean. permalinkToday therefore points at the surviving instance on the second bound page."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/docs/content/docs/developers/getting-started/first-api-call.mdx",
+    "lineToday": 81,
+    "permalink": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/getting-started/first-api-call.mdx#L81-L86",
+    "publishedUrl": "https://docs.documenso.com/docs/developers/getting-started/first-api-call",
+    "commitsSinceReview": [
+      "d42254ff52cd6257380f076022c41152b08ef60e (#3135, 2026-08-19) fixed the documents.mdx half only"
+    ],
+    "note": "Half fixed. documents.mdx now prints the flat counters at L247-L250 and its 'fetch all pending documents' loop destructures { data, currentPage, totalPages } at L944-L947, so the review's primary quote is gone from that page. The identical fabricated envelope is still published on first-api-call.mdx at L81-L86 (tested L79-L84), which is the scenario's second bound page, and on templates.mdx, teams.mdx and examples/common-workflows.mdx. I fetched the live first-api-call page today and it still renders \"pagination\": { \"page\": 1, \"perPage\": 10, \"totalPages\": 1, \"totalItems\": 1 }."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3135",
+        "kind": "pr",
+        "stateAtReview": "open, blocked",
+        "stateToday": "merged",
+        "changedSinceReview": true,
+        "mergedAt": "2026-08-19T09:28:55Z",
+        "mergeCommit": "d42254ff52cd6257380f076022c41152b08ef60e",
+        "baseRef": "main",
+        "note": "Merged today, in v2.17.0. Fixes the documents.mdx half of this finding exactly as the review predicted."
+      },
+      {
+        "ref": "documenso/documenso#3137",
+        "kind": "pr",
+        "stateAtReview": "open, blocked",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "docs/fields-envelope-schema",
+        "note": "Still open and still stacked, now on #3136's branch, and mergeable_state is 'dirty' since its siblings merged, so it needs a rebase. Its first-api-call.mdx hunk still replaces the pagination block with count/currentPage/perPage/totalPages, which is the remaining half of this finding. No maintainer comment or review at any time; last activity 2026-08-19 09:36 UTC (author)."
+      },
+      {
+        "ref": "documenso/documenso#3138",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "docs/first-api-call-fixes",
+        "note": "Unchanged, last touched 2026-08-03. Its diff still rewrites the templates.mdx and teams.mdx copies to count/currentPage/perPage/totalPages."
+      },
+      {
+        "ref": "documenso/documenso#3139",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "docs/templates-teams-envelope",
+        "note": "Unchanged, last touched 2026-08-03. Removes the last copy from examples/common-workflows.mdx (L894, L908)."
+      },
+      {
+        "ref": "documenso/documenso#3186",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, no comments, still about ordering instability and folder scoping rather than the response envelope."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}, WebFetch of the two published doc pages"
+    ]
+  },
+  "reevaluation": "The finding stands but its scope has shrunk by one page, and the review's fixedAfter: no is now only half true. PR #3135 merged this morning into v2.17.0 and removed the fabricated pagination wrapper from documents.mdx, the file the review named as rootCause, replacing it with the real flat counters in both the response example and the paging loop. The second bound page, first-api-call.mdx, is untouched and still publishes \"pagination\": { page, perPage, totalPages, totalItems } at L81-L86, as do templates.mdx, teams.mdx and common-workflows.mdx, and I confirmed that live on docs.documenso.com today. So the scenario would still fail if it were bound to the getting-started page, and a developer reading Example 1 there still gets a TypeError. The product side is entirely unchanged and remains correct against its own schema, so this is still a pure doc bug with a docs-only fix. The three remaining corrective PRs are all still open and #3137 is now 'dirty' and needs a rebase after its base moved.",
+  "routeSuggestion": "comment on existing PR 3137",
+  "policyBasis": null,
+  "confidence": "high",
+  "notes": "The filer must not describe this finding as 'documents.mdx is wrong' any more; that half shipped in v2.17.0. What remains is first-api-call.mdx (#3137), templates.mdx and teams.mdx (#3138) and common-workflows.mdx (#3139). #3137 is the right place to comment because it carries the remaining bound page, but note that it now has a dirty merge state and no maintainer has ever reviewed it, so the comment should say plainly that its base merged and it needs rebasing onto main. If the maintainers would rather have an issue tracking the four leftover pages as one item, that is a reasonable fallback; the rename map to state is page -> currentPage, totalItems -> count, with perPage and totalPages keeping their names and only losing the nesting level."
+}

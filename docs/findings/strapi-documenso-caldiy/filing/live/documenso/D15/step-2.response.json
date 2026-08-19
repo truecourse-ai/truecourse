@@ -1,0 +1,31 @@
+{
+  "step": 2,
+  "label": "outsider's valid token reading the owner's envelope (docs say 403)",
+  "at": "2026-08-19T19:17:28.365Z",
+  "status": 404,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "211",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "998",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "5bb2e1ca-0b1f-4ca5-9359-fde92319497f"
+  },
+  "body": {
+    "message": "Envelope could not be found",
+    "code": "INTERNAL_SERVER_ERROR",
+    "data": {
+      "code": "NOT_FOUND",
+      "httpStatus": 404,
+      "path": "envelope.get",
+      "appError": {
+        "code": "NOT_FOUND",
+        "message": "Envelope could not be found"
+      }
+    }
+  }
+}

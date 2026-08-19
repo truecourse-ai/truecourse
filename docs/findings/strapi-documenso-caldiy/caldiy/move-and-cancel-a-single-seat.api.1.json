@@ -1,0 +1,48 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "move-and-cancel-a-single-seat.api.1",
+  "flowId": "move-and-cancel-a-single-seat",
+  "failingStep": 4,
+  "whatFailed": "The seated reschedule (POST /v2/bookings/{uid}/reschedule with seatUid) returned 201 and a correct seated booking, but the scenario additionally required a top-level `data.bookingFieldsResponses`, a key the seated output schema does not declare, so an otherwise passing step was marked failed.",
+  "docClaim": {
+    "quote": "CreateSeatedBookingOutput_2024_08_13 ... required: - id - uid - title - description - hosts - status - start - end - duration - eventTypeId - eventType - location - absentHost - createdAt - updatedAt - seatUid - attendees",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/reschedule-a-booking.md",
+    "section": "reschedule-a-booking/openapi (components.schemas.CreateSeatedBookingOutput_2024_08_13, lines 542-667; SeatedAttendee at 914-1011)"
+  },
+  "observed": "201 with data = the moved seated booking: id 52, uid m11BzNjjqmiSpV22h8txUV, start 2050-09-08T14:30:00.000Z, top-level seatUid 27ef916b-d64c-4604-9207-2955f89287af, and exactly one attendee (seat-a-0a1993e440@example.com) carrying its own seatUid and its own bookingFieldsResponses {name: 'Booker seat-a', guests: []}. All seventeen documented required keys of CreateSeatedBookingOutput_2024_08_13 were present. Only the eighteenth, undocumented top-level key the scenario asked for was absent. The seated semantics the step exists to prove all held: only the named seat moved, the other seat did not travel with it, and the earlier per-seat cancel of seat B had already removed just that seat. Server logs show nothing but sandbox SMTP failures (ECONNREFUSED ::1:1025).",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None on users. Cost is a false red: a correct seated-reschedule response is reported as a contract violation, which would send a maintainer looking for a bug that is not there.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 17703,
+        "url": "https://github.com/calcom/cal.diy/issues/17703",
+        "state": "closed",
+        "title": "Attendee emails outputting under \"bookingFieldsResponses\" from https://api.cal.com/v2/bookings. Workflows wont fire on it (as it works on attendeees!!)",
+        "relation": "related",
+        "note": "Only touches bookingFieldsResponses content for non-seated bookings and workflow triggering, not the presence of the key on the seated output. No issue or PR reports a missing top-level bookingFieldsResponses on a seated booking response, which is consistent with the schema never promising one."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"bookingFieldsResponses seated\" org:calcom (0 results)",
+      "gh search issues \"bookingFieldsResponses\" org:calcom --limit 20 (16 results, none matching the symptom)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in the product. in cal.diy: packages/platform/types/bookings/2024-08-13/outputs/booking.output.ts is untouched between the tested commit 038381aeca and origin/main (only four unrelated commits landed: #29940, #29901, #29740, #29819), so the seated output shape is the same today. in cal.com: not verifiable from source; no public issue, PR or changelog entry suggests a top-level bookingFieldsResponses was ever added to the seated output, and the published docs for both create-a-booking and reschedule-a-booking still omit it."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to caldiy #4 (seated events oversold, negative seats). That finding is about the add-attendee-to-a-seated-booking path being accepted when it should be refused; this scenario never calls it. Seat accounting behaved correctly throughout the evidence here: two seats booked, the attendee-position cancel of seat B removed exactly that seat (step 3 response lists only seat A), and the seated reschedule of seat A produced a new booking with one attendee. No negative or inflated seat count appears anywhere in the transcript or the server logs, so this failure neither supports nor contradicts #4."
+  },
+  "notes": "Precise location of the test defect: .truecourse/scenarios/core-bookings-api/move-and-cancel-a-single-seat.api.1.yaml lines 135-136 (`data.bookingFieldsResponses: exists: true`). Everything else the step asserts matches the doc exactly, and the step's own note says the response should carry seatUid 'alongside the sixteen other required keys', which is the correct count for CreateSeatedBookingOutput_2024_08_13 (16 + seatUid = 17). The eighteenth assertion is the stray one. It was not inherited from the extracted claim: claims.json entry `reschedule-created-seated-output-required-fields` lists exactly the seventeen documented keys and does not mention bookingFieldsResponses, so the over-assertion was introduced by the scenario author, almost certainly by copying the required list of the NON-seated BookingOutput_2024_08_13 (lines 382-399 of the same doc), which does require a top-level bookingFieldsResponses. In the seated shape the booking-field responses are deliberately per attendee, since each seat answers the booking form separately: doc SeatedAttendee requires name, email, displayEmail, timeZone, absent, seatUid and bookingFieldsResponses, and the product matches (SeatedAttendee at packages/platform/types/bookings/2024-08-13/outputs/booking.output.ts:60-85 declares bookingFieldsResponses; CreateSeatedBookingOutput_2024_08_13 at 359-373 extends BaseBookingOutput and adds only seatUid and attendees, and BaseBookingOutput has no bookingFieldsResponses). The two bound docs agree with each other: create-a-booking.md:1181 defines the same seated schema with the same seventeen required keys. Suggested repair: drop the assertion, or move it to `data.attendees[0].bookingFieldsResponses: exists`, which is what the doc actually promises and what the product returns. Two side notes for whoever re-authors: (1) the systemic cal-api-version mismatch does not apply here, this scenario sends cal-api-version 2024-08-13, a version Cal.diy really has (packages/platform/constants/api.ts API_VERSIONS), which is why the request was validated and served properly, even though the doc page's own header parameter says the value must be 2026-02-25 while the response schemas it documents are the _2024_08_13 ones; (2) the response also carries undocumented extras (isPlatformManagedUserBooking, cancellationReason, rescheduledByEmail, meetingUrl, rating, icsUid), which is allowed and was not what failed."
+}

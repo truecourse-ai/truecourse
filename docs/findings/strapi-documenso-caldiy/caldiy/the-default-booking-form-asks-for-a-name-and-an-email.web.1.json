@@ -1,0 +1,42 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "the-default-booking-form-asks-for-a-name-and-an-email.web.1",
+  "flowId": "the-default-booking-form-asks-for-a-name-and-an-email",
+  "failingStep": 2,
+  "whatFailed": "The scenario walked to /reference-host/default-form on Mon 2027-03-15 and waited for a hardcoded \"10:00\" slot button, but a sibling scenario in the same parallel run had already booked the same host at 10:00 on that date through an event type with 30-minute buffers, so the fully rendered slot grid legitimately skipped 9:30am, 10:00am and 10:30am and the walk never reached the two form assertions it exists to make.",
+  "docClaim": {
+    "quote": "By default, Cal.com booking page has a fullname text input field for the scheduler to put their name in. ... By default, the booking form requires an attendee's email address to confirm a booking.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/split-name.md (section how-to-split-fullname-into-firstname-and-lastname-in-the-public-booking-page) and .truecourse/specs/sources/cal.com-help/help/event-types/booking-questions.md (section Phone-based bookings)",
+    "section": "how-to-split-fullname-into-firstname-and-lastname-in-the-public-booking-page / booking-questions#phone-based-bookings"
+  },
+  "observed": "step-2.png and the step-1/step-2 page text show a completely rendered booking page (host, event title, March 2027 grid, 15 selected, 12h/24h toggle, no skeleton cells, no error banner) whose Mon 15 slot column reads 9:00am, 11:00am, 11:30am, 12:00pm, 12:30pm, 1:00pm, 1:30pm, 2:00pm, 2:30pm, 3:00pm, 3:30pm, 4:30pm. Four of the sixteen 09:00-17:00 half-hour starts are absent: 9:30am, 10:00am, 10:30am (one contiguous 09:30-11:00 hole) and 4:00pm (an isolated hole). The gaps were already present on step 1 at 2.3 s, before the click, so this is not a partially loaded grid; step 2 then burned its full 10 s budget polling for a button that was never going to appear.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None on users. The product computed availability correctly; the scenario hardcodes a slot time it never reserved and shares one host with the rest of the corpus, so it self-destructs whenever a sibling books that time. Cost: the two claims this flow exists to prove (single full-name field by default, required email by default) were never exercised, and the run reports a red that a maintainer would (correctly) reject.",
+  "rootCause": {
+    "file": "/Users/musheghgevorgyan/repos/cal.diy/.truecourse/scenarios/core-booking-page/the-default-booking-form-asks-for-a-name-and-an-email.web.1.yaml",
+    "lines": "41-50",
+    "explanation": "Step 2 asserts `visible: button \"10:00\"` on a shared host's calendar with no reservation of that time and no tolerance for the slot being gone. The 09:30-11:00 hole is produced by a sibling scenario, not by a defect: stacked-buffers-block-more-than-one-buffer-width.web.1 (evidence transcript, outcome pass, finished 03:50:20, ~23 s before this scenario finished at 03:50:43) books /reference-host/buffered-a at 2027-03-15 10:00 and reaches /booking/, and buffered-a carries a 30-minute before and after buffer (its own YAML note states this, and its later steps pass by observing buffered-b's first free start move to 11:15am). In the tested worktree packages/features/busyTimes/services/getBusyTimes.ts:132-183 turns every existing booking of the user into busy time widened by that booking's OWN event type buffers (lines 135-136, pushed at 176-181) plus the queried event type's buffers, and the booking fetch is host-scoped rather than event-type-scoped, so a 10:00-10:30 buffered-a booking blocks 09:30-11:00 for the unbuffered default-form page. 9:30am, 10:00am and 10:30am are therefore the correct answer. The separate 4:00pm gap is pre-existing seed state, not contention: the seeded booking uid refbk-user-limit-a (\"User Limit A Consult\", 2027-03-15T16:00:00.000Z to 16:30) is visible in the bookings list dumped by authenticate-a-booking-request-with-an-api-key.api.1. Corroborating evidence for the same collision: the-booking-title-follows-the-event-name-and-the-attendee.web.1 loaded 3 s earlier, still saw 10:00am, clicked it, and its Confirm got HTTP 409 \"No available users found. Could you try another time slot?\"; the-organizer-email-stays-off-the-booking-confirmation-page.web.1, which ran 14 s later, failed on the identical \"10:00\" expectation."
+  },
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "none run: the verdict is a harness/scenario-authoring defect, not a Cal.diy or Cal.com behavior, so there is nothing to look for upstream. The product behavior involved (host-wide busy time widened by the booked event type's buffers) is intended and is what the sibling buffer scenarios assert as correct."
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable, no product change is called for. In cal.diy: the availability code path is correct and unchanged; git log 038381aeca..origin/main touches nothing here. In cal.com: not verifiable from source (the public calcom/cal.com main is a mirror of cal.diy), and not relevant, since no defect is claimed."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (OOO with date overrides, zero-length team slots, the dropped 9:10 override slot, seated-booking attendee overselling, unauthenticated hold mutation). It is an instance of the coordinator's already-established systemic cause 3, cross-scenario slot contention, and this failure adds a detail that cause 3 as written does not cover: the contending booking's event-type buffers widen the stolen window, so one 10:00 booking removes three consecutive slots (9:30, 10:00, 10:30) rather than one."
+  },
+  "notes": "Signature check against the two other systemic causes: this is NOT cause 2 (sandbox saturation). The scenario ran in a late wave, step 1 completed in 2.3 s with the slot list already rendered, the screenshot shows no skeleton and no error banner, and the missing slots are a stable server-side answer rather than a render race. The 0-byte server logs in the evidence dir are the known web-driver limitation and carry no signal. It is also not cause 1 (API version header), which does not apply to web scenarios.\n\nWhether the doc claims hold anyway: not proven by this run, but the surrounding evidence points to yes. the-booking-title-follows-the-event-name-and-the-attendee.web.1 reached a default-question form for /reference-host/weekly-meeting showing exactly one name input labelled \"Your name*\" plus \"Email address\" with a required marker, and a-phone-only-event-type-books-without-an-email-address.web.1 shows the phone-toggle variant with \"Your name*\" and \"Phone number*\" and no email field, which is the other half of the booking-questions claim. Neither exercises the milestone assertions this scenario owns (the negative \"no Last name\" text assertion at step 4 and the `required` attribute read at step 5), so both milestones remain unevidenced.\n\nHow to fix the scenario, in order of preference: (1) give the flow its own host, so no sibling can consume its calendar; (2) drop steps 1 to 3 entirely and navigate straight to /reference-host/default-form?month=2027-03&date=2027-03-15&slot=2027-03-15T13:00:00.000Z, which is what the four prefill-* scenarios in this same corpus already do to reach the form (the slot query parameter renders the form without needing the slot to be free at click time, and the two claims are about the form, not about the slot grid); or (3) at minimum stop hardcoding a time that other scenarios book, and pick a start no sibling touches. Note that 4:00pm is likewise unusable because the seed itself occupies it. More broadly, ten other scenarios in the corpus hardcode the same \"10:00\" on the same host and date, so any fix should be applied corpus-wide rather than to this file alone."
+}

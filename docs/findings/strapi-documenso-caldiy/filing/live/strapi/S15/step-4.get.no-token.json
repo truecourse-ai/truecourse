@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:1347/api/articles",
+    "headers": {},
+    "body": null
+  },
+  "status": 403,
+  "body": {
+    "data": null,
+    "error": {
+      "status": 403,
+      "name": "ForbiddenError",
+      "message": "Forbidden",
+      "details": {}
+    }
+  }
+}

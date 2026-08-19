@@ -1,0 +1,12 @@
+{
+  "step": 8,
+  "label": "the OTHER pending recipient rejecting after the first one (expected 400)",
+  "at": "2026-08-19T19:16:12.016Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/11/reject",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_nfbbhctvneaaadxv\",\"recipientId\":11,\"reason\":\"tcref late 1f36da77c3\"}"
+}

@@ -1,0 +1,92 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "user-level-booking-limits-cap-every-event-type-at-once.web.1",
+  "flowId": "user-level-booking-limits-cap-every-event-type-at-once",
+  "failingStep": 2,
+  "whatFailed": "On the public booking page /reference-host/user-limit-b?month=2027-03 the date tile \"15\" is enabled and still offers start times, although the host is supposed to be at an account-wide cap of one booking per day on 2027-03-15, because Cal.diy ships no user-level (cross event type) booking limit: there is no User.bookingLimits column and no code path that reads one.",
+  "docClaim": {
+    "quote": "User-level booking limits go further - they apply a cap across every personal and team event type you host, so you can control your total meeting load in one place. ... When you enable user-level booking limits, Cal.com checks your total confirmed bookings for the chosen time period before showing a slot as available. If you have already reached your limit, the slot is removed from your booking page so no one can book you. ... Both limits are enforced simultaneously. If an event type allows 10 bookings per day but your user-level limit is 5 per day, you will not receive more than 5 bookings total.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/user-booking-limits.md (published at cal.com/help/event-types/user-booking-limits; the source lives in the separate calcom/help repo, not in the tested checkout)",
+    "section": "user-level-booking-limits + how-it-works + how-it-differs-from-event-type-booking-limits"
+  },
+  "observed": "The March 2027 grid rendered completely (step 1 took 2.3 s and passed its own assertion that tile \"16\" is enabled). On the failing check the page shows tile 15 selected in the dark active style with a full start-time column for Mon 15: 9:00am, 11:00am, 11:30am, 12:00pm, 12:30pm, 1:00pm, 1:30pm, 2:00pm, 2:30pm, 3:00pm, 3:30pm, 4:30pm. The gaps in that column (9:30, 10:00, 10:30 and 4:00pm are missing from an otherwise complete 09:00-17:00 30-minute grid) are exactly the seeded bookings showing up as ordinary host-wide busy time on a second event type. So the seeded bookings exist and are counted, but the day itself is never closed. The same page proves the assertion's disabled-detection works: tiles 18 to 31 are rendered disabled and the passing step 1 distinguished an enabled tile from them.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "No harm to a Cal.com customer; for a Cal.diy self-hoster the documented account-wide safety net simply does not exist, so a host who believes a per-day cap is in force can be booked without limit across their event types. Practically an edition/docs confusion, not data loss.",
+  "rootCause": {
+    "file": "packages/prisma/schema.prisma and packages/features/availability/lib/getUserAvailability.ts (tested worktree 038381aeca)",
+    "lines": "schema.prisma:246 (EventType.bookingLimits) and :626 (Team.bookingLimits) are the only two bookingLimits columns in the whole schema; the User model at :401 has no limit field at all. getUserAvailability.ts:344-357 and :532-582",
+    "explanation": "Verified by reading the code, not by name. parseLimits (getUserAvailability.ts:344-357) derives bookingLimits and durationLimits from the eventType argument only. The availability builder then has exactly two limit branches: :545-556 calls getBusyTimesFromLimits when the EVENT TYPE carries limits, and :561-582 calls getBusyTimesFromTeamLimits only when eventType.team exists (or a managed parent team with includeManagedEventsInLimits). A personal event type owned by reference-host hits neither, so nothing in the slot computation ever consults a host-wide cap. A repo-wide grep for user.bookingLimits, userBookingLimits and globalBookingLimits returns nothing across packages/ and apps/, and there is no Settings > General control either (the i18n key limit_booking_frequency appears in no file under apps/web/modules/settings). The state the doc describes cannot even be persisted, so the seed could not have created the precondition. This matches the doc's own gate (\"available to members of a Cal.com organization\") and the Cal.diy README, which says Organizations and other EE-only features were removed."
+  },
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 8985,
+        "url": "https://github.com/calcom/cal.diy/issues/8985",
+        "state": "open",
+        "title": "[CAL-1724] Allow global booking limits",
+        "relation": "exact",
+        "note": "Verified via gh api (not a search call): created 2023-05-19, still open on 2026-08-15. This is the tracking issue for the exact capability the bound doc describes, a cap on total bookings across all of a user's event types."
+      }
+    ],
+    "prs": [
+      {
+        "number": 25641,
+        "url": "https://github.com/calcom/cal.diy/pull/25641",
+        "state": "open",
+        "title": "feat: implement global booking limits for users",
+        "relation": "exact",
+        "note": "Verified via gh api: opened 2025-12-05, last updated 2026-03-02, merged=false, still open. A community implementation of precisely this feature; unmerged, so the feature is absent from the tested tree and from main."
+      },
+      {
+        "number": 23100,
+        "url": "https://github.com/calcom/cal.diy/pull/23100",
+        "state": "closed",
+        "title": "feat: Implement global booking limits for users (v2)",
+        "relation": "exact",
+        "note": "Verified via gh api: opened 2025-08-14, closed 2025-09-11, merged=false."
+      },
+      {
+        "number": 14243,
+        "url": "https://github.com/calcom/cal.diy/pull/14243",
+        "state": "closed",
+        "title": "feat: Implement global booking limits for users",
+        "relation": "exact",
+        "note": "Verified via gh api: opened 2024-03-28, closed 2025-08-14, merged=false. Three public attempts at the feature, none merged."
+      },
+      {
+        "number": 115,
+        "url": "https://github.com/calcom/help/pull/115",
+        "state": "merged",
+        "title": "docs: Add user-level booking limits",
+        "relation": "related",
+        "note": "Verified via gh api: merged 2026-04-16. This is the page the scenario binds to, published about seven months after the last public implementation PR was closed unmerged, which is the shape of a feature that shipped in commercial Cal.com only."
+      },
+      {
+        "number": 129,
+        "url": "https://github.com/calcom/help/pull/129",
+        "state": "merged",
+        "title": "docs: clarify user-level booking limits are organization-only",
+        "relation": "related",
+        "note": "Verified via gh api: merged 2026-04-24. It added the Info gate quoted in the doc, the page's own signal that this is an organization/commercial capability."
+      }
+    ],
+    "queries": [
+      "no gh search calls spent: the tracker set was established by the sibling reviewer for this same flow and every item was re-verified individually with gh api repos/calcom/cal.diy/issues/8985, gh api repos/calcom/cal.diy/pulls/{25641,23100,14243}, gh api repos/calcom/help/pulls/{115,129}"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only four commits landed on origin/main between the tested 038381aeca (2026-07-31) and the 2026-08-15 fetch (176037d0af, b2c28a23ab, 5e3fe3cbe6, 8418db70c7), none touching packages/prisma/schema.prisma; git grep on origin/main still shows bookingLimits only at schema.prisma:246 (EventType) and :626 (Team), and PR #25641 is still open. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a mirror of cal.diy main (same commit 176037d0af). The public trace (calcom/help PR #115 publishing the page 2026-04-16 and PR #129 marking it organization-only 2026-04-24) suggests the commercial product does ship it, but no readable source confirms that."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office ignored with date overrides, zero-length group slots, the dropped 9:10 override slot, seated-booking oversell, unauthenticated slot holds); none of them concerns booking limits. It does map onto the sibling reviewer's result for the same doc page, each-user-level-period-counts-its-own-calendar-window.web.1: I agree with it and re-derived the code and tracker evidence independently rather than reusing it. One root cause, the absence of any user-level booking-limit feature, covers both scenarios."
+  },
+  "notes": "None of the three systemic causes applies. Not cause 2 (sandbox saturation): step 1 completed in 2.3 s with the full grid painted and passed its assertion; the failing step's 10.1 s is the expectation poll budget elapsing against a stable, fully rendered page, not a page.goto timeout, and the step-2 screenshot shows the same rendered page. Not cause 3 (slot contention): the assertion is on a date tile's disabled state, not a hardcoded time label, and disabled tiles exist on this very page (18 to 31), so the check would have seen a closed day had there been one. Two things worth flagging. First, the scenario never reached step 3 (the same day on user-limit-a, the event type the seeded bookings sit on), so this run gives no read on the event-type half of the milestone user-and-event-type-limits-enforced-simultaneously; the sibling event-type-limit scenario a-booking-frequency-limit-empties-the-day-once-it-is-reached.web.1 failed on a skeleton page, so ordinary EventType.bookingLimits behaviour remains unchecked in this run. Second, on the TrueCourse side this flow should be excluded or marked edition-gated rather than generated against Cal.diy: its needs list requires a user-account carrying an account-wide cap plus an organization, and this edition can provide neither. For the doc author: the calcom/help page says the feature is \"available to members of a Cal.com organization\", which a self-hoster reads as a plan gate they might satisfy, when in fact the code is not in the MIT tree at all. An aside on the screenshots, unrelated to the verdict: only 15, 16 and 17 are bookable in March 2027, the rest of the month is disabled, which reflects how the seeded event type was configured, not the limit under test."
+}

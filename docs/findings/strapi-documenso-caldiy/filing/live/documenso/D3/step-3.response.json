@@ -1,0 +1,44 @@
+{
+  "step": 3,
+  "label": "ORIGINAL STEP 2: ASSISTANT on an envelope with no signing order set (expected 400)",
+  "at": "2026-08-19T19:15:50.183Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "454",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:50 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "966",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "64e2a8d1-91ef-408f-9159-1d36960b0f66"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_wkflbkwyccsbuznu",
+        "role": "ASSISTANT",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 8,
+        "email": "tcref-asst-d35cadec2f@documenso.test",
+        "name": "TCRef Assistant",
+        "token": "Cd10EhXfCDmlPIT4qPz4A",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

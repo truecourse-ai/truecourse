@@ -1,0 +1,28 @@
+{
+  "id": "C2",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/modules/slots/slots-2024-09-04/services/slots-output.service.ts#L106-L176",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/modules/slots/slots-2024-09-04/services/slots-output.service.ts#L106-L176",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. At today's head getAvailableRangeSlots still opens with `const eventType = await this.eventTypesRepository.getEventTypeById(eventTypeId);` (line 112) and `const slotDuration = duration ?? eventType?.length;` (line 114), and both end computations still read `.plus({ minutes: slotDuration })` (lines 130-131 and 153) with the unchanged `if (!start || !end)` guard at line 155."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 30 '\"format=range\"'  (5 hits, none about slot ranges: cal.diy#29834 WEBAPP_URL_INTERNAL, cal.diy#25707 rolling-window override PR, calcom/companion#32, cal.diy#28142 CLI package, cal.diy#23940 hide-attendees PR)",
+      "gh search issues --owner calcom --include-prs --limit 40 --updated '>2026-08-01' 'slots'  (20 hits, all about other slot behaviours: PENDING bookings in getBusyTimes #29967/#30004, fixed-host intersection #29837/#29797, buffer prefetch window #29540, slot interval on create #683..#29683, embed/ARIA items; none mentions format=range, dynamic usernames or zero-length slots)"
+    ]
+  },
+  "reevaluation": "Stands, unchanged and still high confidence. No commit since the tested tree touches apps/api/v2/src/modules/slots/ or packages/features/eventtypes/lib/defaultEvents.ts, so the dynamic pseudo-event still has id 0, getEventTypeById(0) still misses, slotDuration is still undefined and luxon's plus({minutes: undefined}) still yields end === start behind an HTTP 200. Nothing new in the tracker: the two searches cover the exact query shape (format=range) and all slot activity since 2026-08-01, and neither surfaces this symptom or anything that would fix it. The review's upstream note that its three searches were exhaustive holds. Scope is unchanged and worth restating in the issue because it is what makes the report actionable: only the dynamic form (usernames=a,b, no eventTypeId) with format=range is affected; a real event type with format=range is correct (proven by the passing sibling scenario ask-for-a-particular-slot-length.api.1), and sending &duration=N works around it.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/config.yml sets `blank_issues_enabled: false`, so a bug must go through bug_report.md (Issue Summary / Steps to Reproduce / Actual Results / Expected Results / Technical details / Evidence, the last called \"quite mandatory in terms of bugs\"); CONTRIBUTING.md: \"For bugs, security, performance, documentation, etc., you can start coding immediately, even if the `needs approval` label is present\", so no discussion-first gate applies.",
+  "confidence": "high",
+  "notes": "The doc claim is cal.com's published v2 API reference (get-available-time-slots-for-an-event-type), which Cal.diy has no substitute for, but the faulty code is Cal.diy's own, so the issue goes to calcom/cal.diy. Two adjacent smells to include in the same report, both still present at head: the `if (!start || !end)` guard at line 155 cannot catch a missing duration because luxon turns plus({minutes: undefined}) into a no-op rather than an Invalid DateTime, and getAvailableRangeSlotSeated is declared with eventTypeSeatsPerTimeslot: number yet called with `eventType.seatsPerTimeSlot ?? undefined` at lines 148 and 166. Steps 2 and 3 of the scenario never ran, so the doc's \"usernames must contain at least 2\" and \"organizationSlug is required\" claims are untested and must not be asserted. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

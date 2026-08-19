@@ -1,0 +1,38 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-custom-time-slot-interval-changes-the-start-times-on-offer.web.1",
+  "flowId": "a-custom-time-slot-interval-changes-the-start-times-on-offer",
+  "failingStep": 1,
+  "whatFailed": "Step 1 opened /reference-host/interval-default and asserted the day button \"15\" was visible, but the 10 second per-step budget expired while the booking page was still painting skeleton placeholders; the calendar, day 15 and its slot list rendered correctly about 6 seconds later, on the same page load, as the recorded video shows.",
+  "docClaim": {
+    "quote": "By default, a time-slot interval is of the same length as the event type. However, within each individual event-type, you have the option to choose a different time-slot interval.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/custom-time-slots.md",
+    "section": "custom-time-slot-intervals"
+  },
+  "observed": "page.goto resolved (domcontentloaded) so this was not a navigation error, but nothing was painted until roughly t=10.5s of session.webm. The Booker then showed an August 2026 skeleton grid from t=10.5s to t=15.5s (the initial schedule query for the run month), auto-advanced to September 2026 at t=15.5s because August has no bookable day (apps/web/modules/bookings/components/DatePicker.tsx:17-52, useMoveToNextMonthOnNoAvailability), and finished rendering at t=16-17s. step-1.png and the transcript were captured inside that last skeleton window, which is why the deterministic check and the visual judge both reported no day buttons. The frame at t=17s shows exactly what the scenario asserted: September 2026 with day 15 selected and the start times 9:30am, 10:30am, 11:00am, 11:30am, 12:00pm, 12:30pm, 1:30pm, 2:00pm, 2:30pm, 3:00pm, i.e. only :00 and :30, no :15 and no :45, which is what step 2's regex wanted. diff.txt still says \"August 2026\" while invocation.json says \"September 2026\", confirming the two captures straddle the auto-advance.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "None for users. This is a sandbox timing artifact: the product satisfied the doc claim on the very page load that was judged a failure, so the whole flow (6 steps, 6 milestones about time-slot intervals) is a false negative and blocked its remaining steps (blockedPrecondition: true).",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "none run: the verdict is environment, the product rendered the asserted UI correctly on the same page load 6 seconds after the step budget expired, so there is no product symptom to search for and the shared GitHub search budget was left for the real-defect reviewers"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable, no product change is called for. in cal.diy: nothing to fix, the tested commit 038381aeca renders the asserted calendar and the documented default 30 minute grid correctly. in cal.com: nothing to fix, the code path involved (apps/web/modules/bookings/components/DatePicker.tsx and packages/features/calendars/components/DatePicker.tsx) is not implicated."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Evidence that this is host saturation rather than a slow page in general: the run's web step-1 durations fall into two clear bands against the SAME server. Early scenarios paid 15 to 18.6s (a-booking-frequency-limit 18594ms, a-multi-duration 18233ms, a-booker-at-their-active-booking-limit 17030ms, a-before-buffer 16515ms, this one 16504ms, a-day-split 16237ms) and three more scenarios died outright on `page.goto: Timeout 10000ms`, while later ones served the identical /[user]/[type] route in 2 to 5.3s (stacked-buffers 5273ms on /reference-host/buffered-a?month=2027-03, prefill-the-location 1976ms). The runner defaults to min(cpus, 8) parallel scenario sandboxes (packages/guard-runner/src/run.ts:1383-1394, defaultRunConcurrency), each with its own Chromium, all pointed at one `yarn workspace @calcom/web start` process whose Postgres URL in scenarios/recipe.json pins `connection_limit=3&pool_timeout=60`. Eight browsers plus the NestJS API against three DB connections is the pressure that pushed first paint past 10s. Note the web app is a production build (`yarn build` then `next start`), so this is not a Next.js dev-mode route compile.\n\nTwo things make this scenario the most exposed member of its family, worth fixing on the TrueCourse side. First, its step budget is the fixed DEFAULT_WEB_STEP_TIMEOUT_MS = 10_000 (packages/guard-runner/src/web/executor.ts:47), measured from the start of the step and shared with the navigation itself, so a slow first paint leaves the visibility poll almost no time. Second, this is the only interval scenario that omits ?month= and leans on the app's own auto-advance: it therefore needs TWO serial schedule fetches (August, empty, then September) before any day button exists, and while the second one is in flight the whole grid reverts to skeletons, because DatePicker renders `props.isLoading ? <button disabled><SkeletonText/></button>` for every cell (packages/features/calendars/components/DatePicker.tsx:322-328) and isLoading is `schedule.isPending` (apps/web/modules/bookings/components/Booker.tsx:437-438 and 471-474). Its sibling slot-start-times-follow-the-configured-interval-grid.web.1 hits the same /reference-host/interval-default with ?month=2027-03 pinned and loaded in 5260ms. Pinning the month in the navigate step (the seeded schedule's open days are known to the seed) or raising the web step timeout would settle it; re-running this one scenario alone against a warm server would confirm it in one shot.\n\nSame-cause siblings in this run, all failing step 1 with \"no button named 15 is on the page\" after an auto-advance: a-before-buffer-an-after-buffer-and-both-withhold-different-windows.web.1, a-booker-at-their-active-booking-limit-is-refused.web.1, a-booking-frequency-limit-empties-the-day-once-it-is-reached.web.1, a-day-split-into-two-ranges-hides-the-gap-between-them.web.1 (its visual judge explicitly reports day 15 and a 9:40am slot visible on the screenshot, the same late-render signature), a-past-booking-reschedules-when-the-event-type-allows-it.web.1 (blank page). Whoever reviews those should reuse this timing analysis rather than re-deriving it.\n\nOne genuine product observation, not a doc violation and not the cause here: during the auto-advance the DatePicker drops every rendered day number and shows nameless disabled skeleton buttons, so the calendar visibly regresses from \"August with numbers\" to \"blank grid\" before the next month appears. Keeping the previous month's grid or the day numbers during the refetch would make the transition less jarring and would make the page far easier to automate.\n\nOne stale note in the scenario itself: its step-1 note claims \"the web driver pins a viewport but not a timezone (web/browser.ts:156-160)\", but the driver does pin `timezoneId: 'UTC'` and `locale: 'en-US'` (packages/guard-runner/src/web/browser.ts:154-163). The minute-only assertions still hold, but the stated reason is wrong."
+}

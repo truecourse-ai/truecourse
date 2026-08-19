@@ -1,0 +1,67 @@
+{
+  "repo": "documenso",
+  "scenarioId": "the-token-expiry-choices-the-docs-list.web.1",
+  "flowId": "the-token-expiry-choices-the-docs-list",
+  "failingStep": 7,
+  "whatFailed": "The expiry chooser in the Create API token dialog cannot be reached by its visible label because the Radix select trigger has no accessible name: the visible \"Expires in\" label's htmlFor points at an id that never lands on any DOM element, so getByRole('combobox', { name: 'Expires in' }) matched 0 elements and the step never opened the list.",
+  "docClaim": {
+    "quote": "Select an expiration period: never expires, 7 days, 1 month, 3 months, 6 months, or 1 year",
+    "doc": "apps/docs/content/docs/developers/getting-started/authentication.mdx (line 49 at v2.16.0; published as docs.documenso.com/docs/developers/getting-started/authentication)",
+    "section": "Create an API Token > Generate a new token"
+  },
+  "observed": "Steps 1 to 6 passed: sign-in, /t/guard-owner/settings/tokens, and the Create API token dialog all rendered, and the dialog's Name textbox was found by role+name. Step 7 timed out after 10.1s trying to click combobox \"Expires in\". The harness inventory line reports exactly one combobox on the page whose inner text is \"3 months\" (roleInventory in packages/guard-runner/src/web/executor.ts uses allInnerTexts, so that line is visible text, not an accessible name), and step-7.png shows the closed trigger reading \"3 months\" under a visible \"Expires in\" label with the dropdown never opened. The dialog's own DOM text at step 6 already lists the six items as \"7 days, 1 month, 3 months, 6 months, 12 months, Never\", so the doc's six periods are all present but the last is labelled \"12 months\", not \"1 year\".",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Accessibility: the expiry chooser is an unnamed form control, so a screen reader announces only its role and current value (\"3 months\") with no indication of what it selects, and clicking the \"Expires in\" text does not focus or open it; the same FormControl-wrapping-Select pattern appears 46 times across the app, and only 1 of 84 SelectTriggers carries an aria-label.",
+  "rootCause": {
+    "file": "apps/remix/app/components/dialogs/token-create-dialog.tsx",
+    "lines": "203-231",
+    "explanation": "FormControl (packages/ui/primitives/form/form.tsx lines 96-111) is a Radix Slot that applies id={formItemId}, aria-describedby and aria-invalid to its single child, and FormLabel (lines 78-95) renders <label htmlFor={formItemId}>. In this field the Slot's child is <Select>, which is SelectPrimitive.Root (packages/ui/primitives/select.tsx line 10), a non-DOM provider component that does not spread unknown props onto the trigger, so the id is dropped and the label's htmlFor dangles. SelectTrigger (select.tsx lines 16-46) forwards no aria-label or aria-labelledby, and the Radix trigger renders a <button role=\"combobox\">; combobox is not a name-from-content role, so the value text \"3 months\" does not name it either (the scenario note records the same result from an earlier probe run). Net effect: the control has no accessible name at all. The contrast is inside the same dialog: the Name field's FormControl child is <Input>, a real DOM element, so the Slot's id lands, the label associates, and step 6 found textbox \"Name\" without trouble."
+  },
+  "introducedBy": {
+    "commit": "3ff7f70a7ddd7c9a451a86035dd5588ced92e976",
+    "date": "2026-07-15",
+    "pr": "#3076",
+    "title": "feat: redesign api tokens settings page",
+    "note": "Blame of the tested lines 203-231 is entirely this commit, which moved the form from apps/remix/app/components/forms/token.tsx into the new token-create-dialog.tsx. It carried the defect rather than creating it: the deleted file had the identical <FormControl><Select><SelectTrigger> nesting, blaming to b9e5905469 (Mythie, 2024-02-20, \"feat: create from template\") and moved again by 383b5f78f0 (David Nguyen, 2025-01-02, \"feat: migrate nextjs to rr7\"). The old code also already used the label \"12 months\" for ONE_YEAR."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3076,
+        "url": "https://github.com/documenso/documenso/pull/3076",
+        "state": "merged",
+        "title": "feat: redesign api tokens settings page",
+        "relation": "related",
+        "note": "The PR whose code is in the tested build; it re-authored this dialog and kept the unnamed select trigger and the \"12 months\" label."
+      },
+      {
+        "number": 2349,
+        "url": "https://github.com/documenso/documenso/pull/2349",
+        "state": "closed",
+        "title": "feat: add validation for API token expiration date",
+        "relation": "related",
+        "note": "Community PR against the same Create API token expiry field (validation when no period is chosen), closed unmerged as stale. Does not touch the accessible name."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs accessibility",
+      "gh search issues --repo documenso/documenso --include-prs \"aria-label\"",
+      "gh search issues --repo documenso/documenso --include-prs \"api token expiration\""
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log v2.16.0..origin/main -- apps/remix/app/components/dialogs/token-create-dialog.tsx packages/ui/primitives/form/form.tsx packages/ui/primitives/select.tsx returns nothing (main head 688ef2fdf3, 2026-08-14), and origin/main still shows FormControl wrapping <Select> with no aria-label and ONE_YEAR: msg`12 months`. The doc is also unchanged: origin/main's apps/docs/content/docs/developers/getting-started/authentication.mdx line 51 still reads \"or 1 year\"."
+  },
+  "colleagueFinding": {
+    "ref": "documenso #8",
+    "agreement": "refines",
+    "note": "Agrees that the API-token expiry selector has no accessible name and that the pattern is app-wide, and I found no upstream report, matching their \"unreported\" claim. Refinements: (a) the exact mechanism is FormControl's Radix Slot handing id to SelectPrimitive.Root, a non-DOM component, so the label's htmlFor dangles, plus role=combobox blocking name-from-content, and the Name field in the same dialog proves the Slot works when the child is a real DOM element; (b) blame is not PR #3076 alone, that PR inherited the nesting from b9e5905469 (2024-02-20); (c) quantified as 46 FormControl-wrapping-Select sites and 1 aria-label across 84 SelectTriggers in the tested tree; (d) their finding does not mention that the harness's \"the combobox elements on the page are: 3 months\" line is inner text, not an accessible name, which is what makes the control unreachable by any role+name locator."
+  },
+  "notes": "Two separate things sit behind this one red. First, the reported failure is a markup/accessibility defect, not a violation of the bound doc sentence: the scenario never got to evaluate the six options. Second, and unobserved because step 7 could not act, the doc claim itself is not literally satisfied: EXPIRATION_DATES in token-create-dialog.tsx line 46 labels the longest period \"12 months\" while the doc enumerates \"1 year\". The durations are identical (the key ONE_YEAR resolves through packages/lib/constants/time.ts line 11, Duration.fromObject({ years: 1 }), in packages/lib/server-only/public-api/create-api-token.ts), so this is a wording mismatch, not a functional one, and the fix belongs in whichever side the maintainers prefer: the doc at apps/docs/content/docs/developers/getting-started/authentication.mdx or the UI label. The docs live in this same repo under apps/docs/. Minimal code fix for the accessible name: move FormControl to wrap SelectTrigger instead of Select (the shadcn convention), or add aria-label to the SelectTrigger; the same one-line change applied to the shared pattern would fix the other 45 sites."
+}

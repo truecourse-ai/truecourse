@@ -1,0 +1,62 @@
+{
+  "step": 14,
+  "label": "PASS2 REJECT",
+  "at": "2026-08-19T19:16:33.190Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "869",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:33 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "986",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "0d70f130-4667-483e-95d8-f499e68e01e5"
+  },
+  "body": {
+    "envelopeId": "envelope_mynwzrxyyiddmdfv",
+    "role": "SIGNER",
+    "readStatus": "NOT_OPENED",
+    "signingStatus": "REJECTED",
+    "sendStatus": "NOT_SENT",
+    "id": 12,
+    "email": "tcref-declines2-9c11313f6e@documenso.test",
+    "name": "TCRef Decliner 2",
+    "token": "ky0DRp98n5FEd7w0VrBEo",
+    "documentDeletedAt": null,
+    "expired": null,
+    "expiresAt": "2026-11-17T19:16:32.819Z",
+    "expirationNotifiedAt": null,
+    "signedAt": "2026-08-19T19:16:32.861Z",
+    "authOptions": {
+      "accessAuth": [],
+      "actionAuth": []
+    },
+    "signingOrder": null,
+    "rejectionReason": "tcref declined 9c11313f6e",
+    "fields": [
+      {
+        "envelopeId": "envelope_mynwzrxyyiddmdfv",
+        "envelopeItemId": "envelope_item_bkcfivlfltamfcou",
+        "type": "SIGNATURE",
+        "id": 10,
+        "secondaryId": "cmt0h315c003nhoeot1iv4etb",
+        "recipientId": 12,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "70",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        }
+      }
+    ]
+  }
+}

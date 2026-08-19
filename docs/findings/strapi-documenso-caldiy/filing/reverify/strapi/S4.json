@@ -1,0 +1,70 @@
+{
+  "id": "S4",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/content-manager/server/src/mcp/sanitizers/shape-relations.ts#L73-L98",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/content-manager/server/src/mcp/sanitizers/shape-relations.ts#L73-L98",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for shape-relations.ts or collection-handlers.ts. On origin/develop, reduceToIdentity still spans lines 73-98 with the to-many branch at 79-85: 'if (isMany) { if (Array.isArray(value)) {...} // defensive: { count: N } or null/undefined -> empty array; return []; }'. The MCP collection update handler still calls documentManager.update(documentId, uid, { data, locale }) with no populate at lines 317-325, so the document-manager default (buildDeepPopulate, count-shaped) still applies and { count: N } still maps to []. Line numbers today equal the tested ones (files byte-identical)."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 27395,
+        "url": "https://github.com/strapi/strapi/issues/27395",
+        "state": "open",
+        "title": "MCP `tools/list` advertises draft-07 JSON Schema, making all tools uncallable from strict 2020-12 clients",
+        "createdAt": "2026-08-17",
+        "relation": "related",
+        "note": "New since the review. A different MCP schema defect (dialect of the advertised tool schemas), not this one. Useful precedent: labelled severity: high and status: confirmed within a day, which shows maintainers accept MCP contract bugs as public issues."
+      },
+      {
+        "number": 27115,
+        "url": "https://github.com/strapi/strapi/pull/27115",
+        "state": "open",
+        "title": "fix(content-manager): align MCP draft write schemas with admin draft leniency",
+        "createdAt": "2026-07-23",
+        "relation": "related",
+        "note": "Open PR, base develop, last pushed 2026-08-18. It edits the same file data-schema.ts but only the scalar/component required-field projection; gh pr diff shows no hunk covering the to-many relation object (no occurrence of 'Mutually exclusive'), so it changes nothing here."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#26560",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-06-19",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "fix(content-manager): reduce MCP relation output to identity-only shape. Unchanged since the review."
+      },
+      {
+        "ref": "strapi/strapi#26990",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "develop",
+        "note": "Still open, not merged, base develop, head feat/mcp-read-populate-depth, 11 commits / 17 files. Updated 2026-08-18 (after the review's 2026-08-15 snapshot), no new comments since 2026-08-15. I re-read the current diff: it does NOT fix any finding here (details in the per-finding reevaluation)."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi mcp --include-prs --limit 60 --updated \">2026-08-10\"",
+      "gh search issues --repo strapi/strapi \"relations connect set silently\" --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "reevaluation": "Stands unchanged, but with one material update the review could not have: open PR #26990 was pushed again on 2026-08-18 and it rewrites shape-relations.ts substantially (adding an inline-relation resolver and a shouldInline predicate). I checked whether it fixes this. It does not. Its first hunk on that file starts at line 98, which is reduceToIdentity's closing brace, so lines 1-97 including the '{ count: N } -> []' coercion at 83-84 are untouched context. Its collection-handlers.ts hunks stop at base line ~241, well before the update handler at 317-325, so the write path still takes the count-shaped default populate. Net: if #26990 merges as it stands, this defect survives it, and the file will have been rewritten around the faulty lines, which makes filing BEFORE that merge worthwhile so the author can fold the fix in. Everything else in the review holds: no new report, #26560 unchanged, fixedAfter 'no' still correct.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "high",
+  "notes": "Cross-reference open PR #26990 in the issue body: it is actively reworking shape-relations.ts and its author is the right person to fold in either fix (pass a non-count populate from the MCP write handlers, or make reduceToIdentity refuse to translate { count: N } into []). Scope is broader than 'update': the same count-shaped default populate is used by create, publish, unpublish and discard_draft on collection types. Single types are NOT affected (single-type-handlers.ts:116-118 passes an explicit populate), which is a useful contrast for the report. The write itself is correct; only the reply is false, so this is a wrong-confirmation bug, not data loss."
+}

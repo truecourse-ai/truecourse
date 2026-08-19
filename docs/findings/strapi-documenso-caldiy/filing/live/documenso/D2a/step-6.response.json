@@ -1,0 +1,49 @@
+{
+  "step": 6,
+  "label": "CONTROL: the same move with every coordinate supplied",
+  "at": "2026-08-19T19:15:29.313Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "450",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:29 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "970",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "6d3038d3-9a2c-4a70-8de9-56b5c22ff81b"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_bxwelneerccdovmc",
+        "envelopeItemId": "envelope_item_kiywmastvdzcosci",
+        "type": "TEXT",
+        "id": 7,
+        "secondaryId": "cmt0h1o540029hoeo4e8zzpqi",
+        "recipientId": 7,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "20",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "label": "",
+          "placeholder": "",
+          "required": false,
+          "readOnly": false,
+          "fontSize": 12,
+          "type": "text",
+          "text": "",
+          "textAlign": "left"
+        },
+        "documentId": 5,
+        "templateId": null
+      }
+    ]
+  }
+}

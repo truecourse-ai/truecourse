@@ -1,0 +1,36 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "an-event-type-with-guests-disabled-offers-no-guest-fields.web.1",
+  "flowId": "an-event-type-with-guests-disabled-offers-no-guest-fields",
+  "failingStep": 2,
+  "whatFailed": "The walk step could not find the hardcoded 9:00am slot on /reference-host/no-guests for 2030-06-12 because two earlier scenarios in the same parallel run had already booked the same host at 2030-06-12T09:00Z, so the run never reached the step that actually checks for a guest control.",
+  "docClaim": {
+    "quote": "If you do not wish for your booker to add other guests to your event type, you can make use of this feature to disable adding guests to the event during the booking of this event. ... By default, the Add guests toggle is enabled which allows the booker to add guests to the booking. If you wish to disable it, simply toggle it off.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/disable-guests.md",
+    "section": "disable-guests"
+  },
+  "observed": "Step 1 (03:50:12 local) already rendered the 2030-06-12 slot column as 9:30am, 10:00am, 10:30am, 11:00am, 11:30am, with no 9:00am. Step 2 clicked day 12, the URL advanced to ?month=2030-06&date=2030-06-12, the page painted completely, and the step spent its full 10.1 s budget waiting for a 9:00am button that does not exist. The last frame of session.webm (27.3 s) shows the same complete, stable, fully painted five-slot list, so this is NOT the sandbox-still-painting timeout pattern. Cause: at 03:49:58-03:50:07 the sibling scenarios a-seated-event-type-takes-a-second-booker-into-the-same-slot.web.1 (booking uid 8wV2ymqoY85KTwkDJPfpuj on seated-consult, 'This meeting is scheduled') and a-short-notice-booking-is-the-only-one-that-needs-confirming.web.1 (booking uid kPBtotkes4B1eM8mkoVeaM on notice-confirm) both booked reference-host at 2030-06-12T09:00:00.000Z. Cal.diy correctly treats an ACCEPTED booking as host-wide busy time, so 09:00-09:30 disappeared from every other event type of that host. Screenshots and page text of the earlier 2030-06 pages (ooo-consult at 03:49:34, tz-locked at ~03:49:50, and the seated scenario's own step 2) show 9:00am present before those bookings, and every 2030-06 page loaded after them (domain-restricted 03:50:10, no-guests 03:50:12, custom-questions 03:50:12, buffered-consult 03:50:15, split-name ~03:50:16) shows it gone.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users: the product did the right thing. Cost is a false red plus a blind spot: the disable-guests claim (milestone disable-guests-removes-adding-guests-during-booking) was never exercised, and the same collision reds four sibling scenarios.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": []
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable, there is no product defect to fix. in cal.diy: the busy-time path is untouched since the tested commit (git log 038381aeca..origin/main -- packages/features/busyTimes packages/features/bookings/repositories/BookingRepository.ts is empty; only 4 commits landed on main at all). in cal.com: not verifiable from source, and nothing to verify since the observed behavior is correct."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up is not available."
+  },
+  "notes": "Product behavior verified in the tested worktree, not inferred: packages/features/bookings/repositories/BookingRepository.ts:686-795 (_findAllExistingBookingsForEventTypeBetween) runs one query for every ACCEPTED booking of the user in the window with NO eventTypeId filter (eventTypeId only narrows the extra PENDING/requires-confirmation query), and packages/features/busyTimes/services/getBusyTimes.ts:83-125 turns those into busy blocks; its own comment says 'A user is considered busy within a given time period if there is a booking they own OR attend' and cites calcom/cal.diy#6374. So a booking made by any scenario blocks that time on every other event type of the same host, exactly as observed.\n\nThis is a systemic scenario-design problem, not a one-off. Five scenarios in this run fail at the identical step for the identical reason on 2030-06-12: an-event-type-with-guests-disabled-offers-no-guest-fields, an-email-domain-restriction-refuses-a-booker-from-the-wrong-domain, custom-booking-questions-reach-the-form-and-the-booking, a-split-name-event-type-asks-for-a-first-and-a-last-name (all missing 9:00am), and event-buffers-withhold-the-time-around-a-booking (missing 9:00am AND 9:30am, which is the buffer around the same 09:00 booking and independently confirms the cross-event-type block). All five hardcode both the day and the time and share one seeded host with scenarios that consume that slot, while the runner executes scenarios concurrently (overlapping step screenshots at 03:50:12).\n\nSuggested fixes, in order of robustness: (1) have the seed give each booking-mutating scenario its own day or its own host so no scenario can consume another's slot; (2) make walk steps select the first offered slot instead of a hardcoded clock time; (3) failing those, serialize scenarios that create bookings against a shared host. Note also that this hides real signal: the guest-control assertion in step 3 is well formed (the default form's reveal control is literally named 'Add guests', visible in the seated scenario's booking form page text), so the claim would have been genuinely testable had the walk step reached it.\n\nNo GitHub search budget was spent: the product behaved as designed, so there is no product symptom to file or match against an upstream tracker."
+}

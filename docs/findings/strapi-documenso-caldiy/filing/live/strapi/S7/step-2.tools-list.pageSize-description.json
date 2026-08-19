@@ -1,0 +1,14 @@
+{
+  "pageSize": {
+    "description": "Items per page (default: 25, max: 100).",
+    "type": "integer",
+    "minimum": 1,
+    "maximum": 100
+  },
+  "page": {
+    "description": "Page number (1-indexed, default: 1).",
+    "type": "integer",
+    "minimum": 1,
+    "maximum": 9007199254740991
+  }
+}

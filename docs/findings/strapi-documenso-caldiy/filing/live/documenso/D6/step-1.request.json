@@ -1,0 +1,11 @@
+{
+  "step": 1,
+  "label": "ordinary v2 list call, no DANGEROUS_BYPASS_RATE_LIMITS",
+  "at": "2026-08-19T19:13:57.166Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

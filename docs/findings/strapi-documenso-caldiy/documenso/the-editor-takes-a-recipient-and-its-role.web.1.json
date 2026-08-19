@@ -1,0 +1,64 @@
+{
+  "repo": "documenso",
+  "scenarioId": "the-editor-takes-a-recipient-and-its-role.web.1",
+  "flowId": "the-editor-takes-a-recipient-and-its-role",
+  "failingStep": 13,
+  "whatFailed": "With signing order switched on, the editor's recipient-role dropdown offers a fifth role, ASSISTANT (\"Can prepare\"), and the scenario asserted the quickstart's four-role list (Signer, Approver, Viewer, CC) as a closed set.",
+  "docClaim": {
+    "quote": "Select their role:\n* **Signer** - Must sign the document\n* **Approver** - Must approve (signature optional)\n* **Viewer** - Must confirm they viewed it\n* **CC** - Receives a copy after completion (no action required)",
+    "doc": ".truecourse/specs/sources/docs.documenso.com/docs/users/getting-started/send-first-document.md",
+    "section": "send-a-document > add-recipients (upstream source: apps/docs/content/docs/users/getting-started/send-first-document.mdx, lines 44-50)"
+  },
+  "observed": "Step 12 ticked \"Enable signing order\" (checkbox confirmed checked). Step 13 reopened the role combobox and the list rendered five options: Needs to sign, Needs to approve, Needs to view, Receives copy, Can prepare. step-13.png shows all five fully enabled with the signing-order checkbox green. Earlier, at step 10 with signing order still off, the same list already rendered \"Can prepare\" but greyed out and disabled (step-10.png), with the component's tooltip reading \"Assistant role is only available when the document is in sequential signing mode.\" So the product offers exactly the behaviour the Recipient Roles and Add Recipients pages describe: Assistant is present but locked in parallel mode and unlocked once sequential signing is enabled. The scenario's own step 12 put the editor into the one state where the fifth role is documented to be available, and then asserted it must not be there.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None on users. The product matches its own docs; the assertion is a mis-derived exclusivity claim, so this red is noise rather than a defect signal.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 1588,
+        "url": "https://github.com/documenso/documenso/pull/1588",
+        "state": "merged",
+        "title": "feat: assistant role",
+        "relation": "related",
+        "note": "Added ASSISTANT to the role select on 2025-02-01, a full year before the docs v2 quickstart (PR #2460, 2026-02-27) wrote its four-role list. The product having five roles predates the doc text that omits the fifth."
+      },
+      {
+        "number": 2995,
+        "url": "https://github.com/documenso/documenso/pull/2995",
+        "state": "closed",
+        "title": "feat: assistant always acts before signers without requiring sequential signing",
+        "relation": "related",
+        "note": "Community proposal to drop the sequential-signing requirement for Assistant. Closed unmerged on 2026-06-22, which confirms the current gating (Assistant enabled only in sequential mode) is the intended behaviour, not an oversight."
+      },
+      {
+        "number": 2460,
+        "url": "https://github.com/documenso/documenso/pull/2460",
+        "state": "merged",
+        "title": "feat: docs v2",
+        "relation": "related",
+        "note": "The commit that authored the four-role quickstart list (b92c53dbb2, 2026-02-27). Untouched since; still four roles on main as of 2026-08-15."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"assistant role\" --include-prs",
+      "gh search issues --repo documenso/documenso \"recipient roles\" --include-prs --match title"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in the product. For completeness: git log 3cf2963cd0..origin/main shows zero commits touching apps/docs/content/docs/users/getting-started/send-first-document.mdx, apps/docs/content/docs/users/documents/add-recipients.mdx, apps/docs/content/docs/concepts/recipient-roles.mdx or packages/ui/components/recipient/recipient-role-select.tsx. The quickstart still lists four roles and the select still renders five on main (head 688ef2fdf3, 2026-08-14)."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the researcher's 8 itemized Documenso findings. The scenario note's reference to \"F5\" is the guard run's own internal finding id, not the researcher's numbering."
+  },
+  "notes": "Why the generator got this wrong: the doc corpus is internally inconsistent about the role list, and the scenario bound both sides of it. .truecourse/specs/sources/docs.documenso.com/docs/users/documents/add-recipients.md (a bound doc of this very scenario) has a five-row role table that includes \"Assistant | Pre-fills fields for other recipients\" plus the callout \"The Assistant role is only available when sequential signing is enabled\", and docs/concepts/recipient-roles.md repeats it (\"This role is only available when sequential signing is enabled\"). Only the getting-started quickstart omits Assistant, and it omits it in a walkthrough that never enables signing order, where Assistant genuinely is not selectable. The generator lifted the quickstart's four bullets, read them as exhaustive across all editor states, and ignored the contradiction with the doc sitting next to it in the same bind set.\n\nProduct code confirming the behaviour is intentional (tested worktree, v2.16.0): packages/ui/components/recipient/recipient-role-select.tsx lines 115-144 always render the ASSISTANT item but pass disabled={!isAssistantEnabled} with the opacity-50 / cursor-not-allowed styling and a tooltip that explains the sequential-mode requirement; apps/remix/app/components/general/envelope-editor/envelope-editor-recipient-form.tsx lines 971-975 pass hideAssistantRole={!editorConfig.recipients?.allowAssistantRole} and isAssistantEnabled={isSigningOrderSequential}, where isSigningOrderSequential (line 152) watches the form's signingOrder that the \"Enable signing order\" checkbox flips. Rendering a locked option with an explanation, rather than hiding it, is a deliberate discoverability choice.\n\nHow to make this scenario honest: assert the gating instead of the count. With signing order OFF, \"Can prepare\" should be present and disabled; with it ON, enabled and selectable. That is the falsifiable form of the claim the docs actually make, it uses the state the scenario already builds, and it would have caught a real regression in either direction. If the count claim is wanted at all, it belongs against docs/concepts/recipient-roles.md (five roles), not the quickstart.\n\nOne genuine, low-severity note for the doc author: the quickstart's role list is incomplete relative to the shipped UI, and a reader who follows its own \"Enable Signing Order\" callout will immediately see a fifth option the page never mentioned. Adding Assistant to the list, or pointing the bullet at /docs/concepts/recipient-roles, would remove the inconsistency. Filed as a note rather than a doc-bug verdict because the list is accurate for the parallel-mode flow the page walks through and no reader is misled into a wrong action. Doc lives in this repo at apps/docs/content/docs/users/getting-started/send-first-document.mdx.\n\nAlso observed in the transcript but out of scope: the whole run logs lingui \"Uncompiled message detected!\" warnings on every step (the instance was run from source without a compiled catalog), and step 7 logs several CSP style-src-elem violations for inline styles despite the nonce. Neither affected this assertion."
+}

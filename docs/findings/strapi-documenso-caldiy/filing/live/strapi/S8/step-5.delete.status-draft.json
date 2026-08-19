@@ -1,0 +1,38 @@
+{
+  "request": {
+    "method": "DELETE",
+    "url": "http://127.0.0.1:1347/api/articles/qbod5ch6zve5z4o91xom1gce?status=draft",
+    "headers": {
+      "Authorization": "Bearer 993cab8...<redacted>"
+    },
+    "body": null
+  },
+  "status": 500,
+  "headers": {
+    "access-control-allow-credentials": "true",
+    "access-control-allow-origin": "",
+    "connection": "keep-alive",
+    "content-length": "99",
+    "content-security-policy": "frame-src 'self';script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;connect-src 'self' https:;img-src 'self' data: blob: https://market-assets.strapi.io;media-src 'self' data: blob:;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Wed, 19 Aug 2026 18:52:45 GMT",
+    "keep-alive": "timeout=5",
+    "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-dns-prefetch-control": "off",
+    "x-download-options": "noopen",
+    "x-frame-options": "SAMEORIGIN",
+    "x-permitted-cross-domain-policies": "none"
+  },
+  "text": "{\"data\":null,\"error\":{\"status\":500,\"name\":\"InternalServerError\",\"message\":\"Internal Server Error\"}}",
+  "json": {
+    "data": null,
+    "error": {
+      "status": 500,
+      "name": "InternalServerError",
+      "message": "Internal Server Error"
+    }
+  }
+}

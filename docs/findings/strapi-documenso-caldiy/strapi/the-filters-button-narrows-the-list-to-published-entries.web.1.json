@@ -1,0 +1,59 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-filters-button-narrows-the-list-to-published-entries.web.1",
+  "flowId": "the-filters-button-narrows-the-list-to-published-entries",
+  "failingStep": 12,
+  "whatFailed": "With a Status filter active the scenario asserted that the list view's Status column header exposes an ARIA disabled state, and it does not: the product turns the sort off by dropping the header's click/keydown handlers, tabindex and sort icon, and never sets aria-disabled (nor any other programmatic signal).",
+  "docClaim": {
+    "quote": "The **Status** column sort is disabled when a status filter is active, since filtered results already share the same publication status.",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/content-manager.md (line 51; published as docs.strapi.io/cms/features/content-manager, source in strapi/documentation)",
+    "section": "content-manager/overview, the note directly under \"When Draft & Publish is enabled, you can also sort entries by publication status. Click the Status column header to sort from draft to published, or click it again to reverse the order.\""
+  },
+  "observed": "Step 11 applied filters[$and][1][__status][$eq]=published and the table narrowed correctly to the two published entries (CM Status Published Clean, CM Status Published Modified), dropping CM Status Draft Only and Guard Published Article, so every functional milestone in the flow passed. At step 12 the web driver located a gridcell whose exact accessible name is \"status\" (the header cell) and reported it as \"not disabled\". Reading the tested source confirms why: ListViewPage.tsx computes hasStatusFilter from the __status filter and pushes the Status header with sortable: !hasStatusFilter, and Table.tsx's HeaderCell renders <SortableTh onClick={sortable ? handleClickSort : undefined} onKeyDown={...} tabIndex={sortable ? 0 : undefined}> with no aria-disabled and no role change. The sort really is disabled: no click handler, no keyboard handler, cursor: default, no sort caret, and a useEffect strips sort=status:* from the URL if a status filter becomes active. The refusal is simply not represented in the accessibility tree.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for the documented promise: the Status sort is genuinely disabled while a status filter is live, exactly as the doc says. Real but separate impact for assistive-technology users, who get no programmatic signal that the header stopped being sortable (see notes).",
+  "rootCause": {
+    "file": "packages/core/admin/admin/src/components/Table.tsx (tested worktree, c43e9ee1e2); paired with packages/core/content-manager/admin/src/pages/ListView/ListViewPage.tsx:214-236,314-329",
+    "lines": "184-236",
+    "explanation": "This is the code that explains the observed state rather than a bug behind it. ListViewPage.tsx:215-219 sets hasStatusFilter = true when any $and clause carries __status.$eq, line 321 pushes the Status header with sortable: !hasStatusFilter, and the effect at 221-236 strips a status:* sort out of the URL so the disable cannot be bypassed by hand-editing the address. Table.tsx's HeaderCell (184-236) then expresses \"not sortable\" purely by omission: onClick, onKeyDown and tabIndex become undefined (220-222), the caret is not rendered (231), the tooltip falls back from \"Sort on status\" to the bare label (226), and cursor becomes default via SortableTh (238-240). No aria-disabled, no aria-sort=\"none\", no role swap. The scenario's expectation of an ARIA disabled state is therefore not derivable from the doc sentence, and arguably is not the correct ARIA expression either: aria-disabled belongs on interactive widgets, and a header that is simply not sortable should be a plain columnheader with no sort affordance."
+  },
+  "introducedBy": {
+    "commit": "86fe764f4f4431ee26cc4d646aefcd20f0d09869",
+    "date": "2026-05-04",
+    "pr": "#25689",
+    "title": "feat: sort based on publish status",
+    "note": "This is the commit that introduced both the Status column sort and the hasStatusFilter gate (its own changelog line reads \"fix: override sort if `status` filter is present\"), i.e. the behavior the doc note describes and the behavior the failing step probed. git blame could not run inside the partial clone (missing blobs in the promisor remote), so this was established with git log -S \"hasStatusFilter\" -- packages/core/content-manager/admin/src/pages/ListView/ListViewPage.tsx on the full strapi clone, which returns exactly one commit. The accessibility-tree gaps described in notes are older and live in a different repo (strapi/design-system)."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 25689,
+        "url": "https://github.com/strapi/strapi/pull/25689",
+        "state": "merged",
+        "title": "feat: sort based on publish status",
+        "relation": "related",
+        "note": "Origin of the documented behavior (Status column sortable, and sort suppressed while a status filter is active). Not a report of the symptom."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/design-system --include-prs \"gridcell columnheader accessibility table header\" (0 results)",
+      "gh search issues --repo strapi/design-system --repo strapi/strapi --include-prs \"table column header role gridcell\" (0 results)",
+      "gh search issues --repo strapi/strapi --repo strapi/design-system --include-prs \"aria-sort\" (19 results, none about the admin table's header roles or the disabled Status sort; all incidental hits in unrelated feature PRs)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log c43e9ee1e20f613b63f8f10d9e52be062a8b4a72..origin/develop returns zero commits for packages/core/content-manager/admin/src/pages/ListView/ListViewPage.tsx and zero for packages/core/admin/admin/src/components/Table.tsx (origin/develop tip acf0ce2034, 2026-08-14). On the design-system side, packages/design-system/src/components/RawTable/RawCell.tsx on strapi/design-system main as of 2026-08-15 still ends with <Box role=\"gridcell\" tag={tag} ...>, so the header-role problem is unchanged too."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's eight Strapi findings are all on the MCP server and admin-token API surfaces (token permission reaping, relation ops, filter operators, pagination default, SQL leak, doc mismatches). None touches the content-manager list-view web flow, so this failure maps to none of them."
+  },
+  "notes": "Two things worth separating from the verdict.\n\n1. The scenario is a deliberate expected-red. Its own step note says \"EXPECTED RED, and last for that reason\" and explains that the product drops the handler and tabindex rather than exposing aria-disabled. So the generated test knowingly asserted a state the doc does not promise. Under the taxonomy that is a test-defect, and the fix is to drop the step or restate the milestone as something the doc actually claims (for example: after applying the status filter, clicking the Status header does not change the sort query parameter, and the header shows no sort caret). Every other milestone in the flow (filters-menu-includes-status-with-draft-and-publish, filters-button-sets-condition-based-filters, status-filter-published-all, filter-conditions-combine-conjunctively) passed cleanly, including the conjunctive-filter reading.\n\n2. There IS a genuine, apparently unreported accessibility defect underneath, it is just not the doc claim. Verified in source, not inferred:\n   - strapi/design-system packages/design-system/src/components/RawTable/RawCell.tsx renders every cell as <Box role=\"gridcell\" tag={tag} ...>, and RawTh is simply RawTd with tag=\"th\". The admin table root is role=\"grid\" (RawTable.tsx:140). So every <th> in the Strapi admin carries an explicit role=\"gridcell\" that overrides its native columnheader role, and the grid exposes no column headers at all to assistive technology. This is why the guard locator addressed the header as a gridcell in the first place. A consequence: the aria-sort attribute Table.tsx sets at line 223 is invalid on a gridcell and is ignored by screen readers, so the current sort direction is never announced, sorted or not.\n   - The header's accessible name is the lowercase \"status\" while the screen shows \"STATUS\". Confirmed: ListViewPage.tsx:316-320 formats getTranslation('containers.list.table-headers.status') with defaultMessage 'status', and no such key exists in packages/core/content-manager/admin/src/translations/en.json (grep for \"table-headers\" returns nothing), so the raw defaultMessage is used; the capitals come from Typography variant=\"sigma\", a CSS transform. Minor, but it means the column is announced in a different case than it is written, and it is untranslated in every locale.\n   These belong in strapi/design-system (the role) and strapi/strapi (the missing translation key, and the choice to signal non-sortability only visually). I found no upstream issue or PR for either, using the three queries listed above.\n\n3. Unrelated but visible in the transcript, and NOT a defect: the ID column changes from 6/7/9 before the filter to 8/10 after it, and CM Status Published Modified's authorName changes from \"edited\" to \"Guard Author\". That is correct Strapi 5 draft-and-publish behavior, the draft and published entries of one document have distinct numeric ids and distinct field values, and the published-status filter surfaces the published entry. Flagging it only because it reads like a data change at a glance."
+}

@@ -1,0 +1,12 @@
+{
+  "step": 3,
+  "label": "a field created with NUMBER coordinates; read the types back",
+  "at": "2026-08-19T19:17:28.497Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_bkaasmlwcbywltkb\",\"data\":[{\"type\":\"SIGNATURE\",\"recipientId\":15,\"page\":1,\"positionX\":10,\"positionY\":80,\"width\":20,\"height\":5,\"fieldMeta\":{\"type\":\"signature\",\"required\":true}}]}"
+}

@@ -1,0 +1,21 @@
+{
+  "step": 23,
+  "label": "PASS2 field/delete on the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.651Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "16",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "977",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "9a87fcf1-fc85-4458-a3ad-162d856c4f00"
+  },
+  "body": {
+    "success": true
+  }
+}

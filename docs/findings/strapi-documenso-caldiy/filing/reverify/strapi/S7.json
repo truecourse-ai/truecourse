@@ -1,0 +1,90 @@
+{
+  "id": "S7",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "efe5a9dc17",
+        "date": "2026-08-17",
+        "title": "fix(content-manager): refraining from counting error draft relations",
+        "pr": "#26900",
+        "touchesCulpritLines": false,
+        "effect": "Touches document-manager.ts, a secondary culprit file, but only countDraftRelations (replaces a thrown ApplicationError and an inline zero-object with EMPTY_DRAFT_RELATION_COUNTS). findPage and its pagination.withDefaultPagination(opts, { maxLimit: 1000 }) call are untouched, still at lines 70-72."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/content-manager/server/src/mcp/handlers/collection-handlers.ts#L88-L93",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/content-manager/server/src/mcp/handlers/collection-handlers.ts#L88-L93",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for collection-handlers.ts, input-schemas.ts or packages/core/utils/src/pagination.ts, and exactly one commit (efe5a9dc17, PR #26900) for document-manager.ts, whose diff I read: it only rewrites countDraftRelations. On origin/develop the pair is intact: collection-handlers.ts still spreads '...(page !== undefined && { page })' at line 89 and '...(pageSize !== undefined && { pageSize })' at line 90 before calling documentManager.findPage at line 114, input-schemas.ts still describes the parameter as 'Items per page (default: 25, max: 100).' at line 33, and packages/core/utils/src/pagination.ts still hard-codes limit: 10 in STRAPI_DEFAULTS at lines 29-32. The doc side has not moved either: strapi/documentation origin/main (9226f90506, 2026-08-19) still carries 'The `list` tool also accepts `page` (1-indexed, default: 1) and `pageSize` (default: 25, max: 100) parameters.' at docusaurus/docs/cms/features/strapi-mcp-server.md line 309."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 27395,
+        "url": "https://github.com/strapi/strapi/issues/27395",
+        "state": "open",
+        "title": "MCP `tools/list` advertises draft-07 JSON Schema, making all tools uncallable from strict 2020-12 clients",
+        "createdAt": "2026-08-17",
+        "relation": "related",
+        "note": "New since the review. A different MCP schema defect (dialect of the advertised tool schemas), not this one. Useful precedent: labelled severity: high and status: confirmed within a day, which shows maintainers accept MCP contract bugs as public issues."
+      },
+      {
+        "number": 27115,
+        "url": "https://github.com/strapi/strapi/pull/27115",
+        "state": "open",
+        "title": "fix(content-manager): align MCP draft write schemas with admin draft leniency",
+        "createdAt": "2026-07-23",
+        "relation": "related",
+        "note": "Open PR, base develop, last pushed 2026-08-18. It edits the same file data-schema.ts but only the scalar/component required-field projection; gh pr diff shows no hunk covering the to-many relation object (no occurrence of 'Mutually exclusive'), so it changes nothing here."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#26371",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-05-27",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "feat(*): introduce MCP server. Closed/merged 2026-05-27, last touched 2026-05-27. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#26990",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "develop",
+        "note": "Still open, not merged, base develop, head feat/mcp-read-populate-depth, 11 commits / 17 files. Updated 2026-08-18 (after the review's 2026-08-15 snapshot), no new comments since 2026-08-15. I re-read the current diff: it does NOT fix any finding here (details in the per-finding reevaluation)."
+      },
+      {
+        "ref": "strapi/documentation#3194",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-05-28",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Added the 'default: 25, max: 100' sentence. Not re-queried through the API (budget), but verified downstream: the sentence is still on strapi/documentation origin/main at strapi-mcp-server.md line 309 as of 2026-08-19."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi mcp --include-prs --limit 60 --updated \">2026-08-10\"",
+      "gh search issues --repo strapi/strapi \"pageSize default 25\" --include-prs --limit 30 (1 irrelevant result: PR #25 from 2015)"
+    ]
+  },
+  "reevaluation": "Stands unchanged. Both halves of the contradiction are still in the product (schema says 25, handler omits the key so withDefaultPagination falls to the hardcoded 10) and the doc sentence is still published. PR #26990 edits the very block that omits the keys, adding fields/populate to the same spread, and I confirmed from its current diff that 'pageSize !== undefined' appears as unchanged context in hunk @@ -90,15 +95,29 @@: it leaves the omission and the 25-vs-10 mismatch exactly as they are. Nothing new filed. The review's fixedAfter 'no' and its upstream notes are all still correct.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "high",
+  "notes": "File this on strapi/strapi, not strapi/documentation: the wrong number is inside the shipped product (input-schemas.ts:33 is what a client reads in tools/list), so the docs are downstream of the code and would only need editing if maintainers decide 10 is the intended default. Two supporting facts worth including because they close off the easy dismissals: the 10 is hardcoded in packages/core/utils/src/pagination.ts and unreachable by config, so no app setting explains it; and the MCP unit tests are green on 25 only because they mock documentManager.findPage and hardcode pagination: { page: 1, pageSize: 25 } in the mock's return value (mcp/__tests__/derive-content-type-mcp-tools.test.ts:128-133, 625-633), i.e. they assert the mock. Secondary observation for the same issue: the schema's max of 100 is enforced by Zod at the tool boundary while findPage passes maxLimit 1000, so the two ceilings disagree (the tighter one wins). Note also that the scenario aborted at the first failing step, so the max-100 and page-2 assertions never ran and are untested rather than passing."
+}

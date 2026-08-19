@@ -1,0 +1,40 @@
+{
+  "id": "C13",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/web/modules/form-builder/components/Components.tsx#L399-L522",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/web/modules/form-builder/components/Components.tsx#L399-L522",
+    "howDecided": "git log 038381aeca..origin/main over apps/web/modules/form-builder/components/Components.tsx, packages/features/bookings/Booker/hooks/useInitialFormValues.ts and packages/features/bookings/lib/getBookingResponsesSchema.ts returns nothing, so the whole prefill path is byte-identical to the tested tree. I re-read the two decisive regions at origin/main and the line numbers are unchanged: the radioInput factory still starts at 399, its effect at 411-418 still writes setValue({ value: options[0]?.value, optionValue: \"\" }) whenever the location response is absent, the option input is still picked from optionsInputs[value?.value] at 500, and value?.optionValue is still fed into it at 512. Nothing in 038381aeca..origin/main touches BookingFields.tsx or AddressInput.tsx either."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#17394",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed/completed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2024-11-20. Still the item where the reporter closed his own bug after being told the documented JSON form location={\"value\":\"attendeeInPerson\",\"optionValue\":\"Italy\"} works, which is the exact shape that fails in the tested build. Still the best single piece of evidence that this shape was once honored."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"attendeeInPerson\" --include-prs --limit 25  (12 hits, same set the review saw; only #17394 is relevant, #15225 is the event-type location editor. Nothing new and nothing describing the current symptom.)",
+      "gh search issues --owner calcom \"optionValue location prefill\" --include-prs --limit 25  (0 results)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Every file on the prefill path is byte-identical to the tested tree at today's head and all cited line numbers are current, so the doc's own worked example (location={\"value\":\"attendeeInPerson\",\"optionValue\":\"Delhi\"}) still lands an empty address input. No new tracker item: #17394 remains the only related report and it is closed and stale, which strengthens rather than weakens the case, since it records the documented shape being the accepted working answer in late 2024. What has NOT improved since the review is its own open question, and this must travel with the filing: the review could not separate branch (a), the whole location response being dropped before bookingForm.reset so the Components.tsx:411-418 effect recreates {options[0].value, optionValue: ''}, from branch (b), the value surviving and only optionValue being lost. Source re-reading cannot settle that; only a live load with the parsed responses observed, or running steps 4 and 5 of the scenario (location={\"value\":\"NYC\"} and {\"value\":\"link\"}, both non-first options), can. If branch (a) holds, the finding's scope is wider than the address field: the whole location parameter would be ignored, and step 1's 'the option is pre-selected' pass would be a coincidence of attendeeInPerson being options[0]. Verdict and confidence are unchanged (the address is demonstrably empty in the screenshot, the video and the value read), but the filed issue should state the two branches rather than pick one.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/bug_report.md requires 'Issue Summary', 'Steps to Reproduce', 'Actual Results', 'Expected Results', 'Technical details' and 'Evidence'; config.yml sets blank_issues_enabled: false, so the bug template must be used. No security policy sentence applies.",
+  "confidence": "high",
+  "notes": "The report is strongest if it leads with the control the same run provides: on the same instance minutes apart, location={\"value\":\"phone\",\"optionValue\":\"%2B919999999999\"} DID populate its option input, so the radioInput optionValue mechanism works and only the address variant fails. Include the branch (a) / branch (b) question explicitly and ask for steps 4 and 5 to be run, since a maintainer can answer it in one page load. Two things not to put in the issue: the scenario's 'first textbox address' targeting is ambiguous (in DOM order 'Email address' matches first) and should be fixed to the option input's id=\"optionField\", and the seeded organizer addresses in this fixture render as duplicate 'In Person (Organizer Address)' options, which would independently break the later steps for a seeding reason rather than a product one."
+}

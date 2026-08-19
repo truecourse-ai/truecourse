@@ -1,0 +1,12 @@
+{
+  "step": 13,
+  "label": "PASS2 PREP send NONE",
+  "at": "2026-08-19T19:16:32.788Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/distribute",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_mynwzrxyyiddmdfv\",\"meta\":{\"distributionMethod\":\"NONE\"}}"
+}

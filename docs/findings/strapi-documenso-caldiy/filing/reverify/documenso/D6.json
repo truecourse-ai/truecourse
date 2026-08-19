@@ -1,0 +1,69 @@
+{
+  "id": "D6",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "fixed",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "7f85388eb729370a2223bc52291a25ab2b737de5",
+        "date": "2026-07-21",
+        "title": "fix: increase global API rate limits to 1000/min",
+        "pr": "#3081",
+        "touchesCulpritLines": true,
+        "effect": "Raises apiV1RateLimit.max and apiV2RateLimit.max from 100 to 1000 and updates the five doc pages the scenario read, so the shipped limit now matches the published 1000 req/min."
+      }
+    ],
+    "fix": {
+      "sha": "7f85388eb729370a2223bc52291a25ab2b737de5",
+      "pr": "#3081",
+      "date": "2026-07-21",
+      "inRelease": "v2.17.0",
+      "releaseDate": "2026-08-19",
+      "note": "CONFIRMED IN A RELEASE, which is the one thing that changed since the review. `git merge-base --is-ancestor 7f85388eb v2.17.0` succeeds and `git tag --contains 7f85388eb` now prints v2.17.0 (it printed nothing on 2026-08-15). v2.17.0 = commit 75330166cc, tagged 2026-08-19 10:34 UTC and published 2026-08-19 11:01 UTC, is both the newest tag and today's main head. git show origin/main:packages/lib/server-only/rate-limit/rate-limits.ts shows `max: 1000` at line 87 (api.v1) and line 93 (api.v2), against `max: 100` at the same lines in the tested v2.16.0 tree. Note apiTrpcRateLimit at line 99 is still max: 100, unchanged and out of scope."
+    },
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/server-only/rate-limit/rate-limits.ts#L91-L95",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/rate-limit/rate-limits.ts#L91-L95",
+    "howDecided": "Diffed packages/lib/server-only/rate-limit/rate-limits.ts between 3cf2963cd0 and origin/main: it is the ONLY culprit file across all ten documenso findings whose blob changed (46233354c3 to 5dfa474504). git log over the file returns exactly one commit, 7f85388eb (#3081). Read both versions at lines 80-100: apiV2RateLimit went from max: 100 to max: 1000, window unchanged at '1m'. Then confirmed release membership with git merge-base --is-ancestor and git tag --contains. Separately checked the docs half: apps/docs/content/docs/developers/api/rate-limits.mdx still reads '**Limit:** 1000 requests per minute per IP address' at line 20, so code and docs now agree at 1000."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3081",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-07-21T05:58:37Z",
+        "mergeCommit": "7f85388eb729370a2223bc52291a25ab2b737de5",
+        "baseRef": "main",
+        "note": "PR state unchanged, but its RELEASE state changed: at the review it was on main only and in no tag; it is now in v2.17.0 (2026-08-19). That is what closes this finding."
+      },
+      {
+        "ref": "documenso/documenso#3133",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "merged",
+        "changedSinceReview": true,
+        "mergedAt": "2026-08-19T09:28:24Z",
+        "mergeCommit": "05f646b326",
+        "baseRef": "main",
+        "note": "CHANGED SINCE THE REVIEW: merged 2026-08-19 as 05f646b32 'docs(api): document rate limit headers and 429 variants', 6 files +188/-54, by ephraimduncan, base main. It is in v2.17.0. This also resolves the secondary doc defect the review flagged in its notes: the 'No rate limit headers are currently provided' callout is gone from rate-limits.mdx, replaced by a table of X-RateLimit-Limit / X-RateLimit-Remaining / X-RateLimit-Reset plus Retry-After semantics, which is exactly what step 1 of the scenario observed the product doing."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "No finding-specific search issued: the source diff and the tag membership settle it, and both cited PRs were checked directly with gh api repos/documenso/documenso/pulls/{3081,3133}, which are not search calls."
+    ]
+  },
+  "reevaluation": "This finding is now closed by upstream and should not be filed. At the review it was a genuine release-lag defect: #3081 merged 52 minutes after v2.16.0 was tagged, so every tagged build in existence enforced 100 while docs.documenso.com, built from main, published 1000. v2.17.0 (2026-08-19) contains #3081, so the newest release now advertises x-ratelimit-limit: 1000 and matches the docs. The review's fixedAfter block said 'Fixed on main, in no tag'; that is now out of date, the correct statement is 'fixed and released in v2.17.0'. The secondary doc defect the review recorded in its notes, the contradictory 'No rate limit headers are currently provided' callout, was also resolved on 2026-08-19 when #3133 merged, so neither half of this finding survives. The live re-run the plan schedules against v2.17.0 should confirm 1000 on the wire; if it reports 100 the assumption to re-examine is which build was started, not this analysis.",
+  "routeSuggestion": "skip: fixed (in v2.17.0)",
+  "policyBasis": "SECURITY.md Scope, out-of-scope list: 'Rate limiting, denial of service, and volumetric attacks'. Even had it survived, it could never have been a security disclosure. It is moot now.",
+  "confidence": "high",
+  "notes": "Worth keeping one sentence of this in whatever public write-up the batch produces, because the underlying pattern is not fixed: docs.documenso.com is built from main, so any doc change describing new behavior is published before the release that ships it, and a self-hoster installing a tag cannot tell from the docs which build they describe. That is a process observation, not a bug report, and it should NOT be filed as an issue on its own. Also note for the live step: v2.17.0 is both the newest tag and today's main head, so testing main and testing the release are the same thing today."
+}

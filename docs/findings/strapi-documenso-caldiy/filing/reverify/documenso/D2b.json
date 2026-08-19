@@ -1,0 +1,42 @@
+{
+  "id": "D2b",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/types/field-meta.ts#L403-L448",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/types/field-meta.ts#L403-L448",
+    "howDecided": "git log 3cf2963cd0..origin/main returns zero commits for packages/lib/server-only/field/update-envelope-fields.ts and packages/lib/types/field-meta.ts; both blobs are byte-identical between v2.16.0 and v2.17.0. Read ZEnvelopeFieldAndMetaSchema at origin/main: lines 403-448 are unchanged, every one of the ten fieldMeta-bearing members still reads `fieldMeta: Z<Type>FieldMeta.optional().default(FIELD_<TYPE>_META_DEFAULT_VALUES)` (SIGNATURE 406, INITIALS 414, NAME 418, EMAIL 422, DATE 426, TEXT 430, NUMBER 434, RADIO 438, CHECKBOX 442, DROPDOWN 446), and the discriminator is still `type`, so type remains mandatory on an update and the default is always materialised. The consuming write is still update-envelope-fields.ts line 136, `fieldMeta: updateData.fieldMeta`, written unconditionally inside tx.field.update. The service permalink for the write is https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/field/update-envelope-fields.ts#L136."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3136",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "STALE REVIEW CLAIM: the review recorded baseRefName as docs/documents-cancel-get-many, a non-main base, and concluded the PR could not land on its own. It has since been rebased: base.ref is main today (last updated 2026-08-19, same day #3135, the PR it used to sit on, was merged). It is still open and unmerged, 2 files, +204/-89, by ephraimduncan. No maintainer comment: the only comments are vercel[bot] and coderabbitai[bot], both from 2026-07-30. CONFIRMED AGAIN TODAY that it does NOT fix this half: gh pr diff 3136 shows the new mapping object it introduces in the route still contains `fieldMeta: field.fieldMeta`, i.e. the zod-defaulted object, so with #3136 merged a move would work and would still wipe the field's configuration. The review's warning on this point is correct and is now the single most important thing to tell a maintainer."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"fieldMeta\" --limit 30 (30 results; #3136 is the only item on this surface, and it does not address the reset. Nearest others, #3170 \"Allow signature, initials and date fields to be optional\" and #2669 \"Pre-filled readOnly TEXT field text overflows field border\", are unrelated causes.)"
+    ]
+  },
+  "reevaluation": "The finding stands and its urgency has gone UP relative to the review. Nothing has changed in the schema or the write, so v2.17.0 ships the silent data loss unchanged. What changed is the state of #3136: it is now rebased onto main and therefore mergeable at any time, and merging it will make the endpoint LOOK fixed (moves start working) while the fieldMeta wipe continues silently, because the PR's new mapping still forwards the defaulted fieldMeta. That is a worse end state than today for anyone diagnosing the endpoint: the loud symptom disappears and the quiet one remains. No upstream item reports the reset, and nothing among the 135 items opened between 2026-08-01 and 2026-08-19 mentions it.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: 'The most useful contribution is a detailed issue. Treat it like a spec.' with '#3026: Issues are now the primary way to contribute.' Nothing in SECURITY.md's scope applies: this is data loss through a business-logic default, not a vulnerability, and none of the listed exclusions are relevant either.",
+  "confidence": "high",
+  "notes": "File this as its own bug report even if D2a is handled by commenting on #3136, precisely because #3136 does not fix it and merging #3136 will hide the remaining symptom. The report should name the fix shape: give the update route a schema whose fieldMeta is optional with NO default, so an omitted fieldMeta leaves the column untouched (create keeps its defaults). Blast radius to state in the issue: all ten fieldMeta-bearing types; RADIO drops to a single blank option, DROPDOWN to a single 'Option 1', CHECKBOX to one blank unchecked option, TEXT and NUMBER lose label, placeholder, characterLimit and min/max. Also worth telling the maintainer: the docs' own update example, { id, type, pageY }, is exactly the call that triggers the wipe."
+}

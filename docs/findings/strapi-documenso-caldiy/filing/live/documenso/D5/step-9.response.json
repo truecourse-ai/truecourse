@@ -1,0 +1,51 @@
+{
+  "step": 9,
+  "label": "DROPDOWN default not among its options (expected 400)",
+  "at": "2026-08-19T19:16:54.336Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "418",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:54 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "975",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "27b9a33d-836f-4305-b6fa-65a27864b089"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_urlxhxhbndxwvbvu",
+        "envelopeItemId": "envelope_item_mtahtmyhhvvlchci",
+        "type": "DROPDOWN",
+        "id": 18,
+        "secondaryId": "cmt0h3hrz004mhoeoumdm1bqz",
+        "recipientId": 14,
+        "page": 1,
+        "positionX": "5",
+        "positionY": "70",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "type": "dropdown",
+          "values": [
+            {
+              "value": "EU"
+            },
+            {
+              "value": "US"
+            }
+          ],
+          "defaultValue": "APAC"
+        },
+        "documentId": 10,
+        "templateId": null
+      }
+    ]
+  }
+}

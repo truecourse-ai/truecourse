@@ -1,0 +1,11 @@
+{
+  "step": 7,
+  "label": "read back the PARALLEL envelope with its ASSISTANT",
+  "at": "2026-08-19T19:15:50.267Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_fteuhazrouxlatwn",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

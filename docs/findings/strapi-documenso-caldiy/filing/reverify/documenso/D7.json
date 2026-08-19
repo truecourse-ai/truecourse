@@ -1,0 +1,85 @@
+{
+  "id": "D7",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/apps/remix/app/components/dialogs/envelope-distribute-dialog.tsx#L185-L191",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/remix/app/components/dialogs/envelope-distribute-dialog.tsx#L185-L191",
+    "howDecided": "git log 3cf2963cd0..origin/main returns zero commits for apps/remix/app/components/dialogs/envelope-distribute-dialog.tsx and apps/remix/app/components/general/document/document-page-view-recipients.tsx, and both blobs are byte-identical between v2.16.0 and v2.17.0. I also checked the two supporting files the review names: apps/remix/app/components/general/document/document-recipient-link-copy-dialog.tsx (the review cites it under .../components/dialogs/, which is the wrong directory; the real path is .../components/general/document/) and apps/remix/app/routes/_authenticated+/t.$teamUrl+/documents.$id._index.tsx are both byte-identical too. Read the code at origin/main: envelope-distribute-dialog.tsx lines 187-189 still append '?action=copy-links' when meta.distributionMethod === DocumentDistributionMethod.NONE; document-page-view-recipients.tsx line 48 still compares that value and only sets shouldHighlightCopyButtons, line 199 still forces the tooltip open for `shouldHighlightCopyButtons && i === 0`, line 202 still applies animate-pulse to every row and line 203 still clears the flag on any click; the mounted link dialog still keys on the DIFFERENT value, `actionSearchParam === 'view-signing-links'` at document-recipient-link-copy-dialog.tsx line 61. The stale comment and variable name at document-page-view-recipients.tsx lines 46-48 ('Check for action=view-tokens query parameter', hasViewTokensAction) are still there. Note that #3070 'feat(ui): redesign recipient field hover card' (0099dd672, 2026-08-19) and #3107 'feat: migrate to react 19' (779de01fe, 2026-08-17) both landed since the tested tag but touch neither file. The bound docs are unchanged: apps/docs/content/docs/users/documents/send.mdx and apps/docs/content/docs/users/templates/use.mdx are both byte-identical at the two revisions, so 'You're redirected to the document page where signing links are displayed' still stands at send.mdx line 218 and use.mdx line 107. Second permalink for the second culprit file: https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/remix/app/components/general/document/document-page-view-recipients.tsx#L194-L223."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 3197,
+        "url": "https://github.com/documenso/documenso/issues/3197",
+        "state": "open",
+        "title": "Send dialog keeps the subject/message captured at first mount, and persists them on send",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "A different defect in the same send dialog, filed 2026-08-13, with an open fix PR #3246. It does not touch the post-send redirect or the copy-links action, so it is neither a duplicate nor a conflict, but it means the file is likely to be edited soon and a filer should expect line drift."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#2490",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: closed as stale 2026-08-03, no activity since. Still the closest user-facing evidence that the copy-only affordance confuses people."
+      },
+      {
+        "ref": "documenso/documenso#1169",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: closed 2024-09-21. The original feature request, whose author's follow-up is itself a discoverability complaint about this control."
+      },
+      {
+        "ref": "documenso/documenso#1449",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-11-06T12:34:06Z",
+        "mergeCommit": "efbe94aea8",
+        "baseRef": "main",
+        "note": "Unchanged. Created the 'view-signing-links' convention and the unnamed CopyTextButton."
+      },
+      {
+        "ref": "documenso/documenso#2102",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-10-27T05:11:10Z",
+        "mergeCommit": "5cdd7f8623",
+        "baseRef": "main",
+        "note": "Unchanged. The commit that introduced the post-send redirect with the weaker '?action=copy-links' variant."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"signing links\" --limit 25 (25 results; the only new one is #3189 \"Adding a recipient through API v1 recreates all the others: signing links die\", an unrelated v1 recipient bug. Nothing describes the None-distribution landing page.)"
+    ]
+  },
+  "reevaluation": "The finding stands with its original verdict and its original medium confidence, and nothing has changed on either side. Both culprit files, both supporting files and both doc pages are byte-identical between the tested v2.16.0 and today's v2.17.0, so the send path still redirects with the action value that only pulses the copy icons while the mounted dialog listens for a different one. No upstream item reports it. The confidence stays at medium for the reason the review gave, not for a new reason: the finding straddles code and docs, because even the link dialog renders only email plus a Copy button, so 'signing links are displayed' is not literally true anywhere in the product, and a maintainer could legitimately resolve this by rewording send.mdx and templates/use.mdx instead of changing the redirect. The filer should present both resolutions rather than assert the code is wrong.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: 'The most useful contribution is a detailed issue. Treat it like a spec. The more detail, the better: the problem you're trying to solve, and who it affects; how you expect the feature or change to behave.' Because this finding has two defensible resolutions, the spec-style issue the policy asks for is exactly the right vehicle.",
+  "confidence": "medium",
+  "notes": "File D7 and D9 as ONE issue or as two? Recommend one issue for D7 with D9 mentioned as the aggravating factor, and a separate D9 issue for the app-wide naming pattern, because the two have different fixes and different audiences. The D7 body should lead with the concrete mechanism, not the symptom: the product already has DocumentRecipientLinkCopyDialog mounted on this very page, auto-opening on '?action=view-signing-links', and the template flow (documented with the identical sentence) does get it, while the send flow redirects with '?action=copy-links' and gets only a pulse plus a tooltip on the first recipient. That single sentence makes the fix obvious and cheap. Include the secondary observation that the tooltip reaches only recipient 0 while every row pulses, so on a multi-recipient None send the other rows pulse with no explanation. Screenshot from the run (step-15.png) is available and the bug-report template has a Screenshots field. Also flag the stale identifier drift (comment says view-tokens, variable is hasViewTokensAction, value compared is copy-links, sibling uses view-signing-links) as the likely reason the two paths diverged."
+}

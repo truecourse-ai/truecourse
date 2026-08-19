@@ -1,0 +1,36 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-day-split-into-two-ranges-hides-the-gap-between-them.web.1",
+  "flowId": "a-day-split-into-two-ranges-hides-the-gap-between-them",
+  "failingStep": 1,
+  "whatFailed": "Step 1 navigated to /reference-host/split-day and asserted a button named exactly \"15\" was visible; the assertion was evaluated while the booking page's date picker was still in its skeleton state, so no day-number button existed yet, and the real grid with day 15 painted about half a second after the step's 10 second budget expired.",
+  "docClaim": {
+    "quote": "Cal.com allows you to break your regular schedule day into multiple slots, allowing you to easily take time out of the calendar for consistent events such as lunch breaks, coffee breaks, or even recreational breaks.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/availabilities/multiple-slots.md",
+    "section": "Multiple time slots per day (#multiple-time-slots-per-day)"
+  },
+  "observed": "The failing observation (diff.txt) was taken at /reference-host/split-day?month=2026-09 with visible text ending at the weekday headers (MON..SUN) and the note 'the page has no button elements at all'. That message is produced by roleInventory(), which drops buttons whose inner text is empty, so it describes a page whose only buttons were the icon-only layout toggles and the date picker's own skeleton cells (DatePicker.tsx renders each day as <button disabled><SkeletonText/></button> while props.isLoading). The session recording settles it frame by frame: the page is blank until about 11.5s, paints the August skeleton at 12s, flips to the September skeleton (exactly the state diff.txt recorded, month header plus empty day chips plus a skeleton slot panel) at 15s, and renders the real grid with day 15 selected plus the slot panel at 15.5s. The step's own screenshot and final visible-text capture, taken a moment after the failed assertion, already show 'September 2026', the full 1..30 grid, day 15 highlighted, the URL advanced to ?month=2026-09&date=2026-09-15 and a start time in the right panel. Server stdout/stderr for the scenario are empty (0 bytes), no error was logged.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "None for users. The product rendered exactly what the step asserted, just outside the step's time budget, so this is a false red on the guard board rather than a defect a booker would meet.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": []
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable: there is no product defect to fix. For completeness, in cal.diy: only 4 commits land between the tested 038381aeca and origin/main 176037d0af (#29940 emails, #29901 language update, #29740 phone input country fallback, #29819 Clara app) and none touch packages/features/calendars, packages/features/schedules or the Booker. In cal.com: nothing to check, since no cal.com behavior is implicated."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Why the budget ran out, and why it is the sandbox rather than the test: the runner gives a web step ONE deadline of 10s (DEFAULT_WEB_STEP_TIMEOUT_MS in packages/guard-runner/src/web/executor.ts:47) that covers page.goto plus the expectation poll loop, and it reports the LAST observation before that deadline. Here first paint alone took roughly 6.5s of the step, the slots query kept the date picker in its skeleton for another 3.5s, and the grid appeared about 0.5s past the deadline. The locator itself is correct: DatePicker's Day renders <button type=\"button\"> whose only content is date.date(), so the accessible name is exactly \"15\" once the day cells exist, and a longer budget would have gone green. The slowness is host contention, not the product: the run executes scenarios in parallel sandboxes at min(cpus, 8) (packages/guard-runner/src/run.ts:1387-1394), several of which boot whole NestJS API servers, and the same run shows the pattern systemically. Of the 42 web scenarios, roughly 20 fail with their first booking-page assertion at a duration pinned to 10.0s to 18.6s, six of them with the identical 'no button named 15 is on the page', and 3 more end as page.goto timeouts. Some booking-page scenarios passed in 7.7s to 8.8s, so the machine was right at the edge of the budget. Suggested fix on the harness side: raise the web step budget (or give the expectation its own budget separate from navigation) before re-running the cal.diy web set, otherwise the board's web column mostly measures the laptop.\n\nOne product observation the step never got to assert, flagged for a re-run rather than claimed: every frame after the page loaded shows the day 15 panel offering exactly ONE start time, 9:40am. If the seeded schedule is what the step note describes (a 20 minute event on a day split into 09:00-09:20 and 09:40-10:00), then step 2 of this scenario would have failed too, because a start at :00 is missing, and that would be a defect against the very doc claim under test. Reading the tested source, both ranges should survive: buildDateRanges keys each date override by its own end timestamp and groupByDate appends rather than replaces (packages/features/schedules/lib/date-ranges.ts:269-305 and 332-352), and buildSlotsWithDateRanges emits a start at 09:00 because 09:00 plus 20 minutes minus 1 second is not after 09:20 (packages/features/schedules/lib/slots.ts:178). So the code path predicts 9:00am and 9:40am. What would settle it: the seed script reference/seed/guard-seed.mjs, which is no longer present in the cal.diy checkout or the guard store, so the actual seeded ranges cannot be confirmed from the evidence, plus a re-run of this scenario with a larger web step budget."
+}

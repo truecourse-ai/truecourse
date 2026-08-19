@@ -1,0 +1,46 @@
+{
+  "step": 8,
+  "label": "STEP8 change the invited email on the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.326Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "503",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "992",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "51253f83-c303-413c-a987-3c2f3cf8730c"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_zxidtommuuvcurfz",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 4,
+        "email": "tcref-changed-e095c05f33@documenso.test",
+        "name": "TCRef Frozen",
+        "token": "f1sutPnzPFPjOaCKT0jZd",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": "2026-11-17T19:15:07.288Z",
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": 1,
+        "rejectionReason": null,
+        "documentId": 3,
+        "templateId": null
+      }
+    ]
+  }
+}

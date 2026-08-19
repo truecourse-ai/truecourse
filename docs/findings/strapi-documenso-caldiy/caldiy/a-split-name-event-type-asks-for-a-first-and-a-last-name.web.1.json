@@ -1,0 +1,42 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-split-name-event-type-asks-for-a-first-and-a-last-name.web.1",
+  "flowId": "a-split-name-event-type-asks-for-a-first-and-a-last-name",
+  "failingStep": 2,
+  "whatFailed": "The walk stalled before the booking form: after clicking day 12 on /reference-host/split-name?month=2030-06 the scenario clicked the hard-coded slot button \"9:00am\", but that slot was no longer on offer because an earlier scenario in the same run had already booked the host at 2030-06-12T09:00:00.000Z, so the day's list started at 9:30am.",
+  "docClaim": {
+    "quote": "Cal.com provides the option to split the fullname input field in the booking form into firstname and lastname.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/split-name.md",
+    "section": "how-to-split-fullname-into-firstname-and-lastname-in-the-public-booking-page"
+  },
+  "observed": "step 1 loaded the split-name booking page for June 2030 and passed (day button \"12\" visible). Step 2 clicked \"12\", the URL became /reference-host/split-name?month=2030-06&date=2030-06-12, and the slot column rendered exactly five buttons: 9:30am, 10:00am, 10:30am, 11:00am, 11:30am (step-2.png and diff.txt agree; the visual judge saw a normally rendered page with no error state, no overlay, no spinner). No 9:00am button existed, so the click target was missing and the scenario stopped before step 3, the step that actually asserts the First name / Last name pair. server stdout/stderr for the scenario are empty (0 bytes), the only console output is the usual i18next / zustand / markdownToSafeHTML warnings plus \"Partial prefill: skipped field 'name' due to 2 validation error(s)\", which is itself a sign the name field on this event type IS the two-part variant.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users: the product hid a slot the host is genuinely busy in, which is correct cal.com behavior (busy time is per host, not per event type). The cost is coverage: the split-name doc claim was never exercised, and at least three sibling scenarios on the same day fail identically.",
+  "rootCause": {
+    "file": "/Users/musheghgevorgyan/repos/cal.diy/.truecourse/scenarios/core-booking-page/a-split-name-event-type-asks-for-a-first-and-a-last-name.web.1.yaml",
+    "lines": "32-40",
+    "explanation": "Step 2 hard-codes the slot label \"9:00am\" on a day and a host that the whole corpus shares. Every seeded event type hangs off the single user reference-host with one 09:00-17:00 weekday schedule, and on 2030-06-12 the afternoon is already busy from the seed, so the entire free pool that day is 9:00, 9:30, 10:00, 10:30, 11:00, 11:30 UTC. Other flows pinned to the same day consume that pool as the run proceeds. a-seated-event-type-takes-a-second-booker-into-the-same-slot.web.1 booked reference-host at 2030-06-12T09:00:00.000Z twice (booking uid 8wV2ymqoY85KTwkDJPfpuj, its step 6 and step 12 both land on /booking/... 'This meeting is scheduled', and by its step 14 the seat is full and its own 9:00am button is disabled). An accepted booking makes the host busy 09:00-09:30 for every one of their event types, so split-name legitimately lost 9:00am. The scenario depends on state it did not set up and does not reserve, which is the test-defect definition."
+  },
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "none run: the product behaved as designed (a booked host is busy across all of their event types), so there is no symptom to report to calcom/cal.diy or calcom/cal.com. The shared 30-searches-per-minute budget was left for the other reviewers."
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable, there is no product bug to fix. in cal.diy: only four commits landed between the tested 038381aeca and origin/main 176037d0af (#29940 email customReplyToEmail, #29901 language update, #29740 phone-input country fallback, #29819 Clara app) and none touch slot or busy-time computation, so the behavior is identical today. in cal.com: the same busy-time rule (a host's accepted booking removes the overlapping slot from all of their event types) is the shared, intended cal.com behavior and nothing suggests it changed."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available at review time."
+  },
+  "notes": "Not an edition mismatch: the split-name feature does ship in Cal.diy. packages/features/form-builder/fieldTypes.ts declares the name field's firstAndLastName variant with firstName and lastName sub-fields (lines 22-60), and packages/features/form-builder/utils/variantsConfig.ts resolves it, so step 3 would have had a fair chance of passing. The claim is unproven, not disproven.\n\nCorroboration that this is slot contention and not an event-type quirk, all from the same run's evidence: on 2030-06-12 the pages that ran before the 09:00 booking still show 9:00am (a-short-notice-booking-is-the-only-one-that-needs-confirming on notice-confirm, a-timezone-locked-booking-page-shows-the-organizer-clock on tz-locked, and the seated flow's own first list), while every page that ran after it starts at 9:30am with the identical five-slot list: split-name, custom-questions (custom-booking-questions-reach-the-form-and-the-booking.web.1), no-guests (an-event-type-with-guests-disabled-offers-no-guest-fields.web.1) and domain-restricted (an-email-domain-restriction-refuses-a-booker-from-the-wrong-domain.web.1) all fail step 2 on the same missing 9:00am button. event-buffers-withhold-the-time-around-a-booking.web.1 starts at 10:00am, exactly what a before-buffer around that same 09:00-09:30 booking predicts. each-user-level-period-counts-its-own-calendar-window.web.1 clicked day 13, an untouched day, and got the full 9:00am-4:30pm grid, which pins the schedule at 09:00-17:00 UTC (the booking form renders 'UTC', so the browser clock is UTC and 9:00am is 09:00Z).\n\nThe same brittleness bites outside this day: the sibling the-default-booking-form-asks-for-a-name-and-an-email.web.1 fails the same way on 2027-03-15, where the list reads 9:00am, then jumps to 11:00am, so its hard-coded '10:00' target is gone too.\n\nFor whoever owns the corpus, three fixes in order of cost: (1) give each flow its own host or its own pinned day so no two flows draw from one pool, (2) have the web driver click the first enabled slot button rather than a literal time when the slot's identity is not the claim (step 2's own note says it 'proves no claim of its own'), or (3) reserve or seed the slot the flow needs. Note also that 2030-06-12 is already half consumed before the run starts, the afternoon 12:00-16:30 is never offered by any scenario on that day, so the contended pool is only six slots wide."
+}

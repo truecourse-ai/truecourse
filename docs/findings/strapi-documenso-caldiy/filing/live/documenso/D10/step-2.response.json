@@ -1,0 +1,38 @@
+{
+  "step": 2,
+  "label": "a zod 400: the validation error body",
+  "at": "2026-08-19T19:17:28.394Z",
+  "status": 400,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "251",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "995",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "01d1bb85-9a9c-4f9b-a9ff-a2f6ac9e3802"
+  },
+  "body": {
+    "message": "Input validation failed",
+    "code": "BAD_REQUEST",
+    "data": {
+      "code": "BAD_REQUEST",
+      "httpStatus": 400,
+      "path": "envelope.update"
+    },
+    "issues": [
+      {
+        "code": "invalid_type",
+        "expected": "string",
+        "received": "undefined",
+        "path": [
+          "envelopeId"
+        ],
+        "message": "Required"
+      }
+    ]
+  }
+}

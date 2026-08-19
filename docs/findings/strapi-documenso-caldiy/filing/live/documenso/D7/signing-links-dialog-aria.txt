@@ -1,0 +1,13 @@
+- dialog "Copy Signing Links":
+  - heading "Copy Signing Links" [level=2]
+  - paragraph: You can copy and share these links to recipients so they can action the document.
+  - list:
+    - listitem:
+      - text: "7"
+      - paragraph: 79771c8411@documenso.test
+      - paragraph: Viewer
+      - button "Copy":
+        - paragraph: Copy
+  - button "Close"
+  - button "Bulk Copy"
+  - button "Close"

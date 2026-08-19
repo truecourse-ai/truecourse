@@ -1,0 +1,42 @@
+{
+  "id": "D2a",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/server-only/field/update-envelope-fields.ts#L129-L139",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/field/update-envelope-fields.ts#L129-L139",
+    "howDecided": "git log 3cf2963cd0..origin/main returns zero commits for packages/lib/server-only/field/update-envelope-fields.ts and for packages/trpc/server/envelope-router/envelope-fields/ (note: the FINDINGS-INDEX culprit paths packages/trpc/server/envelope-router/update-envelope-fields{,.types}.ts do not exist at either revision; the real paths are under the envelope-fields/ subdirectory, and I checked those). All three blobs are byte-identical between v2.16.0 and v2.17.0. Read the write block at origin/main: lines 129-138 are still `data: { type: updateData.type, page: updateData.pageNumber, positionX: updateData.pageX, positionY: updateData.pageY, width: updateData.width, height: updateData.height, fieldMeta: updateData.fieldMeta, envelopeItemId: updateData.envelopeItemId }`, i.e. it still reads the legacy v1 names pageNumber/pageX/pageY while the v2 route validates and forwards page/positionX/positionY. width and height still share a name, so the partial-write behavior (resize applies, move is dropped) is unchanged."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3136",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "STALE REVIEW CLAIM: the review recorded baseRefName as docs/documents-cancel-get-many, a non-main base, and concluded the PR could not land on its own. It has since been rebased: base.ref is main today (last updated 2026-08-19, same day #3135, the PR it used to sit on, was merged). It is still open and unmerged, 2 files, +204/-89, by ephraimduncan. No maintainer comment: the only comments are vercel[bot] and coderabbitai[bot], both from 2026-07-30. ITS CODE HALF STILL FIXES EXACTLY THIS FINDING: gh pr diff 3136 shows the route now maps `pageNumber: field.page, pageX: field.positionX, pageY: field.positionY` before calling the service, which closes the coordinate no-op. Because the base is now main, the review's 'cannot land on its own' caveat is no longer true; it is mergeable in isolation."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"fieldMeta\" --limit 30 (30 results, only #3136 relates; nothing new since the review)"
+    ]
+  },
+  "reevaluation": "The finding stands exactly as written. Nothing has touched the service, the route or the route types since v2.16.0, and v2.17.0 (cut 2026-08-19) ships the same code, so the coordinate no-op is now live in two consecutive releases rather than one. One review claim is now WRONG and must not be repeated in the filing: the review says PR #3136 'baseRefName is docs/documents-cancel-get-many, not main, so it is stacked on another unmerged branch and cannot land on its own'. That base branch was merged on 2026-08-19 as #3135, and #3136 has been rebased onto main; it is now an ordinary open PR against main. Its code half is still the exact fix for this finding. Everything else holds: no upstream issue reports the no-op, and nothing in the 135 items opened between 2026-08-01 and 2026-08-19 duplicates it.",
+  "routeSuggestion": "comment on existing PR 3136",
+  "policyBasis": "CONTRIBUTING.md: 'We are no longer accepting external pull requests ... New pull requests will usually be closed with a request to open an issue instead' and, from the pinned issue #3026, 'Existing PRs may still be merged as normal. Work already in flight isn't affected.' So the productive move is to add evidence to the already-open #3136 rather than open a competing PR, and if a standalone record is wanted, the bug-report.yml issue template.",
+  "confidence": "high",
+  "notes": "Two things a filer must get right. (1) #3136 fixes THIS half only; the sibling finding D2b (fieldMeta reset) survives the PR untouched, because the mapped object still passes `fieldMeta: field.fieldMeta`, the zod-defaulted value. Any comment on #3136 should say so explicitly, otherwise a maintainer merging it will believe update-many is fixed. (2) A comment on #3136 carries no reproduction record if the PR is later closed, so consider pairing it with a single bug-report issue that covers D2a and D2b together and links #3136 as the partial fix. The community PR is 21 days old with no maintainer comment (only vercel and coderabbit bots), so it may sit indefinitely."
+}

@@ -1,0 +1,60 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-single-document-object-carries-a-meta-key.api.1",
+  "flowId": "the-single-document-object-carries-a-meta-key",
+  "failingStep": 1,
+  "whatFailed": "GET /api/articles/<documentId> returned 200 with the document object under `data` carrying no `meta` key, although the REST API reference lists `meta` (object) among the keys of the single document object itself.",
+  "docClaim": {
+    "quote": "Requests return a response as an object which usually includes the following keys:\n\n- `data`: the response data itself, which could be:\n  - a single document, as an object with the following keys:\n    - `id` (integer)\n    - `documentId` (string), which is the unique identifier to use when querying a given document,\n    - the attributes (each attribute's type depends on the attribute, see [models attributes](/cms/backend-customization/models#model-attributes) documentation for details)\n    - `meta` (object)\n  - a list of documents, as an array of objects\n  - a custom response\n\n- `meta` (object): information about pagination, publication state, available locales, etc.",
+    "doc": "strapi/documentation: docusaurus/docs/cms/api/rest.md (lines 111-122 upstream; snapshot .truecourse/specs/sources/docs.strapi.io/cms/api/rest.md lines 76-87)",
+    "section": "Requests (#rest-api-reference/requests)"
+  },
+  "observed": "200 with body {\"data\":{\"id\":2,\"documentId\":\"oxu7drtrrz6081a4c0mcn43n\",\"title\":\"Guard Published Article\",...,\"locale\":\"en\"},\"meta\":{}}. `meta` exists exactly once, as a sibling of `data` at the top level, and is an empty object; the document object under `data` has only id, documentId and the flattened attributes. server.stderr.txt is empty, no error path involved.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Low but real developer friction: anyone typing the documented shape (or generating a client/type from it) will declare a per-document `meta` object that the REST API never emits, on any Strapi 5 content type, in either response format. No data loss, no security impact.",
+  "rootCause": {
+    "file": "strapi/documentation: docusaurus/docs/cms/api/rest.md (the doc bug). Product side that fixes the true shape: packages/core/core/src/core-api/controller/transform.ts in the tested worktree.",
+    "lines": "docs 113-122; transform.ts 39-71 and 95-151",
+    "explanation": "The `meta` bullet is indented one level too deep in the docs list, so it reads as a key of the single document object rather than as the sibling of `data` that the very next bullet already declares (`- \\`meta\\` (object): information about pagination, publication state, available locales, etc.`). The product is right and the page's own examples agree with the product: every JSON sample on the same page (lines 157, 210, 301, 382 of the snapshot) shows `meta` beside `data`, never inside the document. In code, `transformResponse` (transform.ts:39-71) is the single place that shapes every core content API response and it returns exactly `{ data, meta }`, with `meta` defaulting to `{}`; `collection-type.ts` findOne calls `this.transformResponse(sanitizedEntity)` with no meta argument, which is why the observed top-level `meta` is `{}`. The document object itself is either the sanitized entity passed through untouched (Strapi 5 flattened default) or, under the deprecated `strapi-response-format: v4` header, `transformEntry`'s `{ id, documentId, attributes }` (transform.ts:146-150). Neither branch has ever attached a `meta` key to an entry, so no configuration of the tested build can satisfy the bullet as written. The bullet is a Strapi v4 carryover: in the v4 code the entry type declared an optional `meta?: Record<string, unknown>` and the return literally carried `// NOTE: not necessary for now  // meta: {}` commented out (see git show a4814d75e4:packages/core/core/src/core-api/controller/transform.ts), so the documented key was aspirational even in v4."
+  },
+  "introducedBy": {
+    "commit": "f28723fbb18a56a501a13490eae65afc33323962",
+    "date": "2022-11-10",
+    "pr": "none (direct commit on strapi/documentation, subject \"Add REST API documentation\"; the GitHub commit-to-PR lookup returns nothing and the ancestry path to main has no merge commit)",
+    "title": "Add REST API documentation",
+    "note": "git blame on strapi/documentation main (HEAD c768c7bf5, 2026-08-15) pins the `- `meta` (object)` line and the sibling `meta` bullet to this v4-era commit by Pierre Wizla. The surrounding lines were rewritten twice since (9358b6c86 2024-03-19 \"Rename entries to documents in REST API\", eba970e24 2025-02-06 \"Move files and fix broken links\") and both rewrites carried the misplaced bullet through untouched. On the product side the vestigial per-entry meta was deleted by commit a6af41a645 (2024-03-04, PR #19675 \"chore: content-api response format header\", merged 2024-03-05), the Strapi 5 flattening change that dropped `meta?` from `TransformedEntry` and made the default response the raw flattened document. So: old doc text, newer code, and the two have disagreed since 2024."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 924,
+        "url": "https://github.com/strapi/documentation/issues/924",
+        "state": "closed",
+        "title": "[Bug]: No meta object in GET response",
+        "relation": "related",
+        "note": "Same family of confusion (a user expected a `meta` object that the response did not carry), but it is about the top-level pagination meta on a v4 GET, not about the misplaced per-document bullet. Closed as completed 2022-07-04."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --repo strapi/documentation --include-prs --limit 25 \"rest api response meta document keys\"  -> 0 results",
+      "gh search issues --repo strapi/documentation --include-prs --limit 30 \"meta rest.md\"  -> 0 results",
+      "gh search issues --repo strapi/documentation --include-prs --limit 40 --match title \"meta\"  -> 8 results, only #924 relevant",
+      "non-search checks: gh api repos/strapi/documentation/pulls?state=open (21 open PRs, none touches the REST reference Requests section); git log on docusaurus/docs/cms/api/rest.md"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Docs: strapi/documentation main at HEAD c768c7bf5 (2026-08-15) still has the bullet nested under the single document object (docusaurus/docs/cms/api/rest.md:118); last touch to that file is 3095d316 (2026-07-21, PR #3341, endpoint component redesign) and it did not move the bullet; no open PR addresses it. Product: `git log c43e9ee1e2..origin/develop -- packages/core/core/src/core-api/controller/` is empty, so develop still shapes responses as `{ data, meta }` and the failure would reproduce identically on today's develop."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the researcher's 8 Strapi findings; those are all MCP server or admin token items. It is however the same class as their finding 8 (docs materially wrong), and adds a third doc drift, this one in the core REST reference rather than in MCP or admin token text. Their blame work is untouched by this one."
+  },
+  "notes": "The fix is a one-character-class edit: de-indent `- `meta` (object)` in docusaurus/docs/cms/api/rest.md from four spaces to the top level, or simply delete it, since the top-level `meta` bullet two lines below already documents it correctly. The scenario was authored deliberately red for exactly this drift (see its `note:` in the yaml), and the evidence confirms the reading is fair: the sentence, taken as written, promises a key the product has never emitted. Worth telling the doc author that the same list also survived the v4 to v5 rewrite unaudited, so a sweep of the Requests section against a live Strapi 5 response is warranted. Only one assertion in the scenario failed; the sibling assertion `data exists` passed, and the response is otherwise exactly what the page's own examples show."
+}

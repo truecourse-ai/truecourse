@@ -1,0 +1,44 @@
+{
+  "step": 22,
+  "label": "PASS2 field/update-many on the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.641Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "387",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "978",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "9808f32c-c8c2-44bc-8cdc-4f1021a7a4f2"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_daillesxfetczrhd",
+        "envelopeItemId": "envelope_item_yuhbxnasvuibzhhu",
+        "type": "SIGNATURE",
+        "id": 5,
+        "secondaryId": "cmt0h17ej001shoeo04adr7rn",
+        "recipientId": 6,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "80",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        },
+        "documentId": 4,
+        "templateId": null
+      }
+    ]
+  }
+}

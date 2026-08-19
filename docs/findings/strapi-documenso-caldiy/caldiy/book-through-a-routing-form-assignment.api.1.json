@@ -1,0 +1,83 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "book-through-a-routing-form-assignment.api.1",
+  "flowId": "book-through-a-routing-form-assignment",
+  "failingStep": 1,
+  "whatFailed": "POST /v2/bookings with a `routing` object and `cal-api-version: 2026-02-25` returned 400 complaining that top-level `timeZone`, `language` and `metadata` are missing, because Cal.diy does not know the 2026-02-25 version and silently validated the body against the 2024-04-15 input shape.",
+  "docClaim": {
+    "quote": "routing: Routing information from routing forms that determined the booking assignment. Both responseId and teamMemberIds are required if provided. ... Routing: queuedResponseId: The ID of the queued form response. Only present if the form response was queued. responseId: The ID of the routing form response. teamMemberIds: Array of team member IDs that were routed to handle this booking. teamMemberEmail: The email of the team member assigned to handle this booking. ... parameters: - name: cal-api-version, in: header, description: Must be set to 2026-02-25, required: true",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md",
+    "section": "create-a-booking/openapi (request body `routing`, lines 242-253 and 397-408 and 559-570; `Routing` schema lines 843-899; `cal-api-version` header lines 85-92)"
+  },
+  "observed": "HTTP 400 in 64 ms with body {\"status\":\"error\",...,\"error\":{\"code\":\"BadRequestException\",\"message\":\"Bad Request Exception\",\"details\":{\"errors\":[{\"property\":\"timeZone\",\"constraints\":{\"isTimeZone\":\"timeZone must be a valid IANA time-zone\"}},{\"property\":\"language\",...},{\"property\":\"metadata\",...}]}}}. The echoed `target` is only {start, eventTypeId}: the whitelisting validator had already stripped `attendee` and `routing` off the payload, so the routing object never reached any handler. No booking was created and steps 2 and 3 never ran.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "A developer following cal.com's published Create-a-booking page cannot book through a routing form on Cal.diy at all: the documented API version is rejected outright, and even on the newest version Cal.diy does ship (2024-08-13) routing forms no longer exist in the product, so there is nothing to route from and nothing to echo back. Doc-following harm, no data loss.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "Two layers. (1) The immediate 400: the NestJS custom version extractor at bootstrap.ts:31-41 returns the header value only when it is a member of API_VERSIONS, otherwise it falls through to VERSION_2024_04_15. packages/platform/constants/api.ts:56-68 in the tested tree lists only 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13 and 2024-09-04, so `2026-02-25` is unknown and is silently downgraded rather than refused. The request is then routed to the 2024-04-15 controller and validated against CreateBookingInput_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts:91-146), whose shape is flat and whose `timeZone` (@IsTimeZone, line 122-124), `language` (@IsString, line 137) and `metadata` (@IsObject, lines 144-146) are all required, producing exactly the three constraint errors seen; the nested `attendee` and `routing` objects are not in that class and are whitelist-stripped. (2) The deeper reason the scenario can never pass on Cal.diy: routing forms are Cal.com team/enterprise code and were removed from the fork. The tested tree has no packages/app-store/routing-forms directory, no packages/features/ee directory, no App_RoutingForms_Form / App_RoutingForms_FormResponse / App_RoutingForms_QueuedFormResponse / RoutingFormResponseDenormalized / RoutingTrace models in packages/prisma/schema.prisma, and migration packages/prisma/migrations/20260305043434_remove_routing_forms/migration.sql drops all of those tables plus the ROUTING_FORM_ROUTING assignment reasons and the ROUTING_FORM_FALLBACK_HIT webhook trigger. The identifier `routingFormResponseId` appears nowhere in packages/ or apps/. A vestigial `routing` property does survive on CreateBookingInput_2024_08_13 (packages/platform/types/bookings/2024-08-13/inputs/create-booking.input.ts:154-247 for the `Routing` class, 376-388 for the property), but apps/api/v2/src/platform/bookings/2024-08-13/services/input.service.ts:200-221 (getRoutingFormData) maps only teamMemberIds, teamMemberEmail, skipContactOwner, crmAppSlug and crmOwnerRecordType, and deliberately drops `responseId`. There is no `routing` object in any 2024-08-13 output DTO or in output.service.ts, so `data.routing.responseId` and `data.routing.queuedResponseId` cannot exist in a Cal.diy response on any shipped version."
+  },
+  "introducedBy": {
+    "commit": "ab21c7f805a089fa3a11ffd61c4a9aecc349c16c",
+    "date": "2026-04-15",
+    "pr": "#28903",
+    "title": "refactor: Cal.diy",
+    "note": "The single EE-strip commit. It deleted packages/app-store/routing-forms/ and packages/features/ee/, added migration 20260305043434_remove_routing_forms, removed the App_RoutingForms_* Prisma models, and removed `routingFormResponseId` from the 2024-08-13 bookings input service (git log -S confirms; the field was added by #22239, 2025-07-04, and lived until #28903). The separate, older half of the failure is the API version list in packages/platform/constants/api.ts, last touched by dcf10935de (#25739, 2026-01-07) and never advanced past 2024-09-04, plus the silent-downgrade extractor in bootstrap.ts; that code is not new, the mismatch is that cal.com's docs moved to 2026-02-25 and the fork's version list did not."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "bookings API version drift (2024-08-13 vs 2026-02-25)",
+        "relation": "exact",
+        "note": "Supplied by the coordinator as the established public trace for systemic cause 1: the docs mandate a cal-api-version the source tree does not implement. Directly explains the 400 on this step. Related: #29785, #28512; PR #28561 (proposed mapping 2026-02-25 to 2024-08-13) closed unmerged 2026-03-25."
+      }
+    ],
+    "prs": [
+      {
+        "number": 29030,
+        "url": "https://github.com/calcom/cal.diy/pull/29030",
+        "state": "closed",
+        "title": "cleanup(routing-forms): remove runtime glue",
+        "relation": "related",
+        "note": "Closed unmerged 2026-05-18 (merged=false). Confirms routing forms are gone from Cal.diy and that leftovers were still being swept after #28903: it removes stale routing-form rewrites/redirects from apps/web/next.config.ts, the dead queued routing-form cleanup cron, and the missing routing-forms env include."
+      },
+      {
+        "number": 29025,
+        "url": "https://github.com/calcom/cal.diy/pull/29025",
+        "state": "closed",
+        "title": "cleanup(webhooks): remove routing form webhook support",
+        "relation": "related",
+        "note": "Closed unmerged 2026-05-22 (merged=false). Same signal: 'removes the remaining internal webhook plumbing for unsupported routing-form events'. The word 'unsupported' is the maintainers' own framing of routing forms in the fork."
+      },
+      {
+        "number": 28929,
+        "url": "https://github.com/calcom/cal.diy/pull/28929",
+        "state": "closed",
+        "title": "feat: add booking question field types to routing forms",
+        "relation": "related",
+        "note": "Opened 2026-04-18, closed 2026-04-21 without merging, three days after the EE strip. A contributor feature against the routing-forms editor that no longer exists in the fork."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"routing forms\" --include-prs --limit 25",
+      "gh search issues --owner calcom \"routing\" --created \">2026-04-15\" --include-prs --limit 30"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only four commits landed on origin/main after the tested commit 038381aeca (176037d0af, b2c28a23ab, 5e3fe3cbe6, 8418db70c7, none of them relevant), and `git log 038381aeca..origin/main` touches none of packages/platform/constants/api.ts, apps/api/v2/src/bootstrap.ts, apps/api/v2/src/platform/bookings/2024-08-13/services/input.service.ts or packages/platform/types/bookings/2024-08-13/inputs/create-booking.input.ts. Routing forms remain absent from the schema and the app-store. in cal.com: not verifiable from source, the commercial tree is private and calcom/cal.com main is a mirror of calcom/cal.diy main (both 176037d0af). Routing forms are documented by cal.com as a paid team feature and are presumably intact there, but nothing in the public record shows a port back to the fork, and PR #28561, the only public attempt at the version mapping, was closed unmerged."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, dropped 9:10 slot, seated-booking oversell, unauthenticated hold mutation). None of the five mentions routing forms. This failure is an instance of systemic cause 1 layered on top of a feature the fork does not ship."
+  },
+  "notes": "Answers to the two questions the brief asks for a systemic-cause-1 failure. (a) Would the scenario also fail on a version Cal.diy does have? Yes. On cal-api-version 2024-08-13 the body would validate (CreateBookingInput_2024_08_13 has nested `attendee` and an optional `routing` object whose `responseId` and `teamMemberIds` are both required once the object is present, matching the doc sentence, so steps 2 and 3 would probably pass), but step 1 would still fail: there is no `routing` key in any 2024-08-13 booking output DTO and output.service.ts never emits one, so `data.routing.responseId` and `data.routing.queuedResponseId` are unresolvable. The `hosts[0].id` / `hosts[0].email` half could pass, since BookingHost (packages/platform/types/bookings/2024-08-13/outputs/booking.output.ts:87-106) does carry id and email and qualified-hosts.service.ts:31-66 does narrow hosts to routedTeamMemberIds. (b) Is there a Cal.diy-side defect independent of the version? Two worth reporting. First, `Routing.responseId` is declared required (@IsInt, non-optional) on the 2024-08-13 input, so callers are forced to supply a routing-form response id, yet getRoutingFormData silently discards it and there is no App_RoutingForms_FormResponse table for it to refer to: a required field that is impossible to satisfy meaningfully and is dropped without a word. Second, the whole `routing` object is dead weight in the fork; the maintainers' own cleanup PRs (#29025, #29030) call routing-form events 'unsupported' but both were closed unmerged, so the vestige remains. Also worth flagging to the doc author: the bound page is internally inconsistent. Its operationId is BookingsController_2026_02_25_createBooking and it mandates cal-api-version 2026-02-25, but its request and response schemas are still named CreateBookingInput_2024_08_13 / CreateBookingOutput_2024_08_13, and the Routing schema appears only under the request body, never in BookingOutput_2024_08_13 (lines 901-1000), so the scenario's expectation of a `data.routing` echo is an extrapolation the page does not actually make. Separately, no real routing-form response could have been seeded: with the App_RoutingForms_* tables dropped, whatever value `{{fixture:teamEventTypeRouting.responseId}}` resolved to was necessarily a synthetic integer. Team and Membership models are still present in the fork's schema, so the team event type itself was fine; the README's 'Teams removed' refers to the paid team features, not the data model."
+}

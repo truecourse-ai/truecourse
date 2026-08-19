@@ -1,0 +1,44 @@
+{
+  "step": 17,
+  "label": "PASS2 PREP recipient",
+  "at": "2026-08-19T19:15:07.568Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "450",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "983",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "003e5bb8-b4aa-4ea1-9067-b4750804b40f"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_daillesxfetczrhd",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 6,
+        "email": "tcref-frozen2-c373a968c2@documenso.test",
+        "name": "TCRef Frozen 2",
+        "token": "_2ugaf5-q2upXODbI9QlD",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": 1,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

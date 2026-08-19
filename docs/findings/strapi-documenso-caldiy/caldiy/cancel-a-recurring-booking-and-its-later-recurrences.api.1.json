@@ -1,0 +1,74 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "cancel-a-recurring-booking-and-its-later-recurrences.api.1",
+  "flowId": "cancel-a-recurring-booking-and-its-later-recurrences",
+  "failingStep": 1,
+  "whatFailed": "The scenario's setup call, POST /v2/bookings with cal-api-version: 2026-02-25 and the doc's own recurring-booking body, returned 400 complaining about timeZone, language and metadata, because Cal.diy does not know the version 2026-02-25 the docs mandate and silently routed the request to the 2024-04-15 controller, whose input schema is a different (flat) shape.",
+  "docClaim": {
+    "quote": ":bookingUid can be :bookingUid of an usual booking, individual recurrence or recurring booking to cancel all recurrences. ... cancelSubsequentBookings: For recurring non-seated booking only - if true, cancel booking with the bookingUid of the individual recurrence and all recurrences that come after it. ... cal-api-version: Must be set to 2026-02-25.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/cancel-a-booking.md",
+    "section": "cancel-a-booking and cancel-a-booking/openapi (operationId BookingsController_2026_02_25_cancelBooking); the setup call's version mandate comes from the sibling page create-a-booking.md, operationId BookingsController_2026_02_25_createBooking, same 'Must be set to 2026-02-25.'"
+  },
+  "observed": "Step 1 body was {start, attendee:{name,timeZone,email}, eventTypeId, recurrenceCount:3} with header cal-api-version: 2026-02-25. Response 400 BadRequestException with three class-validator errors: timeZone must be a valid IANA time-zone (isTimeZone), language must be a string (isString), metadata must be an object (isObject). The error 'target' echoed back only {start, eventTypeId}, proving the global ValidationPipe (whitelist: true) had already stripped 'attendee' and 'recurrenceCount' as unknown properties. server.stdout.txt confirms the received header 'Cal-Api-Version': '2026-02-25' and the same stripped target. Duration 25 ms, so nothing reached the booking handler. The run stopped at step 1, so neither milestone step (cancel by recurring uid, cancelSubsequentBookings) was ever exercised.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "A developer following cal.com's published v2 bookings docs against Cal.diy gets a 400 that names three fields the documented request body does not even contain, with no hint that the cal-api-version header was rejected and downgraded; the recurring-cancel behavior the page promises is unreachable at the documented version.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "The Nest custom version extractor reads the cal-api-version header and returns it only if it is a member of API_VERSIONS; otherwise it falls through to VERSION_2024_04_15, and defaultVersion is 2024-04-15 as well. packages/platform/constants/api.ts:56-68 in the tested tree defines exactly five versions (2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04); 2026-02-25 is not among them, and there is no 2026-02-25 bookings controller at all (apps/api/v2/src/platform/bookings/ contains only 2024-04-15/, 2024-08-13/ and shared/). So the request was dispatched to BookingsController 2024-04-15, whose CreateBookingInput_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts:91-146) declares required top-level timeZone (@IsTimeZone, line 122-124), language (@IsString, line 135-137) and metadata (@IsObject, line 144-146) and knows nothing about an 'attendee' object or 'recurrenceCount'. Combined with the global ValidationPipe's whitelist: true (bootstrap.ts:58-68), the documented 2024-08-13-shaped body is stripped down to {start, eventTypeId} and then rejected for the three fields the 2024-04-15 schema requires. The downgrade is silent: no 400 'unsupported version', no warning header, no log line naming the version. The bound cancel prose itself is NOT the problem: the tested tree's 2024-08-13 bookings controller (apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts:336-386) carries a swagger description byte-identical to the doc page, CancelBookingInput_2024_08_13 (packages/platform/types/bookings/2024-08-13/inputs/cancel-booking.input.ts:4-17) has cancelSubsequentBookings with the same wording, and the implementation exists (services/bookings.service.ts:927, services/input.service.ts:824-843, packages/features/bookings/lib/handleCancelBooking.ts:362-365)."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version",
+    "note": "This is the last commit that appended to API_VERSIONS in packages/platform/constants/api.ts, which is why the tested tree tops out at 2024-09-04. It is not a bug commit; the mismatch is that the published docs moved on (2026-02-25 / 2026-05-01) and the open-source tree did not. The silent-downgrade half traces to the extractor, last moved wholesale by 9ad8aa981ac (2026-01-13, PR #26735 'chore: deploy api v2 on vercel'), with the fallback pattern itself dating to 0a15483c461 (2024-03-20) in the old apps/api/v2/src/app.ts. Old code, new interaction: the fallback was written when the newest documented version was also the newest shipped version."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "bookings API version drift: docs mandate 2026-02-25, source serves 2024-08-13",
+        "relation": "exact",
+        "note": "Reused from the coordinator's established systemic cause 1; this is the same header-version drift that produced the 400 here. Cited, not re-derived."
+      },
+      {
+        "number": 29816,
+        "url": "https://github.com/calcom/cal.diy/issues/29816",
+        "state": "open",
+        "title": "[bug] : cancel-subsequent on a recurring series deletes earlier occurrences scheduled webhook triggers and no-show tasks",
+        "relation": "related",
+        "note": "Found with the one search I spent. It is about the cancelSubsequentBookings path the scenario's steps 5 and 6 would have exercised, and it implies that path is live and reachable in Cal.diy at 2024-08-13. It does not explain this failure, which never got past step 1."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28561,
+        "url": "https://github.com/calcom/cal.com/pull/28561",
+        "state": "closed",
+        "title": "proposed mapping of cal-api-version 2026-02-25 to 2024-08-13",
+        "relation": "related",
+        "note": "Reused from the established systemic cause: closed unmerged 2026-03-25, author confirming production serves 2026-02-25 while the open tree does not. Had it merged, this scenario's step 1 would very likely have passed unchanged."
+      }
+    ],
+    "queries": [
+      "gh search issues \"cancelSubsequentBookings\" --owner calcom (1 of my 3 allowed searches; the version-drift trace #28762 / #29785 / #28512 / PR #28561 was supplied by the coordinator, so I did not re-search it)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed between the tested commit 038381aeca and origin/main (176037d0af, 2026-08-08), and git log 038381aeca..origin/main touches none of packages/platform/constants/api.ts, apps/api/v2/src/bootstrap.ts, apps/api/v2/src/platform/bookings or packages/platform/types/bookings. API_VERSIONS still tops out at 2024-09-04 on main and there is still no 2026-02-25 bookings controller. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is the same commit as calcom/cal.diy main. The public trace (PR #28561, closed unmerged) says production answers 2026-02-25, so hosted Cal.com almost certainly does serve the documented version, but no public source or changelog entry settles it."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office with date overrides, zero-length team slots, dropped 9:10 slot, seated oversell, unauthenticated hold manipulation). This is an instance of the coordinator's systemic cause 1, not of the researcher's write-up."
+  },
+  "notes": "Two things worth handing to a maintainer or doc author. (1) The cal.com docs page is internally inconsistent in a way that makes this diagnosable and cheap to fix: it mandates cal-api-version: 2026-02-25 and names operationIds BookingsController_2026_02_25_createBooking / _cancelBooking, yet every request and response schema on both pages is a _2024_08_13 type (CreateBookingInput_2024_08_13, CreateRecurringBookingInput_2024_08_13, CancelBookingInput_2024_08_13, CancelBookingOutput_2024_08_13). The body the docs hand you is exactly the body Cal.diy's 2024-08-13 controller accepts. Only the header string is out of reach. (2) Answering the brief's question (a), would the scenario also fail on the versions Cal.diy has: for step 1 almost certainly not, it should pass with cal-api-version: 2024-08-13. CreateRecurringBookingInput_2024_08_13 accepts start, eventTypeId, the attendee object with name/timeZone/email (packages/platform/types/bookings/2024-08-13/inputs/create-booking.input.ts:100-150) and recurrenceCount (line 423), the controller's POST / carries no @HttpCode so Nest returns 201, and RecurringBookingOutput_2024_08_13 carries recurringBookingUid, which is what the scenario captures. For the later steps the code paths all exist in the tested tree (cancel by recurring uid, cancelSubsequentBookings), so the flow would actually get to test its claims, but I cannot say they would pass without a re-run, and open issue calcom/cal.diy#29816 shows the cancel-subsequent path has at least one live bug. Recommended action: re-run this flow with cal-api-version: 2024-08-13 before filing anything, since only then does the failure, if any, carry information about the bound claims. Answering (b), whether the bound doc claim has a Cal.diy-side defect independent of the version: not in its prose. The cancel page's description text is byte-identical to the swagger description on the tested tree's 2024-08-13 cancelBooking handler (apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts:344-359), and cancelSubsequentBookings is wired end to end. (3) Separately from the edition question, the silent downgrade is a Cal.diy usability defect in its own right: an unrecognized cal-api-version produces neither a 4xx naming the version nor a log line, only a confusing validation error about fields the caller never sent. Rejecting unknown versions, or at least logging the downgrade, would have turned this into a one-line diagnosis."
+}

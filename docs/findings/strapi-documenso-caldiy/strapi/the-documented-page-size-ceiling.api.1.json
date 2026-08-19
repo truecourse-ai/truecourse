@@ -1,0 +1,67 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-documented-page-size-ceiling.api.1",
+  "flowId": "the-documented-page-size-ceiling",
+  "failingStep": 2,
+  "whatFailed": "GET /api/articles?pagination[pageSize]=100 answered 200 with meta.pagination.pageSize 30 instead of 100, because the application the guard ran against (examples/getstarted, Strapi's in-repo demo app) commits api.rest.maxLimit: 30, while every app produced by create-strapi-app ships maxLimit: 100.",
+  "docClaim": {
+    "quote": "- `pagination[pageSize]` (integer): Items per page. Default `25`, max `100`",
+    "doc": "strapi/documentation: docusaurus/docs/cms/api/rest.md:151 (published as https://docs.strapi.io/cms/api/rest; snapshotted for this run at .truecourse/specs/sources/docs.strapi.io/cms/api/rest.md:113)",
+    "section": "REST API reference > Get documents {#get-all} > GET /api/:pluralApiId - List documents > Parameters"
+  },
+  "observed": "Step 1 (pageSize=150) returned meta.pagination {page:1,pageSize:30,pageCount:1,total:9} and passed its atMost:100 assertion only incidentally, since 30 is under the ceiling. Step 2 (pageSize=100) returned the identical meta block, pageSize 30, so the equals:100 assertion failed. Both responses were 200 with the same 9 documents; server.stderr.txt is empty and server.stdout.txt shows no error. The number 30 is exactly the maxLimit configured by the app under test.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "None for users. The clamp is correct behaviour for the configured maxLimit, and the documented ceiling of 100 holds on any app scaffolded by create-strapi-app. The red is an artifact of running the scenario against Strapi's internal demo app, which deliberately configures a lower maximum.",
+  "rootCause": {
+    "file": "examples/getstarted/config/api.js (app under test); mechanism in packages/core/core/src/core-api/service/pagination.ts and packages/core/utils/src/pagination.ts",
+    "lines": "examples/getstarted/config/api.js:1-11; pagination.ts (core-api/service):34-37,73-82; pagination.ts (utils):42-48,103-114",
+    "explanation": "The app the guard drove is examples/getstarted, whose committed config/api.js sets rest.maxLimit: 30. getLimitConfigDefaults() reads toNumber(strapi.config.get('api.rest.maxLimit')) || null and getPaginationInfo passes maxLimit || -1 into withDefaultPagination, so the effective ceiling is 30. withMaxLimit(limit, maxLimit) returns maxLimit whenever limit is not strictly below it, so a requested pageSize of 100 (and of 150) both collapse to a limit of 30; transformPagedPaginationInfo then reports pageSize 30, page 1, pageCount ceil(9/30)=1, total 9, which reproduces the observed meta block byte for byte. Crucially, 100 is not a framework constant: the core default for api.rest.maxLimit is null, i.e. -1, i.e. no ceiling at all. The 100 the doc cites is the value shipped in the generated project config, and it is present in every generator template in the tested worktree (packages/cli/create-strapi-app/templates/vanilla/config/api.ts, vanilla-js/config/api.js, example/config/api.ts, example-js/config/api.js), plus examples/empty and templates/website, all as defaultLimit: 25, maxLimit: 100. So the documented pair 25/100 exactly matches a stock Strapi app; examples/getstarted is the outlier, not the product."
+  },
+  "introducedBy": {
+    "commit": "b44a552eee3d03c32cfe287074a6c09345950646",
+    "date": "2021-08-31",
+    "pr": null,
+    "title": "Implement REST API pagination with paged or offset and withCount",
+    "note": "git blame of examples/getstarted/config/api.js:4 in the tested worktree. maxLimit: 30 was set in the same commit that introduced REST pagination, evidently so Strapi's own example app exercises clamping with a small, easily reachable ceiling. The commit message carries no (#NNNN) PR reference. Nothing regressed here: the value is 5 years old and intentional, and the pagination code paths it flows through are unchanged between the tested commit and develop."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 22483,
+        "url": "https://github.com/strapi/strapi/issues/22483",
+        "state": "open",
+        "title": "going over the queryLimit result has a breaking change in v5. But should it be allowed at all?",
+        "relation": "related",
+        "note": "Discusses what should happen when a request exceeds the configured maxLimit (silently clamp versus error). Same knob, but it is about the behaviour past the ceiling, not about the docs asserting a fixed 100."
+      },
+      {
+        "number": 19004,
+        "url": "https://github.com/strapi/strapi/issues/19004",
+        "state": "closed",
+        "title": "pagination issues when `maxLimit` is set to `-1`",
+        "relation": "related",
+        "note": "Confirms maxLimit is an app-level configurable with sentinel semantics rather than a fixed framework ceiling. Not this failure."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"pageSize max\" --repo=strapi/documentation --include-prs --limit=15  (0 results)",
+      "gh search issues \"maxLimit\" --repo=strapi/strapi --include-prs --limit=20  (20 results, no exact match)",
+      "gh search issues \"pageSize pagination\" --repo=strapi/documentation --include-prs --limit=20  (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in the product, and nothing changed. git log c43e9ee1e2..develop over examples/getstarted/config/api.js, packages/core/utils/src/pagination.ts and packages/core/core/src/core-api/service/pagination.ts is empty, so the tested behaviour is still current on develop. On the docs side, docusaurus/docs/cms/api/rest.md on strapi/documentation main still reads \"Default `25`, max `100`\" as of 2026-08-15 (blob sha bcdad44e924982a91c72d9fc4f4e433694a9345d); its most recent touch is 3095d316af, 2026-07-21, \"Redesign API reference Endpoint components (#3341)\", which predates the tested build."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "This failure maps to none of the researcher's 8 Strapi findings. The nearest neighbour is their finding 6 (MCP list tool default page size: schema says 25, product returns 10, REST returns 25), which is a different scenario (the-list-tool-paginates-its-results.api.1), a different surface (MCP, not REST) and a different quantity (the default, not the maximum). One incidental corroboration for that finding from the file I read here: packages/core/utils/src/pagination.ts:29-38 hard-codes STRAPI_DEFAULTS.page.pageSize = 10, and the REST path only reaches 25 because core-api/service/pagination.ts:73-79 explicitly injects defaults from api.rest.defaultLimit. A caller that omits those defaults inherits 10. I did not read the MCP call path, so treat that as a pointer, not a verification."
+  },
+  "notes": "Two things worth separating. (1) The failure itself is environmental and the harness can fix it: the ceiling claim can only be validated on an app whose api.rest.maxLimit is the scaffolded 100. examples/getstarted is the only readily runnable app in the strapi monorepo and it pins 30, so this flow will stay red there forever. Either run this flow against a create-strapi-app scaffold, or override maxLimit for the fixture app, or drop the flow as unverifiable in this environment. Note also that step 1 is not a real check as configured: it passed only because 30 happens to be under 100. On a stock app with maxLimit 100 step 1 would exercise the clamp genuinely, and on an app with maxLimit unset it would return pageSize 150 and fail, which is the interesting case the current environment cannot reach. (2) A minor, genuine doc imprecision that did NOT cause this failure and is not worth filing on its own: docs/cms/api/rest.md presents \"max `100`\" as a property of the REST API, whereas 100 is a value in the generated project's config/api.ts that any app may change, and the framework default when the key is absent is no ceiling at all. The sibling page docusaurus/docs/cms/api/rest/sort-pagination.md:321 states this correctly (\"The default and maximum values for `pagination[limit]` can be configured in ./config/api.js ... with the `api.rest.defaultLimit` and `api.rest.maxLimit` keys\"), so the two pages disagree in emphasis. A one-line qualifier on rest.md, for example \"max `100` (configurable via `api.rest.maxLimit`)\", would close the gap. No upstream issue or PR tracks this; three searches returned nothing."
+}

@@ -1,0 +1,148 @@
+{
+  "id": "S15",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/core/src/services/server/compose-endpoint.ts#L41-L55",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/core/src/services/server/compose-endpoint.ts#L41-L55",
+    "howDecided": "git log c43e9ee1e2..origin/develop over packages/core/core/src/middlewares/errors.ts, services/server/compose-endpoint.ts, services/server/koa.ts and services/server/koa-methods.ts returns zero commits. Read them at today's head. The 404 half: middlewares/errors.ts lines 17-19 still take 'if (!ctx.response._explicitStatus) return ctx.notFound();' when no handler set a body, and ctx.notFound defaults its response argument to statusName = STATUS_CODES[404] = 'Not Found'. The 403 half: compose-endpoint.ts lines 46-52 still catch errors.ForbiddenError, re-throw only PolicyError, and otherwise 'return ctx.forbidden();' at line 51, discarding the thrown instance's 'Forbidden access' message in favor of the reason phrase 'Forbidden'. Both wire strings are therefore unchanged on today's develop through v5.52.1. Second permalink (the 404 fallthrough): https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/core/src/middlewares/errors.ts#L17-L19"
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "docusaurus/docs/cms/api/rest.md",
+    "lineToday": 297,
+    "permalink": "https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/api/rest.md#L289-L299",
+    "publishedUrl": "https://docs.strapi.io/cms/api/rest",
+    "commitsSinceReview": [],
+    "note": "Neither doc file moved: git log c768c7bf..origin/main over docusaurus/docs/cms/api/rest.md and docusaurus/docs/cms/error-handling.md is empty. (a) 404 message, rest.md: line 289 opens <ResponseTab status={404} statusText=\"Not Found\"> and line 297 inside it still prints '\"message\": \"Document not found\"', so the component's own statusText contradicts the body it wraps. The wire answers 'Not Found' and also carries a \"details\": {} member the sample omits. (b) 403 message, error-handling.md line 418: 'The custom `message` passed to `ForbiddenError` is not included in the API response. Instead, the API returns the default message.' The API in fact returns the HTTP reason phrase 'Forbidden', not the class default 'Forbidden access' shown in the table at line 411. Permalink for (b): https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/error-handling.md#L416-L420 , published at https://docs.strapi.io/cms/error-handling ."
+  },
+  "tracker": {
+    "newItems": [
+      {
+        "number": 18673,
+        "url": "https://github.com/strapi/strapi/pull/18673",
+        "state": "closed",
+        "title": "Fixing #18672: return message for unauthorized and forbidden",
+        "createdAt": "2023-11-04",
+        "relation": "related",
+        "note": "Not new activity, but new to this finding's record: the community PR that tried to make ForbiddenError/UnauthorizedError return their message. Closed 2024-09-18 unmerged (auto-closed for targeting v4/main after the Strapi 5 code freeze lifted). The decisive part is the maintainer comment of 2024-03-26 by innerdvations: 'I also believe that this is intended behavior to suppress those specific error messages. However, I do agree we need some way to do this, which we currently don't have.' That is on-the-record confirmation from Strapi that the suppression is deliberate, which settles the direction of the fix: the docs are wrong, the code is not."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#18672",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2023-11-08)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'UnauthorizedError and ForbiddenError don't return error's message and details data'. Created 2023-11-04, last updated 2023-11-08, no activity since. Reports the byte-identical 403 body this scenario observed, but was closed after a single maintainer comment about the details argument that never addressed the message. So the 403 symptom is reported-and-closed-without-fix, not open."
+      },
+      {
+        "ref": "strapi/strapi#19282",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2024-02-03)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Same throw site, different failure (500 instead of 403). Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#18566",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2024-02-21)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'PolicyError are replaced by ForbiddenError', the complaint that produced the PolicyError carve-out. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#18782",
+        "kind": "issue",
+        "stateAtReview": "closed (not planned, 2025-11-03)",
+        "stateToday": "closed (not_planned)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Status-code topic (401 vs 403), not the message. Last updated 2025-11-10. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#9512",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2022-02-01)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "The 2021 original of #18782. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#16882",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2023-06-01)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "ctx.forbidden() from a controller producing a 500 on 4.10.7. Same helper, different failure. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#19374",
+        "kind": "pr",
+        "stateAtReview": "merged (2024-02-09)",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-02-09",
+        "mergeCommit": "7fdffa1851",
+        "baseRef": "v5/main",
+        "note": "'enhancement: make policy error public', added the PolicyError carve-out at compose-endpoint.ts:47-50. Evidence the suppression is intended."
+      },
+      {
+        "ref": "strapi/strapi#25424",
+        "kind": "pr",
+        "stateAtReview": "merged (2026-06-25)",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-06-25",
+        "mergeCommit": "6f6af34008",
+        "baseRef": "develop",
+        "note": "'feat(ts): augment all context error response methods'. Kept 'response = statusName' as the default, so the 'Forbidden' / 'Not Found' strings are unchanged and now pinned by a sync test."
+      },
+      {
+        "ref": "strapi/documentation#3341",
+        "kind": "pr",
+        "stateAtReview": "merged (2026-07-21)",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-07-21",
+        "mergeCommit": "3095d316af",
+        "baseRef": "main",
+        "note": "'Redesign API reference Endpoint components'. Moved the wrong 404 example into the <ResponseTab status={404} statusText=\"Not Found\"> component and carried 'Document not found' across verbatim. What a naive blame of today's rest.md points at; not a fix."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/documentation --repo strapi/strapi --include-prs --limit 25 '\"Document not found\" REST 404' -> 2 hits, both false positives matched on the issue number 404 (strapi/documentation#404 'Update amazon-aws.md', strapi/strapi#404), same noise the review recorded",
+      "gh search issues --repo strapi/documentation --include-prs --limit 25 'rest api reference error message response example' -> 0 results",
+      "gh search issues --repo strapi/strapi --include-prs --limit 30 'ForbiddenError' -> 30 hits, all pre-existing, and it surfaced strapi/strapi#18673 (see newItems); nothing created after 2026-08-10",
+      "non-search enumeration: gh api 'repos/strapi/documentation/issues?state=all&since=2026-08-01T00:00:00Z&per_page=100' and gh api --paginate 'repos/strapi/strapi/issues?state=all&since=2026-08-10T00:00:00Z&per_page=100' -> nothing touching rest.md's error examples or error-handling.md"
+    ]
+  },
+  "reevaluation": "The finding stands on both halves, and it got stronger rather than weaker. Nothing moved: the 404 fallthrough and the ctx.forbidden() discard are byte-identical on develop through v5.52.1, rest.md still prints '\"message\": \"Document not found\"' at line 297 under a statusText that says 'Not Found', and error-handling.md still claims at line 418 that the API returns the class default message. Every cited item is in the state the review recorded, with no activity since. The one genuinely new piece of evidence is strapi/strapi#18673, the closed community PR that tried to make the classes return their message: maintainer innerdvations answered 'I also believe that this is intended behavior to suppress those specific error messages', which is Strapi stating on the record that the suppression is deliberate. That resolves the ambiguity the review flagged at medium confidence for the 403 half, so I would now raise that half from medium to high: the code is intended, the doc sentence is the defect, and the correct repair is to the doc, not to compose-endpoint.ts. Scope note for the filer: S15 is one finding with two doc surfaces (a 404 message in rest.md and a 403 message note in error-handling.md); both are the same underlying pattern, the docs printing a message string the wire has never emitted.",
+  "routeSuggestion": "docs repo issue",
+  "policyBasis": "strapi/documentation .github/ISSUE_TEMPLATE/config.yml: 'blank_issues_enabled: false' and the only contact link is 'Strapi Project Issues ... Please use the strapi/strapi repo for these issues'. The code behavior is deliberate (confirmed by the maintainer comment on strapi/strapi#18673), so nothing goes to strapi/strapi; file in strapi/documentation via .github/ISSUE_TEMPLATE/BUG_REPORT.yml ('Documentation Bug Report', title prefix '[Bug]: ', label 'type: bug'), required fields 'Link to the documentation page or resource' and 'Describe the bug'.",
+  "confidence": "high",
+  "notes": "Two separate edits in two files. (1) rest.md line 297: '\"message\": \"Document not found\"' -> '\"message\": \"Not Found\"', matching the surrounding component's own statusText prop; the real body also carries \"details\": {}. Note for the doc author that the product genuinely has three 404 wordings for the same conceptual failure and only one is reachable through /api/:pluralApiId/:documentId: public REST answers 'Not Found', the content-manager admin API and MCP handlers say 'Document not found', and the bare @strapi/utils class default is 'Entity not found'. (2) error-handling.md line 418: 'Instead, the API returns the default message' -> the API returns the generic HTTP status text ('Forbidden'), and say that the suppression applies only to ForbiddenError raised during route authentication/authorization; a ForbiddenError thrown from a controller, service or lifecycle keeps its message. Cite strapi/strapi#18672 (the closed report of the identical 403 body) and #18673 (the maintainer's 'intended behavior' comment) in the 'Related issue(s)/PR(s)' field. This finding and S14 both touch error-handling.md; if filed together, keep them as two clearly separated sections since they are independent defects."
+}

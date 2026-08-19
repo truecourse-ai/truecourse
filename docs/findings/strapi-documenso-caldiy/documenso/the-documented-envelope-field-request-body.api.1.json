@@ -1,0 +1,76 @@
+{
+  "repo": "documenso",
+  "scenarioId": "the-documented-envelope-field-request-body.api.1",
+  "flowId": "the-documented-envelope-field-request-body",
+  "failingStep": 5,
+  "whatFailed": "POST /api/v2/envelope/field/create-many sent exactly the body the fields guide prints for that URL (documentId + fields[] with pageNumber/pageX/pageY) and was rejected with 400 'Input validation failed', because the envelope route requires envelopeId (string) and data[] with page/positionX/positionY.",
+  "docClaim": {
+    "quote": "POST /envelope/field/create-many ... Request Body: | `documentId` | number | Yes | The document ID | ... | `fields` | array | Yes | Array of field configurations |  ... curl -X POST \"https://app.documenso.com/api/v2/envelope/field/create-many\" ... -d '{ \"documentId\": 123, \"fields\": [ { \"type\": \"SIGNATURE\", \"recipientId\": 456, \"pageNumber\": 1, \"pageX\": 10, \"pageY\": 80, \"width\": 30, \"height\": 5 } ] }' ... Response: { \"fields\": [ ... ] }",
+    "doc": "apps/docs/content/docs/developers/api/fields.mdx (published as docs.documenso.com/docs/developers/api/fields)",
+    "section": "Create Fields (#create-fields), and identically Update Fields (#update-fields), Field Positioning example (#example-position-a-signature-at-bottom-right), Complete Example (#complete-example)"
+  },
+  "observed": "HTTP 400 {\"message\":\"Input validation failed\",\"code\":\"BAD_REQUEST\",\"data\":{\"path\":\"envelope.field.createMany\"},\"issues\":[{\"path\":[\"envelopeId\"],\"expected\":\"string\",\"received\":\"undefined\",\"message\":\"Required\"},{\"path\":[\"data\"],\"expected\":\"array\",\"received\":\"undefined\",\"message\":\"Required\"}]}. The server log confirms it never reached the handler: path envelope.field.createMany, status error, TRPC_ERROR_HANDLER, zod input failure. Steps 1 to 4 (envelope/use, envelope/update, document find, recipient/create-many) all returned 200, so the envelope, the legacy document id (350) and the recipient (339) all really existed. Step 6 (update-many, same documented body) never ran; its schema in the tested tree is the same envelopeId/data pair, so it would have failed identically.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Every create and update example on the public fields guide is unusable as printed: a developer copy-pasting the curl or TypeScript sample gets a hard 400 on the first call, and the documented response key (fields) is also wrong (the envelope routes answer data). No data loss, but the page's whole request/response contract for the two write routes is wrong.",
+  "rootCause": {
+    "file": "apps/docs/content/docs/developers/api/fields.mdx",
+    "lines": "125-366 (Create Fields 125-286, Update Fields 290-366), plus 454-468 (the bottom-right coordinate example the scenario copied)",
+    "explanation": "The page pairs the NEW envelope route URLs with the OLD document route body. The tested code shows both shapes exist and neither is the other's alias. The envelope routes take envelopeId/data: packages/trpc/server/envelope-router/envelope-fields/create-envelope-fields.types.ts defines ZCreateEnvelopeFieldsRequestSchema = z.object({ envelopeId: z.string(), data: ZCreateFieldSchema.array() }) with each item positioned by page/positionX/positionY (or a placeholder), and ZCreateEnvelopeFieldsResponseSchema = { data: [...] }; update-envelope-fields.types.ts lines 39-46 are the same pair. The documented shape is precisely the legacy document router contract: packages/trpc/server/field-router/schema.ts lines 36-65 defines ZCreateDocumentFieldsRequestSchema = { documentId: z.number(), fields: [...] } with pageNumber/pageX/pageY and ZCreateDocumentFieldsResponseSchema = { fields: [...] }, served at POST /document/field/create-many and /document/field/update-many (packages/trpc/server/field-router/router.ts lines 131 and 213, still mounted at packages/trpc/server/router.ts line 24). That legacy handler translates pageNumber/pageX/pageY into page/positionX/positionY and calls the same createEnvelopeFields service, which returns { fields: [...] } (packages/lib/server-only/field/create-envelope-fields.ts line 324); the envelope route wraps the same service result as { data: [...] }. So the product behavior is coherent and intentional on both URLs: the doc simply printed the /document/field/* body and response under the /envelope/field/* URLs. Fix is either to rewrite the samples to envelopeId/data (what PR #3136 does) or to point the samples at the legacy /document/field/* URLs."
+  },
+  "introducedBy": {
+    "commit": "b92c53dbb23b89d3cfd89a6b38d2282cf273dfba",
+    "date": "2026-02-27",
+    "pr": "#2460",
+    "title": "feat: docs v2",
+    "note": "git blame on the tested worktree attributes every affected line (the URL at 131, the request-body tables at 137-140 and 300-303, and all curl/TypeScript samples) to this single commit that created the file. The page was never correct: git show b92c53dbb:packages/trpc/server/envelope-router/envelope-fields/create-envelope-fields.types.ts already had ZCreateEnvelopeFieldsRequestSchema = { envelopeId: string, data: [] } on that same commit. The only later touch to the file, 03e2e4f1 (#2560, 2026-03-05, placeholder callout), did not correct it."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 3127,
+        "url": "https://github.com/documenso/documenso/issues/3127",
+        "state": "closed",
+        "title": "v2 API: 19 undocumented parameters + undescribed apiKey security scheme",
+        "relation": "related",
+        "note": "Same family (v2 API documentation quality) but about missing parameter descriptions in the generated OpenAPI spec, not the hand-written guide's wrong request body. Opened and closed the same day, 2026-07-28."
+      },
+      {
+        "number": 2664,
+        "url": "https://github.com/documenso/documenso/issues/2664",
+        "state": "open",
+        "title": "Support `fill` and `strokeWidth` in POST envelope/field/create-many request",
+        "relation": "related",
+        "note": "Only useful as corroboration: a real user of the route works from the envelopeId/data shape, not the documented documentId/fields shape."
+      }
+    ],
+    "prs": [
+      {
+        "number": 3136,
+        "url": "https://github.com/documenso/documenso/pull/3136",
+        "state": "open",
+        "title": "fix(trpc): v2 field position updates silently dropped; rewrite fields API docs",
+        "relation": "exact",
+        "note": "Community PR by ephraimduncan (CONTRIBUTOR), opened 2026-07-30, still open and mergeable_state 'blocked' as of 2026-08-15, last activity 2026-08-03. Its own description states this exact defect: 'Every create/update example on the fields page used a request shape the API rejects (documentId + fields with pageNumber/pageX/pageY).' The diff rewrites apps/docs/content/docs/developers/api/fields.mdx to { envelopeId: string, data: [...] } with page/positionX/positionY, switches both response samples to the { data: [...] } wrapper, fixes the field object table (envelopeId string, coordinates serialized as strings) and the coordinate-system diagram. It also carries the code fix for the update-many silent position drop in packages/trpc/server/envelope-router/envelope-fields/update-envelope-fields.ts. Review state: one bot review flagging the update handler (P1), and one maintainer comment from dguyen on 2026-08-03 questioning only the string coordinate typing ('Is this actually a string?'). No maintainer has disputed the request-body rewrite."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"field create-many\"",
+      "gh search issues --repo documenso/documenso \"documentId\"",
+      "gh search prs --repo documenso/documenso \"docs fields api\" (returned nothing)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log 3cf2963cd0..main -- apps/docs/content/docs/developers/api/fields.mdx is empty, and git show main:apps/docs/content/docs/developers/api/fields.mdx at main head 688ef2fdf3 (2026-08-14) still prints documentId/fields with pageNumber/pageX/pageY under the /envelope/field/create-many and /envelope/field/update-many URLs. The tested behavior is therefore still the current behavior of both the code and the published guide. PR #3136 would fix it in full but has been open since 2026-07-30 and is unmerged, so nothing is in a tag."
+  },
+  "colleagueFinding": {
+    "ref": "documenso #4",
+    "agreement": "refines",
+    "note": "This failure is not one of the 8 itemized findings; it is a third, larger defect on the same doc page as their #1 and #4, fixed by the same PR #3136. It refines their characterization of #3136 as having 'a docs-only patch' for the coordinate string types: the PR's primary documentation change is a full rewrite of the create/update request bodies (documentId/fields -> envelopeId/data, pageNumber/pageX/pageY -> page/positionX/positionY, response fields -> data), and the PR body opens by naming exactly this failure. So the request-body mismatch is reported upstream, unlike the unreported items in their list, though only inside a PR and never as an issue."
+  },
+  "notes": "Three things a maintainer or doc author should know. (1) The documented body is not invented, it is the live contract of the still-mounted legacy routes POST /api/v2/document/field/create-many and /document/field/update-many, which accept documentId + fields[pageNumber/pageX/pageY] and answer { fields: [...] }; only the URL in the guide is wrong, which is why the page reads plausibly and fails totally. (2) Even if the body were accepted, the scenario's response assertion (fields[0].id) would still have failed on the envelope route, which answers { data: [...] }: the page is wrong on both halves of the contract, and the update-many section repeats both errors. (3) Minor test-side wart that does not affect the verdict: the driver substituted the captured document id and recipient id inside JSON string quotes, so it sent documentId \"350\" and recipientId \"339\" as strings while the doc types them as numbers. The envelope route never looks at either key, so the 400 is purely about the missing envelopeId/data. Anyone re-running this against the legacy /document/field/create-many URL must send them as real numbers, since ZCreateDocumentFieldsRequestSchema uses z.number(). The page's only hedge is its standing callout, 'This guide may not reflect the latest endpoints or parameters. For an always up-to-date reference, see the OpenAPI Reference' at openapi.documenso.com, which does carry the correct envelopeId/data schema."
+}

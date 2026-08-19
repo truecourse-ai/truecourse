@@ -1,0 +1,44 @@
+{
+  "step": 5,
+  "label": "set signingOrder PARALLEL explicitly",
+  "at": "2026-08-19T19:15:50.252Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "530",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:50 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "964",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "9ff1d756-246a-4d91-b95f-58a8c4daee2a"
+  },
+  "body": {
+    "internalVersion": 2,
+    "type": "DOCUMENT",
+    "status": "DRAFT",
+    "source": "TEMPLATE",
+    "visibility": "EVERYONE",
+    "templateType": "PRIVATE",
+    "id": "envelope_fteuhazrouxlatwn",
+    "secondaryId": "document_7",
+    "externalId": "tcref-assistant2-bb15bb7b7e",
+    "createdAt": "2026-08-19T19:15:50.231Z",
+    "updatedAt": "2026-08-19T19:15:50.249Z",
+    "completedAt": null,
+    "deletedAt": null,
+    "title": "Guard Source Template",
+    "authOptions": {
+      "globalAccessAuth": [],
+      "globalActionAuth": []
+    },
+    "formValues": null,
+    "publicTitle": "",
+    "publicDescription": "",
+    "userId": 3,
+    "teamId": 3,
+    "folderId": null
+  }
+}

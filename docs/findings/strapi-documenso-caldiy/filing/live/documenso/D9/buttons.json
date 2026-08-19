@@ -1,0 +1,110 @@
+[
+  {
+    "index": 0,
+    "testid": null,
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "Search⌘+K",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": "text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visi"
+  },
+  {
+    "index": 1,
+    "testid": "menu-switcher",
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "PPersonal TeamTeam Admin",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": "justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-offset-2 d"
+  },
+  {
+    "index": 2,
+    "testid": null,
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": ""
+  },
+  {
+    "index": 3,
+    "testid": null,
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": ""
+  },
+  {
+    "index": 4,
+    "testid": null,
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "1 Recipient",
+    "svgCount": 0,
+    "svgHasTitle": false,
+    "classes": "flex cursor-pointer outline-none"
+  },
+  {
+    "index": 5,
+    "testid": "document-page-view-action-btn",
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": ""
+  },
+  {
+    "index": 6,
+    "testid": null,
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "Pending",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": "flex cursor-pointer outline-none"
+  },
+  {
+    "index": 7,
+    "testid": null,
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": "inline-flex items-center justify-center text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-"
+  },
+  {
+    "index": 8,
+    "testid": "toast-close",
+    "ariaLabel": null,
+    "ariaLabelledby": null,
+    "ariaDescribedby": null,
+    "title": null,
+    "text": "",
+    "svgCount": 1,
+    "svgHasTitle": false,
+    "classes": "absolute top-2 right-2 rounded-md p-1 text-foreground/50 opacity-100 transition-opacity hover:text-foreground focus:opac"
+  }
+]

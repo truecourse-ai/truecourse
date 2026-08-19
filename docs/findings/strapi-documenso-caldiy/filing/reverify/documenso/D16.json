@@ -1,0 +1,38 @@
+{
+  "id": "D16",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/apps/remix/app/components/tables/documents-table-title.tsx#L36-L44",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/remix/app/components/tables/documents-table-title.tsx#L36-L44",
+    "howDecided": "git log 3cf2963cd0..origin/main returns nothing for either apps/docs/content/docs/users/documents/add-recipients.mdx or apps/remix/app/components/tables/documents-table-title.tsx, so both halves of the interaction are byte-identical to the tested tree: the dashboard row title still links to `${documentsPath}/${row.envelopeId}`, the read-only document page, and the editor is still reached only through the row's Edit action or the document page's Edit button."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/docs/content/docs/users/documents/add-recipients.mdx",
+    "lineToday": 17,
+    "permalink": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/users/documents/add-recipients.mdx#L17",
+    "publishedUrl": "https://docs.documenso.com/docs/users/documents/add-recipients",
+    "commitsSinceReview": [],
+    "note": "Unchanged, same line number as the tested tag: L15 '### Open the document editor', L17 'You can access the document editor by clicking on a document in your Documents dashboard.' L19 still adds the true half, that an upload redirects you into the editor automatically. The next instruction the page gives ('In the Recipients section, click + Add Signer') is still unreachable from where L17 lands the reader."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}, WebFetch of the two published doc pages",
+      "The review's queries (document editor clicking dashboard; add-recipients docs editor; docs add recipients editor) were not re-run individually; the two created-since sweeps above list every issue and PR opened after 2026-08-10 and none concerns the user docs or dashboard navigation."
+    ]
+  },
+  "reevaluation": "The finding stands with nothing changed at all: no commit has touched the doc page or the title-link component since the tested tag, no PR in the community docs stack goes near apps/docs/content/docs/users (the stack is entirely under docs/developers plus four trpc types files), and no new issue mentions it. It remains the smallest of the Documenso findings, a single sentence that describes navigation the product has never had, with the correction already visible in the product (the row's Edit action and the document page's Edit button). Verdict, confidence and impact are all unchanged.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "The user docs live in the product repo (apps/docs/content/docs/users), .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false and there is no docs-specific template, so this goes on the Bug Report form (labels: ['bug'], Issue Description / Steps to Reproduce / Expected Behavior / Current Behavior / Version).",
+  "confidence": "high",
+  "notes": "A one-sentence patch would close this faster than an issue, and the repo takes community docs PRs (four merged or open from one contributor this month), so if the filer is willing to send a PR rather than an issue that is likely the shortest path. Whichever route, the fix should cover both lines of the same step, since 'In the Recipients section, click + Add Signer' is unreachable until the navigation sentence is corrected, and sibling pages under docs/users/documents should be grepped for the same phrasing before filing."
+}

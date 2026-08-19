@@ -1,0 +1,75 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-list-tool-paginates-its-results.api.1",
+  "flowId": "the-list-tool-paginates-its-results",
+  "failingStep": 7,
+  "whatFailed": "A `list_article` MCP call that passes no pagination arguments comes back with `pagination.pageSize: 10`, while the tool's own input schema and the docs both state the default page size is 25.",
+  "docClaim": {
+    "quote": "The `list` tool also accepts `page` (1-indexed, default: 1) and `pageSize` (default: 25, max: 100) parameters.",
+    "doc": "strapi/documentation: docusaurus/docs/cms/features/strapi-mcp-server.md (snapshot: .truecourse/specs/sources/docs.strapi.io/cms/features/strapi-mcp-server.md line 289)",
+    "section": "Usage > Content management through prompts > Pagination"
+  },
+  "observed": "POST /mcp tools/call list_article with only a `filters` argument returned HTTP 200 and an SSE tool result whose pagination block is {\"page\":1,\"pageSize\":10,\"pageCount\":1,\"total\":3}. `page: 1` and `total: 3` matched; `pageSize` was 10, not 25. The same value appears in both the text content and the structuredContent, so it is the tool's reported contract, not a transport artifact. Steps 1-6 passed; the scenario aborted at step 7, so the later 1-indexing and max-100 assertions never ran.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Wrong contract shipped to every MCP client: the tool schema an AI client reads advertises 25 items per page but only 10 arrive, so a model that trusts the advertised default silently under-reads a collection (and any page arithmetic it does off 25 skips rows).",
+  "rootCause": {
+    "file": "packages/core/content-manager/server/src/mcp/handlers/collection-handlers.ts",
+    "lines": "88-93 (with packages/core/content-manager/server/src/mcp/schemas/input-schemas.ts:27-33 and packages/core/utils/src/pagination.ts:28-37)",
+    "explanation": "The collection list handler builds its query with `...(page !== undefined && { page })` and `...(pageSize !== undefined && { pageSize })`, so when the caller omits both, no pagination key reaches the query at all. It then calls `documentManager.findPage`, which is `pagination.withDefaultPagination(opts, { maxLimit: 1000 })` (packages/core/content-manager/server/src/services/document-manager.ts:70-84) with no `defaults` override. With neither page nor pageSize present, `withDefaultPagination` takes its 'no pagination attribute' branch and merges the OFFSET defaults from STRAPI_DEFAULTS, `{ start: 0, limit: 10 }`; `transformPagedPaginationInfo` then derives `page = floor(0/10)+1 = 1`, `pageSize = limit = 10`. That 10 is hardcoded in packages/core/utils/src/pagination.ts and is not read from config, so no app setting can move it: the effective MCP default is always 10. Meanwhile the tool's own Zod input schema describes the parameter as 'Items per page (default: 25, max: 100).' and that description is what a client sees in tools/list, so the product contradicts itself before the docs are even consulted. 25 is the REST default (`api.rest.defaultLimit`, default 25, packages/core/core/src/core-api/service/pagination.ts:35), which the content-manager path never consults, so the two doors disagree. The MCP unit tests never catch this because they mock `documentManager.findPage` and hardcode `pagination: { page: 1, pageSize: 25 }` in the mock's return value, then assert 25 back (packages/core/content-manager/server/src/mcp/__tests__/derive-content-type-mcp-tools.test.ts:128-133, 625-633): the assertion tests the mock, not the product."
+  },
+  "introducedBy": {
+    "commit": "d6f693da85c71a5d875c58617a9f25d7021b492f",
+    "date": "2026-05-27",
+    "pr": "#26371",
+    "title": "feat(*): introduce MCP server",
+    "note": "git blame in the tested worktree puts both culprit sites on this commit: the 'default: 25' description (input-schemas.ts:27-33) and the omit-when-undefined query build (collection-handlers.ts:88-93). The 10 it actually falls back to is old: STRAPI_DEFAULTS in packages/core/utils/src/pagination.ts:28-37 traces to 02785294f4ab (Convly, 2021-07-30, then packages/core/utils/lib/pagination.js). So this is new code (the MCP tool schema promising 25) interacting with a four-year-old content-manager default of 10; the new half is the wrong half. The doc sentence came a day later, from strapi/documentation PR #3194 'Strapi MCP server for content management', merged 2026-05-28, which copied the schema description verbatim."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 26371,
+        "url": "https://github.com/strapi/strapi/pull/26371",
+        "state": "merged",
+        "title": "feat(*): introduce MCP server",
+        "relation": "related",
+        "note": "Introduced both the 'default: 25' schema description and the handler that never passes a default."
+      },
+      {
+        "number": 26990,
+        "url": "https://github.com/strapi/strapi/pull/26990",
+        "state": "open",
+        "title": "feat(content-manager): add populate/fields/filters + depth guard to MCP read tools",
+        "relation": "related",
+        "note": "Open since 2026-07-12, edits the exact culprit block in collection-handlers.ts (adds fields/populate to the same spread) but leaves the page/pageSize omission and the 25-vs-10 mismatch untouched. Nearest live PR to the code; not a fix."
+      },
+      {
+        "number": 3194,
+        "url": "https://github.com/strapi/documentation/pull/3194",
+        "state": "merged",
+        "title": "Strapi MCP server for content management",
+        "relation": "related",
+        "note": "strapi/documentation. Merged 2026-05-28; added the 'default: 25, max: 100' sentence. The published page still carries it as of 2026-08-15 (verified against the repo contents API)."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi --repo strapi/documentation \"mcp pagination pageSize\" --include-prs (0 results)",
+      "gh search issues --repo strapi/strapi --repo strapi/documentation \"mcp list pagination default\" --include-prs (0 results)",
+      "gh search issues --repo strapi/strapi --repo strapi/documentation \"mcp\" --match title --include-prs --limit 40 (40 MCP-titled items enumerated; none about page size or pagination defaults)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "develop HEAD as fetched 2026-08-15 is acf0ce20345e17fc443a7c79f2744fb072da6080 (2026-08-14). `git log c43e9ee1e2..develop` over packages/core/content-manager/server/src/mcp/, packages/core/utils/src/pagination.ts and services/document-manager.ts returns exactly one commit, 4c2f51a5d2 '#27357 deduplicate MCP tool names when an api has multiple content types', which is unrelated. `git show develop:` on both culprit files confirms the description is still 'Items per page (default: 25, max: 100).' and the handler still omits pageSize when undefined. The upstream doc page also still says 25, so neither side has moved."
+  },
+  "colleagueFinding": {
+    "ref": "strapi #6",
+    "agreement": "refines",
+    "note": "Maps to their finding 6 ('schema says 25, product returns 10, REST returns 25') and I agree with the symptom, the blame PR #26371, and the 'unreported' claim (three searches, nothing filed in either repo). Refinements: (a) the defect is a pair of sites, not just input-schemas.ts, and the operative one is collection-handlers.ts:88-93 omitting the key entirely, which makes findPage take its OFFSET-default branch, so the reported pageSize is literally the offset limit 10 re-expressed as a page size; (b) the 10 is hardcoded in packages/core/utils/src/pagination.ts and unreachable by config, so no app setting explains it away; (c) REST's 25 comes from api.rest.defaultLimit, a config the content-manager path never reads, which is why the two doors will keep drifting; (d) the MCP unit tests assert 25 against a mocked findPage, so the suite is green on a value the product never produces."
+  },
+  "notes": "Cheapest correct fix is one line in the handler: pass an explicit default (`page: page ?? 1, pageSize: pageSize ?? 25`) rather than omitting the keys, which also makes the response's page/pageSize come from the PAGE branch of withDefaultPagination instead of being back-derived from start/limit. Changing STRAPI_DEFAULTS is not an option, it is the admin content-manager default used across the panel. If maintainers instead decide 10 is intended, the fix must edit the shipped schema description in input-schemas.ts as well as the docs page, since the wrong number is inside the product. Two secondary observations from this run: the schema max of 100 is enforced by Zod at the tool boundary while document-manager.findPage passes maxLimit 1000, so the two ceilings disagree though the tighter one wins; and because step 7 aborted the scenario, the max-100 boundary steps (8-10) and the page-2 1-indexing step never executed, so those claims are untested by this run rather than passing."
+}

@@ -1,0 +1,22 @@
+{
+  "topLevelKeys": [
+    "data",
+    "count",
+    "currentPage",
+    "perPage",
+    "totalPages"
+  ],
+  "hasPaginationObject": false,
+  "flatCounters": {
+    "count": 12,
+    "currentPage": 1,
+    "perPage": 10,
+    "totalPages": 2
+  },
+  "documentedButAbsent": [
+    "pagination.page",
+    "pagination.perPage",
+    "pagination.totalPages",
+    "pagination.totalItems"
+  ]
+}

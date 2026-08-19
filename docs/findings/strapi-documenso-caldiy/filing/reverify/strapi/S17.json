@@ -1,0 +1,58 @@
+{
+  "id": "S17",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/examples/getstarted/config/api.js#L1-L11",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/examples/getstarted/config/api.js#L1-L11",
+    "howDecided": "Per the brief this is an environment artifact, so I did the quick confirmation only. git log c43e9ee1e2..origin/develop -- examples/getstarted/config/api.js packages/core/utils/src/pagination.ts packages/core/core/src/core-api/service/pagination.ts returns zero commits. Read examples/getstarted/config/api.js at today's head: it still pins rest.defaultLimit 25 and rest.maxLimit 30 (line 4), so the app the guard drove still clamps pageSize to 30 and the flow would stay red in this environment. For contrast, packages/cli/create-strapi-app/templates/vanilla/config/api.ts at the same head still ships defaultLimit 25 and maxLimit 100 (lines 5-6), so the documented 25/100 pair matches a stock scaffolded app and examples/getstarted is the outlier, exactly as the review concluded."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "docusaurus/docs/cms/api/rest.md",
+    "lineToday": 151,
+    "permalink": "https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/api/rest.md#L151",
+    "publishedUrl": "https://docs.strapi.io/cms/api/rest",
+    "commitsSinceReview": [],
+    "note": "Recorded for completeness only; this is not a filed defect. git log c768c7bf..origin/main -- docusaurus/docs/cms/api/rest.md is empty and line 151 still reads: { name: 'pagination[pageSize]', type: 'integer', required: false, description: 'Items per page. Default <code>25</code>, max <code>100</code>' }. The review's minor, explicitly-not-worth-filing nit stands unchanged: 100 is a value in the generated project's config/api.ts rather than a framework constant (the core default when api.rest.maxLimit is absent is no ceiling at all), and the sibling page docusaurus/docs/cms/api/rest/sort-pagination.md states this correctly, so the two pages disagree in emphasis."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#22483",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'going over the queryLimit result has a breaking change in v5. But should it be allowed at all?' Created 2024-12-20. updated_at moved to 2026-08-17, i.e. after the 2026-08-15 review, but the change is noise: a stale-bot 90-day-inactivity comment on 2026-08-04 and the reporter answering 'Still think this is a bug, not a feature.' on 2026-08-17. No maintainer response, no state change, and it is about whether exceeding maxLimit should clamp or error, not about the documented 100."
+      },
+      {
+        "ref": "strapi/strapi#19004",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed (not_planned)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'pagination issues when `maxLimit` is set to `-1`'. Last updated 2025-09-30, no activity since. Confirms maxLimit is an app-level configurable with sentinel semantics rather than a fixed framework ceiling. Note the review recorded this as simply 'closed'; the precise state_reason is not_planned."
+      }
+    ],
+    "queries": [
+      "No search calls spent on this finding. Per the brief S17 is routed skip: not a finding, and the check required was only that examples/getstarted/config/api.js still pins maxLimit: 30, which is a source read. Cited-item states were fetched with gh api repos/strapi/strapi/issues/{22483,19004} and issues/22483/comments, which are not search calls. Coverage of new activity came from the unrestricted enumerations gh api --paginate 'repos/strapi/strapi/issues?state=all&since=2026-08-10T00:00:00Z&per_page=100' (239 items, nothing about pageSize or maxLimit) and gh api 'repos/strapi/documentation/issues?state=all&since=2026-08-01T00:00:00Z&per_page=100' (40 items, none touching rest.md)."
+    ]
+  },
+  "reevaluation": "Confirmed as an environment artifact, and nothing has changed. examples/getstarted/config/api.js still pins maxLimit: 30 at today's head, the pagination code paths are untouched since the tested build, and the generator templates still ship maxLimit: 100, so the documented 25/100 pair holds on any app produced by create-strapi-app. The red is entirely an artifact of running the flow against Strapi's in-repo demo app, whose lower ceiling has been deliberate since 2021. There is no defect to file against either strapi/strapi or strapi/documentation. Two things the review said that remain true and should not be upgraded into filings: step 1 of the scenario (pageSize=150) is not a real check in this environment because 30 happens to be under 100, and the 'max 100 is really a project-config value' imprecision on rest.md line 151 is a nit the review already judged not worth filing on its own. The only state change in the citedUpstream set is cosmetic: strapi/strapi#22483 got a stale-bot bump and a one-line reporter reply on 2026-08-17, still open, still unaddressed by maintainers, still about clamp-versus-error rather than the documented ceiling.",
+  "routeSuggestion": "skip: not a finding",
+  "policyBasis": null,
+  "confidence": "high",
+  "notes": "Do not file. The only actionable item is on the harness side, not upstream: this flow can only be validated against an app whose api.rest.maxLimit is the scaffolded 100, so either run it against a create-strapi-app scaffold, override maxLimit for the fixture app, or drop the flow as unverifiable in this environment. If anyone later decides the rest.md wording is worth a one-line qualifier ('max `100`, configurable via `api.rest.maxLimit`'), that would be a separate, very low-priority strapi/documentation issue and should not be attached to this finding."
+}

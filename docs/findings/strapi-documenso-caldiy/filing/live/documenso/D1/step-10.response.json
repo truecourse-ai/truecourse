@@ -1,0 +1,31 @@
+{
+  "step": 10,
+  "label": "STEP10 add a field to the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.355Z",
+  "status": 400,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "224",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "990",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "ff50093b-b4aa-4604-9098-807ea75680b2"
+  },
+  "body": {
+    "message": "Recipient 4 not found",
+    "code": "INTERNAL_SERVER_ERROR",
+    "data": {
+      "code": "INVALID_REQUEST",
+      "httpStatus": 400,
+      "path": "envelope.field.createMany",
+      "appError": {
+        "code": "INVALID_REQUEST",
+        "message": "Recipient 4 not found"
+      }
+    }
+  }
+}

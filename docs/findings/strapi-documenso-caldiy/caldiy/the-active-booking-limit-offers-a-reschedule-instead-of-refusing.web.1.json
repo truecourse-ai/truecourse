@@ -1,0 +1,36 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "the-active-booking-limit-offers-a-reschedule-instead-of-refusing.web.1",
+  "flowId": "the-active-booking-limit-offers-a-reschedule-instead-of-refusing",
+  "failingStep": 2,
+  "whatFailed": "Step 2 of 20 selected 2027-03-15 on /reference-host/active-limit-offer and waited for a hardcoded '10:00' slot button that was not there, because a sibling scenario in the same parallel run had booked reference-host at 2027-03-15T10:00Z about nine seconds earlier, so the scenario never reached any of the assertions about the active-booking limit.",
+  "docClaim": {
+    "quote": "If a booker tries to book another time while they already have an active booking, you can choose to offer them a reschedule option instead of blocking the booking. When enabled, this feature will: Detect that the booker already has an active booking. Prompt them to reschedule their existing booking to the new time slot they selected.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/booker-active-booking-limit.md",
+    "section": "booker-active-booking-limit/offer-to-reschedule-existing-booking (plus booker-active-booking-limit/notes: 'The reschedule option only applies if the booker has an existing booking for the same link.')"
+  },
+  "observed": "The booking page rendered completely (step-2.png shows the March 2027 grid with Mon 15 selected and a populated slot column, and the transcript page text lists 9:00am, 9:30am, 10:30am, 11:00am, 11:30am, 12:00pm, 12:30pm, 1:00pm, 1:30pm, 2:00pm, 2:30pm, 3:00pm, 3:30pm, 4:30pm). Exactly two slots are absent from the 09:00-17:00 grid: 10:00am and 4:00pm. 10:00am is absent because stacked-buffers-block-more-than-one-buffer-width.web.1 booked /reference-host/buffered-a at slot=2027-03-15T10:00:00.000Z and got /booking/cri9AchabGVxTTdxvX3jA5 at about 03:50:16, roughly nine seconds before this scenario's step 2 ran (evidence dir mtimes: stacked-buffers 03:50:20, this scenario 03:50:35, its two steps took 4032 ms + 10091 ms so it started about 03:50:21). 4:00pm is absent because the seed itself pre-books reference-host: booking uid refbk-user-limit-a, 'User Limit A Consult', startTime 2027-03-15T16:00:00.000Z, status ACCEPTED, userId 1, event type user-limit-a (visible in the bookings list dumped in authenticate-a-booking-request-with-an-api-key.api.1/transcript.txt). Cal.diy treats an ACCEPTED booking as host-wide busy time regardless of event type, which the sibling stacked-buffers scenario itself proves: right after its 10:00 booking on buffered-a, the buffered-b grid for the same day loses 10:45 and 11:00. The step consumed its full 10 s budget waiting for a locator that will never appear, not waiting for a page to render.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None to users. The scenario is unrunnable in a parallel run: it hardcodes slot labels (10:00, 11:00, 12:00) on a day it shares with every other scenario and with the seed, so it reports a failure that says nothing about the product, and the doc claim it exists to prove is left unevidenced.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": []
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "n/a: this is a defect of the generated scenario, not of the product, so there is nothing upstream to fix. in cal.diy: the Booker Active Booking Limit and its offer-to-reschedule branch are present and unchanged in the tested tree (packages/prisma/schema.prisma:267-268 maxActiveBookingsPerBooker and maxActiveBookingPerBookerOfferReschedule, packages/features/bookings/lib/handleNewBooking/checkActiveBookingsLimitForBooker.ts:9-135), so this is not an edition mismatch either. in cal.com: not verifiable from source."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Maps to none of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md. It is a clean instance of the coordinator's already established systemic cause 3, cross-scenario slot contention on the single seeded host reference-host, and it is not the run-start saturation signature (cause 2): the grid is fully rendered in step-2.png, the calendar and the slot column both painted, only the two busy slots missing."
+  },
+  "notes": "Detail a maintainer of the corpus needs. (1) The doc claim was never exercised. The scenario has 20 steps and 4 milestones (offer-reschedule-instead-of-blocking-the-booking, offer-reschedule-detects-the-existing-booking, offer-reschedule-prompts-to-move-the-existing-booking, offer-reschedule-only-for-a-booking-on-the-same-link) that all sit at steps 12 and later; it died at step 2, before it had even made the first booking that fills the limit. The runner agrees: LATEST.json marks it blockedPrecondition: true. Its sibling a-booker-at-their-active-booking-limit-is-refused.web.1 also failed at step 1 with blockedPrecondition: true, so the whole Booker Active Booking Limit doc page is unevidenced in this run. (2) The scenario's own seeding note says the walk is pinned to 2027-03-15 so it never depends on the day it is run. That pin is correct in intent but the slot within the day is left to a hardcoded label, and 2027-03-15 is the shared pinned Monday for every March-2027 scenario in the corpus. Eight step lines across the corpus target 2027-03-15T10:00 on reference-host through different event types (hide-organizer-email, weekly-meeting, buffered-a, default-form, prefill-fields, multi-location, organizer-address, phone-location, phone-question, prefill-all-fields), and the seed additionally holds 2027-03-15T16:00. Whichever scenario reaches 10:00 first wins and the rest fail on a slot they never reserved. (3) A working pattern already exists in the corpus: the sibling refusal scenario picks its slot with name ':00' and pick: first instead of a literal time. Either that, a per-scenario dedicated slot like the own-<scenario> fixtures the API scenarios get from the seed, or a per-scenario day or host would make this deterministic. (4) Independent corroboration that 10:00 was genuinely taken and that this is contention rather than a rendering problem: the-booking-title-follows-the-event-name-and-the-attendee.web.1 loaded weekly-meeting for the same day at about 03:50:39, four seconds after this scenario finished, and its slot list still showed 10:00am (a stale slot list) but its Confirm at 10:00 then failed to reach /booking/. The 4:00pm hole is present in every March-2027 slot list in the run, including the very first one, which is what identifies it as seed data rather than in-run contention. (5) Worth a separate look by the corpus owner, not filed as a finding here: the booker page offering a slot that is already booked and only failing at submit time is a normal race in any booking product, but in this run it turned into a second scenario failure."
+}

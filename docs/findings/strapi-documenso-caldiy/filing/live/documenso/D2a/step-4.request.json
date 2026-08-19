@@ -1,0 +1,12 @@
+{
+  "step": 4,
+  "label": "THE MOVE: update-many with positionY 60 (docs say the field moves)",
+  "at": "2026-08-19T19:15:29.275Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/update-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_bxwelneerccdovmc\",\"data\":[{\"id\":7,\"type\":\"TEXT\",\"positionY\":60}]}"
+}

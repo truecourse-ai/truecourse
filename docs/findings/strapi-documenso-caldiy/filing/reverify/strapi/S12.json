@@ -1,0 +1,69 @@
+{
+  "id": "S12",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "4c2f51a5d2",
+        "date": "2026-08-14",
+        "title": "fix(content-manager): deduplicate MCP tool names when an api has multiple content types",
+        "pr": "#27357",
+        "touchesCulpritLines": false,
+        "effect": "Landed in the MCP area but touched only packages/core/content-manager/server/src/mcp/utils.ts, its test file and docs/docs/docs/01-core/strapi/mcp-server.md; the ACTIONS map and the tool auth policies are untouched, so it does not affect this finding."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/content-manager/server/src/services/permission-checker.ts#L6-L14",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/content-manager/server/src/services/permission-checker.ts#L6-L14",
+    "howDecided": "git log c43e9ee1e2..origin/develop -- packages/core/content-manager/server/src/services/permission-checker.ts packages/core/content-manager/server/src/mcp/derive-content-type-mcp-tools.ts returns zero commits. Read both files at today's head: permission-checker.ts lines 6-14 still map publish and unpublish to 'plugin::content-manager.explorer.publish' (lines 11-12) and discard to 'plugin::content-manager.explorer.update' (line 13). derive-content-type-mcp-tools.ts still attaches auth: { policies: [{ action: ACTIONS.discard, subject: uid }] } at line 296 (collection types) and line 504 (single types), against ACTIONS.publish at 278/486 and ACTIONS.unpublish at 287/495. The one MCP commit in the range (#27357) is a tool-name dedup in mcp/utils.ts and does not touch the permission mapping. The code is correct and unchanged; the wrong text is entirely on the docs side."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "docusaurus/docs/cms/features/strapi-mcp-server.md",
+    "lineToday": 233,
+    "permalink": "https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/features/strapi-mcp-server.md#L233",
+    "publishedUrl": "https://docs.strapi.io/cms/features/strapi-mcp-server",
+    "commitsSinceReview": [],
+    "note": "git log c768c7bf..origin/main -- docusaurus/docs/cms/features/strapi-mcp-server.md is empty. Both wrong cells are still there, at the same line numbers the review recorded: line 233 (collection types) and line 244 (single types), each reading '| `discard_draft` | Discard draft | `publish` | Discard draft changes and revert to the published version |'. Second permalink for the single-type row: https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/features/strapi-mcp-server.md#L244 . The correct value is `update` in both rows. Also still true at line 232: '| `unpublish` | Unpublish | `publish` |', which is right only because ACTIONS.unpublish is literally the same string as ACTIONS.publish."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "strapi/documentation#3194",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-05-28",
+        "mergeCommit": "a3b573cfd9",
+        "baseRef": "main",
+        "note": "The PR that created the page with the wrong permission cell already in it. Origin, not a fix. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#26371",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-05-27",
+        "mergeCommit": "d6f693da85",
+        "baseRef": "develop",
+        "note": "Introduced the MCP server and wired discard_<slug>_draft to ACTIONS.discard. Correct behavior, cited only to identify the code the doc misdescribes. Unchanged."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner strapi --include-prs --limit 25 'discard_draft' -> 1 hit, strapi/strapi#26444 'feat(core/mcp): add server-side MCP analytics telemetry' (merged 2026-05-26), unrelated to the permission cell. Same single hit the review recorded.",
+      "gh search issues --repo strapi/documentation --include-prs --limit 25 'MCP permission required' -> 0 results",
+      "non-search enumeration: gh api --paginate 'repos/strapi/strapi/issues?state=all&since=2026-08-10T00:00:00Z&per_page=100' -> 239 items; the only new MCP items are #27395 (open, 2026-08-17, 'MCP tools/list advertises draft-07 JSON Schema, making all tools uncallable from strict 2020-12 clients') and #27353/#27357 (tool-name collision, fixed), neither about the permission table. gh api 'repos/strapi/documentation/issues?state=all&since=2026-08-01T00:00:00Z&per_page=100' -> no MCP-related item."
+    ]
+  },
+  "reevaluation": "The finding stands exactly as written. Neither side moved: the ACTIONS map and the MCP tool auth policies are unchanged on develop through v5.52.1, and both wrong table cells are verbatim on strapi/documentation main at lines 233 and 244. Every claim in the review's fixedAfter block re-verifies. The one new piece of context is strapi/strapi#27395 (opened 2026-08-17), a separate MCP defect about the advertised JSON Schema dialect; it confirms the MCP surface is getting outside scrutiny right now but has no bearing on this finding's verdict, confidence or scope. Verdict remains doc-bug, confidence high, scope two cells in one file.",
+  "routeSuggestion": "docs repo issue",
+  "policyBasis": "strapi/documentation .github/ISSUE_TEMPLATE/config.yml: 'blank_issues_enabled: false' with the only contact link being 'Strapi Project Issues ... Please use the strapi/strapi repo for these issues', so a wrong sentence in the docs is filed in strapi/documentation via .github/ISSUE_TEMPLATE/BUG_REPORT.yml ('Documentation Bug Report', title prefix '[Bug]: ', label 'type: bug'), whose required fields are 'Link to the documentation page or resource' and 'Describe the bug', with optional 'Suggested improvements or fixes' and 'Related issue(s)/PR(s)'.",
+  "confidence": "high",
+  "notes": "A fix must touch BOTH rows (233 collection types, 244 single types); patching only the first leaves the single-type table wrong. The correct cell value is `update`, corroborated by three independent code paths: the MCP tool policy (derive-content-type-mcp-tools.ts:296/504 -> ACTIONS.discard), the admin REST route policy for discard, and the admin UI Discard button gated on canUpdate. Worth mentioning in the same issue that `unpublish` has no permission of its own (ACTIONS.unpublish === ACTIONS.publish), so `publish` always grants both tools. The BUG_REPORT template's 'Related issue(s)/PR(s)' field should cite strapi/documentation#3194 as the origin of the cell."
+}

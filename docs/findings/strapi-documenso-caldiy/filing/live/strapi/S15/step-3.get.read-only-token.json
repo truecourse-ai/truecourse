@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:1347/api/articles",
+    "headers": {
+      "Authorization": "Bearer 8201117...<redacted>"
+    },
+    "body": null
+  },
+  "status": 200,
+  "total": 1
+}

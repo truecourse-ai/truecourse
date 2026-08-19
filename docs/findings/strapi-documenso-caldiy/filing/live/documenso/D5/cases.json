@@ -1,0 +1,105 @@
+{
+  "envelopeId": "envelope_urlxhxhbndxwvbvu",
+  "recipientId": 14,
+  "results": [
+    {
+      "label": "required+readOnly TEXT (the original step 3)",
+      "status": 200,
+      "storedFieldMeta": {
+        "required": true,
+        "readOnly": true,
+        "type": "text",
+        "text": "TCRef both"
+      }
+    },
+    {
+      "label": "readOnly TEXT with no default text",
+      "status": 200,
+      "storedFieldMeta": {
+        "readOnly": true,
+        "type": "text"
+      }
+    },
+    {
+      "label": "readOnly NUMBER with no default value",
+      "status": 200,
+      "storedFieldMeta": {
+        "readOnly": true,
+        "type": "number"
+      }
+    },
+    {
+      "label": "readOnly RADIO with no options",
+      "status": 200,
+      "storedFieldMeta": {
+        "readOnly": true,
+        "type": "radio",
+        "values": [],
+        "direction": "vertical"
+      }
+    },
+    {
+      "label": "readOnly CHECKBOX with nothing checked",
+      "status": 200,
+      "storedFieldMeta": {
+        "readOnly": true,
+        "type": "checkbox",
+        "values": [
+          {
+            "id": 1,
+            "checked": false,
+            "value": "A"
+          }
+        ],
+        "direction": "vertical"
+      }
+    },
+    {
+      "label": "readOnly DROPDOWN with no default value",
+      "status": 200,
+      "storedFieldMeta": {
+        "readOnly": true,
+        "type": "dropdown",
+        "values": [
+          {
+            "value": "EU"
+          }
+        ]
+      }
+    },
+    {
+      "label": "DROPDOWN default not among its options",
+      "status": 200,
+      "storedFieldMeta": {
+        "type": "dropdown",
+        "values": [
+          {
+            "value": "EU"
+          },
+          {
+            "value": "US"
+          }
+        ],
+        "defaultValue": "APAC"
+      }
+    },
+    {
+      "label": "NUMBER default above its maximum",
+      "status": 200,
+      "storedFieldMeta": {
+        "type": "number",
+        "value": "20",
+        "maxValue": 10
+      }
+    },
+    {
+      "label": "NUMBER default below its minimum",
+      "status": 200,
+      "storedFieldMeta": {
+        "type": "number",
+        "value": "1",
+        "minValue": 10
+      }
+    }
+  ]
+}

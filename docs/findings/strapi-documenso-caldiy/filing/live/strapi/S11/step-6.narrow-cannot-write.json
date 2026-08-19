@@ -1,0 +1,12 @@
+{
+  "status": 403,
+  "body": {
+    "data": null,
+    "error": {
+      "status": 403,
+      "name": "PolicyError",
+      "message": "Policy Failed",
+      "details": {}
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-edit-view-menu-has-no-delete-document-button.web.1",
+  "flowId": "the-edit-view-menu-has-no-delete-document-button",
+  "failingStep": 8,
+  "whatFailed": "The edit view's top-right \"More actions\" menu carries no item labelled \"Delete document\": since PR #21182 (Sept 2024) the two delete items are named \"Delete entry (all locales)\" and \"Delete entry (<locale>)\", but the Content Manager doc still instructs the reader to click \"Delete document\" / \"Delete locale\".",
+  "docClaim": {
+    "quote": "1. In the edit view of the entry, click on  at the top right of the interface, and click the **Delete document** button.<br/>If Internationalization is enabled for the content-type, you can also choose to delete only the currently selected locale by clicking on the **Delete locale** button.",
+    "doc": "strapi/documentation: docusaurus/docs/cms/features/content-manager.md (line 547 on main; line 371 in the snapshot .truecourse/specs/sources/docs.strapi.io/cms/features/content-manager.md)",
+    "section": "Deleting content (#content-manager/usage/deleting-content)"
+  },
+  "observed": "Step 8 opened the \"More actions\" menu on the seeded document /admin/content-manager/collection-types/api::article.article/oxu7drtrrz6081a4c0mcn43n and the menu rendered fine, but its menuitems were: \"Edit the model\", \"Configure the view\", \"Delete entry (English (en))\", \"Delete entry (all locales)\", \"Copy document ID\". No \"Delete document\" and no \"Delete locale\". step-8.png shows the same menu with the two red trash items. The list-view row-actions menu captured at step 6 shows the identical drift (\"Delete entry (English (en))\", \"Delete entry (all locales)\"), which is the same doc paragraph's tip at line 559 on main. Deletion itself is fully available; only the labels differ.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Low severity but real: a user or support agent following the Deleting content procedure hunts for a button name that has not existed since Strapi 5.0-era Sept 2024; also breaks doc search, translations of the docs, and any onboarding script keyed on the label. No data risk, deletion still works under the new names.",
+  "rootCause": {
+    "file": "strapi/documentation: docusaurus/docs/cms/features/content-manager.md",
+    "lines": "543-559 (Deleting content section; the two offending sentences are lines 547 and 559)",
+    "explanation": "The product side is intentional and correct. In the tested worktree packages/core/content-manager/admin/src/pages/EditView/components/Header.tsx lines 707-725 the DeleteAction builds its label from the ICU message content-manager.actions.delete.label = 'Delete entry{isLocalized, select, true { (all locales)} other {}}' (mirrored in packages/core/content-manager/admin/src/translations/en.json line 7), and packages/plugins/i18n/admin/src/components/CMHeaderActions.tsx lines 655-661 builds the locale-scoped one from i18n's actions.delete.label = 'Delete entry ({locale})' (packages/plugins/i18n/admin/src/translations/en.json line 2). The tested article content type is internationalized, so isLocalized is true and the two items render exactly as the evidence shows. Those strings were changed deliberately to match the design in PR #21182, closing design issue #20812, which explicitly said the old 'Delete document' / 'Delete locale' labels were wrong. The documentation repo was never updated: main still says 'Delete document' and 'Delete locale' as of 2026-08-15. So the defect is in the doc text, not in the admin UI."
+  },
+  "introducedBy": {
+    "commit": "29afb2b9838dc29a972be2b5b5f0c99afd1d1f9f",
+    "date": "2024-09-09",
+    "pr": "#21182",
+    "title": "fix: delete document actions labels",
+    "note": "git blame in strapi-tested puts both label lines on this commit (Header.tsx 719-725 and i18n CMHeaderActions.tsx 655-661). The diff renames 'Delete document' -> 'Delete entry{isLocalized, select, true { (all locales)} other {}}' and 'Delete locale' -> 'Delete entry ({locale})' in both the components and the en.json bundles, and updates the e2e specs to match. The PR body states the intent: match the Figma design, per issue #20812. The stale doc sentence itself is older than that rename, so the doc bug is a divergence created at that moment and never reconciled, not a regression in the product."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 20812,
+        "url": "https://github.com/strapi/strapi/issues/20812",
+        "state": "closed",
+        "title": "[Design] In the edit view, the labels of “Delete locale” and “Delete document” are not the right ones",
+        "relation": "related",
+        "note": "Opened 2024-07-16, closed as completed 2024-10-14. This is the issue that ASKED for the rename, so it confirms the product side is intentional and settles the verdict. It is not a tracker for the documentation drift, and it lives in strapi/strapi, not strapi/documentation."
+      }
+    ],
+    "prs": [
+      {
+        "number": 21182,
+        "url": "https://github.com/strapi/strapi/pull/21182",
+        "state": "merged",
+        "title": "fix: delete document actions labels",
+        "relation": "related",
+        "note": "Merged 2024-09-09. The rename itself. No companion documentation PR was opened."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/documentation --include-prs \"Delete document Delete locale label\" (0 results)",
+      "gh search issues --repo strapi/documentation --include-prs \"Deleting content\" (5 results, all unrelated content-manager/webhooks/bulk-publish PRs)",
+      "gh search issues --repo strapi/documentation --include-prs \"Delete entry\" (4 results, all unrelated: @strapi/utils docs, afterDelete lifecycle hook, the 2021 Content Manager docs PR)",
+      "direct reads (not searches): gh api repos/strapi/strapi/issues/20812, gh api repos/strapi/strapi/pulls/21182, gh api repos/strapi/documentation/contents/docusaurus/docs/cms/features/content-manager.md, gh api repos/strapi/documentation/commits?path=..."
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Product side: unchanged and correct on develop at acf0ce2034 (2026-08-15). Both translation keys still read 'Delete entry{isLocalized, ...}' and 'Delete entry ({locale})', and git log c43e9ee1e2..develop on Header.tsx is empty, so nothing moved after the tested commit and nothing needed to. Doc side: NOT fixed. The live file strapi/documentation main docusaurus/docs/cms/features/content-manager.md (blob 2692df834fc8c5f47b77c621204fa1828c67f0ad, fetched 2026-08-15) still says 'Delete document' at line 547 and again at line 559, and 'Delete locale' at both places. The file is actively maintained (last touched 2026-05-06 by PR #3113), so the Deleting content section was simply passed over for ~23 months. No open documentation PR or issue found."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the researcher's 8 Strapi findings. All 8 are API/MCP-surface (admin-token permissions, relation ops, filter operators, page size, SQL leak, admin-token key readback, MCP tool naming); this one is the admin web UI and a different doc page (content-manager.md, not the MCP or admin-token docs). It is adjacent in kind to their finding 8b, where they also concluded the wrong text lives in strapi/documentation while the code is correct and deliberate, and my evidence supports that same shape of conclusion here with an explicit upstream paper trail (#20812 -> #21182)."
+  },
+  "notes": "The scenario is doing exactly what it was designed to do: the yaml note says it is DELIBERATELY RED and doc-faithful, asserts rather than clicks so the canonical seeded document survives, and already cites #20812. My review confirms every part of that note, including the blame, and adds two things it did not have. First, the precise culprit is PR #21182 merged 2024-09-09 (issue #20812 is the request, not the change), and the rename covered BOTH labels: 'Delete document' -> 'Delete entry (all locales)' and 'Delete locale' -> 'Delete entry ({locale})'. Second, the same doc paragraph is wrong twice: the numbered step at line 547 and the tip at line 559 that describes the list-view row-actions menu, and the run captured evidence for both (step 6 for the list view, step 8 for the edit view), so a single doc PR can cite both screenshots. Suggested doc fix for strapi/documentation: replace 'Delete document' with 'Delete entry (all locales)' and 'Delete locale' with 'Delete entry (<locale name>)', and note that when i18n is NOT enabled for the content type the item is simply 'Delete entry' (the ICU 'other' branch), which is why the label is conditional. Line 86 of the same file still refers to a 'Delete locale icon' in the list-view bullet list; worth checking in the same pass. One caveat on scope: only the English bundle was inspected; the localized admin translation files may still carry the old strings, which would be a separate product-side issue."
+}

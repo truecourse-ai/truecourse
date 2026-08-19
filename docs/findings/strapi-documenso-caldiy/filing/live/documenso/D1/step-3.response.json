@@ -1,0 +1,44 @@
+{
+  "step": 3,
+  "label": "PREP recipient on the draft",
+  "at": "2026-08-19T19:15:07.261Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "447",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "997",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "7727d651-e446-4309-9947-7263ee33e7fe"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_zxidtommuuvcurfz",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 4,
+        "email": "tcref-frozen-e095c05f33@documenso.test",
+        "name": "TCRef Frozen",
+        "token": "f1sutPnzPFPjOaCKT0jZd",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": 1,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

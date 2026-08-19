@@ -1,0 +1,12 @@
+{
+  "step": 2,
+  "label": "the real contract {ids:{type,ids}}",
+  "at": "2026-08-19T19:17:28.405Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/get-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"ids\":{\"type\":\"envelopeIds\",\"ids\":[\"envelope_utdishylsahhlhnw\"]}}"
+}

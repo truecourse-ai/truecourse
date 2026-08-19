@@ -1,0 +1,59 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "prefill-the-location-a-booker-arrives-with.web.1",
+  "flowId": "prefill-the-location-a-booker-arrives-with",
+  "failingStep": 2,
+  "whatFailed": "Opening the booking form with the doc's own attendee-address prefill URL (location={\"value\":\"attendeeInPerson\",\"optionValue\":\"Delhi\"}) leaves the address input the option reveals completely empty; the optionValue never reaches the form.",
+  "docClaim": {
+    "quote": "Different type of locations are selected using different values of location. location param value has to be a valid JSON. ... Pre-filling Attendee Address: ...other-params...&location={\"value\":\"attendeeInPerson\",\"optionValue\":\"Delhi\"}",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/bookings/prefill-fields.md",
+    "section": "Prefilling location / Pre-filling Attendee Address (anchors pre-fill-fields-questions/prefilling-location and pre-fill-fields-questions/pre-filling-attendee-address)"
+  },
+  "observed": "The page loaded fully in about 2s. The 'In Person (Attendee Address)' radio is selected and the address input it reveals shows only the placeholder 'Enter address'. The deterministic check read the value attribute and found none; the visual judge, looking at the screenshot, independently reports the address input empty with no 'Delhi' anywhere on the page; the 19s session video shows the input empty in every frame from the first paint of the form onward, and the step's own 10s retry budget never saw a value. The doc's example value is literally 'Delhi', so this is the doc's own worked example failing.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Anyone who builds a documented prefill link for an attendee-address event type ships a link that silently half-works: the location option is selected so the link looks correct, but the address the integrator passed is dropped and the booker has to retype it (or submits an event with no address). Silent, no error anywhere.",
+  "rootCause": {
+    "file": "apps/web/modules/form-builder/components/Components.tsx",
+    "lines": "399-522",
+    "explanation": "The form value for the location field ends up as {value: 'attendeeInPerson', optionValue: ''}. Line 500 picks the option input from optionsInputs[value.value] (attendeeInPerson maps to {type:'address',required:true} in packages/features/bookings/lib/getBookingFields.ts:145-160), and line 512 feeds value?.optionValue into it, so an empty optionValue renders as the empty AddressInput (packages/ui/components/address/AddressInput.tsx, a plain controlled input) that the evidence shows. The prefill path that should have supplied 'Delhi' is packages/features/bookings/Booker/hooks/useInitialFormValues.ts:100-167 (parse the query with getBookingResponsesPartialSchema, then bookingForm.reset in packages/features/bookings/Booker/hooks/useBookingForm.ts:94-99) feeding packages/features/bookings/lib/getBookingResponsesSchema.ts:60-75, which JSON.parses the radioInput parameter and returns {value, optionValue} verbatim for non-phone option inputs. I read that whole path and could not find the line that drops the address: the partial schema (bookingResponses.location is z.object({optionValue: z.string(), value: z.string()}) intersected with the record schema) accepts the parsed object, and the radioInput superRefine at lines 251-274 raises no issue when optionValue is non-empty. Two branches remain and the evidence in this run cannot separate them: (a) the whole location response was dropped before the reset, in which case the effect at Components.tsx:411-418 ('if (!value) setValue({value: options[0]?.value, optionValue: \"\"})') re-created exactly the observed shape, since options[0] for this event type IS attendeeInPerson; or (b) the reset carried the value and only optionValue was lost afterwards. Either way the product does not honor the documented parameter, and (a) additionally means the step-1 'the option is pre-selected' observation is not evidence that the parameter was read at all."
+  },
+  "introducedBy": {
+    "commit": "517cfde5b8a0e4910ea27f21445a516ea372a3ce",
+    "date": "2023-03-02",
+    "pr": "#6560",
+    "title": "Feature/ Manage Booking Questions",
+    "note": "git blame of Components.tsx:411-418 (the effect that writes {options[0].value, optionValue: ''} whenever the location response is absent, i.e. the shape actually observed). That code is old; the newer half of the interaction is the URL-prefill parse, whose radioInput branch (getBookingResponsesSchema.ts:59-75) was last rewritten by ad65fbbd811 'fix: change URL prefill behavior to skip only invalid fields (#26982)', Hariom Balhara, 2026-02-18, which introduced the per-field rescue (preprocessField try/catch at lines 415-426 and the 'delete responses[field.name]' at lines 496-503) alongside the pre-existing whole-prefill fallback preprocessed.catch(() => ({})) at lines 507-513. useInitialFormValues' async-parse-then-reset shape is from 313bb897897 (Morgan, 2024-01-22). I did not pin which of these actually swallows the address, so treat the blame as the site of the observed value, not a proven culprit line."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 17394,
+        "url": "https://github.com/calcom/cal.diy/issues/17394",
+        "state": "closed",
+        "title": "Location URL prefill breaks input form",
+        "relation": "related",
+        "note": "Same feature, opposite outcome. Reported 2024-10-29 against cal.com hosted and 4.6.12 self-hosted, with location=Italy (not JSON); the reporter closed it himself on 2024-11-20 after finding the documented JSON form location={\"value\":\"attendeeInPerson\",\"optionValue\":\"Italy\"} and linking this very help article. So the exact URL shape our scenario uses was the accepted, working answer in late 2024 and is broken in the tested build. No open issue describes the current symptom."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"prefill location\" --owner calcom (1 hit, unrelated: #11455 organizer address missing in confirmation email)",
+      "gh search issues \"optionValue prefill\" --owner calcom (0 hits)",
+      "gh search issues \"attendeeInPerson\" --owner calcom (5 hits; only #17394 relevant, #15225 is the event-type location editor, not prefill)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main after the tested 038381aeca (176037d0af, b2c28a23ab, 5e3fe3cbe6, 8418db70c7) and git log 038381aeca..origin/main over the culprit files (Components.tsx, useInitialFormValues.ts, getBookingResponsesSchema.ts, BookingFields.tsx, AddressInput.tsx) is empty, so every line cited above is still current on main. in cal.com: not verifiable from source, the public calcom/cal.com main is the same tree as cal.diy main and the commercial source is private; no public PR, issue or changelog entry found that touches this."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the five findings in docs/guard-findings.md covers this. They are out-of-office vs date overrides, zero-length team slots, the 9:10 slot dropped by the slot grid, seated-booking attendee adds, and unauthenticated slot-reservation access. The booking-form prefill surface is not in their write-up."
+  },
+  "notes": "1) Assertion weakness worth fixing regardless of the product bug: the step targets 'first textbox address'. Accessible-name matching here is substring-based and in DOM order the first textbox whose name contains 'address' is the 'Email address' input (empty in this scenario), not the location address input (whose accessible name comes from its placeholder, 'Enter address'). So the step as written could fail on a correct product. It does not change the verdict: the screenshot, the visual judge and every frame of session.webm show the location address input holding only its placeholder, so 'Delhi' is nowhere on the page. The assertion should address the option input by a stable handle (it renders with id=\"optionField\").\n2) Step 1 is a false positive in the making: the same event type's first location option IS attendeeInPerson, and Components.tsx:411-418 selects options[0] whenever the form has no location response, so 'the option is pre-selected' cannot fail for this URL. Steps 4 and 5 of this scenario (location={\"value\":\"NYC\"} and location={\"value\":\"link\"}, both non-first options) are exactly the discriminator, and they never ran because the run stops at the first failing step. Re-running the scenario from step 4, or one page load with the location response logged, is what would settle branch (a) vs branch (b) of the root cause.\n3) Control in the same run: prefill-the-attendee-phone-number-either-way-it-is-asked.web.1 step 2 passed on /reference-host/phone-location with location={\"value\":\"phone\",\"optionValue\":\"%2B919999999999\"}: the phone option input came back holding '+91 99999-99999' with the India flag selected. That is the identical radioInput optionValue mechanism working on the same instance minutes apart, which is why this is a defect and not an environment or an edition question. Cal.diy ships the whole prefill code path, so this is not an edition-mismatch.\n4) Seed/label observation for whoever looks at the later steps: the two seeded organizer addresses both render as 'In Person (Organizer Address)' rather than as the addresses, so getLocationOptionsForSelect got no address for them and BookingFields.tsx:196-220 remaps BOTH duplicate options to the same value string. Step 4's expectation of a radio named 'NYC' would very likely have failed too, for a seeding reason (addresses not set on the inPerson locations) rather than a product one. Worth verifying against the seed before filing anything about the multiple-organizer-address claim.\n5) Sibling harness artifact, not this failure but the same evidence style: prefill-the-booking-form-from-the-address-bar.web.1 step 4 failed as 'textbox Additional notes has no value attribute' while the textarea visibly contained 'Test Notes'. A textarea has no value attribute at all, so that check can never pass. The same 'no value attribute' phrasing here is trustworthy because the target is a real <input> and the sibling steps 2 and 3 read <input> values fine."
+}

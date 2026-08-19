@@ -1,0 +1,51 @@
+{
+  "step": 7,
+  "label": "readOnly CHECKBOX with nothing checked (expected 400)",
+  "at": "2026-08-19T19:16:54.313Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "442",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:54 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "977",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "a4b0fcbe-7fe8-426c-ba7c-9031bcb56e08"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_urlxhxhbndxwvbvu",
+        "envelopeItemId": "envelope_item_mtahtmyhhvvlchci",
+        "type": "CHECKBOX",
+        "id": 16,
+        "secondaryId": "cmt0h3hrb004ihoeorx6mo0bi",
+        "recipientId": 14,
+        "page": 1,
+        "positionX": "5",
+        "positionY": "50",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "readOnly": true,
+          "type": "checkbox",
+          "values": [
+            {
+              "id": 1,
+              "checked": false,
+              "value": "A"
+            }
+          ],
+          "direction": "vertical"
+        },
+        "documentId": 10,
+        "templateId": null
+      }
+    ]
+  }
+}

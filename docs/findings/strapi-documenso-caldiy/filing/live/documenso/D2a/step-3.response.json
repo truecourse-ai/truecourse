@@ -1,0 +1,47 @@
+{
+  "step": 3,
+  "label": "PREP a TEXT field at positionY 20 with the docs worked fieldMeta example",
+  "at": "2026-08-19T19:15:29.275Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "457",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:29 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "973",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "883e784c-4949-471f-9c86-e42f5283fc0f"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_bxwelneerccdovmc",
+        "envelopeItemId": "envelope_item_kiywmastvdzcosci",
+        "type": "TEXT",
+        "id": 7,
+        "secondaryId": "cmt0h1o540029hoeo4e8zzpqi",
+        "recipientId": 7,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "20",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "label": "Job Title",
+          "placeholder": "Enter your job title",
+          "required": true,
+          "type": "text",
+          "characterLimit": 40,
+          "textAlign": "left"
+        },
+        "documentId": 5,
+        "templateId": null
+      }
+    ]
+  }
+}

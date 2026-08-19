@@ -1,0 +1,69 @@
+{
+  "repo": "documenso",
+  "scenarioId": "the-documented-field-configuration-constraints.api.1",
+  "flowId": "the-documented-field-configuration-constraints",
+  "failingStep": 3,
+  "whatFailed": "POST /api/v2/envelope/field/create-many accepted a TEXT field whose fieldMeta set required:true and readOnly:true at the same time, returning 200 and persisting the field, although the product's docs state that combination cannot exist.",
+  "docClaim": {
+    "quote": "A field cannot be both required and read-only at the same time",
+    "doc": "apps/docs/content/docs/concepts/field-types.mdx (line 147; snapshot .truecourse/specs/sources/docs.documenso.com/docs/concepts/field-types.md line 156)",
+    "section": "Text > Rules. The identical sentence is repeated in the Rules lists for Number (line 181), Radio (211), Checkbox (244) and Dropdown (275), so the page states it as a product-wide invariant for every field type, and the page's Related section points at 'Fields API - Programmatically add fields via the API'."
+  },
+  "observed": "HTTP 200 with body {\"data\":[{...,\"id\":332,\"fieldMeta\":{\"required\":true,\"readOnly\":true,\"type\":\"text\",\"text\":\"TCRef both\"},...}]}. The field row was created (id 332, secondaryId cmstdmr340007y6yd9auawyz5) with the forbidden meta echoed back verbatim. server.stderr.txt is empty and server.stdout.txt shows no warning: the write is silently accepted. The run stopped at this first mismatch, so the scenario's other eight forbidden configurations (steps 4 to 11) were never sent.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "API clients that follow the docs can persist field configurations the product declares impossible, with a 200 and no warning; the same rules are enforced server-side on the editor's setFieldsForDocument path and again at signing time, so an invalid configuration created over the API surfaces later as a signer-facing error the sender never saw.",
+  "rootCause": {
+    "file": "packages/lib/server-only/field/create-envelope-fields.ts",
+    "lines": "138-245",
+    "explanation": "The block commented 'Field validation and placeholder resolution' is the only validation the v2 create path runs, and it checks three things only: that envelopeItemId belongs to the envelope, that the recipientId exists, and that canRecipientFieldsBeModified allows new fields. It never inspects fieldMeta. The values are then written straight to prisma (field.createManyAndReturn, lines 250-265) with fieldMeta: field.fieldMeta. The input schema does not catch it either: ZEnvelopeFieldAndMetaSchema in packages/lib/types/field-meta.ts:403-448 composes ZBaseFieldMeta (lines 68-75, where required and readOnly are two independent optional booleans) with per-type extends, and carries no cross-field refine, so required+readOnly parses cleanly. Documenso already owns validators for exactly these documented rules in packages/lib/advanced-fields-validation/ (validate-text.ts:24-26 pushes 'A field cannot be both read-only and required', with the same check in validate-number.ts:56-58, validate-radio.ts:12-14, validate-checkbox.ts:15-17, validate-dropdown.ts:13-15), and calls them server-side from packages/lib/server-only/field/set-fields-for-document.ts:136-195 and set-fields-for-template.ts:118-166. createEnvelopeFields simply does not call them, and it backs both POST /api/v2/envelope/field/create-many (packages/trpc/server/envelope-router/envelope-fields/create-envelope-fields.ts) and the v1 POST /document/field/create-many (packages/trpc/server/field-router/router.ts:127-162). A rejection would naturally be a 400: AppErrorCode.INVALID_REQUEST maps to status 400 in packages/lib/errors/app-error.ts:74-75, which is how this same handler already rejects an unknown recipient, so the scenario's expected 400 matches the product's own convention."
+  },
+  "introducedBy": {
+    "commit": "7f09ba72f4",
+    "date": "2025-10-14",
+    "pr": "#2025",
+    "title": "feat: add envelopes",
+    "note": "git blame on the create path (lines 139-165) points at 7f09ba72f4 by David Nguyen, which created create-envelope-fields.ts; d18dcb4d60 (2026-01-29, 'feat: autoplace fields from placeholders (#2111)') added the surrounding placeholder logic and the 'Field validation' comment but no meta validation. The gap is older than the envelope refactor: git show 7f09ba72f4^:packages/lib/server-only/field/create-document-fields.ts shows the pre-envelope v1 create endpoint also never validated fieldMeta, so #2025 carried an existing hole into the v2 envelope API rather than regressing working code. The old code is the unvalidated create path; the newer code is the doc page that promises the rules, added by b92c53dbb (2026-02-27, 'feat: docs v2 (#2460)') and unchanged since."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3152,
+        "url": "https://github.com/documenso/documenso/pull/3152",
+        "state": "open",
+        "title": "fix: correct read-only number field validation",
+        "relation": "related",
+        "note": "Community PR opened 2026-08-05, still open, fixes two bugs inside validateNumberField (the read-only 'value greater than 0' check rejecting 0<v<1, and a duplicated min>max error). It touches the shared validator this create path never calls, so it neither causes nor fixes this failure; it does show the community treats packages/lib/advanced-fields-validation as the home of these documented rules."
+      },
+      {
+        "number": 3122,
+        "url": "https://github.com/documenso/documenso/pull/3122",
+        "state": "open",
+        "title": "fix: compare grouped number field values against min/max correctly",
+        "relation": "related",
+        "note": "Community PR opened 2026-07-24, still open, also inside validateNumberField (parseFloat truncating thousand-separated values before the min/max comparison). Same relation as #3152: same rule family, different code path."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs 'read-only required field'",
+      "gh search issues --repo documenso/documenso --include-prs 'readOnly validation field API'",
+      "gh search issues --repo documenso/documenso --include-prs 'readOnly OR fieldMeta OR \"read-only\"'",
+      "gh api search/issues q='repo:documenso/documenso read-only field' (33 hits, reviewed top 20)",
+      "gh api search/issues q='repo:documenso/documenso fieldMeta validation' (23 hits, reviewed top 15)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "The tested tag v2.16.0 (3cf2963cd0) is an ancestor of origin/main (688ef2fdf, 2026-08-14). 21 commits landed on main since, none of them touching packages/lib/server-only/field/create-envelope-fields.ts, packages/lib/types/field-meta.ts, packages/lib/advanced-fields-validation/ or packages/trpc/server/envelope-router/envelope-fields/. git show origin/main:packages/lib/server-only/field/create-envelope-fields.ts still contains no reference to the validators or to readOnly, so the create path is still unvalidated on main. The doc page apps/docs/content/docs/concepts/field-types.mdx is also unchanged on main, so the promise still stands."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "This failure maps to none of the eight itemized Documenso findings. It is adjacent to their #1 (update-many returns 200 and moves nothing) and #2 (updating one property resets radio/checkbox/dropdown options behind a 200): same v2 fields API surface, same shape of defect, a write that returns 200 while violating what the docs promise. Theirs are on the update path (update-envelope-fields), this one is on the create path (create-envelope-fields), and neither of their two root causes explains this one."
+  },
+  "notes": "Three things a maintainer should know. First, the fix is small and already written: createEnvelopeFields can call the same per-type validators set-fields-for-document.ts:136-195 calls, and throw AppError(INVALID_REQUEST) so the API answers 400 instead of the bare `new Error(errors.join(', '))` the setFields path throws today, which surfaces as a 500 rather than a 400 even where the rules ARE enforced. Second, the same unvalidated path also serves the v1 endpoint POST /document/field/create-many, so this is not v2-only. Third, only the required+readOnly TEXT case was actually observed, because the scenario aborts at the first mismatch; since no fieldMeta validation runs at all on this path, the other eight forbidden configurations in the scenario (read-only text with no default, read-only number with no default, read-only radio with no options, read-only checkbox with nothing checked, read-only dropdown with no default, dropdown default not in its options, number default above max, number default below min) will almost certainly be accepted too, but that is inference, not evidence. Side observation consistent with the colleague's finding #4: the created field comes back with positionX/positionY/width/height as JSON strings (\"5\", \"10\", \"20\", \"5\") though they were sent as numbers."
+}

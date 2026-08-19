@@ -1,0 +1,12 @@
+{
+  "step": 3,
+  "label": "ORIGINAL STEP 2: ASSISTANT on an envelope with no signing order set (expected 400)",
+  "at": "2026-08-19T19:15:50.164Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_wkflbkwyccsbuznu\",\"data\":[{\"email\":\"tcref-asst-d35cadec2f@documenso.test\",\"name\":\"TCRef Assistant\",\"role\":\"ASSISTANT\"}]}"
+}

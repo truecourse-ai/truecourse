@@ -1,0 +1,12 @@
+{
+  "step": 11,
+  "label": "NUMBER default below its minimum (expected 400)",
+  "at": "2026-08-19T19:16:54.347Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_urlxhxhbndxwvbvu\",\"data\":[{\"type\":\"NUMBER\",\"recipientId\":14,\"page\":1,\"positionX\":5,\"positionY\":90,\"width\":20,\"height\":5,\"fieldMeta\":{\"type\":\"number\",\"value\":\"1\",\"minValue\":10}}]}"
+}

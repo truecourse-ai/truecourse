@@ -1,0 +1,67 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-two-draft-and-publish-tools-the-docs-scope-to-the-publish-permission.api.1",
+  "flowId": "the-two-draft-and-publish-tools-the-docs-scope-to-the-publish-permission",
+  "failingStep": 5,
+  "whatFailed": "An admin token holding exactly plugin::content-manager.explorer.read and .publish on api::article.article is served publish_article and unpublish_article by MCP tools/list but not discard_article_draft, although the docs tool table lists `publish` as the permission required for discard_draft.",
+  "docClaim": {
+    "quote": "| `discard_draft` | Discard draft | `publish` | Discard draft changes and revert to the published version |",
+    "doc": "strapi/documentation: docusaurus/docs/cms/features/strapi-mcp-server.md (snapshot: .truecourse/specs/sources/docs.strapi.io/cms/features/strapi-mcp-server.md line 215, and the identical single-type row at line 226)",
+    "section": "Usage > Available tools > Content management tools"
+  },
+  "observed": "Step 4 (tools/list) returned 200 with unpublish_article present, so the token's publish grant was live. Step 5, an identical tools/list, returned 200 with exactly four tools: list_article, get_article, publish_article, unpublish_article. discard_article_draft was absent, along with create/update/delete, because the token holds no `update` permission. The MCP session enables a tool only when the ability satisfies the tool's declared auth policy (packages/core/core/src/services/mcp/internal/syncMcpSessionCapabilities.ts:28-52), so an unsatisfied policy removes the tool from the listing entirely, exactly as the docs' own 'Permission boundaries' section 1 describes.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Low direct harm but real friction: an operator following the tool table mints a read+publish token expecting the discard_draft tool and never sees it, with no error explaining why; the fix is one cell in each of two tables in the strapi/documentation repo.",
+  "rootCause": {
+    "file": "packages/core/content-manager/server/src/services/permission-checker.ts",
+    "lines": "6-14",
+    "explanation": "ACTIONS maps discard to 'plugin::content-manager.explorer.update' (line 13) while publish and unpublish both map to 'plugin::content-manager.explorer.publish' (lines 11-12). The MCP tool definitions consume that map directly: derive-content-type-mcp-tools.ts:296 gives discard_<slug>_draft the policy { action: ACTIONS.discard } for collection types and line 504 does the same for single types, while lines 287 and 495 give unpublish ACTIONS.unpublish, which is the publish action string. So there is no distinct 'unpublish' permission (the doc row for unpublish is right by accident of that aliasing) and there is no 'discard' permission at all: discard is an update. This is not MCP-specific. The admin REST routes for discard require plugin::content-manager.explorer.update (routes/admin.ts:187-196 for single types, 367-376 for collection types), the controllers gate on permissionChecker.cannot.discard() which resolves to the same update action (controllers/collection-types.ts:909-943), and the admin UI disables the Discard button on canUpdate (admin/src/pages/EditView/components/DocumentActions.tsx:1719-1729). The product is internally consistent; the documentation table's 'Permission required' cell for discard_draft is simply wrong and should read `update`."
+  },
+  "introducedBy": {
+    "commit": "a3b573cfd9b0 (strapi/documentation)",
+    "date": "2026-05-28",
+    "pr": "#3194",
+    "title": "Strapi MCP server for content management",
+    "note": "The wrong cell was born with the page: the commit that created docusaurus/docs/cms/features/strapi-mcp-server.md already contained '| `discard_draft` | Discard draft | `publish` |' in both the collection-type and single-type tables. The code it misdescribes is much older and unchanged: git blame in the tested worktree puts ACTIONS.discard = explorer.update at 4f4e3c3acd12, 2024-02-22, 'feat(cm): D&P pt2 (#19380)'; the MCP tool definitions that consume it are 9247b9b0936, 2026-05-27, 'feat(*): introduce MCP server (#26371)'. So: old, deliberate code; new, wrong doc."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3194,
+        "url": "https://github.com/strapi/documentation/pull/3194",
+        "state": "merged",
+        "title": "Strapi MCP server for content management",
+        "relation": "related",
+        "note": "The PR that introduced the incorrect permission cell (merged 2026-05-28). Not a fix, it is the origin."
+      },
+      {
+        "number": 26371,
+        "url": "https://github.com/strapi/strapi/pull/26371",
+        "state": "merged",
+        "title": "feat(*): introduce MCP server",
+        "relation": "related",
+        "note": "Wired discard_<slug>_draft to ACTIONS.discard (the update action). Correct behavior, listed only to identify the code the doc describes."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi --repo strapi/documentation \"discard_draft\" --include-prs (1 hit, strapi/strapi #26444 MCP telemetry, unrelated)",
+      "gh search issues --repo strapi/documentation \"mcp permission\" --include-prs (0 hits)",
+      "gh search issues --repo strapi/documentation \"mcp\" --include-prs --limit 25 (24 hits, all MCP feature/plugin-API docs work, none about the tool permission table)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Two checks. Code side: git log c43e9ee1e2..develop on packages/core/content-manager/server/src/services/permission-checker.ts and packages/core/content-manager/server/src/mcp/derive-content-type-mcp-tools.ts is empty as of develop @ acf0ce20345e (2026-08-14), so the mapping is unchanged and nothing needs to change there. Doc side: repos/strapi/documentation/contents/docusaurus/docs/cms/features/strapi-mcp-server.md on the default branch (blob 022282379d55, read 2026-08-15) still carries '| `discard_draft` | Discard draft | `publish` |' at lines 233 and 244. The file's whole commit history is four commits (latest 7540427522ad, 2026-06-24, #3263) and none touched the permission column. Still wrong upstream."
+  },
+  "colleagueFinding": {
+    "ref": "strapi #8",
+    "agreement": "refines",
+    "note": "Maps to the second half of their finding 8, the piece they label 8b ('documented tool names and permission requirements do not match the product', code mapping correct and old, PR #19380, 2024, wrong text in strapi/documentation). Their blame is right: I confirm 4f4e3c3acd12, 2024-02-22, 'feat(cm): D&P pt2 (#19380)' for ACTIONS.discard = explorer.update. Refinements: (a) the doc-side origin is strapi/documentation PR #3194, commit a3b573cfd9b0, 2026-05-28, which created the page with the bad cell already in it; (b) the same wrong cell appears twice, in the collection-type table and the single-type table, so a fix must touch both rows; (c) their 'unreported' claim holds, three searches found no issue or PR about it; (d) the exact repair is `update`, not `publish`, and it is corroborated by three independent code paths (MCP tool policy, admin REST route policy, admin UI canUpdate gate), not just the ACTIONS map; (e) finding 8's other half, the admin-token key readback, belongs to a different scenario and is not evidenced here. Note their finding-8 headline also mentions 'documented tool names' not matching; this scenario shows the opposite for names, the served names list_article, get_article, publish_article, unpublish_article match the documented <tool>_<slug> pattern, and discard's absence is a permission effect, not a naming one."
+  },
+  "notes": "For the doc author, the minimal correct patch to docusaurus/docs/cms/features/strapi-mcp-server.md is to change the 'Permission required' cell for discard_draft from `publish` to `update` in both tables (currently lines 233 and 244 on main), optionally with a sentence noting that discarding a draft is an update on the draft, which is why the admin panel's Discard button is likewise gated on update. Worth flagging alongside it: the table implies each row has its own permission, but unpublish has no permission of its own, ACTIONS.unpublish is literally the same string as ACTIONS.publish, so a token with `publish` always gets both publish and unpublish tools and there is no way to grant one without the other. The scenario itself is well formed and its own note predicted this outcome and called it doc drift; the step is a deliberate red that documents the drift, so no test change is warranted until the docs are corrected. Evidence is unambiguous: step 4 and step 5 are byte-identical tools/list calls one after the other, so the difference between unpublish_article being present and discard_article_draft being absent cannot be timing, caching or setup, it is the permission mapping."
+}

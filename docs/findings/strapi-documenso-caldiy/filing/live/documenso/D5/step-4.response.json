@@ -1,0 +1,43 @@
+{
+  "step": 4,
+  "label": "readOnly TEXT with no default text (expected 400)",
+  "at": "2026-08-19T19:16:54.266Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "363",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:54 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "980",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "45e94eca-9a7c-4cc8-b859-6a4e3f2f6653"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_urlxhxhbndxwvbvu",
+        "envelopeItemId": "envelope_item_mtahtmyhhvvlchci",
+        "type": "TEXT",
+        "id": 13,
+        "secondaryId": "cmt0h3hpz004choeo4x28hm9s",
+        "recipientId": 14,
+        "page": 1,
+        "positionX": "5",
+        "positionY": "20",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "readOnly": true,
+          "type": "text"
+        },
+        "documentId": 10,
+        "templateId": null
+      }
+    ]
+  }
+}

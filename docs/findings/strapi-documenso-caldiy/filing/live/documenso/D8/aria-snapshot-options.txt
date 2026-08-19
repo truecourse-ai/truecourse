@@ -1,0 +1,7 @@
+- listbox:
+  - option "7 days"
+  - option "1 month"
+  - option "3 months" [selected]
+  - option "6 months"
+  - option "12 months"
+  - option "Never"

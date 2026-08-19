@@ -1,0 +1,70 @@
+{
+  "id": "S5",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/content-manager/server/src/mcp/schemas/filters-schema.ts#L84-L92",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/content-manager/server/src/mcp/schemas/filters-schema.ts#L84-L92",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for filters-schema.ts. On origin/develop, attributeTypeToFilterValue is still at line 9 and the operator map is still 'Object.fromEntries(FILTER_OPERATORS.map((op) => [op, valueSchema.optional()]))' at line 88, fed by 'const valueSchema = attributeTypeToFilterValue(attr)' at line 86. So $null and $notNull still inherit the field's value type instead of z.boolean(). Same line numbers as the tested build (file byte-identical)."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 27395,
+        "url": "https://github.com/strapi/strapi/issues/27395",
+        "state": "open",
+        "title": "MCP `tools/list` advertises draft-07 JSON Schema, making all tools uncallable from strict 2020-12 clients",
+        "createdAt": "2026-08-17",
+        "relation": "related",
+        "note": "New since the review. A different MCP schema defect (dialect of the advertised tool schemas), not this one. Useful precedent: labelled severity: high and status: confirmed within a day, which shows maintainers accept MCP contract bugs as public issues."
+      },
+      {
+        "number": 27115,
+        "url": "https://github.com/strapi/strapi/pull/27115",
+        "state": "open",
+        "title": "fix(content-manager): align MCP draft write schemas with admin draft leniency",
+        "createdAt": "2026-07-23",
+        "relation": "related",
+        "note": "Open PR, base develop, last pushed 2026-08-18. It edits the same file data-schema.ts but only the scalar/component required-field projection; gh pr diff shows no hunk covering the to-many relation object (no occurrence of 'Mutually exclusive'), so it changes nothing here."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#26990",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "develop",
+        "note": "Still open, not merged, base develop, head feat/mcp-read-populate-depth, 11 commits / 17 files. Updated 2026-08-18 (after the review's 2026-08-15 snapshot), no new comments since 2026-08-15. I re-read the current diff: it does NOT fix any finding here (details in the per-finding reevaluation)."
+      },
+      {
+        "ref": "strapi/strapi#27357",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-08-14",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "MCP tool-name dedupe. Merged 2026-08-14, in v5.52.1. Unrelated to these findings; the issue it closes is #27353."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi mcp --include-prs --limit 60 --updated \">2026-08-10\"",
+      "gh search issues --repo strapi/strapi \"notNull filter operator\" --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "reevaluation": "Stands unchanged, and I re-confirmed the review's most consequential claim about PR #26990 against the PR's current diff (it was pushed again on 2026-08-18, after the review). The PR does refactor the per-field builder into a new helper buildScalarFieldFilter, and that helper still contains the faulty line verbatim: 'const valueSchema = attributeTypeToFilterValue(attr)' followed by 'Object.fromEntries(FILTER_OPERATORS.map((op) => [op, valueSchema.optional()]))'. So merging #26990 would carry $null/$notNull forward broken, exactly as the review said, and would also extend the same bug to nested component fields. Nothing new was filed. The one genuinely new neighbour is issue #27395 (2026-08-17, open, severity: high, status: confirmed), a different MCP tool-schema defect; it is not a duplicate but it establishes that this class of report is accepted and triaged quickly.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "high",
+  "notes": "Worth a short comment on PR #26990 as well as the issue, since that PR relocates the exact faulty line into buildScalarFieldFilter and its author can fix it in place. Scope for the report: broken on every scalar attribute type except boolean, not just on string fields (integer/decimal fields get number | number[] and reject true the same way); accepted only where valueSchema is z.boolean(). Two claims in the review are code-path readings with no evidence file behind them, so mark them as such or drop them: that {\"$null\": \"true\"} works via parseType's TRUTHY_INPUTS, and that {\"$null\": null} force-casts to false and silently runs whereNotNull (the inverse of the request). The second is the more damaging of the pair and is worth reproducing before it goes in a bug report."
+}

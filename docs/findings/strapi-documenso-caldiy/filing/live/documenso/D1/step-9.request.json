@@ -1,0 +1,12 @@
+{
+  "step": 9,
+  "label": "STEP9 delete the recipient on the PENDING envelope (expected 400)",
+  "at": "2026-08-19T19:15:07.327Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/delete",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"recipientId\":4}"
+}

@@ -1,0 +1,72 @@
+{
+  "id": "D8",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/apps/remix/app/components/dialogs/token-create-dialog.tsx#L203-L231",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/remix/app/components/dialogs/token-create-dialog.tsx#L203-L231",
+    "howDecided": "git log 3cf2963cd0..origin/main returns zero commits for apps/remix/app/components/dialogs/token-create-dialog.tsx, and the blob is byte-identical between v2.16.0 and v2.17.0. I also checked the two shared primitives the root cause depends on, packages/ui/primitives/form/form.tsx and packages/ui/primitives/select.tsx: both are byte-identical too, which matters because #3107 'feat: migrate to react 19' (779de01fe, 2026-08-17) landed in this window and could plausibly have rewritten the Slot behavior; it did not touch either file. Read the field at origin/main: lines 208-210 still render <FormLabel><Trans>Expires in</Trans></FormLabel>, line 212 still opens <FormControl> whose single child at line 213 is <Select>, a SelectPrimitive.Root, and line 214's <SelectTrigger className=\"bg-background\"> still carries no aria-label or aria-labelledby. So FormControl's Slot still hands id={formItemId} to a non-DOM provider component, the label's htmlFor still dangles, and the role=combobox trigger still has no accessible name. The doc side is also unchanged in substance: apps/docs/content/docs/developers/getting-started/authentication.mdx was touched by #3022 'chore: deprecate endpoints' (26f0c4c5b, 2026-07-23) but the sentence survives verbatim, now at line 51: '- Select an expiration period: never expires, 7 days, 1 month, 3 months, 6 months, or 1 year', while EXPIRATION_DATES in the dialog still labels the longest period '12 months'."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 3230,
+        "url": "https://github.com/documenso/documenso/pull/3230",
+        "state": "open",
+        "title": "feat: last used column for api tokens",
+        "createdAt": "2026-08-18",
+        "relation": "related",
+        "note": "One of two competing open PRs (with #3253, closed) adding a last-used column to the API tokens settings page that this dialog belongs to. It does not touch the expiry field, but it means the tokens page is under active edit and a fix here may collide."
+      },
+      {
+        "number": 3201,
+        "url": "https://github.com/documenso/documenso/issues/3201",
+        "state": "open",
+        "title": "Multiselect remove/clear buttons lack type=\"button\" and submit the surrounding form",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "The only markup-semantics issue in the recent batch. Different defect (form submission, not accessible naming) on a different primitive, but it is evidence that shared-primitive markup bugs are accepted as issues here."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3076",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-07-15T03:42:13Z",
+        "mergeCommit": "3ff7f70a7d",
+        "baseRef": "main",
+        "note": "Unchanged. The redesign that re-authored this dialog and carried the unnamed select trigger and the '12 months' label forward."
+      },
+      {
+        "ref": "documenso/documenso#2349",
+        "kind": "pr",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: closed unmerged 2026-05-31. Touched the same field's validation, never its accessible name."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"accessibility\" --limit 25 (25 results; not one concerns an accessible name, aria-label or an unlabeled control. The nearest is #3201 \"Multiselect remove/clear buttons lack type='button' and submit the surrounding form\", a form-semantics bug, not a naming one. Confirms the review's \"unreported\".)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged, and one plausible way it could have been fixed incidentally has been ruled out: the react 19 migration (#3107) landed in this window and did not touch form.tsx, select.tsx or the dialog, all three of which are byte-identical to the tested tree. So v2.17.0 ships the unnamed combobox exactly as reviewed. The docs sentence survived a commit to its file (#3022) and still reads '1 year' while the UI still says '12 months'. No upstream report exists: an 'accessibility' search over the whole tracker returns 25 results with not one about an accessible name or aria-label, matching the review's 'unreported'. The review's own framing caveat must survive into the filing and is the main thing a filer can get wrong: the observed failure is an accessibility defect, NOT a violation of the bound doc sentence, because the scenario never reached the six options; the '12 months' versus '1 year' wording mismatch is real but was never exercised.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: 'Issues are now the primary way to contribute' and, from #3026, 'Most new PRs will be closed with a request to open an issue instead.' The fix is a one-line markup change and the temptation to send a PR is strong; the policy forbids it.",
+  "confidence": "high",
+  "notes": "This is really two reports in one and the filer should keep them separate inside a single issue, or split them. (a) Accessibility: the expiry chooser has no accessible name because FormControl's Radix Slot applies id={formItemId} to <Select>, which is SelectPrimitive.Root, a non-DOM provider, so the label's htmlFor dangles, and role=combobox is not a name-from-content role so the value text '3 months' does not name it either. The Name field in the SAME dialog proves the Slot works when the child is a real DOM element, which is the cleanest possible demonstration for a maintainer. Quantify it as the review did: 46 FormControl-wrapping-Select sites and 1 aria-label across 84 SelectTriggers. The shadcn-convention fix is to move FormControl to wrap SelectTrigger instead of Select. (b) Wording: the UI labels the longest period '12 months', the doc says '1 year'; the durations are identical (ONE_YEAR resolves to Duration.fromObject({ years: 1 })), so this is a one-word fix on whichever side the maintainers prefer, and the docs live in this same repo under apps/docs/. Because (b) is a documentation matter, mention 'documentation' and the apps/docs path in the body so a triager can apply the type: documentation label; there is no docs-specific issue template."
+}

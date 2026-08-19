@@ -1,0 +1,12 @@
+{
+  "step": 10,
+  "label": "mint envelope from source template",
+  "at": "2026-08-19T19:16:32.579Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/use",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "multipart/form-data; boundary=tcguard"
+  },
+  "body": "--tcguard\r\nContent-Disposition: form-data; name=\"payload\"\r\n\r\n{\"envelopeId\":\"envelope_nyfhhtxiowvdfahc\",\"externalId\":\"tcref-reject2-9c11313f6e\"}\r\n--tcguard--\r\n"
+}

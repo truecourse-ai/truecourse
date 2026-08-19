@@ -1,0 +1,11 @@
+{
+  "step": 1,
+  "label": "a list response: the pagination keys",
+  "at": "2026-08-19T19:17:28.410Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

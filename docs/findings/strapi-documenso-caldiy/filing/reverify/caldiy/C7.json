@@ -1,0 +1,40 @@
+{
+  "id": "C7",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/packages/trpc/server/routers/viewer/slots/util.ts#L104-L140",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/packages/trpc/server/routers/viewer/slots/util.ts#L104-L140",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. At head the cache is unchanged: DEFAULT_SLOTS_CACHE_TTL = 2000 at line 79, withSlotsCache keyed on nothing but `${JSON.stringify(args.input)}` at line 109 with `parseInt(process.env.SLOTS_CACHE_TTL ?? \"\", 10) || DEFAULT_SLOTS_CACHE_TTL` at line 134, and getAvailableSlots still wraps _getAvailableSlots in it at lines 889-894. apps/api/v2/src/modules/slots/ is untouched, so the reservation write path still has no Redis dependency and clears no key."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#22787",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2025-08-05T17:32:02Z",
+        "mergeCommit": "b71d8baccc44",
+        "baseRef": "main",
+        "note": "\"chore: Implement short-lived redis cache for slots\", the culprit change (the review's introducedBy). Last updated 2025-12-16, no activity since. Not a report of the symptom."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 30 'reserve slot cache stale'  (0 results)",
+      "gh search issues --owner calcom --include-prs --limit 30 'SLOTS_CACHE_TTL'  (2 hits, the same two unrelated env-file PRs the review found: cal.diy#23251 merged, cal.diy#24028 merged)"
+    ]
+  },
+  "reevaluation": "Stands unchanged, high confidence. withSlotsCache is byte-identical at head and still uncoupled from the reservation write path, so for up to SLOTS_CACHE_TTL (2000 ms default) after a successful POST /v2/slots/reservations the next GET /v2/slots with the same query input still offers the held slot, and symmetrically a released hold stays hidden for the same window. Nothing new in the tracker; the org-wide slots sweep for items updated since 2026-08-01 also turned up nothing about the cache. Two scope points the review already established and re-check does not disturb: the harm is bounded, because a second reservation POST for the same slot is still refused with 422 (the reserve path reads the database directly), so this is a wrong slot grid rather than a double booking; and the cache cannot be switched off in a real deployment, since the v2 API halts without REDIS_URL. The secondary observation is worth filing alongside and is arguably worse: the key omits the request context entirely while _getAvailableSlots personalises the result by ctx.req.cookies.uid, so on the trpc/web path one booker's payload (which deliberately still shows that booker's own hold) can be served to a different booker inside the TTL.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/config.yml sets `blank_issues_enabled: false`, so a bug must go through bug_report.md (Issue Summary / Steps to Reproduce / Actual Results / Expected Results / Technical details / Evidence, the last called \"quite mandatory in terms of bugs\"); CONTRIBUTING.md: \"For bugs, security, performance, documentation, etc., you can start coding immediately, even if the `needs approval` label is present\", so no discussion-first gate applies.",
+  "confidence": "high",
+  "notes": "Reproduction is two GET /v2/slots calls with identical query input inside 2 s straddling a POST /v2/slots/reservations; the second returns the pre-reservation body. Include the point that upstream's own e2e already encodes the contract this violates (apps/api/v2/.../e2e/user-event-type-slots.controller.e2e-spec.ts:431 \"should reserve a slot and it should not appear in available slots\" reserves and re-reads with no wait) and only passes because the preceding queries in that suite are older than the TTL or use different params, which makes the coverage timing-dependent. Fix options to offer: delete the cache keys touched by a reservation write, or fold the reservation state and the caller identity into the key. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

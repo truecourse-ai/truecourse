@@ -1,0 +1,75 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "list-the-slots-of-a-team-or-organization-event-type.api.1",
+  "flowId": "list-the-slots-of-a-team-or-organization-event-type",
+  "failingStep": 3,
+  "whatFailed": "GET /v2/slots in the documented team-inside-an-organization form (eventTypeSlug + teamSlug + organizationSlug, cal-api-version 2024-09-04) returned 404 \"Team with slug reference-org-team not found\" instead of 200 with slots, because Cal.diy's enterprise-removal commit deleted the organizationSlug branch of the slots team lookup and left only findTeamBySlug, whose Prisma query hard-excludes every team that belongs to an organization (parentId: null, isOrganization: false).",
+  "docClaim": {
+    "quote": "And 3 ways to get available slots for team event type: ... 3. By team event type slug + team slug + organization slug when searching within an organization. Example '/v2/slots?organizationSlug=org-slug&eventTypeSlug=intro&teamSlug=team-slug&start=2050-09-05&end=2050-09-06'. The bound OpenAPI section repeats it as a parameter: \"name: organizationSlug, required: false, in: query, description: The slug of the organization to which user with username belongs or team with teamSlug belongs.\"",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type.md",
+    "section": "get-available-time-slots-for-an-event-type (prose list, line 27) and get-available-time-slots-for-an-event-type/openapi (parameter block, lines 141-146)"
+  },
+  "observed": "Steps 1 and 2 of the same scenario, on the same cal-api-version 2024-09-04, both returned 200 with eight slots for the standalone team event type: step 1 by eventTypeId=124, step 2 by eventTypeSlug=reference-team-consult + teamSlug=reference-team. Step 3 added the organization arm (eventTypeSlug=reference-org-team-consult, teamSlug=reference-org-team, organizationSlug=reference-org) and got HTTP 404 in 61 ms with body {\"status\":\"error\",...,\"error\":{\"code\":\"NotFoundException\",\"message\":\"Team with slug reference-org-team not found\",\"details\":{\"message\":\"Team with slug reference-org-team not found\",\"error\":\"Not Found\",\"statusCode\":404}}}. The 404 is thrown before any organization lookup happens: organizationSlug is never read on this code path. server.stderr.txt is empty and server.stdout.txt shows no exception, so this is a deliberate NotFoundException, not a crash.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "A self-hoster following cal.com/docs cannot fetch slots for any team that sits inside an organization: Cal.diy still advertises and accepts the organizationSlug query parameter on this route, then ignores it and answers 404 \"Team with slug X not found\", so the caller reads a missing-team error where the truth is \"organizations were removed from this edition\". No data loss and no information disclosure; the individual-user organization form (documented way 3 for user event types, step 4 of this scenario) is stripped the same way.",
+  "rootCause": {
+    "file": "apps/api/v2/src/modules/slots/slots-2024-09-04/services/slots-input.service.ts",
+    "lines": "107-124 (with apps/api/v2/src/modules/teams/teams/teams.repository.ts:117-125)",
+    "explanation": "getEventType() dispatches the byTeamSlugAndEventTypeSlug variant to getEventTypeTeam(), which in the tested tree is a single line: `return await this.teamsRepository.findTeamBySlug(input.teamSlug)`. input.organizationSlug is never consulted. findTeamBySlug is `prisma.team.findFirst({ where: { slug, isOrganization: false, parentId: null } })`, so by construction it can only match a top-level, non-organization team; a team that belongs to an organization has parentId set to the organization's id and is therefore unreachable, whatever organizationSlug the caller sends. The null result makes getEventType throw `new NotFoundException(\"Team with slug ${input.teamSlug} not found\")` at line 110, which is the observed body verbatim. The same removal hit the user arm: getEventTypeUser() at lines 118-120 is now only `usersRepository.findByUsername(input.username)`. organizationSlug does survive one hop, at line 61 it is copied into the internal query as orgSlug, but that happens after the event type has already been resolved or 404'd, so it cannot rescue this form. For contrast, the original implementation (PR #20554) branched on organizationSlug: it resolved the org via OrganizationsRepository.findOrgBySlug and then called OrganizationsTeamsRepository.findOrgTeamBySlug(organization.id, teamSlug), a findUnique on the slug_parentId composite key, which is exactly the query the documented form needs. That repository file no longer exists in the tested tree: apps/api/v2/src/modules/organizations/ now contains only organizations.module.ts and index/organizations.repository.ts, the teams and users subtrees are gone, and packages/features/ee/ does not exist at all. OrganizationsRepository.findOrgBySlug still exists (organizations.repository.ts:131) but is no longer injected into SlotsInputService_2024_09_04's constructor."
+  },
+  "introducedBy": {
+    "commit": "ab21c7f805a089fa3a11ffd61c4a9aecc349c16c",
+    "date": "2026-04-15",
+    "pr": "#28903",
+    "title": "refactor: Cal.diy",
+    "note": "The squashed fork commit (\"Remove Enterprise Edition (EE) features...\", 4080 files changed, 411881 deletions, merged 2026-04-15T12:52:36Z, https://github.com/calcom/cal.diy/pull/28903). git log -S findOrgTeamBySlug on slots-input.service.ts returns exactly two commits: this one, which deleted the org branches of getEventTypeTeam and getEventTypeUser and dropped OrganizationsRepository, OrganizationsTeamsRepository and OrganizationsUsersRepository from the constructor, and 7ef10509469b6a01228cc7012b34c90f28e062a8 (2025-04-16, PR #20554, \"feat: v2 get slots using teamSlug + eventTypeSlug + optional organizationSlug\") which added the whole feature. The surviving findTeamBySlug, with its isOrganization: false + parentId: null filter, also comes from #20554, where it was only ever the no-organizationSlug branch; after #28903 it is the only branch, which is what turns a missing feature into a misleading 404. So: the excluding query is old and correct in its original role, the bug is the interaction with the newer removal."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 20554,
+        "url": "https://github.com/calcom/cal.diy/pull/20554",
+        "state": "merged",
+        "title": "feat: v2 get slots using teamSlug + eventTypeSlug + optional organizationSlug",
+        "relation": "related",
+        "note": "Merged 2025-04-16. The PR that introduced the documented form, the organizationSlug parameter, the org-aware getEventTypeTeam branch, OrganizationsTeamsRepository.findOrgTeamBySlug, the e2e spec org-team-event-type-slots.controller.e2e-spec.ts, and the docs text the scenario binds to. Reading its diff is the proof that the documented behavior was once implemented and is what the tested tree is missing. Note that calcom/cal.com issues and PRs now resolve under calcom/cal.diy, the repo was renamed, so old cal.com numbers appear on the cal.diy tracker."
+      },
+      {
+        "number": 28903,
+        "url": "https://github.com/calcom/cal.diy/pull/28903",
+        "state": "merged",
+        "title": "refactor: Cal.diy",
+        "relation": "exact",
+        "note": "Merged 2026-04-15T12:52:36Z, merge commit ab21c7f805. The removal itself. Not a bug report, it is the change that produced this behavior; there is no issue tracking the leftover organizationSlug parameter."
+      },
+      {
+        "number": 27175,
+        "url": "https://github.com/calcom/cal.diy/pull/27175",
+        "state": "merged",
+        "title": "fix: add type property to @ApiQuery decorators in slots controller",
+        "relation": "related",
+        "note": "Only shows that the slots controller's advertised query surface, organizationSlug included, is actively maintained as a public contract, which makes the post-fork orphaning of the parameter more clearly an oversight than a decision."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"organizationSlug\" --include-prs --limit 30 (14 hits, none about the team-in-organization slots form being unsupported)",
+      "gh search issues --owner calcom \"Team with slug not found\" --include-prs --limit 20 (0 hits)",
+      "gh search issues --owner calcom \"organizations removed fork\" --include-prs --created \">2026-04-01\" --limit 25 (0 hits)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main between the tested commit 038381aeca (2026-07-31) and the fetched head 176037d0af (2026-08-08), and git log 038381aeca..origin/main touches none of the three culprit files (slots-input.service.ts, teams.repository.ts, get-slots.input.ts). The 404 reproduces on current main. in cal.com: not verifiable from source. The public calcom/cal.com main is the content-identical mirror of cal.diy main (same commit 176037d0af), the commercial tree is private, and the three searches above found no public issue, PR or changelog entry about this form, so nothing settles whether hosted Cal.com still honors organizationSlug here. The published cal.com docs still document it, which is weak evidence that it works there."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "This failure maps to none of the five findings in docs/guard-findings.md. Finding #2 (\"Group availability comes back with no length\") is a different flow: it is the sibling scenario list-the-slots-two-people-share.api.1, which binds the SAME doc page but takes the byUsernames dynamic path (GET /v2/slots?usernames=reference-org-member,reference-org-member-2&organizationSlug=reference-org&format=range) and fails at step 1 with a 200 whose every slot has start == end. My failure is a 404 on the byTeamSlugAndEventTypeSlug + organizationSlug path, a different branch of getEventType, and the two have no shared root cause: #2 is an output-shape bug in the range formatter, this is a deleted lookup branch. Worth flagging to whoever reviews #2: its request also carries organizationSlug and, per this same removal, that parameter is likewise not used to scope the username resolution, so #2's slots may not be the organization members the scenario intended."
+  },
+  "notes": "Five things a maintainer or doc author should take away. First, this is NOT the run's systemic API-version cause. The scenario sent cal-api-version: 2024-09-04, which IS in Cal.diy's supported list (packages/platform/constants/api.ts declares API_VERSIONS = 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04), and steps 1 and 2 returned 200 on that very version. There is no silent downgrade here; the form is simply unimplemented. Second, the residual uncertainty and what would settle it: the run's Postgres is gone (docker daemon not running) and reference/seed/guard-seed.mjs is no longer on disk, so I could not confirm that a Team row with slug reference-org-team actually exists. The verdict does not depend on it: findTeamBySlug requires parentId: null, so no team belonging to an organization is reachable by this route whatever the seed wrote, and the fact that the sibling standalone team (reference-team, step 2) resolved fine while the org team did not is exactly the parentId split. What would settle the row's existence: SELECT id, slug, \"parentId\", \"isOrganization\" FROM \"Team\" WHERE slug IN ('reference-org','reference-org-team','reference-team') against the run's database. guard/setup.json records the seed as status ok with fixtures org, org-team, org-team-event-type, org-member and org-member-event-type all emitted, and the recipe declares an org-admin-api-key credential (\"the owner of the organization the reference host belongs to\"), so the seed believed it created the organization; it talks to Postgres directly rather than through the app, which is how it could create org rows in an edition whose org endpoints are gone. Third, a genuine Cal.diy-side contract wart that deserves its own issue and is independent of the edition split: organizationSlug survived the removal in the public input DTOs (packages/platform/types/slots/slots-2024-09-04/inputs/get-slots.input.ts lines 159, 192 and 226), complete with its @ApiProperty descriptions, so the fork's own runtime-generated Swagger at /docs (apps/api/v2/src/swagger/generate-swagger.ts) still advertises a parameter no code reads. On the ByUsernames variant at line 226 it is worse than cosmetic: it is @IsString() and REQUIRED, so a dynamic-slots caller is forced to supply an organization slug that is then discarded. Either wire the parameter back to OrganizationsRepository.findOrgBySlug, which still exists, or delete it from the DTOs and reject it, but do not keep accepting it silently. Fourth, step 4 of this scenario (eventTypeSlug + username + organizationSlug, documented way 3 for individual users) was never reached and would have hit the identical removal in getEventTypeUser; if it returns 200 it will be by accident, matching a globally-unique username rather than an organization-scoped one. Fifth, for the guard corpus: the milestones slots-team-by-slug-team-slug-and-org, slots-organization-slug-optional and slots-by-slug-username-and-org are unprovable against Cal.diy and should be dropped or marked edition-gated; the remaining milestones in this flow (team by id, team by slug pair, the managed-parent prohibition and the managed-child fetch) are still meaningful, and the first two passed."
+}

@@ -1,0 +1,79 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:1347/admin/admin-tokens",
+    "headers": {
+      "Authorization": "Bearer eyJhbGc...<redacted>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "name": "tcref-mcp-restart-mt0g3yf8",
+      "description": "TrueCourse live re-verification - S1",
+      "lifespan": null,
+      "adminPermissions": [
+        {
+          "action": "plugin::content-manager.explorer.read",
+          "subject": "api::article.article"
+        }
+      ]
+    }
+  },
+  "status": 201,
+  "headers": {
+    "access-control-allow-credentials": "true",
+    "access-control-allow-origin": "",
+    "connection": "keep-alive",
+    "content-length": "996",
+    "content-security-policy": "frame-src 'self';script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;connect-src 'self' https:;img-src 'self' data: blob: https://market-assets.strapi.io;media-src 'self' data: blob:;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Wed, 19 Aug 2026 18:49:16 GMT",
+    "keep-alive": "timeout=5",
+    "referrer-policy": "no-referrer",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "vary": "Origin",
+    "x-content-type-options": "nosniff",
+    "x-dns-prefetch-control": "off",
+    "x-download-options": "noopen",
+    "x-frame-options": "SAMEORIGIN",
+    "x-permitted-cross-domain-policies": "none",
+    "x-powered-by": "Strapi <strapi.io>"
+  },
+  "text": "{\"data\":{\"id\":5,\"kind\":\"admin\",\"name\":\"tcref-mcp-restart-mt0g3yf8\",\"description\":\"TrueCourse live re-verification - S1\",\"lastUsedAt\":null,\"type\":\"read-only\",\"lifespan\":null,\"expiresAt\":null,\"createdAt\":\"2026-08-19T18:49:16.327Z\",\"updatedAt\":\"2026-08-19T18:49:16.327Z\",\"adminPermissions\":[{\"id\":364,\"documentId\":\"thjday34nbyyodq8v8edot4y\",\"action\":\"plugin::content-manager.explorer.read\",\"actionParameters\":{},\"subject\":\"api::article.article\",\"properties\":{},\"conditions\":[],\"createdAt\":\"2026-08-19T18:49:16.331Z\",\"updatedAt\":\"2026-08-19T18:49:16.331Z\",\"publishedAt\":\"2026-08-19T18:49:16.331Z\",\"locale\":null}],\"adminUserOwner\":{\"id\":1,\"firstname\":\"TC\",\"lastname\":\"Reverify\",\"username\":null,\"email\":\"tc-reverify@example.com\"},\"accessKey\":\"6cfde791...6c6469-REDACTED-len256\"}}",
+  "json": {
+    "data": {
+      "id": 5,
+      "kind": "admin",
+      "name": "tcref-mcp-restart-mt0g3yf8",
+      "description": "TrueCourse live re-verification - S1",
+      "lastUsedAt": null,
+      "type": "read-only",
+      "lifespan": null,
+      "expiresAt": null,
+      "createdAt": "2026-08-19T18:49:16.327Z",
+      "updatedAt": "2026-08-19T18:49:16.327Z",
+      "adminPermissions": [
+        {
+          "id": 364,
+          "documentId": "thjday34nbyyodq8v8edot4y",
+          "action": "plugin::content-manager.explorer.read",
+          "actionParameters": {},
+          "subject": "api::article.article",
+          "properties": {},
+          "conditions": [],
+          "createdAt": "2026-08-19T18:49:16.331Z",
+          "updatedAt": "2026-08-19T18:49:16.331Z",
+          "publishedAt": "2026-08-19T18:49:16.331Z",
+          "locale": null
+        }
+      ],
+      "adminUserOwner": {
+        "id": 1,
+        "firstname": "TC",
+        "lastname": "Reverify",
+        "username": null,
+        "email": "tc-reverify@example.com"
+      },
+      "accessKey": "6cfde791...6c6469-REDACTED-len256"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-booker-at-their-active-booking-limit-is-refused.web.1",
+  "flowId": "a-booker-at-their-active-booking-limit-is-refused",
+  "failingStep": 1,
+  "whatFailed": "The scenario's very first precondition step gave up after its 10 second budget because the public booking page /reference-host/limit-one was still in its loading state (every day cell rendered as an unnamed disabled skeleton button), so no button named \"15\" existed yet and the documented booker active booking limit was never exercised.",
+  "docClaim": {
+    "quote": "The **Booker Active Booking Limit** lets you control how many active (upcoming) bookings a person can have at the same time for a specific link. Once a booker reaches the limit, they won't be able to schedule another event through this link until one of their existing bookings is either **completed** or **canceled**.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/booker-active-booking-limit.md",
+    "section": "booker-active-booking-limit/overview (plus booker-active-booking-limit/notes: \"Canceled and past events don't count toward the limit\", \"The setting affects the booker, not the host or team members\")"
+  },
+  "observed": "Playwright navigated to /reference-host/limit-one; the Booker's own empty-month logic advanced the browsing month, so the address settled at /reference-host/limit-one?month=2026-09. At the 10 second deadline the September grid was still the loading branch: step-1.png shows the September 2026 header and the weekday row over 30 blank grey placeholder cells, and the right-hand slot column as three grey bars. The visible-text dump ends at \"SUN\" with no day numbers, and the driver's role inventory reported no button carrying any text (the skeleton day cells ARE <button disabled> elements, but they contain a SkeletonText div and therefore have no accessible name). The console carried only warnings (markdownToSafeHTML on the client, a zustand deprecation, react-i18next not initialised, QuickAvailabilityCheck disabled), no errors, and the captured web-server stdout/stderr are empty. Steps 2 onward never ran.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "None to users, and no product signal: the run's step budget expired during a host-load window, so nothing about the booker active booking limit was measured. The cost is a false failure that hides whether the documented cap works.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 24317,
+        "url": "https://github.com/calcom/cal.diy/issues/24317",
+        "state": "closed",
+        "title": "Rescheduling with booker active booking limit not working",
+        "relation": "related",
+        "note": "Same feature area, different behavior (the 'offer to reschedule' variant, which the sibling scenario the-active-booking-limit-offers-a-reschedule-instead-of-refusing.web.1 covers). Nothing to do with this timeout."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner=calcom \"booking page stuck loading slots\" --include-prs (0 results)",
+      "gh search issues --owner=calcom \"booker active booking limit\" --include-prs (8 results, all feature-level, none matching the symptom)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable: there is no product defect to fix. For completeness, in cal.diy: only 4 commits landed between the tested 038381aeca and origin/main (176037d0af, 2026-08-08) and none touch apps/web/modules/bookings/components/DatePicker.tsx, packages/features/calendars/components/DatePicker.tsx or packages/features/bookings/lib/handleNewBooking/checkActiveBookingsLimitForBooker.ts. In cal.com: origin/main is at the same commit 176037d0af and has no changes to either DatePicker since 2026-07-31, so the loading behavior is byte-identical in both repos."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available at review time."
+  },
+  "notes": "Why environment and not a product defect. (1) The state on screen is exactly the product's documented loading branch: packages/features/calendars/components/DatePicker.tsx:317-330 renders each day of the month as <button disabled><SkeletonText/></button> while props.isLoading, which is precisely what step-1.png shows, so the page was mid-fetch, not broken. (2) The slot computation itself is fast on this instance: the API v2 slots calls in the same run answered in 139 ms and 539 ms. (3) The failure sits inside a run-start pressure window. The run began at 10:49:00.307Z and this scenario's evidence was written 46 seconds later; 17 web scenarios finished between 10:49:31 and 10:49:51, i.e. the guard runner's default concurrency (min(cpus, 8) browser sandboxes, plus up to 3 resident NestJS API servers at 1.5-2.5 GB each) was saturating the host against one cold `next start` process. In that first wave EVERY booking page was slow regardless of what it asserted: step 1 took 16.2 to 18.6 s on buffer-before, limit-one, daily-limit, interval-default, split-day and multi-length, 10.4 s on ooo-consult and 14.7 s on ooo-note (both of which pin a month), and three scenarios errored on page.goto. In the second wave (10:50:08 onward) the same route loaded in 2 to 6 s. (4) The clinching sibling is a-day-split-into-two-ranges-hides-the-gap-between-them.web.1: it failed the identical \"no button named 15\" check in the same wave, yet its screenshot, taken after the deadline, shows day 15 rendered and selected with a 9:40am slot. The page simply finished after the budget. (5) The feature is present in Cal.diy, so this is not an edition mismatch: Booking.maxActiveBookingsPerBooker exists at packages/prisma/schema.prisma:267 and packages/features/bookings/lib/handleNewBooking/checkActiveBookingsLimitForBooker.ts throws ErrorCode.BookerLimitExceeded at line 64.\n\nWhat would settle it definitively: re-run this one scenario alone (TRUECOURSE_MAX_CONCURRENCY=1) against an already-warm web server, or raise the web step budget above the default 10 s (packages/guard-runner/src/web/executor.ts:47, DEFAULT_WEB_STEP_TIMEOUT_MS, and note the deadline covers page.goto plus all expectation polling).\n\nTwo harness observations worth acting on. First, this scenario is the most exposed member of its family because step 1 navigates to /reference-host/limit-one with no ?month= pin and relies on the Booker's empty-month advance (apps/web/modules/bookings/components/DatePicker.tsx:17-52), which costs two SEQUENTIAL slot fetches: August resolves empty, then September starts. Every sibling that pins ?month= cleared step 1 in 2 to 6 s. Pinning the month, as the scenario's own siblings do, removes one round trip and the dependency on the advance. Second, the failure line \"the page has no button elements at all\" is misleading: the day buttons exist but the driver's roleInventory (packages/guard-runner/src/web/executor.ts:152-161) filters out elements with empty inner text, so a full grid of skeleton buttons reports as zero buttons. Reporting the count of unnamed buttons of the role would have named the loading state immediately.\n\nFor the maintainer, one genuine if minor a11y nit that this evidence exposes: the loading grid renders 30 disabled <button> elements with no accessible name at all, so a screen reader user hears 30 unlabelled buttons while slots load. An aria-busy container or an aria-hidden skeleton would be better.\n\nFinally, the guard runner itself annotated this result blockedPrecondition: true, i.e. the failing step carries no milestone while later steps do. The three milestones this flow exists to prove (booker-active-limit-caps-upcoming-bookings-per-link, booker-at-the-limit-cannot-schedule-again, cancelled-and-past-bookings-do-not-count-to-the-limit, booker-limit-affects-the-booker-not-the-host) remain untested."
+}

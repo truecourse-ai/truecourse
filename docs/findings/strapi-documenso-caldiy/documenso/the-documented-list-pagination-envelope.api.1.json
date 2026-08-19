@@ -1,0 +1,93 @@
+{
+  "repo": "documenso",
+  "scenarioId": "the-documented-list-pagination-envelope.api.1",
+  "flowId": "the-documented-list-pagination-envelope",
+  "failingStep": 1,
+  "whatFailed": "GET /api/v2/envelope returned 200 with its paging counters flat on the root object (count, currentPage, perPage, totalPages) instead of the nested pagination object with page/perPage/totalPages/totalItems that the docs publish, so pagination.page and its three siblings do not exist on the response.",
+  "docClaim": {
+    "quote": "\"pagination\": { \"page\": 1, \"perPage\": 10, \"totalPages\": 5, \"totalItems\": 42 }  ...  const { data, pagination } = await response.json(); console.log(`Found ${pagination.totalItems} documents`);  ...  hasMore = page < pagination.totalPages;",
+    "doc": "apps/docs/content/docs/developers/api/documents.mdx (published as docs.documenso.com/docs/developers/api/documents); same envelope repeated at apps/docs/content/docs/developers/getting-started/first-api-call.mdx",
+    "section": "List Documents -> Response (documents.mdx:198-203), Code Examples TypeScript tab (documents.mdx:155-156), Filtering and Pagination -> Example: Fetch All Pending Documents (documents.mdx:801-804), and First API Call -> Example 1 successful response (first-api-call.mdx:79-84)"
+  },
+  "observed": "Status 200. The body is {\"data\":[ ...10 envelopes... ],\"count\":320,\"currentPage\":1,\"perPage\":10,\"totalPages\":32}. There is no pagination key at any level, no page key, and no totalItems key: the documented page is named currentPage and the documented totalItems is named count. server.stderr.txt is empty, so nothing went wrong on the server; this is simply the endpoint's normal shape.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Every developer who copies the documented list-response handling gets a TypeError: the two published snippets destructure `pagination` off the body and then read `pagination.totalItems` / `pagination.totalPages` on undefined, so the docs' own \"fetch all pending documents\" paging loop cannot run as written; two of the four documented member names (page, totalItems) have no counterpart on the wire at all.",
+  "rootCause": {
+    "file": "apps/docs/content/docs/developers/api/documents.mdx",
+    "lines": "155-156, 198-203, 801-804",
+    "explanation": "The product side is correct and has been stable for over a year. The list response is typed by ZFindResultResponse in packages/lib/types/search-params.ts:41-47 as a flat { data, count, currentPage, perPage, totalPages }; ZFindEnvelopesResponseSchema (packages/trpc/server/envelope-router/find-envelopes.types.ts:28-30) extends it and is wired as the route's .output(), which is also what feeds the generated OpenAPI reference the guide itself points at. The producer, packages/lib/server-only/envelope/find-envelopes.ts:246-292, returns exactly those five keys on both the empty and the populated path. The string \"pagination\" and the key \"totalItems\" appear nowhere in the product source: grepping packages/ and apps/ for them hits only apps/docs/content. The documentation invented a nesting level and two field names that the API has never emitted. The same fabricated envelope is repeated on four more pages: first-api-call.mdx:79-84, templates.mdx:140-141 and 182-186, teams.mdx:177-178 and 344-345, examples/common-workflows.mdx:892 and 906."
+  },
+  "introducedBy": {
+    "commit": "b92c53dbb2",
+    "date": "2026-02-27",
+    "pr": "#2460",
+    "title": "feat: docs v2",
+    "note": "git blame of documents.mdx:198-203 and first-api-call.mdx:79-84 in the tested worktree points at the single commit that authored the v2 docs site (Lucas Smith). It is a docs-only commit; no code changed. The API contract it describes predates it by more than a year: ZFindResultResponse got its count/currentPage/perPage/totalPages keys in ebbe922982 (David Nguyen, 2025-01-11), so the documented shape was wrong the day it was written rather than having drifted."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 3186,
+        "url": "https://github.com/documenso/documenso/issues/3186",
+        "state": "open",
+        "title": "GET /api/v2/envelope: unstable pagination, and envelopes inside folders are invisible by default",
+        "relation": "related",
+        "note": "Same endpoint and the word pagination, but a different subject: it reports a missing ORDER BY tie-breaker in find-envelopes.ts and the folderId default meaning root-only. It says nothing about the response envelope shape."
+      }
+    ],
+    "prs": [
+      {
+        "number": 3135,
+        "url": "https://github.com/documenso/documenso/pull/3135",
+        "state": "open",
+        "title": "docs(api): document cancel endpoint and fix get-many body shape",
+        "relation": "exact",
+        "note": "Fixes the exact lines in documents.mdx. Its diff replaces the \"pagination\" JSON block with \"count\": 42, \"currentPage\": 1, \"perPage\": 10, \"totalPages\": 5, drops the pagination.totalItems console.log, and rewrites the paging loop to `const { data, currentPage, totalPages } = await response.json(); hasMore = currentPage < totalPages;`. Opened by ephraimduncan 2026-07-30, still open and mergeable_state blocked as of 2026-08-15."
+      },
+      {
+        "number": 3137,
+        "url": "https://github.com/documenso/documenso/pull/3137",
+        "state": "open",
+        "title": "docs(getting-started): fix distribute route, pagination and retry advice",
+        "relation": "exact",
+        "note": "Fixes the second bound doc: replaces the pagination block in first-api-call.mdx with the flat count/currentPage/perPage/totalPages keys. Same author, same date, also open and blocked."
+      },
+      {
+        "number": 3138,
+        "url": "https://github.com/documenso/documenso/pull/3138",
+        "state": "open",
+        "title": "docs(api): make templates and teams pages envelope-first",
+        "relation": "related",
+        "note": "Removes the same fabricated pagination envelope from templates.mdx and teams.mdx. Open."
+      },
+      {
+        "number": 3139,
+        "url": "https://github.com/documenso/documenso/pull/3139",
+        "state": "open",
+        "title": "docs: fix workflows, authentication, error codes and id formats",
+        "relation": "related",
+        "note": "Removes it from examples/common-workflows.mdx too. Open. #3135/#3137/#3138/#3139 are one stacked chain (each PR's base is the previous branch), so none can merge until the bottom of the stack does."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"pagination totalItems\" --include-prs (0 results)",
+      "gh search issues --repo documenso/documenso \"pagination\" --include-prs --limit 30",
+      "local: grep -rn pagination|totalItems over packages/ apps/ in the tested worktree, to prove the names exist only under apps/docs/content",
+      "gh api repos/documenso/documenso/pulls/{3135,3137,3138,3139} + /files (not search calls) to read the diffs"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Still wrong on origin/main at 2026-08-15: git grep on origin/main still shows \"pagination\" at documents.mdx:157-158, 200, 803, 806 and first-api-call.mdx:81. Two commits touched documents.mdx after the v2.16.0 tag (7f85388eb \"fix: increase global API rate limits to 1000/min\" #3081, 2026-07-21, and 26f0c4c5b \"chore: deprecate endpoints\" #3022, 2026-07-23) and neither goes near the pagination block. packages/lib/types/search-params.ts has no commits at all in 3cf2963cd0..origin/main, so the wire shape is unchanged and the guard assertion would still fail against main. The corrective PRs #3135 and #3137 have sat open for 16 days."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Not one of the eight itemized Documenso findings. It does belong to the researcher's headline bucket \"5 independently confirmed by community PRs unmerged for two weeks\": this is another instance of the same ephraimduncan docs stack (#3135/#3137/#3138/#3139) that their finding 4 cites as #3136. It refines that headline in one way worth stating: unlike finding 4 (coordinates, where the product genuinely serializes numbers as JSON strings and the docs-only patch papers over a wire bug), here the product is entirely correct against its own schema and generated OpenAPI reference, so the docs-only fix is the whole and right fix. Nothing here is a product change."
+  },
+  "notes": "Both bound pages are guides, and documents.mdx carries a Callout saying \"This guide may not reflect the latest endpoints or parameters. For an always up-to-date reference, see the OpenAPI Reference (openapi.documenso.com)\". That caveat does not rescue the text: the OpenAPI reference is generated from the same ZFindEnvelopesResponseSchema the endpoint returns, so the flat shape is the authoritative one and the guides contradict it rather than lag it. Renaming is not the only fix a doc author needs to make: page maps to currentPage and totalItems maps to count, but a reader also needs to know that perPage and totalPages kept their names and only lost a level of nesting, and that perPage is capped at 100 by ZFindSearchParamsSchema. The scenario itself is well formed: it asserted presence only, at the exact paths the docs put the fields at, and the mismatch is real."
+}

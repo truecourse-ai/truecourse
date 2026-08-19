@@ -1,0 +1,55 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-past-booking-reschedules-when-the-event-type-allows-it.web.1",
+  "flowId": "a-past-booking-reschedules-when-the-event-type-allows-it",
+  "failingStep": 1,
+  "whatFailed": "Opening the reschedule link of the seeded past booking sent the browser off the app under test: cal.diy answered with an absolute redirect to http://localhost:3000/reference-host/past-reschedule?rescheduleUid=refbk-past-reschedule, and port 3000 on the run host was an unrelated Vite dev server, so no booking page (and therefore no day button “15”) ever rendered.",
+  "docClaim": {
+    "quote": "Enabling this option allows past events to be rescheduled, giving attendees the flexibility to book a new time if they missed the original event.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/allow-rescheduling.md",
+    "section": "allow-rescheduling-past-events"
+  },
+  "observed": "The step navigated to /reschedule/refbk-past-reschedule. The recorded landing path is /reference-host/past-reschedule?rescheduleUid=refbk-past-reschedule, which is exactly the SUCCESS branch of apps/web/lib/reschedule/[uid]/getServerSideProps.ts (lines 200-206: `${eventUrl}?rescheduleUid=<uid>`); the past-booking refusal branch of determineReschedulePreventionRedirect would have produced `${eventUrl}?name=...&email=...` or /booking/<uid> instead. So cal.diy read the booking, honoured allowReschedulingPastBookings = true, and handed the attendee to the booker. The page that then loaded was NOT cal.diy: its console is `[vite] connecting...`, `[vite] connected.`, and two React Router warnings `No routes matched location \"/reference-host/past-reschedule?rescheduleUid=refbk-past-reschedule\"`; visible page text is empty and step-1.png is an all-black viewport. Every other web scenario in the same run shows the real Next.js app (console `markdownToSafeHTML should not be imported on the client side`, react-i18next, `_next/static/chunks/...` on http://127.0.0.1:57826). Grepping the whole run's evidence, this is the only scenario whose console mentions vite, and it is the only scenario that follows a server-side redirect built from WEBAPP_URL. buildEventUrlFromBooking (packages/features/bookings/lib/buildEventUrlFromBooking.ts:39-56) returns an ABSOLUTE url, `${WEBAPP_URL}/${username}/${slug}`, and WEBAPP_URL (packages/lib/constants.ts:23-28) falls back to the literal \"http://localhost:3000\" when NEXT_PUBLIC_WEBAPP_URL is absent from the BUILD environment (Next.js inlines NEXT_PUBLIC_* at build time, which is precisely why cal.diy ships scripts/replace-placeholder.sh and scripts/start.sh to rewrite the baked url before serving). The guard recipe sets NEXT_PUBLIC_WEBAPP_URL=http://localhost:${PORT} but ${PORT} is only substituted at boot (substitutePortInSpawn in packages/guard-runner/src/api/server.ts:120-132), never for the web build, and the recipe never runs replace-placeholder, so the served build kept the localhost:3000 default while listening on the ephemeral port 57826. On the run host, localhost:3000 is TrueCourse's own dashboard dev server (apps/dashboard/client, `vite --port 3000`, React Router, dark background); fetching http://localhost:3000/ right now returns exactly that page (`<title>TrueCourse</title>`, `/@vite/client`), which matches the captured console and the black screenshot line for line.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "No user is harmed: the product did the documented thing (it let the past booking through to the booker). The harm is to the run, the scenario proves nothing about the claim, and because an unrelated dev server happened to occupy port 3000 the browser silently rendered a foreign app instead of failing to connect, which makes the failure look like a product bug.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 195,
+        "url": "https://github.com/calcom/docker/issues/195",
+        "state": "closed",
+        "title": "NEXT_PUBLIC_WEBAPP_URL localhost vs production domain",
+        "relation": "related",
+        "note": "Same class of problem from the self-hosting side: NEXT_PUBLIC_WEBAPP_URL is baked at build, and 'leaving it as localhost leaves the site plagued with localhost links'. Filed 2022-12-30, closed 2023-01-11. Confirms this is a known deployment gotcha, not a product regression."
+      },
+      {
+        "number": 29399,
+        "url": "https://github.com/calcom/cal.diy/issues/29399",
+        "state": "open",
+        "title": "Unknown rescheduleUid opens normal booking flow instead of 404",
+        "relation": "related",
+        "note": "Touches the same /reschedule/[uid] route but a different symptom (unknown uid handling). Not this failure."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"reschedule redirect localhost:3000\" --owner calcom --limit 10"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: nothing to fix and nothing changed. Only 4 commits landed on main after the tested 038381aeca (176037d0af, b2c28a23ab, 5e3fe3cbe6, 8418db70c7) and none touches apps/web/lib/reschedule/[uid]/getServerSideProps.ts, buildEventUrlFromBooking.ts, determineReschedulePreventionRedirect.ts or packages/lib/constants.ts. in cal.com: identical code. packages/features/bookings/lib/buildEventUrlFromBooking.ts on calcom/cal.com main diffs byte-for-byte clean against the cal.diy tested worktree (both use `const bookerUrl = WEBAPP_URL`), and WEBAPP_URL in packages/lib/constants.ts has the same \"http://localhost:3000\" fallback. So there is no edition mismatch on this path and no upstream fix to port."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Harness fix, not a product fix: bake the real base url into the web build. Either run the web build with NEXT_PUBLIC_WEBAPP_URL already pointing at the port the app will be served on (allocate the port before the web build rather than at boot), or keep the build on the placeholder and run cal.diy's own scripts/replace-placeholder.sh \"http://localhost:3000\" \"$NEXT_PUBLIC_WEBAPP_URL\" between build and serve, which is exactly what apps/web ships scripts/start.sh for. Note the recipe's current value, NEXT_PUBLIC_WEBAPP_URL=http://localhost:${PORT}, cannot simply be handed to the build unsubstituted: new URL(\"http://localhost:${PORT}\") throws Invalid URL, and packages/lib/constants.ts calls new URL(WEBAPP_URL) at module scope (line 50), so the app would fail to boot at all. That also proves the build did not receive the literal placeholder and did fall back to localhost:3000. Until this is fixed, every web path that leaves the app through an absolute WEBAPP_URL redirect is untestable, and any such scenario will fail in a way that looks like a product bug. A second, environment-only aggravator worth removing: the guard should not serve the app under test on an ephemeral port while another dev server owns the app's configured port, or at minimum the web driver should record the full origin (it records path only, which is why the transcript makes the browser look like it stayed in the app). What would settle the doc claim itself: re-run this scenario with the base url baked correctly. Half of it is already proven by this run, since cal.diy returned the success-path redirect (?rescheduleUid=...) rather than the past-booking refusal, so allowReschedulingPastBookings was honoured; only the second half, that the new slot can actually be picked and submitted and the booking page then shows 'Former time', remains unproven."
+}

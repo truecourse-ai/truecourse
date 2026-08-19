@@ -1,0 +1,112 @@
+{
+  "repo": "documenso",
+  "scenarioId": "a-none-distribution-send-offers-the-signing-links.web.1",
+  "flowId": "a-none-distribution-send-offers-the-signing-links",
+  "failingStep": 15,
+  "whatFailed": "After sending a document with distribution method None the app redirects to the document page as documented, but that page displays no signing link at all: the rendered text contains no /sign/ URL, only the recipient's email address and an icon-only copy button whose sole label is a transient tooltip.",
+  "docClaim": {
+    "quote": "If you choose **None** as the distribution method: ... The document is sent without notifying recipients. ... You're redirected to the document page where signing links are displayed. ... Copy the links and share them through your preferred channel (SMS, messaging app, etc.).",
+    "doc": "apps/docs/content/docs/users/documents/send.mdx (lines 207-223; snapshotted for the run as .truecourse/specs/sources/docs.documenso.com/docs/users/documents/send.md, section 'Distribution Without Email'). The same promise is repeated at apps/docs/content/docs/users/templates/use.mdx:107: 'you're redirected to the document page where signing links are displayed for you to copy and share.'",
+    "section": "Distribution Without Email"
+  },
+  "observed": "Step 14 clicked Generate Links in the send dialog; the app navigated to /t/guard-owner/documents/envelope_btukcwxerathynac?action=copy-links and toasted 'Envelope distributed'. By step 15 the query parameter had been stripped and the page (step-15.png) showed: title, Pending, 1 Recipient, an Information card, a Recipients card listing 377c10250e@documenso.test / Viewer / Pending with a small unlabeled copy icon, and a Recent activity list. The only occurrence of the words 'Copy Signing Links' in the page text is the Radix tooltip content (it appears twice because Radix also renders a visually hidden copy). No signing URL, and no /sign/ substring, is rendered anywhere on the page. The document itself was distributed correctly (status Pending, recipient Pending), so nothing is broken server side.",
+  "verdict": "real-defect",
+  "confidence": "medium",
+  "impact": "A sender who chose 'None' precisely because they intend to distribute links themselves lands on a page that shows no link and names no control that produces one. Recovery requires guessing an unlabeled icon or an undocumented three-dots menu item; for a screen reader user neither the copy icon nor the three-dots trigger has an accessible name. No data loss and no incorrect state, so the harm is discoverability and accessibility, not correctness.",
+  "rootCause": {
+    "file": "apps/remix/app/components/dialogs/envelope-distribute-dialog.tsx and apps/remix/app/components/general/document/document-page-view-recipients.tsx",
+    "lines": "envelope-distribute-dialog.tsx:185-191, document-page-view-recipients.tsx:44-58 and 194-223",
+    "explanation": "Documenso has two different query-parameter conventions for 'the user wants the signing links now', and the None-distribution send path is wired to the weaker one. envelope-distribute-dialog.tsx:187-188 appends '?action=copy-links' when meta.distributionMethod === NONE. document-page-view-recipients.tsx:48 reads that value and, instead of revealing any link, only sets shouldHighlightCopyButtons: every recipient row gets a CSS 'animate-pulse', and a Radix Tooltip reading 'Copy Signing Links' is forced open for the FIRST recipient only (line 199: open={shouldHighlightCopyButtons && i === 0}); it closes on the first click anywhere on the wrapper (line 203). The control being highlighted is CopyTextButton (packages/ui/components/common/copy-text-button.tsx:40-71), a Button containing only a lucide CopyIcon svg, with no aria-label, title or sr-only text, and it copies formatSigningLink(recipient.token) to the clipboard rather than rendering it. Meanwhile the very same page already mounts DocumentRecipientLinkCopyDialog (routes/_authenticated+/t.$teamUrl+/documents.$id._index.tsx:111-113) whose auto-open effect keys on a DIFFERENT value, 'view-signing-links' (document-recipient-link-copy-dialog.tsx:60-65), produced only by the template path (template-use-dialog.tsx:177). So on the template flow, whose docs make the identical promise, a modal titled 'Copy Signing Links' listing every recipient does open; on the send flow nothing opens. Verified by reading all five files at the tested tag, not inferred. Note the secondary, weaker fact that pushes part of this onto the docs: even that dialog renders only email plus a Copy button, so the literal URL string is never displayed anywhere in the product."
+  },
+  "introducedBy": {
+    "commit": "5cdd7f86238e0cb1955a66e343d2c173c9a1b78f",
+    "date": "2025-10-27",
+    "pr": "#2102",
+    "title": "fix: envelope styling",
+    "note": "git blame of both culprit hunks lands on this commit. It ADDED the post-send redirect (before it, `git show 5cdd7f862^:...envelope-distribute-dialog.tsx` shows onFormSubmit only toasted and closed the dialog, no navigate) and it chose the new 'copy-links' value plus the pulse-and-tooltip handler, rather than the pre-existing 'view-signing-links' value that opens the link dialog (`git grep view-signing-links 5cdd7f862^` returns only template-use-dialog.tsx and the dialog itself). Two older commits are the supporting cast: PR #1449 'feat: add signing link copy' (efbe94aea, 2024-11-06) created the copy-only design, the 'view-signing-links' convention and the unnamed CopyTextButton; PR #2460 'feat: docs v2' (b92c53dbb2, 2026-02-27) wrote the send.mdx sentence, four months AFTER #2102, describing a display behavior the product did not have at the time of writing."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 2490,
+        "url": "https://github.com/documenso/documenso/issues/2490",
+        "state": "closed",
+        "title": "Signing Links copy : can't get url for sign",
+        "relation": "related",
+        "note": "Self-hosted user could not get a URL out of the copy control ('after buttom view click ... click copy not get url'). Diagnosis in-thread went to NEXT_PUBLIC_WEBAPP_URL; closed as stale 2026-08-03 without resolution. Same affordance, different failure mode; shows the copy-only design confuses users."
+      },
+      {
+        "number": 1169,
+        "url": "https://github.com/documenso/documenso/issues/1169",
+        "state": "closed",
+        "title": "Copy signing link to send to recipients",
+        "relation": "related",
+        "note": "The original request that produced the feature. The reporter's own follow-up is a discoverability complaint about exactly this control: 'I found the option now, I need to click in the signer email to copy the link ... I also suggest having this same option in the submenu, since it's easiest to find this information there'."
+      }
+    ],
+    "prs": [
+      {
+        "number": 1449,
+        "url": "https://github.com/documenso/documenso/pull/1449",
+        "state": "merged",
+        "title": "feat: add signing link copy",
+        "relation": "related",
+        "note": "Merged 2024-11-06. Created DocumentRecipientLinkCopyDialog, the 'view-signing-links' action param and CopyTextButton. The button was born without an accessible name and has never had one."
+      },
+      {
+        "number": 2102,
+        "url": "https://github.com/documenso/documenso/pull/2102",
+        "state": "merged",
+        "title": "fix: envelope styling",
+        "relation": "exact",
+        "note": "The commit that introduced the failing behavior (post-send redirect with the '?action=copy-links' variant). Not a bug report, listed here because it is the change under discussion."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso '\"signing links\" OR \"copy links\"' --include-prs  (returned nothing; quoting/OR appears not to be honoured)",
+      "gh search issues --repo documenso/documenso 'signing link' --include-prs --limit 40",
+      "gh search issues --repo documenso/documenso 'accessibility' --include-prs --limit 40  (no hit about unlabeled controls, aria-label or accessible names anywhere in the 40 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log 3cf2963cd0..origin/main over envelope-distribute-dialog.tsx, document-page-view-recipients.tsx, document-recipient-link-copy-dialog.tsx, copy-text-button.tsx and documents.$id._index.tsx returns no commits (clone fetched 2026-08-15), so the send path still redirects with ?action=copy-links on main. The docs are unchanged too: origin/main:apps/docs/content/docs/users/documents/send.mdx:218 still reads 'You're redirected to the document page where signing links are displayed', and templates/use.mdx:107 still repeats it."
+  },
+  "colleagueFinding": {
+    "ref": "documenso #7",
+    "agreement": "refines",
+    "note": "Agrees with the symptom and with 'unreported' (no upstream issue or PR describes it; the two related issues above are about a broken copy and about discoverability, not about the None-send landing page). Refines it in three ways. (1) The mechanism is not just 'copy-to-clipboard behind an unlabeled control': the product has a link dialog that auto-opens on '?action=view-signing-links' and is already mounted on this very page, but the send dialog redirects with '?action=copy-links', a value that only pulses the copy icons and force-opens a tooltip on the FIRST recipient. The sibling template flow, documented with the same sentence, does get the dialog. (2) The literal doc claim is unachievable product-wide, not just on this screen: even inside the dialog only the email and a Copy button are rendered, never the URL, so 'displayed' is wrong in send.mdx and in templates/use.mdx alike. (3) The doc sentence (PR #2460, 2026-02-27) post-dates the code (PR #2102, 2025-10-27) by four months, so it never matched shipped behavior. Colleague finding #8 also touches this scenario but on step 16, which never ran because step 15 failed first; the source evidence for it is confirmed below under additionalDefects."
+  },
+  "notes": "Two defensible resolutions, and a maintainer will probably want both. Code: make the None-distribution redirect use the existing 'view-signing-links' action (or otherwise open DocumentRecipientLinkCopyDialog) so the promised links are actually surfaced, which also removes the naming inconsistency between the send and template paths. Docs: 'displayed' overstates what Documenso does anywhere in the UI; the accurate wording is that the document page offers per-recipient copy controls plus a 'Signing Links' item in the document's actions menu. If the maintainers say the pulse-the-copy-icon design is intended as-is, this reduces to a doc-bug in apps/docs/ inside the same repo (send.mdx:218 and use.mdx:107), which is why the confidence here is medium rather than high. Nothing in the evidence points at the test or the environment: the redirect, the distribution and the Pending state all worked, and the assertion ('/sign/' appears somewhere in the page text) is the weakest possible reading of 'signing links are displayed'.",
+  "additionalDefects": [
+    {
+      "ref": "documenso #8 (the 'Copy Signing Links' half)",
+      "title": "The signing-link copy control has no accessible name",
+      "status": "confirmed in source; not executed in this run (scenario step 16 never ran because step 15 failed first)",
+      "file": "packages/ui/components/common/copy-text-button.tsx:40-71, used at apps/remix/app/components/general/document/document-page-view-recipients.tsx:205-214",
+      "explanation": "CopyTextButton renders <Button type=\"button\" variant=\"none\"> whose only content is a lucide CopyIcon (or CheckSquareIcon) svg, with no aria-label, no title, no visually hidden text; lucide-react emits a bare <svg> with no <title>, so the button's accessible name is empty. The words 'Copy Signing Links' exist only as Radix TooltipContent (document-page-view-recipients.tsx:217-220), which Radix wires as aria-describedby, is a description rather than a name, is attached to the wrapping <div> TooltipTrigger rather than to the button, and here is only open for the first recipient. In the run's page text 'Copy Signing Links' appears twice, which is the tooltip plus Radix's visually hidden copy, not a label on the control. Agrees with the colleague's finding and with their line citation 205-219."
+    },
+    {
+      "ref": "documenso #8 (extension)",
+      "title": "The document page's three-dots actions trigger also has no accessible name",
+      "status": "confirmed in source",
+      "file": "apps/remix/app/components/general/document/document-page-view-dropdown.tsx:73-75",
+      "explanation": "<DropdownMenuTrigger data-testid=\"document-page-view-action-btn\"><MoreHorizontal className=\"h-5 w-5 text-muted-foreground\" /></DropdownMenuTrigger>. data-testid is not an accessible name. This matters here because that menu holds the only textually named route to the links, the 'Signing Links' item at line 162-171 which opens DocumentRecipientLinkCopyDialog. Confirms the colleague's line 73 citation and supports their 'the pattern is app-wide' claim."
+    },
+    {
+      "title": "The post-send hint reaches only the first recipient",
+      "status": "confirmed in source; not exercised (the run's document had one recipient)",
+      "file": "apps/remix/app/components/general/document/document-page-view-recipients.tsx:199-204",
+      "explanation": "open={shouldHighlightCopyButtons && i === 0} forces the explanatory tooltip on recipient 0 only, while the animate-pulse class is applied to every row. On a multi-recipient None send, recipients 2..N pulse with no explanation, and the single tooltip disappears as soon as the user clicks anything in the wrapper (onClick at line 203 clears the flag)."
+    },
+    {
+      "title": "Stale identifier drift around the action parameter",
+      "status": "cosmetic, confirmed in source",
+      "file": "apps/remix/app/components/general/document/document-page-view-recipients.tsx:46-48",
+      "explanation": "The comment says 'Check for action=view-tokens query parameter' and the variable is named hasViewTokensAction, while the value actually compared is 'copy-links' and the sibling flow uses 'view-signing-links'. Three names for one concept, which is how the send path and the link dialog ended up on different strings."
+    }
+  ]
+}

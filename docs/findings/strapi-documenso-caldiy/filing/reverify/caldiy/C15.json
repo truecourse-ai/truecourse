@@ -1,0 +1,47 @@
+{
+  "id": "C15",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L202-L259",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L202-L259",
+    "howDecided": "git log 038381aeca..origin/main over apps/api/v2/src/modules/slots/, packages/platform/types/slots/ and docs/api-reference/v2/openapi.json returns nothing, so the controller, the DTOs and the generated spec are all byte-identical to the tested tree. At origin/main the wrong sentence is still line 205 of slots.controller.ts, inside the @DocsResponse description that spans 204-206: 'For seated slots each object will have attendeesCount and bookingUid properties.' git grep for 'attendeesCount' over that file at origin/main returns that one line and nothing else, and the generated docs/api-reference/v2/openapi.json still embeds the same sentence in the 200 description at line 5431. The oneOf schema below it (lines 207-258 in the controller, 5434 onward in openapi.json) still declares only start, or start plus end, and still names no seat field in either branch."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts (source of the text) and docs/api-reference/v2/openapi.json (generated)",
+    "lineToday": 205,
+    "permalink": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts#L204-L206",
+    "publishedUrl": "https://cal.com/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type",
+    "commitsSinceReview": [],
+    "note": "Verified live today. One unauthenticated GET of https://cal.com/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type.md returned HTTP 200 and still prints 'For seated slots each object will have attendeesCount and bookingUid properties.' at line 237 of the served markdown, and the response schema below it still names no seat field, so a reader who distrusts the prose still cannot recover seatsBooked / seatsRemaining / seatsTotal from the reference. The generated in-repo permalink is https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/docs/api-reference/v2/openapi.json#L5431."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#22189",
+        "kind": "pr",
+        "stateAtReview": "closed unmerged",
+        "stateToday": "closed unmerged",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, untouched since 2025-07-11. Still the only org-wide hit for the token attendeesCount and still about a local variable in the slots reserve path, not the response shape or its docs."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"attendeesCount\" --include-prs --limit 25  (1 hit, calcom/cal.diy#22189, closed unmerged 2025-07-11, unrelated to the response shape. Same single hit the review recorded, so nothing new.)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged and is confirmed live: the sentence promising attendeesCount is still on the served cal.com reference page today, and its in-repo source is byte-identical to the tested tree at line 205. Nobody has reported it; the single org-wide hit for the token is the same unmerged 2025 refactor the review already dismissed. Nothing changes the verdict (doc-bug, high confidence), the scope or the fault location: the emitter and the typed DTOs are correct and pinned by the repo's own e2e assertions, the hand-written decorator prose is the wrong artifact, and it lives in the product repo. The one refinement the review already flagged and that survives re-verification is that the same sentence is wrong twice over: bookingUid is NOT on every seated slot, only on slots that already have a booking, because slots-output.service.ts returns bookingUid: undefined and JSON.stringify drops the key. That is worth carrying into the filing so a maintainer does not fix only the seat names.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/bug_report.md is the only bug path (config.yml sets blank_issues_enabled: false) and requires 'Issue Summary', 'Steps to Reproduce', 'Actual Results', 'Expected Results' and 'Evidence'. The wrong sentence lives in the product repo's own decorator and is exported to docs/api-reference/v2/openapi.json, so it belongs on calcom/cal.diy, not on calcom/docs.",
+  "confidence": "high",
+  "notes": "File jointly with C14: same file, same @DocsResponse decorator, same method, and the same structural fix (reference the Slot_2024_09_04 / SeatedSlot_2024_09_04 / SeatedRangeSlot_2024_09_04 DTOs instead of hand-writing the response schema) closes both. The suggested replacement sentence is 'For seated slots each object also has seatsBooked, seatsRemaining and seatsTotal, and bookingUid when the slot already has a booking'. Include the two supporting facts: the emitter is slots-output.service.ts:91-104 and :188-203, and the product's own e2e suite asserts seatsBooked/seatsRemaining/seatsTotal at user-event-type-slots.controller.e2e-spec.ts:900-952, so no behavior change is being asked for. Also worth saying that attendeesCount matches no version of the endpoint ever: the predecessor 2024-04-15 emitted 'attendees', not 'attendeesCount'."
+}

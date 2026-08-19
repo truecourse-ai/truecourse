@@ -1,0 +1,42 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "prefill-the-booking-form-from-the-address-bar.web.1",
+  "flowId": "prefill-the-booking-form-from-the-address-bar",
+  "failingStep": 4,
+  "whatFailed": "The scenario read the 'Additional notes' field by its HTML `value` attribute, but that field is a `<textarea>`, which has no `value` attribute in HTML at all, so the read returned null even though the textarea was correctly prefilled with 'Test Notes'.",
+  "docClaim": {
+    "quote": "You can pre-fill all the fields/questions on the booking form by using their corresponding **identifiers** that you can see under Advanced -> Booking Questions. ... This can include the user's name and email, notes, guests, event location, Reason for reschedule.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/bookings/prefill-fields.md",
+    "section": "pre-fill-fields-questions (and pre-fill-fields-questions/pre-filling-all-fields, whose worked example query is `name=John Doe&email=johndoe@example.com&notes=Test Notes&Text=TEXT&number=123&select=Option 1&Multiselect=Option 1&Multiselect=Option 2&guests=b&phone=+91&agreed=true`)"
+  },
+  "observed": "Cal.diy did exactly what the doc promises. step-4.png shows the booking form with 'Additional notes' rendered as a multi-line textarea containing the text 'Test Notes', alongside the other prefilled fields (Your name = John Doe, Email address = johndoe@example.com, Text = TEXT, number = 123, Multiselect chips Option 1 and Option 2, Agree checked, guest guest1@example.com). The run's own visual judge annotated the step: 'The Additional notes textarea contains the text Test Notes ... the mismatch appears to be about how the assertion read the element's value/attribute rather than missing UI content.' The step burned its full 10 s budget (durationMs 10116) retrying an assertion that can never be satisfied. Steps 2, 3, 5 and 6 read the same way and passed only because those fields are `<input>` elements, on which React reflects the controlled value into the `value` HTML attribute; a `<textarea>` keeps its value in the `.value` IDL property / child text, never in an attribute.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None on users. Cal.diy's query-parameter prefill of the `notes` field works. The cost is a false red in the guard board and, because step 4 aborted the scenario, the remaining five steps (select/multiselect text, the `agreed` checkbox, the `phone` value, and the submit round trip that proves responses are tied back to their questions) were never exercised.",
+  "rootCause": {
+    "file": "packages/guard-runner/src/web/executor.ts (TrueCourse engine, not the product); the product side is apps/web/modules/form-builder/components/Components.tsx and packages/features/form-builder/widgets.tsx in the caldiy-tested worktree",
+    "lines": "331-352",
+    "explanation": "The generated expectation is `attribute: { of: { role: textbox, name: Additional notes }, name: value, value: { equals: Test Notes } }`. `readAttribute` (executor.ts:331-352) resolves the locator and calls Playwright's `locator.getAttribute('value')`, i.e. it reads the HTML attribute, and reports `has no value attribute` when it comes back null. On the product side `getBookingFields.ts:191-197` declares the system field `notes` with `type: \"textarea\"` and `defaultLabel: \"additional_notes\"`; `Components.tsx:96-100` maps that type to `Widgets.TextAreaWidget`, and `widgets.tsx:17-37` renders `<TextArea value={textValue} ...>`, a real `<textarea>`. Per the HTML spec a `<textarea>` has no `value` content attribute, so `getAttribute('value')` is null by definition regardless of what the control holds. The guard web vocabulary has no `inputValue`-style member (there is no `inputValue` anywhere under packages/guard-runner/src/web/), so `attribute: value` is the only way the generator can express 'this field holds X', and it silently works for `<input>` while being unsatisfiable for `<textarea>` and for any custom control that keeps its value off-attribute. That asymmetry is the defect: the scenario asserts on a DOM detail the doc never promised instead of on the field's value."
+  },
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"prefill notes booking form\" (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable: there is no product bug to fix. in cal.diy: nothing changed, `git log 038381aeca..origin/main -- apps/web/modules/form-builder packages/features/form-builder packages/features/bookings/Booker` is empty (only 4 commits landed on main since the tested commit, none touching the form builder), so the prefill path is byte-identical on today's main. in cal.com: not verifiable from source; the public calcom/cal.com main is a mirror of cal.diy and the commercial tree is private. The fix belongs in TrueCourse's own web expectation vocabulary."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the researcher's five cal.diy findings (#1 OOO ignored under date overrides, #2 zero-length team slots, #3 dropped 9:10 slot, #4 seated-booking attendee oversell, #5 unauthenticated hold mutation). It also does not match any of the three established systemic causes: not cause 1 (this is a web scenario, no `cal-api-version` involved), not cause 2 (no first-wave saturation: step 1 navigated in 2.7 s and the page was fully rendered and correct in every screenshot; the 10 s spent on step 4 is retry budget against an unsatisfiable read, not a slow page), and not cause 3 (no hardcoded slot was clicked; the slot came in on the query string and the form rendered for it)."
+  },
+  "notes": "Two things a maintainer of the generator should take away. First, the fix: give the web driver a value reader that uses Playwright's `locator.inputValue()` (which handles input, textarea and select alike) and route `attribute: { name: value }` on form controls to it, or add an explicit `value:` expectation member. Reading `value` as an HTML attribute is only accidentally correct for `<input>`, where React mirrors the controlled value onto the attribute. The same trap will hit any other textarea-backed booking question, and Cal.diy's form builder exposes `textarea` as a first-class question type, so this is not a one-off. Second, an unexercised observation worth a follow-up run once step 4 is fixed: in step-4.png the Phone control shows a US flag and `+1`, not the `+91` the doc's example passes and step 9 asserts with `contains: '+91'`. I cannot tell from the screenshot alone whether `+1` is the prefilled value or the placeholder, and step 9 never ran because step 4 aborted the scenario, so this is flagged, not judged. Settling it needs a re-run with the notes assertion corrected, or reading the phone input's `.value` on the same URL. Also note the doc's own example query is written unencoded, which the scenario correctly recorded as a forced change: a raw `+` in a query string decodes to a space, so `phone=+91` as literally printed in the doc would arrive as ' 91'. That is a genuine (minor) doc wart in cal.com/help/bookings/prefill-fields.md worth reporting separately, and the same page contradicts itself by noting `%2B is encoded form of +` two sections later."
+}

@@ -1,0 +1,59 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "list-the-available-slots-of-an-event-type.api.1",
+  "flowId": "list-the-available-slots-of-an-event-type",
+  "failingStep": 1,
+  "whatFailed": "GET /v2/slots (cal-api-version 2024-09-04, timeZone=Europe/Rome) answered 200 with each day's array holding OBJECTS ({\"start\":\"2050-09-05T11:00:00.000+02:00\"}), while the endpoint's own documentation says the default format is an array of slots AS STRINGS and its published OpenAPI schema types the array items as `string`, so the scenario's offset regex ran against the serialized object and did not match.",
+  "docClaim": {
+    "quote": "- format: Format of the slots. By default return is an object where each key is date and value is array of slots as string. If you want to get start and end of each slot use \"range\" as value.  ...  200 response schema, oneOf[0] title \"Default format (or with format=time)\": additionalProperties: { type: array, items: { type: string } }  (the example printed directly under that same schema instead shows data['2050-09-05'] = [ { start: '2050-09-05T09:00:00.000+02:00' }, ... ])",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type.md",
+    "section": "get-available-time-slots-for-an-event-type (prose, 'Optional parameters are: - format', line 33) and get-available-time-slots-for-an-event-type/openapi (200 response schema, lines 243-257). Published at https://cal.com/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type.md, snapshot fetched 2026-08-12."
+  },
+  "observed": "200 success. data is a map keyed by date, each value an array of 16 objects each carrying exactly one property `start`, e.g. {\"start\":\"2050-09-05T11:00:00.000+02:00\"} through {\"start\":\"2050-09-05T18:30:00.000+02:00\"} (09:00 to 16:30 UTC, matching the seeded 09:00-17:00 host schedule). The time-zone half of the assertion actually held: every start carries the requested Europe/Rome offset +02:00. The only mismatch is the element SHAPE: object, not bare string. The object shape is what the doc's own example shows, what the DTO Slot_2024_09_04 declares, and what the repo's own e2e fixtures assert.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Wrong published contract: anyone generating a client from the cal.com OpenAPI spec gets `Record<string, string[]>` for the default slots response and will index/parse a JSON object as a timestamp string at runtime; hand-written integrations reading the prose hit the same. No data loss, no security exposure. Affects hosted Cal.com and Cal.diy identically, since the wrong text is generated from the shipped source.",
+  "rootCause": {
+    "file": "apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts",
+    "lines": "89 and 202-229 (the wrong type is line 214)",
+    "explanation": "The shipped behavior is correct and intentional: SlotsOutputService_2024_09_04.getAvailableTimeSlot returns { start } (apps/api/v2/src/modules/slots/slots-2024-09-04/services/slots-output.service.ts:85-89, reached for no format or format=time via lines 33-38), typed by Slot_2024_09_04 / SlotsOutput_2024_09_04 (packages/platform/types/slots/slots-2024-09-04/outputs/slots.output.ts:4-30), returned through GetSlotsOutput_2024_09_04, and asserted object-shaped by the repo's own e2e fixtures (apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/e2e/expected-slots.ts:1-9, used at reschedule-uid-slots.controller.e2e-spec.ts:250). The documentation is the wrong artifact, in two places, both inside this controller file: the @ApiOperation prose at line 89 says the default value is an 'array of slots as string', and the hand-written @DocsResponse schema at lines 207-215 declares additionalProperties.items as { type: \"string\" } for the default format. That hand-written schema bypasses the real DTO, which is why the type system cannot catch the contradiction, and the inline `example` at lines 216-228 of the same object already contradicts it by showing { start } entries (as does the same decorator's own description at 204-206, 'each slot will be an object'). Both strings are exported verbatim into docs/api-reference/v2/openapi.json (verified at paths./v2/slots.get.responses.200), which is the source of the published cal.com docs page the scenario binds to."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version",
+    "note": "Both wrong lines (the 'array of slots as string' prose and items: { type: \"string\" }) were born with the 2024-09-04 slots endpoint in this commit; git log -S on the phrase returns only this commit. The same commit's output service already returned { start } objects, so the sentence was never true of any shipped build. The predecessor version 2024-04-15 also returned objects ({ time: ... }, apps/api/v2/src/modules/slots/slots-2024-04-15/services/slots-output.service.ts:32-43), so there is no earlier release it described either. A later commit touched that exact prose line and left the error in place: 39077a08f1fba6ebef28f5f5179bfb4b901fd111, 2025-05-14, PR #21196 'docs: correct documentation for slot format in 2024-09-04 API' (merged 2025-05-14T06:57:42Z), which only renamed slotFormat to format."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 21196,
+        "url": "https://github.com/calcom/cal.diy/pull/21196",
+        "state": "merged",
+        "title": "docs: correct documentation for slot format in 2024-09-04 API",
+        "relation": "related",
+        "note": "Merged 2025-05-14. Edited the very sentence that carries the bug but only fixed the parameter name (slotFormat to format); 'array of slots as string' and the items: string schema survived. Nearest thing to a report; it is not a report of this defect. Found by reading git blame, not by search. Note calcom/cal.com now redirects to calcom/cal.diy, so old cal.com PR numbers resolve under cal.diy."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom --include-prs 'slots as string'",
+      "gh search issues --owner calcom --include-prs 'slots docs format 2024-09-04'",
+      "gh search issues --owner calcom --include-prs 'documentation slot format'"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: not fixed. Only 4 commits landed on origin/main after the tested commit 038381aeca (main head 176037d0af, 2026-08-08) and none touches apps/api/v2/src/modules/slots/, packages/platform/types/slots/slots-2024-09-04/ or docs/api-reference/v2/openapi.json; both wrong lines are still on main at slots.controller.ts:89 and :214. in cal.com: not verifiable from source (the public calcom/cal.com is the same tree as cal.diy, the commercial tree is private), but the published hosted docs page snapshotted from https://cal.com/docs on 2026-08-12 still carries both the 'array of slots as string' sentence and the items: string schema, so the doc bug is live for hosted Cal.com readers too as of that date."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office with date overrides, zero-length team slots, dropped 9:10 slot, seated oversell, unauthenticated hold manipulation). Nothing in that write-up mentions the slot response shape."
+  },
+  "notes": "Not an edition mismatch and not the systemic cal-api-version problem: the scenario sent cal-api-version 2024-09-04, which Cal.diy does support (packages/platform/constants/api.ts tops out there), the request was not downgraded, and it answered 200 with the documented date-keyed map. Fix for a maintainer is two lines in apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts: line 89 should read 'value is an array of slot objects each with a start property', and line 214 should be items: { type: 'object', properties: { start: { type: 'string' } } } (or better, reference the existing Slot_2024_09_04 / SeatedSlot_2024_09_04 schemas instead of hand-writing the response schema, which is what let the schema drift from the DTO in the first place). Two further inaccuracies on the same page, both verified against source and worth fixing in the same patch: (1) the 200 description at line 205 says 'For seated slots each object will have attendeesCount and bookingUid properties', but SeatedSlot_2024_09_04 (packages/platform/types/slots/slots-2024-09-04/outputs/slots.output.ts:10-26) emits seatsBooked, seatsRemaining, seatsTotal and bookingUid, with no attendeesCount anywhere; (2) neither branch of the hand-written schema documents the seated properties at all. Scenario side: step 5 of this scenario ('format=time' entries must have no `start` PROPERTY) encodes the same false premise and would fail for the same reason once step 1 is unblocked, so a regeneration after the doc fix should flip both. Upstream search caveat: all three searches returned zero results, including a query whose terms match PR #21196's title in the same org, so 'none found' here is weak evidence about whether anyone has filed this; a targeted search on calcom/cal.diy for 'slots' plus 'string' in the issue body would settle it."
+}

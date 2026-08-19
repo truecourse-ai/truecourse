@@ -1,0 +1,76 @@
+{
+  "repo": "documenso",
+  "scenarioId": "a-draft-accepts-changes-and-a-sent-document-refuses-them.api.1",
+  "flowId": "a-draft-accepts-changes-and-a-sent-document-refuses-them",
+  "failingStep": 7,
+  "whatFailed": "POST /api/v2/envelope/recipient/create-many added a second SIGNER to an already-distributed PENDING document and returned 200 with the new recipient row, instead of refusing the change the way the docs say a sent document must.",
+  "docClaim": {
+    "quote": "You cannot modify recipients or fields after a document moves to `PENDING` status.",
+    "doc": "apps/docs/content/docs/developers/api/documents.mdx",
+    "section": "Document Statuses / status-transitions callout (line 755 in the tested worktree; published as docs/developers/api/documents.md)"
+  },
+  "observed": "Step 5 distributed the envelope (distributionMethod NONE) and step 6 read it back as status PENDING. Step 7 then POSTed a new SIGNER (tcref-late-...@documenso.test, signingOrder 2) to /api/v2/envelope/recipient/create-many and got HTTP 200 with a fully materialised recipient: id 342, a fresh signing token 9Pfx8Fnn0S32rwYhyOfL5, sendStatus NOT_SENT, signingStatus NOT_SIGNED. The recipient is persisted on a document that recipients had already been invited to sign. server.stderr.txt is empty; the server logged the mutation as a normal success.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Any API-token holder on the team can silently add (and, by the same hole, edit or delete) recipients and fields on an already-sent document: a new party gains a signing link to a document the existing signers agreed to under a fixed party list, the signing certificate ends up listing a recipient added after the send, and under parallel signing the added signer is never emailed yet still blocks completion, so the envelope is wedged in PENDING forever.",
+  "rootCause": {
+    "file": "packages/lib/server-only/recipient/create-envelope-recipients.ts",
+    "lines": "62-74",
+    "explanation": "createEnvelopeRecipients has exactly two state gates. Line 68 calls assertEnvelopeMutable(envelope), and lines 70-74 reject only when envelope.completedAt is set. assertEnvelopeMutable (packages/lib/server-only/envelope/assert-envelope-mutable.ts:64-70) returns immediately for any envelope that is not AES/QES: `if (!isTspEnvelope(envelope)) return;`. The scenario's envelope is a default SES envelope, so that guard is a no-op and the only remaining check is completedAt, which is null on a PENDING document. Nothing anywhere on this path compares envelope.status to DocumentStatus.DRAFT, so the create proceeds and the transaction-scoped re-check on line 100 is the same no-op. The file's own doc comment states the intent plainly: 'SES envelopes pass through unchanged. The existing per-route guards still enforce COMPLETED/REJECTED rejection for them.' Those per-route guards enforce COMPLETED only, never PENDING, so the freeze the docs promise has no server-side implementation for SES. The identical two-gate shape is present in update-envelope-recipients.ts (lines 72-74), delete-envelope-recipient.ts (lines 68-70), create-envelope-fields.ts (lines 97-99) and update-envelope-fields.ts (lines 64-66), so steps 8, 9 and 10 of this scenario would have failed the same way had the run continued past the first mismatch. The product's own UI treats the freeze as real: apps/remix/app/components/tables/documents-table-action-button.tsx:59 only renders the Edit action when isDraft is true, so this is an enforcement gap in the API, not a deliberate capability."
+  },
+  "introducedBy": {
+    "commit": "ebbe922982a33e00280965827d3b8241bf1ff999",
+    "date": "2025-01-11",
+    "pr": "#1572",
+    "title": "feat: add template and field endpoints",
+    "note": "git blame on the guard lines: the completedAt-only check is original to createDocumentRecipients as introduced by #1572; the file was renamed to create-envelope-recipients.ts by #2105 'feat: add envelopes api' (d05bfa9fe, 2025-11-07), which carried the same two-gate shape onto the v2 endpoint the docs describe. Line 68's assertEnvelopeMutable call is newer, from #2874 'feat: add CSC AES/QES signing' (d5ce222482c2da81a1b0e6740e7d829752ea8f7f, Lucas Smith, 2026-06-16); it looks like a status guard but is deliberately scoped to AES/QES only and does not close the SES hole. So: old missing check (#1572), newer guard that reads as if it covered the case but does not (#2874)."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 2215,
+        "url": "https://github.com/documenso/documenso/issues/2215",
+        "state": "closed",
+        "title": "Envelope status remains PENDING after all recipients have signed",
+        "relation": "related",
+        "note": "Same failure mode from the other end: an envelope stuck in PENDING. Filed for a stuck seal job, not for a post-send recipient addition, but adding a recipient to a PENDING envelope produces exactly this symptom because completion requires every non-CC recipient to be SIGNED (complete-document-with-token.ts:462-470)."
+      },
+      {
+        "number": 3115,
+        "url": "https://github.com/documenso/documenso/issues/3115",
+        "state": "open",
+        "title": "[Bug]: Duplicate-email recipients collapse onto one recipient when resolving PDF placeholder tags",
+        "relation": "related",
+        "note": "Another recipient-creation correctness bug on the same v2 surface; unrelated cause."
+      }
+    ],
+    "prs": [
+      {
+        "number": 3136,
+        "url": "https://github.com/documenso/documenso/pull/3136",
+        "state": "open",
+        "title": "fix(trpc): v2 field position updates silently dropped; rewrite fields API docs",
+        "relation": "related",
+        "note": "Community PR on the sibling v2 fields surface, unmerged. It does not touch the PENDING freeze."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs \"recipient after sending\"",
+      "gh search issues --repo documenso/documenso --include-prs \"pending recipients\"",
+      "gh search issues --repo documenso/documenso --include-prs \"create-many\""
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log 3cf2963cd0..origin/main returns no commits for packages/lib/server-only/recipient/create-envelope-recipients.ts, update-envelope-recipients.ts, delete-envelope-recipient.ts or packages/lib/server-only/envelope/assert-envelope-mutable.ts. Reading origin/main (688ef2fdf303410dce3f519ad40f77ef9f37a7d2, 2026-08-14) directly confirms create-envelope-recipients.ts still has only assertEnvelopeMutable + completedAt, and assert-envelope-mutable.ts still early-returns on !isTspEnvelope. The only post-tag change to the three bound doc files is #3022 'chore: deprecate endpoints' (26f0c4c5, 2026-07-23), which adds an <EnvelopeWarning /> banner to documents.mdx and leaves the freeze sentence untouched. Still broken on main."
+  },
+  "colleagueFinding": {
+    "ref": "documenso #3",
+    "agreement": "refines",
+    "note": "Maps exactly to their finding 3 ('Docs say recipients and fields cannot change once sent; the API adds a recipient to a PENDING document. Unreported.'). My evidence agrees on the symptom and on 'unreported', and refines the cause: the endpoint is not simply missing a check, it has a guard (assertEnvelopeMutable, added by #2874 for the AES/QES TSP lock) that reads like a status guard but early-returns for SES, leaving completedAt as the only gate. That gate has been the only one since #1572 (2025-01-11), so the freeze was never enforced for the default signature level. The scope is also wider than 'adds a recipient': update-many, recipient delete, field create-many and field update-many carry the identical two-gate shape, so all four of the remaining refusal steps in this scenario (8, 9, 10) would also have returned 200."
+  },
+  "notes": "Three separate published pages make the same promise, so this is not a stray sentence: apps/docs/content/docs/concepts/document-lifecycle.mdx:54 'You cannot modify the document content, recipients, or fields while it is pending.'; apps/docs/content/docs/users/documents/add-recipients.mdx:171 'After sending a document, you cannot change recipients. If you need different recipients, you'll need to create a new document.' and :179 'You cannot remove recipients after the document has been sent.'; apps/docs/content/docs/developers/api/documents.mdx:755 for the API. The docs do not disagree with each other. The fix belongs in the shared helper, not per route: assertEnvelopeMutable should grow a mode that rejects any non-DRAFT status for authoring mutations regardless of signature level, keeping the AES/QES-specific ENVELOPE_TSP_LOCKED code and adding a plain INVALID_REQUEST for SES, and the five authoring services listed in rootCause should call it. Note one legitimate exception the fix must preserve: documentMeta.allowDictateNextSigner lets a signer nominate the next recipient on a PENDING envelope (complete-document-with-token.ts:399-458), so that path must stay allowed. Also worth noting for whoever fixes it: the scenario used SEQUENTIAL signing, where the added order-2 signer would in fact be emailed once signer 1 completes, which masks the wedge; under the default PARALLEL order the added signer gets no invitation at all and the envelope can never reach COMPLETED without a manual resend."
+}

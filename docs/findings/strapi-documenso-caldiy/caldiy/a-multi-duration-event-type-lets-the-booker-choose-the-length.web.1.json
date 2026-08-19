@@ -1,0 +1,66 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-multi-duration-event-type-lets-the-booker-choose-the-length.web.1",
+  "flowId": "a-multi-duration-event-type-lets-the-booker-choose-the-length",
+  "failingStep": 1,
+  "whatFailed": "The scenario looked for the duration chips by ARIA role plus accessible name (role listitem, name \"15m\"), and Playwright found no match, even though the page did render the 15m, 30m and 1h chips, because the listitem role never derives its accessible name from its text content.",
+  "docClaim": {
+    "quote": "Instead, Cal.com offers you the possibility of using the same event-type and offer meetings with several durations where the booker can pick the preferred duration. ... There are multiple options to choose from, and no limit on the number of durations to offer the booker from these options. You also have a default selectable for situations where the booker doesn't necessarily need to select a duration, just that they have an option to choose one.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/multiple-durations.md",
+    "section": "multiple-durations"
+  },
+  "observed": "GET /reference-host/multi-length resolved to /reference-host/multi-length?duration=30&month=2026-09&date=2026-09-15 and rendered the multi-duration selector correctly. The captured page text lists \"15m\", \"30m\", \"1h\"; step-1.png shows the three chips in the left panel with 30m highlighted, the September 2026 calendar open on the 15th, and the slot column populated. The run's own diagnostic line contradicts its verdict: \"the listitem elements on the page are: 15m, 30m, 1h\" (that inventory is built with Playwright allInnerTexts()), while the assertion used page.getByRole('listitem', { name: '15m' }), which matches on the COMPUTED ACCESSIBLE NAME. The visual judge annotation reached the same conclusion: the labels are plainly visible and the assertion looks like the brittle part. No server errors, stdout and stderr are empty, only benign console warnings.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None on users. The documented behavior works: three durations are offered, the configured default of 30 minutes is preselected and carried in the URL. The cost is a false positive in the guard report.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 7471,
+        "url": "https://github.com/calcom/cal.diy/issues/7471",
+        "state": "closed",
+        "title": "[CAL-1175] Not possible to select a custom duration on public event page",
+        "relation": "related",
+        "note": "Same control, but about offering arbitrary durations rather than about its markup or accessibility. Not this failure."
+      },
+      {
+        "number": 25282,
+        "url": "https://github.com/calcom/cal.diy/issues/25282",
+        "state": "open",
+        "title": "When setting multiple durations, want to set custom durations",
+        "relation": "related",
+        "note": "Feature request on the same selector, unrelated to the accessible name or keyboard operability of the chips."
+      }
+    ],
+    "prs": [
+      {
+        "number": 15422,
+        "url": "https://github.com/calcom/cal.com/pull/15422",
+        "state": "merged",
+        "title": "feat: make the meeting duration time more visually toggleable",
+        "relation": "related",
+        "note": "Commit 680e748b7a6cd619bfe2902f472385653d297cf3, 2024-08-19, Anik Dhabal Babu. This is the PR that introduced the current ul/li chip markup that the scenario tried to address by role and name. Not a bug fix and not a defect PR, cited only because it is what git blame names on the culprit lines."
+      }
+    ],
+    "queries": [
+      "gh search issues \"duration selector keyboard accessibility booking\" --owner calcom (0 results)",
+      "gh search issues \"booking page accessibility aria\" --owner calcom (0 results)",
+      "gh search issues \"multiple duration\" --owner calcom (20 results, none about the accessible name or keyboard operability of the duration chips)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: apps/web/modules/bookings/components/event-meta/Duration.tsx is untouched between the tested commit 038381aeca and origin/main 176037d0af (git log 038381aeca..origin/main on that path is empty; only 4 commits landed on cal.diy main in that window). in cal.com: origin/main at 176037d0af carries a byte-identical render block for the same file, so the markup is the same in the commercial product too. Nothing to fix on the product side for this failure anyway, since the failure is the assertion, not the page. The separate accessibility gap described in the notes is unfixed in BOTH repos as of 2026-08-15."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "No researcher write-up exists for Cal.diy."
+  },
+  "notes": "Why the assertion cannot pass, precisely. The guard web vocabulary addresses an element as role plus accessible name only (packages/shared/src/guard/web-steps.ts:144-154, GuardWebLocatorSchema), and the executor turns that into page.getByRole(role, { name }) (packages/guard-runner/src/web/executor.ts:145-148). Playwright computes the accessible name per the accname spec. In playwright-core 1.62.1 the function allowsNameFromContent (lib/coreBundle.js) puts 'listitem' ONLY in the descendantAllowsNameFromContent list, never in alwaysAllowsNameFromContent. So when a listitem is the TARGET of the query, its content does not contribute to its name, and a plain <li><div>15m</div></li> computes to the empty accessible name. page.getByRole('listitem', { name: '15m' }) therefore matches zero elements on any conformant list markup. The failure diagnostic is built by roleInventory (executor.ts:155-162), which uses allInnerTexts() rather than the accessible name, which is exactly why the transcript can say \"the listitem elements on the page are: 15m, 30m, 1h\" in the same breath as \"no listitem named 15m is on the page\". This is a self-inconsistency in the harness diagnostic, worth fixing on its own: an inventory computed from accessible names would have said \"the page has 3 listitem elements, all unnamed\", which points at the real problem immediately.\n\nGenerator gap, not a one-off. GUARD_WEB_ROLES (web-steps.ts:73-122) admits several roles that take their name from the author only and never from content: 'listitem', 'list', 'paragraph', 'term', 'time', among others. Any generated step pairing one of those roles with a name: is unsatisfiable before it ever runs, unless the product happens to put an explicit aria-label or title on the element. The durable fix is to constrain the role enum (or validate at generate time) so a name may only be paired with a role in Playwright's alwaysAllowsNameFromContent set, and to route content-only assertions through the expect.text matcher the vocabulary already has and that step 3 of this same scenario already uses. Note that <li aria-label=\"15m\"> would satisfy this locator but is NOT the correct accessibility fix, so the assertion does not even point at the right remedy.\n\nThe underlying accessibility gap is real, but it is not this doc's claim and it is not what step 1 measured. In apps/web/modules/bookings/components/event-meta/Duration.tsx:114-134 of the tested worktree the selector is a bare <ul> of <li> elements: each <li> carries onClick, data-testId and data-active, and nothing else. There is no role=\"radio\"/\"option\", no tabIndex, no key handler, no aria-selected/aria-checked/aria-current, and the <ul> has no role=\"radiogroup\"/\"listbox\" and no accessible name. Selection is conveyed only by the bg-emphasis class and the data-active attribute (lines 123, 127-130). A keyboard-only or screen-reader user cannot reach the chips or perceive which length is active, which is a WCAG 2.1.1 (Keyboard) and 4.1.2 (Name, Role, Value) problem. It is worth filing against calcom/cal.com since the code is identical there, but it should be filed as an accessibility bug on its own evidence, not as a violation of the multiple-durations help page, which makes no accessibility promise. Step 2 of this scenario, which asserts selected: true on the same listitem, would fail for a related reason and is the assertion that actually does encode the a11y gap honestly.\n\nNot an edition mismatch. Cal.diy ships the feature and it works; calcom/cal.com main at 176037d0af has the same component with the same markup. Nothing here is removed EE or hosted-only code.\n\nWhat the doc-bound claim would have needed. The three milestones on step 1 (one-event-type-offers-several-durations, no-limit-on-the-number-of-durations-offered) and step 2 (a-default-duration-is-selectable) are all satisfied by the evidence already captured: the page text carries 15m, 30m and 1h, and the URL the navigate resolved to carries duration=30, which is the seeded default. A text matcher for the three labels plus a URL assertion on duration=30 would have proved the doc claim on this build."
+}

@@ -1,0 +1,86 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:1347/admin/admin-tokens/7",
+    "headers": {
+      "Authorization": "Bearer 7d21038...<redacted>"
+    },
+    "body": null
+  },
+  "status": 200,
+  "body": {
+    "data": {
+      "id": 7,
+      "kind": "admin",
+      "name": "tcref-wide-mt0g9z3k",
+      "description": "wide sibling",
+      "lastUsedAt": null,
+      "lifespan": null,
+      "expiresAt": null,
+      "createdAt": "2026-08-19T18:53:57.179Z",
+      "updatedAt": "2026-08-19T18:53:57.179Z",
+      "adminPermissions": [
+        {
+          "id": 370,
+          "documentId": "u46d7de0sb6leutlmsil3s04",
+          "action": "plugin::content-manager.explorer.read",
+          "actionParameters": {},
+          "subject": "api::article.article",
+          "properties": {},
+          "conditions": [],
+          "createdAt": "2026-08-19T18:53:57.186Z",
+          "updatedAt": "2026-08-19T18:53:57.186Z",
+          "publishedAt": "2026-08-19T18:53:57.186Z",
+          "locale": null
+        },
+        {
+          "id": 371,
+          "documentId": "pdnoowhhmol9g4ar0mhksqum",
+          "action": "plugin::content-manager.explorer.create",
+          "actionParameters": {},
+          "subject": "api::article.article",
+          "properties": {},
+          "conditions": [],
+          "createdAt": "2026-08-19T18:53:57.188Z",
+          "updatedAt": "2026-08-19T18:53:57.188Z",
+          "publishedAt": "2026-08-19T18:53:57.188Z",
+          "locale": null
+        },
+        {
+          "id": 372,
+          "documentId": "a8vkp392nj2n062cpt4t9rql",
+          "action": "plugin::content-manager.explorer.update",
+          "actionParameters": {},
+          "subject": "api::article.article",
+          "properties": {},
+          "conditions": [],
+          "createdAt": "2026-08-19T18:53:57.190Z",
+          "updatedAt": "2026-08-19T18:53:57.190Z",
+          "publishedAt": "2026-08-19T18:53:57.190Z",
+          "locale": null
+        },
+        {
+          "id": 373,
+          "documentId": "f9s6ylnx99i97eaebc2cntn2",
+          "action": "plugin::content-manager.explorer.delete",
+          "actionParameters": {},
+          "subject": "api::article.article",
+          "properties": {},
+          "conditions": [],
+          "createdAt": "2026-08-19T18:53:57.191Z",
+          "updatedAt": "2026-08-19T18:53:57.191Z",
+          "publishedAt": "2026-08-19T18:53:57.191Z",
+          "locale": null
+        }
+      ],
+      "adminUserOwner": {
+        "id": 1,
+        "firstname": "TC",
+        "lastname": "Reverify",
+        "username": null,
+        "email": "tc-reverify@example.com"
+      },
+      "accessKey": "89349998...776d4f (len 256)"
+    }
+  }
+}

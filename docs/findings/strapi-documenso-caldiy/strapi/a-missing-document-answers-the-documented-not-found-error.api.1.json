@@ -1,0 +1,60 @@
+{
+  "repo": "strapi",
+  "scenarioId": "a-missing-document-answers-the-documented-not-found-error.api.1",
+  "flowId": "a-missing-document-answers-the-documented-not-found-error",
+  "failingStep": 3,
+  "whatFailed": "GET /api/articles/<unknown documentId> answers 404 with error.message \"Not Found\", but the REST API reference page prints the 404 for that exact endpoint with error.message \"Document not found\".",
+  "docClaim": {
+    "quote": "{\n  \"data\": null,\n  \"error\": {\n    \"status\": 404,\n    \"name\": \"NotFoundError\",\n    \"message\": \"Document not found\"\n  }\n}",
+    "doc": "strapi/documentation: docusaurus/docs/cms/api/rest.md (snapshot .truecourse/specs/sources/docs.strapi.io/cms/api/rest.md:213-222, message at line 219; live page https://docs.strapi.io/cms/api/rest)",
+    "section": "REST API reference > Requests > Get a document {#get} > GET /api/:pluralApiId/:documentId, the 404 response example (rendered as the ResponseTab status={404} statusText=\"Not Found\")"
+  },
+  "observed": "All three requests behaved identically and the structural half of the envelope matched. Steps 1 and 3 (GET /api/articles/tcrefmissingdocument0000) answered 404 with {\"data\":null,\"error\":{\"status\":404,\"name\":\"NotFoundError\",\"message\":\"Not Found\",\"details\":{}}}. Step 2 (GET /api/articles/oxu7drtrrz6081a4c0mcn43n, an existing published article) answered 200 with data present and no error key, so the optionality contrast held. server.stderr.txt is empty and server.stdout.txt logs the two 404s as ordinary request lines, so nothing was thrown or logged as an error. Only the message wording differs: \"Not Found\" on the wire versus \"Document not found\" in the docs. The response is also byte-identical to what formatHttpError(createError(404, 'Not Found', { details: {} })) produces, including the details: {} member that the doc sample omits entirely.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Low: a client that copies the documented string and branches on error.message === 'Document not found' never matches, and the same page's own statusText already says 'Not Found'. Status 404, name NotFoundError and data: null are all correct, so any client keyed on the status or the name is unaffected. No data loss, no info disclosure.",
+  "rootCause": {
+    "file": "packages/core/core/src/middlewares/errors.ts",
+    "lines": "17-19",
+    "explanation": "The public REST 404 for a missing document is not raised by any controller, so no controller-chosen message exists for the docs to quote. Read end to end in the tested worktree: the core-api collection-type controller findOne (packages/core/core/src/core-api/controller/collection-type.ts:36-45) hands the service result to transformResponse, which short-circuits on isNil and returns the null unchanged (packages/core/core/src/core-api/controller/transform.ts:38-48). returnBodyMiddleware only assigns ctx.body when the returned value is not nil (packages/core/core/src/services/server/compose-endpoint.ts:64-69), so for a miss nothing is assigned, ctx.response._explicitStatus stays false, and the errors middleware takes its `if (!ctx.response._explicitStatus) return ctx.notFound()` branch at lines 17-19. ctx.notFound is one of the helpers generated in packages/core/core/src/services/server/koa.ts:12-21 from errorMethodEntries(), whose default first argument is `statusName`, node's STATUS_CODES[404] = 'Not Found'; it builds createError(404, 'Not Found', { details: {} }) and renders it through formatHttpError (packages/core/core/src/services/errors.ts:49-62). The 'NotFoundError' in the response is http-errors' own class name for 404, not the @strapi/utils class, which is never constructed on this path (its default is 'Entity not found', packages/core/utils/src/errors.ts:70-77). The behavior is deliberate and unchanged since 2021; the docs invented a message the REST path has never emitted. 'Document not found' does exist in the product, but only on the admin-panel and MCP surfaces: packages/core/content-manager/server/src/preview/controllers/validation/preview.ts:43 throws errors.NotFoundError('Document not found') and packages/core/content-manager/server/src/mcp/handlers/constants.ts:1 defines MCP_NOT_FOUND_DOCUMENT = 'Document not found.'. The REST reference appears to have borrowed that admin wording."
+  },
+  "introducedBy": {
+    "commit": "5ae56cbd027f3f96ed74eaec51a294d4fedfb730",
+    "date": "2026-04-04",
+    "pr": null,
+    "title": "Rewrite all API pages to switch to 2-column layout for examples",
+    "note": "This is the DOC commit, in strapi/documentation (author Pierre Wizla, no PR number in the subject, and GET /commits/<sha>/pulls returns no associated PR, so it landed as a direct commit on a branch). It is the first commit for which `git log -S\"Document not found\" -- docusaurus/docs/cms/api/rest.md` reports a change, and its diff shows the string being added inside a newly authored 404 example ({ status: 404, statusText: 'Not Found', body: ... message: 'Document not found' }); the pre-2026-04 page documented no 404 body for this endpoint at all. The example was later reflowed twice without correcting the wording: ede5b50b7a9 (2026-06-29, 'Strapi Docs \"v7\" full redesign (#3281)') and 3095d316af7 (2026-07-21, 'Redesign API reference Endpoint components', PR #3341), which is what a naive blame of today's main attributes it to. The CODE the doc contradicts is far older and unrelated: the ctx.notFound() fallthrough and the reason-phrase default come from b58274aecbdbbef501a2029d952aa80da4b04996 (Pierre Noel, 2021-10-20, 'refactor error handling', no PR number) on top of 1da801ac64c (2021-09-27). The 2026-06-25 refactor 6f6af340081 'feat(ts): augment all context error response methods (#25424)' swapped the `statuses` package for node:http STATUS_CODES but statuses(404) and STATUS_CODES[404] are both 'Not Found', so the wire message never moved. So: new doc text, five-year-old behavior, no regression."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3341,
+        "url": "https://github.com/strapi/documentation/pull/3341",
+        "state": "merged",
+        "title": "Redesign API reference Endpoint components",
+        "relation": "related",
+        "note": "Merged 2026-07-21. Not a report or a fix, listed only because it is what a blame of today's docs main points at for these lines: it moved the wrong 404 example into the new <ResponseTab status={404} statusText=\"Not Found\"> component and carried the 'Document not found' body across verbatim. Notable that the same component now states the correct wording ('Not Found') in its statusText prop right above the body that contradicts it."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/documentation --repo strapi/strapi '\"Document not found\"' --include-prs --limit 30 -> 3 hits, all unrelated (strapi/strapi #27267, #27262, #21251, all about the content-manager Preview feature's own 'Document not found' error, not the REST reference)",
+      "gh search issues --repo strapi/documentation --repo strapi/strapi 'NotFoundError REST 404 message' --include-prs --limit 30 -> 2 hits, both false positives matched on the issue number 404 (strapi/documentation#404 'Update amazon-aws.md', strapi/strapi#404)",
+      "gh search issues --repo strapi/documentation --repo strapi/strapi '\"NotFoundError\" \"Not Found\" documentId' --include-prs --limit 30 -> 0 results",
+      "none found: no open or closed issue or PR in either repo reports that the REST reference's 404 example message does not match the product"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Neither side moved. Docs: I fetched docusaurus/docs/cms/api/rest.md from strapi/documentation main on 2026-08-15 via the contents API; line 297 still reads \"message\": \"Document not found\" inside the status={404} ResponseTab, so the text is unchanged after the tested build. Code: `git log c43e9ee1e2..HEAD` in the develop clone (head acf0ce20345e, 2026-08-14) over packages/core/core/src/middlewares/errors.ts, services/errors.ts, services/server/{koa.ts,koa-methods.ts,compose-endpoint.ts}, core-api/controller/{collection-type.ts,transform.ts} and packages/core/utils/src/errors.ts returns zero commits, so develop still answers 'Not Found'. Strapi tags releases off develop and the tested commit is an ancestor of it, so there is no later release with different behavior either."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the researcher's 8 Strapi findings, which all concern the MCP server (relation set:null no-op, mutually exclusive relation ops, filter operators, stale relation confirmation, page-size schema mismatch, raw SQL leak) or admin-token auth (permissions reaped on restart, admin-token key readback and MCP tool-name doc drift). None touches the public REST error envelope. Their finding 8 is also a docs finding, but about strapi/documentation's admin-token and MCP tool pages, a different surface from the REST reference. Adjacent peer result in this same review batch: the-rest-error-envelope-carries-its-documented-members.api.1 was ruled test-defect because it asserted 'Entity not found' while binding error-handling.md, which documents that string only as the NotFoundError CONSTRUCTOR default, not as an endpoint's output. My evidence agrees with that reasoning and completes it: this scenario binds rest.md, which really does print 'Document not found' for this exact request, so the same wire behavior is a doc bug here rather than a test defect. That peer left the strapi/documentation repo state unchecked; I checked it and it is still wrong on main."
+  },
+  "notes": "For the doc author, the fix is one word in docusaurus/docs/cms/api/rest.md: the 404 example under 'Get a document' should read \"message\": \"Not Found\", which is already what the surrounding component's statusText prop says. Two smaller drifts on the same sample: the real body also carries \"details\": {} (the sample omits it), and the same substitution is needed anywhere else the page shows a core REST 404.\n\nThe product genuinely carries three different 404 wordings for the same conceptual failure, which is what makes this easy to get wrong. Public REST core-api answers 'Not Found' (the ctx.notFound() fallback). The content-manager admin API and the MCP handlers say 'Document not found' / 'Document not found.'. The bare @strapi/utils class default, documented on /cms/error-handling, is 'Entity not found'. Only the first is reachable through /api/:pluralApiId/:documentId.\n\nIf Strapi would rather make the docs true than change them, the change is small and belongs in the controller, not the middleware: have core-api findOne throw errors.NotFoundError('Document not found') when the service returns nil, instead of leaning on the 'no handler set a body' fallback. That would also stop the endpoint from returning an empty details object. It is a wire-visible change to a five-year-old behavior, so it is a semver decision, not a bug fix. Correcting the docs is the cheap and safe option.\n\nScenario quality note: the generated scenario is well constructed and its verdict is trustworthy. Steps 1 and 2 assert the wording-independent half of the envelope and both passed, which is what isolates the failure to the prose; step 3 is deliberately last and its own note predicts doc drift. The only nit is that step 3's expected value is the doc's string rather than the product's, so the scenario will stay red until strapi/documentation is patched."
+}

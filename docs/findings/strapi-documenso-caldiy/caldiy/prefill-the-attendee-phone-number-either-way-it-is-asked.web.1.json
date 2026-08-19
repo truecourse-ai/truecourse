@@ -1,0 +1,76 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "prefill-the-attendee-phone-number-either-way-it-is-asked.web.1",
+  "flowId": "prefill-the-attendee-phone-number-either-way-it-is-asked",
+  "failingStep": 3,
+  "whatFailed": "On /reference-host/phone-question?...&attendeePhoneNumber=%2B919999999999 the documented prefill never reaches the Phone number question (the field still shows the default US +1), and that field additionally has no accessible name, so the step's role+name target resolved to nothing.",
+  "docClaim": {
+    "quote": "Another way to ask for the attendee phone number is to toggle on the \"Phone number\" question in the Advanced -> Booking questions section. In that case, the correct approach to prefill the phone number is to use the `attendeePhoneNumber` param.  ...other-params...&attendeePhoneNumber=%2B919999999999",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/bookings/prefill-fields.md",
+    "section": "Pre-filling Attendee Phone - When used as a separate booking question"
+  },
+  "observed": "Step 1 and 2 (the location half of the same doc page) pass: with location={\"value\":\"phone\",\"optionValue\":\"%2B919999999999\"} the location phone control holds \"+91 99999-99999\". Step 3 navigates to the phone-question event type with attendeePhoneNumber=%2B919999999999; the driver polled the full 10 s budget and found zero textboxes whose accessible name contains \"Phone number\" (the transcript's \"the page has no textbox elements at all\" line is a driver artifact: its inventory lists innerText, which is empty for <input>). step-3.png, taken on the fully rendered page, shows the Phone number field with a US flag and the value \"+1\", so the prefilled number is absent as well: even a correctly named target would have failed the value assertion. The visual judge recorded both halves (\"contains +1 rather than +91\" and \"the assertion could not target the visible phone input by its accessible name\").",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Anyone who links to a booking page with the documented attendeePhoneNumber param (embeds, CRM/AI hand-offs, marketing links) gets an empty +1 field and the attendee has to retype the number; separately the phone control is unreachable by accessible name, so screen-reader users and label clicks get nothing.",
+  "rootCause": {
+    "file": "apps/web/components/phone-input/PhoneInput.tsx",
+    "lines": "117-121",
+    "explanation": "BasePhoneInputWeb renders react-phone-input-2 with value={value ? ... : undefined} and country={value ? undefined : defaultCountry}. The prefill is populated asynchronously: useInitialFormValues (packages/features/bookings/Booker/hooks/useInitialFormValues.ts:87-167) awaits getBookingResponsesPartialSchema().parseAsync on the query params and only then useBookingForm calls bookingForm.reset(), so the attendeePhoneNumber input has already mounted with an empty value. On that update BOTH props change at once: value \"\" -> \"+919999999999\" and country \"us\" -> undefined (React substitutes the component's defaultProps country \"\"). react-phone-input-2 2.15.x's componentDidUpdate is `prevProps.country !== this.props.country ? this.updateCountry(this.props.country) : prevProps.value !== this.props.value && this.updateFormattedNumber(this.props.value)`, so the country branch wins and updateFormattedNumber is never called; updateCountry(\"\") finds no country with iso2 == \"\" and does nothing, leaving the mount-time \"+1\". I reproduced this against the real library (2.15.0 on disk; cal.diy pins 2.15.1): mount(country 'us', value '') then update to (country '', value '+919999999999') yields \"+1\", whereas keeping country 'us' yields \"+91 99999-99999\", and mounting straight away with the value yields \"+91 99999-99999\". That last case is exactly why the location half passes: the location option input only exists once responses.location.value === 'phone', so it mounts after the prefilled value exists. SECOND, INDEPENDENT DEFECT on the same step: the field has no accessible name. apps/web/modules/form-builder/components/FormBuilderField.tsx:174 renders <Label htmlFor={field.name}> (\"attendeePhoneNumber\"), the phone factory in apps/web/modules/form-builder/components/Components.tsx:192-209 passes no id, and PhoneInput.tsx declares id?: string but forwards ...rest to react-phone-input-2, which puts only className/style/handlers/value/placeholder/disabled/type plus inputProps on the <input> and drops id. The question field's placeholder resolves to \"\" (the system field has no defaultPlaceholder), so nothing names it. The location option input escapes this only because BookingFields.tsx:190-195 assigns it the runtime placeholder t(\"enter_phone_number\"), which is what step 2's name match \"Phone\" actually resolved against. I confirmed with Playwright 1.62 (the runner's own engine) on a fixture of both DOM shapes: the dangling for= plus empty placeholder gives 0 matches for \"Phone\"/\"Phone number\", while a properly labelled input matches."
+  },
+  "introducedBy": {
+    "commit": "d59fdf21fdf4bf592b2c7eb75ae3701fad638427",
+    "date": "2025-03-06",
+    "pr": "#19788",
+    "title": "feat: display country code from IP",
+    "note": "This commit created packages/features/components/phone-input/PhoneInput.tsx (now apps/web/components/phone-input/PhoneInput.tsx) and introduced country={value ? undefined : defaultCountry} on the web variant. Before it the web variant passed no country prop at all, so country was the constant defaultProps \"\" and componentDidUpdate always took the value branch, i.e. the async prefill landed. The accessible-name half is older and separate: WithLabel's <Label htmlFor={field.name}> traces to 8dbd96a2f9f (2024-08-08, PR #15742, \"fix: Unable to submit booking form if Attendee Phone is used...\"), and no caller has ever put that id on the react-phone-input-2 input."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 29739,
+        "url": "https://github.com/calcom/cal.diy/issues/29739",
+        "state": "closed",
+        "title": "attendeePhoneNumber in params can't parse country phone code",
+        "relation": "exact",
+        "note": "Same parameter, same mechanism. Filed 2026-07-07 against cal.com production for the calling-code-only case (attendeePhoneNumber=%2B371 shows +1); closed 2026-08-05 by PR #29740. My evidence refines it: the drop is not limited to bare calling codes, a full international number is discarded on the same update path (the country branch of componentDidUpdate runs instead of the value branch regardless of the value's length)."
+      },
+      {
+        "number": 22992,
+        "url": "https://github.com/calcom/cal.diy/issues/22992",
+        "state": "closed",
+        "title": "Passing phone through query params is partially broken (format makes validation not go through)",
+        "relation": "related",
+        "note": "Earlier phone-prefill complaint (2025-08-08, closed 2025-09-01) about the rendered value failing validation, not about the value being dropped. Useful as context: at that point the prefilled number did reach the field."
+      }
+    ],
+    "prs": [
+      {
+        "number": 29740,
+        "url": "https://github.com/calcom/cal.diy/pull/29740",
+        "state": "merged",
+        "title": "fix(bookings): provide stable country fallback for phone input",
+        "relation": "exact",
+        "note": "Merged 2026-08-05T06:29:34Z as 5e3fe3cbe6, 5 days after the tested commit. Changes country={value ? undefined : defaultCountry} to country={defaultCountry}. Its body states the mechanism verbatim: \"attendeePhoneNumber is populated asynchronously from the URL after the initial render. During this update, the phone input received a prefilled value while the country prop was removed\". My simulation confirms the fixed prop shape makes the full +919999999999 land."
+      }
+    ],
+    "queries": [
+      "gh search issues \"attendeePhoneNumber prefill\" --owner calcom (0 results)",
+      "gh search issues \"phone number prefill booking\" --owner calcom (0 results)",
+      "gh search issues attendeePhoneNumber --owner calcom (16 results, yielded #29739 and #22992)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "partial",
+    "by": "#29740 / 5e3fe3cbe60e529b7f0d9d18065fd094c4d2152a",
+    "date": "2026-08-05",
+    "inTag": null,
+    "note": "in cal.diy: the prefill half is fixed on main by PR #29740 (5e3fe3cbe6, 2026-08-05), which is one of only 4 commits between the tested 038381aeca (2026-07-31) and origin/main 176037d0af; `git tag --contains 5e3fe3cbe6` is empty, so it is on main only. The accessible-name half is NOT fixed: origin/main still has the phone factory passing no id and PhoneInput still dropping the declared id prop, so the control remains unnamed. in cal.com: not verifiable from source (the commercial tree is private and the public calcom/cal.com main is the same commit as cal.diy main); issue #29739 was filed against cal.com production and closed the day #29740 merged, which is the only public signal that the hosted product picked the fix up."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office, team slots, date-override grid, seated attendee, hold auth). It does meet the sibling reviewer's cal.diy note that the booking form's phone control has no accessible name because PhoneInput.tsx never applies its id prop: I confirm that half independently (and add that the caller never passes id either, so fixing PhoneInput alone is not enough, and that the location option input only looks named because BookingFields.tsx injects the placeholder t(\"enter_phone_number\")). But it is not the whole story here: the a11y gap is what made the target unresolvable, while the doc claim itself is broken underneath it, because the field holds +1 rather than the prefilled +91."
+  },
+  "notes": "Two independent defects sit on this one step and both need fixing before the scenario can go green: (1) the async prefill is dropped by the country-prop flip (fixed on main by #29740), and (2) the phone control has no accessible name (still broken on main). Upstream's own e2e code already works around (2) by selecting the input as '[name=\"attendeePhoneNumber\"]' (apps/web/playwright/lib/testUtils.ts:212) instead of by role and name. A minimal fix for (2): pass id={props.name} in the phone factory (as the email and address factories already do) AND forward it through PhoneInput via inputProps, since react-phone-input-2 ignores a bare id prop. Caveat on the environment: the run's seed (reference/seed/guard-seed.mjs) is no longer on disk and the run's Postgres is down, so I could not read the seeded event type's bookingFields to confirm the question's identifier is literally attendeePhoneNumber; the rendered label \"Phone number\" with the international-format info badge, its position between Email address and Additional notes, and the fact that the very same defect explains the observed +1 all point that way, but if a maintainer wants to reproduce, the reproduction is simply an event type with the system Phone number question unhidden plus ?attendeePhoneNumber=%2B919999999999 on a cold load. Not an edition-mismatch: cal.diy ships the feature, the code path exists, it just misbehaves. Also note the version nuance: I verified the library behaviour against react-phone-input-2 2.15.0 (the copy available locally) while cal.diy pins 2.15.1; the componentDidUpdate branch that causes this is unchanged in the package's public history and PR #29740 describes the same mechanism, but the simulation itself ran on 2.15.0."
+}

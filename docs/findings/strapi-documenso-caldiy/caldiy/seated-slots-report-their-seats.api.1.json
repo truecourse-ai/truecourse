@@ -1,0 +1,59 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "seated-slots-report-their-seats.api.1",
+  "flowId": "seated-slots-report-their-seats",
+  "failingStep": 2,
+  "whatFailed": "GET /v2/slots (cal-api-version 2024-09-04) on a seated event type returned 200 with per-slot seat data named seatsBooked / seatsRemaining / seatsTotal (plus bookingUid), while the endpoint's own published 200-response description promises the seat count under the name attendeesCount, which appears nowhere in the response.",
+  "docClaim": {
+    "quote": "For seated slots each object will have attendeesCount and bookingUid properties.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type.md line 237; the same sentence is generated from the tested tree at apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts:205 and is committed at docs/api-reference/v2/openapi.json:5431",
+    "section": "get-available-time-slots-for-an-event-type / openapi, GET /v2/slots, responses '200'.description"
+  },
+  "observed": "Step 1 booked a 4th seat on event type 102 at 2050-09-08T14:00Z (201). Step 2's GET /v2/slots returned {\"data\":{\"2050-09-08\":[{\"start\":\"...T13:00:00.000Z\",\"seatsBooked\":0,\"seatsRemaining\":10,\"seatsTotal\":10}, ... {\"start\":\"...T14:00:00.000Z\",\"seatsBooked\":4,\"seatsRemaining\":6,\"seatsTotal\":10,\"bookingUid\":\"ptL2busPDT5RbZRbp5Pmi9\"}, ...]},\"status\":\"success\"}. The seat arithmetic is correct and richer than the doc promises; only the field name attendeesCount is missing. bookingUid is present only on the two slots that already have a booking, not on every seated slot. The request sent cal-api-version 2024-09-04, a version Cal.diy does ship (packages/platform/constants/api.ts:60), so the version-downgrade systemic cause does not apply here.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Anyone integrating against the published v2 slots reference reads the seat count as slot.attendeesCount and gets undefined for every seated slot; the correct names (seatsBooked, seatsRemaining, seatsTotal) appear nowhere in the entire snapshotted cal.com docs corpus, so the docs give a reader no way to find them. No data loss, but a guaranteed broken seated-slots integration written from the docs.",
+  "rootCause": {
+    "file": "apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/slots.controller.ts",
+    "lines": "202-259",
+    "explanation": "The @DocsResponse decorator on getAvailableSlots carries a hand-written prose description (line 205) claiming seated slot objects have attendeesCount and bookingUid, and a hand-written schema (lines 207-258) whose oneOf branches declare only start (default/time format) or start plus end (range format). Neither the prose nor the schema is derived from the DTOs that actually shape the response. The real emitter is apps/api/v2/src/modules/slots/slots-2024-09-04/services/slots-output.service.ts:91-104 (getAvailableTimeSlotSeated) and 188-203 (getAvailableRangeSlotSeated), which return { start, seatsBooked, seatsRemaining: seatsPerTimeslot - seatsBooked, seatsTotal, bookingUid }, matching the typed contract packages/platform/types/slots/slots-2024-09-04/outputs/slots.output.ts:10-26 (SeatedSlot_2024_09_04) and :38-54 (SeatedRangeSlot_2024_09_04), whose @ApiProperty descriptions are correct. The product's own e2e suite pins the emitted shape (apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/e2e/user-event-type-slots.controller.e2e-spec.ts:900-952 asserts seatsBooked/seatsRemaining/seatsTotal), so the behavior is intentional and the prose is the wrong artifact. Because the DocsResponse schema never references SeatedSlot_2024_09_04, the generated docs/api-reference/v2/openapi.json inherits both faults: wrong prose and no seat fields in the schema. The fix is to point the DocsResponse schema at the seated DTOs and correct the sentence, not to change the response."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version",
+    "note": "git blame on line 205 today names 94c7bfea4d302a0ac94c61e82de16f679ee1f0f0 (2025-12-02, PR #25102 'fix: display message in the response'), but that commit only appended the 'If no slots are available...' sentence and rewrote the template literal; `git log -S \"attendeesCount and bookingUid\"` on the controller returns exactly one commit, 5dc81e8677c. That same commit added the seatsBooked/seatsRemaining/seatsTotal emitter (blame of slots-output.service.ts:91-104 is 5dc81e8677c too), so the description was wrong the day the 2024-09-04 slots API shipped. Provenance note: even the predecessor version never used this name. slots-2024-04-15/services/slots-output.service.ts:37-38 emits `attendees` (plus bookingUid), so `attendeesCount` matches no version of the endpoint, past or present."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 22189,
+        "url": "https://github.com/calcom/cal.diy/pull/22189",
+        "state": "closed",
+        "title": "refactor: simplify seated event booking limits implementation",
+        "relation": "related",
+        "note": "The only calcom hit for the token attendeesCount. It touches the `attendeesCount` local variable in the slots reserve path (slots.service.ts:140, :303), not the GET /v2/slots response shape or its docs. Closed unmerged 2025-07-11. Not a fix for this."
+      }
+    ],
+    "queries": [
+      "gh search issues attendeesCount --owner calcom --limit 30 (0 results)",
+      "gh search prs attendeesCount --owner calcom --limit 30 (1 result, calcom/cal.diy#22189, unrelated to the response shape)",
+      "gh search issues seatsRemaining --owner calcom --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: not fixed. `git log 038381aeca..origin/main` has 4 commits and none touch apps/api/v2/src/modules/slots/ or docs/api-reference/v2/openapi.json; `git grep 'attendeesCount and bookingUid' origin/main` still hits slots.controller.ts:205 and openapi.json:5431 at head 176037d0af (2026-08-08). in cal.com: not verifiable from source (the commercial tree is private and the public calcom/cal.com main is the same commit as cal.diy main); no public issue, PR or changelog entry found for this wording, and the docs page snapshotted from cal.com/docs on 2026-08-13 still carries the sentence, so the commercial reference is stale too."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md. The closest is caldiy #4 (adding an attendee to a seated booking is accepted, seat counts go wrong: negative seats left, oversold), but that is a different endpoint and a behavior claim; this failure is purely the response field naming and the seat arithmetic here was internally consistent (seatsTotal 10, seatsBooked 4, seatsRemaining 6, no oversell) on the normal POST /v2/bookings path, which neither confirms nor contradicts #4."
+  },
+  "notes": "Not an edition-mismatch: the offending doc text lives inside the tested Cal.diy tree itself (slots.controller.ts:205, committed docs/api-reference/v2/openapi.json:5431), the published cal.com page is generated from that same openapi.json, and the seated-slots code is present and works. Not a test-defect either: the scenario encodes the doc sentence verbatim, and the scenario's own note flags that it was authored doc-faithfully in the expectation of going red. Two extra inaccuracies for the doc author, both in the same sentence: (1) `bookingUid` is not on every seated slot object, only on slots that already have a booking, because slots-output.service.ts returns bookingUid: undefined and JSON.stringify drops the key (see the 13:00, 15:00, 15:30, 16:00, 16:30 slots in the evidence); (2) the 200-response schema oneOf declares no seat fields at all in either branch, so even a reader who distrusts the prose cannot recover the right names from the reference. Suggested fix: replace the sentence with 'For seated slots each object also has seatsBooked, seatsRemaining and seatsTotal, and bookingUid when the slot already has a booking', and wire the DocsResponse schema to SeatedSlot_2024_09_04 / SeatedRangeSlot_2024_09_04 so the generated openapi.json stops drifting from the DTOs."
+}

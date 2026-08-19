@@ -1,0 +1,108 @@
+{
+  "id": "D13",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "fixed",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "d42254ff52cd6257380f076022c41152b08ef60e",
+        "date": "2026-08-19",
+        "title": "docs(api): document cancel endpoint and fix get-many body shape",
+        "pr": "#3135",
+        "touchesCulpritLines": true,
+        "effect": "Replaces the fabricated flat envelopeIds body with the real nested { ids: { type, ids } } selector, adds the missing { data: [...] } response section, and documents the 1-20 id cap and the documentId/templateId variants."
+      },
+      {
+        "sha": "26f0c4c5b",
+        "date": "2026-07-23",
+        "title": "chore: deprecate endpoints",
+        "pr": "#3022",
+        "touchesCulpritLines": false,
+        "effect": "Banner only; predates the review."
+      }
+    ],
+    "fix": {
+      "sha": "d42254ff52cd6257380f076022c41152b08ef60e",
+      "pr": "#3135",
+      "date": "2026-08-19",
+      "inRelease": "v2.17.0",
+      "releaseDate": "2026-08-19",
+      "note": "Merged 2026-08-19 09:28:55 UTC into main; main head 75330166cc is tag v2.17.0, so the fix is inside the release. The endpoint contract itself never changed: packages/trpc/server/envelope-router/get-envelopes-by-ids.types.ts has no commits since the tested tag and still declares ZGetEnvelopesByIdsRequestSchema = z.object({ ids: ZEnvelopeIdsSchema }) at L31-L33. This was a docs-only defect and the docs were corrected."
+    },
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/apps/docs/content/docs/developers/api/documents.mdx#L685-L729",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/api/documents.mdx#L797-L850",
+    "howDecided": "git log 3cf2963cd0..origin/main -- apps/docs/content/docs/developers/api/documents.mdx now returns d42254ff5 (#3135) on top of the pre-review 26f0c4c5b. I read the merged commit body and the file on origin/main: the Get Multiple Documents section moved to L797 and its request table (L809-L812) and both code samples (L819-L850) now send { \"ids\": { \"type\": \"envelopeId\", \"ids\": [...] } }. git grep on origin/main finds no remaining occurrence of envelopeIds in that section."
+  },
+  "docs": {
+    "stillPresent": false,
+    "file": "apps/docs/content/docs/developers/api/documents.mdx",
+    "lineToday": 797,
+    "permalink": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/api/documents.mdx#L797-L850",
+    "publishedUrl": "https://docs.documenso.com/docs/developers/api/documents",
+    "commitsSinceReview": [
+      "d42254ff52cd6257380f076022c41152b08ef60e (#3135, 2026-08-19, merged by the PR author after dguyen approved it on 2026-08-03)"
+    ],
+    "note": "Fixed in source and already deployed. I fetched https://docs.documenso.com/docs/developers/api/documents today and the live curl example sends the nested selector, and the request table documents ids.type as envelopeId | documentId | templateId with '1-20 IDs: strings for envelopeId; numbers for documentId or templateId'. The review's own recommended fix text and the shipped text agree line for line, including the previously missing { \"data\": [...] } response section."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3135",
+        "kind": "pr",
+        "stateAtReview": "open, mergeable_state blocked, base docs/envelope-openapi-descriptions",
+        "stateToday": "merged",
+        "changedSinceReview": true,
+        "mergedAt": "2026-08-19T09:28:55Z",
+        "mergeCommit": "d42254ff52cd6257380f076022c41152b08ef60e",
+        "baseRef": "main",
+        "note": "Rebased onto main and merged today; approved by dguyen (COLLABORATOR) on 2026-08-03. Fixes this finding completely and is in v2.17.0."
+      },
+      {
+        "ref": "documenso/documenso#3134",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "merged",
+        "changedSinceReview": true,
+        "mergedAt": "2026-08-19T09:28:40Z",
+        "mergeCommit": "914e325486561fe8bf23d8a949629681e2324da1",
+        "baseRef": "main",
+        "note": "The middle of the old stack; merged 15 seconds before #3135. Adds OpenAPI descriptions to three envelope routes, nothing this finding depends on."
+      },
+      {
+        "ref": "documenso/documenso#3133",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "merged",
+        "changedSinceReview": true,
+        "mergedAt": "2026-08-19T09:28:24Z",
+        "mergeCommit": "05f646b326c558edfd920ff1db5836da6680b2fb",
+        "baseRef": "main",
+        "note": "Bottom of the old stack; merged first. Its rate-limits.mdx rewrite is the evidence D10 relies on."
+      },
+      {
+        "ref": "documenso/documenso#3022",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-07-23T03:57:09Z",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. The EnvelopeWarning banner commit 26f0c4c5b, still the only pre-#3135 touch of documents.mdx after the tested tag."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}, WebFetch of the two published doc pages"
+    ]
+  },
+  "reevaluation": "This finding is fixed upstream and should not be filed. The review's fixedAfter: no was correct on 2026-08-15 and is wrong as of today: PR #3135 was rebased from its docs/envelope-openapi-descriptions base onto main and merged at 2026-08-19 09:28:55 UTC as d42254ff5, which sits inside tag v2.17.0 cut the same day, and the published page already serves the corrected body. The review's characterisation of the defect was exactly right and its recommended fix is what shipped, including the nested selector, the 1-20 cap, the numeric documentId/templateId variants and the previously absent response section. The product contract was never at fault and is unchanged. Nothing about the verdict changes, only its disposition: from unreported-and-open to fixed-in-release.",
+  "routeSuggestion": "skip: fixed (in v2.17.0)",
+  "policyBasis": null,
+  "confidence": "high",
+  "notes": "Worth carrying forward for the report rather than for a filing: the two-week 'community docs PRs sit unmerged' narrative needs updating for Documenso, since three of the seven merged on 2026-08-19 (#3133, #3134, #3135), all approved by dguyen on 2026-08-03 and merged 16 days later. The remaining four (#3136, #3137, #3138, #3139) are still open. Also note #3135 shipped more than this finding: a new Cancel Document section, a CANCELLED status row, removal of the nonexistent source: \"API\" enum value, and the pagination corrections that D14 partly depends on."
+}

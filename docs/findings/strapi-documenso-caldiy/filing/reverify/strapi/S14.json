@@ -1,0 +1,82 @@
+{
+  "id": "S14",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/core/src/services/errors.ts#L4-L29",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/core/src/services/errors.ts#L4-L29",
+    "howDecided": "git log c43e9ee1e2..origin/develop over packages/core/core/src/services/errors.ts, packages/core/utils/src/errors.ts and packages/core/admin/server/src/strategies/content-api-token.ts returns zero commits. Read them at today's head: mapErrorsAndStatus still binds errors.UnauthorizedError to 401 (lines 5-8) and errors.ForbiddenError to 403 (lines 9-12), the standard HTTP meanings. packages/core/utils/src/errors.ts still defines ForbiddenError with default message 'Forbidden access' (line 87), UnauthorizedError with default 'Unauthorized' (line 98) and PolicyError extending ForbiddenError (line 132), which is itself evidence that the 403 reading is the intended one. So the product's class-to-status mapping is unchanged and HTTP-correct; the inversion is purely in the doc prose. Supporting permalink: https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/utils/src/errors.ts#L82-L103"
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "docusaurus/docs/cms/error-handling.md",
+    "lineToday": 425,
+    "permalink": "https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/error-handling.md#L425",
+    "publishedUrl": "https://docs.strapi.io/cms/error-handling",
+    "commitsSinceReview": [],
+    "note": "git log c768c7bf..origin/main -- docusaurus/docs/cms/error-handling.md is empty. Both inverted sentences are verbatim at the line numbers the review recorded. Line 407: 'The `ForbiddenError` class is a specific error class used when a user either doesn't provide any or the correct authentication credentials.' Line 425: 'The `UnauthorizedError` class is a specific error class used when a user doesn't have the proper role or permissions to perform a specific action, but has properly authenticated.' They sit in adjacent TabItem blocks ('Forbidden' at line 405, 'Unauthorized' at line 423), so a fix is a straight swap of the two descriptions. Second permalink for the ForbiddenError sentence: https://github.com/strapi/documentation/blob/9226f90506a4a361038f220f24768016a73b5663/docusaurus/docs/cms/error-handling.md#L407 . The self-contradiction the review flagged is also still on the page: line 276 tells the reader to use PolicyError for 'not allowed to perform the action', and PolicyError extends ForbiddenError, which only makes sense under the correct (non-inverted) reading."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#9512",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2022-02-01)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'API access while unauthorized should return 401, but instead returns 403.' Created 2021-02-24, last updated 2023-11-13. About the UNAUTHENTICATED case, not the error-class naming. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#18782",
+        "kind": "issue",
+        "stateAtReview": "closed (not planned, 2025-11-03)",
+        "stateToday": "closed (not_planned)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'Calling Strapi's APIs without credentials on a protected route should return 401 (unauthorized).' Last updated 2025-11-10, no activity since. Same unauthenticated-request topic. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#23733",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2025-06-28)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'Authentication failures return 500 error instead of proper 401/403 responses'. Last updated 2025-06-28. Adjacent 401/403 hygiene, never mentions the doc class descriptions. Unchanged."
+      },
+      {
+        "ref": "strapi/documentation#2376",
+        "kind": "issue",
+        "stateAtReview": "closed (completed, 2025-02-20)",
+        "stateToday": "closed (completed)",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "'[Bug]: No Default error classes export from `@strapi/utils`'. The only tracked bug against this exact doc section; it fixed the import example, not the class descriptions. Unchanged, no activity since 2025-02-20."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner strapi --include-prs --limit 30 'UnauthorizedError ForbiddenError' -> 0 results",
+      "gh search issues --repo strapi/strapi --include-prs --limit 30 'ForbiddenError' -> 30 hits, all pre-existing; the only item newer than 2026-08-10 in the whole strapi org touching this area is #27247 (open, 2026-08-04, locale-restricted single/collection type crashing with a generic Forbidden error), which is a product bug in the i18n permission path and not about the documented class semantics. No issue or PR in either repo reports the inverted descriptions.",
+      "non-search enumeration: gh api --paginate 'repos/strapi/strapi/issues?state=all&since=2026-08-10T00:00:00Z&per_page=100' -> 239 items, none about error-class naming; gh api 'repos/strapi/documentation/issues?state=all&since=2026-08-01T00:00:00Z&per_page=100' -> none touching error-handling.md"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Neither the class-to-status mapping nor the error classes moved on develop through v5.52.1, and both inverted sentences are verbatim on strapi/documentation main at lines 407 and 425. All four cited items are in exactly the state the review recorded, with no activity since. The review's framing correction also still holds and should survive into the filing: the run sent a VALID read-only token, so 403 is the HTTP-correct answer and the product is right; only the doc prose has the two classes the wrong way round. The searches turned up one new-ish neighbour, strapi/strapi#27247 (opened 2026-08-04, a generic Forbidden error when landing on a locale-restricted content type), but it is a product bug in the i18n permission path and does not report or fix this doc inversion. Verdict doc-bug, confidence high, scope two adjacent paragraphs in one file.",
+  "routeSuggestion": "docs repo issue",
+  "policyBasis": "strapi/documentation .github/ISSUE_TEMPLATE/config.yml: 'blank_issues_enabled: false' with the only contact link being 'Strapi Project Issues ... Please use the strapi/strapi repo for these issues'. The code here is correct, so nothing goes to strapi/strapi; file in strapi/documentation via .github/ISSUE_TEMPLATE/BUG_REPORT.yml ('Documentation Bug Report', title prefix '[Bug]: ', label 'type: bug'), required fields 'Link to the documentation page or resource' and 'Describe the bug'.",
+  "confidence": "high",
+  "notes": "The fix is a straight swap of the two TabItem descriptions plus, ideally, naming the HTTP status each class maps to, since packages/core/core/src/services/errors.ts is the authority (UnauthorizedError -> 401, ForbiddenError -> 403) and the page never states the mapping. Corroborating detail for the issue body: PolicyError extends ForbiddenError (packages/core/utils/src/errors.ts:132) and the same page at line 276 already recommends PolicyError for insufficient permissions, so the page contradicts itself two paragraphs apart. Do NOT frame this as a 403-should-be-401 report: strapi/strapi#9512 and #18782 already cover that (different, unauthenticated case) and #18782 was closed as not planned; conflating them is what got those reports dismissed. This finding and S15 both land in error-handling.md and could reasonably be filed as one docs issue with two sections, but they are independent defects (S14 is the inverted class semantics at lines 407/425; S15's doc half includes the 'returns the default message' note at line 418)."
+}

@@ -1,0 +1,83 @@
+{
+  "repo": "strapi",
+  "scenarioId": "a-read-only-api-token-reads-but-cannot-write.api.1",
+  "flowId": "a-read-only-api-token-reads-but-cannot-write",
+  "failingStep": 7,
+  "whatFailed": "A read-only API token that is correctly authenticated but not permitted to create is refused with `error.name: \"ForbiddenError\"` (HTTP 403), while the error-handling doc reserves `ForbiddenError` for callers with missing or wrong credentials and `UnauthorizedError` for exactly this case, an authenticated caller without the permission.",
+  "docClaim": {
+    "quote": "The `UnauthorizedError` class is a specific error class used when a user doesn't have the proper role or permissions to perform a specific action, but has properly authenticated. [...] The `ForbiddenError` class is a specific error class used when a user either doesn't provide any or the correct authentication credentials.",
+    "doc": "docusaurus/docs/cms/error-handling.md (strapi/documentation), upstream lines 425 and 407; snapshot .truecourse/specs/sources/docs.strapi.io/cms/error-handling.md lines 331 and 317",
+    "section": "error-handling / Throwing errors / Default error classes"
+  },
+  "observed": "Steps 2 and 3 pass: the read-only token lists /api/articles and fetches one document (200). Steps 4, 5 and 6 pass: POST, PUT and DELETE with the same token are refused 403 with body {\"data\":null,\"error\":{\"status\":403,\"name\":\"ForbiddenError\",\"message\":\"Forbidden\",\"details\":{}}}. Step 7 re-sends the create only to read the error class and gets the same ForbiddenError, not UnauthorizedError. server.stderr.txt is empty and nothing is logged for the refusals, so this is the deliberate authorization path, not a crash.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Low direct user harm, the wire behavior is the HTTP-correct one. The harm is to backend developers: the docs teach the inverted convention, so custom controllers, policies and middlewares written from this page throw UnauthorizedError (401) for permission failures and ForbiddenError (403) for missing credentials, i.e. the opposite of what Strapi core itself emits and of RFC 7235. Clients that branch on error.name per the docs also branch wrong.",
+  "rootCause": {
+    "file": "packages/core/core/src/services/errors.ts",
+    "lines": "4-29",
+    "explanation": "The doc prose is inverted relative to Strapi's own class-to-status mapping and relative to how core uses the classes. `mapErrorsAndStatus` in services/errors.ts binds `errors.UnauthorizedError` to 401 and `errors.ForbiddenError` to 403, the standard HTTP meanings (401 = not authenticated, 403 = authenticated but refused). The classes themselves are in packages/core/utils/src/errors.ts lines 82-103 with default messages 'Forbidden access' and 'Unauthorized'. The refusal in this scenario comes from packages/core/admin/server/src/strategies/content-api-token.ts lines 77-99: `verify()` lets a READ_ONLY token through only when every route scope ends in `find`/`findOne` (line 11 `isReadScope`, lines 77-83), otherwise falls through to `throw new ForbiddenError()` on line 99. packages/core/core/src/services/server/compose-endpoint.ts lines 41-55 catches that and calls `ctx.forbidden()`, which is why the body carries the http-errors 403 shape (name 'ForbiddenError', message 'Forbidden' rather than the class default 'Forbidden access'). Every layer of the code is self-consistent and HTTP-correct; only the two sentences in error-handling.md describe the classes the wrong way round. The bad text lives in the separate strapi/documentation repo, not in the tested checkout."
+  },
+  "introducedBy": {
+    "commit": "f956b694dc",
+    "date": "2023-02-01",
+    "pr": null,
+    "title": "Docusaurus:add error handling (strapi/documentation)",
+    "note": "GraphQL blame of docusaurus/docs/cms/error-handling.md on strapi/documentation@main puts both the ForbiddenError paragraph (line 407) and the UnauthorizedError paragraph (line 425) in commit f956b694dc, 2023-02-01, the original Docusaurus port of the error-handling page. The section was touched twice since without the inversion being noticed: 9168d6531a (2025-02-20, 'Fix issue #2376') and 082c5921f0 (2026-07-15, the note that ForbiddenError custom messages are dropped from the response). On the code side, `git blame` of the culprit throw attributes packages/core/admin/server/src/strategies/content-api-token.ts:99 to 52b8fd9e3d47132f52ae910d32a6ee25961c5f32, 2026-04-29, 'feat(admin): api token supports admin permissions and admin user ownership (#25657)', but that commit only split the strategy file: `git show 52b8fd9e3d^:packages/core/admin/server/src/strategies/api-token.ts` shows the identical read-only-falls-through-to-ForbiddenError shape before it, so the behavior is long-standing and #25657 is not the cause."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 9512,
+        "url": "https://github.com/strapi/strapi/issues/9512",
+        "state": "closed",
+        "title": "API access while unauthorized should return 401, but instead returns 403.",
+        "relation": "related",
+        "note": "Closed 2022-02-01 as completed. Concerns the UNAUTHENTICATED case (no credentials answered with 403). This scenario sent a valid read-only token, so it is the authenticated-but-unpermitted case, where 403 is correct. Cited by the scenario yaml, but it is not the same defect."
+      },
+      {
+        "number": 18782,
+        "url": "https://github.com/strapi/strapi/issues/18782",
+        "state": "closed",
+        "title": "Calling Strapi's APIs without credentials on a protected route should return 401 (unauthorized).",
+        "relation": "related",
+        "note": "Closed 2025-11-03 as not planned. Same unauthenticated-request topic as #9512, again not what this step exercises."
+      },
+      {
+        "number": 23733,
+        "url": "https://github.com/strapi/strapi/issues/23733",
+        "state": "closed",
+        "title": "Authentication failures return 500 error instead of proper 401/403 responses",
+        "relation": "related",
+        "note": "Closed 2025-06-28 as completed. Adjacent 401/403 hygiene, does not mention the error-class naming in the docs."
+      },
+      {
+        "number": 2376,
+        "url": "https://github.com/strapi/documentation/issues/2376",
+        "state": "closed",
+        "title": "[Bug]: No Default error classes export from `@strapi/utils`",
+        "relation": "related",
+        "note": "Closed 2025-02-20. The only tracked bug against this exact doc section; it fixed the import/example line, not the class descriptions."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --repo strapi/documentation --repo strapi/strapi \"UnauthorizedError ForbiddenError\" --include-prs  (0 results)",
+      "gh search issues --repo strapi/documentation \"UnauthorizedError\" --include-prs  (0 results)",
+      "gh search issues --repo strapi/documentation \"error handling 401 403\" --include-prs  (only #401/#403 number noise, irrelevant)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Docs: fetched docusaurus/docs/cms/error-handling.md from strapi/documentation@main on 2026-08-15 via the contents API; lines 407 and 425 still carry the inverted descriptions verbatim. Code: `git log c43e9ee1e2..develop` over packages/core/admin/server/src/strategies/content-api-token.ts, packages/core/utils/src/errors.ts and packages/core/core/src/services/errors.ts returns nothing, so no behavior change landed after the tested build either. Nothing to fix on the code side; the doc side is unfixed."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the eight itemized Strapi findings. All eight are MCP-server or admin-token findings; this is the content-api REST token path and the shared error-handling page. It is in the same family as their finding 8b (a docs-only bug whose text lives in strapi/documentation while the code is correct) but is a separate, additional instance."
+  },
+  "notes": "Only step 7 is red. Steps 2 to 6 confirm the api-tokens.md claim 'Read-only API tokens can only access the `find` and `findOne` functions' holds exactly: list and fetch pass 200, create, update and delete are all refused 403. The scenario yaml's own note frames step 7 as '403-where-401-belongs' and cites #9512/#18782; that framing needs refining. Those issues are about requests with NO credentials, where 401 would be right. Here a valid token was presented and 403 is the correct status. The mismatch is purely the name the docs attach to each class. Suggested doc fix (strapi/documentation, docusaurus/docs/cms/error-handling.md): swap the two descriptions so ForbiddenError reads 'the caller is authenticated but lacks the role or permission for this action (403)' and UnauthorizedError reads 'the caller provided no credentials or invalid credentials (401)', and state the HTTP status each class maps to, since packages/core/core/src/services/errors.ts is the authority and the page never mentions the mapping today. Worth noting for the doc author that PolicyError extends ForbiddenError (packages/core/utils/src/errors.ts:132), so the page's own advice to use PolicyError for a custom insufficient-permissions message already assumes the 403 reading, contradicting its ForbiddenError paragraph two lines earlier."
+}

@@ -1,0 +1,12 @@
+{
+  "step": 11,
+  "label": "PASS2 PREP two signers",
+  "at": "2026-08-19T19:16:32.739Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_mynwzrxyyiddmdfv\",\"data\":[{\"email\":\"tcref-declines2-9c11313f6e@documenso.test\",\"name\":\"TCRef Decliner 2\",\"role\":\"SIGNER\"},{\"email\":\"tcref-other2-9c11313f6e@documenso.test\",\"name\":\"TCRef Other 2\",\"role\":\"SIGNER\"}]}"
+}

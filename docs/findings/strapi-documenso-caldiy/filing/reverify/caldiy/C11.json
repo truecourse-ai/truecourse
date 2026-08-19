@@ -1,0 +1,56 @@
+{
+  "id": "C11",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "changed-bug-remains",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "5e3fe3cbe60e529b7f0d9d18065fd094c4d2152a",
+        "date": "2026-08-05",
+        "title": "fix(bookings): provide stable country fallback for phone input",
+        "pr": "#29740",
+        "touchesCulpritLines": true,
+        "effect": "Changes one line inside the same JSX block (country={value ? undefined : defaultCountry} becomes country={defaultCountry}) and adds a 3-line comment; it does not touch inputProps, so the accessible-name defect is untouched and the culprit block simply shifted down by three lines."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/web/components/phone-input/PhoneInput.tsx#L105-L132",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/web/components/phone-input/PhoneInput.tsx#L105-L135",
+    "howDecided": "git log 038381aeca..origin/main over PhoneInput.tsx, Components.tsx, FormBuilderField.tsx and packages/features/form-builder/widgets.tsx returns exactly one commit, 5e3fe3cbe6 (#29740), touching PhoneInput.tsx only. I read the full diff: the only functional change is country={value ? undefined : defaultCountry} -> country={defaultCountry}. At origin/main the a11y culprit is intact and now sits at lines 127-132: inputProps={{ name, required: rest.required, placeholder: rest.placeholder, autoComplete: \"tel\" }}, with no id, no aria-label and no aria-labelledby, while the unused declaration id?: string is still on line 17. Components.tsx is byte-identical: the phone factory is still at lines 192-209 and still forwards only {...props} to PhoneInput with no id, three lines above the email factory at 210-228 which does pass id={props.name} (line 220). FormBuilderField.tsx is untouched, so <Label htmlFor={field.name}> still emits for=\"attendeePhoneNumber\" against an input that carries no such id."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 29761,
+        "url": "https://github.com/calcom/cal.diy/pull/29761",
+        "state": "open",
+        "title": "fix(booking-page): hide duplicate phone fields for attendee phone location",
+        "createdAt": "2026-07-13",
+        "relation": "related",
+        "note": "Open, base main, touches apps/web/modules/bookings/components/BookEventForm/BookingFields.tsx plus two new phoneFieldUtils files. BookingFields.tsx is the file that injects the t('enter_phone_number') placeholder which is the ONLY accessible name the location phone variant has, so if this PR ever merges it could change which phone control is rendered, but it adds no id or aria-label and does not fix this finding."
+      },
+      {
+        "number": 26367,
+        "url": "https://github.com/calcom/cal.diy/pull/26367",
+        "state": "open",
+        "title": "feat(api): allow skipping label for phone field in the v2 create event api's booking fields",
+        "createdAt": "2026-01-01",
+        "relation": "related",
+        "note": "Open. Lets an API caller suppress the phone field's visible label, which would make the accessible-name gap worse (no label at all rather than an orphaned one). Adjacent, not a report of this defect."
+      }
+    ],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --owner calcom \"aria-label accessibility input\" --include-prs --limit 25  (0 results)",
+      "gh search issues --owner calcom \"PhoneInput label\" --include-prs --limit 25  (0 results)"
+    ]
+  },
+  "reevaluation": "The finding stands, and the single commit that landed on the culprit file since the review makes it sharper rather than weaker: PR #29740 edited the very JSX block that carries the defect, three lines above inputProps, and still did not give the tel input an id or an aria-label. So a maintainer touched this exact code on 2026-08-05 and the control is still unnamed on main. All three legs of the mechanism are current at today's head: the orphaned <Label htmlFor={field.name}> in FormBuilderField.tsx, the phone factory at Components.tsx:192-209 passing no id while its email neighbour at :220 does, and PhoneInput.tsx's inputProps at 127-132 omitting id while the component still declares an unused id?: string at line 17. Nothing is reported upstream: two searches returned zero results each. Those are weak negatives on their own, and the review's own third probe was inconclusive, so 'nobody has filed this' is a reasonable but not airtight conclusion; what would settle it is a body-text search on calcom/cal.diy for 'accessible name' or 'screen reader' plus 'booking', which I did not have budget for. Confidence stays high on the defect (the DOM mechanism is read directly from source and the review reproduced the zero-match behaviour with Playwright) and only the 'never reported' half is medium.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/bug_report.md requires 'Issue Summary', 'Steps to Reproduce', 'Actual Results', 'Expected Results', 'Technical details' and 'Evidence'; config.yml sets blank_issues_enabled: false so the bug template is mandatory. Nothing in SECURITY.md applies: accessibility is neither in nor excluded from the scope list, and this is not a vulnerability.",
+  "confidence": "high",
+  "notes": "The fix is two coordinated lines and both are needed, which the issue should say plainly: pass id={props.name} in the Components.tsx phone factory AND forward it through PhoneInput via inputProps, because react-phone-input-2 2.15.x drops a bare top-level id, so doing either one alone changes nothing. Strongest supporting evidence to include: upstream's own e2e code already works around this by selecting the control as '[name=\"attendeePhoneNumber\"]' instead of by role and name (apps/web/playwright/lib/testUtils.ts:212), and the neighbouring email factory in the same file gets an id three lines further down. Note for the filer that C11 and C12 came out of the same failing step of the same scenario but have opposite fates: C12's prefill half is fixed on main, C11's a11y half is not, so do not let a maintainer close C11 as covered by #29740."
+}

@@ -1,0 +1,51 @@
+{
+  "repo": "strapi",
+  "scenarioId": "an-admin-token-authenticates-the-admin-api-and-its-key-is-read-back.api.1",
+  "flowId": "an-admin-token-authenticates-the-admin-api-and-its-key-is-read-back",
+  "failingStep": 5,
+  "whatFailed": "GET /admin/admin-tokens/:id returned the token's plaintext accessKey on a read performed minutes after creation, although the admin-tokens page states the plaintext key is shown only once and that the encryption-key configuration does not apply to Admin tokens.",
+  "docClaim": {
+    "quote": "The plaintext token key is shown only once, immediately after creation or regeneration. The `admin.secrets.encryptionKey` configuration that makes Content API token keys persistently viewable does not apply to Admin tokens. Admin token keys are always restricted to the token owner, regardless of encryption configuration.",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/admin-tokens.md",
+    "section": "Configuration > Creating a new Admin token (the :::caution block, line 61 of the snapshot; upstream strapi/documentation docusaurus/docs/cms/features/admin-tokens.md line 89)"
+  },
+  "observed": "Step 2 created admin token id 11 and captured accessKey c22970ff...e0cb0. Steps 3 and 4 confirmed the token authenticates admin routes with the lowercase `bearer` scheme and that the route is 401 without a header. Step 5 then read GET /admin/admin-tokens/11 authenticated with that same admin token and got 200 with data.accessKey set to exactly the same 256-hex-char plaintext key that was issued at creation. The list route (step 3) does not include accessKey, so the disclosure is specific to the get-by-id route.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "No harm from the failing assertion itself, but the docs give a false security guarantee: operators who believe an admin token key is unrecoverable after creation will not treat a leaked admin session or a read-scoped admin token as key-material exposure. See notes for a genuine escalation on the same code path (a token holding only admin::admin-tokens.read can read back the plaintext keys of its owner's other admin tokens).",
+  "rootCause": {
+    "file": "packages/core/admin/server/src/controllers/admin-token.ts",
+    "lines": "138-160",
+    "explanation": "The get handler first loads the token without the key, refuses non-owner non-super-admins with a 404, and then, at lines 153-157, when isTokenOwner(ctx.state.user, token) is true, deliberately re-reads the row as apiTokenService.getById(id, { includeDecryptedKey: true }) and returns that. In packages/core/admin/server/src/services/api-token.ts the admin service's getById is getBy({ id, kind: 'admin' }, options) (lines 1327-1329); getBy (lines 615-664) adds encryptedKey to the select when the option is set and, at lines 659-661, assigns accessKey = encryption.decrypt(token.encryptedKey). The encryptedKey column is written unconditionally on every admin-token create (lines 752-754 and 830-841) and on regenerate (lines 864-876), and packages/core/admin/server/src/services/encryption.ts reads admin.secrets.encryptionKey, which packages/cli/create-strapi-app generates into .env for every new project (src/utils/dot-env.ts lines 19 and 41; templates/*/config/admin.ts exposes it as secrets.encryptionKey). So in a default Strapi 5 install the plaintext key is always recoverable by the owner, on the API and in the panel alike: packages/core/admin/admin/src/pages/Settings/pages/AdminTokens/EditView/EditViewPage.tsx line 238 computes canShowToken from the accessKey the GET returned and line 229 wires a toggleToken eye control that re-reveals it. The behavior is intentional and mirrors Content API tokens (controllers/api-token.ts line 88 does the same unconditionally); the docs' caution asserts the opposite on both of its factual clauses. The one clause the code does honor is owner scoping: a super-admin reading someone else's admin token gets the record without the key (line 159)."
+  },
+  "introducedBy": {
+    "commit": "52b8fd9e3d47132f52ae910d32a6ee25961c5f32",
+    "date": "2026-04-29",
+    "pr": "#25657",
+    "title": "feat(admin): api token supports admin permissions and admin user ownership",
+    "note": "git blame is unusable in the partial clone (promisor object fetch fails), so this was established with git log on the path: that commit is the only one that has ever touched packages/core/admin/server/src/controllers/admin-token.ts, and git show 52b8fd9e3d:<path> already contains the identical includeDecryptedKey branch at lines 153-157. The wrong doc text is a separate, later artifact: strapi/documentation PR #2992 'Admin tokens' (commit f0b2fd2c5d, merged 2026-05-06 by pwizla) created docusaurus/docs/cms/features/admin-tokens.md with the caution already in it, one week after the code shipped."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner strapi \"admin token accessKey\" --include-prs (0 results)",
+      "gh search issues --owner strapi \"admin tokens plaintext key\" --include-prs (0 results)",
+      "gh search issues --owner strapi \"\\\"admin-tokens\\\" key shown only once\" --include-prs (0 results)",
+      "gh api repos/strapi/documentation/commits?path=docusaurus/docs/cms/features/admin-tokens.md (2 commits only: f0b2fd2c5d 2026-05-06 #2992, a3b573cfd9 2026-05-28 #3194)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Code: develop is at acf0ce20345e17fc443a7c79f2744fb072da6080 as of 2026-08-15, only 4 commits after the tested c43e9ee1e2, and git log c43e9ee1e2..develop -- packages/core/admin/server/src is empty, so the controller, the service and the routes are byte-identical to the tested build. Docs: the caution is still verbatim on strapi/documentation default branch (fetched via gh api contents on 2026-08-15, line 89), and the page has not been touched since 2026-05-28."
+  },
+  "colleagueFinding": {
+    "ref": "strapi #8",
+    "agreement": "refines",
+    "note": "Maps to the first half of their finding 8 (8a): 'an admin token's secret key is documented as shown only once but is returned on every read', blamed on PR #25657 commit 52b8fd9e3d, controllers/admin-token.ts. I confirm both the symptom and the blame. Four refinements. (1) It is not an API-only gap: the admin panel re-reveals the key too, because EditViewPage derives canShowToken from the same GET response and offers a toggle, so the 'shown only once' sentence is wrong about the UI it was written for. (2) The second sentence of the caution is wrong in the opposite direction and is the actual mechanism: admin.secrets.encryptionKey is exactly what makes admin token keys persistently viewable, it is written for every admin token unconditionally, and create-strapi-app generates that key into .env for every new project, so this is the default install and not an opt-in configuration. (3) The same page contradicts itself on the config path: its Configuration section says apiToken.secrets.encryptionKey while the code reads admin.secrets.encryptionKey (services/encryption.ts line 8, template config/admin.ts exposes it as top-level secrets). (4) They classify 8a purely as a docs bug; the code path also carries a real privilege-escalation risk they do not mention, described in notes."
+  },
+  "notes": "Escalation worth filing separately, verified in source but NOT exercised by this run: GET /admin-tokens/:id is gated only by admin::isAuthenticatedAdmin plus admin::hasPermissions {admin::admin-tokens.read} (routes/admin-tokens.ts lines 35-45), and the admin-token auth strategy sets ctx.state.user to the token's OWNER user object (strategies/admin-token.ts line 24, services/api-token.ts authenticateAdminToken lines 703-727). The controller's isTokenOwner compares that user's id against the id of the REQUESTED token, with no requirement that it be the authenticating token. So an admin token whose only permission is admin::admin-tokens.read can call GET /admin-tokens/<any sibling id owned by the same user> and receive that sibling's plaintext key, including a sibling with far wider permissions. The docs recommend admin tokens precisely for MCP agents and CI, so a narrowly scoped machine credential handed to an agent can harvest its owner's other admin token keys. The run demonstrates the disclosure only for the token reading itself (step 5, harmless in isolation); one extra request, GET /admin/admin-tokens/6 with the step-2 token's bearer, would settle the sibling case against the live fixture, and the transcript at step 3 shows ids 5, 6, 7, 8 and 10 all owned by the same user id 2. The doc's third clause, 'restricted to the token owner', is honored for humans: a super-admin reading another user's admin token gets no key (controller line 159). Suggested doc fix in strapi/documentation docusaurus/docs/cms/features/admin-tokens.md: replace the caution with the truth, that an admin token's plaintext key stays retrievable by its owner for as long as admin.secrets.encryptionKey is unchanged, exactly as for Content API tokens, and fix apiToken.secrets.encryptionKey to secrets.encryptionKey in the Configuration section."
+}

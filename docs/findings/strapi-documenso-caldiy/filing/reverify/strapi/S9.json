@@ -1,0 +1,71 @@
+{
+  "id": "S9",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/core/src/middlewares/public.ts#L26-L35",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/core/src/middlewares/public.ts#L26-L35",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for middlewares/public.ts, services/server/index.ts or middlewares/errors.ts. On origin/develop the GET catch-all is still at lines 26-35 with path: '/((?!uploads/).+)' at line 29 and koaStatic as its handler; services/server/index.ts still mounts app.use(router.routes()).use(router.allowedMethods()) at line 79; and middlewares/errors.ts still has the ctx.notFound() fallback at line 18 that an explicit status suppresses. Same line numbers as the tested build (all three files byte-identical). The only work touching the culprit line is still the unmerged branch commit 326ed84d77 (2026-08-07, 'chore(core): upgrade @koa/router to 15.7.0'), which git merge-base --is-ancestor confirms is still NOT an ancestor of origin/develop, and which keeps the route a GET catch-all so it would not change the 405."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 25019,
+        "url": "https://github.com/strapi/strapi/issues/25019",
+        "state": "closed",
+        "title": "405 [POST] /admin/register-admin",
+        "createdAt": "2025-12-11",
+        "relation": "related",
+        "note": "Not new activity, but not in the review's list: a fourth instance of the same misdiagnosis (Strapi 5.31.3, POST to an unrouted admin path answers 405 rather than 404). Closed as completed the same day, unlabelled, with no change to public.ts. Strengthens the 'this keeps costing users time' framing."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#11756",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "closed as completed 2021-12-02, untouched since. 4 comments."
+      },
+      {
+        "ref": "strapi/strapi#15024",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "closed as completed 2022-11-29, untouched since. 2 comments."
+      },
+      {
+        "ref": "strapi/strapi#24197",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "closed as completed 2025-08-20, untouched since (no comments after 2026-08-01). 3 comments."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi \"Method Not Allowed\" --include-prs --limit 40 (19 results, all enumerated; newest relevant is #25019 from 2025-12-11; nothing created or updated since 2026-08-10 relates)"
+    ]
+  },
+  "reevaluation": "Stands unchanged on the source side, and nothing new has been filed. The re-verification adds a fourth prior instance the review missed, #25019 (2025-12-11, 405 on POST /admin/register-admin), closed the same day with no code change, which reinforces the pattern that all four reports were resolved as user confusion rather than as the router behaviour. None of them is a duplicate of this finding: none names the catch-all GET route or the allowedMethods interaction, so this is still unreported as such. The review's own confidence of medium is right and should be preserved. The weak point is the doc binding: the REST reference never states a status code for an unknown pluralApiId, so 'expect 404' is the scenario's inference. What carries the report is the product's internal inconsistency, observed in the same run: GET on that exact path returns 404 with the documented {data,error} envelope while DELETE returns 405 with a plain-text body and an Allow header (HEAD, GET) that is factually wrong, since GET is a 404 there too.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "medium",
+  "notes": "Frame it as the inconsistency and the wrong Allow header, not as 'DELETE should be 404', or it will be closed like its four predecessors. Cite #11756, #15024, #24197 and #25019 in the body as evidence of recurring cost. Second thing a filer must fix before filing: the scenario's step 4 (DELETE /api/articles with no documentId, expecting 404) never ran, and 405 would be the CORRECT answer there since /api/articles is a real resource supporting GET, HEAD and POST; do not present step 4 as a defect. Suggested fix to offer: register the koa-static handler as plain app-level middleware (or a method-agnostic layer) rather than a GET router route, so an unrouted path stops advertising GET. Note for scope: this affects every non-GET/HEAD method on every unrouted path in every Strapi app, not just the content API."
+}

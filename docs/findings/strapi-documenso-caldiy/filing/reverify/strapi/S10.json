@@ -1,0 +1,71 @@
+{
+  "id": "S10",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "efe5a9dc17",
+        "date": "2026-08-17",
+        "title": "fix(content-manager): refraining from counting error draft relations",
+        "pr": "#26900",
+        "touchesCulpritLines": false,
+        "effect": "Touches DocumentActions.tsx, the renderer this finding depends on, but only PublishAction's fetchDraftRelationsCount guard (adds !schema?.options?.draftAndPublish and a dep). The DialogOptions interface and the confirm-button footer are untouched: confirmLabel is still declared at line 109, destructured at 533 and rendered at 588-592."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/content-manager/admin/src/pages/ListView/components/BulkActions/Actions.tsx#L180-L209",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/content-manager/admin/src/pages/ListView/components/BulkActions/Actions.tsx#L180-L209",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for ListView/components/BulkActions/Actions.tsx and exactly one commit (efe5a9dc17, PR #26900) for EditView/components/DocumentActions.tsx, whose diff I read in full: two hunks, both inside PublishAction's draft-relations count, neither near the dialog footer. On origin/develop UnpublishAction still returns its descriptor at lines 180-209 with the dead property 'confirmButton: formatMessage({ id: \"app.utils.unpublish\", defaultMessage: \"Unpublish\" })' at lines 203-206, and DocumentActionConfirmDialog still renders '{confirmLabel ?? formatMessage({ id: \"app.components.Button.confirm\", defaultMessage: \"Confirm\" })}' at DocumentActions.tsx:588-592, with confirmLabel (not confirmButton) declared in DialogOptions at line 109. So the property is still dropped and the dialog still says Confirm."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#20235",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-05-09",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Wrote the confirmButton line, correct at the time. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#20431",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2024-06-10",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "The regression: dropped the local BulkActionConfirmDialog that read confirmButton. Unchanged."
+      },
+      {
+        "ref": "strapi/strapi#26736",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-06-25",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Added the supported confirmLabel field to DialogOptions (still at DocumentActions.tsx:109) without migrating bulk unpublish. Unchanged."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi \"bulk unpublish confirm\" --include-prs --limit 30 (0 results)",
+      "gh search issues --repo strapi/strapi confirmLabel confirmButton --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "reevaluation": "Stands unchanged. The dead confirmButton property and the renderer that ignores it are both still on develop and shipped in v5.52.1, and the one commit that did touch DocumentActions.tsx since the tested build (efe5a9dc17, PR #26900) only edits PublishAction's draft-relations counting. Nothing has been filed. The doc sentence the finding binds to is also still live: strapi/documentation origin/main has 'In the confirmation dialog box, confirm your choice by clicking again on the **Unpublish** button' at docusaurus/docs/cms/features/draft-and-publish.md line 193. The review's judgement that the docs are correct here and the UI regressed still holds, and it matters for routing: the sibling bulk-publish dialog really does render 'Publish', and the single-entry unpublish dialog really does say 'Confirm', so the doc author described real per-dialog labels. Verdict, confidence (high) and low severity unchanged.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "high",
+  "notes": "This is a strapi/strapi issue, NOT a docs issue: the docs are right and the UI regressed. The fix is one word, confirmButton -> confirmLabel at packages/core/content-manager/admin/src/pages/ListView/components/BulkActions/Actions.tsx:203, so a PR is cheap if the filer wants one (CLA required, branch from develop, yarn test:front + yarn lint). Two things worth putting in the body: the type checker cannot catch this class of typo in the current shape (freshness is lost on an object literal returned from a contextually typed arrow function, so excess-property checking is skipped; annotating the descriptor explicitly restores TS2353), which suggests auditing the other DescriptionComponent implementations for silently dropped keys; and the action's onConfirm is intact, so the unpublish still works when Confirm is clicked. Label-only, no data loss. The localization angle is the strongest impact argument: the confirm button loses its app.utils.unpublish string in every locale and falls back to app.components.Button.confirm."
+}

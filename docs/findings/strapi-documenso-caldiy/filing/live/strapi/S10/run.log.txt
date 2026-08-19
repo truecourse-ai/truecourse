@@ -1,0 +1,9 @@
+1 bulk bar buttons: ["Unpublish","Delete"]
+2 UNPUBLISH dialog role: alertdialog
+2 UNPUBLISH dialog text: "Confirmation | Are you sure you want to unpublish these entries? | Cancel | Confirm"
+2 UNPUBLISH dialog buttons: ["Cancel","Confirm"]
+2 a button named "Unpublish" inside the dialog: 0
+3 row statuses after clicking Confirm: ["Draft","Draft"]
+4 bulk Publish button present: 1
+5 PUBLISH dialog text: "Publish entries | Close modal | Ready to publish | 2 | \t | Already published | 0 | Ready to publish changes | 0 | \t | Waiting for action | 0 | \t | DOCUMENTID | \t | NAME | \t | STATUS | \t | PUBLICATION STATUS | \tqhlyg4x7f0yxpfr5gob3ieyv\tDP Bulk Unpublish mt0gas78 A\t | Draft | \t | Ready to publish | \t | Edit | \tg347xnx5llj1ozujd7rpi03m\tDP Bulk Unpublish mt0gas78 B\t | Draft | \t | Ready to publish | \t | Edit | Cancel | Refresh | Publish"
+5 PUBLISH dialog buttons: ["Close modal","Cancel","Refresh","Publish"]

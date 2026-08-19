@@ -1,0 +1,73 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "reschedule-a-booking-and-trace-the-uid-links.api.1",
+  "flowId": "reschedule-a-booking-and-trace-the-uid-links",
+  "failingStep": 1,
+  "whatFailed": "On the very first step, a freshly created booking (POST /v2/bookings, 201) omitted the optional keys rescheduledFromUid and rescheduledToUid, and the scenario asserted they must be present, so the run aborted before any actual reschedule happened.",
+  "docClaim": {
+    "quote": "rescheduledFromUid:\n  type: string\n  example: previous_uid_123\n  description: UID of the previous booking from which this booking was rescheduled.\nrescheduledToUid:\n  type: string\n  example: new_uid_456\n  description: UID of the new booking to which this booking was rescheduled.\n... required:\n  - id\n  - uid\n  - title\n  - description\n  - hosts\n  - status\n  - start\n  - end\n  - duration\n  - eventTypeId\n  - eventType\n  - location\n  - absentHost\n  - createdAt\n  - updatedAt\n  - attendees\n  - bookingFieldsResponses",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md",
+    "section": "create-a-booking/openapi, components.schemas.BookingOutput_2024_08_13 (properties at lines 942-949, required list at lines 1021-1038)"
+  },
+  "observed": "POST /v2/bookings with cal-api-version 2024-08-13 returned 201 and a well formed booking (uid pmSoweFYUb5N179r77Wbsu, status accepted, start 2051-01-19T13:00:00.000Z). The payload carried rescheduledByEmail: null but had no rescheduledFromUid and no rescheduledToUid key at all. That is exactly what the tested source does: apps/api/v2/src/platform/bookings/2024-08-13/services/output.service.ts:124 sets rescheduledFromUid to databaseBooking.fromReschedule || undefined, and getRescheduledToUid (lines 187-191) returns undefined unless databaseBooking.rescheduled is true, and undefined properties are dropped from the JSON. Both DTO properties are @ApiPropertyOptional + @IsOptional (packages/platform/types/bookings/2024-08-13/outputs/booking.output.ts:186-205). The linkage itself works in this build: the sibling scenario reschedule-a-pending-booking.api.1 in the same run shows four responses carrying a real rescheduledFromUid value.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users. The harm is to the run: a false positive on step 1 of a 22 step scenario killed roughly 40 milestones, including the only steps (4 and 5, the middle booking read through GET /v2/bookings/{uid} and the list endpoint) that would have proved the exact uid link claims the flow exists to prove.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 24745,
+        "url": "https://github.com/calcom/cal.diy/issues/24745",
+        "state": "closed",
+        "title": "Reschedule booking with multiple durations does not preserve the duration (API v2)",
+        "relation": "related",
+        "note": "Same endpoint family, different symptom (duration not preserved). Nothing about the uid link fields being absent."
+      },
+      {
+        "number": 21169,
+        "url": "https://github.com/calcom/cal.diy/issues/21169",
+        "state": "closed",
+        "title": "Reschedule endpoint triggers BOOKING_REQUESTED instead of BOOKING_RESCHEDULED webhook.",
+        "relation": "related",
+        "note": "Reschedule path, webhook naming. Unrelated to the response shape."
+      }
+    ],
+    "prs": [
+      {
+        "number": 25103,
+        "url": "https://github.com/calcom/cal.diy/pull/25103",
+        "state": "merged",
+        "title": "fix: v2 api rescheduledByEmail not returned",
+        "relation": "related",
+        "note": "Sibling field of the same group. Already in the tested tree as commit d34ad2b0f6, and it is why rescheduledByEmail appears as null in the observed payload while the two uid keys are absent: rescheduledByEmail is passed through as the raw nullable column, the two uid fields are coerced to undefined."
+      },
+      {
+        "number": 22289,
+        "url": "https://github.com/calcom/cal.diy/pull/22289",
+        "state": "merged",
+        "title": "feat: v2 bookings return rescheduledToUid",
+        "relation": "related",
+        "note": "Commit 94a537bfda, 2025-07-11, the commit that added rescheduledToUid to the 2024-08-13 booking output. It was introduced optional (@ApiPropertyOptional) from day one, i.e. present-only-when-set is the designed contract, not a regression."
+      }
+    ],
+    "queries": [
+      "gh search issues 'rescheduledFromUid org:calcom'",
+      "gh search prs 'rescheduledFromUid org:calcom'"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: nothing to fix, and nothing changed. Only 4 commits landed on origin/main since the tested commit 038381aeca, none of them touching apps/api/v2/src/platform/bookings/2024-08-13/services/output.service.ts or packages/platform/types/bookings/2024-08-13/outputs/booking.output.ts, so the behavior on main is identical. in cal.com: not verifiable from source (the public calcom/cal.com main is a mirror of cal.diy main at 176037d0af); the public docs still publish both fields as optional non-required properties of BookingOutput_2024_08_13, so the hosted product is documented the same way."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5. The researcher's write-up covers out-of-office vs date overrides, zero-length team slots, the dropped 9:10 slot, seated oversell, and unauthenticated hold manipulation. No reschedule or uid-link finding appears in it."
+  },
+  "notes": "Fix belongs in the scenario, not in the product. The generator read the two properties out of the OpenAPI properties block and treated them as always-present, but the same schema block leaves both out of `required` and gives neither `nullable: true`, so a booking that was never part of a reschedule chain legitimately omits them, and the JSON null the step's regex ^(null|.+)$ accepts as an alternative is not documented anywhere either. The step's own note admits the reasoning is invented: it says a fresh booking is 'by definition linked to neither, so what is observable on THIS endpoint is that the two documented fields are there'. That inference is the defect. The right encoding for step 1 is either to drop the two assertions entirely (the create milestones are proved by steps 4 and 5, which read a booking that really has both links) or to assert absent-or-string rather than present. Same over-assertion is repeated on steps 6, 7, 8 and 13 in the `data.rescheduledToUid: matches ^(null|.+)$` form, all against bookings that were never rescheduled away, so fixing only step 1 would just move the failure. Independently of the assertion, the product side is consistent: the field is populated when it should be (see reschedule-a-pending-booking.api.1 evidence in the same run) and the tested tree's own e2e suite asserts both directions (apps/api/v2/src/platform/bookings/2024-08-13/controllers/e2e/reschedule-bookings.e2e-spec.ts:145, 185, 209). Two things this step does not touch: no cal-api-version mismatch is involved (step 1 sends 2024-08-13, which this build does serve), and the server.stderr.txt noise is only SMTP ECONNREFUSED on 127.0.0.1:1025 from the absent mail sandbox, unrelated to the assertion. Worth flagging separately to the doc author: rescheduledByEmail is typed `type: string, format: email` and not nullable, yet the product returns literal null on a booking that was never rescheduled, so the same doc block understates nullability for that neighbouring field."
+}

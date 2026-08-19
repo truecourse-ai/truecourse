@@ -1,0 +1,98 @@
+{
+  "step": 2,
+  "label": "the freshly minted envelope: read its signingOrder",
+  "at": "2026-08-19T19:15:50.164Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "1573",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:50 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "967",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "86af04ab-6b67-41bc-b9b5-b16ffcf140a8"
+  },
+  "body": {
+    "internalVersion": 2,
+    "type": "DOCUMENT",
+    "status": "DRAFT",
+    "source": "TEMPLATE",
+    "visibility": "EVERYONE",
+    "templateType": "PRIVATE",
+    "id": "envelope_wkflbkwyccsbuznu",
+    "secondaryId": "document_6",
+    "externalId": "tcref-assistant-d35cadec2f",
+    "createdAt": "2026-08-19T19:15:50.135Z",
+    "updatedAt": "2026-08-19T19:15:50.135Z",
+    "completedAt": null,
+    "deletedAt": null,
+    "title": "Guard Source Template",
+    "authOptions": {
+      "globalAccessAuth": [],
+      "globalActionAuth": []
+    },
+    "formValues": null,
+    "publicTitle": "",
+    "publicDescription": "",
+    "userId": 3,
+    "teamId": 3,
+    "folderId": null,
+    "templateId": 1,
+    "documentMeta": {
+      "signingOrder": "PARALLEL",
+      "distributionMethod": "EMAIL",
+      "id": "cmt0h248l002dhoeoc23r4tmq",
+      "subject": null,
+      "message": null,
+      "timezone": "Etc/UTC",
+      "dateFormat": "yyyy-MM-dd hh:mm a",
+      "redirectUrl": null,
+      "typedSignatureEnabled": true,
+      "uploadSignatureEnabled": true,
+      "drawSignatureEnabled": true,
+      "allowDictateNextSigner": false,
+      "language": "en",
+      "emailSettings": {
+        "recipientSigningRequest": true,
+        "recipientRemoved": true,
+        "recipientSigned": true,
+        "documentPending": true,
+        "documentCompleted": true,
+        "documentDeleted": true,
+        "ownerDocumentCompleted": true,
+        "ownerRecipientExpired": true,
+        "ownerDocumentCreated": true
+      },
+      "emailId": null,
+      "emailReplyTo": null,
+      "envelopeExpirationPeriod": {
+        "unit": "month",
+        "amount": 3
+      }
+    },
+    "recipients": [],
+    "fields": [],
+    "envelopeItems": [
+      {
+        "envelopeId": "envelope_wkflbkwyccsbuznu",
+        "documentDataId": "cmt0h248c002choeo6drw12h8",
+        "id": "envelope_item_byykxrcdysenwman",
+        "title": "Guard Source Template",
+        "order": 1
+      }
+    ],
+    "directLink": null,
+    "team": {
+      "id": 3,
+      "url": "guard-owner"
+    },
+    "user": {
+      "id": 3,
+      "name": "Guard Owner",
+      "email": "guard-owner@documenso.test"
+    }
+  }
+}

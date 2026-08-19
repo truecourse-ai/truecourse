@@ -1,0 +1,76 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-user-who-left-dynamic-group-links-cannot-be-added-to-one.web.1",
+  "flowId": "a-user-who-left-dynamic-group-links-cannot-be-added-to-one",
+  "failingStep": 1,
+  "whatFailed": "Opening the dynamic group address /reference-host+opted-out-host, where one of the two users has allowDynamicBooking turned off, still renders a fully assembled, apparently bookable group booking page instead of refusing the link, and the only thing the booker is ever told is the generic 'No availability in September' dialog.",
+  "docClaim": {
+    "quote": "This is an opt-in feature where a cal.com user can enable/disable if they wish to participate in this and allow the bookers to add them as part of a dynamic collective group.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/dynamic.md",
+    "section": "dynamic-group-links"
+  },
+  "observed": "GET /reference-host+opted-out-host 302-redirected to /reference-host+opted-out-host/dynamic?user=reference-host%2Bopted-out-host&duration=30&month=2026-09 and returned 200 with the Booker rendered: 'Group Meeting', 'Join us for a meeting with multiple people', duration chips 15m/30m/45m/1h/1h 30m, a 'Cal Video' location select and a September 2026 calendar (step-1.png). The two viewer.slots.getSchedule tRPC calls both failed with 401 UNAUTHORIZED, message 'Some of the users in this group do not allow dynamic booking' (transcript console lines), and the Booker swallowed the error into the generic NoAvailabilityDialog ('No availability in September', 'Close', 'View next month'). No 404, no notice that the group link is not bookable, and no mention of the opt-out anywhere on the page.",
+  "verdict": "real-defect",
+  "confidence": "medium",
+  "impact": "Silent no-op of a documented per-user privacy/participation setting: the opted-out user is still assembled into a public group booking page (name, avatar, working duration and location controls) and the booker is shown a generic 'no availability' message that is indistinguishable from a full calendar, so nobody learns the link can never be booked. Enforcement itself holds (slots 401, booking POST 400), so no unwanted booking is created.",
+  "rootCause": {
+    "file": "apps/web/server/lib/[user]/[type]/getServerSideProps.ts",
+    "lines": "114-166 (and the dispatcher comment at 312-319)",
+    "explanation": "getDynamicGroupPageProps loads the group members with UserRepository.findUsersByUsername (which does select allowDynamicBooking, see packages/features/users/repositories/UserRepository.ts:109) and then only returns notFound when the list is empty (143-147) or when EventRepository.getPublicEvent returns nothing (162-166). It never inspects user.allowDynamicBooking, and neither does getPublicEvent's dynamic branch (packages/features/eventtypes/lib/getPublicEvent.ts:297-341), which builds the default event and subsetOfUsers unconditionally. The gate now exists only downstream: packages/trpc/server/routers/viewer/slots/util.ts:201-207 throws TRPCError UNAUTHORIZED and packages/features/bookings/lib/handleNewBooking/loadAndValidateUsers.ts:98-107 throws HttpError 400, both after the page has already rendered. The client renders the schedule failure through the ordinary empty-days path (packages/features/calendars/components/NoAvailabilityDialog.tsx:78), so the precise reason the server computed is discarded. Two pieces of the product's own contract confirm this is unintended rather than a design choice: the comment immediately above the exported getServerSideProps still reads 'Booker page fetches a tiny bit of data server side, to determine early whether the page should show an away state or dynamic booking not allowed' (312-313), and the string user_dynamic_booking_disabled ('Some of the users in the group have currently disabled dynamic group bookings', packages/i18n/locales/en/common.json:584) is still shipped in every locale but referenced by no source file."
+  },
+  "introducedBy": {
+    "commit": "b364a85ed857d94a046a278ad5549d3b716b5111",
+    "date": "2023-07-11",
+    "pr": "#10053",
+    "title": "chore: removed old booker and make new booker as a default",
+    "note": "Regression, not an original omission. Up to and including 9576 / bed3595314 (2023-06-16) apps/web/pages/[user]/[type].tsx computed allowDynamicBooking: !users.some(u => !u.allowDynamicBooking) in getServerSideProps and rendered a dedicated booker-facing state 'Unavailable / Some of the users in the group have currently disabled dynamic group bookings' (props.isDynamic && !props.profile.allowDynamicBooking). PR #10053 deleted the old booker and rewrote the page; its diff removes both that branch and the prop computation while keeping a now-unread allowDynamicBooking in the prisma select. git blame on the surviving lines points at later pure refactors (e99e8b169a app-router migration 2024-01-16, 12466fb0640 move to modules, e4c47640fc UserRepository DI 2025-07-10) because the removed code left nothing to blame; the behavioral change is #10053."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 9060,
+        "url": "https://github.com/calcom/cal.diy/issues/9060",
+        "state": "closed",
+        "title": "[CAL-1743] Bring back the Dynamic Group booking opt-out toggle",
+        "relation": "related",
+        "note": "Filed 2023-05-23, closed completed 2023-05-30: the opt-out toggle had disappeared from settings and was restored to /settings/my-account/general. It restored the control, not the booker-facing enforcement on the public page, and it predates the #10053 regression by six weeks. Nobody has since noticed that the restored toggle no longer changes what the group link renders."
+      },
+      {
+        "number": 3755,
+        "url": "https://github.com/calcom/cal.diy/issues/3755",
+        "state": "closed",
+        "title": "Can't get dynamic group booking to work. \"Unavaliable: Some of the users in the group have currently disabled dynamic group bookings\"",
+        "relation": "related",
+        "note": "2022 report from a self-hoster who hit the old page-level notice. Useful as proof that the removed state was user visible and understood as the intended surface for this setting."
+      }
+    ],
+    "prs": [
+      {
+        "number": 10053,
+        "url": "https://github.com/calcom/cal.diy/pull/10053",
+        "state": "merged",
+        "title": "chore: removed old booker and make new booker as a default",
+        "relation": "exact",
+        "note": "The commit that removed the page-level allowDynamicBooking gate and its UI. Not filed as a bug by anyone; identified here from the diff."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"allowDynamicBooking\" --include-prs --limit 30",
+      "gh search issues --owner calcom \"dynamic group\" --match title --include-prs --limit 60",
+      "gh search issues --owner calcom \"do not allow dynamic booking\" --include-prs --limit 30"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: not fixed. Only 4 commits land in 038381aeca..origin/main (head 176037d0af, 2026-08-08) and none of them touch apps/web/server/lib/[user]/getServerSideProps.ts, apps/web/server/lib/[user]/[type]/getServerSideProps.ts or packages/features/eventtypes/lib/getPublicEvent.ts. in cal.com: not fixed either. calcom/cal.com main at 176037d0af has byte-identical logic, the same set of files referencing allowDynamicBooking, no allowDynamicBooking check in [user]/[type]/getServerSideProps.ts, and no commit touching those files since 2026-07-01. This is therefore NOT an edition mismatch: the commercial upstream carries the same gap, so the doc claim is equally unhonored on cal.com."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Two caveats a maintainer and the scenario author should both see. (1) The assertion is over-specific: the scenario demands the literal string '404' on the page, but the product's own intended state for this case was never a 404, it was a 200 page reading 'Unavailable / Some of the users in the group have currently disabled dynamic group bookings'. A correct fix would therefore still fail this regex. The scenario should assert 'the page offers no booking form / shows the dynamic-booking-disabled notice' instead of '404'. The underlying observation is nevertheless a true positive, which is why the verdict is real-defect rather than test-defect: the doc's opt-out promise has no effect whatsoever on the surface a booker sees. (2) The seed and environment are sound: the tRPC error text proves opted-out-host really had allowDynamicBooking = false, so this is not a fixture problem, and the 401s in the console are the product's own deliberate UNAUTHORIZED, not an auth misconfiguration in the harness. Suggested fix shape: in getDynamicGroupPageProps, after findUsersByUsername, if users.some(u => !u.allowDynamicBooking) return notFound (or thread a dynamicBookingDisabled prop through to the Booker and re-wire the still-shipped user_dynamic_booking_disabled string); the same check is missing in apps/web/server/lib/[user]/getServerSideProps.ts:102-119, which redirects a group address to /dynamic unconditionally. Doc-side, the same page's 'This is an opt-in feature' and 'Dynamic group links are enabled by default' three sentences apart are in tension, which the corpus already flags on the sibling claim dynamic-group-links-enabled-by-default; that tension is separate from this failure."
+}

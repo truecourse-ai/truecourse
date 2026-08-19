@@ -1,0 +1,22 @@
+{
+  "step": 1,
+  "label": "mint envelope from source template",
+  "at": "2026-08-19T19:16:54.210Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "50",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:54 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "983",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "8f290ec2-fbbb-4a84-86b1-3222e0761fe0"
+  },
+  "body": {
+    "id": "envelope_urlxhxhbndxwvbvu",
+    "recipients": []
+  }
+}

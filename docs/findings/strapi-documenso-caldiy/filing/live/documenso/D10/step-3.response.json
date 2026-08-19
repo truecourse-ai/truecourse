@@ -1,0 +1,32 @@
+{
+  "step": 3,
+  "label": "a 401: the auth error body",
+  "at": "2026-08-19T19:17:28.400Z",
+  "status": 401,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "206",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "994",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "9ead0beb-1ef6-4978-835c-eca464729dbf"
+  },
+  "body": {
+    "message": "Invalid token",
+    "code": "INTERNAL_SERVER_ERROR",
+    "data": {
+      "code": "UNAUTHORIZED",
+      "httpStatus": 401,
+      "path": "envelope.get",
+      "appError": {
+        "code": "UNAUTHORIZED",
+        "message": "Invalid token",
+        "statusCode": 401
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-requires-confirmation-event-type-books-into-a-pending-state.web.1",
+  "flowId": "a-requires-confirmation-event-type-books-into-a-pending-state",
+  "failingStep": 7,
+  "whatFailed": "Step 7 asserted the booking success page text contains the literal phrase \"has not been confirmed\", but the page says \"Your booking has been submitted\" plus \"Reference Host still needs to confirm or reject the booking.\", which is the same pending state expressed in the product's own wording.",
+  "docClaim": {
+    "quote": "From here, -> Select **Always** if you want it to be an event-type that requires confirmation at all times -> Select **When booked with less than** `{{ num }}` `{{ time }}` notice to only make it an opt-in event type when a booking is made within the selected/configured time-frame.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/how-to-requires.md",
+    "section": "how-to-set-up-requires-confirmation"
+  },
+  "observed": "The whole booking path behaved as the doc describes. Step 1 loaded /reference-host/pending-consult and the page rendered the \"Requires confirmation\" badge; steps 2-6 picked 2026-09-15 12:00 UTC, filled the booker's name and email, submitted, and landed on /booking/peYr3wxJ1QwAuyy5Uozuo3?isSuccessBookingPage=true. The success page (step-6.png and step-7.png, identical) shows the pending headline \"Your booking has been submitted\" with the subtitle \"Reference Host still needs to confirm or reject the booking.\", the event details, and Reschedule / Cancel links, i.e. the booking is unconfirmed and the page says so. The run's visual judge annotation agrees: \"The pending state is communicated under different wording ... the content is present in meaning but not in the vocabulary the assertion asked for.\" Server stdout/stderr for the scenario are empty (0 bytes), no errors. The rendering is apps/web/modules/bookings/views/bookings-single-view.tsx:429-438 (successPageHeadline -> t(\"booking_submitted\")) and :309-329 + :561 (getTitle -> t(\"user_needs_to_confirm_or_reject_booking\")), resolved from packages/i18n/locales/en/common.json:469-475.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None to users. The product is correct and the doc is correct; only the generated assertion is wrong. Cost is a false positive on the guard board that, if acted on, would send a maintainer looking for a defect that does not exist.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues \"booking submitted requires confirmation wording\" --owner calcom (0 results)",
+      "gh search issues \"success page unconfirmed booking pending copy\" --owner calcom (0 results)",
+      "grep -rn \"has not been confirmed\" over .truecourse/specs/sources (0 hits: the phrase is in no cal.com doc page)",
+      "grep -rn \"not been confirmed\" over the caldiy-tested worktree and git grep over calcom origin/main locales (0 hits: the phrase is in neither codebase)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix: the behavior is correct in both editions and unchanged since the tested build. in cal.diy: only 4 commits landed on main between the tested 038381aeca (2026-07-31) and origin/main 176037d0af (2026-08-08), none of them touching apps/web/modules/bookings/views/bookings-single-view.tsx or packages/i18n/locales/en/common.json. in cal.com: origin/main as of 2026-08-15 carries byte-identical strings, packages/i18n/locales/en/common.json:469 \"needs_to_be_confirmed_or_rejected\": \"Your booking still needs to be confirmed or rejected.\", :471 \"user_needs_to_confirm_or_reject_booking\": \"{{user}} still needs to confirm or reject the booking.\", :475 \"booking_submitted\": \"Your booking has been submitted\", and no occurrence of \"has not been confirmed\" anywhere."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "No Cal.diy researcher write-up was available."
+  },
+  "notes": "Not an edition mismatch: the pending-booking success page and its copy are present and identical in the commercial calcom/cal.com main, so nothing was removed from the fork here. The assertion string \"has not been confirmed\" is an invention of the generator: it appears in no page of the snapshotted cal.com docs corpus (the only doc in the corpus that mentions requires-confirmation at all is the bound how-to page), and in neither the cal.diy tested worktree nor cal.com main. The bound doc section is a UI setup how-to (log in, Advanced tab, toggle, Always vs When booked with less than) and makes no promise about booker-facing copy after submission, so there is no doc sentence to hold the product to. The scenario's own step note concedes this, calling itself \"authored DOC-FAITHFULLY and expected to fail\" as transform-gap W20 and arguing the string should not be patched to what the code renders. That reasoning does not survive the taxonomy: an assertion whose literal text comes from neither the doc nor the product is a test defect, and the honest doc-faithful assertion for this section would be the state, not the sentence, e.g. that the page reaches /booking/<uid> and shows the booking as awaiting the host (\"still needs to confirm or reject\") rather than confirmed. Two secondary observations for whoever owns the flow. First, the scenario under-delivers on its own promise: the title and promise say the host \"clears\" the pending booking and interface.path lists web/open-bookings-list, web/open-unconfirmed-bookings-tab and web/confirm-booking-request, but no step exercises any of them, so the host-side half of the claim (the Unconfirmed tab, the Confirm action) is never verified. Second, if a phrase assertion is kept, the product does ship a near-miss string for the anonymous-profile case, packages/i18n/locales/en/common.json:469 \"Your booking still needs to be confirmed or rejected.\", reached only when props.profile.name is null (bookings-single-view.tsx:328); with a named host, as here, the {{user}} variant at :471 always wins, so a naive \"needs to be confirmed\" assertion would still be flaky across seeds."
+}

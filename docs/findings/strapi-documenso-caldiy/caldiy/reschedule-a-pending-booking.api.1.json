@@ -1,0 +1,75 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "reschedule-a-pending-booking.api.1",
+  "flowId": "reschedule-a-pending-booking",
+  "failingStep": 7,
+  "whatFailed": "Rescheduling a PENDING (requires-confirmation) booking with rescheduledBy set to the attendee's email returned a booking with status accepted instead of pending, because the API silently substituted the authenticated API-key owner's identity for the rescheduledBy identity, auto-confirming the booking without the host acting.",
+  "docClaim": {
+    "quote": "Email of the person who is rescheduling the booking - only needed when rescheduling a booking that requires a confirmation. If event type owner email is provided then rescheduled booking will be automatically confirmed. If attendee email or no email is passed then the event type owner will have to confirm the rescheduled booking.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/reschedule-a-booking.md",
+    "section": "reschedule-a-booking/openapi, components.schemas.RescheduleBookingInput_2024_08_13.properties.rescheduledBy (lines 124-134; repeated verbatim for RescheduleSeatedBookingInput_2024_08_13 at lines 189-199). The page header (lines 9-11) adds: 'pending - a booking awaiting host confirmation can be rescheduled. The new booking stays pending until the host confirms or declines it.' This is NOT only a hosted-Cal.com doc: the identical sentence ships in the Cal.diy tested tree as the DTO's own swagger description, packages/platform/types/bookings/2024-08-13/inputs/reschedule-booking.input.ts:4-6 (RESCHEDULED_BY_DOCS)."
+  },
+  "observed": "Step 6 created a booking on the requires-confirmation event type (id 101, owner reference-host, user id 1): status pending. Step 7 POSTed /v2/bookings/uRaPUKxn8ZDJpDbQgi5LoR/reschedule with cal-api-version 2024-08-13, the HOST api key, and rescheduledBy = pending2-5ed06ce52e@example.com (the attendee's own address, exactly the doc's 'attendee email' arm). Response 201 with data.status 'accepted' and data.rescheduledByEmail 'pending2-5ed06ce52e@example.com'. The evidence contains the controlled comparison: step 2 sent the SAME shape (attendee email in rescheduledBy, pending booking) but with the OUTSIDER api key and got status 'pending'. Only the caller credential differs between step 2 and step 7, so the confirm decision is being made by the caller's identity, not by rescheduledBy.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Silent bypass of the host's confirmation gate: a platform or host integrator that reschedules on an attendee's behalf using its own (owner) API key, and correctly declares the attendee in rescheduledBy as the docs instruct, gets the booking auto-accepted. The host never sees a confirmation request and a requires-confirmation event type is booked without approval. The reverse direction is worse (see notes): rescheduledBy is trusted with no verification on an endpoint whose auth is optional, so any caller holding a booking uid can pass the owner's email and force the same auto-confirm.",
+  "rootCause": {
+    "file": "apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts",
+    "lines": "766-777 (the offending expression is line 769)",
+    "explanation": "The documented rule is implemented in apps/api/v2/src/platform/bookings/2024-08-13/services/input.service.ts:544-548, which resolves an acting userId from rescheduledBy ONLY when rescheduledBy differs from the attendee's own email (bodyTransformed.responses.email). For the doc's 'attendee email or no email' arm it deliberately leaves userId undefined, so that packages/features/bookings/lib/handleNewBooking/getRequiresConfirmationFlags.ts:77-93 computes isUserReschedulingOwner(undefined, organizerId) = false and determineIsConfirmedByDefault returns false, leaving the new booking pending. bookings.service.ts:769 then defeats that intent: it passes bookingMeta.userId = bookingRequest.userId ?? authUser?.id, so the undefined that ENCODED 'the attendee is rescheduling' falls back to the authenticated API-key owner (OptionalApiAuthGuard / GetOptionalUser, controller line 321-328). When that caller is the event type organizer, userId === originalRescheduledBookingOrganizerId, isUserReschedulingOwner is true, determineIsConfirmedByDefault short-circuits to true (packages/.../getRequiresConfirmationFlags.ts:92) and RegularBookingService.ts:668-675 writes the new booking ACCEPTED. The value the caller explicitly supplied is discarded exactly in the case the parameter exists for."
+  },
+  "introducedBy": {
+    "commit": "b0b94b91fec1447062ace4886c2f1ab902952121",
+    "date": "2025-10-30",
+    "pr": "#24640",
+    "title": "fix: allow org admin to cancel and reschedule seated bookings",
+    "note": "git blame of the culprit line in the tested worktree. That PR changed 'userId: bookingRequest.userId' to 'userId: bookingRequest.userId ?? authUser?.id' so an org admin's identity would reach createBooking; the diff shows exactly that one-line edit. The rescheduledBy semantics it overrides are older and were correct: commit 76b9b9b0fe67fd126d2e2c31092a2dbffbecbff9, 2025-03-11, PR #19833 'fix: v2 rescheduled booking with confirmation' (Lauris Skraucis), which REPLACED the previous 'userId = createBookingRequestOwnerId(request)' (the api-key owner) with the rescheduledBy-derived userId precisely so the api-key owner would stop deciding confirmation. So the old code is the correct rule and the newer code is the regression: #24640 restored the api-key-owner fallback that #19833 had removed, seven months later, as a side effect of an org-admin seated-booking fix."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 16877,
+        "url": "https://github.com/calcom/cal.diy/issues/16877",
+        "state": "open",
+        "title": "[CAL-4431] RescheduledBy feature needs more fixes",
+        "relation": "related",
+        "note": "Open since 2024-09-30, but about the WEB reschedule flow losing the ?rescheduledBy= URL param across a redirect. Not the API confirm decision. Only evidence that rescheduledBy has known rough edges."
+      },
+      {
+        "number": 25100,
+        "url": "https://github.com/calcom/cal.diy/issues/25100",
+        "state": "closed",
+        "title": "fix: v2 api rescheduledBy",
+        "relation": "related",
+        "note": "Closed 2025-11-26. Same v2 input.service.ts area but a different symptom: rescheduledByEmail came back null in the output. In our run rescheduledByEmail is correctly populated, so that fix is present and is not this bug."
+      },
+      {
+        "number": 21630,
+        "url": "https://github.com/calcom/cal.diy/issues/21630",
+        "state": "closed",
+        "title": "POST /v2/bookings/:uuid/reschedule returns 401 Unauthorized despite valid auth",
+        "relation": "related",
+        "note": "Same endpoint, auth-shaped, but about a 401 rather than the confirmation outcome."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"rescheduledBy\" --owner calcom --limit 30 (13 hits, all cal.diy; none describe an api-key owner auto-confirming a pending reschedule)",
+      "gh search prs \"rescheduledBy confirmation\" --owner calcom --limit 30 (0 hits)",
+      "gh search issues \"reschedule automatically confirmed requires confirmation api\" --owner calcom --limit 25 (0 hits)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed between the tested commit 038381aeca and origin/main (176037d0af, 2026-08-08), and `git log 038381aeca..origin/main` touches none of the culprit files (apps/api/v2/src/platform/bookings/2024-08-13/services/{bookings,input}.service.ts, packages/features/bookings/lib/handleNewBooking/getRequiresConfirmationFlags.ts, packages/features/bookings/lib/service/RegularBookingService.ts, packages/platform/types/bookings/2024-08-13/inputs/reschedule-booking.input.ts). in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a mirror of cal.diy main. No public PR, issue or changelog entry found for this symptom. The published cal.com docs snapshot still carries the unconditional sentence, which is weak evidence the hosted product has not changed the rule either."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, dropped 9:10 slot, seated-booking oversell, unauthenticated slot-hold tampering). None touches reschedule or rescheduledBy. It is thematically adjacent to their #5 (an identity/authorization field trusted without verification), and the notes below record the same shape on this endpoint."
+  },
+  "notes": "1) Not an edition-mismatch and not the systemic API-version issue. The scenario sends cal-api-version 2024-08-13, which IS a version Cal.diy ships (packages/platform/constants/api.ts tops out at 2024-09-04), the request was accepted and the whole flow ran; and the doc sentence is not hosted-only, it is generated from Cal.diy's own DTO (RESCHEDULED_BY_DOCS). Cal.diy has the code and it misbehaves.\n\n2) The scenario is well constructed, not a test defect. Its own note marks step 7 KEPT RED and names input.service.ts:544-548 and getRequiresConfirmationFlags.ts:84; I verified both line references are exactly right in the tested tree, and I add the missing third link, bookings.service.ts:769, which is what actually defeats the rule. Step 2 (non-owner caller, same request shape, pending) and step 7 (owner caller, accepted) form a controlled pair inside one evidence file, which is why confidence is high.\n\n3) Refinement worth telling the maintainer: rescheduledBy never drives the confirm decision when it equals the attendee's email. It is dropped, and the outcome is decided entirely by the caller credential. The doc's 'attendee email ... owner will have to confirm' arm therefore only holds by accident, whenever the caller happens not to be the organizer. It fails for the single most common integration pattern the parameter was added for, a host or platform backend rescheduling on an attendee's behalf with its own key.\n\n4) Second-order finding from the same code, NOT exercised by this run so reported as code-derived only, and it points the other way. input.service.ts:544-548 resolves userId by `usersRepository.findByEmail(rescheduledBy)` with no check that the caller is that person, and the endpoint is guarded by OptionalApiAuthGuard (apps/api/v2/src/modules/auth/guards/optional-api-auth/optional-api-auth.guard.ts), which returns null rather than rejecting when no auth is provided. So an unauthenticated caller who knows a booking uid can pass the event type owner's email in rescheduledBy and get userReschedulingIsOwner = true, auto-confirming a pending booking. Owner emails are frequently public. Settling it needs one unauthenticated POST /v2/bookings/<uid>/reschedule with rescheduledBy set to the host address against a pending booking, which I did not run because the ground rules forbid writes against a live service and the run's instance is gone. It should be reproduced on a local instance before filing.\n\n5) Suggested fix shape for the maintainer, since the org-admin case #24640 was solving is real: keep the authUser fallback but make it lose to an explicit rescheduledBy. Have input.service.ts return a tri-state (rescheduledBy absent -> fall back to authUser; rescheduledBy present and resolvable to a user -> that user, after verifying the caller may act as them; rescheduledBy present and equal to the attendee -> explicitly no acting user) instead of encoding 'attendee is rescheduling' as an undefined that `??` cannot distinguish from 'not supplied'. Whichever way it is resolved, the docs and RESCHEDULED_BY_DOCS need a sentence about caller-identity precedence, because today they promise an unconditional rule the code does not implement."
+}

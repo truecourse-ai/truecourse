@@ -1,0 +1,103 @@
+{
+  "id": "D10",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "26f0c4c5b",
+        "date": "2026-07-23",
+        "title": "chore: deprecate endpoints",
+        "pr": "#3022",
+        "touchesCulpritLines": false,
+        "effect": "Adds an <EnvelopeWarning /> banner to first-api-call.mdx; predates the review, nothing in the Error Handling section."
+      },
+      {
+        "sha": "7f85388eb",
+        "date": "2026-07-21",
+        "title": "fix: increase global API rate limits to 1000/min",
+        "pr": "#3081",
+        "touchesCulpritLines": false,
+        "effect": "Changes the 100 to 1000 req/min sentence on the same page; predates the review, leaves the error block alone."
+      },
+      {
+        "sha": "fc95ee9ea",
+        "date": "2026-08-10",
+        "title": "fix: handle completion when already signed",
+        "pr": "#3159",
+        "touchesCulpritLines": false,
+        "effect": "Adds RECIPIENT_ALREADY_SIGNED to AppErrorCode in packages/lib/errors/app-error.ts; no change to the error body or the code mapping call sites."
+      },
+      {
+        "sha": "871c2a6f0",
+        "date": "2026-08-18",
+        "title": "fix: surface actionable errors when completing documents",
+        "pr": "#3229",
+        "touchesCulpritLines": false,
+        "effect": "Adds RECIPIENT_HAS_UNSIGNED_FIELDS and RECIPIENT_OUT_OF_TURN plus their genericErrorCodeToTrpcErrorCodeMap rows; the map's `code` half is still read by nobody."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/trpc/server/trpc.ts#L39-L67",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/trpc/server/trpc.ts#L39-L67",
+    "howDecided": "git log 3cf2963cd0..origin/main on packages/trpc/server/trpc.ts is empty, so the errorFormatter that builds {message, code, data} is byte-identical. packages/lib/errors/app-error.ts took two commits since the tested tag (fc95ee9ea, 871c2a6f0); the full diff only adds three AppErrorCode members plus two map rows. Both surviving call sites of genericErrorCodeToTrpcErrorCodeMap still read `?.status` and never `?.code` (git grep on origin/main: trpc.ts:59 and apps/remix/server/trpc/hono-trpc-open-api.ts:27), so an AppError-derived 404 still comes out labelled INTERNAL_SERVER_ERROR at the top level and no code path emits `error` or `statusCode`. hono-trpc-open-api.ts took one commit (1bd09480e, #2824, sub-path serving) that only computes the endpoint prefix."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/docs/content/docs/developers/getting-started/first-api-call.mdx",
+    "lineToday": 447,
+    "permalink": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/getting-started/first-api-call.mdx#L447-L484",
+    "publishedUrl": "https://docs.documenso.com/docs/developers/getting-started/first-api-call",
+    "commitsSinceReview": [],
+    "note": "The Error Response Format block and all three Common Errors examples are verbatim what the review quoted, only shifted by two lines (tested: L445-L482, today: L447-L484). No commit has touched the file since 26f0c4c5b on 2026-07-23. I fetched the live page today and it still renders {\"error\": \"Description of what went wrong\", \"code\": \"ERROR_CODE\", \"statusCode\": 400}. Cross-check on origin/main: `statusCode` now survives in exactly two places under apps/docs/content, this page (L453, L464, L473, L482) and a hand-written TypeScript error class in examples/common-workflows.mdx (L1041-L1085) that constructs the field itself. The sibling copy of the fiction in rate-limits.mdx is gone: merged PR #3133 replaced it on 2026-08-19 with the real {message, code, data:{code, httpStatus, appError}} shape, which upstream-confirms the finding while leaving this page wrong."
+  },
+  "tracker": {
+    "newItems": [
+      {
+        "number": 3219,
+        "url": "https://github.com/documenso/documenso/pull/3219",
+        "state": "open",
+        "title": "refactor(trpc): tighten error formatter and route meta types",
+        "createdAt": "2026-08-15",
+        "relation": "related",
+        "note": "Rewrites the exact errorFormatter in packages/trpc/server/trpc.ts but is shape-preserving: it early-returns the tRPC template for non-AppError causes and otherwise re-adds appError/code/httpStatus under `data`. It does not add `error` or `statusCode` and does not stop the top-level INTERNAL_SERVER_ERROR labelling, so it neither fixes nor conflicts with this finding."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#2114",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Feedback for API Reference V2. Unchanged: closed 2025-10-29 as completed, last updated 2025-10-29, 1 comment (the welcome bot). Still the best public evidence of the real {message, code, data} envelope."
+      },
+      {
+        "ref": "documenso/documenso#3133",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "merged",
+        "changedSinceReview": true,
+        "mergedAt": "2026-08-19T09:28:24Z",
+        "mergeCommit": "05f646b326c558edfd920ff1db5836da6680b2fb",
+        "baseRef": "main",
+        "note": "Approved by dguyen (collaborator) on 2026-08-03, rebased onto main and merged today; it is inside v2.17.0. It changed only rate-limits.mdx and common-workflows.mdx, so the {error, code, statusCode} fiction is now published on first-api-call.mdx alone. Documenso has therefore already accepted, in its own repo, that the v2 body is {message, code, data:{...}}."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged and is now stronger. Neither half moved: the doc block is byte-identical (two lines lower) and still live at docs.documenso.com, and the product still cannot emit `error` or `statusCode` on any tRPC-backed v2 route. What changed is the surrounding evidence. PR #3133 merged today, so Documenso itself has now published the real v2 error shape on rate-limits.mdx, which makes first-api-call.mdx the last page carrying the invented envelope and makes the internal contradiction the review described a matter of record rather than of a pending PR. Critically, no PR in the merged or open stack touches this block: I read the first-api-call.mdx hunks of #3137 (it changes the 429 row at L441 and the rate-limit prose at L485 and steps over L447-L484 untouched) and the file lists of #3138 and #3139 (neither includes first-api-call.mdx). So the review's fixedAfter: no is still correct, and the only correction the review hedged on (partial credit via #3133) has now landed for the sibling page only. The INTERNAL_SERVER_ERROR rider is also unchanged: #3219 rewrites the errorFormatter without changing the shape, and the dead `code` half of genericErrorCodeToTrpcErrorCodeMap gained two more rows nobody reads.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "Documenso's docs live in the product repo (apps/docs) and .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false with no docs-specific template, so the only route is the Bug Report form: 'Create a bug report to help us improve', labels: ['bug'], with required Issue Description / Steps to Reproduce / Expected Behavior / Current Behavior / Version textareas. Not a security item, so the config.yml contact link 'Please report security vulnerabilities privately via GitHub Security Advisories' does not apply.",
+  "confidence": "high",
+  "notes": "Two things for the filer. (1) Scope the issue to first-api-call.mdx only and cite the merged #3133 as the shape of the correction the maintainers already accepted; do not claim rate-limits.mdx is still wrong, it was fixed today. (2) The finding has two halves and only the first is a pure doc bug: the missing `error`/`statusCode` keys (doc fix) and the top-level INTERNAL_SERVER_ERROR on AppError-derived failures (product fix, one line, use genericErrorCodeToTrpcErrorCodeMap[...].code which is already computed and discarded at trpc.ts:59 and hono-trpc-open-api.ts:27). Open PR #3219 is refactoring exactly that function right now, which is a natural place to mention the second half. Also worth repeating from the review: /api/v2 genuinely serves two envelopes, since the hand-rolled Hono download routes do return {error, code}, so an issue that says 'the API never returns `error`' would be overstated."
+}

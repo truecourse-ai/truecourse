@@ -1,0 +1,85 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "book-recurring-seats.api.1",
+  "flowId": "book-recurring-seats",
+  "failingStep": 1,
+  "whatFailed": "POST /v2/bookings with the documented `cal-api-version: 2026-02-25` header returned 400 instead of 201, because Cal.diy does not know that version, silently routes the request to the 2024-04-15 controller, strips the nested `attendee` object and then demands the 2024-04-15 flat fields `timeZone`, `language` and `metadata`.",
+  "docClaim": {
+    "quote": "- name: cal-api-version / in: header / description: Must be set to 2026-02-25. / required: true / schema: type: string, example: '2026-02-25', default: '2026-02-25'  ... and, on the same operation (operationId: BookingsController_2026_02_25_createBooking), the 201 response for a recurring seated event type is an array of CreateRecurringSeatedBookingOutput_2024_08_13 whose required list is: id, uid, title, description, hosts, status, start, end, duration, eventTypeId, eventType, location, absentHost, createdAt, updatedAt, seatUid, attendees, recurringBookingUid.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md",
+    "section": "create-a-booking/openapi (header parameter at lines 85-92; response oneOf at lines 624-638; CreateRecurringSeatedBookingOutput_2024_08_13 schema and its required list at lines 1307-1436)"
+  },
+  "observed": "400 BadRequestException. The error `details.errors[].target` is `{\"start\":\"2050-11-17T09:00:00.000Z\",\"eventTypeId\":108}`, i.e. the `attendee` object the scenario sent was whitelist-stripped before validation, and three constraints fire on fields the docs never mention for this endpoint: `timeZone must be a valid IANA time-zone`, `language must be a string`, `metadata must be an object`. Those three are exactly the required properties of CreateBookingInput_2024_04_15. The response took 25 ms, so nothing reached the booking service; server.stderr.txt is empty and server.stdout.txt shows no handler error.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "Anyone following cal.com's public API v2 create-a-booking page against a Cal.diy instance cannot create a booking at all: the mandated header is rejected by silent downgrade and the resulting 400 names three fields the page does not document, so the error gives no hint that the version is the problem. This blocks the whole recurring-seats flow at its first step.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41 (with packages/platform/constants/api.ts:56-68 and apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts:122-146)",
+    "explanation": "packages/platform/constants/api.ts:56-68 in the tested tree declares API_VERSIONS as exactly [2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04]; the string 2026-02-25 appears nowhere under packages/platform or apps/api/v2/src. bootstrap.ts:31-41 installs a CUSTOM versioning extractor that returns the header value only when API_VERSIONS.includes it and otherwise falls through to `return VERSION_2024_04_15`, with defaultVersion also 2024-04-15, so an unsupported version is silently downgraded rather than refused. POST /v2/bookings therefore lands on apps/api/v2/src/platform/bookings/2024-04-15/controllers/bookings.controller.ts (its @Controller version list is [2024-04-15, 2024-06-11, 2024-06-14]) instead of the 2024-08-13 controller. The global ValidationPipe in bootstrap.ts:59-69 runs with `whitelist: true`, which deletes the unknown `attendee` object, and CreateBookingInput_2024_04_15 requires flat `timeZone` (@IsTimeZone), `language` (@IsString) and `metadata` (@IsObject) - the three constraints in the response, and the stripped target proves the whitelisting. Everything the doc claim asserts about the RESPONSE is present in Cal.diy: packages/platform/types/bookings/2024-08-13/outputs/booking.output.ts:375-391 defines CreateRecurringSeatedBookingOutput_2024_08_13 (extends BaseBookingOutput_2024_08_13, plus seatUid, attendees: SeatedAttendee[], recurringBookingUid), SeatedAttendee carries displayEmail/absent/seatUid/bookingFieldsResponses, apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts:139-146 dispatches isRecurring && isSeated to createRecurringSeatedBooking, and output.service.ts:391-394 populates attendees[].bookingFieldsResponses. Only the request-side version gate is missing."
+  },
+  "introducedBy": {
+    "commit": "3a22fdb428",
+    "date": "2024-06-04",
+    "pr": "#15135",
+    "title": "feat: API v2 subversioning",
+    "note": "3a22fdb428 introduced the `return VERSION_2024_04_15` fallback in the version extractor (then in apps/api/v2/src/app.ts, moved verbatim to bootstrap.ts by 9ad8aa981ac, 2026-01-13, 'chore: deploy api v2 on vercel (#26735)'). That is the silent-downgrade half. The other half is that API_VERSIONS has not grown since 5dc81e8677c, 2025-02-13, 'feat: v2 slots new version (#18758)', which added the newest entry 2024-09-04; the list itself dates to 0eabe7f28bc, 2024-09-23, 'refactor: v2 bookings (#16200)'. So the code is old and the failure is an interaction: old, unchanged Cal.diy code meeting a much newer documented API version that only the commercial Cal.com serves."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "exact",
+        "note": "The canonical public trace for this systemic cause: names the drift between the versions the public docs mandate (2026-02-25) and the versions the open source tree ships (tops out at 2024-09-04). Opened 2026-04-06, still open."
+      },
+      {
+        "number": 29785,
+        "url": "https://github.com/calcom/cal.diy/issues/29785",
+        "state": "open",
+        "title": "Improve Maintainability of cal-api-version",
+        "relation": "related",
+        "note": "Same header, maintainability framing. Opened 2026-07-16, still open."
+      },
+      {
+        "number": 28512,
+        "url": "https://github.com/calcom/cal.diy/issues/28512",
+        "state": "closed",
+        "title": "get all bookings filter",
+        "relation": "related",
+        "note": "A user hitting the same downgrade on a different bookings endpoint. Closed 2026-03-24."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28561,
+        "url": "https://github.com/calcom/cal.diy/pull/28561",
+        "state": "closed",
+        "title": "fix(bookings): map cal-api-version 2026-02-25 to latest supported version",
+        "relation": "exact",
+        "note": "A community fix that would have made exactly this request work: map the documented 2026-02-25 onto the newest version the tree has. Closed unmerged 2026-03-25; its author confirmed that production serves 2026-02-25 while the open source tree does not."
+      }
+    ],
+    "queries": [
+      "gh search issues 'recurring seats booking API version' --owner calcom (0 results)",
+      "gh search issues '2026-02-25 cal-api-version' --owner calcom (0 results)",
+      "gh search issues 'cal-api-version' --owner calcom --limit 25 (returned #29785, #28762 and unrelated items; no issue about recurring seated creation failing on the documented version)",
+      "non-search verification via gh api repos/calcom/cal.com/issues/{28762,29785,28512,28561} (all redirect to calcom/cal.diy, confirming the mirror)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: not fixed. `git log 038381aeca..origin/main` has only 4 commits and none touches packages/platform/constants/api.ts or apps/api/v2/src/bootstrap.ts; origin/main (176037d0af, 2026-08-08) still lists API_VERSIONS ending at VERSION_2024_09_04 and still silently downgrades unknown versions to 2024-04-15. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a byte-identical mirror of cal.diy. The public trace (PR #28561's author, closed 2026-03-25) says production Cal.com does serve 2026-02-25, so the documented behavior is presumably live there, but no public commit proves it."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md. Their #4 is the nearest neighbour by subject (seats oversold, adding an attendee to a seated booking accepted instead of refused) but that is scenario seated-bookings-refuse-attendees-and-guests.api.1, a 2024-08-13 call that reached the handler; this failure never reached any booking handler. It is an instance of the coordinator's established systemic cause 1 (unsupported cal-api-version header), not of the researcher's list."
+  },
+  "notes": "Two follow-ups the brief asks for.\n\n(a) Would the scenario also fail on the versions Cal.diy has? For step 1, no: the evidence says it would have passed at cal-api-version 2024-08-13. Empirically, in the same run and against the same server, move-and-cancel-a-single-seat.api.1 step 1 posts a byte-identical body shape (eventTypeId, start, attendee{name,email,timeZone}) to POST /v2/bookings with cal-api-version 2024-08-13 and got its 201 (that scenario fails later, at step 4). mark-a-booking-absence.api.1 likewise cleared its 2024-08-13 create. Statically, packages/platform/types/bookings/2024-08-13/inputs/create-booking.input.ts declares BaseBookingAttendee as exactly {name @IsString, timeZone @IsTimeZone, email optional}, so the sent body validates; the 2024-08-13 @Post(\"/\") carries no @HttpCode, so Nest answers 201; bookings.service.ts:139-146 routes recurring+seated to createRecurringSeatedBooking; and CreateRecurringSeatedBookingOutput_2024_08_13 supplies every field the step asserts. Note that the doc's own 2026-02-25 operation names the response schema CreateRecurringSeatedBookingOutput_2024_08_13, i.e. the response contract is version-stamped 2024-08-13 even in the 2026-02-25 operation, which is why only the request-side gate differs. What would settle it beyond doubt: re-run book-recurring-seats.api.1 with cal-api-version 2024-08-13 on the create step.\n\n(b) Is there a Cal.diy-side defect in the bound doc claim independent of the version? None provable from this evidence: the run never got a 201 to inspect, and the DTO plus the output service supply all sixteen required keys, seatUid, recurringBookingUid, and the SeatedAttendee sub-fields. One adjacent signal worth a maintainer's eye: move-and-cancel-a-single-seat.api.1 step 4 (a 2024-08-13 seated reschedule) failed with `data.bookingFieldsResponses missing`, so at least one seated output path does not honour the documented required list; that is a different scenario and a different endpoint, and I did not verify it.\n\nSecondary defect worth reporting separately, layered on top of the edition mismatch: Cal.diy answers an unsupported cal-api-version by silently downgrading rather than refusing. A caller gets a 400 naming timeZone, language and metadata, three fields the create-a-booking page never mentions, with no mention of the version anywhere in the response. The docs themselves acknowledge the downgrade (\"Not passing the correct value will default to an older version of this endpoint.\", create-a-booking.md lines 32 and 81), but that note is easy to miss and does not surface at the point of failure. A 400 or 406 naming the supported versions, or the mapping PR #28561 proposed, would turn a mystifying validation error into a one-line diagnosis. This is the same defect issue #28762 asks to solve from the discovery side.\n\nDoc ownership: the page is cal.com's public API v2 reference (upstream repo calcom/docs), describing the commercial hosted Cal.com. The Cal.diy tree's own generated OpenAPI says the opposite for this endpoint family: apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts:232 renders \"cal-api-version: `2024-08-13` is required in the request header.\""
+}

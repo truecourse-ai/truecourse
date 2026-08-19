@@ -1,0 +1,92 @@
+{
+  "id": "D1",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/server-only/recipient/create-envelope-recipients.ts#L62-L74",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/recipient/create-envelope-recipients.ts#L62-L74",
+    "howDecided": "git log 3cf2963cd0..origin/main over all six culprit files (create-envelope-recipients.ts, assert-envelope-mutable.ts, update-envelope-recipients.ts, delete-envelope-recipient.ts, create-envelope-fields.ts, update-envelope-fields.ts) returns zero commits. Stronger check: git rev-parse on each blob at both revisions returns the SAME sha for all six, so the files are byte-identical between v2.16.0 and v2.17.0 and line numbers have not drifted. Read the culprit region at origin/main: line 68 is still `assertEnvelopeMutable(envelope);`, lines 70-74 are still `if (envelope.completedAt) { throw new AppError(AppErrorCode.INVALID_REQUEST, { message: 'Envelope already complete' }); }`, and line 100 is still the transaction-scoped `await assertEnvelopeMutable(envelope, tx);`. There is still no comparison of envelope.status to DocumentStatus.DRAFT anywhere on the path. Read assert-envelope-mutable.ts at origin/main: assertSnapshotMutable still opens with `if (!isTspEnvelope(envelope)) { return; }` at lines 65-67, so it is still inert for the default SES envelope. The bound doc sentence also survives: origin/main:apps/docs/content/docs/developers/api/documents.mdx still reads 'You cannot modify recipients or fields after a document moves to `PENDING` status.', now at line 898 (it was line 755 at v2.16.0; the file grew via #3022 'chore: deprecate endpoints' and #3135 'docs(api): document cancel endpoint and fix get-many body shape'). apps/docs/content/docs/concepts/document-lifecycle.mdx and apps/docs/content/docs/users/documents/add-recipients.mdx are byte-identical to the tested revision, so all three promises still stand."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 3188,
+        "url": "https://github.com/documenso/documenso/issues/3188",
+        "state": "open",
+        "title": "setDocumentRecipients and setFieldsForDocument delete already-signed recipients and fields",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "Filed 2026-08-13, after the review's search date but before the review was written; the review does not cite it. Same family (authoring mutations on a document that has already moved past DRAFT) but a different code path: the v1 set-* replace endpoints destroying existing rows, not the v2 create-many accepting a new one on PENDING. A filer should cross-reference it, not treat it as a duplicate."
+      },
+      {
+        "number": 3189,
+        "url": "https://github.com/documenso/documenso/issues/3189",
+        "state": "open",
+        "title": "Adding a recipient through API v1 recreates all the others: signing links die and fields are lost",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "Closest new neighbour: also about adding a recipient to an existing document over the API. Different endpoint (v1 setDocumentRecipients) and different harm (collateral recreation of the other recipients). It does NOT report that a PENDING document accepts the addition at all, which is this finding. Not a duplicate."
+      },
+      {
+        "number": 3186,
+        "url": "https://github.com/documenso/documenso/issues/3186",
+        "state": "open",
+        "title": "GET /api/v2/envelope: unstable pagination, and envelopes inside folders are invisible by default",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "Another v2 envelope API correctness issue from the same 2026-08-13 batch; unrelated cause. Listed only to show the v2 surface is being actively reported against."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#2215",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged. Closed 2025-11-19, no activity since. Still the 'stuck in PENDING' symptom relative, not a report of this bug."
+      },
+      {
+        "ref": "documenso/documenso#3115",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: open, created and last updated 2026-07-20, no comments since. Still only a related recipient-creation bug (duplicate-email collapse)."
+      },
+      {
+        "ref": "documenso/documenso#3136",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "STALE REVIEW CLAIM: the review recorded baseRefName as docs/documents-cancel-get-many, a non-main base, and concluded the PR could not land on its own. It has since been rebased: base.ref is main today (last updated 2026-08-19, same day #3135, the PR it used to sit on, was merged). It is still open and unmerged, 2 files, +204/-89, by ephraimduncan. No maintainer comment: the only comments are vercel[bot] and coderabbitai[bot], both from 2026-07-30. Irrelevant to D1 either way: it touches only the fields update route and the fields docs page, not the PENDING freeze."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"add recipient pending document\" --limit 25 (0 results)"
+    ]
+  },
+  "reevaluation": "The finding stands, unchanged and unweakened. Every one of the six culprit files is byte-identical between the tested v2.16.0 and today's v2.17.0, so the defect ships in the newest release exactly as reviewed: createEnvelopeRecipients gates only on assertEnvelopeMutable (a no-op for SES) plus envelope.completedAt, and update-envelope-recipients, delete-envelope-recipient, create-envelope-fields and update-envelope-fields carry the same two-gate shape. All three doc pages that promise the freeze are still live, one of them having merely moved line (documents.mdx:755 to :898). The review's fixedAfter claim ('still broken on main') is still correct; its only detail that has aged is the head sha it cites (688ef2fd, 2026-08-14) and the documents.mdx line number. Nothing in the 135 issues and PRs opened between 2026-08-01 and 2026-08-19 reports this: the two nearest, #3188 and #3189, are both v1 set-* endpoints and both are about collateral destruction of existing rows rather than the missing PENDING guard. Scope note for the filer: steps 8-12 of the scenario, the recipient update, recipient delete and field write refusals, still have no runtime evidence and are source-level inference only, so the issue body should either present them as 'the same two-gate shape, so we expect the same result' or be backed by the live re-run the plan schedules.",
+  "routeSuggestion": "security disclosure",
+  "policyBasis": "SECURITY.md: 'Report security vulnerabilities privately. Do not open a public issue, discussion, or pull request for security reports.' plus 'If you're unsure whether something is in scope, report it privately anyway and we'll happily take a look.' The scope exclusions (SSRF, DNS, rate limiting, TLS/headers, self-hosted misconfiguration) do not cover it: this is application authorization logic in the repo's own code, which SECURITY.md's Scope section explicitly does cover.",
+  "confidence": "high",
+  "notes": "The security routing is a judgement call, not a slam dunk, and the filer should decide deliberately. Arguments for the advisory form: it is an unenforced authorization rule on a first-party API that lets a token holder add a signing party to a document other parties already agreed to sign, which lands on the signing certificate; SECURITY.md tells you to report privately when unsure. Arguments for a public issue: the actor is an authenticated same-team API-token holder acting inside their own tenant, so it is a missing business rule rather than a privilege escalation, and the maintainers evidently take comparable integrity bugs publicly (#3188, #3189, #2475 'Ghost Recipients'). If the advisory route is chosen and the maintainers say it is out of scope, refile it as a public bug report; do not file both at once. Also note documenso runs OpenAI Codex security analysis over the codebase and warns it may close a report as a duplicate of a Codex finding. One legitimate exception the fix must preserve, already recorded in the review and worth repeating in the report: documentMeta.allowDictateNextSigner lets a signer nominate the next recipient on a PENDING envelope."
+}

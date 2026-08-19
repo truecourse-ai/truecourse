@@ -1,0 +1,84 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "choose-a-length-on-a-multi-duration-event-type.api.1",
+  "flowId": "choose-a-length-on-a-multi-duration-event-type",
+  "failingStep": 1,
+  "whatFailed": "POST /v2/bookings with the docs-mandated header cal-api-version: 2026-02-25 returned 400 instead of 201, because Cal.diy has no 2026-02-25 booking API and silently routed the request to the 2024-04-15 controller, whose DTO does not know attendee or lengthInMinutes and demands flat timeZone, language and metadata.",
+  "docClaim": {
+    "quote": "lengthInMinutes: type: number, minimum: 1, example: 30, description: 'If it is an event type that has multiple possible lengths that attendee can pick from, you can pass the desired booking length here. If not provided then event type default length will be used for the booking.' ... and, in the same operation's Headers section: 'name: cal-api-version, in: header, description: Must be set to 2026-02-25. required: true'",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md",
+    "section": "create-a-booking/openapi (operationId BookingsController_2026_02_25_createBooking; lengthInMinutes at lines 232-241, header at lines 85-91)"
+  },
+  "observed": "server.stdout.txt line 298 shows the request arriving with header Cal-Api-Version: 2026-02-25 and body {\"start\":\"2050-09-05T17:00:00.000Z\",\"attendee\":{\"name\":\"Guard Booker\",\"timeZone\":\"Europe/Rome\",\"email\":\"guard-booker@example.com\"},\"eventTypeId\":116,\"lengthInMinutes\":60}. Every route in that boot log is mapped as '(version: 2024-04-15)'. The 400 body's validation targets are {\"start\":...,\"eventTypeId\":116}: the NestJS whitelist ValidationPipe stripped attendee and lengthInMinutes as unknown properties, then reported the three fields CreateBookingInput_2024_04_15 requires as missing: timeZone must be a valid IANA time-zone, language must be a string, metadata must be an object. Response time 15 ms, no timeout, API up and healthy 15 ms earlier (GET /health 200). Step 2 never ran.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "None for a Cal.diy operator who knows to send a version Cal.diy ships: the multi-duration booking feature itself is present and works at cal-api-version 2024-08-13. The harm is that Cal.com's public docs are the only docs Cal.diy points people at, and following them verbatim makes every booking create fail with an error naming three fields the reader was never told to send.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "The NestJS custom version extractor reads the cal-api-version header and returns it only if it is a member of API_VERSIONS. packages/platform/constants/api.ts:56-68 in the tested tree lists exactly 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13 and 2024-09-04. '2026-02-25' is not in that list, so the extractor falls through to VERSION_2024_04_15 with no warning, no 400 naming the header, and no response header saying which version served. The request is then bound to CreateBookingInput_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts:91-146), a flat DTO with required timeZone (124), language (137) and metadata (146) and no attendee or lengthInMinutes at all, and the globally whitelisting ValidationPipe drops the two unknown properties before validating. The resulting 400 is a red herring: it complains about the shape of the 2024-04-15 body, never about the version header the caller actually got wrong. There is no 2026-02-25 or 2025-* directory anywhere under apps/api/v2/src (find -type d -name '*2026*' and '*2025*' both empty); the only booking API versions Cal.diy ships are 2024-04-15 and 2024-08-13."
+  },
+  "introducedBy": {
+    "commit": "9ad8aa981ac44553b0fa94a65a86d8076d4fd408",
+    "date": "2026-01-13",
+    "pr": "#26735",
+    "title": "chore: deploy api v2 on vercel",
+    "note": "This is the blame for the silent-downgrade extractor lines as they stand in the tested tree; the commit moved the block from apps/api/v2/src/app.ts, where the same fall-through to 2024-04-15 dates back to 0a15483c461 (Morgan, 2024-03-20). The silent downgrade is therefore old code. What is new is the drift: API_VERSIONS last grew at 5dc81e8677c 'feat: v2 slots new version (#18758)' (Lauris Skraucis, 2025-02-13, adding 2024-09-04), while the public docs moved on to 2026-02-25. Old code, newer docs: the bug is the interaction."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "exact",
+        "note": "Opened 2026-04-06. Names the exact drift: the docs advertise 2026-02-25 while the tree tops out at 2024-08-13, and there is no way for a caller to discover which version an instance actually serves. This is the systemic cause behind this failure."
+      },
+      {
+        "number": 29785,
+        "url": "https://github.com/calcom/cal.diy/issues/29785",
+        "state": "open",
+        "title": "Improve Maintainability of cal-api-version",
+        "relation": "related",
+        "note": "Opened 2026-07-16, still open at the tested commit. About the versioning mechanism generally, including how unknown versions are handled."
+      },
+      {
+        "number": 28512,
+        "url": "https://github.com/calcom/cal.diy/issues/28512",
+        "state": "closed",
+        "title": "get all bookings filter",
+        "relation": "related",
+        "note": "Another report whose real cause was a version header the tree does not implement. Different endpoint, same mechanism."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28561,
+        "url": "https://github.com/calcom/cal.diy/pull/28561",
+        "state": "closed",
+        "title": "fix(bookings): map cal-api-version 2026-02-25 to latest supported version",
+        "relation": "exact",
+        "note": "Opened 2026-03-24, closed unmerged 2026-03-25. Proposed mapping the documented 2026-02-25 onto a version the tree has, which is exactly the fix this failure needs. Not merged, so the tested tree still silently downgrades."
+      }
+    ],
+    "queries": [
+      "gh search issues 'lengthInMinutes booking' --owner calcom  (0 results: no upstream report of the multi-duration booking behaviour itself)",
+      "gh search issues 'cal-api-version 2026-02-25' --owner calcom  (returned cal.diy #28762 open, #28512 closed)",
+      "gh search prs 'cal-api-version version mapping' --owner calcom  (0 results; #28561 then confirmed directly via gh api repos/calcom/cal.diy/pulls/28561, which is not a search call)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. git log 038381aeca..origin/main shows only four commits (176037d0af, b2c28a23ab, 5e3fe3cbe6, 8418db70c7) and none touches packages/platform/constants/api.ts, apps/api/v2/src/bootstrap.ts, or apps/api/v2/src/platform/bookings/. 2026-02-25 is still unsupported on cal.diy main as of 2026-08-15. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a mirror of cal.diy main at the same commit 176037d0af. The public trace is that the docs describe 2026-02-25 as required and PR calcom/cal.diy#28561's author reported production serving it, so the hosted product has it and the open-source fork does not."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md. Those five are out-of-office vs date overrides, zero-length team slots, the dropped 9:10 slot, seated-booking attendee adds, and unauthenticated hold mutation. Multi-duration booking length is not among them, and this failure never reached booking logic at all."
+  },
+  "notes": "Two things the brief asked to settle. (a) Would the scenario also fail on a version Cal.diy has? Almost certainly not: the exact body the driver sent validates cleanly against CreateBookingInput_2024_08_13 (packages/platform/types/bookings/2024-08-13/inputs/create-booking.input.ts) where attendee.name and attendee.timeZone are required, attendee.email is accepted, attendee.language is @IsOptional, and lengthInMinutes is an optional number at line 374 whose ApiPropertyOptional description at lines 371-372 is word-for-word the sentence the doc claim quotes. (b) Is there a Cal.diy-side defect in the doc claim itself? No evidence of one. apps/api/v2/src/platform/bookings/2024-08-13/services/input.service.ts:144-148 computes endTime from inputBooking.lengthInMinutes ?? eventType.length, and validateBookingLengthInMinutes at 223-240 rejects lengthInMinutes on a single-length event type and rejects a value outside multipleDuration. Cal.diy's own e2e suite asserts both halves of this scenario at 2024-08-13: apps/api/v2/src/platform/bookings/2024-08-13/controllers/e2e/variable-length-bookings.e2e-spec.ts:176-218 expects data.duration to equal the event type default when lengthInMinutes is omitted, and 220-260 expects data.duration to equal the requested 30 when it is sent. So the feature the doc describes is shipped, only the API version the doc mandates is not, which is why this is edition-mismatch rather than real-defect. Re-running this scenario with cal-api-version: 2024-08-13 is the single check that would confirm it, and it is worth doing before anyone files anything: if it still fails, the finding upgrades to a real defect. One residual unknown: the seeded event type 116's multipleDuration array is not inspectable, the seed script named in the brief (reference/seed/guard-seed.mjs) is not present in the checkout, so I could not confirm the requested otherLength of 60 is one of its offered lengths. If it is not, a 2024-08-13 re-run would return 400 with the explicit 'Provided lengthInMinutes is not one of the possible lengths' message, which is correct behaviour and would make this a test-defect on top of the version mismatch. Finally, a genuine usability complaint worth passing to Cal.diy independent of the edition question: the silent downgrade at bootstrap.ts:31-41 turns an unsupported-version request into a 400 about three unrelated body fields. Rejecting the unknown version explicitly, or at least echoing the served version in a response header, would have made this self-diagnosing. That is what issue #28762 asks for and what PR #28561 tried to patch."
+}

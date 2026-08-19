@@ -1,0 +1,65 @@
+{
+  "repo": "documenso",
+  "scenarioId": "every-api-response-carries-the-rate-limit-headers.api.1",
+  "flowId": "every-api-response-carries-the-rate-limit-headers",
+  "failingStep": 2,
+  "whatFailed": "An ordinary GET /api/v2/envelope on v2.16.0 advertises x-ratelimit-limit: 100, while every published Documenso doc page states the global per-IP ceiling is 1000 requests per minute.",
+  "docClaim": {
+    "quote": "**Limit:** 1000 requests per minute per IP address / **Response:** 429 Too Many Requests (rate-limits); \"The API allows 1000 requests per minute per IP address. Your organisation may have its own lower rate limits.\" (first-api-call); \"The API allows 1000 requests per minute (your organisation may have its own lower limit).\" (common-workflows)",
+    "doc": "apps/docs/content/docs/developers/api/rate-limits.mdx (snapshot: .truecourse/specs/sources/docs.documenso.com/docs/developers/api/rate-limits.md), plus getting-started/first-api-call.mdx and examples/common-workflows.mdx",
+    "section": "HTTP Rate Limits (#http-rate-limits); Handling Rate Limits; the batch-send Callout"
+  },
+  "observed": "Step 1 passed: the response carries x-ratelimit-limit, x-ratelimit-remaining and x-ratelimit-reset, all numeric. Step 2 read the value and got x-ratelimit-limit: 100 (diff.txt: expected 1000, actual 100). Both calls returned 200 with a normal envelope list, no server errors in server.stderr.txt.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Anyone running the newest release (v2.16.0, self-hosted or from source) and sizing a client to the documented 1000 req/min per IP is throttled with 429 at 10 percent of the documented budget. Harm is limited to clients that trust the doc number rather than reading the header, which advertises the true value.",
+  "rootCause": {
+    "file": "packages/lib/server-only/rate-limit/rate-limits.ts",
+    "lines": "91-95",
+    "explanation": "apiV2RateLimit is created with max: 100, window: '1m' (apiV1RateLimit at lines 85-89 is the same). apps/remix/server/router.ts:54-55 wraps both in createRateLimitMiddleware and applies them at lines 97-101 to /api/v1/*, /api/v2/* and /api/v2-beta/*. packages/lib/server-only/rate-limit/rate-limit-middleware.ts:11-15 (setRateLimitHeaders) emits X-RateLimit-Limit as String(result.limit), so the header simply reports the configured max. The header is therefore correct about the build; it is the shipped max that is 100 while the published docs say 1000. There is no separate constant, env var or override: the value is hardcoded and the organisation-limits doc says so."
+  },
+  "introducedBy": {
+    "commit": "653ab3678a7d46c14975a33f38e44c4a81d8610a",
+    "date": "2026-02-20",
+    "pr": "#2520",
+    "title": "feat: better ratelimiting",
+    "note": "git blame of lines 85-101 in the tested worktree is entirely this commit. It was not a bug when written: the in-repo docs said 100 too, and they still say 100 at the tested tag (git show v2.16.0:apps/docs/content/docs/developers/api/rate-limits.mdx reads '**Limit:** 100 requests per minute per IP address'). The mismatch was created later, by PR #3081 raising code AND docs to 1000 on main 52 minutes after v2.16.0 was tagged. Old code, new docs."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3081,
+        "url": "https://github.com/documenso/documenso/pull/3081",
+        "state": "merged",
+        "title": "fix: increase global API rate limits to 1000/min",
+        "relation": "exact",
+        "note": "Opened 2026-07-08, merged 2026-07-21T05:58:37Z as squash commit 7f85388eb729370a2223bc52291a25ab2b737de5. Its diff is exactly the fix: rate-limits.ts apiV1RateLimit and apiV2RateLimit max 100 -> 1000, plus the five doc pages the scenario read (rate-limits.mdx, common-workflows.mdx, first-api-call.mdx, policies/fair-use.mdx, self-hosting/configuration/organisation-limits.mdx) and two e2e comment blocks. git tag --contains returns nothing, so it is on main only."
+      },
+      {
+        "number": 3133,
+        "url": "https://github.com/documenso/documenso/pull/3133",
+        "state": "open",
+        "title": "docs(api): document rate limit headers and 429 variants",
+        "relation": "related",
+        "note": "Open since 2026-07-30, 6 files, unmerged as of 2026-08-15. It deletes the still-live 'No rate limit headers are currently provided' callout from rate-limits.mdx and replaces it with a table of X-RateLimit-Limit / Remaining / Reset plus Retry-After semantics, which is what step 1 of this scenario observed the product actually doing. It does not touch the limit value; #3081 already did."
+      }
+    ],
+    "queries": [
+      "none issued: the coordinator had already established the upstream facts for this failure (#3081 merged 2026-07-21 05:58 UTC, not in a tag; docs PR #3133 open since 2026-07-30; app.documenso.com answers 1000 as of 2026-08-15). Verified them directly instead, via gh api repos/documenso/documenso/pulls/3081 and /3133 and git show/log/blame on the clone, which are not search calls. Search budget left unspent."
+    ]
+  },
+  "fixedAfter": {
+    "status": "yes",
+    "by": "PR #3081, squash commit 7f85388eb729370a2223bc52291a25ab2b737de5",
+    "date": "2026-07-21",
+    "inTag": null,
+    "note": "Fixed on main, in no tag. v2.16.0 = 3cf2963cd0 was committed 2026-07-21T05:06:36Z and #3081 merged 2026-07-21T05:58:37Z, 52 minutes later; v2.16.0 is still the newest tag on 2026-08-15, so every tagged build in existence enforces 100. Confirmed on main: git show origin/main:packages/lib/server-only/rate-limit/rate-limits.ts has max: 1000 for both api.v1 and api.v2. The coordinator's check of app.documenso.com answering x-ratelimit-limit: 1000 is consistent with hosted running main rather than a tag."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the researcher's 8 itemized Documenso findings covers rate limiting; their list is field update-many, field option reset, PENDING recipient add, coordinate string types, the INTERNAL_SERVER_ERROR envelope, async rejection status, the send-screen signing links, and the two unlabeled controls. This failure is outside that subset."
+  },
+  "notes": "Two things a maintainer should take away. (1) The limit mismatch is a release-lag artifact, not an unknown bug: docs.documenso.com is built from main, so from 2026-07-21 05:58 UTC onward the published docs describe a rate limit that no released build ships. The fix is either to cut a release containing #3081 or to pin the docs site to the released version. Worth saying out loud because a reader cannot tell from the docs which build they describe, and self-hosters install tags. (2) A separate and still-unfixed documentation defect sits in the same page, and this scenario has the evidence for it: rate-limits.md carries a warn callout reading 'No rate limit headers are currently provided. When you receive a 429 response, wait at least 60 seconds before retrying.' while common-errors.md tells callers to 'Implement rate-limiting handling based on the response headers.' The docs contradict each other, and the product sides with common-errors: step 1 of this scenario read all three of x-ratelimit-limit, x-ratelimit-remaining and x-ratelimit-reset off an ordinary 200, emitted unconditionally by setRateLimitHeaders in rate-limit-middleware.ts:11-15 for every /api/v1, /api/v2 and /api/v2-beta request. The callout is wrong on main today; PR #3133 fixes it and has been open for over two weeks. Also note the header itself is honest, it reported 100 on a build whose max is 100, so this is a docs-vs-build disagreement rather than a wrong header. The scenario deliberately split presence (step 1) from value (step 2), which is why the presence milestones stayed green."
+}

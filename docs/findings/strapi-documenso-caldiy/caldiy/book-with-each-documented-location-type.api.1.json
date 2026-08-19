@@ -1,0 +1,76 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "book-with-each-documented-location-type.api.1",
+  "flowId": "book-with-each-documented-location-type",
+  "failingStep": 1,
+  "whatFailed": "POST /v2/bookings sent with the documented header cal-api-version: 2026-02-25 and the documented location object {\"type\":\"address\"} returned 400 instead of 201, complaining about timeZone, language and metadata, three fields the request never sent, because Cal.diy does not implement API version 2026-02-25 and silently served the legacy 2024-04-15 endpoint instead.",
+  "docClaim": {
+    "quote": "cal-api-version ... description: Must be set to 2026-02-25. required: true ... example: '2026-02-25' default: '2026-02-25'  |  location: One of the event type locations. If instead of passing one of the location objects as required by schema you are still passing a string please use an object. oneOf: BookingInputAddressLocation_2024_08_13, BookingInputAttendeeAddressLocation_2024_08_13, BookingInputAttendeeDefinedLocation_2024_08_13, BookingInputAttendeePhoneLocation_2024_08_13, BookingInputIntegrationLocation_2024_08_13, BookingInputLinkLocation_2024_08_13, BookingInputPhoneLocation_2024_08_13, BookingInputOrganizersDefaultAppLocation_2024_08_13  |  BookingInputAddressLocation_2024_08_13: only allowed value for type is `address` - it refers to address defined by the organizer.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md",
+    "section": "create-a-booking/openapi (header parameter at lines 85-92, location property at lines 205-222, BookingInputAddressLocation_2024_08_13 at lines 714-723)"
+  },
+  "observed": "The API answered 400 in 17 ms: {\"error\":{\"code\":\"BadRequestException\",\"details\":{\"errors\":[{\"target\":{\"start\":\"2050-09-14T09:00:00.000Z\",\"eventTypeId\":115},\"property\":\"timeZone\",\"constraints\":{\"isTimeZone\":\"timeZone must be a valid IANA time-zone\"}},{...\"property\":\"language\"...},{...\"property\":\"metadata\"...}]}}}. The echoed target holds only start and eventTypeId: the nested attendee object and the location object were whitelist-stripped, which is the fingerprint of the request being validated against CreateBookingInput_2024_04_15 (flat timeZone/language/metadata, no nested attendee, no location object). Nothing in the response mentions the version header, so the caller gets no signal that a downgrade happened. server.stderr.txt is empty; the seeded instance was healthy (other scenarios in the same run created bookings against the very same event type id 115 seconds later).",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "Anyone following cal.com's published v2 create-a-booking reference against a Cal.diy instance is refused with a 400 that names three fields they never sent and never mentions the version; the whole documented location-object surface at booking-create time is unreachable through the header the docs mandate, and the error actively misdirects debugging.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "The NestJS custom version extractor reads the cal-api-version header and returns it only when API_VERSIONS.includes(headerVersion); otherwise it returns VERSION_2024_04_15, with defaultVersion also VERSION_2024_04_15. packages/platform/constants/api.ts:56-68 in the tested worktree defines exactly five versions (2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04) and stops at 2024-09-04, so the documented 2026-02-25 is unknown. The request is therefore routed to BookingsController_2024_04_15.createBooking (apps/api/v2/src/platform/bookings/2024-04-15/controllers/bookings.controller.ts:199), whose body type CreateBookingInput_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts:91-146) declares a required flat timeZone (@IsTimeZone, lines 122-124), a required language (@IsString, lines 135-137) and a required metadata (@IsObject, lines 144-146), and has neither a nested attendee object nor a location object. Nest's whitelisting validation pipe drops attendee and location and then reports the three legacy fields as missing, which is exactly the 400 observed. The downgrade is silent by construction: the extractor has no branch that rejects or warns about an unrecognised version. The behaviour the doc describes does exist in Cal.diy under a version it does ship: packages/platform/types/bookings/2024-08-13/inputs/location.input.ts declares all eight documented location input classes (address, link, integration, phone, attendeeAddress, attendeePhone, attendeeDefined, organizersDefaultApp) with the same names the doc references, and apps/api/v2/src/platform/bookings/2024-08-13/services/output.service.ts:110,141 emits data.location. So this is a version-surface gap, not a missing feature."
+  },
+  "introducedBy": {
+    "commit": "9ad8aa981ac44553b0fa94a65a86d8076d4fd408",
+    "date": "2026-01-13",
+    "pr": "#26735",
+    "title": "chore: deploy api v2 on vercel",
+    "note": "This is the commit that owns the current lines 31-41 of apps/api/v2/src/bootstrap.ts, but it only relocated the extractor: the silent fallback to VERSION_2024_04_15 for an unrecognised header dates back to apps/api/v2/src/app.ts, commit 0a15483c461 (Morgan, 2024-03-20). The other half of the interaction is the version ceiling: 0eabe7f28bc (Lauris Skraucis, 2024-09-23) introduced the API_VERSIONS array and 5dc81e8677c (2025-02-13, PR #18758 'feat: v2 slots new version') added the last entry, VERSION_2024_09_04. So the code is old; what is new is the documentation, which now mandates 2026-02-25 (and 2026-05-01 elsewhere), versions that were never added to this open-source tree. Nothing was 'introduced' by a Cal.diy commit: the mismatch is the never-ported state after the spring 2026 commercial/open-source split."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "exact",
+        "note": "Opened 2026-04-06. The canonical public trace for this systemic cause: it names the drift between the versions the docs mandate (2026-02-25) and the versions the open-source tree serves (tops out at 2024-08-13 / 2024-09-04), and asks for a discovery endpoint because callers cannot tell which version an instance actually accepts."
+      },
+      {
+        "number": 28512,
+        "url": "https://github.com/calcom/cal.diy/issues/28512",
+        "state": "closed",
+        "title": "get all bookings filter",
+        "relation": "related",
+        "note": "A bookings-API report that surfaced the same version-header confusion on a different endpoint."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28561,
+        "url": "https://github.com/calcom/cal.diy/pull/28561",
+        "state": "closed",
+        "title": "fix(bookings): map cal-api-version 2026-02-25 to latest supported version",
+        "relation": "exact",
+        "note": "Opened 2026-03-24, closed unmerged 2026-03-25 (merged: false). Proposed mapping the documented 2026-02-25 onto a version the tree actually implements. Its author noted that production cal.com serves 2026-02-25 while the public source tree does not. Because it was not merged, the tested tree still silently downgrades."
+      }
+    ],
+    "queries": [
+      "gh search issues \"cal-api-version 2026-02-25\" --owner calcom",
+      "gh search issues \"booking location attendeePhone\" --owner calcom (0 results)",
+      "gh search issues \"v2 bookings 400 timeZone language metadata\" --owner calcom (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. git log 038381aeca..origin/main lands only 4 commits in total and touches none of packages/platform/constants/api.ts, apps/api/v2/src/bootstrap.ts, packages/platform/types/bookings/2024-08-13/inputs/location.input.ts or .../create-booking.input.ts, so origin/main (176037d0af, 2026-08-08) still tops out at 2024-09-04 and still downgrades silently. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is byte-identical to calcom/cal.diy main. The only public signal is PR calcom/cal.diy#28561, which proposed the mapping and was closed unmerged on 2026-03-25, and open issue #28762."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "This failure maps to none of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, dropped 9:10 slot, seated-booking oversell, unauthenticated hold manipulation). It is an instance of the coordinator's systemic cause 1, the unsupported cal-api-version header."
+  },
+  "notes": "(a) Would the scenario also fail on a version Cal.diy does ship? Step 1 almost certainly would NOT: in the same run, update-a-booking-location.api.1 step 1 POSTed /v2/bookings with cal-api-version: 2024-08-13 against the SAME seeded event type (id 115, slug reference-locations) and got 201 with \"location\":\"12 Reference Street\", the organizer-defined address, which is what this scenario's step 1 asserts data.location equals. The five other steps look equally reachable, with one exception. Step 4 (type attendeePhone, phone +19876543210) would still 400 on 2024-08-13: BookingInputAttendeePhoneLocation_2024_08_13.phone carries a bare @IsPhoneNumber() (packages/platform/types/bookings/2024-08-13/inputs/location.input.ts), and the same run proved that exact number is rejected: update-a-booking-location.api.1 step 5 got 400 \"UpdateBookingInputLocationValidator_2024_08_13 - Validation failed for attendeePhone location: phone must be a valid phone number\" for {\"type\":\"attendeePhone\",\"phone\":\"+19876543210\"}. That number is the create-a-booking doc's example for attendee.phoneNumber, not for the location phone (whose documented example is +37120993151), so the scenario borrowed the wrong sample value. That sub-issue is a test defect, and it is worth a separate look as a doc-vs-validator inconsistency (the docs present +19876543210 as a valid international number).\n\n(b) Does the bound doc claim have a Cal.diy-side defect independent of the version? No. All eight location input classes the doc's oneOf enumerates exist verbatim in the tested tree, still carrying their _2024_08_13 suffixes, which is itself the tell: the doc mandates header 2026-02-25 while describing request schemas that were named for 2024-08-13. Cal.diy implements the schemas and not the version label. The substance of the claim (a booker can choose each documented non-integration location type at create time and the created booking carries it) appears to be honoured under 2024-08-13.\n\nFor a maintainer: the highest-value change is not adding 2026-02-25, it is making apps/api/v2/src/bootstrap.ts:33-38 refuse an unrecognised cal-api-version with a 400 that names the header and lists API_VERSIONS, instead of silently downgrading to 2024-04-15 and emitting a validation error about fields the caller never sent. For the doc author: the cal.com v2 reference is not usable against an open-source Cal.diy instance as written, since it declares the version header required and set to 2026-02-25.\n\nRe-testing note: re-running this scenario with cal-api-version: 2024-08-13 and a valid attendeePhone number (for example the doc's own +37120993151) would settle both (a) and (b) empirically."
+}

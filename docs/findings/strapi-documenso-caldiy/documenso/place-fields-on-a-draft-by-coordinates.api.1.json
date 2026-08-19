@@ -1,0 +1,59 @@
+{
+  "repo": "documenso",
+  "scenarioId": "place-fields-on-a-draft-by-coordinates.api.1",
+  "flowId": "place-fields-on-a-draft-by-coordinates",
+  "failingStep": 3,
+  "whatFailed": "POST /api/v2/envelope/field/create-many accepted the coordinates as JSON numbers and returned them as JSON strings (\"10\", \"80\", \"20\", \"5\"), while the Fields API doc types positionX/positionY/width/height as `number` and shows them unquoted in every response example, so the step's `data[0].positionX equals 10` assertion read \"10\".",
+  "docClaim": {
+    "quote": "| `positionX`      | number         | X coordinate as percentage (0-100)           |  ...  Example Field Object: \"page\": 1, \"positionX\": 10, \"positionY\": 80, \"width\": 30, \"height\": 5",
+    "doc": "apps/docs/content/docs/developers/api/fields.mdx (lines 25-28 type table, lines 44-47 example; snapshot at .truecourse/specs/sources/docs.documenso.com/docs/developers/api/fields.md lines 24-27 and 43-46)",
+    "section": "Fields API > Field Object / Example Field Object (and the Create Fields response example, fields.mdx lines ~199-252, plus the same unquoted numbers in documents.md line 78, first-api-call.md and examples/common-workflows.md)"
+  },
+  "observed": "Step 3 sent {\"page\":1,\"positionX\":10,\"positionY\":80,\"width\":20,\"height\":5} and got HTTP 200 with data[0] = {..., \"page\":1, \"positionX\":\"10\", \"positionY\":\"80\", \"width\":\"20\", \"height\":\"5\", \"customText\":\"\", \"inserted\":false, \"fieldMeta\":{\"required\":true,\"overflow\":\"auto\",\"type\":\"signature\"}, \"documentId\":345, \"templateId\":null}. Only the four Decimal-backed columns stringify: `page` (Int) came back as the number 1 and `recipientId` as 335. The values are exact and lossless, just quoted. Every other assertion in the step (id, secondaryId, type, recipientId, envelopeItemId, page, customText, inserted, fieldMeta) passed; the run stopped at the first mismatch, so steps 4 and 5 never executed.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Integrators who code to the published Fields API page get the wrong wire type: a generated or statically typed client (TS/Go/Java) fails to deserialize \"10\" into a number, and a field object read back cannot be replayed into POST /envelope/field/update-many without a cast, because the request schema is z.number().min(0).max(100). No data is lost or misplaced; the coordinates are stored and rendered correctly.",
+  "rootCause": {
+    "file": "apps/docs/content/docs/developers/api/fields.mdx",
+    "lines": "25-28",
+    "explanation": "The wire form is a deliberate consequence of the storage type, and the docs never caught up. packages/prisma/schema.prisma:696-699 declares positionX/positionY/width/height as Prisma `Decimal`; the v2 response schema packages/lib/types/field.ts:31-49 (ZFieldSchema) picks those four straight out of the generated Prisma model zod schema, and packages/trpc/server/envelope-router/envelope-fields/create-envelope-fields.ts:13 applies it as `.output(ZCreateEnvelopeFieldsResponseSchema)`. That output parse passes the Prisma.Decimal instances through unchanged (it cannot be a `z.number()` schema, or the 200 would have been a validation 500 instead), and JSON.stringify then calls Decimal.prototype.toJSON, which emits a string. The docs table at lines 25-28 and the response examples at lines 44-47 and ~199-252 instead show plain numbers. Two independent signals say the string wire form is known and intended, not an accident: packages/lib/types/field.ts:93-97 defines PrismaDecimalSchema as `z.preprocess((val) => (typeof val === 'string' ? new Prisma.Decimal(val) : val), z.instanceof(Prisma.Decimal))`, i.e. the app's own client-side field schema re-hydrates the serialized string back into a Decimal, and the v1 API schema (packages/api/v1/schema.ts:584-587) deliberately types the same four properties `z.unknown()` rather than number. The OpenAPI reference the doc page itself calls authoritative is generated from this same zod output schema (packages/trpc/server/open-api.ts, served at /api/v2/openapi.json), so `number` is asserted nowhere in the runtime contract, only in the prose page."
+  },
+  "introducedBy": {
+    "commit": "b92c53dbb23b89d3cfd89a6b38d2282cf273dfba",
+    "date": "2026-02-27",
+    "pr": "#2460",
+    "title": "feat: docs v2",
+    "note": "This commit (Lucas Smith) authored the wrong doc text: it added the Field Object type table and the example objects with `number` coordinates. The behavior it mis-describes is much older: Decimal storage for positionX/positionY/width/height traces to 3c73f030a 'feat: persist fields and recipients for document editing' (2023-06-21), and exposing the raw Prisma Decimal in a typed v2 response schema traces to 901be70f97 'feat: add consistent response schemas' (#1582, 2025-01-14), later renamed into the envelope shape by 7f09ba72f4 'feat: add envelopes' (#2025, 2025-10-14). Old code, newer doc: the doc is the part that was written wrong."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3136,
+        "url": "https://github.com/documenso/documenso/pull/3136",
+        "state": "open",
+        "title": "fix(trpc): v2 field position updates silently dropped; rewrite fields API docs",
+        "relation": "exact",
+        "note": "By ephraimduncan, opened 2026-07-30, last updated 2026-08-03, still open on 2026-08-15 and based on `docs/documents-cancel-get-many`, not main. Its docs half is exactly this finding: the Field Object table rows become `| positionX | string | X coordinate as percentage (0-100), a decimal serialized as a string |` (same for positionY/width/height), every response example becomes \"positionX\": \"10\", and the envelopeId row goes number -> string. Request examples stay numeric, which matches the code. Its code half fixes a different failure (the update-many coordinate drop, colleague finding documenso #1), not this one."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"positionX\" --include-prs (11 hits, only #3136 relevant)",
+      "gh search issues --repo documenso/documenso \"decimal\" --include-prs (9 hits, only #3136 relevant)",
+      "gh search issues --repo documenso/documenso \"string instead of number\" --include-prs (0 hits)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing changed on main after the tested tag v2.16.0 (3cf2963cd0, 2026-07-21). `git log 3cf2963cd0..origin/main` (21 commits, main head 688ef2fdf3 of 2026-08-14) shows no commit touching apps/docs/content/docs/developers/api/fields.mdx, packages/lib/types/field.ts, packages/prisma/schema.prisma or packages/trpc/server/envelope-router/envelope-fields/. The docs on main still say `number`, the API on main still answers strings. The only fix in existence, PR #3136, is unmerged and stacked on a non-main base, so it is in no tag."
+  },
+  "colleagueFinding": {
+    "ref": "documenso #4",
+    "agreement": "refines",
+    "note": "Their facts hold: coordinates go out as numbers and come back as JSON strings, and PR #3136 carries a docs-only patch for it (verified in the PR diff, which retypes the four rows to string and requotes the response examples). Three refinements. (1) 'docs, schema and wire disagree' is one party too many: the wire matches the runtime schema exactly. The v2 response schema is the generated Prisma Decimal model schema, so a string is what it describes; the request schema is z.number().min(0).max(100). The disagreement is docs vs wire, plus a request/response asymmetry inside the API itself. (2) The verdict is doc-bug, not a product defect: the string form is lossless, longstanding (Decimal since 2023-06-21), and demonstrably intentional, since v1 types the same properties z.unknown() and packages/lib/types/field.ts:93-97 exists purely to turn the serialized string back into a Decimal. (3) PR #3136 is not merely unmerged, it is based on `docs/documents-cancel-get-many` rather than main, so merging main alone would not pick it up."
+  },
+  "notes": "1) Step 4 of this scenario (`envelopeId matches ^[0-9]+$`) never ran because the run stops at the first mismatch, but it would have failed the same way: fields.mdx line 21 types `envelopeId` as number while the wire returns \"envelope_ibilomevvhibyzka\". PR #3136 patches that row too. Both belong in one doc fix. 2) The doc fix is multi-page, not just fields.mdx: documents.md line 78, developers/getting-started/first-api-call.md and developers/examples/common-workflows.md all show field objects with unquoted coordinates in responses. Request examples are correct as they stand and must stay numeric. 3) If the maintainers would rather fix code than docs, the minimal change is a Number cast on the four coordinates in ZFieldSchema (packages/lib/types/field.ts:31-49), which would also make a read object replayable into update-many; that is a breaking change for existing v2 clients and should be weighed against just correcting the page. 4) Two smaller undocumented deltas visible in the same response, out of scope for this step's assertions: `fieldMeta` came back with an added \"overflow\":\"auto\" default that no doc example shows, and the response carries `documentId`/`templateId` (the backwards-compat extension at packages/lib/types/field.ts:46-49) which the Field Object table does not list."
+}

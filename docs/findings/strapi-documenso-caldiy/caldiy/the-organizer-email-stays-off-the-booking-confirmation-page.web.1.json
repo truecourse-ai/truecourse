@@ -1,0 +1,55 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "the-organizer-email-stays-off-the-booking-confirmation-page.web.1",
+  "flowId": "the-organizer-email-stays-off-the-booking-confirmation-page",
+  "failingStep": 2,
+  "whatFailed": "The scenario clicked 15 March 2027 on /reference-host/hide-organizer-email and waited for a hardcoded 10:00 slot button that was no longer offered, because a sibling scenario in the same parallel run had already booked the same host at 2027-03-15 10:00 on a different event type carrying 30-minute buffers.",
+  "docClaim": {
+    "quote": "This setting hides the organizer's email address from guests-on the booking confirmation page, in email notifications, and on calendar invites.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/hideorganizersemail.md",
+    "section": "Hide organizer's email"
+  },
+  "observed": "Both step 1 and step 2 rendered the booking page fully: March 2027 grid, Mon 15 selected, and a complete slot column reading 9:00am, 11:00am, 11:30am, 12:00pm, 12:30pm, 1:00pm, 1:30pm, 2:00pm, 2:30pm, 3:00pm, 3:30pm, 4:30pm. Exactly two holes: 9:30/10:00/10:30 and 4:00pm. The visual judge confirmed the page was not broken or overlaid, only that no 10:00 button exists. Step 2 burned the full 10.0 s budget waiting for a button that was never going to appear. The 9:30-10:30 hole is explained by sibling scenario stacked-buffers-block-more-than-one-buffer-width.web.1 (transcript written 03:50:20, ours 03:50:57), which passed and booked event type buffered-a for Monday, March 15, 2027 10:00 AM - 10:30 AM UTC on the same host (booking uid cri9AchabGVxTTdxvX3jA5); buffered-a carries a 30-minute before and after buffer, so the busy interval it contributes is 09:30-11:00. The 4:00pm hole pre-dates every web booking (buffered-a's own grid at 03:50:1x already stopped at 3:00pm, which is what a 16:00-16:30 busy interval plus 30/30 buffers produces) and therefore comes from the seed's own 2027-03-15 bookings, not from contention.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None to users. The scenario aborted five steps before the assertion that carries the doc claim, so 'hide organizer's email keeps the host address off the confirmation page' was never exercised; the flow is a coverage hole, not a defect report.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 24611,
+        "url": "https://github.com/calcom/cal.diy/issues/24611",
+        "state": "closed",
+        "title": "The organizer's email is showing on the booking cancellation page and in the email, even when 'Hide Organizer Email' is enabled",
+        "relation": "related",
+        "note": "Nearest known bug against the same setting, but on the CANCELLATION page and in email, not the confirmation page this scenario targets. Not the cause of this failure; recorded only so a re-run knows the setting has a history of leaking on surfaces adjacent to the one under test."
+      },
+      {
+        "number": 21540,
+        "url": "https://github.com/calcom/cal.diy/issues/21540",
+        "state": "closed",
+        "title": "Custom Reply-To setting does not work in conjunction with \"Hide organizer email\"",
+        "relation": "related",
+        "note": "Same setting, email path only. Unrelated to the slot grid."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"hide organizer email\" --owner calcom --limit 12"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable: there is no product defect to fix. In cal.diy: the two files that produce the observed behavior, packages/features/busyTimes/services/getBusyTimes.ts and packages/features/bookings/repositories/BookingRepository.ts, have no commits in 038381aeca..origin/main, and neither does apps/web/modules/bookings/views/bookings-single-view.tsx, so the product side is byte-identical to the tested build. In cal.com: not verifiable from source (the commercial tree is private and the public calcom/cal.com main is a mirror of cal.diy)."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md. It is an instance of the coordinator's systemic cause 3, cross-scenario slot contention, with the culprit sibling identified by name and booking uid."
+  },
+  "notes": "Why the hole is three slots wide and not one, verified in the tested worktree rather than inferred. packages/features/bookings/repositories/BookingRepository.ts:686-795 (_findAllExistingBookingsForEventTypeBetween) selects ACCEPTED bookings by userId with NO eventTypeId filter, so every booking on reference-host is busy time for every one of that host's event types. packages/features/busyTimes/services/getBusyTimes.ts:135-136 then widens each busy interval by the BOOKED event type's own buffers: minutesToBlockBeforeEvent = eventType.beforeEventBuffer + queried afterEventBuffer, minutesToBlockAfterEvent = eventType.afterEventBuffer + queried beforeEventBuffer. hide-organizer-email is an unbuffered 30-minute type, so it contributes nothing, but buffered-a's 30/30 turns its 10:00-10:30 booking into 09:30-11:00 host-wide, removing exactly 9:30, 10:00 and 10:30 from our grid. Both behaviors are intended and correct; the scenario is what is wrong.\n\nThe scenario's own seeding note asserts 'the scenario never depends on the day it is run', which is true of the calendar but not of the run: pinning every web scenario to the same host, the same day and a hardcoded clock label makes each one depend on the write side effects of its siblings. Same-run casualties of this one booking: the-default-booking-form-asks-for-a-name-and-an-email.web.1 and the-active-booking-limit-offers-a-reschedule-instead-of-refusing.web.1 both failed on the identical 'button 10:00 is visible' step, and the-booking-title-follows-the-event-name-and-the-attendee.web.1 got as far as submitting at 10:00 and failed on the booking form with an error state. Four scenarios, one root cause.\n\nFixes, in preference order: (a) give each booking-writing flow its own seeded host, or at minimum its own day, so one scenario's write cannot move another's grid; (b) let the runner select the first available slot button instead of naming one; (c) if a literal time must stay, seed the corpus so that only the scenario that owns a slot ever books it. Option (a) is the only one that also protects the flows that assert on slot ABSENCE.\n\nNot an edition mismatch: hideOrganizerEmail is fully present in the Cal.diy tested tree, including on the surface under test (apps/web/modules/bookings/views/bookings-single-view.tsx:580, 648, 661 and bookings-single-view.getServerSideProps.tsx:146, 234-236 filter the organizer out of the Who block for non-hosts). Nothing here needs cal.com's commercial source. Worth adding for whoever re-runs this: the sibling stacked-buffers transcript shows the baseline, an unhidden event type's confirmation page printing 'reference-host@example.com' under Who, so the assertion this scenario never reached is genuinely falsifiable and the flow is worth repairing rather than dropping."
+}

@@ -1,0 +1,100 @@
+{
+  "repo": "documenso",
+  "scenarioId": "reject-a-document-on-a-recipients-behalf.api.1",
+  "flowId": "reject-a-document-on-a-recipients-behalf",
+  "failingStep": 6,
+  "whatFailed": "After POST /api/v2/envelope/recipient/{id}/reject returned 200 with signingStatus REJECTED, the very next GET /api/v2/envelope/{id} still reported the envelope status as PENDING, because the document-level flip to REJECTED is performed only by the asynchronous internal.seal-document job, not by the rejection request.",
+  "docClaim": {
+    "quote": "If you enable document rejection in settings, recipients can reject instead of signing. When any recipient rejects: * The document immediately moves to **Rejected** state * Other pending recipients can no longer act on the document * The document owner is notified",
+    "doc": "apps/docs/content/docs/concepts/document-lifecycle.mdx",
+    "section": "Rejected [#rejected] (line 84 in the tested worktree; snapshot: .truecourse/specs/sources/docs.documenso.com/docs/concepts/document-lifecycle.md lines 79-90)"
+  },
+  "observed": "Transcript step 5: POST /api/v2/envelope/recipient/360/reject -> 200, recipient 360 signingStatus REJECTED, rejectionReason recorded, signedAt 2026-08-14T20:05:31.134Z. Server log shows the request then firing three jobs: internal.seal-document, send.signing.rejected.emails, send.document.cancelled.emails. Step 6, issued about 200-400 ms later (step 5 took 299 ms, step 6 took 205 ms), GET /api/v2/envelope/envelope_dswotmftyonlisrm -> 200 with \"status\":\"PENDING\", completedAt null, while the embedded recipient 360 already reads signingStatus REJECTED and recipient 361 still reads NOT_SIGNED. The cancellation emails to the other recipients had already been queued at that point, so the owner and the other signer are told the document is dead while the API still calls it Pending. The run halted at step 6, so steps 7 and 8 (rejected envelope refuses an update; the second recipient can no longer reject) were never executed and carry no evidence either way.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Read-after-write on the documented status field is wrong for every API consumer: a 200 rejection is followed by a Pending document, with no documented signal for when it will settle. Worse, every guard that is supposed to stop the rest of the signing flow keys off envelope.status === PENDING, so during the window (and forever if the seal job fails) the other recipients can still sign or reject a document the product has already cancelled by email.",
+  "rootCause": {
+    "file": "packages/lib/server-only/document/reject-document-on-behalf-of.ts",
+    "lines": "115-177",
+    "explanation": "The rejection handler commits exactly two rows in its transaction: the recipient (signedAt, signingStatus REJECTED, rejectionReason) and a DOCUMENT_RECIPIENT_REJECTED audit log (lines 115-147). It never touches Envelope.status. It then fires three jobs and returns (lines 149-179). The only place in production code that writes DocumentStatus.REJECTED is the async seal job: packages/lib/jobs/definitions/internal/seal-document.handler.ts line 167 computes finalEnvelopeStatus = isRejected ? REJECTED : COMPLETED and lines 291-317 write it, but only after the whole PDF pipeline has run (load every envelope item's PDF, stamp the rejection, generate the certificate and audit-log PDFs, sign, upload). With the default local job provider that job is dispatched over HTTP and explicitly not awaited: packages/lib/jobs/client/local.ts lines 378-388 race the fetch against a 150 ms timeout, so the mutation returns long before the status changes. The recipient-driven path packages/lib/server-only/document/reject-document-with-token.ts lines 57-116 has the identical shape, so this is the design of rejection, not an API-only slip. Nothing anywhere gates a sibling recipient on \"some recipient has REJECTED\": packages/lib/server-only/field/sign-field-with-token.ts lines 108-114 and packages/lib/server-only/document/complete-document-with-token.ts lines 82-103 check only envelope.status === PENDING and the acting recipient's own signingStatus, which is why the doc's second bullet is enforced solely by that late status flip. The seal-document sweep cron (packages/lib/jobs/definitions/internal/seal-document-sweep.handler.ts) is a 15-minute-to-6-hour safety net for exactly this class of stall and gives up after 6 hours."
+  },
+  "introducedBy": {
+    "commit": "f2525ae95ba60334ed60c06fa3bb2b8f5e6c6caf",
+    "date": "2026-06-22",
+    "pr": "#3007",
+    "title": "feat: add API endpoint to reject documents on behalf of recipients",
+    "note": "#3007 is what put this behavior on the public v2 API surface the scenario drives; it is in v2.14.0, v2.15.0 and the tested v2.16.0. The code deliberately mirrors the older recipient-token path, whose header even says changes should be mirrored between the two. The async design itself is older: 5398026b80 'feat: signature rejection' (#1472, 2024-11-14) introduced rejection triggering internal.seal-document, 22c9fb777b 'fix: perf improvements' (2024-12-18) owns the envelope.update inside the seal transaction, and 0d65693d55 'fix: highlight rejected certificate text' (#2478, 2026-02-12) is the blame line for status: finalEnvelopeStatus. So the new code is #3007, the bug is inherited."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 3191,
+        "url": "https://github.com/documenso/documenso/issues/3191",
+        "state": "open",
+        "title": "Rejecting an AES/QES envelope is a dead end: status never becomes REJECTED and cannot be recovered",
+        "relation": "related",
+        "note": "This is the filed 'stuck job' edge the researcher refers to, opened 2026-08-13 against main @ 617f8cc (v2.16.0), one day before this run. It states the same root fact I verified independently: DocumentStatus.REJECTED is written in exactly one place, seal-document.handler.ts, and both reject-document-with-token.ts and reject-document-on-behalf-of.ts commit the recipient and send cancellation emails before that job runs. It also names the same missing guard, 'other recipients keep signing a document that can never conclude'. It is scoped to the TSP/CSC case where the handler throws at lines 176-181 so the flip never happens at all; the ordinary non-TSP case this scenario hits, where the flip happens but only after the async seal completes, is not filed."
+      },
+      {
+        "number": 2921,
+        "url": "https://github.com/documenso/documenso/issues/2921",
+        "state": "open",
+        "title": "Bug: Document remains in \"Pending\" state when TSA is enabled behind an HTTP proxy",
+        "relation": "related",
+        "note": "Same failure mode from a different cause: the seal job dies, so the envelope never leaves PENDING. Open since 2026-06-03, with an unmerged PR #2979 'Fix/tsa proxy pending'."
+      },
+      {
+        "number": 3092,
+        "url": "https://github.com/documenso/documenso/issues/3092",
+        "state": "open",
+        "title": "Sealing fails with PlaceholderError when a timestamp authority is configured (B-LTA signature exceeds @libpdf default estimatedSize of 12288 bytes)",
+        "relation": "related",
+        "note": "Another way the single async writer of the terminal status can die, leaving the envelope in PENDING."
+      },
+      {
+        "number": 2215,
+        "url": "https://github.com/documenso/documenso/issues/2215",
+        "state": "closed",
+        "title": "Envelope status remains PENDING after all recipients have signed",
+        "relation": "related",
+        "note": "The completion twin of this bug (status also only written by the seal job). Its fix was the sweep, not a synchronous status write."
+      }
+    ],
+    "prs": [
+      {
+        "number": 2563,
+        "url": "https://github.com/documenso/documenso/pull/2563",
+        "state": "merged",
+        "title": "feat: add seal-document sweep job and admin unsealed documents page",
+        "relation": "related",
+        "note": "Merged 2026-03-05. The project's own mitigation for envelopes left PENDING by a missed seal, including the rejection case (its query explicitly matches 'any recipient has REJECTED'). It retries only between 15 minutes and 6 hours after the last recipient action, so it cannot make 'immediately' true and abandons anything older than 6 hours."
+      },
+      {
+        "number": 3007,
+        "url": "https://github.com/documenso/documenso/pull/3007",
+        "state": "merged",
+        "title": "feat: add API endpoint to reject documents on behalf of recipients",
+        "relation": "exact",
+        "note": "The PR that added the endpoint under test, carrying the async pattern onto the public API."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"stuck\" --include-prs --limit 40",
+      "gh search issues --repo documenso/documenso \"reject\" --match title --include-prs --limit 40",
+      "gh search issues --repo documenso/documenso \"rejection status immediately pending\" --include-prs --limit 25 (zero results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "21 commits landed on main between the tested tag v2.16.0 (3cf2963cd0, 2026-07-21) and the 2026-08-15 fetch; none touch reject-document-on-behalf-of.ts, reject-document-with-token.ts, seal-document.handler.ts or seal-document-sweep.handler.ts. The status flip is still the async job's alone on main. Issue #3191, which names the same single-writer root cause, is open and unanswered."
+  },
+  "colleagueFinding": {
+    "ref": "documenso #6",
+    "agreement": "refines",
+    "note": "Agrees on the core: the docs promise an immediate move to Rejected, the write is done by an async job, and the next read still says Pending. The filed 'stuck job' edge they allude to is issue #3191 (open, 2026-08-13), which is narrower than a generic stuck job: it is the TSP/CSC envelope case where seal-document throws before the status write, so REJECTED is never reached at all. Two refinements. First, the harm is not only a stale read: because sign-field-with-token and complete-document-with-token gate solely on envelope.status === PENDING plus the acting recipient's own status, the docs' companion promise that 'other pending recipients can no longer act' is unenforced for the whole window, while the cancellation emails have already gone out. Second, the blame is split: PR #3007 (2026-06-22) put this on the public API, but the async design dates to #1472 (2024-11-14), and the project already acknowledged the failure mode with the sweep job in #2563 (2026-03-05)."
+  },
+  "notes": "For maintainers: the cheap correct fix is to write Envelope.status = REJECTED (and the DOCUMENT_REJECTED webhook) inside the same transaction that flips the recipient, and let the seal job only produce the stamped PDF. That closes the read-after-write gap, makes the other-recipients guard effective immediately, and removes the dependency of a terminal legal state on a PDF pipeline that can and does fail (see #2921, #3092, #3191). For the doc author: if the async behavior is intended, docs/concepts/document-lifecycle.mdx line 84 and the PENDING to REJECTED transition in docs/developers/api/documents.mdx should say the document status settles asynchronously after sealing and tell integrators to use the DOCUMENT_REJECTED webhook or poll, the way developers/examples/common-workflows.md already polls for a terminal status. Note also that recipient-level truth is immediate and correct in the same payload: the GET at step 6 already shows recipient 360 as REJECTED with the reason, so an integration can read the rejection from the recipient array before the envelope agrees. Evidence limitation: each scenario runs against a freshly booted server that is torn down at the end, so the captured logs cannot show whether the seal job later completed for envelope_dswotmftyonlisrm; the source, not the transcript, is what establishes that the flip is async, and the transcript establishes only that it had not happened within ~200-400 ms."
+}

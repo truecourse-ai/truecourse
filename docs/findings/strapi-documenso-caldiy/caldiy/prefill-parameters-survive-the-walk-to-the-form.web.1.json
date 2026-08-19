@@ -1,0 +1,38 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "prefill-parameters-survive-the-walk-to-the-form.web.1",
+  "flowId": "prefill-parameters-survive-the-walk-to-the-form",
+  "failingStep": 2,
+  "whatFailed": "On the /reference-host/prefill-fields booking page for Mon 15 March 2027 the scenario clicked the hardcoded 10:00 slot, but 09:30, 10:00 and 10:30 were no longer on offer because a sibling scenario in the same parallel run had just booked the same host at 10:00-10:30 on a 30/30-buffered event type.",
+  "docClaim": {
+    "quote": "You can add anywhere in the booking flow before the booking form page or in the booking form page itself. Simply add these in the URL and you're good to go!",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/bookings/prefill-fields.md",
+    "section": "pre-fill-fields-questions"
+  },
+  "observed": "Step 1 navigated to /reference-host/prefill-fields?month=2027-03&name=Jane%20Booker&email=jane%40example.com&notes=Test%20Notes and passed (day button 15 visible). Step 2 clicked 15; the address kept every prefill parameter (?month=2027-03&name=Jane+Booker&email=jane%40example.com&notes=Test+Notes&date=2027-03-15) and the day's slot list rendered fully: 9:00am, 11:00am, 11:30am, 12:00pm, 12:30pm, 1:00pm, 1:30pm, 2:00pm, 2:30pm, 3:00pm, 3:30pm, 4:30pm. 9:30am, 10:00am, 10:30am and 4:00pm were absent. step-2.png shows a fully painted page with no spinner, skeleton or error banner, and the visual judge agreed the slot is genuinely absent. The runner marked the scenario blockedPrecondition: true, so the milestone step 4 (the prefill assertion) never ran.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users. Test-side only: a scenario that hardcodes a slot it never reserved is not isolated from its siblings in the same parallel run, so the doc claim it exists to prove was never exercised.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "none run: the product behaved correctly (host-wide busy time plus the booked event type's own buffers), so there is no product symptom to search for; the 3-search budget was left for failures that need it"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: nothing to fix in the product; the availability code the failure runs through is unchanged since the tested commit (git log 038381aeca..origin/main touches neither packages/features/busyTimes/services/getBusyTimes.ts nor packages/features/bookings/repositories/BookingRepository.ts; only 4 commits landed on main at all). in cal.com: not verifiable from source, and not applicable, since the behavior is intentional. The fix belongs in the scenario corpus, not in either product."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (OOO with date overrides, zero-length team slots, the 9:10 override slot, seated-booking attendee adds, unauthenticated hold mutation). It is an instance of the coordinator's already-established systemic cause 3, cross-scenario slot contention."
+  },
+  "notes": "Evidence chain for the contention, all inside the same run 2026-08-13T10-49-00Z_ad590c8c. (1) stacked-buffers-block-more-than-one-buffer-width.web.1 passed and, at its step 6, actually booked reference-host on event type buffered-a for Monday, March 15, 2027, 10:00 AM - 10:30 AM UTC (booking uid cri9AchabGVxTTdxvX3jA5; success page in its transcript). (2) Its own scenario note states the seeded configuration: buffered-a carries a 30-minute buffer before and after. (3) In the tested tree packages/features/busyTimes/services/getBusyTimes.ts:135-136 computes the busy window as the BOOKED event type's beforeEventBuffer/afterEventBuffer plus the queried event type's buffers, and packages/features/bookings/repositories/BookingRepository.ts:686-745 selects ACCEPTED bookings by userId with no eventTypeId filter. A buffered-a booking at 10:00-10:30 therefore makes the host busy 09:30-11:00 for every other event type of that host, which is exactly the 9:30 / 10:00 / 10:30 hole the prefill-fields page shows on a 30-minute grid. (4) Ordering from the evidence screenshot mtimes: stacked-buffers step-1 03:50:16 and its booking confirmation step-6 03:50:19; prefill-parameters step-1 03:50:30, eleven seconds later. Before the booking the slots were there: both stacked-buffers (03:50:16) and the-booking-title-follows-the-event-name-and-the-attendee.web.1 (03:50:17) list 9:30am and 10:00am on the same date for other reference-host event types. (5) A second casualty of the same booking: the-booking-title-follows-the-event-name-and-the-attendee.web.1 clicked 10:00 on weekly-meeting a second before and was refused at Confirm with \"Could not book the meeting. No available users found. Could you try another time slot?\". (6) The missing 4:00pm is unrelated and not contention: it is the seed booking refbk-user-limit-a, \"User Limit A Consult\", 2027-03-15T16:00:00.000Z to 16:30, ACCEPTED on reference-host, visible in the bookings listing inside the-api-rate-limits-at-120-requests-a-minute.api.1. The 4:00pm gap has been there since seed and no scenario ever clicked it.\n\nWas the doc claim exercised? Not by this scenario: the milestone step (prefill-params-work-anywhere-in-booking-flow, step 4, textbox \"Your name\" value equals \"Jane Booker\") never ran. Partial positive evidence does exist in the same run: the step 2 address shows name, email and notes surviving the calendar-to-day navigation intact, and the parent scenario prefill-the-booking-form-from-the-address-bar.web.1 reached the form with the values visibly rendered (its visual judge confirms \"Additional notes\" contains \"Test Notes\"; that scenario failed for an unrelated test-side reason, reading a textarea's value as an HTML attribute, which a textarea does not have). So there is no sign of a Cal.diy prefill defect behind this failure.\n\nSuggested corpus fixes, in order of robustness: (a) give this flow its own seeded host so no sibling can consume its slots; (b) stop hardcoding a clock time and click the first slot button in the list; (c) at minimum move this walk to a date no other scenario books. Note that (c) alone is fragile, since the day is shared by many scenarios and buffers widen each booking's blast radius by up to an hour."
+}

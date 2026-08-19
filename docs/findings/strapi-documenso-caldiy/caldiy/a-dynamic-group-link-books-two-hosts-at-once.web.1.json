@@ -1,0 +1,38 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-dynamic-group-link-books-two-hosts-at-once.web.1",
+  "flowId": "a-dynamic-group-link-books-two-hosts-at-once",
+  "failingStep": 1,
+  "whatFailed": "The very first navigation of the scenario, to the dynamic group link /reference-host+reference-host-2, did not reach DOMContentLoaded inside the harness's fixed 10 second web-step budget, so the scenario errored before it could assert anything about dynamic group booking.",
+  "docClaim": {
+    "quote": "With dynamic group links, bookers can dynamically create group links by adding users using + between their usernames. ... Dynamic group links are enabled by default.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/dynamic.md",
+    "section": "dynamic-group-links"
+  },
+  "observed": "The web app did serve the link. Playwright's recorded final URL is /reference-host+reference-host-2/dynamic?user=reference-host%2Breference-host-2, which is exactly the redirect apps/web/server/lib/[user]/getServerSideProps.ts emits once it resolves more than one user for a plus-joined username list, so both seeded hosts existed and the dynamic-group branch was taken. The client bundle then booted on the redirect target and logged the same four console lines that passing booking-page scenarios log (markdownToSafeHTML client-side warning, the zustand deprecation, the react-i18next warning, 'QuickAvailabilityCheck feature enabled: false'). The document stream had still not closed at 10s, so DOMContentLoaded never fired, page.goto threw, and the captured screenshot and page text are the empty gray shell. server.stdout/stderr in the evidence dir are zero bytes, so the product logged no error.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "None on users or on the doc. The cost is a lost verdict: this scenario proves nothing about the 'enabled by default' and 'plus-joined usernames' claims, and the same is true of the two sibling error scenarios in this run.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues \"dynamic group booking page slow timeout\" --owner calcom (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in either product, the failure is sandbox timing. For completeness: in cal.diy, only 4 commits landed between the tested 038381aeca and origin/main (176037d0af, 2026-08-08) and none of them touch apps/web/app/(booking-page-wrapper) or apps/web/server/lib/[user], so the dynamic-group SSR path is byte-identical to what was tested. In cal.com, no fix is relevant because there is no product defect to port."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Why environment and not real-defect or edition-mismatch, in order of weight. (1) Cal.diy ships dynamic group booking: getDynamicGroupPageProps exists in apps/web/server/lib/[user]/[type]/getServerSideProps.ts (lines ~114-200), the plus-split lives in getUsernameList from @calcom/features/eventtypes/lib/defaultEvents, and the feature has its own migration (packages/prisma/migrations/20220330071743_add_dynamic_group_booking), unit test (packages/features/bookings/lib/handleNewBooking/test/dynamic-group-booking.test.ts) and e2e spec (apps/web/playwright/dynamic-booking-pages.e2e.ts). The redirect to /<a+b>/dynamic actually fired at run time, which is the code path executing. (2) The sibling scenario a-user-who-left-dynamic-group-links-cannot-be-added-to-one.web.1, in the SAME run, navigated to /reference-host+opted-out-host, got the same redirect, fully rendered, hydrated, and ran viewer.slots.getSchedule which answered 'Some of the users in this group do not allow dynamic booking'. So the dynamic group page loads fine in this environment; it just did not load fast enough in this one attempt. (3) The other two error outcomes in the run are plain single-user event pages, /reference-host/holiday-check and /reference-host/ooo-note?month=2027-03, the same route dozens of other scenarios loaded successfully. There is no feature common to the three, only timing. (4) Timing is the pattern: all three errors have scenario durations of 37-39s and their evidence lands at 03:49:37-39 against a run that started at 03:49:00, i.e. all three were in the very first burst of workers hitting a just-started server. Every later navigation to those routes succeeded. (5) Two sandbox knobs make a cold first burst expensive. The recipe's DATABASE_URL pins connection_limit=3 with pool_timeout=60, while the run's effective concurrency was about 16 (sum of scenario durations 1988s over a ~126s wall clock), so the web app's SSR queries queue behind three Postgres connections. The web readiness gate is healthPath /api/auth/csrf, a trivial route that answers long before the heavy booking route has ever been exercised, so 'ready' does not mean the booking page is warm. (6) The budget is a harness constant, not a product timeout: DEFAULT_WEB_STEP_TIMEOUT_MS = 10_000 in packages/guard-runner/src/web/executor.ts:47, and page.goto uses waitUntil 'domcontentloaded' (executor.ts:617-620). This scenario is the worst case for that budget because it is a two-hop SSR: a full render of /[user] that queries, detects the group and 302s, then a full render of /[user]/[type] whose getDynamicGroupPageProps serially awaits getServerSession, handleOrgRedirect, findUsersByUsername and EventRepository.getPublicEvent. What would settle it beyond doubt: re-run this one scenario alone against an already-warm server, or with TRUECOURSE_MAX_CONCURRENCY=1, or with the web step timeout raised to 30s, and confirm the page renders. A cheaper permanent fix for the harness is to warm one booking page after the web health check passes, and to raise connection_limit above 3 when concurrency is above 3."
+}

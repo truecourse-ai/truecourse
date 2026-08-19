@@ -1,0 +1,59 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "reserve-a-slot-and-read-the-reservation-back.api.1",
+  "flowId": "reserve-a-slot-and-read-the-reservation-back",
+  "failingStep": 3,
+  "whatFailed": "Immediately after POST /v2/slots/reservations returned 201 for slot 2050-10-01T09:00:00.000Z, the very next GET /v2/slots for the same event type and window still offered that slot, because the slots read path served a Redis-cached payload computed before the reservation existed and no reservation write invalidates that cache.",
+  "docClaim": {
+    "quote": "Make a slot not available for others to book for a certain period of time. ... reservationDuration: For how many minutes the slot is reserved - for this long time noone else can book this event type at `start` time.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/slots/reserve-a-slot.md",
+    "section": "reserve-a-slot (endpoint description, line 7) and reserve-a-slot/openapi (ReserveSlotOutput_2024_09_04.reservationDuration description, lines 159-164)"
+  },
+  "observed": "Step 2 created the reservation (201, reservationUid 26108a7f-698d-45b6-8110-50b651d1c3c2, slotStart 2050-10-01T09:00:00.000Z, releaseAt 2026-08-13T10:56:04.293Z). Step 3, 16 ms later, got a 200 whose body is byte-identical to step 1's and still lists 2050-10-01T09:00:00.000Z. server.stdout.txt proves the mechanism: '[slots/util] [CACHE HIT] Available slots' at 10:51:04.261 (step 1) and 10:51:04.310 (step 3) for cacheKey {\"isTeamEvent\":false,\"startTime\":\"2050-09-01T00:00:00.000Z\",\"endTime\":\"2050-10-01T23:59:59.000Z\",\"eventTypeId\":100,\"eventTypeSlug\":\"reference-consult\",\"usernameList\":[],\"orgSlug\":null,\"rescheduleUid\":null}. The value behind that key was written by a sibling scenario's CACHE MISS at 10:51:03.518 (release-a-reserved-slot.api.1), 0.8 s before our POST, and the default TTL is 2000 ms. The exclusion logic itself works: that same freshly computed payload already omits 2050-09-29T09:30, 2050-09-29T13:00 and 2050-09-30T09:30, the three slots sibling scenarios had reserved before 10:51:03.518. So the only reason our slot survived is the stale cache entry.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "For up to SLOTS_CACHE_TTL (2000 ms by default) after a successful reservation, every caller of GET /v2/slots is still offered the held slot, and symmetrically a released reservation stays hidden for the same window; this is exactly the concurrent-booker race the reserve endpoint exists to close, though the damage is bounded (a second POST /v2/slots/reservations for the same slot is still refused with 422 because the reserve path reads the database directly), so the harm is a wrong slot grid rather than a double booking.",
+  "rootCause": {
+    "file": "packages/trpc/server/routers/viewer/slots/util.ts",
+    "lines": "79, 104-140, 889-894",
+    "explanation": "AvailableSlotsService.getAvailableSlots (line 889) wraps _getAvailableSlots in withSlotsCache (line 104). The cache key is nothing but JSON.stringify(args.input) (line 109), the value is the whole rendered slot map, and the TTL is process.env.SLOTS_CACHE_TTL or DEFAULT_SLOTS_CACHE_TTL = 2000 ms written with redis SET ... PX (line 134-137, apps/api/v2/src/modules/redis/redis.service.ts set()). Reservation state is computed inside _getAvailableSlots (_getReservedSlotsAndCleanupExpired at lines 146-174, feeding busySlotsFromReservedSlots and checkForConflicts at lines 1209-1225), so it lives entirely under the cache, yet nothing on the write side clears the key: apps/api/v2/src/modules/slots/slots-2024-09-04/slots.repository.ts:59-110 (createSlot / updateSlot / deleteSlot) only touches Prisma, and SlotsService_2024_09_04.reserveSlot has no Redis dependency at all. The v2 API always has a live Redis (apps/api/v2/src/modules/redis/redis.service.ts:13-14 throws 'Misconfigured Redis, halting.' without REDIS_URL), so the window is present in every real deployment, not just this sandbox. Two secondary observations on the same code: the key omits the request context entirely while _getAvailableSlots personalises the result by ctx.req.cookies.uid (line 1104, filter at line 164), so on the web/trpc path with Upstash configured one booker's payload, which deliberately still shows that booker's own held slot, can be served to a different booker inside the TTL; and a cache hit also skips the expired-reservation cleanup that _getReservedSlotsAndCleanupExpired performs as a side effect."
+  },
+  "introducedBy": {
+    "commit": "b71d8baccc446066337a05c2e0eb371c06fa61b5",
+    "date": "2025-08-05",
+    "pr": "#22787",
+    "title": "chore: Implement short-lived redis cache for slots",
+    "note": "The cache is the new code. The reservation-exclusion logic it hides is older: git blame puts the reserved-slot filtering and the ctx.req.cookies.uid personalisation at 7ada02177d, 2025-07-09, PR #22340 'refactor: get available slots service', and the SelectedSlots feature is older still. The bug is the interaction: PR #22787 added a shared, input-only-keyed cache in front of a computation whose result depends on mutable reservation rows and on the caller, and added no invalidation on the reservation write path."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 22787,
+        "url": "https://github.com/calcom/cal.diy/pull/22787",
+        "state": "merged",
+        "title": "chore: Implement short-lived redis cache for slots",
+        "relation": "related",
+        "note": "The PR that introduced the cache (merged 2025-08-05T17:32:02Z, author emrysal). Not a report of the symptom; listed because it is the culprit change."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"slots redis cache\" --include-prs --limit 30 (0 results)",
+      "gh search issues --owner calcom \"reserved slot available slots\" --include-prs --limit 30 (0 results)",
+      "gh search issues --owner calcom \"SLOTS_CACHE_TTL\" --include-prs --limit 30 (2 results, both unrelated env-file edits: calcom/cal.diy#23251, calcom/cal.diy#24028)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main after the tested commit 038381aeca (up to 176037d0af, 2026-08-08) and none touches packages/trpc/server/routers/viewer/slots/util.ts, packages/features/selectedSlots or apps/api/v2/src/modules/slots; withSlotsCache is unchanged and still uncoupled from reservation writes. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is the same commit as calcom/cal.diy main; no public issue, PR or changelog entry found for the symptom."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md covers this. Their #5 is also about slot holds but concerns missing authentication and ownership checks on the hold endpoints, a different defect on a different code path; the sibling reviewer's established result (POST enforces the documented 'reservationDuration is only for authenticated requests' rule while GET/PATCH/DELETE /v2/slots/reservations/{uid} carry no guard, PR #18758) likewise does not touch the read path that failed here. Neither of the two systemic causes in the brief applies either: this is an API scenario, not a web timeout, and the slot is this scenario's own fixture (own-reserve-a-slot-and-read-the-reservation-back.start), not a hardcoded slot another scenario consumed."
+  },
+  "notes": "Reproduction and fix guidance for a maintainer: any two GET /v2/slots calls with identical query input inside 2 s straddling a POST /v2/slots/reservations show it; the second call returns the pre-reservation body. The fix is either to delete the cache keys touched by a reservation write (create/update/delete in apps/api/v2/src/modules/slots/slots-2024-09-04/slots.repository.ts) or to fold the reservation state, and the caller identity, into the cache key. Upstream's own e2e encodes the immediacy contract this scenario asserted: apps/api/v2/src/modules/slots/slots-2024-09-04/controllers/e2e/user-event-type-slots.controller.e2e-spec.ts:431 'should reserve a slot and it should not appear in available slots' reserves and then immediately re-reads /v2/slots with no wait, so the scenario is not over-asserting. That test does not catch the regression only because the preceding queries in the suite are more than the 2 s TTL old or use different query params, which makes the coverage timing-dependent rather than real. Two further points: sibling scenarios in this run hitting the same event type and window are what warmed the key, but that is realistic production traffic and is precisely the load the cache was added for, so this is product behaviour and not a sandbox artifact; and the run's redis comes from the recipe (REDIS_URL=redis://localhost:6379) which the v2 API requires anyway, so the cache cannot be switched off in a normal deployment. Setting SLOTS_CACHE_TTL to a larger value widens the window proportionally."
+}

@@ -1,0 +1,60 @@
+{
+  "step": 2,
+  "label": "second call, to show remaining decrements",
+  "at": "2026-08-19T19:13:57.275Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "673",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:13:57 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "998",
+    "x-ratelimit-reset": "1787166840",
+    "x-request-id": "d45e2e7b-09db-41cd-8c8d-bb93869a63c9"
+  },
+  "body": {
+    "data": [
+      {
+        "internalVersion": 2,
+        "type": "TEMPLATE",
+        "status": "DRAFT",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_nyfhhtxiowvdfahc",
+        "secondaryId": "template_1",
+        "externalId": null,
+        "createdAt": "2026-08-19T19:13:08.185Z",
+        "updatedAt": "2026-08-19T19:13:08.185Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": null,
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": null,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      }
+    ],
+    "count": 1,
+    "currentPage": 1,
+    "perPage": 10,
+    "totalPages": 1
+  }
+}

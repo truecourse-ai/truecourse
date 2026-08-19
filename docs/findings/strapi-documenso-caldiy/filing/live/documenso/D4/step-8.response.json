@@ -1,0 +1,31 @@
+{
+  "step": 8,
+  "label": "the OTHER pending recipient rejecting after the first one (expected 400)",
+  "at": "2026-08-19T19:16:12.028Z",
+  "status": 400,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "312",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:12 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "992",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "11cbf09c-ebef-41eb-8998-63b835bf5663"
+  },
+  "body": {
+    "message": "Document envelope_nfbbhctvneaaadxv must be pending to reject",
+    "code": "INTERNAL_SERVER_ERROR",
+    "data": {
+      "code": "INVALID_REQUEST",
+      "httpStatus": 400,
+      "path": "envelope.recipient.rejectOnBehalfOf",
+      "appError": {
+        "code": "INVALID_REQUEST",
+        "message": "Document envelope_nfbbhctvneaaadxv must be pending to reject"
+      }
+    }
+  }
+}

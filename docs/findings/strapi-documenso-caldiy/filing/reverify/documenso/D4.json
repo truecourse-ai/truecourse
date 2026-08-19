@@ -1,0 +1,134 @@
+{
+  "id": "D4",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/server-only/document/reject-document-on-behalf-of.ts#L115-L177",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/document/reject-document-on-behalf-of.ts#L115-L177",
+    "howDecided": "git log 3cf2963cd0..origin/main returns zero commits for packages/lib/server-only/document/reject-document-on-behalf-of.ts and packages/lib/jobs/definitions/internal/seal-document.handler.ts; both blobs are byte-identical between v2.16.0 and v2.17.0. Read the handler at origin/main: the transaction at lines 115-147 still commits exactly two rows, prisma.recipient.update (signedAt, signingStatus REJECTED, rejectionReason) and the DOCUMENT_RECIPIENT_REJECTED audit log, and never touches Envelope.status; lines 152-177 then fire internal.seal-document, send.signing.rejected.emails and send.document.cancelled.emails and line 179 returns. Grepping the whole file for DocumentStatus finds only line 93's precondition `if (envelope.status !== DocumentStatus.PENDING)`, never a write. The single writer of DocumentStatus.REJECTED is still seal-document.handler.ts, unchanged. Note one nearby commit that does NOT touch this path: #3229 'fix: surface actionable errors when completing documents' (871c2a6f0, 2026-08-18) is on the completion path, not rejection, and does not change any status write. The bound doc is unchanged too: apps/docs/content/docs/concepts/document-lifecycle.mdx is byte-identical at both revisions, so 'The document immediately moves to Rejected state' still stands at the same line."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 3180,
+        "url": "https://github.com/documenso/documenso/issues/3180",
+        "state": "open",
+        "title": "Recipients who already signed can still reject, destroying their own signature",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "Filed 2026-08-13. Same endpoint family and the same missing-guard shape (rejection is under-gated), but the gap it names is 'the acting recipient's own signingStatus is not checked', not 'the envelope status flip is asynchronous'. Complementary, not a duplicate; a filer should link it."
+      },
+      {
+        "number": 3187,
+        "url": "https://github.com/documenso/documenso/issues/3187",
+        "state": "open",
+        "title": "Concurrent completion can trigger sealing twice, re-signing the PDF over itself",
+        "createdAt": "2026-08-13",
+        "relation": "related",
+        "note": "Another consequence of the seal job being the sole owner of the terminal transition. Different failure, same architectural single point."
+      },
+      {
+        "number": 3232,
+        "url": "https://github.com/documenso/documenso/pull/3232",
+        "state": "closed",
+        "title": "fix: isolate post-seal webhook and email dispatch",
+        "createdAt": "2026-08-18",
+        "relation": "related",
+        "note": "Closed unmerged. Touches the post-seal dispatch, not the status write. Listed because it shows active churn around the seal handler that a filer may be asked about."
+      },
+      {
+        "number": 3234,
+        "url": "https://github.com/documenso/documenso/pull/3234",
+        "state": "closed",
+        "title": "feat: make internal sweep job cron schedules configurable",
+        "createdAt": "2026-08-18",
+        "relation": "related",
+        "note": "Closed unmerged. Would have made the seal-document-sweep cadence configurable, which is the mitigation for exactly this class of stall. Its closure means the 15-minute-to-6-hour sweep window is still fixed."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3191",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged and still unanswered: open, created 2026-08-13, last updated 2026-08-13, ZERO comments (gh api repos/documenso/documenso/issues/3191/comments returns an empty array). No maintainer has responded in six days. It remains scoped to the TSP/CSC case where the seal handler throws so the flip never happens at all; the ordinary non-TSP async lag this finding reports is still unfiled."
+      },
+      {
+        "ref": "documenso/documenso#2921",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: open, last updated 2026-06-09."
+      },
+      {
+        "ref": "documenso/documenso#3092",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: open, last updated 2026-07-13."
+      },
+      {
+        "ref": "documenso/documenso#2215",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: closed 2025-11-19."
+      },
+      {
+        "ref": "documenso/documenso#2563",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-03-05T02:56:40Z",
+        "mergeCommit": "7f5f2b22ed",
+        "baseRef": "main",
+        "note": "Unchanged. The seal-document sweep, the project's own acknowledgement of the failure mode."
+      },
+      {
+        "ref": "documenso/documenso#3007",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-06-22T11:59:08Z",
+        "mergeCommit": "f2525ae95b",
+        "baseRef": "main",
+        "note": "Unchanged. The PR that put this behavior on the public v2 API."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created \">=2026-08-01\" --limit 100 (enumerates every issue and PR opened 2026-08-12 to 2026-08-19; 100 results)",
+      "gh search issues --repo documenso/documenso --include-prs --created \"2026-08-01..2026-08-12\" --limit 100 (fills the gap; 35 results)",
+      "gh search issues --repo documenso/documenso --include-prs --updated \">=2026-08-14\" --created \"<2026-08-01\" --limit 60 (older items with activity since the review; 50 results)",
+      "gh search issues --repo documenso/documenso --include-prs \"rejected status\" --limit 25 (8 results, all pre-existing plumbing PRs from 2024-2026 already known to the review; nothing new)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Both culprit files are byte-identical between v2.16.0 and v2.17.0, so the rejection handler still commits only the recipient row and the audit log and leaves Envelope.status to the async seal job; the doc sentence promising an immediate move to Rejected is likewise byte-identical. #3191, the review's nearest neighbour, is still open with zero comments after six days, so the review's 'open and unanswered' remains literally true and the narrower TSP variant is still the only filed form of the root cause. Two new items sharpen the picture without duplicating it: #3180 reports a second missing guard on the same rejection path, and the closure of #3234 means the sweep cadence that partially mitigates this is still hardcoded to the 15-minute-to-6-hour window. Nothing changes the verdict, confidence or scope. One evidence limitation carried over from the review and still true: the transcript proves only that the flip had not happened within roughly 200 to 400 milliseconds; the source, not the run, is what establishes that the write is async.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: 'Issues are now the primary way to contribute' and 'Before opening an issue, search existing issues and discussions for related items.' The search is done and #3191 is a related but narrower item, so a new issue is right, cross-linking #3191, #3180, #2921 and #3092.",
+  "confidence": "high",
+  "notes": "The strongest framing for the maintainer is not the stale read, it is the second doc bullet: 'Other pending recipients can no longer act on the document' is unenforced for the whole window, because sign-field-with-token and complete-document-with-token gate only on envelope.status === PENDING plus the acting recipient's own status, while the cancellation emails have ALREADY gone out. That makes it a correctness gap, not a latency nit. Include the fix shape the review proposed: write Envelope.status = REJECTED and the DOCUMENT_REJECTED webhook inside the same transaction that flips the recipient, leaving the seal job to produce only the stamped PDF; that also removes the dependency of a terminal legal state on a PDF pipeline that demonstrably fails (#2921, #3092, #3191). A docs-side alternative exists if maintainers say the async design is intended: say in document-lifecycle.mdx that the status settles after sealing and point integrators at the DOCUMENT_REJECTED webhook. Mention in the issue that recipient-level truth IS immediate in the same payload, so an integration can read the rejection off the recipient array before the envelope agrees."
+}

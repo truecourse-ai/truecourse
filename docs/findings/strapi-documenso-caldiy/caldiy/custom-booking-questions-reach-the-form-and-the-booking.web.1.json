@@ -1,0 +1,38 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "custom-booking-questions-reach-the-form-and-the-booking.web.1",
+  "flowId": "custom-booking-questions-reach-the-form-and-the-booking",
+  "failingStep": 2,
+  "whatFailed": "The walk step that clicks day 12 on /reference-host/custom-questions expected a hardcoded \"9:00am\" slot button, but 09:00 on 2030-06-12 had already been taken by a sibling scenario in the same parallel run, so the booking page correctly offered 9:30am onwards and the scenario never reached the booking form.",
+  "docClaim": {
+    "quote": "If you'd like to collect more information about your attendees, you can use our booking questions feature and get the necessary information filled out by your attendees when booking. The booking questions can be either required or optional, depending on your needs. ... A new field will appear on the booking page where attendees enter the booking details.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/booking-questions.md",
+    "section": "booking-questions"
+  },
+  "observed": "Step 1 (navigate /reference-host/custom-questions?month=2030-06, 4.9 s) already rendered a complete, non-skeleton page: Wed 12 auto-selected with the slot list 9:30am, 10:00am, 10:30am, 11:00am, 11:30am (step-1.png and step-2.png are identical in the slot column). Step 2 clicked day 12, landed on ?month=2030-06&date=2030-06-12, polled the full 10 s budget (durationMs 10058) and found no button named 9:00am; the visual judge confirms the page looks normally rendered and 9:00am is genuinely absent. The sibling scenario a-seated-event-type-takes-a-second-booker-into-the-same-slot.web.1 had, at 03:50:07 (about 20 s before this scenario's step 2), confirmed two ACCEPTED bookings on the same host at slot=2030-06-12T09:00:00.000Z on the seated-consult event type (booking uid 8wV2ymqoY85KTwkDJPfpuj). Cal.diy treats that as host-wide busy time for every OTHER event type, so exactly the 09:00-09:30 slot dropped out of the custom-questions grid, leaving the remaining five slots of that event type's 09:00-12:00 window.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for real users: the product hid a slot that was genuinely booked on the host. The cost is coverage loss, this run never evidenced the booking-questions claim it was written to prove, plus five sibling scenarios failing for the same reason.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues \"seats booking blocks availability other event types\" --owner calcom (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "unknown",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Not applicable, nothing in the product is broken. in cal.diy: the busy-time code that produced this behavior is unchanged since the tested commit, git log 038381aeca..origin/main -- packages/features/busyTimes/services/getBusyTimes.ts is empty (only 4 commits landed on main at all). in cal.com: not verifiable from source, the commercial tree is not public; nothing in the public docs or trackers suggests the cross-event-type blocking of an accepted booking differs there."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to caldiy #1 to #5 in docs/guard-findings.md. It is an instance of the third systemic cause named in the coordinator brief: sibling scenarios in the same parallel run consumed the shared reference-host slot 2030-06-12T09:00Z. It is not systemic cause 1 (no cal-api-version involved, this is a web scenario) and not systemic cause 2 (no first-wave timeout, the page was fully rendered at 4.9 s and the slot list was complete, just without 9:00am)."
+  },
+  "notes": "Product side is correct and deliberate. packages/features/busyTimes/services/getBusyTimes.ts:131-171 in the tested worktree reduces the host's ACCEPTED bookings into busy times; for a seated booking the carve-out at lines 138-148 keeps the slot bookable only while seats remain AND only for the seated event type itself, with the in-code comment \"and this is the seated event, other event types should be blocked\". custom-questions is a different event type of the same user, so 09:00-09:30 is busy for it. The scenario is the defect: step 2's own note says it \"proves no claim of its own\", yet it hardcodes a slot label on a host shared with 17 other web scenarios and never reserves it. Evidence ordering settles the race: a-timezone-locked-booking-page-shows-the-organizer-clock.web.1 passed its 9:00am assertion at 03:50:05, the seated scenario's two 09:00 bookings landed by 03:50:07, and every later 9:00am assertion on reference-host failed. Six scenarios in this run carry the identical signature at step 2 (custom-booking-questions, a-split-name-event-type-asks-for-a-first-and-a-last-name, a-usage-limited-private-link-dies-with-its-last-booking, an-email-domain-restriction-refuses-a-booker-from-the-wrong-domain, an-event-type-with-guests-disabled-offers-no-guest-fields, event-buffers-withhold-the-time-around-a-booking). Fixes, any of: pick the first offered slot instead of a hardcoded label, give each scenario its own host or its own day, or serialize the web scenarios that book on reference-host. The bound doc claim is left unevidenced in both directions: the run never rendered the form, so nothing here says whether the two seeded questions (\"How did you hear about us?\", \"Anything else?\") appear or enforce requiredness. There is no reason to suspect an edition mismatch for that claim, the booking-fields machinery is present in the tested tree (packages/features/bookings/lib/getBookingFields.ts, 318 lines). What would settle it: re-run this scenario alone against a clean seed, or against a slot no sibling books. Note also that the custom-questions event type only ever offers 09:00-11:30, so this run had six slots to begin with and lost the one the scenario asked for."
+}

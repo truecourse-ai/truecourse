@@ -1,0 +1,12 @@
+{
+  "step": 2,
+  "label": "a zod 400: the validation error body",
+  "at": "2026-08-19T19:17:28.387Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/update",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"notAField\":1}"
+}

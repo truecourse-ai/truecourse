@@ -1,0 +1,12 @@
+{
+  "step": 5,
+  "label": "set signingOrder PARALLEL explicitly",
+  "at": "2026-08-19T19:15:50.238Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/update",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_fteuhazrouxlatwn\",\"meta\":{\"signingOrder\":\"PARALLEL\"}}"
+}

@@ -1,0 +1,69 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "reassignment-refuses-a-non-round-robin-booking.api.1",
+  "flowId": "reassignment-refuses-a-non-round-robin-booking",
+  "failingStep": 2,
+  "whatFailed": "POST /v2/bookings/{uid}/reassign/{userId} answered 200 with status \"success\" and a reassignedTo object for a plain, non-round-robin booking, because Cal.diy replaced the removed round-robin reassignment implementation with a silent no-op stub while leaving the route, the service and the success-shaped response in place.",
+  "docClaim": {
+    "quote": "Currently only supports reassigning host for round robin bookings. The provided authorization header refers to the owner of the booking.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/reassign-a-booking-to-a-specific-host.md",
+    "section": "reassign-a-booking-to-a-specific-host (the same sentence is the whole description of reassign-a-booking-to-auto-selected-host.md, the doc bound by the never-reached step 3). The page also publishes ReassignBookingOutput_2024_08_13 with a required status of success|error and a required data object, so a success envelope is a positive claim that a reassignment happened."
+  },
+  "observed": "Step 1 created booking uid cW2D5sw1gGqKMxAN4fbgpM on event type 100 (reference-consult, schedulingType: null in the server log, so an individual event type, and Cal.diy cannot have round-robin event types at all since teams are removed). Step 2 POSTed to /v2/bookings/cW2D5sw1gGqKMxAN4fbgpM/reassign/1 and got HTTP 200 with {\"status\":\"success\",\"data\":{\"bookingUid\":\"cW2D5sw1gGqKMxAN4fbgpM\",\"reassignedTo\":{\"id\":1,\"name\":\"Reference Host\",...}}}. reassignedTo names the host the booking already had, so nothing moved. Corroborating evidence that no work ran: the call returned in 20 ms of server time (server.stdout.txt line 359, responseTime 20) versus 6.3 s for the booking create, there is not a single log line between the incoming request and the outgoing response, and no reassignment email was even attempted (server.stderr.txt only shows the step 1 confirmation mail failing against the absent SMTP sandbox). The routes are registered: server.stdout.txt lines 174-175 map both /v2/bookings/:bookingUid/reassign and /:bookingUid/reassign/:userId at version 2024-08-13, which is the version the scenario sent, so the API-version systemic cause does not apply to this failure. Step 3 (the auto route) never ran.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Silent no-op behind a false confirmation: any Cal.diy API caller with BOOKING_WRITE gets 200 success and a reassignedTo payload naming a host, while the booking is untouched. An integration that trusts the envelope believes a host handoff happened; the original host stays on the call and no one is notified. Every call to both reassign routes is affected, not just non-round-robin ones, since the feature cannot work in this edition at all.",
+  "rootCause": {
+    "file": "packages/platform/libraries/index.ts",
+    "lines": "125-150",
+    "explanation": "When the Cal.diy fork deleted packages/features/ee/round-robin/, it kept API v2's dependency on the two entry points and satisfied it with stubs: roundRobinManualReassignment (lines 126-138) and roundRobinReassignment (lines 140-150) are both empty async functions whose only body is the comment 'No-op in community edition'. apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts:1089-1109 awaits the stub, then re-reads the booking with getByUidWithUser and hands it to output.service.ts:539-553, which builds reassignedTo out of databaseBooking.user, i.e. the unchanged original host. bookings.controller.ts:439-468 wraps that in SUCCESS_STATUS. Nothing on the path can produce an error for the stubbed case: the service's only two catch branches translate 'invalid_round_robin_host' and 'no_available_users_found_error' thrown by the real implementation, and the stub throws neither. The same file shows the fork's own convention for this situation and shows these two stubs breaking it: createApiKeyHandler (line 162), createNewUsersConnectToOrgIfExists (198), sendVerificationCode (203) and verifyPhoneNumber (213) all throw 'X is not available in community edition', and verifyCodeAuthenticated returns a safe false. Only the two reassignment stubs return a silent success. The honest fix is to make them throw the community-edition error (which the service would surface as a 500, or better, to raise a 501 or 400 in the service) or to unregister the two routes."
+  },
+  "introducedBy": {
+    "commit": "ab21c7f805a089fa3a11ffd61c4a9aecc349c16c",
+    "date": "2026-04-15",
+    "pr": "#28903",
+    "title": "refactor: Cal.diy",
+    "note": "git log -L 123,151 on packages/platform/libraries/index.ts returns this single commit, the fork commit that stripped the EE code: it deleted packages/features/ee/round-robin/roundRobinManualReassignment.ts and roundRobinReassignment.ts (plus the whole round-robin directory and the teams trpc handlers) and added the no-op stubs in the same change. The endpoint, the service and the output shaping are older, unmodified cal.com code; the bug is the interaction, old API v2 plumbing now sitting on top of a new no-op implementation."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 25920,
+        "url": "https://github.com/calcom/cal.diy/issues/25920",
+        "state": "open",
+        "title": "RR reassignment with Host Groups",
+        "relation": "related",
+        "note": "Pre-fork cal.com issue about round-robin reassignment semantics with host groups, filed 2025-12-16. Unrelated to the community-edition no-op; listed only to show the tracker has no post-fork reassignment report."
+      }
+    ],
+    "prs": [
+      {
+        "number": 20755,
+        "url": "https://github.com/calcom/cal.diy/pull/20755",
+        "state": "merged",
+        "title": "refactor: v2 automatic round robin reassign error message",
+        "relation": "related",
+        "note": "Pre-fork (2025-04-17) work on the auto reassign route's error envelope, i.e. the error path that the fork's no-op stub now bypasses entirely. Not a report of this bug."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo calcom/cal.diy reassign --include-prs --limit 40 (40 hits, all pre-fork cal.com items about the real round-robin feature; nothing about the community-edition stub)",
+      "gh search issues --owner calcom --include-prs --created \">=2026-04-15\" \"community edition\" --limit 40 (2 hits, neither about reassignment or the EE stubs)",
+      "gh search issues --owner calcom --include-prs --created \">=2026-04-15\" reassign --limit 30 (6 hits, none about the reassign endpoints; the only relevant-looking one is calcom/help#151, a docs PR about reassignment notification emails)",
+      "note: gh search issues --repo calcom/cal.com ... is rejected ('the resources do not exist or you do not have permission'), so the calcom/cal.com tracker is the same tracker as calcom/cal.diy; both were searched by the queries above. None found."
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main after the tested commit 038381aeca (8418db70c7, 5e3fe3cbe6, b2c28a23ab, 176037d0af, 2026-08-04 to 2026-08-08) and none touches packages/platform/libraries/index.ts, apps/api/v2/.../bookings.service.ts or bookings.controller.ts; git show origin/main:packages/platform/libraries/index.ts still has the 'No-op in community edition' stubs at lines 125-150. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is byte-identical to calcom/cal.diy main. Nothing in the public tracker or docs indicates a change, and the question is moot for the commercial product, which still ships the real round-robin implementation."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, the dropped 9:10 slot, seated-booking oversell, unauthenticated slot holds). This is a separate defect class: an EE feature removed by the fork whose HTTP surface survived as a lying no-op."
+  },
+  "notes": "Read this before filing anything upstream, because the scenario is right about the outcome and wrong about the reason. (1) The scenario's premise, that a non-round-robin booking must be refused, is not what the code proves and should not be reported to cal.com. The pre-fork implementation (git show ab21c7f805^:packages/features/ee/round-robin/roundRobinManualReassignment.ts) has no schedulingType or ROUND_ROBIN gate at all: it throws invalid_round_robin_host only when the target user is not among the event type's hosts, and user_is_round_robin_fixed when the matched host is fixed. For an individual event type it falls back to eventType.users, so reassigning to the booking's own single host (userId 1, exactly what step 2 did) would have passed both checks on real cal.com too. The doc sentence 'Currently only supports reassigning host for round robin bookings' is a capability caveat, not a documented error contract, and the pages name no status code. A stricter scenario would reassign to a user who is NOT a host of the event type, which is the case the real implementation genuinely refuses. (2) What makes this a defect anyway is independent of the round-robin question: on Cal.diy the endpoint can never do anything, for any booking, and it reports success with a reassignedTo object regardless. That violates the tested tree's own contract, since bookings.controller.ts:439-450 still carries the cal.com @ApiOperation description and the ReassignBookingOutput_2024_08_13 DTO still promises a reassignment. (3) On the edition-mismatch question: the underlying feature is genuinely EE-removed (README line 47 lists Teams among the removed enterprise features, and the whole packages/features/ee/round-robin/ directory was deleted in #28903), so a reviewer could stop at edition-mismatch. It is not one, per the brief's own rule, because Cal.diy does ship the code on this path and that code misbehaves: the fork chose a silent no-op where its own four sibling stubs in the same file throw 'not available in community edition'. That deviation, in packages/platform/libraries/index.ts:126-150, is the one-line actionable report for a Cal.diy maintainer. (4) Step 3, the auto route, never ran, but roundRobinReassignment at lines 140-150 is the identical no-op, so it would have returned success the same way; the failure is representative of both bound doc pages. (5) The API-version systemic cause does not apply here: the docs demand cal-api-version 2026-02-25, but the scenario sent 2024-08-13, which Cal.diy really has, and the router log confirms both routes were matched at that version."
+}

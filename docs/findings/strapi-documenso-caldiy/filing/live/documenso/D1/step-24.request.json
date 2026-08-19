@@ -1,0 +1,11 @@
+{
+  "step": 24,
+  "label": "PASS2 final read",
+  "at": "2026-08-19T19:15:07.652Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_daillesxfetczrhd",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

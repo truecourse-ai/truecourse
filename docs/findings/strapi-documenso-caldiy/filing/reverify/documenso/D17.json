@@ -1,0 +1,52 @@
+{
+  "id": "D17",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/apps/remix/server/api/files/files.helpers.ts#L112",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/remix/server/api/files/files.helpers.ts#L112",
+    "howDecided": "One check, as instructed: git log 3cf2963cd0..origin/main -- apps/remix/server/api/files/ apps/remix/server/api/download/ is empty, and both bound doc sentences are still on origin/main (first-api-call.mdx L31 'Retrieve the signed PDF until all recipients have completed signing' and examples/common-workflows.mdx L966 'Attempting to download before completion returns the original document without signatures'). Product and docs agree, exactly as the review concluded."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3169",
+        "kind": "pr",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, last updated 2026-08-11. Still adds version=pending to the recipient token route only, not to the API-token signed/original branch."
+      },
+      {
+        "ref": "documenso/documenso#3096",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged, last updated 2026-07-14. Same handler, relevant only to the _signed.pdf filename wart."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}, WebFetch of the two published doc pages"
+    ]
+  },
+  "reevaluation": "Not a finding, and re-verification does not change that. The review's verdict was test-defect: the scenario asserts both that version=signed on a PENDING envelope returns a PDF (step 7) and that it does not (step 8), so one step fails by construction, and the product did what both bound doc pages say it does. Today the download handlers are untouched since the tested tag and both doc sentences are still in place, so there is nothing to report and nothing to re-evaluate. The right action remains a corpus-side conflict resolution in favour of common-workflows.mdx, not an upstream filing. The one genuine observation in the review, that Content-Disposition still names the unsigned original <title>_signed.pdf, is a minor naming wart the docs already warn about and is not worth an issue on its own.",
+  "routeSuggestion": "skip: not a finding",
+  "policyBasis": null,
+  "confidence": "high",
+  "notes": "If anyone later wants to file the filename note, it belongs as a comment on existing issue #3096, which is already about the Content-Disposition filename built by the same handler, not as a new issue."
+}

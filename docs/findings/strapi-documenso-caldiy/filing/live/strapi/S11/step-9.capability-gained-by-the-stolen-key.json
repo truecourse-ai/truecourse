@@ -1,0 +1,11 @@
+{
+  "narrowTokenTools": [],
+  "stolenWideTokenTools": [
+    "list_article",
+    "get_article",
+    "create_article",
+    "update_article",
+    "delete_article",
+    "discard_article_draft"
+  ]
+}

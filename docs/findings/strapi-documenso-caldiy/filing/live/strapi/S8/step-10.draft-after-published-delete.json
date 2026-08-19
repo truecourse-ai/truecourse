@@ -1,0 +1,12 @@
+{
+  "status": 404,
+  "body": {
+    "data": null,
+    "error": {
+      "status": 404,
+      "name": "NotFoundError",
+      "message": "Not Found",
+      "details": {}
+    }
+  }
+}

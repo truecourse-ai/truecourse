@@ -1,0 +1,23 @@
+{
+  "byNameCount": 0,
+  "comboInfo": [
+    {
+      "index": 0,
+      "tag": "BUTTON",
+      "id": null,
+      "role": "combobox",
+      "ariaLabel": null,
+      "ariaLabelledby": null,
+      "ariaDescribedby": null,
+      "text": "3 months",
+      "ariaSnapshot": "- combobox: 3 months"
+    }
+  ],
+  "labelInfo": [
+    {
+      "text": "Expires in",
+      "htmlFor": "_r_f_-form-item",
+      "targetExists": false
+    }
+  ]
+}

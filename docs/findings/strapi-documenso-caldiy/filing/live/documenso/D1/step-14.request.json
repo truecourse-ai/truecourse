@@ -1,0 +1,11 @@
+{
+  "step": 14,
+  "label": "final read of the PENDING envelope",
+  "at": "2026-08-19T19:15:07.388Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_zxidtommuuvcurfz",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

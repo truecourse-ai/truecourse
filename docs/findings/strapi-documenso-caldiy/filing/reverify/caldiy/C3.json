@@ -1,0 +1,40 @@
+{
+  "id": "C3",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/platform/bookings/2024-08-13/services/booking-attendees.service.ts#L71-L120",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/platform/bookings/2024-08-13/services/booking-attendees.service.ts#L71-L120",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. addAttendee at today's head is identical: it loads the booking with getByUidWithEventType (line 76), throws only NotFoundException when the booking is missing (lines 77-79), and delegates straight to this.bookingAttendeesService.addAttendee (line 87) with no read of eventType.seatsPerTimeSlot anywhere. The shared service is at packages/features/bookings/services/BookingAttendeesService.ts (the FINDINGS-INDEX path packages/features/bookings/lib/BookingAttendeesService.ts does not exist at head; the review's path is the right one), and it is untouched too."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#27759",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-02-17T20:46:18Z",
+        "mergeCommit": "b1eb5a280915",
+        "baseRef": "main",
+        "note": "The PR that introduced the endpoint without a seats guard (the review's introducedBy). Last updated 2026-02-17, no activity since. Not a report of the bug."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 30 --updated '>2026-08-01' 'seated seats'  (0 results)",
+      "gh search issues --owner calcom --include-prs --limit 30 '\"does not support seated\"'  (0 results, i.e. the documented refusal sentence appears in no issue or PR title/body anywhere in the org)"
+    ]
+  },
+  "reevaluation": "Stands unchanged. Neither booking-attendees.service.ts (v2), packages/features/bookings/services/BookingAttendeesService.ts nor booking-guests.service.ts was touched by any of the 4 commits since the tested tree, so POST /v2/bookings/{uid}/attendees on a seated booking still returns 201 and still creates an Attendee row with no BookingSeat. No new tracker item: nothing seated-related has been updated org-wide since 2026-08-01 and the documented refusal sentence appears nowhere in the tracker. The review's cited PR #27759 is unchanged (merged 2026-02-17). One framing point survives re-check and must be in the filed issue: the promise \"Attempting to add an attendee to a seated event booking will return a 400 error\" exists only in cal.com's published OpenAPI; the Cal.diy controller's own @ApiOperation has no Seated Events paragraph, so this is most likely a guard added on the commercial side after the April 2026 fork and never ported. That does not make it an edition mismatch, because the harm (a seat-less attendee that violates Cal.diy's own required seatUid in GetSeatedBookingOutput and splits its two seat counters) is entirely inside Cal.diy code.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/config.yml sets `blank_issues_enabled: false`, so a bug must go through bug_report.md (Issue Summary / Steps to Reproduce / Actual Results / Expected Results / Technical details / Evidence, the last called \"quite mandatory in terms of bugs\"); CONTRIBUTING.md: \"For bugs, security, performance, documentation, etc., you can start coding immediately, even if the `needs approval` label is present\", so no discussion-first gate applies.",
+  "confidence": "high",
+  "notes": "Only the first half of the finding is evidenced by the run: the add is accepted (201, attendee id 79 on booking 73, event type 102 with seatsPerTimeSlot 10). The seat-count drift (display counts raw Attendee rows, the seat gate counts only rows with a BookingSeat) is derived from source, not observed, because the scenario aborted at step 2 and nothing re-read the booking. The FINDINGS-INDEX liveNote asks for exactly that re-read; until it is done the issue should claim the 201 and describe the seat arithmetic as a code-level consequence. The guests endpoint (booking-guests.service.ts) has the identical hole and its documented refusal is equally false, so file both in one issue. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

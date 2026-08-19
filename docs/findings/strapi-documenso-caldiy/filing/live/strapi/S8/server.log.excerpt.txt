@@ -1,0 +1,16 @@
+[2026-08-19 11:52:45.222] [32mhttp[39m: GET /api/articles?status=published&filters[slug][$eq]=dp-api-status-mt0g8fky (3 ms) 200
+[2026-08-19 11:52:45.229] [32mhttp[39m: PUT /api/articles/qbod5ch6zve5z4o91xom1gce?status=draft (5 ms) 200
+[2026-08-19 11:52:45.232] [31merror[39m: Cannot delete a draft document
+Error: Cannot delete a draft document
+    at deleteDocument (/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/services/document-service/repository.js:273:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/database/dist/index.js:89:29
+    at async Array.databaseErrorsMiddleware (/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/services/document-service/middlewares/errors.js:16:16)
+    at async CollectionTypeService.delete (/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/core-api/service/collection-type.js:58:29)
+    at async Object.delete (/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/core-api/controller/collection-type.js:78:13)
+    at async returnBodyMiddleware (/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/services/server/compose-endpoint.js:50:20)
+    at async policiesMiddleware (/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/services/server/policy.js:21:9)
+    at async /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/services/server/compose-endpoint.js:31:20
+    at async /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/build/strapi/packages/core/core/dist/services/mcp/middleware/oauthDiscoveryFallback.js:29:9
+[2026-08-19 11:52:45.232] [32mhttp[39m: DELETE /api/articles/qbod5ch6zve5z4o91xom1gce?status=draft (2 ms) 500
+[2026-08-19 11:52:45.236] [32mhttp[39m: GET /api/articles/qbod5ch6zve5z4o91xom1gce?status=draft (2 ms) 200

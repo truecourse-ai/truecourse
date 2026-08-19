@@ -1,0 +1,47 @@
+{
+  "id": "D15",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "26f0c4c5b",
+        "date": "2026-07-23",
+        "title": "chore: deprecate endpoints",
+        "pr": "#3022",
+        "touchesCulpritLines": false,
+        "effect": "Adds an <EnvelopeWarning /> banner to authentication.mdx; predates the review and shifts the accordion from L194 to L196."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/server-only/envelope/get-envelope-by-id.ts#L128-L192",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/envelope/get-envelope-by-id.ts#L128-L192",
+    "howDecided": "git log 3cf2963cd0..origin/main is empty for packages/lib/server-only/envelope/get-envelope-by-id.ts and for apps/docs/content/docs/developers/api/common-errors.mdx, and returns only the pre-review banner commit for authentication.mdx. The ownership-scoped where clause and its AppErrorCode.NOT_FOUND throw are therefore byte-identical, so a cross-tenant read still answers 404. packages/lib/errors/app-error.ts changed twice since the tag but only to add three recipient-completion codes; FORBIDDEN/403 still has no resource-ownership producer (its only mapped 403 users remain the licence gate and CSC_UNLICENSED)."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/docs/content/docs/developers/getting-started/authentication.mdx",
+    "lineToday": 196,
+    "permalink": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/getting-started/authentication.mdx#L196-L198",
+    "publishedUrl": "https://docs.documenso.com/docs/developers/getting-started/authentication",
+    "commitsSinceReview": [],
+    "note": "Unchanged. origin/main L196 still reads <Accordion title=\"403 Forbidden - Token doesn't have access to the resource\"> (the source uses an em dash; reproduced here with a hyphen), and the second bound page still carries the FORBIDDEN row at apps/docs/content/docs/developers/api/common-errors.mdx L23: '| `FORBIDDEN` | Access to the resource is denied (403). | Ensure your API key or user account has the necessary permissions and roles to execute this specific action. |'. Open PR #3139 edits this exact accordion but only changes its body from \"the token's account\" to \"the token's team\" and keeps the 403 title, so the finding survives that PR intact."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}, WebFetch of the two published doc pages",
+      "The review's own queries (403 forbidden token access, 403 in title, FORBIDDEN, all --include-prs) were not re-run individually; the two created-since sweeps above enumerate every issue and PR opened after 2026-08-10 and none concerns 403-vs-404 on cross-tenant reads."
+    ]
+  },
+  "reevaluation": "The finding stands exactly as written, on both sides, with only a two-line drift in the doc (L194 -> L196, caused by the pre-review EnvelopeWarning banner). Nothing new was filed. One thing the review could not have known: open PR #3139, 'docs: fix workflows, authentication, error codes and id formats', edits this very accordion, and it does not fix it. It rewrites the body sentence from 'Ensure you're accessing resources owned by the token's account' to '...the token's team' while leaving the '403 Forbidden' title, and its common-errors.mdx hunk keeps the FORBIDDEN row and adds CSC_UNLICENSED (403) alongside. So a knowledgeable contributor has been over these exact lines twice without noticing that the API answers 404 there, which raises rather than lowers the value of reporting it. Verdict (doc-bug, low impact, no data exposure) and confidence are unchanged.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "Docs live in the product repo and .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the Bug Report form is the only route: labels: ['bug'], required Issue Description / Steps to Reproduce / Expected Behavior / Current Behavior / Version. This is not a vulnerability (the refusal is correct and nothing leaks), so config.yml's 'Please report security vulnerabilities privately via GitHub Security Advisories. Do not open a public issue.' does not apply.",
+  "confidence": "high",
+  "notes": "Two filer notes. (1) Frame it as a documentation correction, not a security report: cross-tenant 404 is the deliberate anti-enumeration design, the function even carries the 'Needs at minimum two reviewers' warning, so the ask is to change the accordion to 404 and to scope the common-errors FORBIDDEN row to licence-gated and CSC features. (2) The strongest supporting evidence is Documenso's own per-endpoint status tables, which list 400/401/404/429/500 and never 403 (fields.mdx, recipients.mdx, first-api-call.mdx) while the error-handling switch in examples/common-workflows.mdx has no 403 branch. Consider raising it inline on open PR #3139 as well, since it is already rewriting that accordion."
+}

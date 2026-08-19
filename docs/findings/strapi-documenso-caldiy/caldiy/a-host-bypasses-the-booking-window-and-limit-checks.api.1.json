@@ -1,0 +1,76 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-host-bypasses-the-booking-window-and-limit-checks.api.1",
+  "flowId": "a-host-bypasses-the-booking-window-and-limit-checks",
+  "failingStep": 1,
+  "whatFailed": "POST /v2/bookings sent with the documented header cal-api-version: 2026-02-25 and body field allowBookingOutOfBounds: true returned 400 with class-validator errors for timeZone, language and metadata instead of the documented 201, because cal.diy does not implement API version 2026-02-25 at all and silently routed the request to the legacy 2024-04-15 booking controller.",
+  "docClaim": {
+    "quote": "cal-api-version ... Must be set to 2026-02-25. ... allowBookingOutOfBounds: When true and the authenticated user is a host of the event type, booking time out-of-bounds checks are bypassed allowing bookings outside the normally permitted scheduling window. If the user is not a host or is unauthenticated, this parameter is silently ignored. Only supported on the 2026-02-25 API version. ... skipBookingLimits: When true and the authenticated user is a host of the event type, booking limit checks (event type, team, and per-host limits such as bookings per day/week/month/year, as well as duration limits) are bypassed, allowing the booking to be created even when a host has reached their limit. If the user is not a host or is unauthenticated, this parameter is silently ignored. Only supported on the 2026-02-25 API version.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md",
+    "section": "create-a-booking/openapi (lines 85-92 for the header, 267-286 for the two flags; operationId BookingsController_2026_02_25_createBooking at line 83). The reschedule doc repeats the same two flags at lines 152-170 and 217-235 and the same 2026-02-25 header at lines 59-64."
+  },
+  "observed": "HTTP 400. Body: {\"status\":\"error\",...,\"error\":{\"code\":\"BadRequestException\",\"message\":\"Bad Request Exception\",\"details\":{\"errors\":[{\"property\":\"timeZone\",\"constraints\":{\"isTimeZone\":\"timeZone must be a valid IANA time-zone\"}},{\"property\":\"language\",\"constraints\":{\"isString\":\"language must be a string\"}},{\"property\":\"metadata\",\"constraints\":{\"isObject\":\"metadata must be an object\"}}]}}}. Each error's target is {\"start\":\"2050-09-15T09:00:00.000Z\",\"eventTypeId\":118}, i.e. the global ValidationPipe (whitelist: true) had already stripped both attendee and allowBookingOutOfBounds because they are not properties of the DTO it validated against. Those three required top-level properties identify the DTO as CreateBookingInput_2024_04_15. server.stdout.txt from the same run shows the app booting with every route mapped for versions 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04 only, and the incoming request carrying Cal-Api-Version: 2026-02-25.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "A self-hoster following cal.com/docs cannot create any booking on the documented version: the whole 2026-02-25 booking API, including the host override flags allowBookingOutOfBounds, skipBookingLimits and allowConflicts, is absent from cal.diy, and the unknown version is not rejected but silently downgraded to the 2024-04-15 contract, so the caller gets a misleading 400 about unrelated missing fields rather than an unsupported-version error. No data loss and no security exposure; the overrides simply do not exist, so out-of-window and over-limit bookings stay refused.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "The NestJS custom version extractor reads the cal-api-version header and returns it only if it is a member of API_VERSIONS; otherwise it returns VERSION_2024_04_15, and defaultVersion is VERSION_2024_04_15 too. In the tested worktree API_VERSIONS (packages/platform/constants/api.ts lines 57-68) is exactly [2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04), so 2026-02-25 is unknown, the request is dispatched to apps/api/v2/src/platform/bookings/2024-04-15/controllers/bookings.controller.ts, and the global ValidationPipe in the same file (lines 58-70, whitelist: true) validates the body against CreateBookingInput_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts), whose required top-level timeZone (@IsTimeZone), language (@IsString) and metadata (@IsObject) produce exactly the three observed errors while attendee and allowBookingOutOfBounds are whitelisted away. The deeper cause is absence, not the fallback: git grep over the tested worktree finds zero occurrences of 2026-02-25, 2026_02_25, allowBookingOutOfBounds, skipBookingLimits or allowConflicts anywhere in apps/ or packages/. The fork's newest bookings controller is 2024-08-13 and its own @ApiHeader says 'Must be set to 2024-08-13' (apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts lines 86-92). The fork's committed OpenAPI, docs/api-reference/v2/openapi.json, gives POST /v2/bookings the operationId BookingsController_2024_08_13_createBooking with cal-api-version default 2024-08-13 and contains neither allowBookingOutOfBounds nor allowConflicts, while the cal.com doc under test gives the same path operationId BookingsController_2026_02_25_createBooking. Finally the booking engine itself has no bypass seam: packages/features/bookings/lib/service/RegularBookingService.ts line 764 calls validateBookingTimeIsNotOutOfBounds unconditionally, and checkBookingAndDurationLimits has no skip parameter, so even accepting the flags at the DTO layer would change nothing."
+  },
+  "introducedBy": {
+    "commit": "0a15483c461a6541b1759e499d088b5432390232",
+    "date": "2024-03-20",
+    "pr": "#14106",
+    "title": "feat: platform atoms + api v2",
+    "note": "Not the introduction of a bug, since the feature was never in this fork. This is the blame for the silent-downgrade shape of the observed 400: the version extractor's fallback to VERSION_2024_04_15 dates to the original api v2 landing (then apps/api/v2/src/app.ts); the current lines were moved verbatim into bootstrap.ts by 9ad8aa981ac44553b0fa94a65a86d8076d4fd408, 2026-01-13, 'chore: deploy api v2 on vercel (#26735)'. The version list itself was last extended by 5dc81e8677c on 2025-02-13 (adding 2024-09-04); no API version has been added to the open-source line since, so the gap to the documented 2026-02-25 has been widening for about 18 months."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "related",
+        "note": "Filed 2026-04-06, still open. Its body names this exact drift: 'When Cal.com updates this version (e.g., from 2024-08-13 to 2026-02-25 for POST /bookings), existing integrations break silently with no prior notice' and asks for a version-discovery endpoint plus backward compatibility. It confirms from the community side that 2026-02-25 is the live hosted version for POST /v2/bookings while the open-source line still answers on 2024-08-13, and it confirms the failure mode is silent."
+      }
+    ],
+    "prs": [
+      {
+        "number": 72,
+        "url": "https://github.com/calcom/companion/pull/72",
+        "state": "merged",
+        "title": "fix: improve MCP tool descriptions and add missing critical parameters",
+        "relation": "related",
+        "note": "Merged 2026-04-07 in calcom/companion. Adds allowConflicts and allowBookingOutOfBounds to the create_booking MCP tool schema, describing allowBookingOutOfBounds as 'book outside the configured availability window'. Independent evidence that the flags are real on the hosted Cal.com API, not a doc fabrication."
+      },
+      {
+        "number": 74,
+        "url": "https://github.com/calcom/companion/pull/74",
+        "state": "merged",
+        "title": "fix: correct MCP tool schemas against Cal.com API v2 spec",
+        "relation": "related",
+        "note": "Merged 2026-04-09. Clarifies allowConflicts / allowBookingOutOfBounds as host-only and ignored for non-hosts, matching the doc sentence under test, and states the changes were 'verified against calcom/cal source types (packages/platform/types/)'. That names calcom/cal, a repo distinct from the public calcom/cal.com, as where the commercial platform types live."
+      }
+    ],
+    "queries": [
+      "gh search prs \"allowBookingOutOfBounds\" --owner calcom (2 hits, both calcom/companion; nothing in calcom/cal.com or calcom/cal.diy)",
+      "gh search issues \"cal-api-version 2026-02-25\" --owner calcom (2 hits: cal.diy#28762 and cal.diy#28512, the latter unrelated)",
+      "gh search issues \"skipBookingLimits\" --owner calcom (0 hits)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed between the tested 038381aeca and origin/main 176037d0af (2026-08-08), none of them touching apps/api/v2/src/bootstrap.ts, apps/api/v2/src/lib/api-versions.ts or packages/platform/constants, and git grep over origin/main still finds zero occurrences of 2026-02-25, allowBookingOutOfBounds or skipBookingLimits. in cal.com: not verifiable from public source, and the brief's premise about the cross-reference clone is wrong. The clone at <scratch>/src/calcom has remote https://github.com/calcom/cal.com.git but its origin/main is commit 176037d0af with tree 5db105b2b6b79d3f568cd56dd1ce180f1663208e, byte-identical to calcom/cal.diy origin/main, and it carries the cal.diy README ('Cal.diy is the open source community edition of Cal.com'). So the public calcom/cal.com repo now mirrors cal.diy and contains no 2026-02-25 code either. The commercial implementation lives in a non-public repo that calcom/companion PR #74 calls calcom/cal. The documented behavior is therefore certainly shipped by hosted Cal.com (docs plus the two companion PRs) and certainly not present in any public source, so it cannot be 'ported' from anywhere a self-hoster can see."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available."
+  },
+  "notes": "Three things a maintainer or doc author should take away. First, the edition-mismatch evidence rule in the brief asks for the implementing code in calcom/cal.com main: that is impossible here because the public calcom/cal.com repo is now a content-identical mirror of cal.diy (same tree sha), so the strongest available proof is the fork's own generated contract, docs/api-reference/v2/openapi.json, which declares operationId BookingsController_2024_08_13_createBooking and cal-api-version default 2024-08-13 for the very path whose cal.com doc declares BookingsController_2026_02_25_createBooking. The two contracts for the same route differ by an entire API version. Second, the failure mode is worse than a plain 404-style rejection: bootstrap.ts silently downgrades an unrecognized cal-api-version to the oldest version rather than returning an unsupported-version error, so a caller who follows the published docs gets a 400 complaining about timeZone, language and metadata, three fields the doc they are reading does not even mention. cal.com's own doc anticipates this ('Not passing the correct value will default to an older version of this endpoint'), which makes the 400 documented behavior rather than a second defect, but returning 400 UNSUPPORTED_API_VERSION with the supported list would have made this diagnosable in one request instead of requiring source reading, and it is exactly what cal.diy#28762 asks for. Third, this scenario cannot be salvaged by rewriting it: steps 2, 3, 5, 6, 10, 12, 15 and 17 assert the non-host and old-version halves and would pass trivially against a build with no override flags at all, so the flow as a whole tests nothing in this edition. If the guard corpus is regenerated for cal.diy it should be bound to the fork's own docs/api-reference/v2/openapi.json rather than cal.com/docs; the same 2026-02-25 versus 2024-08-13 gap will invalidate every other bookings-API scenario in this corpus the same way. Two of the guard fixtures the scenario depends on, eventTypeWindow (a scheduling window that excludes 2050-09-15T09:00:00.000Z, event type id 118) and eventTypeLimitReached, were seeded correctly; the run aborted at step 1 before either was exercised, so nothing here is a seeding or sandbox problem."
+}

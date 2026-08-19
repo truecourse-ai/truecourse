@@ -1,0 +1,11 @@
+{
+  "step": 3,
+  "label": "the same call with DANGEROUS_BYPASS_RATE_LIMITS=true (as the original guard run had it)",
+  "at": "2026-08-19T19:23:14.852Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

@@ -1,0 +1,63 @@
+- dialog "Publish entries":
+  - banner:
+    - heading "Publish entries" [level=2]
+    - button "Close modal"
+  - grid:
+    - rowgroup:
+      - row "Ready to publish 2 Already published 0":
+        - gridcell "Ready to publish 2":
+          - img
+          - text: Ready to publish 2
+        - gridcell "Already published 0":
+          - img
+          - text: Already published 0
+      - row "Ready to publish changes 0 Waiting for action 0":
+        - gridcell "Ready to publish changes 0":
+          - img
+          - text: Ready to publish changes 0
+        - gridcell "Waiting for action 0":
+          - img
+          - text: Waiting for action 0
+  - grid:
+    - rowgroup:
+      - row "Select all entries documentId name status Publication status":
+        - gridcell "Select all entries":
+          - checkbox "Select all entries" [checked]:
+            - img
+        - gridcell "documentId"
+        - gridcell "name"
+        - gridcell "status"
+        - gridcell "Publication status"
+    - rowgroup:
+      - row "Select 11 qhlyg4x7f0yxpfr5gob3ieyv DP Bulk Unpublish mt0gas78 A draft Ready to publish Edit":
+        - gridcell "Select 11":
+          - checkbox "Select 11" [checked]:
+            - img
+        - gridcell "qhlyg4x7f0yxpfr5gob3ieyv"
+        - gridcell "DP Bulk Unpublish mt0gas78 A"
+        - gridcell "draft":
+          - status "draft": Draft
+        - gridcell "Ready to publish":
+          - img
+          - text: Ready to publish
+        - gridcell "Edit":
+          - link "Edit":
+            - /url: /admin/content-manager/collection-types/api::article.article/qhlyg4x7f0yxpfr5gob3ieyv?plugins[i18n][locale]=en
+      - row "Select 13 g347xnx5llj1ozujd7rpi03m DP Bulk Unpublish mt0gas78 B draft Ready to publish Edit":
+        - gridcell "Select 13":
+          - checkbox "Select 13" [checked]:
+            - img
+        - gridcell "g347xnx5llj1ozujd7rpi03m"
+        - gridcell "DP Bulk Unpublish mt0gas78 B"
+        - gridcell "draft":
+          - status "draft": Draft
+        - gridcell "Ready to publish":
+          - img
+          - text: Ready to publish
+        - gridcell "Edit":
+          - link "Edit":
+            - /url: /admin/content-manager/collection-types/api::article.article/g347xnx5llj1ozujd7rpi03m?plugins[i18n][locale]=en
+  - contentinfo:
+    - button "Cancel"
+    - button "Refresh"
+    - button "Publish"

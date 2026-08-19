@@ -1,0 +1,12 @@
+{
+  "step": 3,
+  "label": "required+readOnly TEXT (the original step 3) (expected 400)",
+  "at": "2026-08-19T19:16:54.225Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_urlxhxhbndxwvbvu\",\"data\":[{\"type\":\"TEXT\",\"recipientId\":14,\"page\":1,\"positionX\":5,\"positionY\":10,\"width\":20,\"height\":5,\"fieldMeta\":{\"type\":\"text\",\"required\":true,\"readOnly\":true,\"text\":\"TCRef both\"}}]}"
+}

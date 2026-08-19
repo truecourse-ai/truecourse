@@ -1,0 +1,84 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "page-through-the-bookings-list.api.1",
+  "flowId": "page-through-the-bookings-list",
+  "failingStep": 3,
+  "whatFailed": "GET /v2/bookings?limit=1 with the documented `cal-api-version: 2026-05-01` returned 200 but with the legacy 2024-04-15 envelope `{status, data:{bookings, recurringInfo, totalCount, nextCursor}}` and no top-level `pagination` object at all, because Cal.diy does not ship the 2026-05-01 bookings API and silently downgraded the unknown version header to 2024-04-15.",
+  "docClaim": {
+    "quote": "Cursor-based pagination. Pass the `pagination.nextCursor` from the previous response as the `cursor` query parameter to fetch the next page. Omit `cursor` to fetch the first page. `pagination.hasMore` is `false` and `pagination.nextCursor` is `null` when you've reached the last page. <Note>Must pass `cal-api-version: 2026-05-01` header.</Note> ... GetBookingsOutput_2026_05_01 required: [status, data, pagination]; pagination: $ref CursorPaginationMeta_2026_05_01 { nextCursor: string|null (opaque), hasMore: boolean }; operationId: BookingsController_2026_05_01_getBookings",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/get-all-bookings.md",
+    "section": "get-all-bookings and get-all-bookings/openapi (lines 7, 9, 47-54, 259-275, 316-323, 852-870)"
+  },
+  "observed": "200 with body {\"status\":\"success\",\"data\":{\"bookings\":[ ...one raw internal booking record with startTime/endTime/customInputs/responses/references/payment/seatsReferences... ],\"recurringInfo\":[...],\"totalCount\":38,\"nextCursor\":1}}. No `pagination` key anywhere. `nextCursor` is a plain integer offset nested inside `data`, not an opaque string under `pagination`. The entry returned was seeded booking id 44 (2026-09-15), not either of the two bookings the scenario had just created, because the 2024-04-15 controller defaults `filters.status` to `upcoming` and sorts ascending. The server's own route table in server.stdout.txt lines 156-170 shows only `Mapped {/v2/bookings, GET} (version: 2024-04-15,2024-06-11,2024-06-14)` and `(version: 2024-08-13)`; there is no 2026-05-01 route. The run's 200 is logged at server.stdout.txt:325. The stderr in this evidence dir is unrelated (SMTP ECONNREFUSED on :1025 and a Daily.co api_key ZodError from the two booking-creation steps, both sandbox noise that did not affect the 201s).",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "An integrator following cal.com's published Get-all-bookings reference against a Cal.diy instance gets a 200 with a completely different, undocumented response envelope instead of an error, so cursor paging code silently reads `pagination.nextCursor` as undefined and stops after page one, or worse treats the single first page as the whole list. Nothing here is exploitable, but the silence is the harm: no 400, no warning header, no deprecation notice.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts (and packages/platform/constants/api.ts, apps/api/v2/src/platform/bookings/)",
+    "lines": "bootstrap.ts:31-41; api.ts:56-68",
+    "explanation": "Cal.diy's Nest custom version extractor reads the `cal-api-version` header and returns it only if it is a member of `API_VERSIONS`; otherwise it falls through to `return VERSION_2024_04_15` (bootstrap.ts:38) with `defaultVersion: VERSION_2024_04_15` (line 40). `API_VERSIONS` in packages/platform/constants/api.ts:62-68 contains exactly 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13 and 2024-09-04, so `2026-05-01` is unknown and the request is routed to `BookingsController_2024_04_15`. That controller (apps/api/v2/src/platform/bookings/2024-04-15/controllers/bookings.controller.ts:129-161) calls the legacy `getAllUserBookings` with `skip: cursor ?? 0, take: limit ?? 10`, computes `nextCursor = (cursor ?? 0) + (limit ?? 10)` when `totalCount` exceeds it, and returns `{status, data: {...bookings, nextCursor}}` with no `pagination` member at all, which is byte-for-byte what the evidence shows (limit=1, totalCount=38, nextCursor=1). Grepping the whole tested tree for `2026_05_01` / `2026-05-01` returns nothing and `apps/api/v2/src/platform/bookings/` contains only `2024-04-15`, `2024-08-13` and `shared`, so the documented `BookingsController_2026_05_01` does not exist in this edition. `hasMore` and any `CursorPaginationMeta` appear nowhere in `apps/api/v2/src` or `packages/platform/types`; the only `nextCursor` in the tree is the numeric one on the 2024-04-15 output DTO (packages/platform/types/bookings/2024-04-15/outputs/get-bookings.output.ts:271)."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version",
+    "note": "This is the last commit that appended to `API_VERSIONS` (it added VERSION_2024_09_04); the list has not grown since, which is why 2026-05-01 is unknown. The silent-downgrade branch itself is older: `git blame` puts bootstrap.ts:33-38 on 9ad8aa981ac44553b0fa94a65a86d8076d4fd408 (Morgan, 2026-01-13, PR #26735 'chore: deploy api v2 on vercel'), which only moved the block; the surrounding closure line still blames to 0a15483c461 in apps/api/v2/src/app.ts (Morgan, 2024-03-20), so the fallback-to-2024-04-15 design dates to the original v2 bootstrap. The interaction, not either commit, is the bug: old permissive routing code meets a docs surface that advertises a version this tree never gained. No commit introduced a defect here; the 2026-05-01 bookings controller was simply never part of the open-source fork."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "exact",
+        "note": "The established public trace for the systemic cause: the docs advertise cal-api-version values (2026-02-25, and by the same mechanism 2026-05-01) that the open tree does not implement, and there is no way for a client to discover which versions a given deployment actually serves. Verified open as of 2026-08-15."
+      },
+      {
+        "number": 29785,
+        "url": "https://github.com/calcom/cal.diy/issues/29785",
+        "state": "open",
+        "title": "Improve Maintainability of cal-api-version",
+        "relation": "related",
+        "note": "Same root mechanism, framed as maintainability of the version list. Open as of 2026-08-15."
+      },
+      {
+        "number": 28512,
+        "url": "https://github.com/calcom/cal.diy/issues/28512",
+        "state": "closed",
+        "title": "get all bookings filter",
+        "relation": "related",
+        "note": "Touches the same GET /v2/bookings endpoint and the version confusion around it; closed, not about pagination."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28561,
+        "url": "https://github.com/calcom/cal.diy/pull/28561",
+        "state": "closed",
+        "title": "fix(bookings): map cal-api-version 2026-02-25 to latest supported version",
+        "relation": "related",
+        "note": "Community attempt to make the tree tolerate the newer documented versions by mapping them onto a supported one. Closed unmerged 2026-03-25 (created 2026-03-24), merged: false. Had it landed, a 2026-05-01 request would still not produce a cursor `pagination` block, since no controller implements that shape."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"bookings cursor pagination nextCursor\" (0 results)",
+      "gh search issues --owner calcom \"2026-05-01 cal-api-version\" (0 results)",
+      "gh search issues --owner calcom \"unsupported cal-api-version silently falls back 2024-04-15\" (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "In cal.diy: no. `git log 038381aeca..origin/main` in the caldiy clone has exactly 4 commits (176037d0af, b2c28a23ab, 5e3fe3cbe6, 8418db70c7, newest 2026-08-08) and none touches apps/api/v2/src/platform/bookings, packages/platform/constants/api.ts or apps/api/v2/src/bootstrap.ts. `2026_05_01` still appears nowhere. In cal.com: not verifiable from source, since calcom/cal.com main is the same commit and identical tree as calcom/cal.diy main (176037d0af) and the commercial source is private. The public docs page documenting BookingsController_2026_05_01_getBookings is itself the only evidence that the commercial product serves it; PR calcom/cal.diy#28561 was closed unmerged with its author reporting that prod serves the newer versions while the open tree does not."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md. Those five are out-of-office vs date overrides, zero-length team slots, a dropped 9:10 override slot, seated-booking attendee oversell, and unauthenticated hold mutation. None concerns the bookings list, its envelope, or API versioning. This failure is instance 1 of the coordinator's already-established systemic cause 1 (API version header not shipped by Cal.diy), applied to GET /v2/bookings rather than to a booking-creation body."
+  },
+  "notes": "Sub-question (a), would the scenario also fail on the versions Cal.diy does have: yes, on both, and for different reasons. On 2024-08-13, the newest bookings version in the tree, `pagination` DOES exist (bookings.controller.ts:283-293 spreads it from bookings.service.ts:706) but it is OFFSET pagination, `PaginationMetaDto` = {returnedItems, totalItems, itemsPerPage, remainingItems, currentPage, totalPages, hasNextPage, hasPreviousPage} per apps/api/v2/src/lib/pagination/pagination.ts. There is no `nextCursor` and no `hasMore`, so `pagination.exists` would pass while `pagination.nextCursor: matches .+` and `pagination.hasMore: equals true` would both fail. The 2024-08-13 input DTO also names its page controls `take` (Min 1, Max 250, default 100) and `skip`, not `limit` and `cursor` (packages/platform/types/bookings/2024-08-13/inputs/get-bookings.input.ts:270-285); with the global ValidationPipe running `whitelist: true` and no `forbidNonWhitelisted`, a stray `limit=1` is stripped rather than rejected, so step 5's `limit=101 -> 400` would also fail with a 200. On the 2024-04-15 fallback that actually served the request, `limit` and `cursor` ARE valid query params (packages/platform/types/bookings/2024-04-15/inputs/index.ts:49-68, limit Min 1 Max 100, cursor numeric) so `limit=1` was honored and step 5 would probably have passed; but the cursor is a plain offset integer, not opaque, and it lives at `data.nextCursor`, so the whole cursor-contract half of the scenario is unreachable on every version this build ships.\n\nSub-question (b), is there a Cal.diy-side defect independent of the version: one worth filing, and it is not pagination. The extractor at bootstrap.ts:33-38 accepts ANY unrecognized `cal-api-version` value and silently serves the oldest version, changing the response envelope shape with no 400, no warning header and no body signal. Cal.com's own controller ApiOperation text acknowledges this ('Not passing the correct value will default to an older version of this endpoint'), so it is intentional, but the practical result for a doc-following integrator is a 200 carrying a schema they have never seen. Rejecting unknown versions with a 400 naming the supported set, or echoing the resolved version in a response header, would turn this class of failure from silent to loud, and is essentially what issues #28762 and #29785 are asking for.\n\nFor the doc author: the page gives no minimum-version or availability note. Every claim on it (the 2026-05-01 header, the `cursor`/`limit` query params, `GetBookingsOutput_2026_05_01`, `CursorPaginationMeta_2026_05_01`) describes an endpoint that does not exist in the MIT fork, yet the page is served from cal.com/docs, which self-hosters of cal.diy are pointed at. A per-endpoint 'available from version X, self-hosted editions serve Y' banner would prevent this entire failure family.\n\nMinor observation from the fallback path: the 2024-04-15 controller declares `filters[status]` as required via @ApiQuery (bookings.controller.ts:132) but the handler defaults it to `upcoming` (line 141), so the documented-as-required parameter is optional in practice. Not the subject of this scenario, just noticed while reading the culprit."
+}

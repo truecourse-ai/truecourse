@@ -1,0 +1,34 @@
+{
+  "notFound": {
+    "status": 404,
+    "keys": [
+      "message",
+      "code",
+      "data"
+    ],
+    "hasError": false,
+    "hasStatusCode": false,
+    "topLevelCode": "INTERNAL_SERVER_ERROR"
+  },
+  "badRequest": {
+    "status": 400,
+    "keys": [
+      "message",
+      "code",
+      "data",
+      "issues"
+    ],
+    "hasError": false,
+    "hasStatusCode": false,
+    "topLevelCode": "BAD_REQUEST"
+  },
+  "unauthorized": {
+    "status": 401,
+    "keys": [
+      "message",
+      "code",
+      "data"
+    ],
+    "topLevelCode": "INTERNAL_SERVER_ERROR"
+  }
+}

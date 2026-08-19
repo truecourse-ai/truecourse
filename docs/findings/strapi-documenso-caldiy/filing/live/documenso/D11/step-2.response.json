@@ -1,0 +1,44 @@
+{
+  "step": 2,
+  "label": "PREP recipient",
+  "at": "2026-08-19T19:17:28.496Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "451",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "989",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "f664f25f-17af-4977-b903-5a32b74678cb"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_bkaasmlwcbywltkb",
+        "role": "SIGNER",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 15,
+        "email": "tcref-coords-1c101c7839@documenso.test",
+        "name": "TCRef Coords",
+        "token": "TgjtKo5FYZI9KgHvCsDwp",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "authenticate-a-booking-request-with-an-api-key.api.1",
+  "flowId": "authenticate-a-booking-request-with-an-api-key",
+  "failingStep": 3,
+  "whatFailed": "An anonymous POST /v2/bookings sent exactly as the Cal.com docs instruct, with cal-api-version: 2026-02-25 and the {start, attendee, eventTypeId} body, returned 400 with class-validator errors demanding timeZone, language and metadata, because Cal.diy does not know the version 2026-02-25 and silently routed the request to its legacy 2024-04-15 booking controller.",
+  "docClaim": {
+    "quote": "cal-api-version ... description: Must be set to 2026-02-25. ... example: '2026-02-25' ... default: '2026-02-25'  (and, in the same page: \"Please make sure to pass in the cal-api-version header value as mentioned in the Headers section. Not passing the correct value will default to an older version of this endpoint.\")",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md",
+    "section": "POST /v2/bookings, OpenAPI parameters -> header cal-api-version (lines 85-92); the note at line 32. The scenario's bound page, .truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/introduction.md #introduction-to-api-v2/deprecated-maintenance-for-existing-users-only/3-platform-managed-user-access-token, supplies the asserted claim: \"Bookings - some endpoints like creating a booking is public, but some like getting all managed user's bookings require managed user's access token\"."
+  },
+  "observed": "Step 1 (GET /v2/bookings with cal-api-version: 2026-05-01, the version get-all-bookings.md mandates at line 95) returned 200, but the payload is the legacy 2024-04-15 shape (data.bookings[] plus recurringInfo and nextCursor), not the 2024-08-13 shape, so that step also silently fell back. Step 2 (no credential) returned the expected 403 from PermissionsGuard. Step 3 (no credential, cal-api-version: 2026-02-25, body {start: 2051-01-12T11:00:00.000Z, attendee: {name, timeZone: Europe/Rome, email}, eventTypeId: 100}) returned 400 BadRequestException whose error targets show only {start, eventTypeId}: the attendee object was stripped as non-whitelisted and the legacy DTO's required timeZone, language and metadata were reported missing. No authentication error appeared anywhere, so the endpoint was indeed reached unauthenticated.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "An integrator following the public Cal.com API v2 docs against a Cal.diy instance gets a 400 on every documented booking create, and the failure mode is misleading: instead of \"unsupported cal-api-version\" the server silently serves a two-year-old endpoint version and reports missing fields the documented request body does not even have. Reads are worse than writes here because they succeed with a 200 in the wrong response shape (step 1), so a client can consume legacy payloads without ever noticing.",
+  "rootCause": {
+    "file": "apps/api/v2/src/bootstrap.ts",
+    "lines": "31-41",
+    "explanation": "The NestJS custom version extractor reads the cal-api-version header and returns it only when it is a member of API_VERSIONS; anything else falls through to VERSION_2024_04_15, and defaultVersion is VERSION_2024_04_15 as well. API_VERSIONS in the tested tree (packages/platform/constants/api.ts, lines 55-67) is exactly [2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04): there is no 2026-02-25 and no 2026-05-01 anywhere in apps/api/v2 or packages/platform. So the documented header value is unrecognised and the request is dispatched to BookingsController_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/controllers/bookings.controller.ts), whose CreateBookingInput_2024_04_15 (apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts, lines 91-146) declares @IsTimeZone() timeZone, @IsString() language and @IsObject() metadata as required, which is verbatim the three constraints in the 400 body. Cal.diy's own contract disagrees with the docs at the source level: BookingsController_2024_08_13 is declared version: VERSION_2024_08_13_VALUE and its @ApiHeader says \"Must be set to 2024-08-13. If not set to this value, the endpoint will default to an older version.\" (apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts, lines 80-94). The newest booking API version Cal.diy ships is 2024-08-13; 2026-02-25 is a commercial Cal.com version that was never ported to the open-source fork. The scenario's underlying claim is in fact true in Cal.diy: POST / on the 2024-08-13 controller is guarded by OptionalApiAuthGuard (line 105-106), so creating a booking is public; re-running step 3 with cal-api-version: 2024-08-13 and the identical body should return 201."
+  },
+  "introducedBy": {
+    "commit": "9ad8aa981ac44553b0fa94a65a86d8076d4fd408",
+    "date": "2026-01-13",
+    "pr": "#26735",
+    "title": "chore: deploy api v2 on vercel",
+    "note": "git blame of bootstrap.ts lines 31-41 in the tested worktree attributes the extractor block to 9ad8aa981a (#26735), which moved it from apps/api/v2/src/app.ts; the defaultVersion line still blames to 0a15483c461 (Morgan, 2024-03-20, app.ts). The silent-downgrade mechanism is therefore old and pre-dates the fork. Nothing here is a regression: the actual cause of this failure is the absence of the 2026-02-25 version, i.e. a commercial Cal.com change that never landed in Cal.diy, interacting with that old fallback. Cal.diy's public history contains no commit adding 2026-02-25, so there is no blameable commit for the missing version."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "exact",
+        "note": "Opened 2026-04-06. Names this exact drift: \"When Cal.com updates this version (e.g., from 2024-08-13 to 2026-02-25 for POST /bookings), existing integrations break silently with no prior notice\", and lists the affected endpoint as \"POST /v2/bookings (cal-api-version: 2026-02-25)\". It is filed as a feature request (version discovery endpoint, deprecation policy, backward compatibility) rather than as a bug against the docs, and it is still open and unaddressed."
+      },
+      {
+        "number": 29785,
+        "url": "https://github.com/calcom/cal.diy/issues/29785",
+        "state": "open",
+        "title": "Improve Maintainability of cal-api-version",
+        "relation": "related",
+        "note": "Opened 2026-07-16. Describes the amplifier precisely: \"Currently, the API checks for an exact match on the string. If the date exactly matches, then the current version of the API is invoked. If it is NEWER (ie, today's date), then the API actually falls back to using the older version of the API.\" Asks for the header to select the newest version <= the supplied date, which would have made this scenario pass. Open, no linked PR."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"2026-02-25 cal-api-version\" --owner calcom (0 results)",
+      "gh search issues \"cal-api-version\" --owner calcom --limit 20 (returned #29785, #28762, plus unrelated cal.diy issues)",
+      "gh api repos/calcom/cal.diy/issues/28762 and .../29785 (direct reads, not searches)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main between the tested 038381aeca (2026-07-31) and head 176037d0af (2026-08-08), none touching packages/platform/constants/api.ts or apps/api/v2/src/bootstrap.ts, and git grep for 2026-02-25 / 2026-05-01 over origin/main:apps/api/v2 and packages/platform is still empty. Both tracker items (#28762, #29785) are open. in cal.com: not verifiable from source. The clone at <scratch>/src/calcom is a mirror of cal.diy (same head 176037d0af, and 2026-02-25 is absent there too), and the commercial Cal.com source is private, so nothing here can confirm or deny the commercial build. The public docs asserting 2026-02-25 as the mandatory value are themselves the only evidence that the commercial product ships it."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "This failure maps to none of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, dropped 9:10 slot, seated-booking overselling, unauthenticated hold manipulation). The researcher's write-up does not mention cal-api-version at all."
+  },
+  "notes": "Three points for whoever triages this. First, the scenario is not at fault: it sent the header value the create-a-booking page mandates, and the milestone it was proving (creating a booking is public) is actually true in Cal.diy, since POST / on BookingsController_2024_08_13 carries OptionalApiAuthGuard. Re-running the same scenario with cal-api-version: 2024-08-13 on step 3 and 2024-08-13 on step 1 is the correct adaptation for this target, and it should turn the scenario green. Second, this drift is systemic across the bookings docs, not local to create: get-all-bookings.md mandates 2026-05-01 at line 95, and step 1 of this very scenario used it and silently got legacy 2024-04-15 output behind a 200. Any Cal.diy-targeted scenario generated from cal.com/docs bookings pages carries the same latent version mismatch, and the read-side version of it is invisible because it does not fail. Third, the silent downgrade itself deserves a separate report against Cal.diy: an unrecognised cal-api-version should be a 400 naming the supported versions, not a quiet fallback to a version from 2024. The docs do warn that a wrong value defaults to an older version, so the fallback is documented behavior and not a defect on its own, but combined with a docs set that mandates versions this build does not have, it converts a clear configuration error into an obscure body-validation error. Issue #29785 already asks for the nearest-older-version semantics that would fix it."
+}

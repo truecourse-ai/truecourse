@@ -1,0 +1,125 @@
+{
+  "repo": "strapi",
+  "scenarioId": "read-the-content-api-with-a-bearer-api-token.api.1",
+  "flowId": "read-the-content-api-with-a-bearer-api-token",
+  "failingStep": 3,
+  "whatFailed": "An unauthenticated GET /api/articles is correctly refused with 403 and error.name ForbiddenError, but the body's error.message is the bare HTTP reason phrase \"Forbidden\" instead of the ForbiddenError default message \"Forbidden access\" that the error-handling docs document as what the API returns.",
+  "docClaim": {
+    "quote": "The `ForbiddenError` class is a specific error class used when a user either doesn't provide any or the correct authentication credentials. It accepts the following parameters: | `message` | `string` | The error message | `Forbidden access` | ... :::note The custom `message` passed to `ForbiddenError` is not included in the API response. Instead, the API returns the default message. If you need to return a custom error message indicating insufficient permissions, use `PolicyError` instead. :::",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/error-handling.md (lines 317-329); upstream source is strapi/documentation, docusaurus/docs/cms/error-handling.md lines 407-419",
+    "section": "error-handling/throwing-errors/default-error-classes"
+  },
+  "observed": "Steps 2 and 3 both got HTTP 403 with body {\"data\":null,\"error\":{\"status\":403,\"name\":\"ForbiddenError\",\"message\":\"Forbidden\",\"details\":{}}}. Status, name and the null data envelope are exactly as documented; only the message string differs. server.stderr.txt is empty and server.stdout.txt shows nothing abnormal, so this is the ordinary refusal path, not an internal error.",
+  "verdict": "doc-bug",
+  "confidence": "medium",
+  "impact": "Low. No data loss and no information disclosure (the generic phrase is the safer of the two strings). A client that branches on error.message rather than error.status/error.name, following the documented default, never matches; and a developer reading the note is told the default message is returned when in fact the HTTP reason phrase is.",
+  "rootCause": {
+    "file": "/private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/2bf12aed-ec88-4169-9508-ad041bec80c0/scratchpad/src/strapi-tested/packages/core/core/src/services/server/compose-endpoint.ts",
+    "lines": "41-55",
+    "explanation": "The users-permissions content-api strategy authenticates the anonymous caller against the public role (packages/plugins/users-permissions/server/src/strategies/users-permissions.js:65-79), then its verify() finds the public ability cannot perform api::article.article.find and throws `new ForbiddenError()` at line 111. That instance carries the class default message 'Forbidden access' (packages/core/utils/src/errors.ts:82-92). The authorize middleware catches it in compose-endpoint.ts:46-52 and, unless it is a PolicyError, DISCARDS the error object and calls the bare `ctx.forbidden()`. The koa helper registered in packages/core/core/src/services/server/koa.ts:12-18 defaults its `response` argument to `statusName`, which is node:http STATUS_CODES[403] = 'Forbidden' (packages/core/core/src/services/server/koa-methods.ts:18-30), builds an http-errors HttpError from it, and formatHttpError (packages/core/core/src/services/errors.ts) writes that string into error.message. So the thrown error's message never reaches the wire and the class default is replaced by the HTTP reason phrase. Discarding the message is deliberate: the inline comment and the PolicyError carve-out exist precisely so auth failures cannot leak a custom reason, and the docs themselves acknowledge the suppression. What is wrong is the doc's claim about WHICH string replaces it. The doc sentence is wrong in the other direction too: reading packages/core/core/src/middlewares/errors.ts plus formatApplicationError, a `throw new errors.ForbiddenError('custom')` from a controller, service or lifecycle is an ApplicationError and its custom message IS serialized into error.message, so the note's blanket 'not included in the API response' only holds for the auth-verify path."
+  },
+  "introducedBy": {
+    "commit": "a14b16af5146a6dc5810f1478a0a89b9f244d90e",
+    "date": "2021-09-08",
+    "pr": "#10910",
+    "title": "Move admin auth to global auth system",
+    "note": "git blame is unusable on these partial clones (missing promisor objects), so this was established with `git log -S 'return ctx.forbidden();'` over compose-endpoint's full path history; the three hits are 2021-09-08 a14b16af51 (introduces the authorize middleware and the bare ctx.forbidden() call), 2023-08-01 e1658b575c (repo re-init) and 2023-11-28 a4814d75e4 (the strapi/core package split), i.e. only the first is a behavior change. The koa helper's 'default to the node reason phrase' behavior is equally old and survived the 2026-06-25 typing refactor 6f6af34008 (#25424) unchanged. PR #19374 'enhancement: make policy error public' (7fdffa185155bf1a65095c71eda6163de3b6b788, 2024-02-09) added the PolicyError carve-out at compose-endpoint.ts:47-50, which is what makes the message suppression demonstrably intentional rather than accidental. The doc note under review was written to describe that suppression, so the doc text is the newer half of the mismatch and the code is the old half."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 18672,
+        "url": "https://github.com/strapi/strapi/issues/18672",
+        "state": "closed",
+        "title": "UnauthorizedError and ForbiddenError don't return error's message and details data",
+        "relation": "exact",
+        "note": "Reports the byte-identical body {\"data\":null,\"error\":{\"status\":403,\"name\":\"ForbiddenError\",\"message\":\"Forbidden\",\"details\":{}}}. Filed 2023-11-04 on 4.14.5, closed 2023-11-08 after a single maintainer comment ('Those 2nd parameters need to be objects not strings') that answers the details argument and never addresses the message being replaced by the HTTP reason phrase. So the symptom is reported but was closed without a fix or a docs change."
+      },
+      {
+        "number": 19282,
+        "url": "https://github.com/strapi/strapi/issues/19282",
+        "state": "closed",
+        "title": "User-permissions unauthorized endpoint ForbiddenError not caught and transformed to 403 response",
+        "relation": "related",
+        "note": "Same throw site (users-permissions verify -> compose-endpoint authorize), but the complaint is a 500 instead of a 403; the stack trace in the body points at exactly the lines named in rootCause. Closed as completed 2024-02-03."
+      },
+      {
+        "number": 18566,
+        "url": "https://github.com/strapi/strapi/issues/18566",
+        "state": "closed",
+        "title": "PolicyError are replaced by ForbiddenError",
+        "relation": "related",
+        "note": "The complaint that produced the PolicyError carve-out in PR #19374, i.e. the documented escape hatch the doc note points users at."
+      },
+      {
+        "number": 18782,
+        "url": "https://github.com/strapi/strapi/issues/18782",
+        "state": "closed",
+        "title": "Calling Strapi's APIs without credentials on a protected route should return 401 (unauthorized).",
+        "relation": "related",
+        "note": "The scenario yaml cites this and #9512. They are about the STATUS code (403 vs 401), not the message, and the run did not reproduce them as defects: step 2 asserting 403 + ForbiddenError PASSED, and it passed because Strapi's own error-handling doc defines ForbiddenError as the missing-credentials class. Closed 2025-11-03 (labelled v4-unsupported). The yaml's 'UPSTREAM ... reproduced by this corpus on 5.52.0' line therefore overstates: what 5.52.0 reproduces is the 403 status, which the docs sanction."
+      },
+      {
+        "number": 9512,
+        "url": "https://github.com/strapi/strapi/issues/9512",
+        "state": "closed",
+        "title": "API access while unauthorized should return 401, but instead returns 403.",
+        "relation": "related",
+        "note": "The 2021 original of #18782, closed 2022-02-01. Same status-code question, not the message."
+      },
+      {
+        "number": 16882,
+        "url": "https://github.com/strapi/strapi/issues/16882",
+        "state": "closed",
+        "title": "Returning forbidden from a controller results in an internal server error",
+        "relation": "related",
+        "note": "About ctx.forbidden() from a controller producing a 500 on 4.10.7; touches the same helper, different failure."
+      }
+    ],
+    "prs": [
+      {
+        "number": 19374,
+        "url": "https://github.com/strapi/strapi/pull/19374",
+        "state": "merged",
+        "title": "enhancement: make policy error public",
+        "relation": "related",
+        "note": "Merged 2024-02-09. Added the PolicyError exception at compose-endpoint.ts:47-50 that keeps every other ForbiddenError message private. Evidence that the suppression is intended."
+      },
+      {
+        "number": 10910,
+        "url": "https://github.com/strapi/strapi/pull/10910",
+        "state": "merged",
+        "title": "Move admin auth to global auth system",
+        "relation": "related",
+        "note": "Merged 2021-09-08. Introduced the authorize middleware and the bare ctx.forbidden() call."
+      },
+      {
+        "number": 25424,
+        "url": "https://github.com/strapi/strapi/pull/25424",
+        "state": "merged",
+        "title": "feat(ts): augment all context error response methods",
+        "relation": "related",
+        "note": "Merged 2026-06-25 (commit 6f6af34008). Refactored the koa helper registration into koa-methods.ts and kept `response = statusName` as the default, so the 'Forbidden' string is unchanged and now has a sync test pinning it."
+      }
+    ],
+    "queries": [
+      "gh search issues '\"Forbidden access\"' --repo strapi/strapi --limit 25",
+      "gh search issues 'ForbiddenError' --owner strapi --limit 25",
+      "gh api repos/strapi/strapi/issues/{9512,18782,19282,16882,18672} and repos/strapi/strapi/commits/{a14b16af51,7fdffa1851}/pulls (not search calls)",
+      "gh api repos/strapi/documentation/contents/docusaurus/docs/cms/error-handling.md (not a search call)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "`git log c43e9ee1e2..develop` over packages/core/core/src/services/server/, packages/core/core/src/services/errors.ts, packages/core/utils/src/errors.ts, packages/plugins/users-permissions/server/src/strategies/ and packages/core/admin/server/src/strategies/content-api-token.ts returns nothing, and `git diff --stat` over the same paths is empty. develop at acf0ce2034 (2026-08-14) still has `return ctx.forbidden();` at compose-endpoint.ts:51. The doc side is unfixed too: the live strapi/documentation main still carries the identical table row and note at docusaurus/docs/cms/error-handling.md:407-419."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of the researcher's 8 Strapi findings. Theirs cover the MCP server (findings 2-7), admin-token permission reaping (1) and admin-token/tool-name doc errors (8); this failure is the plain Content API REST refusal path and a different doc page (error-handling.md, not api-tokens.md or the MCP pages). It does sit in the same family as their finding 8, 'docs materially wrong', and is a second, independent instance of it."
+  },
+  "notes": "The scenario itself is well built and this step was authored as expected-RED with the drift named in its own note, so the corpus already predicted the outcome; the only thing the note gets wrong is attributing it to #9512/#18782, which are about the status code. Steps 1 and 2 passed, so the substantive promises (token in the Authorization header authenticates a REST read, no user account needed, the same read without a token is refused with 403/ForbiddenError/data:null) all hold on 5.52.0. Recommended docs fix in strapi/documentation, docusaurus/docs/cms/error-handling.md:417-419: replace 'Instead, the API returns the default message' with something like 'Instead, the API returns the generic HTTP status text (\"Forbidden\"), and this suppression applies to ForbiddenError raised during route authentication and authorization; a ForbiddenError thrown from a controller, service or lifecycle keeps its message.' Alternatively the one-line code fix is to pass the class default through, `return ctx.forbidden(new errors.ForbiddenError().message)`, which honors the docs without leaking any caller-supplied text; that choice is Strapi's to make, but the two sources must not keep disagreeing. Worth flagging separately: the same discard at compose-endpoint.ts:42-44 makes every 401 answer 'Unauthorized', which happens to equal the UnauthorizedError class default, so the sibling class does not drift and only ForbiddenError does."
+}

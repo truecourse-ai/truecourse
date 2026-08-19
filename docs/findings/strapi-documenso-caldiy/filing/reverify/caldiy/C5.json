@@ -1,0 +1,62 @@
+{
+  "id": "C5",
+  "repo": "caldiy",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "176037d0afbe572f870a3c702985e7cd83fe6c0c",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/calcom/cal.diy/blob/038381aeca6261635357957d66b8ba85cdb29737/apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts#L766-L777",
+    "permalinkToday": "https://github.com/calcom/cal.diy/blob/176037d0afbe572f870a3c702985e7cd83fe6c0c/apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts#L766-L777",
+    "howDecided": "In src/caldiy: `git log --format='%h %ad %s' --date=short 038381aeca..origin/main -- <culprit files>` returned nothing. The whole delta 038381aeca..176037d0af is 4 commits (#29819 Clara app, #29740 phone-input country fallback, #29901 language update, #29940 customReplyToEmail) and `git diff --stat 038381aeca origin/main` lists 16 files, none of them a culprit file for this finding. I then read the culprit region out of today's head with `git show origin/main:<file>` and re-numbered it: the lines are byte-identical to the tested tree and sit at the same line numbers. Line 769 at today's head is still `userId: bookingRequest.userId ?? authUser?.id,` inside the bookingMeta passed to regularBookingService.createBooking, and input.service.ts, getRequiresConfirmationFlags.ts and RegularBookingService.ts are all untouched, so the `??` still cannot distinguish \"the attendee is rescheduling\" (encoded as undefined) from \"no rescheduledBy supplied\"."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "calcom/cal.diy#16877",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "[CAL-4431] RescheduledBy feature needs more fixes. Still open, last updated 2025-10-07, 1 comment. About the WEB reschedule flow losing the ?rescheduledBy= URL param, not the API confirm decision. FINDINGS-INDEX lists it as calcom/cal.com#16877; that is the same issue, see the repo-rename note."
+      },
+      {
+        "ref": "calcom/cal.diy#25100",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "\"fix: v2 api rescheduledBy\", closed 2025-11-26, no activity since. Different symptom (rescheduledByEmail returned null); that fix is present in the tested tree, since our run returned the email correctly."
+      },
+      {
+        "ref": "calcom/cal.diy#21630",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "\"POST /v2/bookings/:uuid/reschedule returns 401 Unauthorized despite valid auth\", closed 2025-06-16, unchanged. Same endpoint, different symptom."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom --include-prs --limit 30 'rescheduledBy'  (30 hits org-wide, superset of the review's 13; newest relevant activity is 2026-05-06 (#28636) and everything else predates the review. None describes an api-key owner auto-confirming a pending reschedule)",
+      "gh search issues --owner calcom --include-prs --limit 30 --updated '>2026-05-01' 'reschedule requires confirmation pending accepted'  (0 results)"
+    ]
+  },
+  "reevaluation": "Stands unchanged, high confidence. None of the culprit files moved, so bookings.service.ts:769 still overrides the rescheduledBy-derived identity with the authenticated API-key owner and a PENDING booking rescheduled by an owner-key caller who correctly declares the attendee in rescheduledBy still comes back accepted. The tracker is unchanged: all three cited items are in exactly the state the review recorded, and no new item describes this symptom. The strength of the finding is that the evidence contains its own control, step 2 (outsider key, same request shape, pending) against step 7 (owner key, accepted), which isolates the caller credential as the deciding input. One thing the filer must NOT assert as observed: the second-order path where an UNauthenticated caller passes the host's email in rescheduledBy and gets the booking auto-confirmed. That is derived from input.service.ts:544-548 (findByEmail with no check that the caller is that person) plus OptionalApiAuthGuard returning null instead of rejecting; it was never run. If the live step confirms it, that half is a privilege bypass and should go the security route separately, while the main finding stays a public contract bug.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "calcom/cal.diy .github/ISSUE_TEMPLATE/config.yml sets `blank_issues_enabled: false`, so a bug must go through bug_report.md (Issue Summary / Steps to Reproduce / Actual Results / Expected Results / Technical details / Evidence, the last called \"quite mandatory in terms of bugs\"); CONTRIBUTING.md: \"For bugs, security, performance, documentation, etc., you can start coding immediately, even if the `needs approval` label is present\", so no discussion-first gate applies.",
+  "confidence": "high",
+  "notes": "The doc sentence is not hosted-only: it ships in the Cal.diy tree as the DTO's own swagger description (packages/platform/types/bookings/2024-08-13/inputs/reschedule-booking.input.ts, RESCHEDULED_BY_DOCS), which makes this Cal.diy's own contract and removes any edition-mismatch defence. Blame is a regression worth naming in the issue: PR #19833 (2025-03-11) deliberately REMOVED the api-key-owner fallback so the owner would stop deciding confirmation, and PR #24640 (2025-10-30, an org-admin seated-booking fix) restored it as a one-line `?? authUser?.id`. Suggested fix shape: make input.service.ts return a tri-state instead of encoding \"attendee is rescheduling\" as an undefined that `??` cannot distinguish from \"not supplied\". If the maintainer keeps the current precedence, the docs and RESCHEDULED_BY_DOCS need a caller-identity sentence, because today they state an unconditional rule the code does not implement. calcom/cal.com and calcom/cal.diy are the SAME repository: gh api repos/calcom/cal.com returns full_name calcom/cal.diy (the repo was renamed, GitHub redirects the old path). Every calcom/cal.com#NNNN reference in the review resolves to the same number on calcom/cal.diy, and one `--owner calcom` search covers both. The commercial Cal.com source is private, so nothing about the hosted product is verifiable and no \"fixed in cal.com\" claim can be made."
+}

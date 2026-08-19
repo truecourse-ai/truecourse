@@ -1,0 +1,75 @@
+{
+  "repo": "strapi",
+  "scenarioId": "a-permission-configured-through-the-admin-api-does-not-outlive-a-restart.api.1",
+  "flowId": "a-permission-configured-through-the-admin-api-does-not-outlive-a-restart",
+  "failingStep": 7,
+  "whatFailed": "An admin token that was granted plugin::content-manager.explorer.read on api::article.article through the admin panel's own route, and that demonstrably derived the list_article MCP tool, derives an empty tool list after a plain server restart, because Strapi's boot-time permission cleanup silently deletes the token's permission row.",
+  "docClaim": {
+    "quote": "Admin tokens are configured entirely from the admin panel. No code-based configuration is specific to Admin tokens. ... Removing a permission from a role causes Admin tokens owned by users of that role to have the corresponding permission deleted automatically.",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/admin-tokens.md (published at https://docs.strapi.io/cms/features/admin-tokens; source repo strapi/documentation)",
+    "section": "Configuration (line 29) plus Managing Admin tokens (line 74)"
+  },
+  "observed": "Step 3 (POST /admin/admin-tokens) returned 201 with adminPermissions[0] = plugin::content-manager.explorer.read on api::article.article, permission id 382, properties {}. Step 4 (PUT /admin/admin-tokens/10) returned 200 and echoed the same permission back. Step 5 (POST /mcp tools/list with the token) returned list_article and get_article, so the grant was live. Step 6 restarted the server, changing nothing else. Step 7, the identical tools/list call, returned HTTP 200 with {\"result\":{\"tools\":[]}}. The token still authenticates (an invalid or expired token would be rejected, not answered with an empty list), so the permission row itself is gone: authenticateAdminToken builds the CASL ability from apiToken.adminPermissions read live from the database on every request (packages/core/admin/server/src/services/api-token.ts:685-728). No warning, log line or error accompanied the deletion (server.stderr.txt is empty).",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "Silent privilege loss and silent config loss: an admin token configured for Content-Manager work keeps authenticating but can do nothing after any restart (deploy, crash, supervisor bounce), so MCP agents and CI pipelines break with no error, no log and no notification, and the panel simply shows the permission unchecked.",
+  "rootCause": {
+    "file": "packages/core/admin/server/src/services/permission/queries.ts",
+    "lines": "90-187",
+    "explanation": "Admin bootstrap calls permissionService.cleanPermissionsInDatabase() on every boot (packages/core/admin/server/src/bootstrap.ts:203). That function pages through admin::permission and asks filterPermissionsToRemove (lines 90-123) which rows are stale. A row is removed when its action is unregistered, its subject is out of the action's subject list, OR every property in the action's options.applyToProperties is nil on the row (`hasInvalidProperties`). plugin::content-manager.explorer.read declares applyToProperties: ['fields'] (packages/core/content-manager/server/src/services/permission.ts:41-48), and the i18n plugin appends 'locales' to every contentTypes-section action (packages/plugins/i18n/server/src/services/permissions/actions.ts:42-62). The admin-token API stores its permissions with properties {} : permissionDomain.create fills the default `properties: {}` and neither enforceAdminPermissionsCeiling nor createApiTokenAdminPermissions ever backfills fields or locales (packages/core/admin/server/src/services/api-token.ts:255-378), which is deliberate, since a nil fields set means 'all fields' at request time (see the ceiling comment at api-token.ts:265-268 and the tool outputSchema in step 5 listing every field). The fixture's api::article.article is localized (the step 5 tool schema hits the 'No locale access for this action.' branch, reachable only for a localized type per packages/core/content-manager/server/src/mcp/permissions.ts:66-90), so both 'fields' and 'locales' are nil-and-applicable, hasInvalidProperties is true, and the row is deleted by deleteByIds at line 180. PR #25657 taught the SAME function about token-owned permissions in its other branch (the orphan filter at lines 147-154 explicitly keeps rows that have an apiToken and no role, and the unit test at services/__tests__/permission.test.ts:189-260 covers exactly that case with actions that have no applyToProperties), but left filterPermissionsToRemove written for role permissions only, where the panel always writes an explicit fields array. Nothing else at boot can be the culprit: syncAPITokensPermissions touches admin::api-token-permission (content-API tokens) not admin::permission, assignPermissions/resetSuperAdminPermissions delete only rows scoped to `role: { id }`, and syncApiTokenPermissionsForUser returns early for super-admin owners (api-token.ts:534-548), which this token's owner is."
+  },
+  "introducedBy": {
+    "commit": "52b8fd9e3d47132f52ae910d32a6ee25961c5f32",
+    "date": "2026-04-29",
+    "pr": "#25657",
+    "title": "feat(admin): api token supports admin permissions and admin user ownership",
+    "note": "This commit created token-owned admin::permission rows and edited cleanPermissionsInDatabase (adding populate: ['role','apiToken'] and the orphan branch) without extending filterPermissionsToRemove, whose nil-property removal rule is much older: it is present in packages/core/admin/server/src/services/permission/queries.js from d44a6f68ee (2021-08-02, 'Migrate admin to programmatic loading') and was moved to TypeScript by 728d614ca4 (2023-11-16, #18232 'Migrate @strapi/admin server to typescript'). Old code, new interaction: the pre-existing cleanup is correct for role permissions (the panel always sends properties.fields for content-type actions, see packages/core/admin/admin/src/pages/Settings/pages/Roles/utils/permissions.ts:80-200) and only becomes destructive once the admin-token API starts writing content-type permissions with empty properties."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 25657,
+        "url": "https://github.com/strapi/strapi/pull/25657",
+        "state": "merged",
+        "title": "feat(admin): api token supports admin permissions and admin user ownership",
+        "relation": "related",
+        "note": "The PR that introduced token-owned admin permissions and the half-updated boot cleanup. No issue or PR reports the restart wipe."
+      },
+      {
+        "number": 27027,
+        "url": "https://github.com/strapi/strapi/pull/27027",
+        "state": "merged",
+        "title": "fix(admin): make plugin/setting \"Select all\" work in admin token permissions",
+        "relation": "related",
+        "note": "Merged 2026-07-15, before the tested build. Same feature area (admin token permission editing) but a front-end selection bug, unrelated to persistence."
+      },
+      {
+        "number": 26371,
+        "url": "https://github.com/strapi/strapi/pull/26371",
+        "state": "merged",
+        "title": "feat(*): introduce MCP server",
+        "relation": "related",
+        "note": "Supplies the tools/list surface the scenario observes the loss through; it is the messenger, not the cause."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi \"admin token\" --include-prs --limit 40",
+      "gh search issues --repo strapi/strapi \"permissions restart deleted\" --include-prs --limit 25 (0 results)",
+      "gh search issues --repo strapi/strapi \"token permissions lost restart\" --include-prs --limit 25 (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log c43e9ee1e2..develop -- packages/core/admin/server/src/services/permission/queries.ts packages/core/admin/server/src/bootstrap.ts packages/core/admin/server/src/services/api-token.ts returns nothing, and git log c43e9ee1e2..develop -- packages/core/admin/server/src is empty too. Only 4 commits separate the tested commit from develop HEAD acf0ce2034 (2026-08-14), none in the admin server. The behaviour is unchanged on develop as of the 2026-08-15 fetch."
+  },
+  "colleagueFinding": {
+    "ref": "strapi #1",
+    "agreement": "refines",
+    "note": "Agrees on the symptom (permissions granted through the admin-token API are deleted at the next boot, token still authenticates and can do nothing) and on the blame commit 52b8fd9e3d / PR #25657. Refines the mechanism: the boot cleanup WAS taught about token permissions (PR #25657 added populate: ['role','apiToken'] and an orphan filter that deliberately keeps apiToken-owned rows, with a unit test for it); what reaps the row is the much older nil-property rule in filterPermissionsToRemove, which #25657 did not touch. Also refines the scope: the wipe is not universal. It hits content-type permissions stored with empty properties, i.e. what the API writes when the caller omits properties.fields. Permissions on non-localized content types survive by accident (the i18n 'locales' check returns false, so not EVERY applicable property is nil), permissions with an explicit fields array survive, and settings/plugin permissions (subject null, no applyToProperties) survive. Panel-created content-type permissions carry an explicit fields array, so in practice this bites the programmatic caller, which is precisely the audience admin tokens exist for."
+  },
+  "notes": "For maintainers: the smallest correct fix is to stop applying the nil-property rule to apiToken-owned permissions in filterPermissionsToRemove (queries.ts:90-123), mirroring the orphan branch that already special-cases them; alternatively backfill properties at write time in createApiTokenAdminPermissions. A related inconsistency worth fixing in the same pass: nil properties mean opposite things in the three code paths. At creation, nil fields explicitly means 'all fields' (api-token.ts:265-268, and the step 5 tool outputSchema exposed every field). At request time, nil locales means 'no locales' (the tool schema rendered locale as z.never() with 'No locale access for this action.'). At boot, nil means 'invalid, delete'. For the doc author (strapi/documentation, cms/features/admin-tokens): the page lists exactly one way a token loses a permission, 'Removing a permission from a role causes Admin tokens owned by users of that role to have the corresponding permission deleted automatically', which reads as an exhaustive statement and reinforces that a restart is not supposed to be another way. Reproduction: POST /admin/admin-tokens with adminPermissions [{action: 'plugin::content-manager.explorer.read', subject: '<any localized content type>'}] and no properties, confirm the grant, restart, then GET /admin/admin-tokens/:id and observe adminPermissions is empty. Nothing needs the MCP server; the MCP tools/list call is only the most legible readout of the ability."
+}

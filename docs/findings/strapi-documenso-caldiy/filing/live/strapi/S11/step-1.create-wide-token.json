@@ -1,0 +1,11 @@
+{
+  "status": 201,
+  "id": 7,
+  "accessKeyMasked": "89349998...776d4f (len 256)",
+  "permissions": [
+    "plugin::content-manager.explorer.read",
+    "plugin::content-manager.explorer.create",
+    "plugin::content-manager.explorer.update",
+    "plugin::content-manager.explorer.delete"
+  ]
+}

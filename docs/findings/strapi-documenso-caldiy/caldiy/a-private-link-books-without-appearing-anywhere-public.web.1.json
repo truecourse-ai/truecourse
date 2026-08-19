@@ -1,0 +1,39 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-private-link-books-without-appearing-anywhere-public.web.1",
+  "flowId": "a-private-link-books-without-appearing-anywhere-public",
+  "failingStep": 2,
+  "whatFailed": "On the private link booking page /d/refprivatelink0000000000/private-consult the calendar day button \"15\" was still not in the DOM when the step's 10 second budget ran out, so the incidental \"the page behind the hash is bookable\" half of step 2 went red even though the page rendered correctly a moment later.",
+  "docClaim": {
+    "quote": "Private Links are not discoverable on your public booking page. ... Non-Guessable, Secure URLs: Each private link is generated as a secure, hash-based URL that cannot be guessed or found publicly.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/private-links.md",
+    "section": "private-links, private-links/key-features"
+  },
+  "observed": "Step 1 passed: the public profile /reference-host lists \"Private Consult\" as a link and the literal hash segment refprivatelink0000000000 appears nowhere in the page text. Step 2's URL assertion also passed: the address was /d/refprivatelink0000000000/private-consult?month=2026-09, matching the hash-shaped pattern. Only the second assertion of step 2 failed. The failure detail says \"the page has no button elements at all\", which is what the driver prints when every element carrying role=button has empty inner text, i.e. the calendar is still rendering the SkeletonText placeholder buttons (packages/features/calendars/components/DatePicker.tsx, the props.isLoading branch around lines 315-322). The page reached this state because the scenario navigates with no month parameter: the seed closes the whole run month (August 2026), so the booker first fetches August's slots, finds none, and only then calls useMoveToNextMonthOnNoAvailability (apps/web/modules/bookings/components/DatePicker.tsx:17-52) to advance to September, which starts a SECOND slots query and puts the grid back into the skeleton state. Two sequential slot round trips did not fit inside DEFAULT_WEB_STEP_TIMEOUT_MS = 10000, which also covers the page.goto. The full-page screenshot taken right after the deadline (step-2.png) shows the finished page: September 2026, day 15 selected in a dark square, and the 9:30am to 4:30pm slot list for Tue 15. The run's own visual judge reached the same conclusion, that the expected result appears visible and the assertion, not the page, is at fault.",
+  "verdict": "environment",
+  "confidence": "high",
+  "impact": "None. No user is harmed and no doc claim is contradicted: both milestones this scenario exists to prove (the hash is absent from the public profile, and the private address is hash shaped) were evidenced green. The cost is a false red in the guard board.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"booking page slow to load calendar skeleton\" (0 results)",
+      "gh search issues --owner calcom \"booker automatically moves to next month no availability\" (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix upstream, and nothing changed. In cal.diy: git log 038381aeca..origin/main touches neither apps/web/modules/bookings/components/DatePicker.tsx nor packages/features/calendars/components/DatePicker.tsx (only 4 commits landed on main at all since the tested commit). In cal.com: git log --since=2026-07-31 on the same two files is empty, so the empty-month auto-advance and the skeleton loading state are byte identical in both repos as of 2026-08-15."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available at review time."
+  },
+  "notes": "Three independent controls make the timing reading solid rather than a guess. (1) Same route, same assertion, pinned month: a-usage-limited-private-link-dies-with-its-last-booking.web.1 navigates /d/ref-private-link-once/private-consult?month=2030-06 and its \"button 12 (exact) is visible\" check passes in 6704 ms, so the /d/<hash>/<slug> page itself exposes day buttons normally and this is not an accessibility or edition problem. (2) The failure signature is a cluster, not a one-off: in the same run the identical \"no button named N is on the page\" mismatch hits /reference-host/buffer-before (16515 ms), /reference-host/limit-one (17030 ms), /reference-host/daily-limit (18594 ms), /reference-host/interval-default (16504 ms), /reference-host/split-day (16237 ms) and /reschedule/refbk-past-reschedule (10732 ms), all of them navigations that force the extra month hop, while every navigation that pins ?month= to a month with availability passes in 458 to 6704 ms. (3) The passes that do take the extra month hop cluster right under the budget: custom-title 9110 ms, override-check 9116 ms, phone-only 9715 ms. That is the shape of a budget marginally too small, not of a broken page. What would settle it beyond doubt: re-run this scenario with ?month=2026-09 appended to the step 2 navigate (the convention roughly twenty sibling scenarios already follow), or raise the web step timeout above 10 s; either should turn it green without touching cal.diy. Two smaller observations for whoever touches this scenario next. First, the step 2 URL regex ^/d/[A-Za-z0-9]{16,}/private-consult is satisfied by the seed literal refprivatelink0000000000, which is a 24 character seeded constant rather than a product-generated hash, so this assertion proves the route shape, not that cal.diy generates non-guessable hashes; the generation itself is untested by this scenario. Second, the driver's \"the page has no button elements at all\" line is misleading here: roleInventory drops buttons whose inner text is empty, so a grid of icon-only or skeleton buttons reads as no buttons at all. Reporting the raw role count separately from the named-text inventory would have made this failure self-diagnosing."
+}

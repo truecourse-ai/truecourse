@@ -1,0 +1,12 @@
+{
+  "step": 2,
+  "label": "PREP recipient",
+  "at": "2026-08-19T19:16:54.212Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/recipient/create-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_urlxhxhbndxwvbvu\",\"data\":[{\"email\":\"tcref-metabad-8e267c4132@documenso.test\",\"name\":\"TCRef Meta Bad\",\"role\":\"SIGNER\"}]}"
+}

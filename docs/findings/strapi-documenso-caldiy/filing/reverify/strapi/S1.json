@@ -1,0 +1,67 @@
+{
+  "id": "S1",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/admin/server/src/services/permission/queries.ts#L90-L123",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/admin/server/src/services/permission/queries.ts#L90-L123",
+    "howDecided": "git log c43e9ee1e2..origin/develop over all five culprit files (admin/server/src/services/permission/queries.ts, admin/server/src/bootstrap.ts, admin/server/src/services/api-token.ts, content-manager/server/src/services/permission.ts, plugins/i18n/server/src/services/permissions/actions.ts) returns nothing: not one of the 14 commits in the range touches any of them. I then read origin/develop:queries.ts directly: filterPermissionsToRemove is still at lines 90-123 with hasInvalidProperties at line 113 and the removal condition '!isRegisteredAction || isInvalidSubject || hasInvalidProperties' at line 117; the apiToken-aware orphan branch from PR #25657 is still at lines 141-149 (populate ['role','apiToken'] at 141, the !permission.role && !permission.apiToken filter at 149) and deleteByIds still runs at 180. bootstrap.ts still calls permissionService.cleanPermissionsInDatabase() at line 203. Line numbers today are identical to the tested build because the files are byte-identical."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#25657",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-04-29",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "The PR that introduced token-owned admin permissions and the half-updated boot cleanup. Last touched 2026-05-15, well before the review."
+      },
+      {
+        "ref": "strapi/strapi#27027",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-07-16",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Front-end 'Select all' fix in the admin-token permission editor. Unchanged; still unrelated to persistence."
+      },
+      {
+        "ref": "strapi/strapi#26371",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-05-27",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "feat(*): introduce MCP server. Closed/merged 2026-05-27, last touched 2026-05-27. Unchanged."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi \"admin token permissions\" --include-prs --limit 40 (2 results: PR #27027 merged 2026-07-15, PR #25951 closed 2026-04-07 e2e test fix. Neither reports the restart wipe.)",
+      "gh search issues --repo strapi/strapi \"permissions deleted restart\" --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. No commit since the tested build touches any of the five culprit files, and the exact lines the review blamed are still where it left them, so the boot-time reap of apiToken-owned content-type permissions with empty properties is still live on develop and in v5.52.1. Two searches turned up nothing new: nobody has reported the restart wipe, and no PR is in flight on permission/queries.ts. The review's fixedAfter 'no' is still correct. Verdict, confidence (high) and scope are all unchanged. One thing a filer should carry over from the review's own scoping, because it decides whether a maintainer can reproduce: the wipe only bites a content-type permission stored with empty properties on a LOCALIZED content type. A non-localized type survives (the i18n 'locales' check returns false so not every applicable property is nil), an explicit properties.fields array survives, and settings/plugin permissions survive. Nothing about MCP is required to reproduce; MCP was only the readout.",
+  "routeSuggestion": "public issue",
+  "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
+  "confidence": "high",
+  "notes": "Not a security report despite being a permission bug: it fails closed (the token loses access, it does not gain any), so it is not a boundary violation under SECURITY.md and belongs in the public tracker. Reproduction for the BUG_REPORT.yml 'Steps to Reproduce' field, no MCP needed: POST /admin/admin-tokens with adminPermissions [{action: 'plugin::content-manager.explorer.read', subject: '<a localized content type>'}] and no properties, GET it back to confirm the grant, restart the server, GET again and observe adminPermissions empty. Strapi Version field: 5.52.0 (tested) and confirm it also reproduces on 5.52.1. The suggested fix belongs in filterPermissionsToRemove (queries.ts:90-123): skip the nil-property rule for apiToken-owned rows, mirroring the orphan branch at 147-154 that already special-cases them.",
+  "filed": {
+    "url": "https://github.com/strapi/strapi/issues/27417",
+    "at": "2026-08-19",
+    "account": "truecourse-agent"
+  }
+}

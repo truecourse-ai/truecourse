@@ -1,0 +1,84 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "request-a-reschedule-from-the-attendee.api.1",
+  "flowId": "request-a-reschedule-from-the-attendee",
+  "failingStep": 2,
+  "whatFailed": "POST /v2/bookings/{bookingUid}/request-reschedule, a documented Cal.com API v2 operation, is not routed at all in the Cal.diy build: Nest answered 404 NotFoundException \"Cannot POST /v2/bookings/5fT3LTWxLc83LVmjBioSY5/request-reschedule\" instead of the documented 200.",
+  "docClaim": {
+    "quote": "Request to reschedule a booking. The booking will be cancelled and the attendee will receive an email with a link to reschedule. ... Please make sure to pass in the cal-api-version header value as mentioned in the Headers section. ... paths: /v2/bookings/{bookingUid}/request-reschedule: post: ... operationId: BookingsController_2026_02_25_requestReschedule ... parameters: - name: cal-api-version ... description: Must be set to 2026-02-25. required: true ... responses: '200': ... RequestRescheduleOutput_2024_08_13: type: object properties: status: enum: [success, error] ... required: [status]",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/request-to-reschedule-a-booking.md",
+    "section": "request-to-reschedule-a-booking + request-to-reschedule-a-booking/openapi (lines 5-11 and 28-98)"
+  },
+  "observed": "Step 1 created booking uid 5fT3LTWxLc83LVmjBioSY5 (201, status accepted). Step 2 POSTed to /v2/bookings/5fT3LTWxLc83LVmjBioSY5/request-reschedule with cal-api-version: 2026-02-25 and body {\"rescheduleReason\": \"...\"} and got HTTP 404 with {\"status\":\"error\",\"error\":{\"code\":\"NotFoundException\",\"message\":\"Cannot POST /v2/bookings/5fT3LTWxLc83LVmjBioSY5/request-reschedule\"}}. server.stdout.txt shows the request reaching the app (Incoming Request logged, auth fine: the prior call ran as userId 1) and then HttpExceptionFilter emitting Nest's generic unmatched-route NotFoundException. This is a router miss, not a version rejection, not an auth failure, and not a missing booking: the message is Nest's default \"Cannot POST <url>\" text.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "Anyone reading Cal.com's public API v2 reference and driving a Cal.diy / self-hosted build gets a hard 404 on a documented endpoint; the underlying capability (cancel the booking and email the attendee a reschedule link) exists in Cal.diy but is only reachable from the web UI via tRPC, so there is no REST path to automate host-initiated reschedule requests. No data loss, a missing documented contract.",
+  "rootCause": {
+    "file": "apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts",
+    "lines": "80-566",
+    "explanation": "The documented operation has no implementation anywhere in the tested tree. BookingsController_2024_08_13 (the only booking-action controller that ships) declares @Post(\"/\"), @Post(\"/:bookingUid/reschedule\") (296), @Post(\"/:bookingUid/cancel\") (336), @Post(\"/:bookingUid/mark-absent\") (390), @Post(\"/:bookingUid/reassign\") (415/439), @Post(\"/:bookingUid/confirm\") (470) and @Post(\"/:bookingUid/decline\") (494), and no request-reschedule sibling. `git grep request-reschedule` and `git grep requestReschedule` over apps/api/v2 and packages/platform in the tested worktree return nothing at all, so no version of the API exposes it. Two independent things are wrong relative to the doc: (1) the doc mandates cal-api-version 2026-02-25 and names operationId BookingsController_2026_02_25_requestReschedule, but packages/platform/constants/api.ts:56-68 lists only 2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04, and apps/api/v2/src/bootstrap.ts:31-41 silently downgrades an unknown header to 2024-04-15 (systemic cause 1); (2) even on the versions Cal.diy does have, the path does not exist, so the header is irrelevant here and the scenario would 404 identically with cal-api-version 2024-08-13 or 2024-04-15. The behavior the doc describes IS implemented in the product: packages/trpc/server/routers/viewer/bookings/requestReschedule.handler.ts sets the booking to BookingStatus.CANCELLED with rescheduled: true and cancellationReason (lines 80-84) and calls sendRequestRescheduleEmailAndSMS (line 206). Only the REST v2 surface is missing. Corroborating first-party record: .github/oasdiff-err-ignore.txt:2022 in the tested tree reads \"POST /v2/bookings/{bookingUid}/request-reschedule api path removed without deprecation\", one of 180 such path-removal entries (the rest are mostly /v2/organizations/* EE endpoints) that the Cal.diy fork commit added in bulk; the pre-fork parent a17f28e9ab has zero such entries, and the workflow that consumed the file (.github/workflows/check-api-v2-breaking-changes.yml at a17f28e9ab) diffed the fork's generated spec against calcom/cal.com main's published docs/api-reference/v2/openapi.json. Caveat: the openapi.json committed at a17f28e9ab itself has no request-reschedule path and no BookingsController_2026_02_25_* operation, so the live baseline that produced the entry was ahead of the committed OSS artifact. Do not lean on the oasdiff line alone; the grep-level absence plus PR #28243 settle it."
+  },
+  "introducedBy": {
+    "commit": "ab21c7f805a089fa3a11ffd61c4a9aecc349c16c",
+    "date": "2026-04-15",
+    "pr": "#28903",
+    "title": "refactor: Cal.diy",
+    "note": "Not a regression introduced by a code change to a working route: the endpoint never existed in the public OSS tree. The last pre-fork public spec (git show a17f28e9ab:docs/api-reference/v2/openapi.json) lists booking operationIds only up to BookingsController_2024_08_13_* and contains no request-reschedule path. The fork commit ab21c7f805a is the point at which Cal.diy formally recorded the path as absent relative to Cal.com's published spec (.github/oasdiff-err-ignore.txt:2022, git blame). The commercial implementation lives in a BookingsController_2026_02_25 that is not in any public repo, so the introducing change on the Cal.com side is not verifiable from source."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "bookings API version drift: docs mandate cal-api-version 2026-02-25, source tops out at 2024-08-13/2024-09-04",
+        "relation": "related",
+        "note": "Reused from the coordinator's established systemic cause 1. Explains why the scenario sends 2026-02-25, a version Cal.diy does not implement, but is not the reason for this 404: the path is missing at every version."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28243,
+        "url": "https://github.com/calcom/cal.diy/pull/28243",
+        "state": "closed",
+        "title": "feat: add request reschedule API v2 endpoint",
+        "relation": "exact",
+        "note": "Decisive. Opened 2026-03-02 by PeerRich (Devin-authored, 8 files, +368), closed unmerged 2026-03-03 with no stated reason. Its own description says it 'Adds a new POST /v2/bookings/:bookingUid/request-reschedule endpoint ... This exposes the existing tRPC requestRescheduleHandler as a REST API v2 endpoint', which confirms the OSS tree did not have it. Notably the PR targeted cal-api-version 2024-08-13, not the 2026-02-25 the public docs mandate, further evidence that the documented 2026-02-25 controller is commercial-only."
+      },
+      {
+        "number": 28205,
+        "url": "https://github.com/calcom/cal.diy/pull/28205",
+        "state": "open",
+        "title": "fix(request-reschedule): admins can request rescheduling of team member bookings",
+        "relation": "related",
+        "note": "Touches the tRPC request-reschedule path (permissions), not the missing REST endpoint."
+      },
+      {
+        "number": 28543,
+        "url": "https://github.com/calcom/cal.diy/issues/28543",
+        "state": "open",
+        "title": "Bug: rescheduledToUid Is null in BOOKING_CANCELLED Webhook When Triggered via \"Request Reschedule\"",
+        "relation": "related",
+        "note": "Confirms the request-reschedule feature exists and is exercised through the UI/tRPC path in the OSS build; unrelated to the missing REST route."
+      }
+    ],
+    "queries": [
+      "gh search issues \"request-reschedule\" --owner calcom --include-prs --limit 30 (30 hits, all calcom/cal.diy, all open, none about the missing REST v2 endpoint)",
+      "gh search issues \"request-reschedule api\" --owner calcom --include-prs --state closed --limit 25 (1 hit: PR #28243, the exact match)",
+      "note: calcom/cal.com issue and PR URLs redirect to calcom/cal.diy, so both repos were covered by the two org-scoped searches; no separate --repo query was needed. No issue was found reporting the 404 itself, so the user-facing symptom appears unreported."
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on main between the tested 038381aeca (2026-07-31) and origin/main 176037d0af (2026-08-08): #29940 emails customReplyToEmail, #29901 language update, #29740 phone-input country fallback, #29819 Clara app. None touches bookings routing. `grep -rn request-reschedule apps/api/v2/src` on main returns nothing, and packages/platform/constants/api.ts still has no 2026 version, so the endpoint is still absent on main. The only attempt to add it, PR #28243, was closed unmerged on 2026-03-03. in cal.com: not verifiable from source; the commercial tree is private and the public calcom/cal.com main is a byte-identical mirror of cal.diy main (176037d0af). The public docs page still documents the endpoint at cal-api-version 2026-02-25, which implies the hosted product serves it, but nothing public confirms a fix or a port."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office vs date overrides, zero-length team slots, dropped 9:10 slot, seated-booking oversell, unauthenticated slot-hold mutation). None of them concerns request-reschedule or a missing REST route."
+  },
+  "notes": "Not a test-defect. The scenario's own step-2 note says the author knew the route was catalogued specOnly and deliberately asserted the documented 200 so the documented-but-unimplemented gap would surface; the request itself is doc-faithful (correct path, correct header value per the doc, the single optional rescheduleReason body field). Answers to the two questions the brief asks for a systemic-cause-1 hit: (a) yes, the scenario would fail identically on the versions Cal.diy does have, because the path is unrouted at every version, so the 2026-02-25 header is incidental here rather than causal; (b) no independent Cal.diy-side defect in the bound claim: the documented behavior (cancel the booking, email the attendee a reschedule link) is correctly implemented in packages/trpc/server/routers/viewer/bookings/requestReschedule.handler.ts, it simply has no REST exposure. Consequences for the rest of the scenario: step 3 (read the booking back and expect status cancelled) would also fail because nothing cancelled it, step 4 (expect 400 for a missing body) would get 404, and step 5 (expect 404 without the bookingUid segment) would pass vacuously since every shape of this path 404s. For the doc author: the page is Cal.com's hosted API v2 reference and carries no note that the operation is unavailable in the open-source or self-hosted build, unlike the plainly EE-gated organizations endpoints; adding an availability note, or Cal.diy publishing its own reduced API v2 reference, would close the gap. For a Cal.diy maintainer: reviving PR #28243 (or reworking it against a supported version) is the whole fix, and the PR body already flags the three review points that presumably stalled it (a TrpcSessionUser vs ApiAuthGuardUser compile-time type mismatch, a status-only response shape unlike confirm/decline, and a redundant booking lookup). Sandbox noise present in the evidence but irrelevant to the verdict: SMTP ECONNREFUSED on ::1:1025 and a Daily/Cal Video api_key ZodError during step 1's booking creation; step 1 still returned 201 and the captured uid was valid."
+}

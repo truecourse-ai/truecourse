@@ -1,0 +1,84 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "reassign-a-round-robin-booking.api.1",
+  "flowId": "reassign-a-round-robin-booking",
+  "failingStep": 2,
+  "whatFailed": "POST /v2/bookings/{bookingUid}/reassign answered 200 with the envelope the docs require (status: success, data present) and the exact body its own DTO declares, {bookingUid, reassignedTo:{id,name,email,displayEmail}}, but the scenario asserted data.uid and data.hosts[0].id, two fields that no schema on either bound doc page defines.",
+  "docClaim": {
+    "quote": "ReassignBookingOutput_2024_08_13: type: object; properties: status: enum: [success, error]; data: oneOf: [$ref: '#/components/schemas/ReassignBookingOutput_2024_08_13'] description: 'Booking data, which can be either a ReassignAutoBookingOutput object or a ReassignManualBookingOutput object' allOf: [$ref: '#/components/schemas/ReassignBookingOutput_2024_08_13']; required: [status, data]",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/reassign-a-booking-to-auto-selected-host.md",
+    "section": "reassign-a-booking-to-auto-selected-host/openapi (lines 73-94; the identical schema is repeated in reassign-a-booking-to-a-specific-host.md lines 93-112)"
+  },
+  "observed": "Step 1 created the round-robin booking (uid cVRx1La31YaHnjS7MPFz3F, host id 1 Reference Host). Step 2 POST /v2/bookings/cVRx1La31YaHnjS7MPFz3F/reassign with cal-api-version 2024-08-13 returned HTTP 200 in 31 ms with {\"status\":\"success\",\"data\":{\"bookingUid\":\"cVRx1La31YaHnjS7MPFz3F\",\"reassignedTo\":{\"id\":1,\"name\":\"Reference Host\",\"email\":\"reference-host@example.com\",\"displayEmail\":\"reference-host@example.com\"}}} (server.stdout.txt line 314). status matched the enum and data existed; only data.uid (and, had it been reached, data.hosts[0].id) was absent. The server mapped only the 2024-08-13 versions of both reassign routes (server.stdout.txt lines 174-175), and the only stderr noise is the sandbox mail server on port 1025 refusing connections, unrelated to the assertion.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for the asserted field: the response matched the product contract and the docs' only concrete promise (status + data). The real harm sits next to it: the published reassign response schema is self-referential, so no API consumer can learn the shape, and in Cal.diy the endpoint reports a successful reassignment it never performs.",
+  "rootCause": {
+    "file": "apps/api/v2/src/platform/bookings/2024-08-13/outputs/reassign-booking.output.ts",
+    "lines": "8-22",
+    "explanation": "This is the root cause of the DOC defect that made the scenario guess, not of the failing assertion itself. The NestJS envelope class here is named ReassignBookingOutput_2024_08_13 and its data property is typed as the platform-types class of the SAME name (imported aliased at line 6, registered via @ApiExtraModels at line 8, $ref'd via getSchemaPath at line 15). Nest's Swagger plugin keys component schemas by class name, so the two collapse into one entry and the generated OpenAPI emits data.oneOf/allOf pointing back at the envelope itself: the published page therefore documents zero response fields. The prose at lines 16-17, carried verbatim into the docs, names ReassignAutoBookingOutput and ReassignManualBookingOutput, which exist nowhere in the codebase (only this string) and nowhere in the fetched doc corpus. The actual data shape is packages/platform/types/bookings/2024-08-13/outputs/booking.output.ts:415-426 (bookingUid + reassignedTo), materialized by getOutputReassignedBooking at apps/api/v2/src/platform/bookings/2024-08-13/services/output.service.ts:539-553, and that is exactly what the product returned. There is no uid or hosts anywhere on this response path, in this build or in the documented 2026-02-25 operation, whose declared response schema on the doc page is still ReassignBookingOutput_2024_08_13."
+  },
+  "introducedBy": {
+    "commit": "25d39b42738d8119a13dd1e95354b23cce656002",
+    "date": "2024-11-08",
+    "pr": "#17460",
+    "title": "feat: api v2 reassign",
+    "note": "Added the two reassign routes, the {bookingUid, reassignedTo} data class, the same-name envelope class that collapses the OpenAPI schema, and the ReassignAuto/ManualBookingOutput description string. git blame in the tested worktree attributes the current file lines to ab21c7f805a089fa3a11ffd61c4a9aecc349c16c 'refactor: Cal.diy (#28903)' (2026-04-15) only because that squash moved apps/api/v2/src/ee/bookings/** to apps/api/v2/src/platform/bookings/**; the reassign code itself is unchanged from #17460. The same squash replaced the reassignment engine with no-op stubs (packages/platform/libraries/index.ts:123-150, '// Round-robin reassignment removed (EE feature)')."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 17401,
+        "url": "https://github.com/calcom/cal.diy/issues/17401",
+        "state": "closed",
+        "title": "[CAL-4646] Reassign automatic and Reassign manual given API V2 endpoints",
+        "relation": "related",
+        "note": "The Linear-synced request that produced the two endpoints. Its title is the origin of the 'auto or manual output' wording, but the body is a bare SyncLinear stub and specifies no response shape. Closed 2025-04-17. Does not report the schema problem."
+      },
+      {
+        "number": 21485,
+        "url": "https://github.com/calcom/cal.diy/issues/21485",
+        "state": "closed",
+        "title": "docs: document that reassign is only for round robin",
+        "relation": "related",
+        "note": "The only docs-side reassign item found. It is about the round-robin-only restriction, not the response schema."
+      }
+    ],
+    "prs": [
+      {
+        "number": 17460,
+        "url": "https://github.com/calcom/cal.diy/pull/17460",
+        "state": "merged",
+        "title": "feat: api v2 reassign",
+        "relation": "related",
+        "note": "The blame PR: introduced both the shipped response shape and the name collision that empties the published schema."
+      },
+      {
+        "number": 20755,
+        "url": "https://github.com/calcom/cal.diy/pull/20755",
+        "state": "merged",
+        "title": "refactor: v2 automatic round robin reassign error message",
+        "relation": "related",
+        "note": "Later touch on the same v2 auto-reassign path (error text only); shows the endpoint was still maintained upstream before the fork stubbed it."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom --include-prs \"ReassignBookingOutput reassign output schema\" (0 results)",
+      "gh search issues --owner calcom --include-prs \"reassign booking api v2 response\" (0 results)",
+      "gh search issues --owner calcom --include-prs --match title \"reassign\" --limit 30 (26 results, none about the response schema, the circular OpenAPI ref, or the community-edition no-op)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only four commits landed on origin/main after the tested 038381aeca (through 176037d0af, 2026-08-08) and none touches apps/api/v2/src/platform/bookings/2024-08-13/**, packages/platform/types/bookings/2024-08-13/** or packages/platform/libraries/index.ts, so both the response shape and the no-op stubs are unchanged on main. in cal.com: not verifiable from source (the commercial tree is private and the public calcom/cal.com clone is a mirror of cal.diy). The public docs snapshot fetched 2026-08-12 still carries the self-referential ReassignBookingOutput_2024_08_13 schema on both reassign pages, and the documented 2026-02-25 operation still declares that same 2024-08-13 output type, so there is no public sign the schema was fixed either."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's write-up at /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (5 findings: OOO vs date overrides, zero-length team slots, the dropped 9:10 override slot, seated-booking attendee add, unauthenticated slot holds) contains no reassign item; the word does not appear in the file. This failure maps to none of caldiy #1 to #5."
+  },
+  "notes": "Answering the round-robin edition question directly: the endpoint DOES exist in the tested tree. Both routes are declared in apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts:415-437 and 439-456 and were mapped at boot (server.stdout.txt lines 174-175), teams and round-robin event types still exist in the data model (the seed's 'Reference Team Round Robin' event type booked fine in step 1), and only the ENGINE was removed: packages/platform/libraries/index.ts:123-150 replaces roundRobinReassignment and roundRobinManualReassignment with empty async no-ops under the comment 'Round-robin reassignment removed (EE feature)'. bookings.service.ts:993-1048 awaits the no-op, re-reads the booking, and hands the unchanged host to getOutputReassignedBooking, which is why the response says reassignedTo id 1, the original host, in 31 ms with no calendar or email work. So Cal.diy answers 200 'success' for a reassignment that provably did not happen. That is a genuine edition-mismatch defect against the doc sentence 'Currently only supports reassigning host for round robin bookings', and it is worth filing on its own (a removed feature should 501 or 404, not report success), but it is NOT what step 2 asserted: the step only checked the envelope and the invented fields, and the scenario's own note already anticipated the no-op as product finding P7. Recommended scenario fix: assert data.bookingUid and data.reassignedTo.id (the real, code-declared contract) instead of data.uid and data.hosts[0].id, and add an assertion that reassignedTo.id differs from the original host if the intent is to prove reassignment actually moved the booking. Recommended docs fix for cal.com: rename one of the two ReassignBookingOutput_2024_08_13 classes (or pass an explicit @ApiExtraModels name) so the generated OpenAPI stops $ref-ing the envelope from its own data property, and delete the stale ReassignAutoBookingOutput / ReassignManualBookingOutput wording. Version-header note: this step deliberately sent cal-api-version 2024-08-13, a version Cal.diy actually serves, so systemic cause 1 (the missing 2026-02-25 version) is not in play here; step 3, the step that does send 2026-02-25, never ran because step 2 aborted the scenario, and the same is true of the six later steps including both named-route shape checks."
+}

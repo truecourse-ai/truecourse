@@ -1,0 +1,44 @@
+{
+  "step": 4,
+  "label": "PREP signature field on the draft",
+  "at": "2026-08-19T19:15:07.272Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "387",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:07 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "996",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "ebee0fd4-ff3d-45e0-bcfd-f5ab7936220e"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_zxidtommuuvcurfz",
+        "envelopeItemId": "envelope_item_ruomtronircenbzi",
+        "type": "SIGNATURE",
+        "id": 4,
+        "secondaryId": "cmt0h175y0018hoeo3ub78ko7",
+        "recipientId": 4,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "80",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        },
+        "documentId": 3,
+        "templateId": null
+      }
+    ]
+  }
+}

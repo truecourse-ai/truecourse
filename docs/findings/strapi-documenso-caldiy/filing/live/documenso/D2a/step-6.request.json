@@ -1,0 +1,12 @@
+{
+  "step": 6,
+  "label": "CONTROL: the same move with every coordinate supplied",
+  "at": "2026-08-19T19:15:29.303Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/field/update-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeId\":\"envelope_bxwelneerccdovmc\",\"data\":[{\"id\":7,\"type\":\"TEXT\",\"page\":1,\"positionX\":10,\"positionY\":60,\"width\":20,\"height\":5}]}"
+}

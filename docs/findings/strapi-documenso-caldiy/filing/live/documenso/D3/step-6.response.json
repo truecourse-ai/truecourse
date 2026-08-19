@@ -1,0 +1,44 @@
+{
+  "step": 6,
+  "label": "ASSISTANT on an explicitly PARALLEL envelope (expected 400)",
+  "at": "2026-08-19T19:15:50.266Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "457",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:15:50 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "963",
+    "x-ratelimit-reset": "1787166960",
+    "x-request-id": "6669825c-2f72-4228-8f80-0f5e3e1f5809"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_fteuhazrouxlatwn",
+        "role": "ASSISTANT",
+        "readStatus": "NOT_OPENED",
+        "signingStatus": "NOT_SIGNED",
+        "sendStatus": "NOT_SENT",
+        "id": 9,
+        "email": "tcref-asst2-bb15bb7b7e@documenso.test",
+        "name": "TCRef Assistant 2",
+        "token": "1vSbCfk6CVHuk3FZKT3MB",
+        "documentDeletedAt": null,
+        "expired": null,
+        "expiresAt": null,
+        "expirationNotifiedAt": null,
+        "signedAt": null,
+        "authOptions": {
+          "accessAuth": [],
+          "actionAuth": []
+        },
+        "signingOrder": null,
+        "rejectionReason": null
+      }
+    ]
+  }
+}

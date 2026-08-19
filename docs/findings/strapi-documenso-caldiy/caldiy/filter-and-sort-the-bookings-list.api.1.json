@@ -1,0 +1,84 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "filter-and-sort-the-bookings-list.api.1",
+  "flowId": "filter-and-sort-the-bookings-list",
+  "failingStep": 1,
+  "whatFailed": "The scenario's first setup call, POST /v2/bookings with cal-api-version: 2026-02-25 and a 2026-era body ({start, attendee:{name,email,timeZone}, eventTypeId}), returned 400 because Cal.diy does not know that version, silently fell back to the 2024-04-15 route, and validated the body against the legacy CreateBookingInput_2024_04_15 DTO, which requires flat timeZone, language and metadata and has no attendee property.",
+  "docClaim": {
+    "quote": "Must pass `cal-api-version: 2026-05-01` header. ... - name: cal-api-version / in: header / description: Must be set to 2026-05-01. / required: true (get-all-bookings.md, the bound page). The version the failing step actually sent comes from the sibling page the scenario used for setup: \"- name: cal-api-version / in: header / description: Must be set to 2026-02-25. / required: true\" (create-a-booking.md:85-92).",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/get-all-bookings.md",
+    "section": "get-all-bookings/openapi (lines 9, 54, 93-100); setup version from create-a-booking.md lines 85-92"
+  },
+  "observed": "400 BadRequestException with three class-validator errors: timeZone must be a valid IANA time-zone (isTimeZone), language must be a string (isString), metadata must be an object (isObject). The echoed `target` is {\"start\":\"2050-09-17T13:00:00.000Z\",\"eventTypeId\":123}, i.e. the nested `attendee` object the request sent was whitelist-stripped before validation, which is the fingerprint of the 2024-04-15 DTO handling a 2024-08-13/2026-era body. Duration 16 ms, no server error, server.stderr.txt empty. The scenario aborted at step 1, so none of the 17 documented filter and sort parameters it was written to exercise were ever hit.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "None for a Cal.diy operator who uses the versions Cal.diy ships. An integrator who follows the public Cal.com docs verbatim against a self-hosted Cal.diy gets a confusing 400 naming fields the docs never mention (timeZone, language, metadata), because the unknown version is downgraded silently rather than rejected.",
+  "rootCause": {
+    "file": "packages/platform/constants/api.ts",
+    "lines": "56-68",
+    "explanation": "API_VERSIONS in the tested tree is exactly [2024-06-14, 2024-06-11, 2024-04-15, 2024-08-13, 2024-09-04]. Neither 2026-02-25 nor 2026-05-01 appears anywhere in apps/api/v2/src or packages/platform (grep returns zero hits at 038381aeca), and there is no BookingsController_2026_05_01. apps/api/v2/src/bootstrap.ts:31-41 installs a CUSTOM Nest version extractor that returns the header only when API_VERSIONS.includes(it) and otherwise returns VERSION_2024_04_15, with defaultVersion also 2024-04-15, so an unknown version is downgraded silently instead of 400-ing with 'unsupported version'. POST /v2/bookings at 2024-04-15 is served by apps/api/v2/src/platform/bookings/2024-04-15/controllers/bookings.controller.ts:196, whose body DTO apps/api/v2/src/platform/bookings/2024-04-15/inputs/create-booking.input.ts:91-146 declares timeZone (@IsTimeZone, line 122-124), language (@IsString, 135-137) and metadata (@IsObject, 144-146) as required and has no `attendee` member; the global ValidationPipe runs with whitelist: true (bootstrap.ts:58-60), which is why the echoed target lost `attendee`. That triple is verbatim what the 400 reports."
+  },
+  "introducedBy": {
+    "commit": "5dc81e8677c14525242d88419cc2544741c08fdb",
+    "date": "2025-02-13",
+    "pr": "#18758",
+    "title": "feat: v2 slots new version (#18758)",
+    "note": "Not a bug that was introduced, an absence. git blame on packages/platform/constants/api.ts:56-68 at the tested commit shows the API_VERSIONS list was last extended by 5dc81e8677c (2025-02-13, PR #18758, adding VERSION_2024_09_04); nothing has been added since, so every 2026-era version the public docs mandate is unknown to this tree. The silent-downgrade half is older-but-newer-touched: the extractor at apps/api/v2/src/bootstrap.ts:31-41 traces to 9ad8aa981ac 'chore: deploy api v2 on vercel (#26735)', 2026-01-13 (Morgan), which moved the block from apps/api/v2/src/app.ts (0a15483c461, 2024-03-20); the fall-through to VERSION_2024_04_15 has been the behavior since 2024. The 2024-04-15 DTO fields themselves are 2024-era code. The failure is the interaction: 2026 docs against a 2024-capped version table plus a fallback that never says 'unsupported version'."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 28762,
+        "url": "https://github.com/calcom/cal.diy/issues/28762",
+        "state": "open",
+        "title": "Endpoint to discover latest cal-api-version per endpoint",
+        "relation": "exact",
+        "note": "The canonical trace for this systemic cause: names the 2024-08-13 vs 2026-02-25 bookings API drift and asks for a way to discover the version an endpoint actually supports, precisely because the docs and the shipped tree disagree."
+      },
+      {
+        "number": 29785,
+        "url": "https://github.com/calcom/cal.diy/issues/29785",
+        "state": "open",
+        "title": "Improve Maintainability of cal-api-version",
+        "relation": "related",
+        "note": "Open meta-issue about how cal-api-version is managed; same root, no fix."
+      },
+      {
+        "number": 28512,
+        "url": "https://github.com/calcom/cal.diy/issues/28512",
+        "state": "closed",
+        "title": "get all bookings filter",
+        "relation": "related",
+        "note": "A user reporting that ?attendeeEmail= on GET /v2/bookings returns every booking (filter ignored) against api.cal.com. It targets the same bound doc claim this scenario was written to prove, but it is a hosted-API report and it was resolved in the thread as a client-side usage problem (closed 2026-03-24). Cal.diy's own code does honour the parameter: apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts:643-644 maps attendeeEmail before querying. Recorded here because if the version header is ever fixed this is the first thing a re-run would re-test."
+      }
+    ],
+    "prs": [
+      {
+        "number": 28561,
+        "url": "https://github.com/calcom/cal.diy/pull/28561",
+        "state": "closed",
+        "title": "fix(bookings): map cal-api-version 2026-02-25 to latest supported version",
+        "relation": "exact",
+        "note": "Opened 2026-03-24, closed unmerged 2026-03-25. Proposed mapping 2026-02-25 onto 2024-08-13, exactly the failing step's header. Its author confirmed the hosted API serves 2026-02-25 while the open-source tree does not. Still unmerged at the tested commit and at origin/main 176037d0af."
+      }
+    ],
+    "queries": [
+      "gh search issues 'cal-api-version 2026-05-01 bookings' --owner calcom (0 results)",
+      "gh search issues 'cal-api-version 2026' --owner calcom (3 results: cal.diy #29785, #28762, #28512)",
+      "reused the coordinator-established traces rather than re-searching them; gh issue view 28512 and gh pr view 28561 are not search calls"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on origin/main after the tested 038381aeca (through 176037d0af, 2026-08-08) and git log 038381aeca..origin/main touches none of packages/platform/constants/api.ts, apps/api/v2/src/bootstrap.ts, apps/api/v2/src/platform/bookings/ or packages/platform/types/bookings/. The four are #29940 (email reply-to), #29901 (language update), #29740 (phone country fallback) and #29819 (Clara app). PR #28561, the only proposed fix, is closed unmerged. in cal.com: not verifiable from source. The commercial tree is private and the public calcom/cal.com main is byte-identical to calcom/cal.diy main (176037d0af), so it carries the same 2024-capped API_VERSIONS. The public docs and PR #28561's author both indicate the hosted API does serve 2026-02-25 and 2026-05-01, but that cannot be checked from any source available here."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md (out-of-office with date overrides, zero-length team slots, dropped 9:10 override slot, seated-booking oversell, unauthenticated slot-hold mutation). This is instance #1 of the coordinator's systemic cause 1, the API version header Cal.diy does not ship."
+  },
+  "notes": "Answers to the two questions the brief asks for a systemic-cause-1 failure.\n\n(a) Would the scenario also fail on the versions Cal.diy actually has? No, it looks like it would substantially pass on 2024-08-13, which makes this a pure version-header mismatch and not a hidden product defect. The failing body is the exact shape of CreateBookingInput_2024_08_13 (packages/platform/types/bookings/2024-08-13/inputs/create-booking.input.ts:222-238: required start, required attendee object with name and timeZone, optional eventTypeId), so POST /v2/bookings would have returned 201. Every one of the 17 filter and sort parameters the GET steps assert exists verbatim in GetBookingsInput_2024_08_13 (packages/platform/types/bookings/2024-08-13/inputs/get-bookings.input.ts): attendeeEmail:72, attendeeName:82, bookingUid:92, eventTypeIds:114, eventTypeId:125, teamsIds:146, teamId:157, afterStart:167, beforeEnd:177, afterCreatedAt:187, beforeCreatedAt:197, afterUpdatedAt:207, beforeUpdatedAt:217, sortStart:230, sortEnd:242, sortCreated:255, sortUpdatedAt:268. The scenario is also internally inconsistent about this: its own step 32 (POST /v2/bookings/{uid}/guests) already sends cal-api-version: 2024-08-13, a version Cal.diy does have, because that doc page names it. Re-running this scenario with 2024-08-13 on every step is the single highest-value follow-up, and it is the only way to learn whether the filter and sort claims hold in Cal.diy.\n\n(b) Does the bound doc claim have a Cal.diy-side defect independent of the version? Not one this run can show, and none is visible in source for the filters. But part of the bound page is Cal.com-only beyond the header: the 2026-05-01 page documents cursor-based pagination (`cursor` query param at line 259, `pagination.nextCursor`, `pagination.hasMore`) and a status-derived `Booking.uuid` ordering table. Neither `cursor` nor `nextCursor` nor `hasMore` appears in Cal.diy's GetBookingsInput_2024_08_13 or its outputs; Cal.diy paginates with take and skip (lines 277 and 284). So even at the newest version Cal.diy ships, the pagination contract on this page does not describe it. The scenario never asserted pagination, so that gap went unmeasured.\n\nOne product observation worth passing upstream regardless of edition: the downgrade is silent. bootstrap.ts:31-41 turns an unrecognised cal-api-version into 2024-04-15 with no warning header, no log and no 400 naming the version. The user-visible result is a validation error about three fields the caller never sent and the docs never mention, with the caller's own `attendee` object missing from the echoed target because whitelist: true stripped it. A one-line rejection of unknown versions, or an echo of the resolved version in a response header, would turn every failure of this class into a self-explaining one. The 2024-08-13 controller's own ApiHeader text already admits the behavior (\"If not set to this value, the endpoint will default to an older version\", bookings.controller.ts:88), which is documentation of a footgun rather than a fix."
+}

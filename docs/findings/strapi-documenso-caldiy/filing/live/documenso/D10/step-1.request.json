@@ -1,0 +1,11 @@
+{
+  "step": 1,
+  "label": "unknown envelope id: the documented {error, code, statusCode} body",
+  "at": "2026-08-19T19:17:28.378Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_doesnotexist0000",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

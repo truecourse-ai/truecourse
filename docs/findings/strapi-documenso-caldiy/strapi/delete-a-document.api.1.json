@@ -1,0 +1,84 @@
+{
+  "repo": "strapi",
+  "scenarioId": "delete-a-document.api.1",
+  "flowId": "delete-a-document",
+  "failingStep": 3,
+  "whatFailed": "DELETE /api/tcref-not-a-content-type/<documentId>, a path no content-type declares, answers 405 Method Not Allowed with Allow: HEAD, GET and a plain-text body, while GET on the exact same path in the same run answers 404 with Strapi's JSON error envelope.",
+  "docClaim": {
+    "quote": "| `DELETE` | `/api/:pluralApiId/:documentId` | [Delete a document](#delete) |  ...  **Parameters:** - `pluralApiId` (string, required): Plural API ID (e.g. `restaurants`) - `documentId` (string, required): Document ID of the entry to delete  ...  Requests return a response as an object which usually includes the following keys: ... `error` (object, _optional_): information about any [error](/cms/error-handling) thrown by the request",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/api/rest.md",
+    "section": "rest-api-reference/endpoints + rest-api-reference/requests/delete-a-document-delete (upstream: https://docs.strapi.io/cms/api/rest, source lives in the separate strapi/documentation repo)"
+  },
+  "observed": "server.stdout.txt: 'DELETE /api/tcref-not-a-content-type/kd5glmt3qd4fro8k5967nx8h (1 ms) 405'; response body is the bare string 'Method Not Allowed' (response.txt / response.raw.txt), i.e. Koa's default status text, not JSON. In the same run (read-one-document-by-its-documentid.api.1, step 5) 'GET /api/tcref-not-a-content-type/oxu7drtrrz6081a4c0mcn43n' returned 404 with {\"data\":null,\"error\":{\"status\":404,\"name\":\"NotFoundError\",\"message\":\"Not Found\",\"details\":{}}}. So the same non-existent resource is reported as absent to GET and as existing-but-wrong-method to DELETE.",
+  "verdict": "real-defect",
+  "confidence": "medium",
+  "impact": "Any integrator who mistypes a pluralApiId (or calls a content-type whose route was disabled) gets a misleading 405 with Allow: HEAD, GET, telling them the URL is right and the verb is wrong, when GET on that URL is a 404 too; the body is plain text rather than the documented JSON error envelope, so generic Strapi error handling (response.json() / reading error.status) breaks. Applies to every non-GET/HEAD method on every unrouted path in every Strapi app, not just the content API.",
+  "rootCause": {
+    "file": "packages/core/core/src/middlewares/public.ts",
+    "lines": "26-35",
+    "explanation": "The strapi::public middleware registers a GET route whose path is the catch-all regexp '/((?!uploads/).+)' on the shared top-level Koa router so koa-static can serve ./public. packages/core/core/src/services/server/index.ts:79 mounts that router as app.use(router.routes()).use(router.allowedMethods()). @koa/router 12.0.2 (pinned in packages/core/core/package.json:62) builds allowedMethods from ctx.matched, which is matched.path: every layer whose PATH regexp matched, regardless of whether its handler ran (@koa/router lib/router.js:479-531, read from the published 12.0.2 tarball). The public catch-all matches every path except /uploads/..., and its Layer methods are ['HEAD','GET'] (lib/layer.js:27-29 unshifts HEAD for GET). So for a request with no route at all, allowed = {HEAD, GET}, the request method DELETE is not in it, and allowedMethods sets ctx.status = 405 with Allow: HEAD, GET. Setting the status explicitly also flips Koa's ctx.response._explicitStatus, which makes the strapi::errors middleware skip its ctx.notFound() fallback (packages/core/core/src/middlewares/errors.ts:16-19) - that fallback is exactly what produces the JSON {data:null,error:{status:404,...}} envelope the GET on the same path gets. Result: 405 plus a plain-text body instead of 404 plus the documented envelope. Middleware order is confirmed by packages/core/core/src/services/server/register-middlewares.ts:7-18, where strapi::errors is registered before strapi::public and before the router mount. Secondary sites: packages/core/core/src/services/server/index.ts:79 and packages/core/core/src/middlewares/errors.ts:16-19."
+  },
+  "introducedBy": {
+    "commit": "38a7e3ce244c3655419c1beaecac9fb08a3eff8a",
+    "date": "2024-01-18",
+    "pr": "#19270",
+    "title": "chore: remove default index page from public middleware",
+    "note": "git blame of the tested worktree puts the current lines on this commit (merged 2024-01-19 as PR #19270), but that commit only lifted the route out of the old packages/core/core/src/middlewares/public/index.ts, where the identical '/((?!uploads/).+)' GET catch-all already existed behind the defaultIndex flag (on by default). The behaviour therefore predates Strapi 5: issue #11756 reports the same 405 on a fresh Strapi v4.0.0 install (2021-12-01). The interaction is old code (the catch-all) meeting old code (koa-router allowedMethods); nothing recent introduced it. Verified by git show 38a7e3ce244^:packages/core/core/src/middlewares/public/index.ts."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 11756,
+        "url": "https://github.com/strapi/strapi/issues/11756",
+        "state": "closed",
+        "title": "V4 Method Not Allowed when hitting /auth/local",
+        "relation": "related",
+        "note": "Same symptom from the user side on Strapi v4.0.0: a POST to a path with no matching route answers 405 instead of 404, which sent the reporter looking for a method problem. Closed as completed with no code change to the public middleware; the underlying 405-for-unrouted-paths behaviour was never filed as such."
+      },
+      {
+        "number": 24197,
+        "url": "https://github.com/strapi/strapi/issues/24197",
+        "state": "closed",
+        "title": "405 Method Not Allowed for custom plugin routes after upgrading from 5.17 to 5.22",
+        "relation": "related",
+        "note": "Strapi 5 report of the same downstream confusion: routes that failed to register answer 405, so the reporter concluded the method was rejected rather than that the route was gone. Closed 2025-08-20 without touching public.ts."
+      },
+      {
+        "number": 15024,
+        "url": "https://github.com/strapi/strapi/issues/15024",
+        "state": "closed",
+        "title": "Not able to extend user-permissions controller endpoints (results in 405 error)",
+        "relation": "related",
+        "note": "Same misdiagnosis pattern on v4.5.1: an unregistered extension route surfaces as 405, not 404."
+      }
+    ],
+    "prs": [
+      {
+        "number": 0,
+        "url": "https://github.com/strapi/strapi/commit/326ed84d774fe11eb214ab6aaa11937c1035b75c",
+        "state": "open",
+        "title": "chore(core): upgrade @koa/router to 15.7.0",
+        "relation": "related",
+        "note": "Unmerged branch chore/upgrade-koa-router-15, commit 326ed84d774fe11eb214ab6aaa11937c1035b75c dated 2026-08-07; no PR number confirmed (finding it would have cost a fourth search call). It touches the culprit line: path '/((?!uploads/).+)' becomes the RegExp /^\\/(?!uploads\\/).+/ for path-to-regexp v8. Still a GET catch-all on the same router, so it would not change the 405, and it is not an ancestor of origin/develop as of 2026-08-15."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi --include-prs '\"Method Not Allowed\"'",
+      "gh search issues --repo strapi/strapi --include-prs 'allowedMethods'",
+      "gh search issues --repo strapi/strapi --include-prs '405 instead of 404'"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log c43e9ee1e20f613b63f8f10d9e52be062a8b4a72..origin/develop -- packages/core/core/src/middlewares/public.ts packages/core/core/src/services/server/index.ts packages/core/core/src/middlewares/errors.ts packages/core/core/src/services/server/api.ts returns nothing; develop at acf0ce2034 (fetched 2026-08-15) still has the same catch-all and the same allowedMethods mount. The only post-tested work touching the line is the unmerged chore/upgrade-koa-router-15 branch, which preserves the behaviour."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the researcher's 8 Strapi findings covers this. Theirs are MCP-tool, admin-token, filter-operator, page-size, SQL-leak and docs items; this one is the core REST router answering 405 rather than 404 for unrouted paths, and it is not MCP related."
+  },
+  "notes": "Two caveats a maintainer should hear. (1) The bound doc never states a status code for an unknown pluralApiId; it only lists 'pluralApiId (string, required)' and shows a 404 example under Get a document. The scenario turned 'required' into 'expect 404', which is an inference, so the specific expected value was over-specified. What makes this still a product defect rather than a test defect is the product's own inconsistency, visible in the same run: GET on that exact path returns 404 with the documented {data,error} envelope, DELETE returns 405 with Allow: HEAD, GET and a plain-text body, and the docs' Requests section does promise an 'error' object for errors. The Allow header is factually wrong: GET on that path is also a 404. (2) Step 4 of this scenario (DELETE /api/articles, documentId omitted, expect 404) never ran because step 3 aborted the scenario, but it would also have failed with 405 - and there 405 is the CORRECT answer, since /api/articles is a real resource supporting GET, HEAD and POST. If this scenario is regenerated, step 4's expectation should become 405 with Allow containing GET and POST, and step 3's should become 404 with the JSON error envelope. Suggested upstream fix: register the koa-static handler as plain app-level middleware (or via router.all / a method-agnostic layer) instead of a GET router route, so an unrouted path does not advertise GET; alternatively mount allowedMethods before the public middleware registers its catch-all."
+}

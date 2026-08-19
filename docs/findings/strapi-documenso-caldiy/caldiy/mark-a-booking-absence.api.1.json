@@ -1,0 +1,50 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "mark-a-booking-absence.api.1",
+  "flowId": "mark-a-booking-absence",
+  "failingStep": 2,
+  "whatFailed": "Step 2 called POST /v2/bookings/{uid}/mark-absent on the booking step 1 had just created for 2051-01-15T13:00:00Z and got 400 instead of 200, because cal.diy only allows a booking to be marked absent after its scheduled start time and the scenario never arranged for a booking that had started.",
+  "docClaim": {
+    "quote": "post /v2/bookings/{bookingUid}/mark-absent ... description: The provided authorization header refers to the owner of the booking. ... requestBody: required: true ... responses: '200': description: '' content: application/json: schema: $ref: '#/components/schemas/MarkAbsentBookingOutput_2024_08_13'. The page documents no other response and no precondition on the booking. The sibling help page in the same scanned corpus does state the precondition: \"You can now mark guests as \\\"No Show\\\" for past bookings where one or more attendees did not attend.\" (.truecourse/specs/sources/cal.com-help/help/bookings/no-show.md:7)",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/mark-a-booking-absence.md",
+    "section": "mark-a-booking-absence/openapi"
+  },
+  "observed": "Step 1 created booking uid n96fHhyNNhAKqU8UUyrejq with start 2051-01-15T13:00:00.000Z (201, accepted). Step 2 posted {host: true, attendees: [{email, absent: true}]} with cal-api-version 2024-08-13 and got HTTP 400 in 27 ms: {\"status\":\"error\",\"error\":{\"code\":\"BadRequestException\",\"message\":\"Bookings can only be marked as absent after their scheduled start time. Current time in UTC+0: 2026-08-13T10:50:37.824Z, Booking start time in UTC+0: 2051-01-15T13:00:00.000Z\"}}. The request reached the real 2024-08-13 handler, so this is a semantic refusal, not a version or validation-shape problem. server.stderr.txt only shows the sandbox SMTP being absent (ECONNREFUSED ::1:1025 while sending the booking confirmation), which is unrelated.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users: the refusal is correct, immediate and its message names the exact reason. The cost is coverage: because the scenario books 25 years into the future and marks absence one step later, the entire documented mark-absent contract (the 200 envelope, the 17 required booking-output fields, absentHost true and attendees[0].absent true) is never exercised, and steps 3 to 6 of the scenario never run.",
+  "rootCause": {
+    "file": "apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts",
+    "lines": "959-966",
+    "explanation": "markAbsent loads the booking, computes nowUtc and the booking start in UTC, and throws BadRequestException when nowUtc < bookingStartTimeUtc, before calling handleMarkNoShow. This is a deliberate precondition, not a defect: it matches the product's own help documentation (no-show is an action on past bookings, reached from bookings/past) and the web UI, which only offers Mark as No Show on past bookings. Cited here as the code the scenario collided with, not as a bug. The scenario also had no documented way to reach the happy path: POST /v2/bookings refuses a start in the past (packages/lib/isOutOfBounds.tsx:10 BookingDateInPastError, mapped to 400 in apps/api/v2/src/platform/bookings/2024-08-13/services/errors.service.ts:47-48), so an eligible booking has to be seeded directly in the database."
+  },
+  "introducedBy": {
+    "commit": "1a70f83d34f14955ddb03d895d4c46117ac83a6b",
+    "date": "2025-05-14",
+    "pr": "#21214",
+    "title": "fix: v2 sentry errors",
+    "note": "This commit added the not-found check and the start-time guard to markAbsent; its message lists \"fix: POST /v2/bookings/:bookingUid/mark-absent Failed to update no-show status\", so the 400 was introduced on purpose to replace a Sentry-reported failure on bookings that had not started. git blame in the tested worktree points instead at 77f59b1e4d8 (2026-01-12, #26523 \"chore: Integrate confirmation booking audit\"), which only moved the lines while the file still lived under apps/api/v2/src/ee/... before the ee to platform rename; the guard text is byte-identical at 77f59b1e4d8^ and at e20cc960f16^."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues \"mark-absent\" --owner calcom --include-prs --limit 30 (30 fuzzy hits across calcom/cal.diy and calcom/companion, none about the mark-absent start-time precondition or the missing doc note)",
+      "gh search issues '\"marked as absent after their scheduled start time\"' --include-prs --limit 20 (one hit, qodo-benchmark/cal.com-combined-qodo#121, a mirror of the same code, not an upstream report)",
+      "gh search issues \"mark absent no-show\" --owner calcom --match title --include-prs --limit 20 (empty)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: nothing changed and nothing needs to. Only 4 commits landed between the tested commit 038381aeca and origin/main head 176037d0af (2026-08-08) and none of them touches apps/api/v2/src/platform/bookings/2024-08-13/services/bookings.service.ts, so the start-time guard is still in place on main. in cal.com: not verifiable from source. The published API reference page snapshotted on 2026-08-13 still lists a 200 as the only response and still says nothing about the precondition, and cal.diy's own bundled spec (docs/api-reference/v2/openapi.json, path /v2/bookings/{bookingUid}/mark-absent) has the identical gap, so this is a shared documentation gap rather than an edition mismatch."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md; that write-up covers out-of-office with date overrides, zero-length team slots, the dropped 9:10 slot, seated-booking attendee add, and unauthenticated slot holds. Nothing there touches mark-absent or no-show."
+  },
+  "notes": "Not an edition-mismatch and not the API-version systemic cause: step 2 sent cal-api-version 2024-08-13, which cal.diy does serve, and the request reached BookingsController_2024_08_13_markNoShow. Systemic cause 1 would have bitten step 3 (cal-api-version 2026-02-25, and the doc's operationId is BookingsController_2026_02_25_markNoShow while cal.diy tops out at 2024-08-13), but the run stopped at step 2.\n\nWhy test-defect rather than doc-bug: no API-reference page in this scanned corpus enumerates any 4xx for any bookings endpoint, so a page listing only a 200 is not a promise that every well-formed call succeeds; and a sibling page in the same corpus (cal.com-help/help/bookings/no-show.md) states plainly that no-show applies to past bookings. The scenario contradicted a doc it had already ingested and depended on state (a booking whose start time has passed) that it never set up.\n\nStill worth filing as a documentation improvement, secondary to the verdict: the mark-absent endpoint description should state that the booking must have started and that the API answers 400 otherwise. The text is generated from the @ApiOperation description at apps/api/v2/src/platform/bookings/2024-08-13/controllers/bookings.controller.ts:395-401 in the tested tree, so the one-line fix lives in cal.diy as well as in whatever tree generates cal.com's published reference.\n\nFor the guard engine: this flow cannot pass as written. Either seed a booking with a past startTime directly (the create route refuses past starts) and mark absence against that, or drop the contract step and keep only the input-validation steps. Note that a seeded past booking would also let steps 4 to 6 (body required, empty attendees array, attendee entry missing absent) run against the real validator instead of dying behind the same 400."
+}

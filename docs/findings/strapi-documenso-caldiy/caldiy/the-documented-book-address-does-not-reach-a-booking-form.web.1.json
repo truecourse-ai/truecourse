@@ -1,0 +1,92 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "the-documented-book-address-does-not-reach-a-booking-form.web.1",
+  "flowId": "the-documented-book-address-does-not-reach-a-booking-form",
+  "failingStep": 1,
+  "whatFailed": "Navigating to the prefill address the help centre prints verbatim, /{user}/book?type=12345&duration=30&email=...&notes=..., renders the app's fully drawn ERROR 404 page instead of a booking form, so no textbox named \"Email address\" exists to carry the prefilled value.",
+  "docClaim": {
+    "quote": "An example URL with a few prefill fields is given below: `https://cal.com/johndoe/book?type=12345&duration=30&email=johndoe%40example.com&notes=Test+Notes` You can integrate the prefill-fields with your booking page URL in a similar way.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/bookings/prefill-fields.md",
+    "section": "pre-fill-fields-questions (lines 21-23 of the snapshot). Upstream source of the same text: calcom/help repo, bookings/prefill-fields.mdx line 20; duplicated in calcom/docs repo, pages/core-features/bookings/prefill-fields.mdoc lines 17-20."
+  },
+  "observed": "HTTP 404. transcript.txt and invocation.json record one console error 'Failed to load resource: the server responded with a status of 404 (Not Found)' and visible page text 'ERROR 404 / This page does not exist. / Check for spelling mistakes or go back to the previous page. / POPULAR PAGES ...'. step-1.png shows that 404 page fully rendered (headline, Documentation and Blog cards, 'Or go back home'), not a skeleton, spinner or blank frame, and the step returned in 10.07 s. The page has no textbox elements at all. There is no /{user}/book route in the tested tree, so 'book' is parsed as the [type] segment, no event type of reference-host has that slug, and the route returns notFound.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Anyone who copies the help centre's worked example gets a 404 instead of a prefilled booking form; the mechanism the article teaches is fine, only its address is dead. Sharper hazard: because 'book' is now just an event-type slug, a host who happens to own an event type slugged 'book' turns the documented URL into a silent wrong-page load rather than a 404, opening an unrelated event's booker with the prefill applied.",
+  "rootCause": {
+    "file": "apps/web/server/lib/[user]/[type]/getServerSideProps.ts",
+    "lines": "212-259",
+    "explanation": "The behaviour is correct and deliberate, so the 'root cause' here is the routing shape the doc is stale against, not a bug. The tested tree's only public booker routes are apps/web/app/(booking-page-wrapper)/[user]/page.tsx and .../[user]/[type]/page.tsx (plus their /embed variants and /d/[link]/[slug]); there is no [user]/book page and no rewrite or redirect for one (grep of apps/web/next.config.ts finds only /booking/:uid and /bookings rules; the '?!book' comments left in apps/web/pagesAndRewritePaths.ts:62-64 are dead leftovers of the old booker). So /reference-host/book resolves to the [user]/[type] route with user='reference-host' and slug='book'. getUserPageProps parses those params at line 214, finds the user at line 233, then calls EventRepository.getPublicEvent with eventSlug='book' at lines 245-253; nothing matches, so lines 255-259 return { notFound: true } and Next renders the 404 page. That is the documented-since-2023 replacement shape: the same prefill query parameters do work on /{user}/{type}, which the sibling scenario prefill-the-booking-form-from-the-address-bar.web.1 proves in this very run (steps 1-3 passed on /reference-host/prefill-all-fields?...&email=johndoe%40example.com, reading the Email address textbox back as johndoe@example.com; it only failed later at step 4 on how the Additional notes textarea exposes its value). The doc sentence, not the product, is what is wrong."
+  },
+  "introducedBy": {
+    "commit": "b364a85ed857d94a046a278ad5549d3b716b5111",
+    "date": "2023-07-11",
+    "pr": "#10053",
+    "title": "chore: removed old booker and make new booker as a default",
+    "note": "This commit deleted apps/web/pages/[user]/book.tsx (309 lines), apps/web/pages/team/[slug]/book.tsx and apps/web/pages/d/[link]/book.tsx along with the rest of the old booker. git show b364a85ed8^:'apps/web/pages/[user]/book.tsx' confirms that page read exactly the parameters the doc example uses: line 82-83 '/** This is the event \"type\" ID */ type: z.coerce.number().optional()' and line 87 'duration: z.coerce.number().optional()'. So the doc example is a verbatim old-booker URL. git merge-base --is-ancestor confirms b364a85ed8 is an ancestor of both the tested cal.diy commit 038381aeca and of calcom/cal.diy main 176037d0af, i.e. the removal predates the spring 2026 fork by three years and is not an edition difference. Blame on the 404 lines themselves is unrelated plumbing history (e99e8b169af 2024-01-16 for the !user branch, 81e4241f855 2026-02-10 for the !eventData branch, moved by f31c45a153d 2025-04-23 and 218ec9140c0 2025-06-24); the routing decision, not those lines, is what the doc is stale against."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 6612,
+        "url": "https://github.com/calcom/cal.diy/issues/6612",
+        "state": "closed",
+        "title": "[CAL-854] get rid of /<username>/book route (cal.com/peer/book)",
+        "relation": "related",
+        "note": "The tracker item for the removal, filed 2023-01-21, closed COMPLETED 2023-05-17. Its body states the intent and the replacement shape: 'right now events fail if you call your event-type: \"book\" because https://cal.com/peer/book?type=50756&... is being used. we should not use a new route and instead just use parameters: before: https://cal.com/peer/book?type=50756&... after: https://cal.com/peer/30min?type=50756&...'. This is direct upstream evidence that the 404 is intentional product behaviour and that the doc example is the abandoned shape. Nobody filed a follow-up to fix the docs."
+      },
+      {
+        "number": 6529,
+        "url": "https://github.com/calcom/cal.diy/issues/6529",
+        "state": "closed",
+        "title": "[CAL-814] /book endpoint can't be directly embedded.",
+        "relation": "related",
+        "note": "Contemporary complaint about the same /{user}/book endpoint, part of the case for retiring it."
+      },
+      {
+        "number": 2010,
+        "url": "https://github.com/calcom/cal.diy/issues/2010",
+        "state": "closed",
+        "title": "HTTP 404 when trying to access `/[user]/book` route with username containing uppercase letters",
+        "relation": "related",
+        "note": "Historic 404 on the same route for a different reason (username casing), from the era when the route still existed. Not the same defect."
+      }
+    ],
+    "prs": [
+      {
+        "number": 10053,
+        "url": "https://github.com/calcom/cal.diy/pull/10053",
+        "state": "merged",
+        "title": "chore: removed old booker and make new booker as a default",
+        "relation": "exact",
+        "note": "Merged 2023-07-11. The change that made the documented address stop existing. It touched no documentation."
+      },
+      {
+        "number": 48,
+        "url": "https://github.com/calcom/help/pull/48",
+        "state": "merged",
+        "title": "Add Organizer's default app prefill documentation",
+        "relation": "related",
+        "note": "Merged 2025-11-17, the most recent edit to bookings/prefill-fields.mdx in calcom/help. It appended a new location section and left the dead example URL untouched, so the article was reviewed after the route was gone and the error survived."
+      }
+    ],
+    "queries": [
+      "gh search issues --owner calcom \"prefill\" --limit 60  (60 hits, none about the dead /{user}/book example; only calcom/docs#124 in the docs repo, unrelated)",
+      "gh search issues --owner calcom '\"/book?type=\"' --limit 30  (surfaced calcom/cal.diy#6612, #6529, #2010)",
+      "gh search prs --owner calcom '\"prefill-fields\"' --limit 25  (surfaced calcom/help#48, calcom/cal.diy#22436, #26982, #10130; revealed that the help article lives in the public calcom/help repo)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no. Only 4 commits landed on calcom/cal.diy main between the tested 038381aeca and 176037d0af, none touching apps/web/app or apps/web/next.config.ts; git ls-tree -r 176037d0af finds no [user]/book or team/[slug]/book path, so main still 404s the documented address. This is expected, not a regression: the route was retired on purpose. in cal.com: not verifiable from source (the commercial tree is private and the public calcom/cal.com main is byte-identical to cal.diy main), but the doc side is verifiable and is still broken. The authoritative article source calcom/help bookings/prefill-fields.mdx still carries `https://cal.com/johndoe/book?type=12345&duration=30&email=johndoe%40example.com&notes=Test+Notes` on main as of 2026-08-15 (path history: 60894dae17 2025-02-26 init, e588e27f2a 2025-06-13, 7bb0b77921 2025-09-08, 91e34c32d0 2025-11-17), and the mirror calcom/docs pages/core-features/bookings/prefill-fields.mdoc carries it too (single commit e25efd96a1, 2024-02-15). No PR proposes correcting it."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the five findings in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md map to this failure. That write-up covers out-of-office versus date overrides (#1), zero-length team slots (#2), the dropped 9:10 slot (#3), oversold seated bookings (#4) and unauthenticated slot-reservation access (#5). Nothing about prefill or the retired /{user}/book address."
+  },
+  "notes": "Not edition-mismatch, and worth stating plainly because this target invites that reading: the deleting commit b364a85ed8 is an ancestor of both the tested cal.diy tree and public main, so the route was gone from Cal.com's own codebase three years before the fork. Cal.diy is missing nothing Cal.com has here; the help centre is simply describing a 2023-and-earlier product. Not environment either: systemic cause 2 does not apply, the screenshot shows a fully painted 404 rather than a skeleton, and the 404 is a deterministic server verdict, not a deadline artefact. Not test-defect: the scenario transcribed the doc's own example shape for shape (its own note records this as DELIBERATELY RED) and swapped only the host for the seeded one, which is the honest way to ask whether the printed address works. Two extra observations for whoever fixes the doc. First, the article contradicts a sibling page in the same corpus: calcom/docs legacy/pages/developer/pre-fill.mdx uses the correct modern shape, `cal.com/rick/quick-chat/?email=attendee@example.com&name=John`. Second, `type=12345` and `duration=30` in the example are inert on the current booker even after the path is corrected: they were the old booker's event-type id and duration parameters, so the fixed example should read something like `https://cal.com/johndoe/30min?email=johndoe%40example.com&notes=Test+Notes` rather than merely swapping `book` for the slug. Finally, note the collision hazard the upstream issue itself raised: with `book` now an ordinary slug, following the stale URL against a host who owns an event type named `book` produces a plausible wrong page instead of an honest 404."
+}

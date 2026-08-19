@@ -1,0 +1,20 @@
+{
+  "status": 201,
+  "id": 8,
+  "accessKeyMasked": "7d21038e...f8a3e6 (len 256)",
+  "permissions": [
+    {
+      "id": 374,
+      "documentId": "vdsl6rpzs374t11hsnoufu1g",
+      "action": "admin::admin-tokens.read",
+      "actionParameters": {},
+      "subject": null,
+      "properties": {},
+      "conditions": [],
+      "createdAt": "2026-08-19T18:53:57.226Z",
+      "updatedAt": "2026-08-19T18:53:57.226Z",
+      "publishedAt": "2026-08-19T18:53:57.226Z",
+      "locale": null
+    }
+  ]
+}

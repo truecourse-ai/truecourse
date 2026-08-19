@@ -1,0 +1,62 @@
+{
+  "step": 5,
+  "label": "REJECT on the recipient behalf",
+  "at": "2026-08-19T19:16:11.377Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "865",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:11 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "995",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "985c8c81-c11b-4f7e-a347-a1136ec6094a"
+  },
+  "body": {
+    "envelopeId": "envelope_nfbbhctvneaaadxv",
+    "role": "SIGNER",
+    "readStatus": "NOT_OPENED",
+    "signingStatus": "REJECTED",
+    "sendStatus": "NOT_SENT",
+    "id": 10,
+    "email": "tcref-declines-1f36da77c3@documenso.test",
+    "name": "TCRef Decliner",
+    "token": "zkg6-gbbQJID09CoU63yn",
+    "documentDeletedAt": null,
+    "expired": null,
+    "expiresAt": "2026-11-17T19:16:10.854Z",
+    "expirationNotifiedAt": null,
+    "signedAt": "2026-08-19T19:16:10.877Z",
+    "authOptions": {
+      "accessAuth": [],
+      "actionAuth": []
+    },
+    "signingOrder": null,
+    "rejectionReason": "tcref declined 1f36da77c3",
+    "fields": [
+      {
+        "envelopeId": "envelope_nfbbhctvneaaadxv",
+        "envelopeItemId": "envelope_item_rfurxxfnzmanxacn",
+        "type": "SIGNATURE",
+        "id": 8,
+        "secondaryId": "cmt0h2k6m002yhoeoaqbgdr03",
+        "recipientId": 10,
+        "page": 1,
+        "positionX": "10",
+        "positionY": "70",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "fontSize": 18,
+          "overflow": "auto",
+          "type": "signature"
+        }
+      }
+    ]
+  }
+}

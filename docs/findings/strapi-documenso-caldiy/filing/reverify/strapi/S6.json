@@ -1,0 +1,59 @@
+{
+  "id": "S6",
+  "repo": "strapi",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "c7dbadd4feec41f0d3892c1bc9f5435e7aad3672",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/strapi/strapi/blob/c43e9ee1e20f613b63f8f10d9e52be062a8b4a72/packages/core/core/src/services/mcp/tool-registry.ts#L104-L113",
+    "permalinkToday": "https://github.com/strapi/strapi/blob/c7dbadd4feec41f0d3892c1bc9f5435e7aad3672/packages/core/core/src/services/mcp/tool-registry.ts#L104-L113",
+    "howDecided": "git log c43e9ee1e2..origin/develop returns nothing for packages/core/core/src/services/mcp/tool-registry.ts. On origin/develop, createErrorResult is still at line 104 and still interpolates the raw driver message verbatim at line 109: text: `Tool \"${name}\" execution failed: ${error.message}`, with no ApplicationError check and no environment gate. I also checked whether the leak is dev-mode-only, because Strapi's SECURITY.md excludes anything that only reproduces under strapi develop: it is not. McpConfiguration.isEnabled() reads server.mcp.enabled (default false) and is the only gate on the MCP server; isDevMode() reads autoReload and is consumed solely by syncMcpSessionCapabilities/canUseMcpCapability to widen which capabilities a session may use. So an operator running strapi start with server.mcp.enabled: true gets the same verbatim echo."
+  },
+  "docs": null,
+  "tracker": {
+    "newItems": [
+      {
+        "number": 27395,
+        "url": "https://github.com/strapi/strapi/issues/27395",
+        "state": "open",
+        "title": "MCP `tools/list` advertises draft-07 JSON Schema, making all tools uncallable from strict 2020-12 clients",
+        "createdAt": "2026-08-17",
+        "relation": "related",
+        "note": "New since the review. A different MCP schema defect (dialect of the advertised tool schemas), not this one. Useful precedent: labelled severity: high and status: confirmed within a day, which shows maintainers accept MCP contract bugs as public issues."
+      },
+      {
+        "number": 27115,
+        "url": "https://github.com/strapi/strapi/pull/27115",
+        "state": "open",
+        "title": "fix(content-manager): align MCP draft write schemas with admin draft leniency",
+        "createdAt": "2026-07-23",
+        "relation": "related",
+        "note": "Open PR, base develop, last pushed 2026-08-18. It edits the same file data-schema.ts but only the scalar/component required-field projection; gh pr diff shows no hunk covering the to-many relation object (no occurrence of 'Mutually exclusive'), so it changes nothing here."
+      }
+    ],
+    "citedItems": [
+      {
+        "ref": "strapi/strapi#26371",
+        "kind": "pr",
+        "stateAtReview": "merged",
+        "stateToday": "merged",
+        "changedSinceReview": false,
+        "mergedAt": "2026-05-27",
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "feat(*): introduce MCP server. Closed/merged 2026-05-27, last touched 2026-05-27. Unchanged."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo strapi/strapi mcp --include-prs --limit 60 --updated \">2026-08-10\"",
+      "gh search issues --repo strapi/strapi \"SQL query exposed error message\" --include-prs --limit 30 (0 results)"
+    ]
+  },
+  "reevaluation": "Stands unchanged: the verbatim echo is byte-identical on develop and shipped in v5.52.1. Nothing has been filed. The one thing re-verification adds is the dev-mode question, which decides whether Strapi will even look at it: the MCP server is gated by server.mcp.enabled, not by autoReload, so this is NOT an 'only reproduces under strapi develop' finding and the report should say so in as many words. What the review did not establish, and what SECURITY.md demands, is a PoC showing the disclosure crosses a security boundary. The observed leak (an INSERT statement with the caller's own values plus the internal created_by_id) is largely the caller's own data plus table/column names an authenticated MCP client can derive from the content-type schemas anyway. The review's stronger claim, that an UPDATE or a unique-constraint violation can put another record's data in the message, is a code-path inference with no evidence file behind it. Verdict on the behavior stays real-defect; confidence that Strapi will accept it as a vulnerability is medium at best.",
+  "routeSuggestion": "security disclosure",
+  "policyBasis": "SECURITY.md, Reporting a Vulnerability: \"All vulnerability reports are REQUIRED to be submitted through GitHub's Security Advisory (GHSA) system. This is the only accepted intake channel for security reports.\" (https://github.com/strapi/strapi/security/advisories/new). Filing an unpatched information disclosure as a public issue would be public disclosure, which the same policy's coordinated-disclosure section forbids.",
+  "confidence": "medium",
+  "notes": "Filer must know four things. (1) The GHSA report has a MANDATORY template (Summary / Affected Versions / Vulnerability Details / Proof of Concept / Impact / optional CVSS 4.0 / AI Usage Disclosure) and NO file attachments; inline everything in fenced blocks. (2) AI-usage disclosure is required in the initial report: \"If artificial intelligence tools (LLMs, AI-powered scanners, AI-assisted code analysis, agentic coding tools, etc.) were used in any part of discovering, validating, analyzing, or drafting your vulnerability report, you are required to disclose this\", listing tools, stages, and confirming human verification. This finding came out of an agentic review, so that section is not optional. (3) Two exclusions are live risks and should be pre-empted in the Impact section: \"Banner, version, or stack disclosure on public surfaces without a demonstrated downstream exploit\" and CNA rule 4.1.2 \"Conditions or behaviors that do not lead to a security impact\". The strongest available framing is the self-contradiction: wrapSafeHandler's own docblock promises the client \"a safe error response (no stack trace leak)\" while tool-registry.ts defeats it, and Strapi's REST path scrubs the identical error via formatInternalError. (4) The same verbatim echo exists in prompt-registry.ts:91 and resource-registry.ts:93, so all three MCP capability kinds leak; include them or the fix will be partial. If triage declines it as non-security, refile as a public issue on the docblock contradiction. There is no bounty, and there is no response SLA (escalate by commenting on the GHSA thread after 14 days)."
+}

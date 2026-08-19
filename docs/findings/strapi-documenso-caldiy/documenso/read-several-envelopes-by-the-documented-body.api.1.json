@@ -1,0 +1,83 @@
+{
+  "repo": "documenso",
+  "scenarioId": "read-several-envelopes-by-the-documented-body.api.1",
+  "flowId": "read-several-envelopes-by-the-documented-body",
+  "failingStep": 3,
+  "whatFailed": "POST /api/v2/envelope/get-many with the exact body the Documents API guide publishes, {\"envelopeIds\": [id, id]}, is rejected with 400 Input validation failed because the endpoint's real input is a nested selector object under `ids`, so the documented batch-read call cannot work as printed.",
+  "docClaim": {
+    "quote": "Retrieve multiple documents by their IDs in a single request. POST /envelope/get-many ... | `envelopeIds` | array | Yes | Array of document IDs | ... curl -X POST \"https://app.documenso.com/api/v2/envelope/get-many\" -H \"Authorization: api_xxxxxxxxxxxxxxxx\" -H \"Content-Type: application/json\" -d '{ \"envelopeIds\": [\"envelope_abc123\", \"envelope_def456\", \"envelope_ghi789\"] }'",
+    "doc": "apps/docs/content/docs/developers/api/documents.mdx",
+    "section": "Get Multiple Documents (#get-multiple-documents), Request Body + Code Examples; snapshot at .truecourse/specs/sources/docs.documenso.com/docs/developers/api/documents.md lines 690-735"
+  },
+  "observed": "Steps 1 and 2 minted two envelopes from the seed template (envelope_dhbduzeshridkmkv, envelope_nytlatnoekemzehf, both 200). Step 3 posted {\"envelopeIds\":[...]} and got 400 with {\"message\":\"Input validation failed\",\"code\":\"BAD_REQUEST\",\"data\":{\"path\":\"envelope.getMany\"},\"issues\":[{\"code\":\"invalid_type\",\"expected\":\"object\",\"received\":\"undefined\",\"path\":[\"ids\"],\"message\":\"Required\"}]}. The `envelopeIds` key was ignored entirely; zod complained that the required object property `ids` was missing. server.stderr.txt is empty, so nothing crashed; this is plain input validation.",
+  "verdict": "doc-bug",
+  "confidence": "high",
+  "impact": "Any developer who copies the published curl or TypeScript snippet gets a hard 400 and no hint of the real body; the documented batch-read is unusable as written and the correct nested selector shape is undiscoverable from the guide. No data loss, no security exposure.",
+  "rootCause": {
+    "file": "apps/docs/content/docs/developers/api/documents.mdx",
+    "lines": "685-729 (wrong body specifically at 695-697, 707-709, 720-722)",
+    "explanation": "The product side is correct and deliberate. packages/trpc/server/envelope-router/get-envelopes-by-ids.types.ts lines 16-33 define ZGetEnvelopesByIdsRequestSchema as z.object({ ids: ZEnvelopeIdsSchema }) where ZEnvelopeIdsSchema is a discriminated union on `type` with variants envelopeId (string[]), documentId (number[]) and templateId (number[]), each 1 to 20 ids. get-envelopes-by-ids.ts destructures `ids` from the input and passes it straight to the lib service, and packages/app-tests/e2e/api/v2/test-unauthorized-api-access.spec.ts (lines 2900-3070) exercises the endpoint successfully with data: { ids: { type: 'envelopeId', ids: [...] } }, so the union exists to let one endpoint address envelopes by envelope id or by legacy numeric document/template id after the envelope migration. There is no `envelopeIds` key on this route at all. The documentation page invents one: the field table and both code samples name a flat `envelopeIds` array, which zod discards as an unknown key, leaving the required `ids` undefined. The guess is a plausible one because sibling routes in the same router really do take a flat envelopeIds array (bulk-cancel-envelopes.types.ts, bulk-delete-envelopes.types.ts, bulk-move-envelopes.types.ts all declare envelopeIds: string[]), and the pre-envelope /document/get-many took a flat documentIds: number[] (packages/trpc/server/document-router/get-documents-by-ids.types.ts lines 16-18). The guide also omits the response shape ({ data: [...] }, which is what the scenario asserted) and describes the field as \"Array of document IDs\" while the examples use envelope_ string ids. The two docs surfaces disagree with each other: the same page's top callout points readers at the OpenAPI reference, and that reference is machine-generated from the zod schema (packages/trpc/server/open-api.ts, served at /api/v2/openapi.json), so it publishes the correct `ids` selector while the hand-written guide publishes the fabricated one."
+  },
+  "introducedBy": {
+    "commit": "b92c53dbb23b89d3cfd89a6b38d2282cf273dfba",
+    "date": "2026-02-27",
+    "pr": "#2460",
+    "title": "feat: docs v2",
+    "note": "git blame of the whole Get Multiple Documents section in the tested worktree points at this single commit by Lucas Smith; the section has never been edited since. The endpoint schema is older: packages/trpc/server/envelope-router/get-envelopes-by-ids.types.ts lines 16-33 blame to 90fdba800055e6c0c11226eeae3b16edf4df2038, 2025-12-24, PR #2226 'feat: get many endpoints' by Catalin Pit. The code therefore predates the prose by two months, so the docs page was wrong from birth rather than going stale: no version of /envelope/get-many ever accepted a flat envelopeIds array."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [
+      {
+        "number": 3135,
+        "url": "https://github.com/documenso/documenso/pull/3135",
+        "state": "open",
+        "title": "docs(api): document cancel endpoint and fix get-many body shape",
+        "relation": "exact",
+        "note": "Community PR by ephraimduncan, opened 2026-07-30 21:39 UTC, last touched 2026-08-03, still open and mergeable_state 'blocked'. Its body says it replaces 'the fabricated envelopeIds: [...] get-many body with the real nested selector: { \"ids\": { \"type\": \"envelopeId\" | \"documentId\" | \"templateId\", \"ids\": [...] } } (string[] for envelopeId, number[] otherwise, 1-20 IDs)' and adds the missing { \"data\": [...] } response section. Same defect, independently found. Only bot comments (vercel, coderabbit skip), no maintainer review."
+      },
+      {
+        "number": 3134,
+        "url": "https://github.com/documenso/documenso/pull/3134",
+        "state": "open",
+        "title": "docs(trpc): add openapi descriptions to envelope cancel, delete and update routes",
+        "relation": "related",
+        "note": "#3135 is stacked on this branch (base ref docs/envelope-openapi-descriptions), which in turn targets docs/rate-limit-headers, i.e. PR #3133. None of the three targets main, so the get-many fix cannot land until the whole stack is reviewed."
+      },
+      {
+        "number": 3133,
+        "url": "https://github.com/documenso/documenso/pull/3133",
+        "state": "open",
+        "title": "docs: rate-limit headers and 429 variants",
+        "relation": "related",
+        "note": "Root of the same unmerged community docs stack, already established by the coordinator for the rate-limit failure. Open since 2026-07-30."
+      },
+      {
+        "number": 3022,
+        "url": "https://github.com/documenso/documenso/pull/3022",
+        "state": "merged",
+        "title": "chore: deprecate endpoints",
+        "relation": "related",
+        "note": "The only change to documents.mdx after the tested tag (commit 26f0c4c5, 2026-07-23). It only inserts an <EnvelopeWarning /> banner; the get-many body was left untouched. The snapshot the scenario bound to already contains that banner, so the fetched docs site is current and still wrong."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso \"get-many envelopeIds\" --include-prs (0 results)",
+      "gh search issues --repo documenso/documenso \"envelope/get-many\" --include-prs (found #3135, #3022)",
+      "gh search issues --repo documenso/documenso \"get-many documentation body\" --include-prs (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "origin/main as of 2026-08-15 still publishes the flat envelopeIds body in apps/docs/content/docs/developers/api/documents.mdx; git log v2.16.0..origin/main on that file returns only 26f0c4c5 (PR #3022, banner only). git log v2.16.0..origin/main on get-envelopes-by-ids.ts and get-envelopes-by-ids.types.ts returns nothing, so the endpoint contract is unchanged too. The fix exists only in unmerged PR #3135, which is stacked two deep behind #3134 and #3133 and has had no maintainer review in the two weeks since 2026-07-30."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the researcher's 8 itemized Documenso findings covers /envelope/get-many; this is a ninth, separate one. It does fit their headline pattern of defects independently confirmed by community PRs left unmerged for about two weeks: PR #3135 sits in the very same ephraimduncan docs stack as #3133 (the rate-limit docs PR the coordinator already established) and #3136 (their findings 1 and 4). It also refines their finding 4 in kind: both are the hand-written Documents API guide disagreeing with the zod-generated wire contract, one on coordinate types, this one on the request body shape."
+  },
+  "notes": "For the doc author: the fix is to replace the field table and both code samples with { \"ids\": { \"type\": \"envelopeId\", \"ids\": [\"envelope_abc123\", ...] } }, note the 1 to 20 id cap and the documentId/templateId numeric variants, and add the { \"data\": [ ... ] } response section that the page currently omits. Worth flagging the inconsistency to the API owners as well: get-many is the odd one out in the envelope router, since bulk-cancel, bulk-delete and bulk-move all take a flat envelopeIds: string[] at top level, so the docs error is the natural mistake to make. The docs page carries its own hedge ('This guide may not reflect the latest endpoints or parameters, see the OpenAPI Reference'), which reduces but does not remove the harm: the page still presents a complete copy-pasteable curl that cannot succeed. The scenario itself is well formed, it sent exactly what the doc prints and asserted only that two rows come back, so no test change is warranted."
+}

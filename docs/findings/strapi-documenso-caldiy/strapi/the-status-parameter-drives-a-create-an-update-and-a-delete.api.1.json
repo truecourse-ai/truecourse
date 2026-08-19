@@ -1,0 +1,51 @@
+{
+  "repo": "strapi",
+  "scenarioId": "the-status-parameter-drives-a-create-an-update-and-a-delete.api.1",
+  "flowId": "the-status-parameter-drives-a-create-an-update-and-a-delete",
+  "failingStep": 5,
+  "whatFailed": "DELETE /api/articles/{documentId}?status=draft answered 500 InternalServerError with a generic message instead of deleting the draft (204), because the document service throws a bare Error('Cannot delete a draft document') for a value of a parameter that the REST query validation and the Delete params type both accept.",
+  "docClaim": {
+    "quote": "Draft or published content can be requested, created, updated, and deleted using the `status` parameter through the various front-end APIs accessible from [Strapi's Content API](/cms/api/content-api).",
+    "doc": ".truecourse/specs/sources/docs.strapi.io/cms/features/draft-and-publish.md (line 147; upstream source strapi/documentation docusaurus/docs/cms/features/draft-and-publish.md line 197)",
+    "section": "Draft & Publish > Usage with APIs"
+  },
+  "observed": "Steps 1 to 4 pass: create with status=draft yields publishedAt null (201), the draft is found with status=draft (total 1), is absent with status=published (total 0), and the update with status=draft applies the new title (200). Step 5, DELETE /api/articles/x9755osemditfok6sp7563ys?status=draft, returns 500 with body {\"data\":null,\"error\":{\"status\":500,\"name\":\"InternalServerError\",\"message\":\"Internal Server Error\"}}. The server log for that request shows 'error: Cannot delete a draft document' with the stack starting at deleteDocument in services/document-service/repository.js:273 (source line 389), so the throw happens before any row is touched: the call is a total no-op and the document survives.",
+  "verdict": "real-defect",
+  "confidence": "high",
+  "impact": "An integrator following the Draft & Publish page gets an opaque 500 with no message from a documented, schema-accepted parameter value: the failure is indistinguishable from a server crash, invites retries, and pollutes error logs. The neighbouring value is worse: status=published returns 204 while deleting the draft row too, since deleteDocument omits status from its lookup, so anyone reading the same doc sentence as 'delete only the published version' loses the draft silently.",
+  "rootCause": {
+    "file": "packages/core/core/src/services/document-service/repository.ts",
+    "lines": "369-390",
+    "explanation": "deleteDocument builds its lookup and selection queries with omit('status'), so the parameter never reaches the database query, and then guards with `if (hasDraftAndPublish && params.status === 'draft') throw new Error('Cannot delete a draft document')` at lines 388-390. Two things are wrong. First, the error type: this is a rejected user parameter, and every other input guard in this same file (lines 83, 111, 119, 137, 178, 190, 210, 287, 295) throws errors.ValidationError, which the HTTP layer maps to 400 with a readable message. A bare Error is not an HttpError, so the Koa error middleware maps it to 500 InternalServerError and scrubs the message, which is exactly what the evidence shows. Second, nothing upstream rejects the value: the core-api collection-type controller's delete (packages/core/core/src/core-api/controller/collection-type.ts:106-114) runs validateQuery then sanitizeQuery and both let status through, and the Delete params type at packages/core/types/src/modules/documents/params/document-engine.ts:51-63 explicitly Picks 'status'. So the product declares status as a valid delete parameter, accepts it at the edge, and then 500s one of its only two legal values deep in the service. Because status is omitted from lookupQuery and transform/query.ts adds no publishedAt condition (only DP.statusToLookup does, and deleteDocument does not call it), the other legal value, published, is silently ignored and every version of the document is deleted."
+  },
+  "introducedBy": {
+    "commit": "5153a18c04f5f229483d31dd9482f37a7bc0836b",
+    "date": "2024-03-04",
+    "pr": "#19665",
+    "title": "chore: merge repo & doc-engine into one before cleaning up",
+    "note": "GraphQL blame at the tested commit c43e9ee1e2 puts the throw (line 389) on 5153a18c04 by Alexandre Bodin, merged 2024-03-05. That commit added repository.ts whole (411 additions, status 'added'), moving the logic out of the Strapi 5 doc-engine work, so the guard itself predates the file. The condition on line 388 was later narrowed from `params.status === 'draft'` to `hasDraftAndPublish && params.status === 'draft'` by 79a590a581, 2026-02-24, PR #25528 'security(feat): add strictParam, addQueryParams, addBodyParams', which touched the condition and left the bare Error in place. The doc sentence the scenario binds to is separate and much newer than the code."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --repo strapi/strapi \"Cannot delete a draft document\" --include-prs (0 results)",
+      "gh search issues --repo strapi/strapi \"delete draft status parameter\" --include-prs (0 results)",
+      "gh api search/issues q='repo:strapi/strapi delete draft in:title' (1 result, #10653 from 2021 about media library side effects, unrelated)",
+      "gh api search/issues q='repo:strapi/strapi \"status=draft\" delete' (30 results, all relation/publish/content-manager items, none about DELETE with status)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "git log c43e9ee1e2..develop -- packages/core/core/src/services/document-service/repository.ts returns nothing, and the file fetched from the develop branch through the GitHub contents API still carries `throw new Error('Cannot delete a draft document')` at line 389, identical to the tested build. develop HEAD at check time was acf0ce20345e17fc443a7c79f2744fb072da6080, 2026-08-14. The docs side is unfixed too: the 'requested, created, updated, and deleted using the status parameter' sentence is still on strapi/documentation main at docusaurus/docs/cms/features/draft-and-publish.md:197."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "None of the researcher's 8 Strapi findings cover this. All 8 sit on the MCP server (PR #26371) or admin-token auth (PR #25657); this failure is on the public REST content API and the core document service, a code path they did not touch. It is a ninth, independent finding."
+  },
+  "notes": "Two separable problems, and a maintainer will want to fix both. (1) Code: line 389 should be errors.ValidationError, matching the nine sibling guards in the same file, so the caller gets 400 plus 'Cannot delete a draft document' instead of a scrubbed 500. Better still, reject the value at the edge in validateParams so it never reaches the service. There is no test anywhere in the repo for this branch: 'Cannot delete a draft document' appears exactly once in the whole tree, in the source line itself. (2) Docs: the delete half of the feature-page sentence is not implementable. On DELETE, status=draft throws and status=published is dropped by omit('status'), so both versions go, which means status cannot scope a delete at all and the sentence over-promises. The product's own detailed pages agree with the code, not with the feature page: the REST status page (cms/api/rest/status.md in the corpus) describes status purely as a query filter and never mentions delete, and the document-service status page on strapi/documentation lists only findOne, findMany, findFirst, count, create and update. So the docs contradict each other, and the fix on the doc side is to drop 'and deleted' from the feature page or to spell out that a delete always removes every version. The scenario's own note anticipated this outcome and asserted the documented behaviour deliberately, which is the correct call: the run surfaced a genuine contract mismatch rather than encoding the code's behaviour. No data was lost in this run because the throw precedes the query."
+}

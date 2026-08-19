@@ -1,0 +1,20 @@
+{
+  "rejectRequestAt": "2026-08-19T19:16:10.863Z",
+  "rejectResponseAt": "2026-08-19T19:16:11.378Z",
+  "polls": [
+    {
+      "atMsRequested": 0,
+      "msSinceRejectReturned": 112,
+      "envelopeStatus": "PENDING",
+      "recipientSigningStatus": "REJECTED",
+      "rejectionReason": "tcref declined 1f36da77c3"
+    },
+    {
+      "atMsRequested": 500,
+      "msSinceRejectReturned": 638,
+      "envelopeStatus": "REJECTED",
+      "recipientSigningStatus": "REJECTED",
+      "rejectionReason": "tcref declined 1f36da77c3"
+    }
+  ]
+}

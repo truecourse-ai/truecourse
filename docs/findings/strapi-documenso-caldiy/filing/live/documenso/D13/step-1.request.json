@@ -1,0 +1,12 @@
+{
+  "step": 1,
+  "label": "the documented {envelopeIds} body",
+  "at": "2026-08-19T19:17:28.401Z",
+  "method": "POST",
+  "url": "http://localhost:3347/api/v2/envelope/get-many",
+  "headers": {
+    "Authorization": "<REDACTED api token>",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"envelopeIds\":[\"envelope_utdishylsahhlhnw\"]}"
+}

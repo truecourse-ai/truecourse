@@ -1,0 +1,45 @@
+{
+  "step": 6,
+  "label": "readOnly RADIO with no options (expected 400)",
+  "at": "2026-08-19T19:16:54.296Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "400",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:16:54 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "978",
+    "x-ratelimit-reset": "1787167020",
+    "x-request-id": "81a1a2ff-6205-4c4a-aa59-5bbc6458b368"
+  },
+  "body": {
+    "data": [
+      {
+        "envelopeId": "envelope_urlxhxhbndxwvbvu",
+        "envelopeItemId": "envelope_item_mtahtmyhhvvlchci",
+        "type": "RADIO",
+        "id": 15,
+        "secondaryId": "cmt0h3hqs004ghoeo516502pn",
+        "recipientId": 14,
+        "page": 1,
+        "positionX": "5",
+        "positionY": "40",
+        "width": "20",
+        "height": "5",
+        "customText": "",
+        "inserted": false,
+        "fieldMeta": {
+          "readOnly": true,
+          "type": "radio",
+          "values": [],
+          "direction": "vertical"
+        },
+        "documentId": 10,
+        "templateId": null
+      }
+    ]
+  }
+}

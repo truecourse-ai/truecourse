@@ -1,0 +1,49 @@
+{
+  "id": "D11",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/types/field.ts#L31-L49",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/types/field.ts#L31-L49",
+    "howDecided": "git log 3cf2963cd0..origin/main is empty for both culprit files (apps/docs/content/docs/developers/api/fields.mdx and packages/lib/types/field.ts) and also for packages/prisma/schema.prisma's Field model consumers packages/trpc/server/envelope-router/envelope-fields/. ZFieldSchema on origin/main still starts at L31 and still picks the four Decimal columns straight out of the generated Prisma model schema, so the wire still stringifies positionX/positionY/width/height."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/docs/content/docs/developers/api/fields.mdx",
+    "lineToday": 25,
+    "permalink": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/api/fields.mdx#L25-L28",
+    "publishedUrl": "https://docs.documenso.com/docs/developers/api/fields",
+    "commitsSinceReview": [],
+    "note": "fields.mdx has had no commit since the tested tag, so every line number in the review still holds exactly: the type table still reads '| `positionX` | number | X coordinate as percentage (0-100) |' at L25-L28, `envelopeId` is still typed number at L22, and the response examples still print unquoted numbers at L44-L47 and L259-L280. The corrective rows exist only in open PR #3136."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3136",
+        "kind": "pr",
+        "stateAtReview": "open (based on docs/documents-cancel-get-many)",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "Two changes since the review. (1) Its base is now main, not docs/documents-cancel-get-many, because the three PRs below it in the stack (#3133, #3134, #3135) merged this morning; so the review's 'stacked on a non-main base' caveat is no longer true and mergeable_state is no longer blocked by the stack. (2) The one maintainer objection, dguyen's inline 'Is this actually a string?' of 2026-08-03 on the fields.mdx coordinate rows, was answered by the author on 2026-08-19 09:26 UTC with the Prisma Decimal / ZFieldSchema / JSON.stringify explanation, i.e. exactly this finding's root cause. No maintainer has replied yet. The diff still retypes the four coordinate rows and envelopeId to string and requotes every response example."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}"
+    ]
+  },
+  "reevaluation": "The finding stands verbatim: nothing on either side has moved, the doc still types the coordinates `number` at the same line numbers and the API still answers JSON strings. The only change is upstream momentum. #3136 is no longer stacked on a non-main base (the review's third refinement of the colleague finding is now out of date, and the filer must not repeat it), and the single maintainer doubt about the string typing was answered by the PR author today with the same Prisma Decimal reasoning the review reached independently. That leaves this finding fully covered by a live, maintainer-approved-adjacent PR whose siblings merged hours ago, so the cheapest correct action is to strengthen that PR, not to open a competing issue. Confidence and verdict (doc-bug, not a product defect) are unchanged.",
+  "routeSuggestion": "comment on existing PR 3136",
+  "policyBasis": null,
+  "confidence": "high",
+  "notes": "The filer should note that #3136 is a two-headed PR: its code half fixes D2a (the update-many coordinate drop) and its docs half fixes both D11 and D12. A comment should confirm the string coordinates with an actual wire capture (the scenario's data[0] response), since that is the one thing dguyen asked for and the author answered only from source. Two doc gaps #3136 does not close, worth listing in the same comment: the unquoted coordinates in response examples on documents.mdx, first-api-call.mdx and examples/common-workflows.mdx, and the undocumented fieldMeta.overflow default plus the documentId/templateId compat keys the Field Object table omits."
+}

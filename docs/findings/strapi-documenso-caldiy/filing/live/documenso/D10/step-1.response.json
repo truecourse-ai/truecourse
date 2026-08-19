@@ -1,0 +1,31 @@
+{
+  "step": 1,
+  "label": "unknown envelope id: the documented {error, code, statusCode} body",
+  "at": "2026-08-19T19:17:28.387Z",
+  "status": 404,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "211",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "996",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "6dd5b283-3843-44e9-a344-0a6793e6ebff"
+  },
+  "body": {
+    "message": "Envelope could not be found",
+    "code": "INTERNAL_SERVER_ERROR",
+    "data": {
+      "code": "NOT_FOUND",
+      "httpStatus": 404,
+      "path": "envelope.get",
+      "appError": {
+        "code": "NOT_FOUND",
+        "message": "Envelope could not be found"
+      }
+    }
+  }
+}

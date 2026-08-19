@@ -1,0 +1,16 @@
+{
+  "navLog": [
+    {
+      "method": "pushState",
+      "url": "/t/guard-owner/documents/envelope_ucsrsvlywaoffiom?action=copy-links",
+      "href": "http://localhost:3347/t/guard-owner/documents/envelope_ucsrsvlywaoffiom/edit"
+    },
+    {
+      "method": "pushState",
+      "url": "/t/guard-owner/documents/envelope_ucsrsvlywaoffiom",
+      "href": "http://localhost:3347/t/guard-owner/documents/envelope_ucsrsvlywaoffiom?action=copy-links"
+    }
+  ],
+  "finalUrl": "http://localhost:3347/t/guard-owner/documents/envelope_ucsrsvlywaoffiom",
+  "note": "history.pushState/replaceState calls recorded by an init script; the app pushes ?action=copy-links then replaces it away once document-page-view-recipients.tsx has consumed it"
+}

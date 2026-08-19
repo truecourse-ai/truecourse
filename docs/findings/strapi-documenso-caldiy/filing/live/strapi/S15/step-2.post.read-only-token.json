@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:1347/api/articles",
+    "headers": {
+      "Authorization": "Bearer 8201117...<redacted>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "data": {
+        "title": "TC RO mt0g95gm"
+      }
+    }
+  },
+  "status": 403,
+  "body": {
+    "data": null,
+    "error": {
+      "status": 403,
+      "name": "ForbiddenError",
+      "message": "Forbidden",
+      "details": {}
+    }
+  }
+}

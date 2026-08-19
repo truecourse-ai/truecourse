@@ -1,0 +1,11 @@
+{
+  "step": 7,
+  "label": "read back after the control update",
+  "at": "2026-08-19T19:15:29.314Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_bxwelneerccdovmc",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

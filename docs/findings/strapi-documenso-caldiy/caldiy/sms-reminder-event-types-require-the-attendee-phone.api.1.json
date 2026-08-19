@@ -1,0 +1,59 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "sms-reminder-event-types-require-the-attendee-phone.api.1",
+  "flowId": "sms-reminder-event-types-require-the-attendee-phone",
+  "failingStep": 2,
+  "whatFailed": "POST /v2/bookings (cal-api-version 2024-08-13) with no attendee.phoneNumber against the event type the scenario treats as SMS-reminder-enabled returned 201 and created booking 75 instead of the documented 400, because Cal.diy has no Workflows feature and therefore no event type in it can ever be SMS-reminder-enabled.",
+  "docClaim": {
+    "quote": "For event types that have SMS reminders workflow, you need to pass the attendee's phone number in the request body via `attendee.phoneNumber` (e.g., \"+19876543210\" in international format). This is an optional field, but becomes required when SMS reminders are enabled for the event type.",
+    "doc": ".truecourse/specs/sources/cal.com-docs/docs/api-reference/v2/bookings/create-a-booking.md (lines 30 and 79; upstream source is Cal.com's public docs, cal.com/docs/api-reference/v2/bookings/create-a-booking, repo calcom/docs)",
+    "section": "create-a-booking"
+  },
+  "observed": "Step 1 (ordinary event type 100 reference-consult, no phoneNumber) returned 201 as expected, proving the field is optional in general. Step 2 (event type 122 reference-sms, no phoneNumber) also returned 201 with booking id 75, uid 4aoQDx9aPPuWZ2y1Gp6YmV. Both responses carry bookingFieldsResponses of only {email, name, displayEmail}: neither event type has an attendeePhoneNumber or smsReminderNumber response, and no phone booking field is present or required. server.stderr.txt shows only ECONNREFUSED to the local SMTP sink on port 1025, no validation activity. The seeded 'Reference SMS Consult' event type is an SMS event type in name only: the tested build cannot attach a workflow to it.",
+  "verdict": "edition-mismatch",
+  "confidence": "high",
+  "impact": "No Cal.diy user is harmed by the API here, but the feature the doc claim depends on does not exist in this edition at all: a self-hoster following Cal.com's API v2 reference will expect SMS reminder workflows and conditional attendee.phoneNumber requiredness that Cal.diy cannot deliver, and no error tells them so.",
+  "rootCause": {
+    "file": "packages/features/bookings/lib/getBookingFields.ts",
+    "lines": "123-135",
+    "explanation": "The conditional requiredness the doc describes is implemented in Cal.com by a separate system booking field named smsReminderNumber, injected into an event type's bookingFields by getBookingFields when the event type carries a workflow with an SMS_ATTENDEE or WHATSAPP_ATTENDEE step, with a workflow source whose fieldRequired mirrors step.numberRequired (packages/features/eventtypes/lib/bookingFieldsManager.ts:78 and :120 compute required from sources.some(s => s.fieldRequired), and getBookingResponsesSchema.ts:451-465 rejects missing required fields). The Cal.diy fork deleted that entire mechanism: getSmsReminderNumberField, getSmsReminderNumberSource, the workflows parameter of getBookingFieldsWithSystemFields/ensureBookingInputsHaveSystemFields, and the smsNumberSources block are all gone. What remains at lines 123-135 is the unrelated attendeePhoneNumber system field, hardcoded required: false, hidden: true, which is upstream Cal.com code and was never the field that enforced the requirement. The v2 layer still has the vestigial hook, apps/api/v2/src/platform/bookings/2024-08-13/services/input.service.ts:166-171 looks up a bookingFields entry named smsReminderNumber and line 191 forwards attendee.phoneNumber into responses.smsReminderNumber only when it finds one, but nothing in Cal.diy can ever create that field, so needsSmsReminderNumber is permanently undefined and no 400 is reachable. Backing evidence that the whole feature is gone: packages/features/ee does not exist in the tested tree, the Prisma schema has no Workflow, WorkflowStep or WorkflowsOnEventTypes model, migration packages/prisma/migrations/20260319000000_drop_workflow_tables/migration.sql drops Workflow, WorkflowStep, WorkflowsOnEventTypes, WorkflowReminder, WorkflowStepTranslation, WorkflowOptOutContact and every Workflow* enum, and README.md:47 states 'No enterprise features - Teams, Organizations, Insights, Workflows, SSO/SAML, and other EE-only features have been removed'."
+  },
+  "introducedBy": {
+    "commit": "ab21c7f805a089fa3a11ffd61c4a9aecc349c16c",
+    "date": "2026-04-15",
+    "pr": "#28903",
+    "title": "refactor: Cal.diy",
+    "note": "The fork's squashed EE-removal commit. Its diff on packages/features/bookings/lib/getBookingFields.ts is 5 insertions / 94 deletions and removes exactly the workflow-driven SMS reminder number plumbing. This is a deliberate edition change, not a regression. The surviving attendeePhoneNumber block at lines 123-135 blames to 499cbd08ca2 (Udit Takkar, 2025-06-27) and 517cfde5b8a (Hariom Balhara, 2023-03-02), both pre-fork Cal.com code that the fork did not touch: old code, newly load-bearing because the code that used to carry the requirement was deleted around it."
+  },
+  "upstream": {
+    "issues": [
+      {
+        "number": 23722,
+        "url": "https://github.com/calcom/cal.diy/issues/23722",
+        "state": "open",
+        "title": "One Phone Input no matter the workflows / questions",
+        "relation": "related",
+        "note": "Pre-fork Cal.com issue inherited by the calcom/cal.diy tracker (the repo kept Cal.com's issue history). It concerns the smsReminderNumber vs attendeePhoneNumber duplication in Cal.com, the same two fields at the heart of this failure, but it is about Cal.com and predates the fork. Nothing filed anywhere about Cal.diy having dropped the conditional requiredness."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom \"sms reminder workflow phone number required booking\" (0 results)",
+      "gh search issues --repo calcom/cal.diy workflows --limit 20 (20 results, all inherited pre-fork Cal.com feature requests about Workflows; none about Workflows being absent in Cal.diy or about the docs promising them)",
+      "gh search issues --owner calcom \"cal.diy docs document removed enterprise features\" (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: no, and nothing to fix. Only 4 commits landed on origin/main between the tested 038381aeca (2026-07-31) and the 2026-08-15 fetch, and git log 038381aeca..origin/main touches neither packages/features/bookings/lib/getBookingFields.ts nor apps/api/v2/src/platform/bookings/2024-08-13/services/input.service.ts nor packages/prisma/schema.prisma. Workflows remain absent on main. in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is byte-identical to calcom/cal.diy main (176037d0af). No public PR, issue or changelog entry found that changes this behavior."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5 in /Users/musheghgevorgyan/repos/cal.diy/docs/guard-findings.md. Those cover out-of-office vs date overrides, zero-length team slots, a dropped 9:10 override slot, seated-booking oversell, and unauthenticated slot-reservation mutation. None mentions SMS, workflows or attendee phone numbers, and the file contains no occurrence of the strings sms, phone or workflow."
+  },
+  "notes": "Two things a maintainer and the scenario author should know. First, this failure is not an instance of either established systemic cause: the request used cal-api-version 2024-08-13, which packages/platform/constants/api.ts:56-68 does list, so no silent downgrade occurred, and step 1 of the same scenario passed on the same header. Second, there is a genuine test-design weakness underneath the edition mismatch: the scenario's precondition ('an event type carrying an SMS reminders workflow') was never established and could not have been. The seed created event type 122 with the human name 'Reference SMS Consult' and slug reference-sms, but with no workflow attached, because the Workflow tables do not exist in this build. Even against a Cal.com instance the scenario would need a real workflow with an SMS_ATTENDEE step and numberRequired set, and the recipe's sms-event-type fixture provides only an id, with no way to express that. So the scenario is unrunnable on Cal.diy in principle and under-specified in general, and the milestone create-booking-sms-workflow-needs-phone cannot be evidenced on this target at all. The sibling milestone create-booking-phone-optional-unless-sms-enabled is half-evidenced: step 1 did prove that attendee.phoneNumber is optional on an ordinary event type. Suggested handling: drop or park the SMS half of this flow for Cal.diy rather than reporting it upstream, and keep step 1 as its own scenario. If Cal.diy wants to close the loop on its own side, the residual dead plumbing is worth a cleanup ticket: input.service.ts:166-171 and :191, the SMS_REMINDER_NUMBER_FIELD constant in packages/lib/bookings/SystemField.ts:16, and the smsReminderNumber column still selected all over packages/features/bookings/repositories/BookingRepository.ts are now unreachable branches."
+}

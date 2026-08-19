@@ -1,0 +1,71 @@
+{
+  "id": "D12",
+  "repo": "documenso",
+  "checkedAt": "2026-08-19",
+  "defaultHead": "75330166cc00b29c14399bc2e391e4b4d8080c00",
+  "source": {
+    "status": "unchanged",
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/apps/docs/content/docs/developers/api/fields.mdx#L125-L366",
+    "permalinkToday": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/api/fields.mdx#L125-L366",
+    "howDecided": "The only culprit file is the doc page and it has no commits in 3cf2963cd0..origin/main, so line numbers are identical to the review. I also re-read the two contracts the page mis-pairs on origin/main: packages/trpc/server/envelope-router/envelope-fields/create-envelope-fields.types.ts:79-86 is still { envelopeId: z.string(), data: ZCreateFieldSchema.array() } answering { data: [...] } (no commits since the tag), and the legacy packages/trpc/server/field-router/schema.ts documentId/fields shape is still mounted, so the documented body is still the right body under the wrong URL."
+  },
+  "docs": {
+    "stillPresent": true,
+    "file": "apps/docs/content/docs/developers/api/fields.mdx",
+    "lineToday": 139,
+    "permalink": "https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/apps/docs/content/docs/developers/api/fields.mdx#L125-L366",
+    "publishedUrl": "https://docs.documenso.com/docs/developers/api/fields",
+    "commitsSinceReview": [],
+    "note": "Unchanged and still wrong on origin/main at the same lines: the Create Fields request table types `documentId` number at L139 under the URL POST /envelope/field/create-many at L131, the curl body sends documentId + fields[] with pageNumber/pageX/pageY at L151-L176, the TypeScript sample repeats it at L202-L227, the documented response key is \"fields\" at L253, and Update Fields repeats every one of those errors at L295-L362."
+  },
+  "tracker": {
+    "newItems": [],
+    "citedItems": [
+      {
+        "ref": "documenso/documenso#3136",
+        "kind": "pr",
+        "stateAtReview": "open, mergeable_state blocked, base docs/documents-cancel-get-many",
+        "stateToday": "open",
+        "changedSinceReview": true,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": "main",
+        "note": "Rebased onto main after #3133/#3134/#3135 merged this morning, so it is no longer stacked. Its diff still performs the whole rewrite this finding needs: documentId -> envelopeId (string), fields -> data, pageNumber/pageX/pageY -> page/positionX/positionY, response \"fields\" -> \"data\", plus a new sentence listing the required per-entry keys and the placeholder alternative. Last activity 2026-08-19 09:26 UTC, the author answering dguyen's 2026-08-03 question about the string coordinates; no maintainer response since 2026-08-15."
+      },
+      {
+        "ref": "documenso/documenso#3127",
+        "kind": "issue",
+        "stateAtReview": "closed",
+        "stateToday": "closed",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Unchanged: opened and closed 2026-07-28, last updated 2026-07-28. Related only as v2 API documentation quality."
+      },
+      {
+        "ref": "documenso/documenso#2664",
+        "kind": "issue",
+        "stateAtReview": "open",
+        "stateToday": "open",
+        "changedSinceReview": false,
+        "mergedAt": null,
+        "mergeCommit": null,
+        "baseRef": null,
+        "note": "Still open, last updated 2026-08-18 (comment traffic only, no state change). Still corroborates that real users of the route work from the envelopeId/data shape."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo documenso/documenso --include-prs --created '>2026-08-10' --limit 80 (80 results, numbers 3196-3275, every new item scanned by title)",
+      "gh search issues --repo documenso/documenso --include-prs --created '2026-08-10..2026-08-13' --limit 60 (53 results, numbers 3160-3212, completes the window the first sweep truncated)",
+      "non-search lookups: gh api repos/documenso/documenso/pulls/{3133,3134,3135,3136,3137,3138,3139}, gh api repos/documenso/documenso/issues/{2114,2664,3022,3096,3127,3169,3186}, gh api .../pulls/3136/comments, gh pr diff {3136,3137,3138,3139}"
+    ]
+  },
+  "reevaluation": "The finding stands with no change to verdict, confidence or scope: fields.mdx is untouched since the tested tag, so every published create and update example on that page still 400s as printed, and both contracts it confuses are still live. The only material update is that the fix PR #3136 is now based on main rather than on a sibling docs branch, which removes the review's 'cannot land until the whole stack is reviewed' obstacle; three PRs from that same stack merged into v2.17.0 this morning, so this one is plausibly next. The review's upstream claims all still hold, with that one correction about the base branch.",
+  "routeSuggestion": "comment on existing PR 3136",
+  "policyBasis": null,
+  "confidence": "high",
+  "notes": "D11 and D12 are the same PR and should be handled in one comment. The comment's added value over the PR text is the reproduction: the exact 400 body {\"issues\":[{\"path\":[\"envelopeId\"],\"message\":\"Required\"},{\"path\":[\"data\"],\"message\":\"Required\"}]} from posting the page's own curl, plus the observation the PR does not state, that the documented body is not invented but is the live contract of the still mounted legacy POST /api/v2/document/field/create-many, so a reader who found the page plausible was not being careless. If the maintainers prefer, the alternative one-line fix is to repoint the samples at the legacy URLs."
+}

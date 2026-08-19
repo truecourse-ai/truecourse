@@ -1,0 +1,38 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "a-short-notice-booking-is-the-only-one-that-needs-confirming.web.1",
+  "flowId": "a-short-notice-booking-is-the-only-one-that-needs-confirming",
+  "failingStep": 13,
+  "whatFailed": "Step 13 navigated an unauthenticated browser to /bookings/upcoming and got the sign-in page instead of the host dashboard, so the radio \"Unconfirmed\" it wanted to click was not on the page.",
+  "docClaim": {
+    "quote": "From here, -> Select **Always** if you want it to be an event-type that requires confirmation at all times -> Select **When booked with less than** `{{ num }}` `{{ time }}` notice to only make it an opt-in event type when a booking is made within the selected/configured time-frame.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/how-to-requires.md",
+    "section": "how-to-set-up-requires-confirmation"
+  },
+  "observed": "Steps 1 to 12 all passed and, between them, already demonstrate the documented rule: the booking at 2030-06-12 (inside the seeded 3650-day notice window) landed on \"Your booking has been submitted / Reference Host still needs to confirm or reject the booking\" (step-6.png), while the booking at 2040-06-12 (outside the window) landed on \"This meeting is scheduled / We sent an email with a calendar invitation\" (step-12.png). Step 13 then navigated to /bookings/upcoming; the request took 10.1s and ended at /auth/login showing \"Welcome back! Sign in to continue\" with Email, Password, Continue, Create account and no radio elements at all. The visual judge agreed the page was the sign-in form. The redirect is the app's intended auth gate: apps/web/app/(use-page-wrapper)/(main-nav)/bookings/[status]/page.tsx lines 33-36 read the server session and `return redirect(\"/auth/login\")` when there is no session user id. There was no session to read: the guard web driver builds its Playwright context in packages/guard-runner/src/web/browser.ts lines 156-166 with viewport, deviceScaleFactor, timezoneId, locale and recordVideo only, no storageState and no cookies, the recipe's `web` block (packages/guard-runner/src/recipe.ts lines 521-551) has no auth or session field, and the scenario itself contains no sign-in step.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users. Cal.diy behaved exactly as the doc describes and as its own code intends; the scenario just parked its observation on a surface the harness cannot reach.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues \"bookings page redirects to login\" org:calcom (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix in the product. in cal.diy: the auth gate at apps/web/app/(use-page-wrapper)/(main-nav)/bookings/[status]/page.tsx is untouched between the tested commit 038381aeca and origin/main (git log 038381aeca..origin/main on that file is empty; only 4 commits landed on main in total). in cal.com: main carries the identical `return redirect(\"/auth/login\")` at line 36 of the same file, so the behavior is the same on both sides and is intended in both."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "The researcher's Cal.diy write-up was not available for cross-check."
+  },
+  "notes": "Three things a maintainer or the scenario author should take away. (1) The doc claim is SATISFIED by the product and the run already proves it: packages/features/bookings/lib/handleNewBooking/getRequiresConfirmationFlags.ts lines 62-67 compute `dayjs(bookingStartTime).diff(dayjs(), rcThreshold.unit)` and set requiresConfirmation to false when that difference exceeds the threshold, which is precisely 'only an opt-in event type when a booking is made within the configured time-frame'. The step-6 vs step-12 success-page wording is a complete, deterministic observation of the rule and needs no dashboard. (2) The scenario's step-13 note claims it is 'signed in through the seeded browser session'; no such thing exists. Every guard web scenario runs in a fresh anonymous Chromium context, so any assertion behind /bookings, /event-types or any other authenticated route is unreachable by construction. This is the only scenario in the run that navigates to /bookings (grep over .truecourse/scenarios), so no other failure masks or corroborates it. (3) The enabling defect is upstream of the scenario, in the generated interface map: guard/interfaces.json declares web/open-bookings-list with startingState 'browser-idle' and a single `navigate /bookings/upcoming` step, yet its endState 'bookings-list-open' is described as 'The signed-in host's bookings list is open'. The map also defines a 'login-page-open' state (reached by web/sign-in-to-change-a-seated-booking) but has NO transition that actually authenticates, so the composer had no way to satisfy the precondition and no signal that one was needed. Fixes, in order of value: give the recipe a web session/storageState seeding field and add a real sign-in interface, or teach the interface map to mark authenticated routes so generation stops composing them. Secondary note: the locator itself was fine. The status tabs are a Radix ToggleGroup with type=\"single\" (packages/ui/components/form/toggleGroup/ToggleGroup.tsx lines 54-55, used at apps/web/modules/bookings/components/BookingListContainer.tsx line 166), so its items really do expose role=radio and 'Unconfirmed' really is one of the five valid statuses (apps/web/modules/bookings/lib/validStatuses.ts). Signed in, the step would have worked. The seed script reference/seed/guard-seed.mjs was not present in any of the reviewed clones, so the 3650-day threshold figure comes from the scenario note rather than from re-read seed source; the observed pending/scheduled split at the two dates is consistent with it."
+}

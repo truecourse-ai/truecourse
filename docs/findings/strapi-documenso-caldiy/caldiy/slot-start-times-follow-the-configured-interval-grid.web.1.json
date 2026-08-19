@@ -1,0 +1,65 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "slot-start-times-follow-the-configured-interval-grid.web.1",
+  "flowId": "slot-start-times-follow-the-configured-interval-grid",
+  "failingStep": 2,
+  "whatFailed": "The step asserted that the event type with no time-slot interval configured offers only on-the-hour starts (no 10:30), but the seeded `interval-default` event type is 30 minutes long, and Cal.diy's documented default slot interval is the event length, so the page correctly offered a 30-minute grid containing 10:30am.",
+  "docClaim": {
+    "quote": "By default, event slots are generated at predefined intervals (for example, every 60 minutes starting on the hour). This means booking options follow a fixed slot grid, not necessarily the exact start of someone's availability.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/event-types/optimized-slots.md",
+    "section": "optimized-slots/how-it-works"
+  },
+  "observed": "The booking page /reference-host/interval-default?month=2027-03&date=2027-03-15 rendered fully (step-2.png): header 'Interval Default' with duration '30m', and slot buttons 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am, 12:00pm ... 3:30pm, 4:30pm. The two positive checks in the same step (button '10:00' visible, button '11:00' visible) both passed; only the negative page-text assertion /^(?![\\s\\S]*10:30)[\\s\\S]*$/ failed. The visual judge annotation agreed the page looked normal and that the grid was simply half-hourly. Step duration 10075 ms, no timeout, no error, no console errors beyond routine warnings.",
+  "verdict": "test-defect",
+  "confidence": "high",
+  "impact": "None for users. The product produced exactly the grid its own settings define; this is a false failure caused by the scenario asserting a 60-minute grid on a 30-minute event type.",
+  "rootCause": null,
+  "introducedBy": null,
+  "upstream": {
+    "issues": [
+      {
+        "number": 26220,
+        "url": "https://github.com/calcom/cal.diy/issues/26220",
+        "state": "open",
+        "title": "Booking Slot Start Times",
+        "relation": "related",
+        "note": "Feature request from 2025-12-27 asking that slots keep to the configured interval boundaries when calendar gaps push them off-grid. Same slot-grid area, opposite direction, and not the symptom here: it presumes the interval grid, which is what this step tripped over."
+      },
+      {
+        "number": 20770,
+        "url": "https://github.com/calcom/cal.diy/issues/20770",
+        "state": "closed",
+        "title": "Feature Request: Allow Custom Start Times (e.g. 14:20, 09:10) Outside 15-Minute Grid",
+        "relation": "related",
+        "note": "Confirms the predefined start-time grid [60, 30, 20, 15, 10, 5] is intended product behavior users ask to escape, not a defect."
+      },
+      {
+        "number": 21441,
+        "url": "https://github.com/calcom/cal.diy/issues/21441",
+        "state": "open",
+        "title": "\"Time-slot Intervals\" are Broken",
+        "relation": "related",
+        "note": "Reports about an explicitly configured interval not being honored. This failure is the opposite case: no interval configured, so the event length governs. Not an exact match."
+      }
+    ],
+    "prs": [],
+    "queries": [
+      "gh search issues \"slot interval default event length\" --owner calcom (0 results)",
+      "gh search issues \"optimized slots default interval\" --owner calcom (0 results)",
+      "gh search issues '\"time-slot intervals\"' --owner calcom (10 results, listed above)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "Nothing to fix: there is no product defect. In cal.diy: only four commits landed between the tested 038381aeca and origin/main 176037d0af (#29940, #29901, #29740, #29819) and none touches packages/trpc/server/routers/viewer/slots/util.ts or packages/features/schedules/lib/slots.ts, so the default-interval behavior is unchanged on main. In cal.com: not verifiable from source (the commercial tree is private); nothing in the public help doc or trackers indicates a change to the default."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "Does not map to any of caldiy #1 to #5. It is however the same code path as caldiy #3 (the predefined start-time grid in packages/features/schedules/lib/slots.ts:113-121), and my reading supports the other reviewer who judged #3 to be documented default grid behavior rather than a defect: the bound help page itself enumerates the grid (60/30/20/15/10/5) and that array is literally intervalsWithDefinedStartTimes in the source."
+  },
+  "notes": "Source verification, tested worktree /private/tmp/.../src/caldiy-tested. (1) packages/trpc/server/routers/viewer/slots/util.ts:1097 computes `frequency: eventType.slotInterval || input.duration || eventType.length`, so an event type with slotInterval null uses its own length as the slot frequency. (2) packages/features/schedules/lib/slots.ts:113-121 then aligns starts to the largest member of `intervalsWithDefinedStartTimes = [60, 30, 20, 15, 10, 5]` that divides the frequency, which for a 30-minute event is 30, giving :00 and :30 starts. (3) The product's own UI names this default: packages/i18n/locales/en/common.json:1310-1311 `slot_interval` = 'Time-slot intervals', `slot_interval_default` = 'Use event length (default)', rendered by packages/features/eventtypes/components/tabs/limits/EventLimitsTab.tsx:604-636. So a 30-minute default event type offering a 30-minute grid is the documented contract. (4) The scenario's own bound claim disagrees with the scenario's own setup: .truecourse/scenarios/claims.json for milestone `default-slots-generated-at-predefined-intervals` records verifyVia = 'web: without the setting, a 60-minute event type offers only on-the-hour start times', yet the seeded `interval-default` event type renders '30m'. The fix is either to seed `interval-default` at 60 minutes, or to drop the negative 10:30 assertion from that step, since the doc's '(for example, every 60 minutes ...)' is an illustration and not a promise about a 30-minute event. The other steps of the flow (interval-60, interval-30, interval-20, interval-15, interval-10, interval-5) test the doc's actual bullet list and never ran, because the run halts at the first failing step; they should be re-run once step 2 is corrected. (5) Unrelated but worth recording: the slot list jumps from 3:30pm to 4:30pm because a sibling scenario in the same parallel run, authenticate-a-booking-request-with-an-api-key.api.1, created an ACCEPTED booking at 2027-03-15T16:00:00Z-16:30:00Z on the same host. That is systemic cause 3 (cross-scenario slot contention) showing up in this evidence, though it did not cause this failure. (6) All four server log files in this evidence dir are 0 bytes, as expected for web scenarios in this run; that is not evidence of a clean server."
+}

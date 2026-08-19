@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:1347/api/articles",
+    "headers": {
+      "Authorization": "Bearer 993cab8...<redacted>"
+    },
+    "body": null
+  },
+  "status": 200,
+  "pagination": {
+    "page": 1,
+    "pageSize": 25,
+    "pageCount": 0,
+    "total": 0
+  }
+}

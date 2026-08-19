@@ -1,0 +1,624 @@
+{
+  "step": 3,
+  "label": "the same call with DANGEROUS_BYPASS_RATE_LIMITS=true (as the original guard run had it)",
+  "at": "2026-08-19T19:23:14.972Z",
+  "status": 200,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "11408",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:23:14 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "999",
+    "x-ratelimit-reset": "1787167440",
+    "x-request-id": "77262dd3-f66c-4372-85a8-e377151d9ed5"
+  },
+  "body": {
+    "data": [
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "PENDING",
+        "source": "DOCUMENT",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_ucsrsvlywaoffiom",
+        "secondaryId": "document_16",
+        "externalId": null,
+        "createdAt": "2026-08-19T19:21:50.924Z",
+        "updatedAt": "2026-08-19T19:21:54.027Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "tc-nomail3-2d8d9e4be1.pdf",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": null,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_ucsrsvlywaoffiom",
+            "role": "VIEWER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 21,
+            "email": "2d8d9e4be1@documenso.test",
+            "name": "Recipient 2d8d9e4be1",
+            "token": "3O0Z9yrA5ZX0DSB75s32Q",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": "2026-11-17T19:21:54.023Z",
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": 1,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "PENDING",
+        "source": "DOCUMENT",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_iscshkwxwlwnnsek",
+        "secondaryId": "document_15",
+        "externalId": null,
+        "createdAt": "2026-08-19T19:21:07.036Z",
+        "updatedAt": "2026-08-19T19:21:10.485Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "tc-nomail2-79771c8411.pdf",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": null,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_iscshkwxwlwnnsek",
+            "role": "VIEWER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 19,
+            "email": "79771c8411@documenso.test",
+            "name": "Recipient 79771c8411",
+            "token": "93_LyB44Cv3YyG0b1t8KO",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": "2026-11-17T19:21:10.481Z",
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": 1,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "PENDING",
+        "source": "DOCUMENT",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_hskvwewvmxenlmnk",
+        "secondaryId": "document_14",
+        "externalId": null,
+        "createdAt": "2026-08-19T19:19:54.539Z",
+        "updatedAt": "2026-08-19T19:19:58.162Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "tc-nomail-d0ba0339a9.pdf",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": null,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_hskvwewvmxenlmnk",
+            "role": "VIEWER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 17,
+            "email": "d0ba0339a9@documenso.test",
+            "name": "Recipient d0ba0339a9",
+            "token": "4zpmFv38qQANOiQSLvyP5",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": "2026-11-17T19:19:58.160Z",
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": 1,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "DRAFT",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_rskscwckoxdkimmd",
+        "secondaryId": "document_13",
+        "externalId": "tcref-getmany-25fdae62eb",
+        "createdAt": "2026-08-19T19:17:55.356Z",
+        "updatedAt": "2026-08-19T19:17:55.356Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": 1,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "DRAFT",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_bkaasmlwcbywltkb",
+        "secondaryId": "document_12",
+        "externalId": "tcref-coords-1c101c7839",
+        "createdAt": "2026-08-19T19:17:28.475Z",
+        "updatedAt": "2026-08-19T19:17:28.475Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": 1,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_bkaasmlwcbywltkb",
+            "role": "SIGNER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 15,
+            "email": "tcref-coords-1c101c7839@documenso.test",
+            "name": "TCRef Coords",
+            "token": "TgjtKo5FYZI9KgHvCsDwp",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": null,
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": null,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "DRAFT",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_utdishylsahhlhnw",
+        "secondaryId": "document_11",
+        "externalId": "tcref-owned-8b783142e8",
+        "createdAt": "2026-08-19T19:17:28.335Z",
+        "updatedAt": "2026-08-19T19:17:28.335Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": 1,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "DRAFT",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_urlxhxhbndxwvbvu",
+        "secondaryId": "document_10",
+        "externalId": "tcref-metabad-8e267c4132",
+        "createdAt": "2026-08-19T19:16:54.198Z",
+        "updatedAt": "2026-08-19T19:16:54.198Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": 1,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_urlxhxhbndxwvbvu",
+            "role": "SIGNER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 14,
+            "email": "tcref-metabad-8e267c4132@documenso.test",
+            "name": "TCRef Meta Bad",
+            "token": "vTfPpkWkAGX8OMW4nA7f1",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": null,
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": null,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "REJECTED",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_mynwzrxyyiddmdfv",
+        "secondaryId": "document_9",
+        "externalId": "tcref-reject2-9c11313f6e",
+        "createdAt": "2026-08-19T19:16:32.717Z",
+        "updatedAt": "2026-08-19T19:16:33.198Z",
+        "completedAt": "2026-08-19T19:16:33.197Z",
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": 1,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_mynwzrxyyiddmdfv",
+            "role": "SIGNER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "REJECTED",
+            "sendStatus": "NOT_SENT",
+            "id": 12,
+            "email": "tcref-declines2-9c11313f6e@documenso.test",
+            "name": "TCRef Decliner 2",
+            "token": "ky0DRp98n5FEd7w0VrBEo",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": "2026-11-17T19:16:32.819Z",
+            "expirationNotifiedAt": null,
+            "signedAt": "2026-08-19T19:16:32.861Z",
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": null,
+            "rejectionReason": "tcref declined 9c11313f6e"
+          },
+          {
+            "envelopeId": "envelope_mynwzrxyyiddmdfv",
+            "role": "SIGNER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 13,
+            "email": "tcref-other2-9c11313f6e@documenso.test",
+            "name": "TCRef Other 2",
+            "token": "f1SZflLAG5DvXoMulK1y8",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": "2026-11-17T19:16:32.819Z",
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": null,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "REJECTED",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_nfbbhctvneaaadxv",
+        "secondaryId": "document_8",
+        "externalId": "tcref-reject-1f36da77c3",
+        "createdAt": "2026-08-19T19:16:10.743Z",
+        "updatedAt": "2026-08-19T19:16:11.511Z",
+        "completedAt": "2026-08-19T19:16:11.511Z",
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": 1,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_nfbbhctvneaaadxv",
+            "role": "SIGNER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "REJECTED",
+            "sendStatus": "NOT_SENT",
+            "id": 10,
+            "email": "tcref-declines-1f36da77c3@documenso.test",
+            "name": "TCRef Decliner",
+            "token": "zkg6-gbbQJID09CoU63yn",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": "2026-11-17T19:16:10.854Z",
+            "expirationNotifiedAt": null,
+            "signedAt": "2026-08-19T19:16:10.877Z",
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": null,
+            "rejectionReason": "tcref declined 1f36da77c3"
+          },
+          {
+            "envelopeId": "envelope_nfbbhctvneaaadxv",
+            "role": "SIGNER",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 11,
+            "email": "tcref-other-1f36da77c3@documenso.test",
+            "name": "TCRef Other",
+            "token": "OeEMKBoGkqY7rqBDN3lg7",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": "2026-11-17T19:16:10.854Z",
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": null,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      },
+      {
+        "internalVersion": 2,
+        "type": "DOCUMENT",
+        "status": "DRAFT",
+        "source": "TEMPLATE",
+        "visibility": "EVERYONE",
+        "templateType": "PRIVATE",
+        "id": "envelope_fteuhazrouxlatwn",
+        "secondaryId": "document_7",
+        "externalId": "tcref-assistant2-bb15bb7b7e",
+        "createdAt": "2026-08-19T19:15:50.231Z",
+        "updatedAt": "2026-08-19T19:15:50.249Z",
+        "completedAt": null,
+        "deletedAt": null,
+        "title": "Guard Source Template",
+        "authOptions": {
+          "globalAccessAuth": [],
+          "globalActionAuth": []
+        },
+        "formValues": null,
+        "publicTitle": "",
+        "publicDescription": "",
+        "userId": 3,
+        "teamId": 3,
+        "folderId": null,
+        "templateId": 1,
+        "user": {
+          "id": 3,
+          "name": "Guard Owner",
+          "email": "guard-owner@documenso.test"
+        },
+        "recipients": [
+          {
+            "envelopeId": "envelope_fteuhazrouxlatwn",
+            "role": "ASSISTANT",
+            "readStatus": "NOT_OPENED",
+            "signingStatus": "NOT_SIGNED",
+            "sendStatus": "NOT_SENT",
+            "id": 9,
+            "email": "tcref-asst2-bb15bb7b7e@documenso.test",
+            "name": "TCRef Assistant 2",
+            "token": "1vSbCfk6CVHuk3FZKT3MB",
+            "documentDeletedAt": null,
+            "expired": null,
+            "expiresAt": null,
+            "expirationNotifiedAt": null,
+            "signedAt": null,
+            "authOptions": {
+              "accessAuth": [],
+              "actionAuth": []
+            },
+            "signingOrder": null,
+            "rejectionReason": null
+          }
+        ],
+        "team": {
+          "id": 3,
+          "url": "guard-owner"
+        }
+      }
+    ],
+    "count": 17,
+    "currentPage": 1,
+    "perPage": 10,
+    "totalPages": 2
+  }
+}

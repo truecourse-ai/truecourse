@@ -1,0 +1,11 @@
+{
+  "step": 20,
+  "label": "PASS2 read back PENDING",
+  "at": "2026-08-19T19:15:07.603Z",
+  "method": "GET",
+  "url": "http://localhost:3347/api/v2/envelope/envelope_daillesxfetczrhd",
+  "headers": {
+    "Authorization": "<REDACTED api token>"
+  },
+  "body": null
+}

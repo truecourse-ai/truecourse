@@ -1,0 +1,42 @@
+{
+  "step": 2,
+  "label": "the real contract {ids:{type,ids}}",
+  "at": "2026-08-19T19:17:28.409Z",
+  "status": 400,
+  "headers": {
+    "access-control-allow-origin": "*",
+    "connection": "keep-alive",
+    "content-length": "347",
+    "content-type": "application/json",
+    "date": "Wed, 19 Aug 2026 19:17:28 GMT",
+    "keep-alive": "timeout=5",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "992",
+    "x-ratelimit-reset": "1787167080",
+    "x-request-id": "a28480bd-0f24-4d80-849a-53dc2e8b5ac9"
+  },
+  "body": {
+    "message": "Input validation failed",
+    "code": "BAD_REQUEST",
+    "data": {
+      "code": "BAD_REQUEST",
+      "httpStatus": 400,
+      "path": "envelope.getMany"
+    },
+    "issues": [
+      {
+        "code": "invalid_union_discriminator",
+        "options": [
+          "envelopeId",
+          "documentId",
+          "templateId"
+        ],
+        "path": [
+          "ids",
+          "type"
+        ],
+        "message": "Invalid discriminator value. Expected 'envelopeId' | 'documentId' | 'templateId'"
+      }
+    ]
+  }
+}

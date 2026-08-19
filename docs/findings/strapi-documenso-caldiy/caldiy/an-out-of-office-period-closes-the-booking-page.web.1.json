@@ -1,0 +1,50 @@
+{
+  "repo": "caldiy",
+  "scenarioId": "an-out-of-office-period-closes-the-booking-page.web.1",
+  "flowId": "an-out-of-office-period-closes-the-booking-page",
+  "failingStep": 1,
+  "whatFailed": "On the public booking page /reference-host/ooo-consult?month=2030-06 the day covered by the host's active out-of-office entry (2030-06-12) is still rendered as a normal, selectable day with six bookable 30 minute slots (9:00am to 11:30am), and the entry's reason emoji never replaces the date, so no button named “🏝️” exists on the page.",
+  "docClaim": {
+    "quote": "Out of office (OOO) lets you mark periods where you're unavailable so people can't book you ... Choose a reason from the dropdown (for example, vacation, sick leave, public holiday). Each reason has an emoji that shows on your booking page during the OOO period. ... The entry appears in your list and immediately blocks new bookings for that date range.",
+    "doc": ".truecourse/specs/sources/cal.com-help/help/availabilities/out-of-office.md",
+    "section": "out-of-office (intro) and out-of-office/add-an-out-of-office-entry (steps 3 and the closing sentence)"
+  },
+  "observed": "step-1.png and the captured page text show a fully painted booking page: June 2030, day 12 auto selected with a dark selected background, the right panel listing 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am. Sampling the screenshot shows day 12 is the ONLY day in June 2030 with a non-white cell background, i.e. the only bookable day that month, which matches this corpus's seeding convention of a date-specific availability window (other scenarios state it as “the seeded schedule opens 2030-06-12, 9:00–12:00”). The OOO day is therefore not merely un-emojified, it is fully bookable. invocation.json records timedOut: false and durationMs 10389 with the slot query resolved, so this is NOT the sandbox 10 s page-goto timeout pattern seen in the three error-outcome Cal.diy failures (the sibling scenario out-of-office-notes-shown-publicly-reach-the-booker.web.1 IS one of those).",
+  "verdict": "real-defect",
+  "confidence": "medium",
+  "impact": "Silent double booking against declared time off: a host whose bookable days come from date-specific availability (a date override, or any schedule with no weekly day matching the OOO day) keeps taking bookings straight through their out-of-office period, with no emoji, no blocked day and no warning on either side. The same filter was copied into the Holidays path, so country holidays inherit the hole.",
+  "rootCause": {
+    "file": "packages/features/availability/lib/getUserAvailability.ts",
+    "lines": "744-755",
+    "explanation": "calculateOutOfOfficeRanges (lines 727-783) builds the datesOutOfOffice map that drives BOTH symptoms. Before recording an OOO day it computes flattenDays = the union of a.days over the user's availability rows, and then `if (!flattenDays?.includes(dayNumberOnWeek)) continue;`. Only weekly working-hours rows carry days; date-override rows carry a date and an empty days array, so a schedule whose availability for the period is date-specific yields flattenDays = [] and EVERY day of EVERY OOO entry is skipped, returning {}. That empty map is then passed to buildDateRanges as outOfOffice (line 517), so packages/features/schedules/lib/date-ranges.ts never overwrites the day's range with a zero-length OOO range and oooExcludedDateRanges equals the ordinary dateRanges: the slots stay bookable. The same empty map reaches packages/features/schedules/lib/slots.ts (lines 188-218), which is the only place a slot is stamped away: true and given emoji, so packages/features/calendars/components/DatePicker.tsx (lines 251-279, 102-103) computes away = false for the day and renders the date instead of the emoji. One filter explains both the missing 🏝️ and the live slots. Note the intent of the filter is sane (do not paint OOO on days the host never works); it is simply blind to date overrides, which are exactly the rows that make an otherwise non-working day bookable."
+  },
+  "introducedBy": {
+    "commit": "880ba8f1dd",
+    "date": "2024-04-09",
+    "pr": "#13621",
+    "title": "feat: ooo-v2",
+    "note": "The flattenDays guard was added verbatim in this commit (then packages/core/getUserAvailability.ts). git blame at the tested commit points at 26b43856797 (2025-12-11) and 7180eb067a / PR #19655 (2025-03-02), but both are pure file moves (packages/core -> packages/lib -> packages/features/availability/lib); `git log --follow -S flattenDays` resolves to 880ba8f1dd. Related: 12e07f20d4, PR #25561 “feat: Add Holidays feature to block availability on public holidays” (2025-12-15) copied the identical guard into calculateHolidayBlockedDates with the comment “Match OOO pattern” (same file, around line 860), so the holiday blocker has the same defect."
+  },
+  "upstream": {
+    "issues": [],
+    "prs": [],
+    "queries": [
+      "gh search issues --owner calcom --include-prs 'out of office date override' (0 results)",
+      "gh search issues --owner calcom --include-prs 'flattenDays' (0 results)",
+      "gh search issues --owner calcom --include-prs '\"out of office\" override' (0 results)"
+    ]
+  },
+  "fixedAfter": {
+    "status": "no",
+    "by": null,
+    "date": null,
+    "inTag": null,
+    "note": "in cal.diy: not fixed. Only 4 commits landed on calcom/cal.diy main between the tested commit 038381aeca (2026-07-31) and the fetched head 176037d0af (2026-08-08), and `git log 038381aeca..origin/main -- packages/features/availability/lib/getUserAvailability.ts packages/features/schedules/lib/date-ranges.ts` is empty; `git show origin/main:packages/features/availability/lib/getUserAvailability.ts` still carries the identical flattenDays guard at lines 744-755 (and the copied one at ~860). in cal.com: not verifiable from source, the commercial tree is private and the public calcom/cal.com main is a mirror of cal.diy main (same commit 176037d0af); no public issue, PR or changelog entry surfaced in the three searches above."
+  },
+  "colleagueFinding": {
+    "ref": null,
+    "agreement": "n/a",
+    "note": "No Cal.diy researcher write-up was supplied with the brief. There is an untracked docs/guard-findings.md inside /Users/musheghgevorgyan/repos/cal.diy whose finding 1 (“Vacation doesn't stop bookings ... If their calendar gets its availability from specific dates rather than a repeating weekly schedule, the site ignores the vacation completely”) describes this same failure; my independent read of the source agrees with it and pins the mechanism to the flattenDays guard in calculateOutOfOfficeRanges and its blame to PR #13621."
+  },
+  "notes": "Not an edition mismatch: out of office is present and implemented in the Cal.diy tested tree end to end (OutOfOfficeEntry -> calculateOutOfOfficeRanges -> slots.ts away/emoji -> DatePicker away-emoji span), and the scenario asserts nothing plan-gated (booking forwarding, which the doc does gate on Teams, is not exercised). Not a test defect: with the OOO applied, DatePicker.tsx line 270 would compute disabled = !oooIsSelectable = true (no redirect user, note private) and line 102 would render the emoji in place of the date, so the scenario's expectation of a disabled button named “🏝️” is exactly what this code produces when the entry is honored. The one link I could not verify directly is that the run's seed actually inserted the OutOfOfficeEntry row: the seed script reference/seed/guard-seed.mjs is absent from the working tree and from both scratch clones (never committed), and the sandbox Postgres on localhost:5450 is down, so I could not read the row back. Circumstantial support: the seed created an event type dedicated to this flow (slug ooo-consult, title “OOO Consult”) plus a second one for the public-note variant (ooo-note), and the scenario pins exact seeded values (emoji 🏝️, note “Back on the fifteenth”). What would settle it: `SELECT * FROM \"OutOfOfficeEntry\" e JOIN users u ON u.id = e.\"userId\" WHERE u.username = 'reference-host'` against the seeded database, or a standalone repro: one user, a schedule whose only availability row is a date override on day D 09:00-12:00, one OOO entry covering D, then GET the slots for D and observe away: false and live slots. Two more things a maintainer should know: (1) calculateOutOfOfficeRanges has no unit test anywhere in the repo (no *.test.ts references it or outOfOfficeDays); the only OOO coverage, packages/features/schedules/lib/date-ranges.test.ts line 548, hands buildDateRanges a pre-built outOfOffice map and so drives straight past the buggy filter; (2) the scenario's steps 2 and 3 (emoji visible, private note absent) never ran because step 1 failed, so the private-note claim is untested in this run."
+}
