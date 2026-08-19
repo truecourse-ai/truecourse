@@ -145,6 +145,23 @@ python3 tools/redact-transcript.py <files...> -o /tmp/redacted
 
 Always re-scan what actually left the machine, not just what the tool generated.
 
+## Pace, and not getting flagged
+
+The filing account is new and has no history, which is exactly the profile GitHub's abuse detection treats as suspicious. A suspension would take every filed issue down with it, so pace matters more than throughput.
+
+- **At most 2 to 3 public issues per day**, alternating repos rather than concentrating on one.
+- **Private security advisories are exempt.** They are not public content, so they add no spam signal, and they are usually the highest-value item anyway. File them with the API rather than the web form when the repo has private reporting enabled:
+
+```bash
+gh api repos/<owner>/<repo>/private-vulnerability-reporting          # {"enabled":true}
+gh api -X POST repos/<owner>/<repo>/security-advisories/reports --input payload.json \
+  --jq '{ghsa_id, state, html_url}'
+```
+
+  The payload takes `summary`, `description` (the full report body), `severity`, and a `vulnerabilities` array naming the affected package and version range. The reply's `state` is `triage` and the advisory is visible only to the maintainers and the reporter.
+- **Give the account a profile** before a long campaign: avatar, bio, profile README saying what it files. Cheap, and it changes how both the heuristics and the maintainers read it.
+- **Hold a sibling public issue when a private advisory covers the same code.** Filing the docs-side issue for a finding whose security half is still in triage would disclose it early.
+
 ## The filing procedure
 
 ```bash

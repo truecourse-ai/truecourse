@@ -4,7 +4,11 @@ target: strapi/strapi
 route: security disclosure
 title: An admin token holding only admin::admin-tokens.read reads back a sibling token's plaintext key and gains its permissions
 labels: none (GHSA advisory, not a labelled issue)
-status: draft
+status: filed
+filed_url: https://github.com/strapi/strapi/security/advisories/GHSA-h3c5-gq5q-4q3m
+filed_ghsa: GHSA-h3c5-gq5q-4q3m
+filed_at: 2026-08-19
+filed_note: private advisory, state=triage, severity=high. Not public; the sibling docs issue for the "shown only once" text stays unfiled until this is triaged.
 reverified: yes (Strapi 5.52.1, develop @ c7dbadd4feec41f0d3892c1bc9f5435e7aad3672, 2026-08-19)
 ---
 
