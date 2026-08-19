@@ -5,7 +5,8 @@ route: public issue
 title: Admin token permissions on localized content types are deleted at every server restart
 labels: none (BUG_REPORT.yml applies no automatic labels)
 status: filed
-filed_url: https://github.com/strapi/strapi/issues/27417
+filed_url: https://github.com/strapi/strapi/issues/27418
+superseded: https://github.com/strapi/strapi/issues/27417 (auto-closed on template format before triage; refiled as 27418)
 filed_at: 2026-08-19
 reverified: yes (develop c7dbadd4fe / 5.52.1, 2026-08-19)
 format_note: Body follows strapi/strapi BUG_REPORT.yml exactly (### section headers matching each field label + the two required checked checkboxes). The repo's Check Required Checkboxes workflow parses these headers; a table or custom headings gets auto-flagged and closed.
@@ -40,6 +41,8 @@ SQLite
 Javascript
 
 ### Bug Description
+
+Refiled from #27417, which the template checker auto-closed before triage because the original body used a table instead of this form's sections. Same finding, correctly formatted here; #27417 can be closed as a duplicate.
 
 The Admin tokens documentation names exactly one way a token loses a permission: removing that permission from the owner's role. In practice, a permission granted through `POST /admin/admin-tokens` (or `PUT /admin/admin-tokens/:id`) on a localized content type is deleted from the database by the boot-time permission cleanup at the next server start. The token keeps authenticating and can do nothing. Nothing is logged, and the admin panel simply shows the checkbox unchecked. This hits programmatic callers, which is the audience Admin tokens exist for: the panel always sends an explicit `properties.fields` array, so panel-created permissions survive, while a permission created through the API without `properties` does not.
 
@@ -152,8 +155,13 @@ The smallest correct fix looks like skipping the nil-property rule for `apiToken
 
 One related inconsistency, worth a look in the same pass: nil properties mean three different things in three code paths. At creation nil `fields` means "all fields" (`api-token.ts:265-268`, and the MCP tool output schema exposes every field). At request time nil `locales` means "no locales" (the tool schema renders `locale` as `z.never()` with "No locale access for this action."). At boot, nil means "invalid, delete".
 
+#### Suggested labels
+
+`issue: bug`, `severity: high`, `source: core:admin`, `version: 5`
+
 #### Related
 
+- #27417, the original filing of this same report, auto-closed on template format before triage.
 - PR #25657 (merged 2026-04-29) introduced token-owned admin permissions and edited this cleanup without extending `filterPermissionsToRemove`.
 - PR #27027 (merged 2026-07-16) fixes "Select all" in the Admin token permission editor. Same feature area, front-end only, unrelated to persistence.
 - PR #26371 (merged 2026-05-27) added the MCP server, which is the surface the loss is easiest to observe on, not the cause.

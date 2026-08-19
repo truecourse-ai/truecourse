@@ -63,7 +63,7 @@ Root: /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/2bf12aed-
 
 ## Filed (issue URLs)
 
-- Strapi "Admin token permissions on localized content types are deleted at every server restart" -> https://github.com/strapi/strapi/issues/27417 (filed 2026-08-19 as truecourse-agent). [the finding I labelled S1]
+- Strapi "Admin token permissions on localized content types are deleted at every server restart" (S1) -> **https://github.com/strapi/strapi/issues/27418** (OPEN, filed 2026-08-19 as truecourse-agent, passed the template checker clean, no flag). Supersedes https://github.com/strapi/strapi/issues/27417, which was auto-closed on template format before triage and now carries a comment pointing at 27418; asked maintainers to close it as a duplicate. dosubot confirmed the mechanism on the original. See FILING-GUIDE.md for the format rules this taught us.
 
 ## Filing lesson (IMPORTANT for the rest of the batch)
 
@@ -89,3 +89,24 @@ TODO before filing the rest:
 ## Filed so far
 
 - strapi/strapi #27417 (S1, admin-token permissions deleted at restart): filed 2026-08-19 as truecourse-agent; auto-closed on format, reformatted+flag-cleared, dosubot-confirmed; awaiting maintainer reopen. URL https://github.com/strapi/strapi/issues/27417
+
+## Label convention (user rule: review the last 10-20 issues of the repo before filing)
+
+A NONE-association account cannot apply labels, so each draft should carry a "Suggested labels" line and let maintainers/dosubot apply them.
+
+strapi/strapi taxonomy observed on issues #27350-#27417 (25 sampled):
+- `issue: bug` (15/25) or `issue: enhancement`
+- `severity: low | medium | high | critical`  <- NAMED, not numeric. dosubot suggested "severity: 2" on #27417, which does not exist in this repo.
+- `source: core:admin | core:content-manager | core:upload | core:strapi | core:data-transfer | cli`
+- `status: confirmed | pending reproduction`
+- `version: 5` (16/25, effectively mandatory)
+- `flag: EE`, `Priority: Urgent` (maintainer-applied)
+- `flag: invalid template` = the auto-flag we must never trigger (8/25 of recent issues have it, so this trap is common)
+
+Mapping for our Strapi findings: admin-token ones (S1, S11) -> `source: core:admin`; MCP ones (S2-S7) -> `source: core:strapi` or `source: core:content-manager`; Content Manager UI (S10) -> `source: core:content-manager`; REST/routing (S8, S9) -> `source: core:strapi`. All get `issue: bug` + `version: 5` + a severity.
+
+Neighbouring MCP issues worth cross-linking in our MCP drafts: #27395 (MCP tools/list advertises draft-07 JSON Schema), #27353 (MCP tool names collide for content types sharing an API), #27397 (CM list view draft/publish status).
+
+## Transcript attachment policy
+
+Drafts end with "the full transcript is available on request" rather than pasting it. Reasons, measured: one scenario transcript is ~27 KB against GitHub's 65 KB issue-body limit, so a single one nearly fills an issue and buries the report; the evidence dir per scenario is ~96 KB including screenshots; and the transcripts contain live credentials (admin jwt, token accessKey) that would need redaction before publication. The drafts already inline the specific requests and responses that prove the claim. If a maintainer asks, attach the redacted transcript as a gist or a file attachment on the issue rather than inline.

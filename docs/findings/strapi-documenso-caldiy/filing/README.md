@@ -4,6 +4,7 @@ Re-verified 2026-08-19, before anything is filed upstream. This folder is the ou
 
 ## What is here
 
+- **`FILING-GUIDE.md` - read this before filing anything.** The per-repo issue-template requirements, the bot behavior that auto-closes a wrongly formatted issue, the label convention, the evidence/transcript policy, and the exact filing commands.
 - `FILING-TABLE.md` - one row per finding (49 distinct findings, ids S1-S17 / D1-D17 / C1-C16 from `../strapi-documenso-caldiy.md`): still present on the default branch today, live re-run verdict, new upstream reports since 2026-08-15, route, confidence, draft file. Per-finding filer notes follow the table. **Generated**; edit the sources, not the file.
 - `issues/<target>/<ID>-<slug>.md` - one drafted issue (or PR comment, or security report) per filable finding, ready to paste or `gh issue create --body-file`. Each has a front-matter block (`finding`, `target`, `route`, `title`, `labels`, `status: draft`, `reverified`) that is not part of the pasted body.
 - `reverify/<repo>/<ID>.json` - the step 1+2 re-check per finding (source state today, doc state today, tracker dedupe, cited-item state, route + policy basis). `reverify/<repo>/POLICY.md` - each repo's security policy, CONTRIBUTING and issue-template requirements, quoted.

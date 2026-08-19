@@ -60,8 +60,9 @@
   "confidence": "high",
   "notes": "Not a security report despite being a permission bug: it fails closed (the token loses access, it does not gain any), so it is not a boundary violation under SECURITY.md and belongs in the public tracker. Reproduction for the BUG_REPORT.yml 'Steps to Reproduce' field, no MCP needed: POST /admin/admin-tokens with adminPermissions [{action: 'plugin::content-manager.explorer.read', subject: '<a localized content type>'}] and no properties, GET it back to confirm the grant, restart the server, GET again and observe adminPermissions empty. Strapi Version field: 5.52.0 (tested) and confirm it also reproduces on 5.52.1. The suggested fix belongs in filterPermissionsToRemove (queries.ts:90-123): skip the nil-property rule for apiToken-owned rows, mirroring the orphan branch at 147-154 that already special-cases them.",
   "filed": {
-    "url": "https://github.com/strapi/strapi/issues/27417",
+    "url": "https://github.com/strapi/strapi/issues/27418",
     "at": "2026-08-19",
-    "account": "truecourse-agent"
+    "account": "truecourse-agent",
+    "superseded": "https://github.com/strapi/strapi/issues/27417 (auto-closed on template format before triage)"
   }
 }
