@@ -48,6 +48,20 @@ export function connectorDocPath(kind: string, externalId: string): string {
   return `knowledge/${kind}/${externalId}.md`;
 }
 
+/**
+ * A source timestamp as a `timestamptz` column will accept it, or null. `DocRef`
+ * types these as strings but nothing constrains their shape — a connector may
+ * use `updatedAt` as an opaque change marker, and a source may emit a format
+ * `Date` cannot read. Either would fail the INSERT and take the whole sync with
+ * it, so an unusable value is dropped: the doc keeps its other columns and only
+ * loses its ordering hint.
+ */
+function isoOrNull(value: string | undefined): string | null {
+  if (!value) return null;
+  const when = new Date(value);
+  return Number.isNaN(when.getTime()) ? null : when.toISOString();
+}
+
 export interface SyncDoc {
   externalId: string;
   title: string;
@@ -69,8 +83,8 @@ function toSyncDoc(kind: string, ref: DocRef, content: DocContent): SyncDoc {
     url: ref.url,
     version: ref.version ?? null,
     // The dates in their own columns, not smuggled through `version`.
-    sourceCreatedAt: ref.createdAt ?? null,
-    sourceUpdatedAt: ref.updatedAt ?? null,
+    sourceCreatedAt: isoOrNull(ref.createdAt),
+    sourceUpdatedAt: isoOrNull(ref.updatedAt),
     contentHash: sha256(Buffer.from(content.markdown, 'utf-8')),
     doc: {
       docPath: connectorDocPath(kind, ref.id),
