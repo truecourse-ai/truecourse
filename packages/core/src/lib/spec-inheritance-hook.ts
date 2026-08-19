@@ -25,6 +25,8 @@ export interface WorkspaceInheritanceDoc {
   docPath: string;
   /** The stored (content-addressed) markdown body. */
   markdown: string;
+  /** ISO timestamp the source tool reports; stamped onto the materialized file. */
+  lastTouched?: string;
 }
 
 /** The workspace layer a repo inherits: doc bodies to materialize + the workspace

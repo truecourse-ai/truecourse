@@ -54,6 +54,15 @@ export const knowledgeDocuments = pgTable(
     url: text('url'),
     /** Source version string (connector); null when only a content hash is available. */
     version: text('version'),
+    /**
+     * When the source tool says the doc was created / last modified. Nullable:
+     * rows written before these columns existed have neither, and a source may
+     * expose only one. Deliberately separate from `version` — Jira happens to
+     * put a date there because it has no version counter, Confluence puts an
+     * edit counter, and nothing downstream should have to know which.
+     */
+    sourceCreatedAt: ts('source_created_at'),
+    sourceUpdatedAt: ts('source_updated_at'),
     /** sha256 of the body at last sync — the incremental-sync diff key. */
     contentHash: text('content_hash').notNull(),
     /**

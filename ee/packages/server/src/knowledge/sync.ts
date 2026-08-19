@@ -53,6 +53,8 @@ export interface SyncDoc {
   title: string;
   url: string | null;
   version: string | null;
+  sourceCreatedAt: string | null;
+  sourceUpdatedAt: string | null;
   contentHash: string;
   doc: WorkspaceDocInput;
 }
@@ -66,6 +68,9 @@ function toSyncDoc(kind: string, ref: DocRef, content: DocContent): SyncDoc {
     title: content.title || ref.title,
     url: ref.url,
     version: ref.version ?? null,
+    // The dates in their own columns, not smuggled through `version`.
+    sourceCreatedAt: ref.createdAt ?? null,
+    sourceUpdatedAt: ref.updatedAt ?? null,
     contentHash: sha256(Buffer.from(content.markdown, 'utf-8')),
     doc: {
       docPath: connectorDocPath(kind, ref.id),
@@ -164,6 +169,8 @@ async function reconcileLedgerSlice(
       title: d.title,
       url: d.url,
       version: d.version,
+      sourceCreatedAt: d.sourceCreatedAt,
+      sourceUpdatedAt: d.sourceUpdatedAt,
       contentHash: d.contentHash,
     });
   }
@@ -229,7 +236,14 @@ export async function processWorkspaceKnowledge(
     loaded += 1;
     await progress?.(loaded, total, SYNC_MSG_FETCH);
     if (markdown == null) continue;
-    docs.push({ docPath: row.docPath, markdown, lastTouched: row.lastSyncedAt });
+    // The SOURCE's date orders the corpus. `lastSyncedAt` is the same instant for
+    // every doc in a run, so it can only be the fallback for a row that predates
+    // the source-date columns.
+    docs.push({
+      docPath: row.docPath,
+      markdown,
+      lastTouched: row.sourceUpdatedAt ?? row.lastSyncedAt,
+    });
     consolidated.push({ docPath: row.docPath, processedHash: row.contentHash });
     bySource[row.sourceKind] = (bySource[row.sourceKind] ?? 0) + 1;
   }
