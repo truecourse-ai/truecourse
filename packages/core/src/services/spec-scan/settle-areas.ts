@@ -24,6 +24,7 @@ import {
 } from '@truecourse/spec-consolidator'
 import { promptFingerprint } from '../agent/session-cache.js'
 import {
+  docTitle,
   docsWithLabelTool,
   instructionsBriefingBlock,
   readDocTool,
@@ -39,14 +40,28 @@ export const SUBDIVISION_DOC_THRESHOLD = 40
 
 /**
  * The three numbers (§3.3): the settlement is a read-a-few-samples-and-decide
- * job — eight turns covers the label listings plus a handful of doc reads, and
- * one resume grant covers a corpus whose vocabulary genuinely needs the tour.
+ * job. The briefing carries the WHOLE label→docs map, so no turn is spent
+ * enumerating it — eight turns is a handful of doc reads, `check_settlement`
+ * and the outcome, and one resume grant covers a vocabulary that genuinely
+ * needs the tour. (Before the map rode the briefing, a 45-concern corpus spent
+ * all 16 turns calling `docs_with_label` one label at a time and settled
+ * nothing.)
  */
 export const SETTLE_AREAS_BUDGET: SessionBudget = {
   turns: 8,
   maxResumes: 1,
   tokenCeiling: 100_000,
 }
+
+/**
+ * The briefing's per-label doc list is CAPPED — a corpus with hundreds of
+ * concerns must not turn its briefing into the corpus. The cap shrinks as the
+ * vocabulary grows (every label keeps at least a couple of docs), and a
+ * truncated label says how many it withheld; `docs_with_label` lists the rest.
+ */
+export const BRIEFED_DOCS_PER_LABEL_MAX = 12
+const BRIEFED_DOCS_PER_LABEL_MIN = 2
+const BRIEFED_DOC_LINE_BUDGET = 600
 
 // Every field REQUIRED (empty containers are fine) — a `.default()` would give
 // the schema a different input than output type, which `SessionDef`'s
@@ -149,9 +164,9 @@ You decide FOUR things:
 3. PRODUCT VERDICTS — for EVERY non-core product in the briefing, one verdict:
    - "justified"        — the repo genuinely ships this as a distinct, separately-deployed app/service, and keeping its concerns apart from same-named core concerns earns the axis its keep.
    - "collapse-to-core" — it is a feature, module or domain wearing a product name; its docs belong to core. (Equivalent to a product merge onto core — state it either way, but state it.)
-   Judge from the docs: \`docs_with_label\` lists a label's docs, \`read_doc\` opens one. A repository is usually ONE product — the default lean is collapse.
+   Judge from the docs: the briefing lists EVERY label with the docs that carry it, so decide from those paths and titles and open one with \`read_doc\` only when the title is not enough. (\`docs_with_label\` exists for the rare label whose briefing list was truncated — never to re-list what the briefing already showed you.) A repository is usually ONE product — the default lean is collapse.
 
-4. SUBDIVISIONS — a concern flagged as oversized in the briefing may be split into 2+ finer concerns. If you subdivide, you MUST assign EVERY doc of that label to exactly one of the new concerns — an unassigned doc is a validation error. Subdivide only when the label genuinely bundles distinct slices (an "api" label holding auth + billing + webhooks); a large-but-coherent label stays whole. The new concerns become ordinary areas.
+4. SUBDIVISIONS — a concern flagged as oversized in the briefing may be split into 2+ finer concerns. If you subdivide, you MUST assign EVERY doc of that label to exactly one of the new concerns — an unassigned doc is a validation error. An oversized label is the one case where the briefing's list may be cut short: call \`docs_with_label\` on THAT label to get its full list before you assign. Subdivide only when the label genuinely bundles distinct slices (an "api" label holding auth + billing + webhooks); a large-but-coherent label stays whole. The new concerns become ordinary areas.
 
 VALIDATE BEFORE YOU FINISH: call \`check_settlement\` with your complete draft. It runs the exact checks the run applies — missing product verdicts, merge targets not in the briefing, incomplete subdivision assignments — and a problem it finds costs one turn here instead of your whole settlement at the outcome.
 
@@ -161,18 +176,29 @@ The outcome is one object: { "concernMerges": {...}, "productMerges": {...}, "pr
 export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SYSTEM_PROMPT)
 
 /**
- * The cache key: label SETS only, deliberately — a doc edit that moves no
- * label is a hit. `extraParts` is the appendable tail (step 6's orchestrator
- * `instructions` land there later).
+ * The cache key covers everything the BRIEFING says — which, since the map
+ * moved into it, is the labels AND the docs behind them. So a corpus that
+ * gained, lost or re-tagged a doc settles again (the settlement was judged
+ * against a doc list that no longer holds), while a doc EDIT that moves no
+ * label is still a hit: content never enters this key. `extraParts` is the
+ * appendable tail (step 6's orchestrator `instructions` land there).
  */
 export function settleAreasCacheKey(vocab: AreaVocabView, extraParts: readonly string[] = []): string {
   return scanCacheKey([
     SETTLE_AREAS_PROMPT_FINGERPRINT,
-    [...vocab.products.keys()].sort().join(','),
-    [...vocab.concerns.keys()].sort().join(','),
+    labelMapKeyPart(vocab.products),
+    labelMapKeyPart(vocab.concerns),
     [...vocab.overThreshold].sort().join(','),
     ...extraParts,
   ])
+}
+
+/** One axis of the briefed map, order-independent: `label=ref,ref;label=ref`. */
+function labelMapKeyPart(map: ReadonlyMap<string, readonly string[]>): string {
+  return [...map.entries()]
+    .map(([label, refs]) => `${label}=${[...refs].sort().join(',')}`)
+    .sort()
+    .join(';')
 }
 
 /**
@@ -249,10 +275,9 @@ export interface AppliedSettlement {
 /**
  * Sanitize + apply a settlement — like the old vocab sanitize EXCEPT that
  * collapse-to-core is legal on this path. LENIENT where the validator is
- * strict, because a CACHED settlement (keyed on label sets alone) may meet a
- * slightly different doc set: unknown docs are skipped, an unassigned doc
- * keeps its label, an invalid mapping is dropped rather than refusing the
- * settlement whole.
+ * strict: one bad mapping must never cost the whole settlement, so an unknown
+ * doc is skipped, an unassigned doc keeps its label, and an invalid mapping is
+ * dropped rather than refusing the settlement whole.
  */
 export function applySettlement(settlement: AreaSettlement, vocab: AreaVocabView): AppliedSettlement {
   const products = new Set(vocab.products.keys())
@@ -348,20 +373,65 @@ function labelIndex(vocab: AreaVocabView): Map<string, readonly string[]> {
 
 export const SETTLE_AREAS_WORK_ITEM = 'vocabulary'
 
-export function settleAreasBriefing(vocab: AreaVocabView, instructions: readonly string[] = []): string {
-  const line = (map: Map<string, string[]>): string[] =>
-    [...map.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([label, refs]) => `  ${label}  (${refs.length} doc${refs.length === 1 ? '' : 's'})`)
+/**
+ * How many docs each label lists in the briefing: the whole list for an
+ * ordinary vocabulary, shrinking toward {@link BRIEFED_DOCS_PER_LABEL_MIN} as
+ * the label count grows past the line budget. Deterministic (it enters no key,
+ * but it must not wobble between the estimate and the run).
+ */
+function briefedDocsPerLabel(vocab: AreaVocabView): number {
+  const labels = vocab.products.size + vocab.concerns.size
+  if (labels === 0) return BRIEFED_DOCS_PER_LABEL_MAX
+  const fair = Math.floor(BRIEFED_DOC_LINE_BUDGET / labels)
+  return Math.max(BRIEFED_DOCS_PER_LABEL_MIN, Math.min(BRIEFED_DOCS_PER_LABEL_MAX, fair))
+}
+
+/**
+ * The briefing carries the LABEL→DOCS MAP itself (not just doc counts): the
+ * data this session certainly needs rides the briefing, not a tool — the same
+ * philosophy as interface authoring's state registry (plan item 106). A
+ * session that has to fetch the map spends its whole budget fetching it.
+ */
+export function settleAreasBriefing(
+  vocab: AreaVocabView,
+  universe: ScanDocUniverse,
+  instructions: readonly string[] = [],
+): string {
+  const perLabel = briefedDocsPerLabel(vocab)
+  const block = (map: Map<string, string[]>): string[] =>
+    [...map.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .flatMap(([label, refs]) => [
+        `  ${label}  (${refs.length} doc${refs.length === 1 ? '' : 's'})`,
+        ...refs.slice(0, perLabel).map((ref) => {
+          const doc = universe.byPath.get(ref)
+          return doc ? `    ${ref}  ·  ${docTitle(doc)}` : `    ${ref}`
+        }),
+        ...(refs.length > perLabel
+          ? [`    … and ${refs.length - perLabel} more — \`docs_with_label\` lists all ${refs.length}.`]
+          : []),
+      ])
   const lines = [
     ...instructionsBriefingBlock(instructions),
     `Settle the area vocabulary of this doc corpus.`,
     '',
+    'Every label below is listed with the docs that carry it — the whole label→docs map',
+    'is here, so nothing needs listing label by label. Judge the merges from these paths',
+    'and titles; `read_doc` opens a doc when a title is not enough.',
+    ...(perLabel < BRIEFED_DOCS_PER_LABEL_MAX
+      ? [
+          `(This vocabulary is large, so each list is cut to its first ${perLabel} docs — a cut list`,
+          'says how many it withheld, and `docs_with_label` names them.)',
+        ]
+      : []),
+    '',
     vocab.products.size > 0
       ? `Non-core products (${vocab.products.size}):`
       : `Non-core products: none — every doc tagged core (or process).`,
-    ...line(vocab.products),
+    ...block(vocab.products),
     '',
     `Concerns (${vocab.concerns.size}):`,
-    ...line(vocab.concerns),
+    ...block(vocab.concerns),
   ]
   if (vocab.overThreshold.length > 0) {
     lines.push(

@@ -14,6 +14,7 @@ import { resetKvCacheStore } from '@truecourse/llm'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import {
+  BRIEFED_DOCS_PER_LABEL_MAX,
   SETTLE_AREAS_SESSION_KIND,
   SUBDIVISION_DOC_THRESHOLD,
   applySettlement,
@@ -26,7 +27,12 @@ import {
   type AreaSettlement,
 } from '../../packages/core/src/services/spec-scan/settle-areas'
 import { buildScanUniverse } from '../../packages/core/src/services/spec-scan/tools'
-import type { AreaTag, DecisionsFile, RepoIdentity } from '../../packages/spec-consolidator/src/index.js'
+import type {
+  AreaTag,
+  DecisionsFile,
+  DocCandidate,
+  RepoIdentity,
+} from '../../packages/spec-consolidator/src/index.js'
 import {
   docPathOf,
   memoryPersistence,
@@ -46,6 +52,20 @@ const tagMap = (rows: Record<string, [string, string][]>): Map<string, AreaTag[]
       ref,
       tags.map(([product, concern]) => ({ product, concern })),
     ]),
+  )
+
+/** A doc universe from `ref → first heading`, for the briefing's titles. */
+const universeOf = (titles: Record<string, string>) =>
+  buildScanUniverse(
+    Object.entries(titles).map(
+      ([path, title]): DocCandidate => ({
+        path,
+        absPath: `/repo/${path}`,
+        kind: 'spec',
+        preview: `# ${title}\n`,
+        lastTouched: '2026-01-01T00:00:00.000Z',
+      }),
+    ),
   )
 
 describe('settleAreasGate — when a settlement is worth a session', () => {
@@ -80,7 +100,7 @@ describe('settleAreasGate — when a settlement is worth a session', () => {
     expect(vocab.overThreshold).toEqual(['endpoints'])
     expect(settleAreasGate(vocab)).toBe(true)
 
-    const briefing = settleAreasBriefing(vocab)
+    const briefing = settleAreasBriefing(vocab, buildScanUniverse([]))
     expect(briefing).toContain(`Oversized concerns (over ${SUBDIVISION_DOC_THRESHOLD} docs)`)
     expect(briefing).toMatch(/^ {2}endpoints$/m)
   })
@@ -89,6 +109,78 @@ describe('settleAreasGate — when a settlement is worth a session', () => {
     const vocab = collectAreaVocab(tagMap({ 'a.md': [['process', 'goals']], 'b.md': [['core', 'auth']] }))
     expect([...vocab.products.keys()]).toEqual([])
     expect([...vocab.concerns.keys()]).toEqual(['auth'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// the briefing carries the label→docs map (the defect: a 45-concern vocabulary
+// spent all 16 turns enumerating `docs_with_label` and never settled anything)
+// ---------------------------------------------------------------------------
+
+describe('settleAreasBriefing — the label→docs map rides the briefing', () => {
+  const vocab = collectAreaVocab(
+    tagMap({
+      'docs/booking-auth.md': [['booking', 'auth']],
+      'docs/core-auth.md': [['core', 'auth']],
+      'docs/billing.md': [['core', 'billing']],
+    }),
+  )
+  const universe = universeOf({
+    'docs/booking-auth.md': 'Booking auth',
+    'docs/core-auth.md': 'Auth',
+    'docs/billing.md': 'Billing',
+  })
+
+  it('names every doc of every concern, with its title', () => {
+    const briefing = settleAreasBriefing(vocab, universe)
+    expect(briefing).toContain('docs/booking-auth.md  ·  Booking auth')
+    expect(briefing).toContain('docs/core-auth.md  ·  Auth')
+    expect(briefing).toContain('docs/billing.md  ·  Billing')
+    // The counts stay, as the label header.
+    expect(briefing).toMatch(/^ {2}auth {2}\(2 docs\)$/m)
+    expect(briefing).toMatch(/^ {2}billing {2}\(1 doc\)$/m)
+  })
+
+  it('names every doc of every non-core product too', () => {
+    const briefing = settleAreasBriefing(vocab, universe)
+    const products = briefing.slice(briefing.indexOf('Non-core products'), briefing.indexOf('Concerns ('))
+    expect(products).toContain('docs/booking-auth.md  ·  Booking auth')
+  })
+
+  it('says the map is complete, so no session goes label-by-label for it', () => {
+    expect(settleAreasBriefing(vocab, universe)).toContain('the whole label→docs map')
+  })
+
+  it('a doc missing from the universe still gets its ref listed', () => {
+    expect(settleAreasBriefing(vocab, buildScanUniverse([]))).toContain('docs/billing.md')
+  })
+
+  it('caps a pathological label list and says how many it withheld', () => {
+    const rows: Record<string, [string, string][]> = {}
+    for (let i = 0; i < BRIEFED_DOCS_PER_LABEL_MAX + 7; i += 1) {
+      rows[`docs/d${String(i).padStart(2, '0')}.md`] = [['core', 'endpoints']]
+    }
+    const big = collectAreaVocab(tagMap(rows))
+    const briefing = settleAreasBriefing(big, buildScanUniverse([]))
+
+    expect(briefing).toContain('docs/d00.md')
+    expect(briefing).not.toContain(`docs/d${String(BRIEFED_DOCS_PER_LABEL_MAX).padStart(2, '0')}.md`)
+    expect(briefing).toContain(`… and 7 more — \`docs_with_label\` lists all ${BRIEFED_DOCS_PER_LABEL_MAX + 7}.`)
+  })
+
+  it('shrinks the per-label list further as the vocabulary grows', () => {
+    const rows: Record<string, [string, string][]> = {}
+    for (let label = 0; label < 300; label += 1) {
+      for (let doc = 0; doc < 5; doc += 1) rows[`docs/c${label}-d${doc}.md`] = [['core', `concern-${label}`]]
+    }
+    const huge = collectAreaVocab(tagMap(rows))
+    const briefing = settleAreasBriefing(huge, buildScanUniverse([]))
+
+    expect(huge.concerns.size).toBe(300)
+    // Every label is still named; the doc lists are what gives.
+    expect(briefing).toContain('concern-299')
+    expect(briefing).toContain('more — `docs_with_label` lists all 5.')
+    expect(briefing.length).toBeLessThan(120_000)
   })
 })
 
@@ -226,14 +318,26 @@ describe('the settle session definition', () => {
     expect(def.tools.map((t) => t.name).sort()).toEqual(['check_settlement', 'docs_with_label', 'read_doc'])
   })
 
-  it('keys the cache on the label SETS, never on the docs behind them', () => {
+  // The key covers everything the briefing SAYS. Since the briefing carries the
+  // label→docs map, the docs behind a label are part of the key — a corpus that
+  // gained, lost or re-tagged a doc briefs differently and settles again.
+  it('keys the cache on the label→docs map the briefing carries', () => {
     const one = collectAreaVocab(tagMap({ 'a.md': [['booking', 'endpoints']] }))
-    const same = collectAreaVocab(
+    const sameLabelsMoreDocs = collectAreaVocab(
       tagMap({ 'a.md': [['booking', 'endpoints']], 'b.md': [['booking', 'endpoints']] }),
     )
+    const sameLabelsOtherDocs = collectAreaVocab(tagMap({ 'z.md': [['booking', 'endpoints']] }))
     const different = collectAreaVocab(tagMap({ 'a.md': [['booking', 'billing']] }))
-    expect(settleAreasCacheKey(same)).toBe(settleAreasCacheKey(one))
+
+    expect(settleAreasCacheKey(sameLabelsMoreDocs)).not.toBe(settleAreasCacheKey(one))
+    expect(settleAreasCacheKey(sameLabelsOtherDocs)).not.toBe(settleAreasCacheKey(one))
     expect(settleAreasCacheKey(different)).not.toBe(settleAreasCacheKey(one))
+    // Identical vocabulary, identical key — the doc ORDER is not information.
+    expect(
+      settleAreasCacheKey(
+        collectAreaVocab(tagMap({ 'b.md': [['booking', 'endpoints']], 'a.md': [['booking', 'endpoints']] })),
+      ),
+    ).toBe(settleAreasCacheKey(sameLabelsMoreDocs))
     // The instructions tail (step 6) moves it too.
     expect(settleAreasCacheKey(one, ['fp'])).not.toBe(settleAreasCacheKey(one))
   })
@@ -392,7 +496,7 @@ describe('spec-scan.settle-areas — through the run', () => {
     })
   })
 
-  it('caches on the label sets: a doc edit that moves no label is a settle hit', async () => {
+  it('caches on the briefed vocabulary: a doc edit that moves no label is a settle hit', async () => {
     writeDoc('docs/booking-auth.md', '# Booking auth\nA booking is authorized by its owner.\n')
     writeDoc('docs/core-auth.md', '# Auth\nSessions authenticate users with a bearer token.\n')
     const script = (concernForCore: string) => async (call: StubCall) => {

@@ -799,7 +799,7 @@ export async function runSpecScanSessions(
       cacheKey: () => settleAreasCacheKey(vocabView, instructionParts),
       schema: AreaSettlementSchema,
       session: () => settleAreasSessionDef({ vocab: vocabView, universe }),
-      briefing: () => settleAreasBriefing(vocabView, instructions),
+      briefing: () => settleAreasBriefing(vocabView, universe, instructions),
       driver: opts.driver,
       persistence: opts.persistence,
       concurrency: 1,

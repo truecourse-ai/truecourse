@@ -520,7 +520,8 @@ export async function estimateScanTokens(
       maxItems: settleMax,
       budget: SETTLE_AREAS_BUDGET,
       systemPromptChars: SETTLE_AREAS_SYSTEM_PROMPT.length,
-      briefingChars: settleItems > 0 ? settleAreasBriefing(vocab, instructions).length : 0,
+      briefingChars:
+        settleItems > 0 ? settleAreasBriefing(vocab, buildScanUniverse(docs), instructions).length : 0,
     }),
     sessionKindStage({
       kind: OVERLAP_SESSION_KIND,

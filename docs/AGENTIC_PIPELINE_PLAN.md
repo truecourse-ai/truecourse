@@ -1183,12 +1183,28 @@ all run over the orchestrator's kept scope.
   two values, which is exactly the single-area, single-product shape the
   reference has — the corpus whose invented `truecourse` product is the
   defect §6.2 records. Prompt: reconcile the emergent area vocabulary of
-  this corpus. Inputs: the product and concern label sets, and nothing
-  else — today's normalizer is cached on the vocabulary set alone, so a
-  doc edit that does not move a label is free, and that property is kept
-  by keeping doc-level detail OUT of the inputs. Tools: look up which
-  docs carry a label, and read a doc (to decide whether two labels
-  really name one concept) — tool calls do not enter the cache key.
+  this corpus. Inputs: the product and concern label sets WITH THE DOCS
+  THAT CARRY EACH (amended 2026-08-20 — see below); tools: read a doc (to
+  decide whether two labels really name one concept), and the full doc
+  list of one label whose briefed list was cut short.
+
+  **The label→docs map rides the briefing** (amendment 2026-08-20, the
+  documenso field run). The original inputs were the label SETS alone,
+  with the map behind a `docs_with_label` tool, to keep the cache keyed on
+  the vocabulary and nothing else. On a 45-concern vocabulary that failed
+  outright, twice: the session correctly went to judge the merge
+  candidates from their docs, spent all 16 turns (8 × one resume) calling
+  the tool one label at a time, and produced NO settlement — the run
+  fell open to one area per concern. The rule of item 106 applies here
+  too: data the session certainly needs rides the briefing, not a tool. So
+  the briefing now lists every label with its docs (path + title), capped
+  per label and shrinking as the vocabulary grows, and the tool survives
+  only as the escape hatch for a cut list (an oversized subdivision
+  candidate). The cache key follows the briefing, as it must: the docs
+  behind a label are keyed too, so a corpus that gained, lost or re-tagged
+  a doc settles again. The property that mattered is untouched — a doc
+  EDIT still moves no key, because content never enters it.
+
   Done: the concern merges, the product merges, a verdict on every
   non-`core` product — justified, naming the second separately-deployed
   application, or collapsed to `core` — and the SUBDIVISIONS (below). That

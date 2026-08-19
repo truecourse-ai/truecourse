@@ -206,7 +206,10 @@ export function listDocsTool(universe: ScanDocUniverse): SessionTool {
 
 /**
  * `docs_with_label` — the docs carrying one canonical product/concern label
- * (settle-areas). The label index is live state the run maintains.
+ * (settle-areas). The label index is live state the run maintains. The settle
+ * briefing already carries the WHOLE map, so this is the ESCAPE HATCH for the
+ * one label whose briefed list was cut short (an oversized subdivision
+ * candidate), not the way to read the map.
  */
 export function docsWithLabelTool(
   universe: ScanDocUniverse,
@@ -215,7 +218,7 @@ export function docsWithLabelTool(
   return defineSessionTool({
     name: 'docs_with_label',
     description:
-      'List the docs tagged with one canonical product or concern label (path + title). Use it to judge whether two labels name the same thing, or how a big label subdivides.',
+      'The FULL doc list of one canonical product or concern label (path + title). The briefing already lists every label with its docs — call this only for a label whose briefed list was cut short, e.g. before assigning every doc of an oversized label you are subdividing.',
     kind: 'docs-with-label',
     readOnly: true,
     destructive: false,
