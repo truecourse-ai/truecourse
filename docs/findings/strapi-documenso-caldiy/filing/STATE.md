@@ -110,3 +110,16 @@ Neighbouring MCP issues worth cross-linking in our MCP drafts: #27395 (MCP tools
 ## Transcript attachment policy
 
 Drafts end with "the full transcript is available on request" rather than pasting it. Reasons, measured: one scenario transcript is ~27 KB against GitHub's 65 KB issue-body limit, so a single one nearly fills an issue and buries the report; the evidence dir per scenario is ~96 KB including screenshots; and the transcripts contain live credentials (admin jwt, token accessKey) that would need redaction before publication. The drafts already inline the specific requests and responses that prove the claim. If a maintainer asks, attach the redacted transcript as a gist or a file attachment on the issue rather than inline.
+
+
+## Evidence policy: transcripts stay off the internet (2026-08-19, reverted decision)
+
+Briefly tried publishing a redacted evidence gist per finding and linking it from the issue. Reverted the same day at the user's call, and the reasoning is worth keeping:
+
+- it creates a second public artifact under a second account, for little gain;
+- it adds a redaction surface that has to be perfect every time, and the tooling nearly leaked a live 256-character admin key on its very first run (escaped-JSON key/value pairs the patterns did not match);
+- the issue body already carries the exact requests and responses needed to reproduce, so the gist mostly duplicated it.
+
+The drafts' existing closing line, offering the full transcript on request, is the policy. `filing/tools/redact-transcript.py` stays in the tree for the case where a maintainer actually asks.
+
+Rollback performed: gist deleted, and the comment linking it removed from strapi issue 27418 (issue comments delete cleanly and vanish from the timeline, unlike push-generated reference events).
