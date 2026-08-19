@@ -426,11 +426,31 @@ guardCmd
   .option("-y, --yes", "Skip the pre-flight cost-estimate confirmation")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  // Single-step mode: run one of the pipeline's three session steps in
+  // isolation. Prior steps replay from their outcome caches (a missing one
+  // fails loud), later steps never start; only --only-worker writes anything.
+  .option("--only-extract", "Run only the claim-extraction sessions (nothing is written)")
+  .option("--only-flows", "Run only the flow-synthesis sessions (extraction replayed from cache; nothing is written)")
+  .option("--only-worker", "Run only the flow-worker sessions (earlier steps replayed from cache) and write the scenarios")
   .action(async (options) => {
+    const only = (
+      [
+        ["extract", options.onlyExtract],
+        ["flows", options.onlyFlows],
+        ["worker", options.onlyWorker],
+      ] as const
+    )
+      .filter(([, picked]) => !!picked)
+      .map(([step]) => step);
+    if (only.length > 1) {
+      console.error("error: the --only-<step> flags are mutually exclusive — pick one");
+      process.exit(1);
+    }
     await runGuardGenerate({
       yes: options.yes,
       llmTransport: options.llmTransport,
       io: options.io,
+      ...(only[0] ? { only: only[0] } : {}),
     });
   });
 

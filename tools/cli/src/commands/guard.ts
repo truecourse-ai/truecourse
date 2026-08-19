@@ -39,6 +39,8 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
+  GenerateStepNotReadyError,
+  type GenerateStep,
 } from "@truecourse/core/commands/guard-in-process";
 import {
   composeGuardStatus,
@@ -314,7 +316,39 @@ export interface RunGuardGenerateOptions {
   llmTransport?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
+  /**
+   * Single-step mode (`--only-<step>`): run one session step in isolation —
+   * prior steps replay from their outcome caches (a missing one aborts loudly),
+   * later steps never start. Only `worker` writes anything durable.
+   */
+  only?: GenerateStep;
 }
+
+/** Human name of each `--only-<step>` generate step, for prose lines. */
+const GENERATE_STEP_LABEL: Record<GenerateStep, string> = {
+  extract: "claim extraction",
+  flows: "flow synthesis",
+  worker: "flow working",
+};
+
+/** The step to suggest after a stopped single-step run. `worker` never stops
+ *  (it completes the generate), so its row is unreachable. */
+const GENERATE_STEP_NEXT: Record<GenerateStep, GenerateStep> = {
+  extract: "flows",
+  flows: "worker",
+  worker: "worker",
+};
+
+/**
+ * The checklist a single-step run actually opens. The engine returns before the
+ * later steps start, so handing the tracker the full list would leave green-less
+ * rows pending forever.
+ */
+const GENERATE_STEP_CHECKLIST: Record<GenerateStep, readonly string[]> = {
+  extract: ["index", "extract"],
+  flows: ["index", "extract", "interfaces", "flows"],
+  worker: GUARD_GENERATE_STEPS.map((s) => s.key),
+};
 
 /**
  * Author scenarios from spec sections. Birth findings (a scenario that failed
@@ -325,7 +359,7 @@ export interface RunGuardGenerateOptions {
  */
 export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
-  p.intro("Guard generate");
+  p.intro(opts.only ? `Guard generate — ${GENERATE_STEP_LABEL[opts.only]} only` : "Guard generate");
   await requireGitRepo(repoRoot);
   await registerProject(repoRoot);
 
@@ -345,15 +379,21 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // The estimate resolves its own spinner line before the panel prints; the
   // checklist below only starts once the run does, so it paints exactly once.
   const renderer = createStdoutStepRenderer();
-  const tracker = new StepTracker(renderer.onProgress, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
+  // Single-step runs get a checklist of only the steps that will open.
+  const stepDefs = opts.only
+    ? GUARD_GENERATE_STEPS.filter((s) => GENERATE_STEP_CHECKLIST[opts.only!].includes(s.key))
+    : GUARD_GENERATE_STEPS;
+  const tracker = new StepTracker(renderer.onProgress, stepDefs.map((s) => ({ ...s })));
   // The ceiling the gate quoted, kept so the summary can print spend against it.
   let estimatedCostUsd: number | undefined;
   let guard;
+  let sessionsRunDir: string | undefined;
   try {
-    ({ guard } = await guardGenerateInProcess(repoRoot, {
+    ({ guard, sessionsRunDir } = await guardGenerateInProcess(repoRoot, {
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
+      ...(opts.only ? { only: opts.only } : {}),
       onEstimatePhase: estimateSpinnerPhase(),
       onLlmEstimate: (est) => {
         estimatedCostUsd = est.estimatedCostUsd;
@@ -365,6 +405,19 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     if (e instanceof EstimateDeclined) {
       p.cancel("Generate cancelled.");
       process.exit(0);
+    }
+    // A single-step run found a PRIOR step's cache missing entries: running them
+    // here would blur the step isolation (and mask cache-key drift), so it stops.
+    if (e instanceof GenerateStepNotReadyError) {
+      const n = e.missing.length;
+      p.log.error(
+        `Step not ready — ${n} item${n === 1 ? "" : "s"} missing from the ${GENERATE_STEP_LABEL[e.step]} step's cache:`,
+      );
+      for (const m of e.missing.slice(0, 10)) p.log.message(`  • ${m}`);
+      if (n > 10) p.log.message(`  … (+${n - 10} more)`);
+      p.log.step(`Run \`truecourse guard generate --only-${e.step}\` first, then re-run this step.`);
+      p.outro("Aborted.");
+      process.exit(1);
     }
     // Open spec conflicts block generate before any spend — print the FULL list
     // (area, both repo-relative paths, note) and the resolution pointers, exit 1.
@@ -453,6 +506,37 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     }
   }
 
+  // A single-step run stopped before the final step: NOTHING durable was
+  // written (no scenario, no manifest, no flows.json, no result.json), so the
+  // whole-generate summary below has nothing to read. Report what this step
+  // did, where its transcripts landed, and which flag comes next.
+  if (guard.stoppedAfter) {
+    printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
+    if (guard.noChanges) {
+      p.log.success(
+        `Nothing to run — the ${GENERATE_STEP_LABEL[guard.stoppedAfter]} step is already settled (its inputs are unchanged).`,
+      );
+    } else if (guard.stoppedAfter === "extract") {
+      p.log.step(`sections    ${guard.sectionsChanged} of ${guard.sectionsTotal} changed`);
+      p.log.step(`claims      ${guard.coverageGaps.length} gap${guard.coverageGaps.length === 1 ? "" : "s"} settled at extraction`);
+      if (guard.extractionFailures.length > 0) {
+        p.log.warn(`${guard.extractionFailures.length} document${guard.extractionFailures.length === 1 ? "" : "s"} failed extraction — re-run this step to retry`);
+      }
+    } else {
+      const f = guard.flows;
+      p.log.step(`flows       ${f.total} synthesized · ${f.dismissed} dismissed · ${f.orphaned} orphaned · ${f.noFlowClaims} claims with no flow`);
+      if (f.unsettledAreas.length > 0) {
+        p.log.warn(`${f.unsettledAreas.length} area${f.unsettledAreas.length === 1 ? "" : "s"} produced no flows:`);
+        for (const u of f.unsettledAreas.slice(0, 10)) p.log.message(`  • ${u.areaId} — ${u.reason}`);
+      }
+    }
+    if (sessionsRunDir) p.log.step(`sessions    ${sessionsRunDir}`);
+    p.outro(
+      `Stopped after ${GENERATE_STEP_LABEL[guard.stoppedAfter]} — nothing written. Next: \`truecourse guard generate --only-${GENERATE_STEP_NEXT[guard.stoppedAfter]}\`.`,
+    );
+    return;
+  }
+
   if (guard.noChanges) {
     printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
     p.log.success("Nothing changed — every section is already covered since the last generate.");
@@ -465,6 +549,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // the in-memory result if the file is somehow absent.
   const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
   printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { estimatedCostUsd });
+  // Single-step mode: name where the transcripts landed — the inspection loop's
+  // whole point. (`--only-worker` completes the generate, so it prints the full
+  // summary above and this line instead of a next-flag pointer.)
+  if (opts.only && sessionsRunDir) p.log.step(`sessions    ${sessionsRunDir}`);
 
   // The runner DECLINED the run — a broken recipe, a half-configured external
   // account. Nothing was built, booted or validated, so this is the only news the

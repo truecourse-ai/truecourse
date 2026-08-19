@@ -29,6 +29,7 @@ import {
   type FlowWorkerSessionSeam,
   type MatchRunner,
   type InterfaceProvider,
+  type GenerateStep,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -71,6 +72,8 @@ import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
 import { createGuardGenerateSessionSeams } from '../services/guard-generate/index.js';
+export { GenerateStepNotReadyError } from '../services/guard-generate/index.js';
+export { GENERATE_SESSION_STEPS, type GenerateStep } from '@truecourse/guard-generator';
 import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
@@ -209,6 +212,15 @@ export interface GuardGenerateInProcessOptions {
    * curation is `dismissedFlows` and cost control is the estimate gate.
    */
   stopAfterFlows?: boolean;
+  /**
+   * Single-step mode (the CLI's `--only-<step>` flags): run only this session
+   * step's sessions — prior steps replay from their outcome caches (a miss
+   * throws {@link GenerateStepNotReadyError}), later steps never start, and
+   * nothing durable is written unless the FINAL step (`worker`) runs: no
+   * scenario file, no manifest, no `flows.json`, and no `guard/result.json`.
+   * The estimate gate prices only the chosen step.
+   */
+  only?: GenerateStep;
 }
 
 /**
@@ -266,6 +278,13 @@ function resolveTransport(options: {
 
 export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
+  /**
+   * The sessions-store run dir (`.truecourse/sessions/guard-generate/<runId>/`)
+   * this run's transcripts landed in — what a stepwise run is inspected
+   * through. Absent when no session ran (a fully-cached step) or when the
+   * caller injected its own seams.
+   */
+  sessionsRunDir?: string;
 }
 
 export async function guardGenerateInProcess(
@@ -286,7 +305,7 @@ export async function guardGenerateInProcess(
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateGuardTokens(repoRoot, prices, { mode }),
+      estimateGuardTokens(repoRoot, prices, { mode, ...(options.only ? { only: options.only } : {}) }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -376,6 +395,9 @@ export async function guardGenerateInProcess(
       : createGuardGenerateSessionSeams({
           repoRoot,
           ...(options.llm ? { transport: options.llm } : {}),
+          // Single-step mode: the seams enforce the cache-only replay of every
+          // step before the chosen one (the engine enforces the stop after it).
+          ...(options.only ? { only: options.only } : {}),
         });
   const extractSession = options.extractSession ?? sessionSeams!.extractSession;
   const flowsAreaSession = options.flowsAreaSession ?? sessionSeams!.flowsAreaSession;
@@ -419,6 +441,7 @@ export async function guardGenerateInProcess(
           };
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
@@ -508,8 +531,23 @@ export async function guardGenerateInProcess(
     // dashboard popup (same steps payload) would tick them green.
     if (guard.status === 'no-docs' || guard.status === 'recipe-failed' || guard.status === 'llm-failed') {
       tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
-      persistGuardReport(repoRoot, guard);
+      // Single-step mode, before the final step: the same write gate as a clean
+      // stop. This run could never have produced a whole generate's report, so
+      // persisting one would overwrite the LAST FULL generate's `result.json`
+      // (what `guard status` and the dashboard read) with a partial abort. The
+      // caller still gets the failure — loudly, and non-zero.
+      if (!options.only || options.only === 'worker') persistGuardReport(repoRoot, guard);
       return { guard };
+    }
+
+    // A single-step run stopped BEFORE the final step: close only the step that
+    // actually opened (the CLI hands the tracker a reduced checklist, so the
+    // later keys don't exist — and StepTracker no-ops on unknown keys anyway),
+    // and persist NOTHING. `guard/result.json` describes a completed generate;
+    // a partial run's counts would read as a whole one's.
+    if (guard.stoppedAfter) {
+      tracker?.done(STEPS[cur], `stopped after ${guard.stoppedAfter}`);
+      return { guard, ...(sessionSeams?.runDir() ? { sessionsRunDir: sessionSeams.runDir()! } : {}) };
     }
 
     // Mark every remaining step done with a closing detail.
@@ -533,7 +571,7 @@ export async function guardGenerateInProcess(
     // error, which never reaches here — the report describes a completed generate.
     persistGuardReport(repoRoot, guard);
 
-    return { guard };
+    return { guard, ...(sessionSeams?.runDir() ? { sessionsRunDir: sessionSeams.runDir()! } : {}) };
   } catch (e) {
     tracker?.error(STEPS[cur], (e as Error).message);
     throw e;

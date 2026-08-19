@@ -74,6 +74,9 @@ export {
 
 export {
   createGuardGenerateSessionSeams,
+  // Single-step mode (`--only-<step>`): the loud refusal a cache-only replay of
+  // a prior step raises instead of spending that step's sessions.
+  GenerateStepNotReadyError,
   type GuardGenerateSessionSeams,
   type CreateGuardGenerateSeamsOptions,
   // The driver+persistence pair the `driver` test seam resolves to — exported

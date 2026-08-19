@@ -17,6 +17,13 @@
  *   neither (and an api-mode config error surfaces as the seam's failure, not
  *   a crashed generate);
  * - tools never write repo/store state; every write stays in `generateGuards`.
+ *
+ * SINGLE-STEP MODE (`only` / the CLI's `--only-<step>` flags, SPEC_GUARD_PLAN
+ * item 109): run one step's sessions in isolation. Prior steps REPLAY from
+ * their outcome caches — a miss throws {@link GenerateStepNotReadyError}
+ * instead of spending sessions that belong to that step's own flag — and the
+ * engine stops before the next one, writing nothing durable until the final
+ * step (`worker`) runs. See {@link CreateGuardGenerateSeamsOptions.only}.
  */
 
 import path from 'node:path'
@@ -32,6 +39,7 @@ import type {
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { ExtractOutcomeSchema, type ExtractOutcome, type GuardFlowWorkerOutcome } from '@truecourse/shared'
 import {
+  GENERATE_SESSION_STEPS,
   checkEpicSet,
   checkFlowSet,
   snapExtraction,
@@ -47,6 +55,7 @@ import {
   type FlowWorkerSessionResult,
   type FlowWorkerSessionSeam,
   type FlowWorkerTask,
+  type GenerateStep,
   type GuardDoc,
   type GuardSessionSummary,
 } from '@truecourse/guard-generator'
@@ -104,6 +113,29 @@ export interface AcquiredContext {
   persistence: SessionPersistence
 }
 
+// ---------------------------------------------------------------------------
+// Single-step mode (`--only-<step>`)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single-step run (`only`) found a PRIOR step's artifact missing: that step's
+ * outcome cache has no entry for `missing`, so replaying it would spend
+ * sessions that belong to that step's own flag. Deliberately loud — a silent
+ * re-run here would mask exactly the cache-key drift a stepwise run exists to
+ * expose. The fix is always `truecourse guard generate --only-<step>`.
+ */
+export class GenerateStepNotReadyError extends Error {
+  constructor(
+    readonly step: GenerateStep,
+    readonly missing: string[],
+  ) {
+    super(
+      `the ${step} step has ${missing.length} uncached item${missing.length === 1 ? '' : 's'} — run \`truecourse guard generate --only-${step}\` first`,
+    )
+    this.name = 'GenerateStepNotReadyError'
+  }
+}
+
 export interface GuardGenerateSessionSeams {
   extractSession: ExtractSessionSeam
   flowsAreaSession: FlowsAreaSessionSeam
@@ -112,6 +144,13 @@ export interface GuardGenerateSessionSeams {
   flowWorkerSession: FlowWorkerSessionSeam
   /** The run id, once a session has run; undefined on a fully-cached run. */
   runId(): string | undefined
+  /**
+   * The sessions-store run dir (`.truecourse/sessions/guard-generate/<runId>/`)
+   * where this run's transcripts landed — what a stepwise run is inspected
+   * through. Undefined until a session actually runs (and on the injected-driver
+   * test seam, which owns its own run record).
+   */
+  runDir(): string | undefined
   /** Close the run record (when one was created). `failed` only when every
    *  session failed; the command adapter calls this exactly once. */
   finish(aborted: boolean): void
@@ -125,6 +164,14 @@ export interface CreateGuardGenerateSeamsOptions {
   concurrency?: number
   /** Every transcript event as it is persisted — the CLI's live line. */
   onSessionEvent?: (workItem: string, event: SessionEvent) => void
+  /**
+   * Single-step mode: the ONE step whose sessions may run. Every PRIOR step's
+   * pool becomes a cache-only replay — served from its outcome cache, and a
+   * miss throws {@link GenerateStepNotReadyError} rather than silently spending
+   * the prior step's sessions. Steps AFTER it are never reached: the engine
+   * (`generateGuards({ only })`) returns before calling their seams.
+   */
+  only?: GenerateStep
   /**
    * Test seam: a lazy thunk overriding the internal
    * `createConfiguredSessionDriver` path — the spec-scan analog's shape, plus
@@ -168,6 +215,13 @@ interface CachedPoolOptions<TItem, TOutcome> {
   /** Strictly serial across items: hits in item order (before the pool), fresh
    *  outcomes in the pool's serial fold. */
   fold(item: TItem, result: CachedPoolResult<TOutcome>): void
+  /**
+   * Single-step mode, replaying a PRIOR step: serve every item from cache and
+   * throw {@link GenerateStepNotReadyError} (naming this step) on any miss
+   * instead of running a session — the misses belong to this step's own
+   * `--only` flag.
+   */
+  cacheOnly?: GenerateStep
 }
 
 /**
@@ -247,6 +301,15 @@ async function runCachedGuardPool<TItem, TOutcome>(
     await decided
   }
 
+  // A cache-only replay refuses to spend: the misses' parked promises are
+  // simply abandoned (nothing awaits them past this throw).
+  if (opts.cacheOnly !== undefined && toRun.length > 0) {
+    throw new GenerateStepNotReadyError(
+      opts.cacheOnly,
+      toRun.map((item) => opts.workItem(item)),
+    )
+  }
+
   if (toRun.length > 0) {
     // The construction guard the module header promises: a driver that cannot
     // be built fails every pending item transport-class (same `firstError`),
@@ -323,6 +386,9 @@ export function createGuardGenerateSessionSeams(
 ): GuardGenerateSessionSeams {
   let acquired: Promise<{ run: SessionRunStore; driver: SessionDriver }> | null = null
   let run: SessionRunStore | null = null
+  // Kept beside `run`, which `finish()` clears: the caller reports where the
+  // transcripts landed AFTER the run record is closed.
+  let runIdentity: { runId: string; dir: string } | null = null
   let completed = 0
   let failed = 0
 
@@ -341,6 +407,7 @@ export function createGuardGenerateSessionSeams(
       ...(attribution.fallbackModel ? { fallbackModel: attribution.fallbackModel } : {}),
     })
     run = store
+    runIdentity = { runId: store.runId, dir: store.dir }
     return { run: store, driver }
   }
   // An injected driver (`opts.driver`, the test seam) brings its own
@@ -357,6 +424,9 @@ export function createGuardGenerateSessionSeams(
     completed += summary.ran - summary.failed
     failed += summary.failed
   }
+  /** Single-step mode: is `step` PRIOR to the chosen one (replay, never spend)? */
+  const replayOnly = (step: GenerateStep): boolean =>
+    opts.only !== undefined && GENERATE_SESSION_STEPS.indexOf(step) < GENERATE_SESSION_STEPS.indexOf(opts.only)
 
   const extractSession: ExtractSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs)
@@ -375,6 +445,7 @@ export function createGuardGenerateSessionSeams(
       session: (doc) => extractSessionDef({ doc, universe }),
       briefing: (doc) => extractSessionBriefing(doc),
       driver: acquire,
+      ...(replayOnly('extract') ? { cacheOnly: 'extract' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       fold: (doc, result) => {
@@ -421,6 +492,7 @@ export function createGuardGenerateSessionSeams(
       session: (area) => flowsSessionDef({ area, universe, checker }),
       briefing: (area) => flowsSessionBriefing(area, input.grounding),
       driver: acquire,
+      ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       // The fold-side refusal (never trust the transcript): the SAME checker
@@ -465,6 +537,7 @@ export function createGuardGenerateSessionSeams(
       briefing: () => flowsEpicSessionBriefing(input.digests),
       driver: acquire,
       concurrency: 1,
+      ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       rejectOutput: (_item, output) => {
         const { unknownReferences } = checkEpicSet(output, input.digests, input.claims)
@@ -686,6 +759,7 @@ export function createGuardGenerateSessionSeams(
     flowsEpicSession,
     flowWorkerSession,
     runId: () => run?.runId,
+    runDir: () => runIdentity?.dir,
     finish(aborted) {
       if (!run) return
       run.finish(aborted ? 'interrupted' : failed > 0 && completed === 0 ? 'failed' : 'completed')

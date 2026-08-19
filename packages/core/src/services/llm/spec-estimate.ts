@@ -109,6 +109,7 @@ import {
   type FlowAreaDocInput,
   type FlowClaimInput,
   type GuardSetupOnlyStep,
+  type GenerateStep,
   type GuardWorkPlan,
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
@@ -1165,7 +1166,7 @@ export async function estimateGuardSetup(
 export async function estimateGuardTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { mode?: LlmTransportMode } = {},
+  opts: { mode?: LlmTransportMode; only?: GenerateStep } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.mode);
   const plan = planGuardWork(repoRoot);
@@ -1268,8 +1269,27 @@ export async function estimateGuardTokens(
     }),
   ];
 
-  return estimateStageTokens(withLabels(stages), changedSubject(plan.sections.length, work.length, 'section'), prices);
+  // Single-step mode prices only the chosen step — prior steps replay from
+  // their outcome caches (a miss fails the run loudly, never spends), later
+  // ones never start. `guardMatch` rides the WORKER step: it is the only
+  // pre-stage with a bill, it runs nowhere else (both earlier steps return
+  // before it), and quoting the worker step without it would under-price the
+  // run. `guardRecipe` rides nothing: generate refuses to start without the
+  // recipe `guard setup` committed, so a stepwise run never discovers one.
+  const included = opts.only
+    ? stages.filter((s) => GENERATE_STEP_STAGES[opts.only!].includes(s.stage))
+    : stages;
+  return estimateStageTokens(withLabels(included), changedSubject(plan.sections.length, work.length, 'section'), prices);
 }
+
+/** Which priced stages each `--only-<step>` flag actually runs. */
+const GENERATE_STEP_STAGES: Record<GenerateStep, readonly string[]> = {
+  extract: [EXTRACT_SESSION_KIND],
+  flows: [FLOWS_SESSION_KIND],
+  // The fidelity judge is a depth-1 CHILD of a worker session, so it prices with
+  // the worker step rather than carrying a flag of its own.
+  worker: ['guardMatch', FLOW_WORKER_SESSION_KIND, FIDELITY_SESSION_KIND],
+};
 
 /** Confirm-copy subject surfacing how many of `total` units are changed vs cached. */
 function changedSubject(total: number, changed: number, noun: string): string {
