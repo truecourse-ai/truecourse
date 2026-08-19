@@ -447,13 +447,38 @@ guardCmd
   .option("-y, --yes", "Skip the cost confirm (and, with --refresh, consent to replacing the seed)")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  // Single-step mode: run one of setup's five LLM-bearing steps in isolation.
+  // Prior steps replay from what they left on disk (a step nobody ran fails
+  // loud), later steps never start; the free `detect` pass always runs, and
+  // guard/setup.json is merged so the untouched steps keep their record.
+  .option("--only-recipe", "Run only the recipe step (derive, verify and probe the recipe; nothing downstream)")
+  .option("--only-catalog", "Run only the dependency-catalog step (recipe replayed from recipe.json)")
+  .option("--only-interfaces", "Run only the interface-authoring step (earlier steps replayed from disk)")
+  .option("--only-seed", "Run only the seed step (earlier steps replayed from disk)")
+  .option("--only-auth", "Run only the auth-proof step (earlier steps replayed from disk)")
   .action(async (options) => {
+    const only = (
+      [
+        ["recipe", options.onlyRecipe],
+        ["catalog", options.onlyCatalog],
+        ["interfaces", options.onlyInterfaces],
+        ["seed", options.onlySeed],
+        ["auth", options.onlyAuth],
+      ] as const
+    )
+      .filter(([, picked]) => !!picked)
+      .map(([step]) => step);
+    if (only.length > 1) {
+      console.error("error: the --only-<step> flags are mutually exclusive — pick one");
+      process.exit(1);
+    }
     await runGuardSetup({
       refresh: !!options.refresh,
       replace: !!options.replace,
       yes: !!options.yes,
       llmTransport: options.llmTransport,
       io: options.io,
+      ...(only[0] ? { only: only[0] } : {}),
     });
   });
 

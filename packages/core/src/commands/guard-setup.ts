@@ -23,6 +23,7 @@ import {
   runGuardSetup,
   spawnRecipeRunner,
   GUARD_SETUP_STEPS,
+  type GuardSetupOnlyStep,
   type GuardSetupAuthStep,
   type GuardSetupCatalogSession,
   type GuardSetupInterfaceProvider,
@@ -60,6 +61,7 @@ import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
+import { sessionRunDir } from '../lib/sessions-store.js';
 import {
   buildAuthProof,
   buildCatalogSession,
@@ -73,7 +75,12 @@ import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
-export { GUARD_SETUP_STEPS } from '@truecourse/guard-generator';
+export {
+  GUARD_SETUP_STEPS,
+  GUARD_SETUP_ONLY_STEPS,
+  SetupStepNotReadyError,
+  type GuardSetupOnlyStep,
+} from '@truecourse/guard-generator';
 export { EstimateDeclined } from './spec-in-process.js';
 export { readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 
@@ -98,6 +105,14 @@ export interface GuardSetupInProcessOptions {
   refresh?: boolean;
   /** Interfaces step: re-author places that already carry authored tasks. */
   replace?: boolean;
+  /**
+   * Single-step mode (the CLI's `--only-<step>` flags): run only this step —
+   * prior steps replay from what they left on disk (a step nobody ran throws
+   * {@link SetupStepNotReadyError}), later steps never start, and the persisted
+   * `guard/setup.json` merges over the previous one. The estimate gate prices
+   * only the chosen step.
+   */
+  only?: GuardSetupOnlyStep;
   /**
    * Pre-flight cost gate. Called with the session-modeled estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}).
@@ -125,6 +140,13 @@ export interface GuardSetupInProcessResult {
   report: GuardSetupReport;
   /** Absolute path of the persisted `guard/setup.json`. */
   reportPath: string;
+  /**
+   * The sessions-store run dirs this run opened — `sessions/guard-setup/<runId>/`
+   * and, when the interfaces step authored, the `sessions/guard-interfaces/<runId>/`
+   * its own engine opened. Empty when nothing spent a session. Named for
+   * stepwise runs, whose point is reading the transcripts afterwards.
+   */
+  sessionsRunDirs: string[];
 }
 
 /**
@@ -207,7 +229,13 @@ interface ResolvedSetupTransport {
 /** The pre-flight estimate the CLI prompt renders — the SAME one the gate uses. */
 export async function estimateGuardSetupCost(
   repoRoot: string,
-  opts: { refresh?: boolean; replace?: boolean; mode?: LlmTransportMode } = {},
+  opts: {
+    refresh?: boolean;
+    replace?: boolean;
+    mode?: LlmTransportMode;
+    /** Single-step mode: price ONLY this step's sessions. */
+    only?: GuardSetupOnlyStep;
+  } = {},
 ): Promise<LlmEstimate> {
   return estimateGuardSetup(repoRoot, await getModelPrices(), opts);
 }
@@ -249,6 +277,7 @@ export async function guardSetupInProcess(
       mode,
       ...(options.refresh ? { refresh: true } : {}),
       ...(options.replace ? { replace: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
     });
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -275,6 +304,10 @@ export async function guardSetupInProcess(
       })
     : null;
   const transportFlag = options.llm === 'cli' || options.llm === 'api' ? options.llm : undefined;
+  // The interfaces step runs under `guard interfaces author`'s OWN sessions-store
+  // run, so its transcripts live somewhere else than setup's; a stepwise run has
+  // to be told where.
+  let interfacesRunId: string | undefined;
   const repair =
     options.repair ??
     (sessionContext
@@ -304,6 +337,7 @@ export async function guardSetupInProcess(
               ...(options.signal ? { signal: options.signal } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });
+            interfacesRunId = run.runId;
             return {
               runId: run.runId,
               authored: run.authored,
@@ -330,6 +364,16 @@ export async function guardSetupInProcess(
           ...(options.signal ? { signal: options.signal } : {}),
         })
       : undefined);
+
+  /** Where this run's transcripts landed — setup's own run, then the interfaces
+   *  step's, in the order they open. */
+  const sessionsRunDirs = (): string[] => {
+    const setupRunId = sessionContext?.runId();
+    return [
+      ...(setupRunId ? [sessionRunDir(repoRoot, 'guard-setup', setupRunId)] : []),
+      ...(interfacesRunId ? [sessionRunDir(repoRoot, 'guard-interfaces', interfacesRunId)] : []),
+    ];
+  };
 
   const steps = GUARD_SETUP_STEPS.map((s) => s.key as GuardSetupStepKey);
   let current = 0;
@@ -372,6 +416,7 @@ export async function guardSetupInProcess(
       ...(verifyAuth ? { verifyAuth } : {}),
       ...(options.refresh ? { refresh: true } : {}),
       ...(options.replace ? { replace: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
       ...(options.confirmSeedReplace ? { confirmSeedReplace: options.confirmSeedReplace } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       onStep: (step) => advanceTo(step),
@@ -390,7 +435,10 @@ export async function guardSetupInProcess(
     if (result.report.status === 'failed') {
       tracker?.error(steps[current], firstLine(result.report.reason) ?? 'aborted');
     } else {
-      for (let i = current; i < steps.length; i++) tracker?.done(steps[i]);
+      // A single-step run closes the checklist at the step it was asked for:
+      // everything past it never started, so nothing past it may tick.
+      const last = options.only ? steps.indexOf(options.only) + 1 : steps.length;
+      for (let i = current; i < last; i++) tracker?.done(steps[i]);
     }
 
     const report: GuardSetupReport = {
@@ -398,7 +446,7 @@ export async function guardSetupInProcess(
       ...withUsage(sessionContext?.usageTotals() ?? null),
     };
     const reportPath = writeGuardSetup(repoRoot, report);
-    return { report, reportPath };
+    return { report, reportPath, sessionsRunDirs: sessionsRunDirs() };
   } catch (e) {
     tracker?.error(steps[current], (e as Error).message);
     throw e;

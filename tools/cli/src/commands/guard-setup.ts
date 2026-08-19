@@ -33,7 +33,10 @@ import {
   estimateGuardSetupCost,
   NoLlmProviderError,
   GUARD_SETUP_STEPS,
+  GUARD_SETUP_ONLY_STEPS,
+  SetupStepNotReadyError,
   EstimateDeclined,
+  type GuardSetupOnlyStep,
 } from "@truecourse/core/commands/guard-setup";
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
@@ -48,6 +51,12 @@ export interface RunGuardSetupOptions {
   refresh?: boolean;
   /** Interfaces step: re-author places that already carry authored tasks. */
   replace?: boolean;
+  /**
+   * Single-step mode (`--only-<step>`): run one step in isolation — prior steps
+   * replay from what they left on disk (a step nobody ran aborts loudly), later
+   * steps never start. `detect` always runs; it costs nothing.
+   */
+  only?: GuardSetupOnlyStep;
   /** Skip the pre-flight cost confirm — and, with `--refresh`, consent to replacing the seed. */
   yes?: boolean;
   /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
@@ -62,7 +71,7 @@ export interface RunGuardSetupOptions {
 
 export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
-  p.intro("Guard setup");
+  p.intro(opts.only ? `Guard setup — ${SETUP_STEP_LABEL[opts.only]} only` : "Guard setup");
   await requireGitRepo(repoRoot);
   await registerProject(repoRoot);
 
@@ -84,17 +93,26 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
   const interactive = opts.interactive ?? isInteractive();
 
   const renderer = createStdoutStepRenderer();
-  const tracker = new StepTracker(renderer.onProgress, GUARD_SETUP_STEPS.map((s) => ({ ...s })));
+  // A single-step run gets a checklist of only the steps that will report:
+  // everything up to the chosen one (they replay), plus the free `detect` pass.
+  const stepDefs = opts.only
+    ? GUARD_SETUP_STEPS.filter(
+        (s, i) => s.key === "detect" || i <= GUARD_SETUP_STEPS.findIndex((x) => x.key === opts.only),
+      )
+    : GUARD_SETUP_STEPS;
+  const tracker = new StepTracker(renderer.onProgress, stepDefs.map((s) => ({ ...s })));
 
   let report: GuardSetupReport;
   let reportPath: string;
+  let sessionsRunDirs: string[];
   try {
-    ({ report, reportPath } = await guardSetupInProcess(repoRoot, {
+    ({ report, reportPath, sessionsRunDirs } = await guardSetupInProcess(repoRoot, {
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
       ...(opts.refresh ? { refresh: true } : {}),
       ...(opts.replace ? { replace: true } : {}),
+      ...(opts.only ? { only: opts.only } : {}),
       ...(opts.recipeRunner ? { recipeRunner: opts.recipeRunner } : {}),
       ...(opts.interfaces ? { interfaces: opts.interfaces } : {}),
       onLlmEstimate: async (estimate) => {
@@ -143,6 +161,14 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
       p.outro("Aborted — setup needs a model to fall back on when the repo's own manifests do not decide.");
       process.exit(1);
     }
+    // A single-step run found a PRIOR step never ran: doing it here would blur
+    // the step isolation the flags exist for, so it stops and names the flag.
+    if (e instanceof SetupStepNotReadyError) {
+      p.log.error(`Step not ready — the ${SETUP_STEP_LABEL[e.step]} step has not run (${e.missing}).`);
+      p.log.step(`Run \`truecourse guard setup --only-${e.step}\` first, then re-run this step.`);
+      p.outro("Aborted.");
+      process.exit(1);
+    }
     p.log.error(`Guard setup failed: ${(e as Error).message}`);
     p.outro("Aborted.");
     process.exit(1);
@@ -157,8 +183,16 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
   // externals` because declaring a service is what enters the recipe fingerprint —
   // doing it in the preparation stage is free, doing it after a generate is a
   // regenerate. Non-interactive runs skip it: the declarations are already written,
-  // and the values can be supplied later for nothing.
-  if (report.status === "ok" && interactive && (report.externals?.unprovided.length ?? 0) > 0) {
+  // and the values can be supplied later for nothing. A single-step run offers it
+  // only when the CATALOG step is the one that ran — otherwise the `unprovided`
+  // list is the previous report's, carried forward, and nothing just changed.
+  const catalogRan = !opts.only || opts.only === "catalog";
+  if (
+    report.status === "ok" &&
+    interactive &&
+    catalogRan &&
+    (report.externals?.unprovided.length ?? 0) > 0
+  ) {
     await provisionExternals(repoRoot);
   }
 
@@ -167,10 +201,39 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
     process.exit(1);
     return;
   }
+  // Single-step mode: name where the transcripts landed (the inspection loop's
+  // whole point) and which step comes next.
+  if (opts.only) {
+    for (const dir of sessionsRunDirs) {
+      p.log.step(`sessions    ${path.relative(repoRoot, dir) || dir}`);
+    }
+    const next = SETUP_STEP_NEXT[opts.only];
+    p.outro(
+      next
+        ? `Ran the ${SETUP_STEP_LABEL[opts.only]} step only — every other row of guard/setup.json is carried forward. Next: \`truecourse guard setup --only-${next}\`.`
+        : `Ran the ${SETUP_STEP_LABEL[opts.only]} step only — the last one. Review what changed, then run \`truecourse guard generate\`.`,
+    );
+    return;
+  }
   p.outro(
     "Review and commit what changed (recipe.json, the seed script), then run `truecourse guard generate`.",
   );
 }
+
+/** Human name of each `--only-<step>` setup step, for prose lines. */
+const SETUP_STEP_LABEL: Record<GuardSetupOnlyStep, string> = {
+  recipe: "recipe",
+  catalog: "dependency catalog",
+  interfaces: "interface authoring",
+  seed: "seed",
+  auth: "auth proof",
+};
+
+/** The step to suggest after a single-step run; the last one has no successor. */
+const SETUP_STEP_NEXT: Record<GuardSetupOnlyStep, GuardSetupOnlyStep | undefined> =
+  Object.fromEntries(
+    GUARD_SETUP_ONLY_STEPS.map((step, i) => [step, GUARD_SETUP_ONLY_STEPS[i + 1]]),
+  ) as Record<GuardSetupOnlyStep, GuardSetupOnlyStep | undefined>;
 
 /** The closing report: one block per step, then the honest to-do list. */
 export function printSetupReport(report: GuardSetupReport, reportPath: string): void {
