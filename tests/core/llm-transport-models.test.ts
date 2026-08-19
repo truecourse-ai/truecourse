@@ -16,12 +16,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resetKvCacheStore } from '@truecourse/llm';
 import { setDefaultTransport } from '@truecourse/shared/llm';
-import type {
-  AreaTagRunner,
-  OverlapRunner,
-  RelevanceRunner,
-  VerifyOverlapRunner,
-} from '../../packages/spec-consolidator/src/index.js';
 
 // The API transport, stubbed one step short of the provider: the saved config is
 // still validated by the real builder, but the transport answers from a per-stage
@@ -51,8 +45,7 @@ vi.mock('../../packages/core/src/services/llm/install-transport.js', async (impo
 import { writeGlobalConfig } from '../../packages/core/src/config/global-config.js';
 import { STAGE_DEFAULTS } from '../../packages/core/src/config/llm-models.js';
 import { guardGenerateInProcess } from '../../packages/core/src/commands/guard-in-process.js';
-import { curateInProcess, CURATE_STEPS } from '../../packages/core/src/commands/spec-in-process.js';
-import { StepTracker } from '../../packages/core/src/progress.js';
+import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
 import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe, DEFAULT_INTERFACES } from '../guard-generator/helpers.js';
 
 const FAKE_CLAUDE = fileURLToPath(new URL('../fixtures/fake-claude/claude.mjs', import.meta.url));
@@ -188,35 +181,14 @@ describe('guard generate — the models follow the run transport', () => {
 // spec scan
 // ---------------------------------------------------------------------------
 
-const relevance: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
-const areaTagger: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'orders' }], status: 'shipped' });
-const flagNone: OverlapRunner = async () => ({ overlap: false, note: 'distinct' });
-const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
-
 /**
- * Every stage runner is injected, so no call is recorded and each step's detail
- * falls back to the model the run RESOLVED for that stage — the same resolution
- * the pipeline hands the runners.
+ * SPEC SCAN runs agent SESSIONS on ONE model (§3.4), so there are no per-stage
+ * tiers left to leak — the whole question collapses to "which model does the run
+ * resolve". The pre-flight estimate is where that resolution surfaces to the
+ * user (the CLI panel and the dashboard modal both render it), so it is what the
+ * override is pinned on, in both directions.
  */
-async function scanDetails(repo: string, llm: 'cli' | 'api'): Promise<string[]> {
-  const details: string[] = [];
-  const tracker = new StepTracker((payload) => {
-    for (const s of payload.steps ?? []) if (s.detail) details.push(s.detail);
-  }, [...CURATE_STEPS]);
-  await curateInProcess(repo, {
-    tracker,
-    llm,
-    skipGit: true,
-    skipCorpusWrite: true,
-    relevanceRunner: relevance,
-    areaTagRunner: areaTagger,
-    overlapRunner: flagNone,
-    verifyOverlapRunner: confirmAll,
-  });
-  return details;
-}
-
-describe('spec scan — the models follow the run transport', () => {
+describe('spec scan — the model follows the run transport', () => {
   function scanRepo(): string {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-transport-models-scan-'));
     dirs.push(r);
@@ -226,17 +198,26 @@ describe('spec scan — the models follow the run transport', () => {
     return r;
   }
 
-  it('resolves the tier models when `cli` overrides a saved api selection', async () => {
+  const models = async (repo: string, mode: 'claude-code' | 'api'): Promise<string[]> => {
+    const est = await estimateScanTokens(repo, undefined, { mode });
+    return [...new Set((est.stages ?? []).map((s) => s.model))];
+  };
+
+  it('resolves the pinned session tier when `cli` overrides a saved api selection', async () => {
     saveSelection('api');
-    const details = await scanDetails(scanRepo(), 'cli');
-    expect(details.some((d) => /\b(haiku|sonnet|opus)\b/.test(d))).toBe(true);
-    expect(details.some((d) => d.includes(API_MODEL))).toBe(false);
-  }, 60_000);
+    expect(await models(scanRepo(), 'claude-code')).toEqual(['opus']);
+  });
 
   it('resolves the api model when `api` overrides a saved Claude Code selection', async () => {
     saveSelection('claude-code');
-    const details = await scanDetails(scanRepo(), 'api');
-    expect(details.some((d) => d.includes(API_MODEL))).toBe(true);
-    expect(details.some((d) => /\b(haiku|sonnet|opus)\b/.test(d))).toBe(false);
-  }, 60_000);
+    expect(await models(scanRepo(), 'api')).toEqual([API_MODEL]);
+  });
+
+  it('quotes ONE model for every scan stage, whichever transport wins', async () => {
+    saveSelection('api');
+    const repo = scanRepo();
+    const est = await estimateScanTokens(repo, undefined, { mode: 'api' });
+    expect((est.stages ?? []).length).toBeGreaterThan(1);
+    expect(new Set((est.stages ?? []).map((s) => s.model)).size).toBe(1);
+  });
 });

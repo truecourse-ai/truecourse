@@ -27,6 +27,7 @@ import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { estimateSpinnerPhase, promptLlmEstimate } from "./llm-prompt.js";
 import { requireGitRepo } from "./git-guard.js";
+import { getServerUrl } from "./helpers.js";
 
 export interface RunSpecOptions {
   cwd?: string;
@@ -61,8 +62,10 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   p.intro("Spec scan");
   await requireGitRepo(root);
   // Scan is the first command in the spec/contract pipeline — register the repo
-  // so the corpus it produces is visible in the dashboard's project list.
-  await registerProject(root);
+  // so the corpus it produces is visible in the dashboard's project list. The
+  // entry's slug is also the dashboard deep link the question line points at.
+  const project = await registerProject(root);
+  const activityUrl = `${getServerUrl()}/repos/${project.slug}?tab=activity`;
   // The relevance + area-tag stages shell out to `claude`; an expired login would
   // fail every doc. Probe once up front — or, in API mode, validate the provider
   // config instead (the `agent` transport answers via the mailbox: neither applies).
@@ -72,13 +75,20 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // The estimate resolves its own spinner line before the panel prints; the
   // checklist below only starts once the run does, so it paints exactly once.
   const { renderer, tracker } = withTracker(CURATE_STEPS);
-  const { curate, noChanges } = await curateInProcess(root, {
+  const { curate, noChanges, pendingQuestions, scanFindings } = await curateInProcess(root, {
     tracker,
     source: "cli",
     llm: opts.llm,
     io: opts.io,
     onEstimatePhase: estimateSpinnerPhase(),
     onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Scan" } }),
+    // A scan session asked a question (§3.7 — the interactive scope
+    // orchestrator). The CLI never blocks on it: print the dashboard deep link
+    // where it can be answered; unanswered it lands in pendingQuestions below.
+    onQuestion: (_workItem, question) => {
+      p.log.warn(`Scan question: ${question.header} — ${question.question}`);
+      p.log.message(`  Answer it in the dashboard: ${activityUrl}`);
+    },
   }).catch((e: unknown) => {
     renderer.dispose();
     if (e instanceof EstimateDeclined) {
@@ -140,6 +150,19 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     }
   }
   printLlmFailures(s.llmFailures);
+  // Questions the interactive orchestrator left unanswered — the run never
+  // blocks on them, so LOUD surfacing here is the contract (§3.7).
+  if (pendingQuestions.length > 0) {
+    p.log.warn(
+      `${pendingQuestions.length} scan question${pendingQuestions.length === 1 ? "" : "s"} went unanswered — the scan proceeded on defaults:`,
+    );
+    for (const q of pendingQuestions) p.log.message(`  • ${q.header}: ${q.question}`);
+    p.log.message(`  Answer them in the dashboard (${activityUrl}), then re-run \`truecourse spec scan\`.`);
+  }
+  if (scanFindings.length > 0) {
+    p.log.step(`Scan findings (from the scope orchestrator):`);
+    for (const f of scanFindings) p.log.message(`  • ${f}`);
+  }
   if (s.outOfScopeManualIncludes.length > 0) {
     p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
     for (const inc of s.outOfScopeManualIncludes) p.log.message(`  • ${inc}`);
@@ -168,7 +191,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const lost = s.llmFailures.reduce((n, f) => n + f.failures, 0);
   if (lost > 0) {
     p.outro(
-      `Corpus written to .truecourse/specs/corpus.json — INCOMPLETE: ${lost} LLM call${lost === 1 ? "" : "s"} failed; re-run to fill the gaps.${conflictTail}`,
+      `Corpus written to .truecourse/specs/corpus.json — INCOMPLETE: ${lost} session${lost === 1 ? "" : "s"} failed; re-run to fill the gaps.${conflictTail}`,
     );
     return;
   }
@@ -187,9 +210,9 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
  */
 function printLlmFailures(failures: readonly StageTransportTally[]): void {
   if (failures.length === 0) return;
-  p.log.warn("LLM calls failed — the results above are incomplete:");
+  p.log.warn("Scan sessions failed — the results above are incomplete:");
   for (const f of failures) {
-    p.log.message(`  • ${stageLabel(f.stage)}: ${f.failures} of ${f.attempts} calls failed — ${SCAN_STAGE_EFFECT[f.stage] ?? "affected items skipped"}`);
+    p.log.message(`  • ${stageLabel(f.stage)}: ${f.failures} of ${f.attempts} sessions failed — ${SCAN_STAGE_EFFECT[f.stage] ?? "affected items skipped"}`);
     if (f.firstError) p.log.message(`    first failure: ${f.firstError}`);
   }
 }
@@ -200,20 +223,19 @@ function stageLabel(stage: string): string {
 }
 
 const SCAN_STAGE_LABEL: Record<string, string> = {
-  "spec.relevance": "relevance",
-  "spec.areaTag": "area tags",
-  "spec.vocab": "vocabulary",
-  "spec.overlap": "overlap",
-  "spec.verifyOverlap": "overlap verify",
+  // Session kinds (the scan runs agent sessions — plan 02).
+  "spec-scan.orchestrate": "scan scope",
+  "spec-scan.curate-doc": "doc curation",
+  "spec-scan.settle-areas": "area settling",
+  "spec-scan.overlap": "overlap",
 };
 
-/** What each stage's per-item fail-open default did to the calls it lost. */
+/** What each kind's per-item fail-open default did to the sessions it lost. */
 const SCAN_STAGE_EFFECT: Record<string, string> = {
-  "spec.relevance": "affected docs kept by default",
-  "spec.areaTag": "affected docs left untagged (they join no area)",
-  "spec.vocab": "area names left un-normalized",
-  "spec.overlap": "affected doc pairs left unflagged",
-  "spec.verifyOverlap": "affected flags kept as conflicts",
+  "spec-scan.orchestrate": "stored scope verdicts kept — no new subtree decisions",
+  "spec-scan.curate-doc": "affected docs kept by default, untagged (they join no area)",
+  "spec-scan.settle-areas": "area labels kept as-is (no merges/subdivisions)",
+  "spec-scan.overlap": "affected areas left unflagged (their docs land in notReached)",
 };
 
 

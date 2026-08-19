@@ -351,7 +351,7 @@ function makeOpenApiCandidate(
  * A STRUCTURAL (non-prose) spec source — currently only an OpenAPI document.
  * Structural docs are admitted into the corpus deterministically: they skip the
  * LLM relevance filter and every prose-only stage (area tagging, vocab, overlap).
- * The single predicate both the runtime (`filterByRelevance`/`planRelevanceWork`)
+ * The single predicate both the runtime (the scan run's `prefilterDocs` pass)
  * and the pre-flight estimate use to exclude them identically.
  */
 export function isStructuralSpecDoc(doc: DocCandidate): boolean {

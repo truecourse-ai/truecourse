@@ -12,6 +12,7 @@ export type {
   ManualArea,
   ConflictResolution,
   DecisionsFile,
+  ScopeVerdict,
 } from './types.js';
 
 export {
@@ -20,6 +21,8 @@ export {
   ManualAreaSchema,
   ConflictResolutionSchema,
   DecisionsFileSchema,
+  ScopeVerdictSchema,
+  DECISIONS_FILE_VERSION,
 } from './types.js';
 
 // --- Curated corpus (spec-scan redesign) -----------------------------------
@@ -61,51 +64,42 @@ export {
   writeCorpus,
 } from './corpus-store.js';
 
-export { tagDocs, isAreaTagCached, parseDocStatus, AREA_TAGGER_SYSTEM_PROMPT, buildAreaTaggerUserPrompt } from './area-tagger.js';
-export type { DocAreaTags, AreaTagRunner, AreaTagRunnerInput, AreaTaggerOptions } from './area-tagger.js';
+export {
+  parseDocStatus,
+  classifyStatusValue,
+  AREA_TAGGER_SYSTEM_PROMPT,
+} from './area-tagger.js';
+export type { DocAreaTags } from './area-tagger.js';
 
 export { groupByArea } from './area-grouper.js';
 export type { GroupResult } from './area-grouper.js';
 
-export {
-  normalizeVocabulary,
-  VOCAB_NORMALIZER_SYSTEM_PROMPT,
-  buildVocabUserPrompt,
-} from './vocab-normalizer.js';
-export type { VocabRunner, VocabRunnerInput, VocabNormalizerOptions } from './vocab-normalizer.js';
+export { VOCAB_NORMALIZER_SYSTEM_PROMPT } from './vocab-normalizer.js';
 
 export {
-  flagOverlaps,
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  buildOverlapUserPrompt,
   OVERLAP_WINDOW_CHARS,
-} from './overlap-detector.js';
-export type {
-  OverlapRunner,
-  OverlapRunnerInput,
-  OverlapVerdict,
-  OverlapDetectorOptions,
-  OverlapPart,
+  widenedOverlapDocs,
+  hasConcernHeading,
 } from './overlap-detector.js';
 
-export { verifyOverlapSections } from './pointer-verifier.js';
-export type { VerifyPointersInput } from './pointer-verifier.js';
+export { verifyOverlapSections, splitDocSections, locateQuote } from './pointer-verifier.js';
+export type { VerifyPointersInput, DocSection } from './pointer-verifier.js';
 
 export {
-  verifyFlaggedOverlaps,
-  buildVerifyOverlapUserPrompt,
+  headingOutline,
+  leadText,
+  sectionText,
   VERIFY_OVERLAP_SYSTEM_PROMPT,
   VERIFY_DOC_BUDGET_CHARS,
 } from './overlap-verifier.js';
-export type {
-  OverlapVerification,
-  VerifyOverlapRunner,
-  VerifyFlaggedOverlapsOptions,
-  VerifyOverlapsResult,
-} from './overlap-verifier.js';
 
-export { curate, readCorpusDecisions } from './curate.js';
-export type { CurateModels, CurateOptions, CurateResult, CurateStats } from './curate.js';
+export {
+  readCorpusDecisions,
+  pruneOrphanedConflictResolutions,
+  autoApplyHighConfidenceRecommendations,
+} from './curate.js';
+export type { CurateResult, CurateStats } from './curate.js';
 
 export {
   resolveRepoIdentity,
@@ -199,25 +193,17 @@ export type {
 } from './sources/index.js';
 
 export {
-  filterByRelevance,
-  planRelevanceWork,
-  readRelevanceCache,
-  relevanceUserPromptChars,
   buildRelevanceUserPrompt,
   isCarvedOutAgentSkill,
   applySubjectAttribution,
+  namesOurProduct,
+  prefilterCategory,
   SkipCategorySchema,
   DocSubjectSchema,
   RELEVANCE_SYSTEM_PROMPT,
 } from './relevance-filter.js';
 export type {
-  PlanRelevanceOptions,
   SkipCategory,
   DocSubject,
-  RelevanceFilterOptions,
-  RelevanceFilterOutcome,
-  RelevancePlan,
-  RelevanceRunner,
-  RelevanceRunnerInput,
   RelevanceVerdict,
 } from './relevance-filter.js';

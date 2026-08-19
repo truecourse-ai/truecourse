@@ -163,4 +163,25 @@ describe('spec scan outro points at guard generate, never at contracts generate'
   it('no user-facing next-step in the scan/spec flow names `contracts generate`', () => {
     expect(specSrc).not.toContain('contracts generate');
   });
+
+  // §3.7 / plan 02 step 6: the scope orchestrator is interactive, but a CLI run
+  // never blocks on a question. Both the live `onQuestion` line and the closing
+  // summary must point at the dashboard deep link, or an unanswered question
+  // silently becomes a default nobody sees.
+  it('a live scan question prints the dashboard deep link, without blocking', () => {
+    expect(specSrc).toContain('?tab=activity');
+    expect(specSrc).toContain('Scan question:');
+    expect(specSrc).toContain('Answer it in the dashboard:');
+  });
+
+  it('unanswered questions get a LOUD closing block naming the deep link', () => {
+    expect(specSrc).toContain('pendingQuestions.length > 0');
+    expect(specSrc).toContain('went unanswered — the scan proceeded on defaults');
+    expect(specSrc).toContain('Answer them in the dashboard (${activityUrl})');
+  });
+
+  it('the orchestrator\'s findings are surfaced in the summary', () => {
+    expect(specSrc).toContain('scanFindings.length > 0');
+    expect(specSrc).toContain('Scan findings (from the scope orchestrator)');
+  });
 });

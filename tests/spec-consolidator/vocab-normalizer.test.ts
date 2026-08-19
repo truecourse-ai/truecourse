@@ -1,25 +1,19 @@
 /**
- * Cross-doc vocabulary reconciliation: collects the emergent product/concern
- * vocabulary, runs ONE clustering pass, sanitizes the result (no inventing
- * targets, no touching core/process), caches it, and the grouper applies the map
- * so drifted names (booking vs booking-app) collapse into one area.
+ * Cross-doc vocabulary reconciliation, AFTER the move to sessions (plan 02
+ * step 4). `normalizeVocabulary` — the one-shot stage this file was named for —
+ * is retired; its judgment now belongs to the `spec-scan.settle-areas` session
+ * (`tests/core/spec-scan-settle.test.ts` carries the gate, the validator, the
+ * to-core collapse and the cache).
+ *
+ * What survives here is the half that never was LLM work: the GROUPER applying
+ * a vocab map, which is what a settlement ultimately turns into. The retired
+ * cases were the runner seam (gone), the per-run cache (now the session cache),
+ * and the sanitize rule forbidding a merge onto `core` — deliberately REVERSED
+ * for the settle path, where collapse-to-core is the point.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { resetKvCacheStore } from '@truecourse/llm';
-import { normalizeVocabulary, groupByArea } from '../../packages/spec-consolidator/src/index.js';
-import type { DocAreaTags, DocCandidate, VocabRunner } from '../../packages/spec-consolidator/src/index.js';
-
-let scope: string;
-beforeEach(() => {
-  resetKvCacheStore();
-  scope = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-vocab-'));
-});
-afterEach(() => {
-  fs.rmSync(scope, { recursive: true, force: true });
-});
+import { describe, it, expect } from 'vitest';
+import { groupByArea } from '../../packages/spec-consolidator/src/index.js';
+import type { DocAreaTags, DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 
 function tags(map: Record<string, [string, string][]>): Map<string, DocAreaTags> {
   const out = new Map<string, DocAreaTags>();
@@ -31,73 +25,6 @@ function tags(map: Record<string, [string, string][]>): Map<string, DocAreaTags>
 function doc(p: string): DocCandidate {
   return { path: p, absPath: '', kind: 'prd', preview: '', lastTouched: '2026-01-01T00:00:00Z', contentHash: `h-${p}`, size: 1 };
 }
-
-describe('normalizeVocabulary', () => {
-  it('returns the reconciliation map from the runner (sanitized)', async () => {
-    const t = tags({
-      'readme.md': [['booking', 'appointments-entity']],
-      'prd.md': [['booking-app', 'appointments-entity']],
-    });
-    const runner: VocabRunner = async () => ({ products: { 'booking-app': 'booking' }, concerns: {} });
-    const map = await normalizeVocabulary(scope, t, { runner });
-    expect(map.products).toEqual({ 'booking-app': 'booking' });
-  });
-
-  it('drops unsafe mappings — invented targets, identities, core/process merges', async () => {
-    const t = tags({
-      'a.md': [['booking', 'auth']],
-      'b.md': [['booking-app', 'auth']],
-      'c.md': [['ops', 'events']],
-    });
-    const runner: VocabRunner = async () => ({
-      products: {
-        'booking-app': 'booking', // ok
-        'ops': 'core', // drop — never merge into core
-        'booking': 'booking', // drop — identity
-        'booking-app2': 'whatever', // drop — neither side in the input vocab
-      },
-      concerns: {},
-    });
-    const map = await normalizeVocabulary(scope, t, { runner });
-    expect(map.products).toEqual({ 'booking-app': 'booking' });
-  });
-
-  it('skips the call entirely when there is nothing to reconcile', async () => {
-    let calls = 0;
-    const runner: VocabRunner = async () => {
-      calls++;
-      return { products: {}, concerns: {} };
-    };
-    // One product, one concern → nothing can collide.
-    const map = await normalizeVocabulary(scope, tags({ 'a.md': [['core', 'auth']] }), { runner });
-    expect(calls).toBe(0);
-    expect(map).toEqual({ products: {}, concerns: {} });
-  });
-
-  it('caches the reconciliation — a second run does not call the runner', async () => {
-    let calls = 0;
-    const runner: VocabRunner = async () => {
-      calls++;
-      return { products: { 'booking-app': 'booking' }, concerns: {} };
-    };
-    const t = tags({ 'a.md': [['booking', 'auth']], 'b.md': [['booking-app', 'auth']] });
-    await normalizeVocabulary(scope, t, { runner });
-    await normalizeVocabulary(scope, t, { runner });
-    expect(calls).toBe(1);
-  });
-
-  it('returns an identity map when disabled', async () => {
-    let calls = 0;
-    const runner: VocabRunner = async () => {
-      calls++;
-      return { products: { 'booking-app': 'booking' }, concerns: {} };
-    };
-    const t = tags({ 'a.md': [['booking', 'auth']], 'b.md': [['booking-app', 'auth']] });
-    const map = await normalizeVocabulary(scope, t, { runner, enabled: false });
-    expect(map).toEqual({ products: {}, concerns: {} });
-    expect(calls).toBe(0);
-  });
-});
 
 describe('groupByArea + vocab', () => {
   it('collapses drifted product names into one area, keeping different products apart', () => {
@@ -114,5 +41,16 @@ describe('groupByArea + vocab', () => {
     expect(ids).toEqual(['booking/appointments-entity', 'ops/appointments-entity']);
     const booking = areas.find((a) => a.id === 'booking/appointments-entity')!;
     expect(booking.docRefs).toEqual(['prd.md', 'readme.md']); // README + PRD now in ONE area
+  });
+
+  // The settle session may collapse a product ONTO core — the one merge the old
+  // vocab sanitize forbade. The grouper has always been able to apply it; this
+  // pins that the map a settlement produces lands where it is meant to.
+  it('applies a collapse onto core, merging a product-named area into core', () => {
+    const docs = [doc('booking.md'), doc('core.md')];
+    const t = tags({ 'booking.md': [['booking', 'auth']], 'core.md': [['core', 'auth']] });
+    const { areas } = groupByArea(docs, t, [], { products: { booking: 'core' }, concerns: {} });
+    expect(areas.map((a) => a.id)).toEqual(['core/auth']);
+    expect(areas[0].docRefs).toEqual(['booking.md', 'core.md']);
   });
 });

@@ -331,6 +331,21 @@ export const AreaSchema = z.object({
   docRefs: z.array(DocRefSchema),
   /** Within-area overlaps still awaiting a relation. */
   overlaps: z.array(OverlapSchema).default([]),
+  /**
+   * Docs of this area the overlap SESSION did not reach — either the session
+   * declared them (its budget contract: "docs you do not reach go in
+   * notReached") or the session failed and every doc of the area lands here.
+   * Additive + optional so older corpora parse; absent means fully covered by
+   * the one-shot pipeline that predates sessions.
+   */
+  notReached: z.array(DocRefSchema).optional(),
+  /**
+   * How many `read_section` tool calls the area's overlap session actually
+   * made — counted from the TRANSCRIPT by the fold (never self-reported), so a
+   * session that flagged nothing while opening nothing is visible as a skim.
+   * Absent on cache-hit areas (no transcript) and on pre-session corpora.
+   */
+  sectionsOpened: z.number().int().nonnegative().optional(),
 });
 export type Area = z.infer<typeof AreaSchema>;
 

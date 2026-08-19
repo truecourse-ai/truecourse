@@ -112,6 +112,32 @@ export const ManualAreaSchema = z.object({
 export type ManualArea = z.infer<typeof ManualAreaSchema>;
 
 /**
+ * A SCOPE verdict — the scan orchestrator session's (or the user's) call on one
+ * SUBTREE of the doc universe: a directory prefix of repo docs, or a registered
+ * llms.txt source (by its id). `exclude` drops the whole subtree BEFORE any
+ * discovery-cost stage — its docs never reach identity resolution, the
+ * prefilter, or a curation session. `keep` records that the subtree was looked
+ * at and belongs, so the orchestrator's covered-universe pre-pass can spend
+ * zero sessions on an unchanged universe.
+ *
+ * `resolvedBy` mirrors {@link ConflictResolutionSchema}: `auto` = the
+ * orchestrator session wrote it (replaceable by a later session), absent/`user`
+ * = a human wrote it (never overwritten by an auto row).
+ */
+export const ScopeVerdictSchema = z.object({
+  /** Directory prefix of repo docs (`docs/archive`), a single root doc
+   *  (`CHANGELOG.md`), `.` for root-level files — or a registered source id. */
+  path: z.string(),
+  verdict: z.enum(['keep', 'exclude']),
+  reason: z.string(),
+  /** ISO timestamp the verdict was recorded. */
+  decidedAt: z.string(),
+  /** `auto` = the orchestrator session; absent/`user` = a human. */
+  resolvedBy: z.enum(['user', 'auto']).optional(),
+});
+export type ScopeVerdict = z.infer<typeof ScopeVerdictSchema>;
+
+/**
  * The decisions file — the user-authored curation intent the corpus
  * path reads:
  *
@@ -119,13 +145,19 @@ export type ManualArea = z.infer<typeof ManualAreaSchema>;
  *   - `manualIncludes[]` relevance-filter force-includes
  *   - `manualExcludes[]` force-excludes (drop an otherwise-kept doc)
  *   - `conflictResolutions[]` section-scoped conflict verdicts
+ *   - `scopeVerdicts[]` subtree keep/exclude calls (v2 — see {@link ScopeVerdictSchema})
+ *   - `instructions[]`  standing scan instructions (v2) — they ride EVERY scan
+ *     session's briefing and enter every scan cache key, so editing one
+ *     re-scans the corpus (deliberate: an instruction changes every judgment)
  *
- * Unknown fields in an older decisions.json (e.g. a `relations` array from a
- * version that had doc→doc relations) are dropped on parse — nothing consumes
- * them and they are not rewritten.
+ * VERSIONING: v1 and v2 both parse (v1 simply has no scope rows and no
+ * instructions — the defaults fill in); writers always stamp version 2
+ * (`writeDecisions`). Unknown fields in an older decisions.json (e.g. a
+ * `relations` array from a version that had doc→doc relations) are dropped on
+ * parse — nothing consumes them and they are not rewritten.
  */
 export const DecisionsFileSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   /**
    * Doc paths the user has manually marked "always include" — these
    * bypass the LLM relevance filter so the user can override a wrong
@@ -147,5 +179,18 @@ export const DecisionsFileSchema = z.object({
    * decisions.json written before conflict verdicts existed still parses.
    */
   conflictResolutions: z.array(ConflictResolutionSchema).default([]),
+  /**
+   * Subtree keep/exclude verdicts over the doc universe (v2). Applied BEFORE
+   * discovery-cost stages; user rows are never overwritten by auto rows.
+   */
+  scopeVerdicts: z.array(ScopeVerdictSchema).default([]),
+  /**
+   * Standing scan instructions (v2). Briefed to EVERY scan session and folded
+   * into every scan cache key — an edit re-scans, which is correct.
+   */
+  instructions: z.array(z.string()).default([]),
 });
 export type DecisionsFile = z.infer<typeof DecisionsFileSchema>;
+
+/** The version every writer stamps (readers accept 1 and 2). */
+export const DECISIONS_FILE_VERSION = 2 as const;
