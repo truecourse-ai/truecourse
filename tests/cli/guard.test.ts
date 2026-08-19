@@ -8,6 +8,8 @@ import {
   readGuardLatest,
   writeGuardResult,
   readGuardResult,
+  writeGuardRun,
+  appendGuardHistory,
   guardResultPath,
   writeManifest,
 } from '@truecourse/guard-runner'
@@ -16,6 +18,7 @@ import {
     type GuardManifest,
   type GuardManifestFlow,
   type GuardLatest,
+  type GuardScenarioAdjudication,
   type GuardScenarioResult,
   type GuardOutcome,
   type GuardGenerateReport,
@@ -1255,6 +1258,62 @@ describe('runGuardStatus (printer)', () => {
     await runGuardStatus({ cwd: r })
     expect(out).toContain('1 blocked on')
     expect(out).not.toContain('need setup')
+  })
+
+  // --- The adjudication / convergence line (plan 05 step 23) ----------------
+  //
+  // `guard status` is where a corpus run is read between passes, so it is where
+  // "how many failures still have no verdict" and "have the last two runs stopped
+  // moving" belong. Both are silent on a green board: there is nothing to judge.
+  const ADJUDICATED: GuardScenarioAdjudication = {
+    class: 'drift',
+    mechanism: 'the doc promises a flag the CLI never shipped',
+    evidence: ['exit 2 — unknown flag'],
+    confidence: 'high',
+    findings: [],
+    adjudicatedAt: '2026-02-01T00:00:00.000Z',
+  }
+
+  it('says how many failures carry a verdict, and points at the command for the rest', async () => {
+    const r = repo()
+    writeGuardLatest(
+      r,
+      sampleLatest([scn('a', 'pass'), scn('b', 'fail', { adjudication: ADJUDICATED }), scn('c', 'fail')]),
+    )
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('adjudicated 1/2 failure(s) · not converged — run `truecourse guard adjudicate`')
+  })
+
+  it('drops the pointer once every failure is judged, and says converged when the runs agree', async () => {
+    const r = repo()
+    const rows = [scn('a', 'pass'), scn('b', 'fail', { adjudication: ADJUDICATED })]
+    // Two runs with the same per-scenario outcomes, both snapshots on disk: the
+    // corpus has stopped moving AND every failure is classified.
+    for (const runId of ['run-1', 'run-2']) {
+      const snapshot: GuardLatest = { ...sampleLatest(rows), run: { ...sampleLatest(rows).run, runId } }
+      writeGuardRun(r, snapshot)
+      appendGuardHistory(r, {
+        runId,
+        ranAt: snapshot.run.ranAt,
+        branch: 'main',
+        commit: 'deadbeefcafef00d',
+        summary: snapshot.summary,
+      })
+    }
+    writeGuardLatest(r, { ...sampleLatest(rows), run: { ...sampleLatest(rows).run, runId: 'run-2' } })
+
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('adjudicated 1/1 failure(s) · converged')
+    expect(out).not.toContain('run `truecourse guard adjudicate`')
+  })
+
+  it('stays silent on an all-green board — nothing to adjudicate', async () => {
+    const r = repo()
+    writeGuardLatest(r, sampleLatest([scn('a', 'pass'), scn('b', 'pass')]))
+    await runGuardStatus({ cwd: r })
+    expect(out).toContain('last run')
+    expect(out).not.toContain('adjudicated')
+    expect(out).not.toContain('converged')
   })
 
   it('says how many flows the sections went through, and words both lines with the five', async () => {

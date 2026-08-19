@@ -9,6 +9,7 @@
  */
 
 import { z } from 'zod'
+import { GuardScenarioAdjudicationSchema } from './adjudication.js'
 import { OutputExcerptsSchema } from './excerpts.js'
 import { GuardVisualAnnotationSchema } from './visual.js'
 import { GuardDependencyNeedSchema } from './dependencies.js'
@@ -286,6 +287,15 @@ export const GuardScenarioResultSchema = z
      * failure (nothing executed, so there is no failing step to point at).
      */
     blockedOn: GuardBlockedDependencySchema.optional(),
+    /**
+     * The ADJUDICATION VERDICT this failure carries (`truecourse guard
+     * adjudicate`, plan 05 step 23) — written AFTER the run by the adjudication
+     * fold, never by the runner. The board merge carries it with an untouched
+     * row and DROPS it from a re-run one (a new actual needs a new verdict —
+     * see `mergeGuardBoard`). Present only on `fail` / `error` rows that were
+     * adjudicated; optional so every pre-existing snapshot parses.
+     */
+    adjudication: GuardScenarioAdjudicationSchema.optional(),
     /**
      * Teardown-incomplete ANNOTATION (always `true` when present): after this
      * scenario settled, one of its BEST-EFFORT teardown steps (run because an

@@ -29,10 +29,14 @@ import { z } from 'zod'
 import { GuardDriverIdSchema } from './drivers.js'
 
 /** What drove an auto-resolution: a HIGH-confidence `generation-defect` triage
- *  verdict, a HIGH-confidence fidelity flag (the self-heal discard), or — on the
+ *  verdict, a HIGH-confidence fidelity flag (the self-heal discard), — on the
  *  session path (plan 04 step 17) — a flow-worker session ending `retired` (the
- *  worker itself judged its attempts defective and gave the flow up this run). */
-export const GuardAutoResolutionSourceSchema = z.enum(['triage', 'fidelity', 'worker'])
+ *  worker itself judged its attempts defective and gave the flow up this run),
+ *  or an `authoring-defect` verdict from `guard adjudicate` (plan 05 step 23:
+ *  a post-run adjudication blamed the scenario, so the flow taints and the
+ *  same escalate-after-{@link DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER} budget
+ *  applies before it becomes a human task). */
+export const GuardAutoResolutionSourceSchema = z.enum(['triage', 'fidelity', 'worker', 'adjudicate'])
 export type GuardAutoResolutionSource = z.infer<typeof GuardAutoResolutionSourceSchema>
 
 /** One tracked flow — how many times its test has auto-resolved without
@@ -77,8 +81,15 @@ export const GuardAutoResolutionsSchema = z
   .strict()
 export type GuardAutoResolutions = z.infer<typeof GuardAutoResolutionsSchema>
 
-/** An empty, valid ledger — the reader's fallback and the writer's seed. */
-export const EMPTY_GUARD_AUTO_RESOLUTIONS: GuardAutoResolutions = { version: 1, entries: {}, tainted: {} }
+/** An empty, valid ledger — a module-level SHARED constant, deep-frozen so a
+ *  caller that mutates it throws instead of silently leaking state across
+ *  repos. Readers that hand a ledger to mutating callers must build a fresh
+ *  object instead (see `readGuardAutoResolutions`). */
+export const EMPTY_GUARD_AUTO_RESOLUTIONS: GuardAutoResolutions = Object.freeze({
+  version: 1,
+  entries: Object.freeze({}),
+  tainted: Object.freeze({}),
+})
 
 /**
  * The ledger key — the flow×surface identity both records share. Deliberately the

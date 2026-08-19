@@ -12,9 +12,11 @@
  */
 
 import {
+  guardResultRunId,
   worstOutcome,
   type GuardLatest,
   type GuardOutcome,
+  type GuardScenarioAdjudication,
   type GuardScenarioResult,
   type GuardSectionRollup,
   type GuardSummary,
@@ -61,6 +63,12 @@ export function mergeGuardBoard(
   run: GuardLatest,
   corpusIds: ReadonlySet<string>,
 ): GuardLatest {
+  // A RE-RUN row never carries an adjudication verdict: the verdict judged an
+  // ACTUAL, and this run produced a new one — a new actual needs a new verdict
+  // (`guard adjudicate`, plan 05 step 23). The runner never writes the field,
+  // so this strip is the stated invariant rather than a live code path; an
+  // untouched CARRIED row (below) keeps its verdict verbatim.
+  run = { ...run, scenarios: run.scenarios.map(withoutAdjudication) }
   if (!prior) return run
 
   const ranIds = new Set(run.scenarios.map((s) => s.id))
@@ -84,6 +92,46 @@ export function mergeGuardBoard(
     scenarios,
     sections: mergeSections(prior.sections, run.sections, outcomeById, new Set(carried.map((s) => s.id))),
   }
+}
+
+/** A row with its adjudication verdict removed (identity when it carries none). */
+function withoutAdjudication(row: GuardScenarioResult): GuardScenarioResult {
+  if (row.adjudication === undefined) return row
+  const { adjudication: _dropped, ...rest } = row
+  return rest
+}
+
+/**
+ * Attach an adjudication verdict to ONE scenario row of a board — the PURE fold
+ * behind `guard adjudicate`'s write path (plan 05 step 23), exported so the
+ * run-snapshot patch and the LATEST patch go through the same rule.
+ *
+ * `onlyIfRunId`, when given, holds the patch to a row whose EFFECTIVE run
+ * (its own `runId` stamp, else the envelope's — `guardResultRunId`) is that
+ * run: the verdict judged one run's actual, and a board whose row has since
+ * been re-run must not inherit it. Returns the patched copy, or `null` when
+ * no row matched (absent scenario, or the run-identity guard held) — the
+ * caller then simply does not write.
+ *
+ * `summary` / `sections` are untouched: an adjudication is an annotation,
+ * never an outcome, so nothing it says can move a tally.
+ */
+export function withScenarioAdjudication(
+  board: GuardLatest,
+  scenarioId: string,
+  adjudication: GuardScenarioAdjudication,
+  opts: { onlyIfRunId?: string } = {},
+): GuardLatest | null {
+  let patched = false
+  const scenarios = board.scenarios.map((row) => {
+    if (row.id !== scenarioId) return row
+    if (opts.onlyIfRunId !== undefined && guardResultRunId(row, board.run) !== opts.onlyIfRunId) {
+      return row
+    }
+    patched = true
+    return { ...row, adjudication }
+  })
+  return patched ? { ...board, scenarios } : null
 }
 
 /**

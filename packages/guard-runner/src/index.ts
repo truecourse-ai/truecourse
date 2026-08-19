@@ -8,7 +8,7 @@ export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurren
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 // The board — `LATEST.json` as the merged current-state view across runs.
-export { mergeGuardBoard, summarizeResults } from './board.js'
+export { mergeGuardBoard, summarizeResults, withScenarioAdjudication } from './board.js'
 
 export { newRunNonce, scenarioUnique, applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
 export {
@@ -363,6 +363,8 @@ export {
   guardAuthoredInterfacesPath,
   guardInterfaceFindingsPath,
   guardSetupFindingsPath,
+  guardAdjudicateFindingsPath,
+  guardFindingsReportPath,
   scenariosDir,
   recipePath,
   manifestPath,

@@ -16,6 +16,7 @@ import { readFlowsFile } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
 import { readGuardSectionTotals } from "@truecourse/core/commands/guard-read";
 import { readGuardSetup } from "@truecourse/core/commands/guard-setup";
+import { readGuardAdjudicationView } from "@truecourse/core/commands/guard-adjudicate";
 import {
   guardNeedsSetupServices,
   readGuardExternalsView,
@@ -905,6 +906,18 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     // WHICH dependency, per scenario that never ran — the tally alone says a number
     // and leaves the reader with nothing to do about it.
     for (const line of blockedDependencyLines(latest?.scenarios ?? [])) p.log.message(`    ${line}`);
+    // Adjudication + convergence (plan 05 step 23): how many failures carry a
+    // verdict, and whether the last two runs agree per scenario. Silent on an
+    // all-green board — there is nothing to adjudicate.
+    const adjudication = await readGuardAdjudicationView(repoRoot);
+    if (adjudication.failures.length > 0) {
+      const verdicts = adjudication.failures.length - adjudication.unadjudicated;
+      p.log.message(
+        `    adjudicated ${verdicts}/${adjudication.failures.length} failure(s) · ${
+          adjudication.converged ? "converged" : "not converged"
+        }${adjudication.unadjudicated > 0 ? " — run `truecourse guard adjudicate`" : ""}`,
+      );
+    }
   }
 
   // Last generate — guard/result.json.

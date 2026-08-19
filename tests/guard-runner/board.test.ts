@@ -15,6 +15,7 @@ import path from 'node:path'
 import {
   runGuard,
   mergeGuardBoard,
+  withScenarioAdjudication,
   guardLatestPath,
   guardRunPath,
   readGuardHistory,
@@ -26,6 +27,7 @@ import {
   guardResultRanAt,
   guardResultRunId,
   type GuardLatest,
+  type GuardScenarioAdjudication,
 } from '@truecourse/shared'
 import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds } from './helpers.js'
 
@@ -359,6 +361,103 @@ describe('mergeGuardBoard — the merge itself', () => {
     ])
     expect(merged.run.runId).toBe('r3')
     expect(merged.summary).toMatchObject({ total: 3, pass: 2, fail: 1 })
+  })
+
+  // --- Adjudication verdicts across a scoped run (plan 05 step 23) ----------
+  //
+  // A verdict judges ONE recorded actual. A row nobody re-ran still shows that
+  // actual, so its verdict carries; a row this run re-executed shows a new one,
+  // so whatever verdict it arrived with is dropped rather than re-attached to a
+  // failure it never looked at.
+  const verdict = (mechanism: string): GuardScenarioAdjudication => ({
+    class: 'bug',
+    mechanism,
+    code: { file: 'src/thing.ts', line: 12 },
+    evidence: ['exit 2 — unknown flag'],
+    confidence: 'high',
+    findings: [],
+    adjudicatedAt: '2026-02-01T00:00:00.000Z',
+  })
+
+  it('carries an untouched row’s adjudication verbatim, stamped with the run it judged', () => {
+    const prior = latest('r1', '2026-01-01T00:00:00.000Z', [
+      { ...row('a', 'fail'), adjudication: verdict('the flag parser drops the last token') },
+      row('b', 'pass'),
+    ])
+    const run = latest('r2', '2026-01-02T00:00:00.000Z', [row('b', 'fail')])
+    const merged = mergeGuardBoard(prior, run, new Set(['a', 'b']))
+
+    const a = merged.scenarios.find((s) => s.id === 'a')!
+    expect(a.adjudication).toEqual(verdict('the flag parser drops the last token'))
+    // The verdict and the run identity travel together: the evidence the verdict
+    // cites lives in r1's bundle.
+    expect(guardResultRunId(a, merged.run)).toBe('r1')
+  })
+
+  it('drops the adjudication of a row THIS run re-executed — a new actual needs a new verdict', () => {
+    const prior = latest('r1', '2026-01-01T00:00:00.000Z', [
+      { ...row('a', 'fail'), adjudication: verdict('the flag parser drops the last token') },
+      row('b', 'pass'),
+    ])
+    // The run row arrives carrying a verdict (nothing in the runner writes one —
+    // the strip is the stated invariant, so state it).
+    const run = latest('r2', '2026-01-02T00:00:00.000Z', [
+      { ...row('a', 'fail'), adjudication: verdict('a stale verdict riding a fresh row') },
+    ])
+    const merged = mergeGuardBoard(prior, run, new Set(['a', 'b']))
+
+    const a = merged.scenarios.find((s) => s.id === 'a')!
+    expect(a.adjudication).toBeUndefined()
+    expect('adjudication' in a).toBe(false)
+    // The carried row is untouched by the strip.
+    expect(merged.scenarios.find((s) => s.id === 'b')!.outcome).toBe('pass')
+  })
+
+  it('strips a run row’s adjudication even when there is no prior board', () => {
+    const run = latest('r1', '2026-01-01T00:00:00.000Z', [
+      { ...row('a', 'fail'), adjudication: verdict('nothing has judged this run yet') },
+    ])
+    const merged = mergeGuardBoard(null, run, new Set(['a']))
+    expect(merged.scenarios[0].adjudication).toBeUndefined()
+  })
+
+  describe('withScenarioAdjudication — the pure verdict patch', () => {
+    it('patches the named row and only it, leaving the tallies alone', () => {
+      const board = latest('r1', '2026-01-01T00:00:00.000Z', [row('a', 'fail'), row('b', 'fail')])
+      const patched = withScenarioAdjudication(board, 'a', verdict('the mechanism'))!
+      expect(patched).not.toBeNull()
+      expect(patched.scenarios.find((s) => s.id === 'a')!.adjudication).toEqual(verdict('the mechanism'))
+      expect(patched.scenarios.find((s) => s.id === 'b')!.adjudication).toBeUndefined()
+      // An adjudication is an annotation, never an outcome.
+      expect(patched.summary).toBe(board.summary)
+      expect(patched.sections).toBe(board.sections)
+      // …and the input is not mutated.
+      expect(board.scenarios.find((s) => s.id === 'a')!.adjudication).toBeUndefined()
+    })
+
+    it('returns null when the board holds no such scenario', () => {
+      const board = latest('r1', '2026-01-01T00:00:00.000Z', [row('a', 'fail')])
+      expect(withScenarioAdjudication(board, 'nope', verdict('m'))).toBeNull()
+    })
+
+    it('holds the patch to the row’s EFFECTIVE run — its own stamp, else the envelope', () => {
+      const board = latest('r2', '2026-01-02T00:00:00.000Z', [
+        { ...row('a', 'fail'), runId: 'r1', ranAt: '2026-01-01T00:00:00.000Z' },
+        row('b', 'fail'),
+      ])
+      // `a` was carried from r1: the envelope's r2 must not match it.
+      expect(withScenarioAdjudication(board, 'a', verdict('m'), { onlyIfRunId: 'r2' })).toBeNull()
+      const byOwnStamp = withScenarioAdjudication(board, 'a', verdict('m'), { onlyIfRunId: 'r1' })
+      expect(byOwnStamp?.scenarios.find((s) => s.id === 'a')!.adjudication).toEqual(verdict('m'))
+
+      // `b` has no stamp of its own, so the envelope answers for it.
+      expect(withScenarioAdjudication(board, 'b', verdict('m'), { onlyIfRunId: 'r1' })).toBeNull()
+      expect(
+        withScenarioAdjudication(board, 'b', verdict('m'), { onlyIfRunId: 'r2' })?.scenarios.find(
+          (s) => s.id === 'b',
+        )!.adjudication,
+      ).toEqual(verdict('m'))
+    })
   })
 
   it('follows a scenario whose binding moved between runs', () => {

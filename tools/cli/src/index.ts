@@ -60,6 +60,7 @@ import {
   runGuardInterfacesReconcile,
 } from "./commands/guard-interfaces.js";
 import { runGuardSeed } from "./commands/guard-seed.js";
+import { runGuardAdjudicate } from "./commands/guard-adjudicate.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -244,8 +245,34 @@ specCmd
   .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
+  // Single-step mode: run one of the scan's four session steps in isolation.
+  // Prior steps replay from their stored artifacts (a missing one fails loud),
+  // later steps never start; only --only-overlap writes corpus.json.
+  .option("--only-orchestrate", "Run only the scan-scope step (writes scope verdicts to decisions.json; corpus.json untouched)")
+  .option("--only-curate", "Run only the doc-curation step (scope replayed from stored verdicts; corpus.json untouched)")
+  .option("--only-settle", "Run only the area-settling step (curation replayed from cache; corpus.json untouched)")
+  .option("--only-overlap", "Run only the overlap step (earlier steps replayed from cache) and write corpus.json")
   .action(async (options) => {
-    await runSpecScan({ yes: !!options.yes, llm: options.llmTransport, io: options.io });
+    const only = (
+      [
+        ["orchestrate", options.onlyOrchestrate],
+        ["curate", options.onlyCurate],
+        ["settle", options.onlySettle],
+        ["overlap", options.onlyOverlap],
+      ] as const
+    )
+      .filter(([, picked]) => !!picked)
+      .map(([step]) => step);
+    if (only.length > 1) {
+      console.error("error: the --only-<step> flags are mutually exclusive — pick one");
+      process.exit(1);
+    }
+    await runSpecScan({
+      yes: !!options.yes,
+      llm: options.llmTransport,
+      io: options.io,
+      ...(only[0] ? { only: only[0] } : {}),
+    });
   });
 
 specCmd
@@ -521,6 +548,29 @@ guardFlowsCmd
   .description("Put a dismissed flow back — the next generate authors tests for it again")
   .action(async (flowId) => {
     await runGuardFlowUndismiss(flowId);
+  });
+
+// Adjudication — classify the board's failures (plan 05): deterministic
+// pre-pass + verdict cache first, one agent session per surprise. Verdicts
+// land on the run snapshot and the board; `--report` renders guard/findings.md.
+guardCmd
+  .command("adjudicate")
+  .description("Classify the board's failing scenarios — expected-red, drift, bug, defect, or infrastructure")
+  .option("--run <id>", "Only failures recorded by this run")
+  .option("--scenario <id>", "Adjudicate only this scenario (repeatable; re-adjudicates a verdicted row)", collectPlace, [])
+  .option("--report", "Render guard/findings.md from the board's bug/drift verdicts")
+  .option("--concurrency <n>", "Run N sessions at once (default: min(cpus, 4))", parseInt)
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardAdjudicate({
+      run: options.run,
+      scenario: options.scenario,
+      report: !!options.report,
+      concurrency: options.concurrency,
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
   });
 
 guardCmd

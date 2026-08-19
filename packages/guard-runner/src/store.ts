@@ -26,7 +26,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { z } from 'zod'
 import {
-  EMPTY_GUARD_AUTO_RESOLUTIONS,
   GuardAutoResolutionsSchema,
   GuardClaimsFileSchema,
   GuardFlowsFileSchema,
@@ -63,6 +62,8 @@ const INTERFACES_FILE = 'interfaces.json'
 const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json'
 const INTERFACE_FINDINGS_FILE = 'interfaces.findings.md'
 const SETUP_FINDINGS_FILE = 'setup.findings.md'
+const ADJUDICATE_FINDINGS_FILE = 'adjudicate.findings.md'
+const FINDINGS_REPORT_FILE = 'findings.md'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
@@ -134,6 +135,29 @@ export function guardInterfaceFindingsPath(repoRoot: string): string {
  */
 export function guardSetupFindingsPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), SETUP_FINDINGS_FILE)
+}
+
+/**
+ * The ADJUDICATION FINDINGS LEDGER — where `guard adjudicate`'s sessions append
+ * the code-vs-docs discrepancies they read while classifying failures (the
+ * outcome's `findings`, plan 05 step 21). Committed for the same reason its two
+ * siblings above are: a report about the REPOSITORY, not a record of a run.
+ * Keep it out of `GITIGNORE_CONTENTS`.
+ */
+export function guardAdjudicateFindingsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), ADJUDICATE_FINDINGS_FILE)
+}
+
+/**
+ * THE FINDINGS REPORT — `guard/findings.md` (plan 05 step 24): the on-demand
+ * render of the board's `bug` / `drift` adjudications, one `## F<n>` per
+ * finding with stable first-seen numbering persisted in the file itself.
+ * COMMITTABLE (deliberately not in `GITIGNORE_CONTENTS`): it is the repo's
+ * findings record, regenerated — never appended — by
+ * `truecourse guard adjudicate --report`.
+ */
+export function guardFindingsReportPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), FINDINGS_REPORT_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -275,9 +299,21 @@ export function guardAutoResolutionsPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
 }
 
-/** Read the ledger; a missing or corrupt file reads as empty (never blocks a run). */
+/**
+ * Read the ledger; a missing or corrupt file reads as empty (never blocks a run).
+ * Every call returns a FRESH object — never the shared
+ * `EMPTY_GUARD_AUTO_RESOLUTIONS` constant by reference — because callers follow
+ * the store's read-patch-write idiom (adjudication's fold mutates the read
+ * before writing it back), and a shared fallback would leak one repo's
+ * escalation counts and taints into every ledgerless repo of a long-lived
+ * process.
+ */
 export function readGuardAutoResolutions(repoRoot: string): GuardAutoResolutions {
-  return readJsonOr(guardAutoResolutionsPath(repoRoot), GuardAutoResolutionsSchema, EMPTY_GUARD_AUTO_RESOLUTIONS)
+  return readJsonOr<GuardAutoResolutions>(guardAutoResolutionsPath(repoRoot), GuardAutoResolutionsSchema, {
+    version: 1,
+    entries: {},
+    tainted: {},
+  })
 }
 
 /** Write the durable auto-resolution ledger atomically. */
