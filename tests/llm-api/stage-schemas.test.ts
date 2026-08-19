@@ -67,7 +67,6 @@ import {
   spawnGenerateRunner,
   spawnFidelityRunner,
   spawnTriageRunner,
-  spawnSeedRunner,
   spawnRecipeRunner,
 } from '../../packages/guard-generator/src/runners.js';
 import type {
@@ -77,9 +76,17 @@ import type {
   FlowsEpicUserContext,
   MatchUserContext,
   RecipeDiscoveryInput,
-  SeedDraftInput,
 } from '../../packages/guard-generator/src/prompts.js';
 import type { TriageUserContext } from '../../packages/guard-generator/src/triage.js';
+
+// --- guard setup (plan 03) ---------------------------------------------------
+// Six one-shot stages became agent SESSIONS here too; like the scan's, their
+// outcome schemas ride the driver's toolset and are checked object-rooted below.
+import { RecipeProposalSchema } from '../../packages/guard-generator/src/schemas.js';
+import { CatalogDraftSchema } from '../../packages/core/src/services/guard-setup/dependency-catalog.js';
+import { ReconcileResolutionsSchema } from '../../packages/core/src/services/guard-setup/reconcile-interfaces.js';
+import { SeedSessionOutcomeSchema } from '../../packages/core/src/services/guard-setup/seed-session.js';
+import { AuthProofOutcomeSchema } from '../../packages/core/src/services/guard-setup/auth-proof.js';
 
 // --- analyze (core cli-provider transport branch) ----------------------------
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
@@ -354,20 +361,6 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     await spawnTriageRunner(t)(triageCtx);
     push('guard.triage', c.reqs.splice(0));
 
-    const seedCtx: SeedDraftInput = {
-      driver: 'pg',
-      databaseType: 'postgres',
-      tables: [{ name: 'users', columns: [{ name: 'id', type: 'uuid', isPrimaryKey: true }] }],
-      relations: [],
-      connectionEnv: ['DATABASE_URL'],
-      appImports: ['pg'],
-      blocked: [{ flow: 'a signed-in user lists todos', needs: ['credentials'] }],
-      ecosystem: 'node',
-      suggestedPath: 'scripts/guard-seed.mjs',
-    };
-    await spawnSeedRunner(t)(seedCtx);
-    push('guard.seed', c.reqs.splice(0));
-
     const recipeCtx: RecipeDiscoveryInput = {
       packageJson: '{"name":"relkit","bin":{"relkit":"dist/cli.js"}}',
       presentInputs: ['package.json'],
@@ -433,7 +426,6 @@ const EXPECTED_OPT_OUTS = [
   'guard.generate', // a scenario's `setup.files` / `setup.env` records
   'guard.generate.api', // the same schema, api driver
   'guard.recipe', // `env` / `servers` records
-  'guard.seed', // `provides.credentials` / `provides.fixtures` records
 ];
 
 let repo: string;
@@ -454,9 +446,10 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    // 23 since the five spec stages became agent sessions (plan 02) — they build
-    // no LlmRequest at all. A NEW schema-bearing call site still has to raise it.
-    expect(collected.length).toBeGreaterThanOrEqual(23);
+    // 22 since the five spec stages (plan 02) and the seed draft (plan 03 step
+    // 13) became agent sessions — they build no LlmRequest at all. A NEW
+    // schema-bearing call site still has to raise it.
+    expect(collected.length).toBeGreaterThanOrEqual(22);
     // Each collected call site contributed exactly one request.
     expect(new Set(collected.map((c) => c.name)).size).toBe(collected.length);
   });
@@ -513,7 +506,6 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
       'guard.generate.api',
       'guard.match',
       'guard.recipe',
-      'guard.seed',
       'guard.triage',
     ]);
   });
@@ -736,6 +728,31 @@ describe('spec-scan session outcome schemas', () => {
 
   it('are all object-rooted', () => {
     for (const [kind, schema] of SCAN_OUTCOMES) {
+      const rendered = JSON.parse(jsonSchemaHint(schema)) as { type?: string };
+      expect(rendered.type, kind).toBe('object');
+    }
+  });
+});
+
+/**
+ * The guard-setup sessions (plan 03 steps 9–14) reach a provider the same way:
+ * the api driver renders the outcome schema as the injected `outcome` TOOL's
+ * input schema, and the Agent SDK driver hands it to `outputFormat.json_schema`.
+ * Both places take a JSON SCHEMA OBJECT — a tool's `input_schema` must be
+ * `type: "object"` on every provider — so the object-root rule binds a session
+ * outcome exactly as it binds a JSON-mode stage.
+ */
+describe('guard-setup session outcome schemas', () => {
+  const SETUP_OUTCOMES: Array<[string, ZodType]> = [
+    ['guard-setup.recipe-repair', RecipeProposalSchema],
+    ['guard-setup.dependency-catalog', CatalogDraftSchema],
+    ['guard-setup.reconcile-interfaces', ReconcileResolutionsSchema],
+    ['guard-setup.seed', SeedSessionOutcomeSchema],
+    ['guard-setup.auth-proof', AuthProofOutcomeSchema],
+  ];
+
+  it('are all object-rooted', () => {
+    for (const [kind, schema] of SETUP_OUTCOMES) {
       const rendered = JSON.parse(jsonSchemaHint(schema)) as { type?: string };
       expect(rendered.type, kind).toBe('object');
     }

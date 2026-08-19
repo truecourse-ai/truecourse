@@ -117,6 +117,8 @@ export {
 export {
   discoverRecipe,
   verifyProposal,
+  recipeCacheKey,
+  staticProposalComplaints,
   RECIPE_CACHE_NAME,
   type RecipeDiscoveryResult,
   type RecipeDiscoverySource,
@@ -127,6 +129,9 @@ export {
   type VerifiableProposal,
   type VerifyContext,
   type ProposalVerdict,
+  type RecipeRepairContext,
+  type RecipeRepairResult,
+  type RecipeRepairFn,
 } from './recipe-discovery.js'
 
 export {
@@ -180,15 +185,18 @@ export {
 } from './ground.js'
 
 export {
-  draftSeed,
   seedDraftGate,
   detectRoleColumns,
+  readExistingSeedScript,
+  connectionEnvVars,
+  suggestedScriptPath,
+  toRecipeSeed,
+  resolveScriptPath,
+  writeSeedArtifacts,
   SEED_CACHE_NAME,
-  type DraftSeedOptions,
   type DraftSeedResult,
   type SeedBlockedFlow,
   type SeedDraftDatabase,
-  type SeedDraftPhase,
 } from './seed-draft.js'
 
 // `truecourse guard setup` — the cheap preparation stage between the spec scan and
@@ -197,10 +205,28 @@ export {
   runGuardSetup,
   readSpecExcerpts,
   collectSecuritySchemes,
+  ecosystemFingerprint,
+  interfacesFingerprint,
+  computeSeedStepFingerprint,
+  authFingerprint,
+  settledFingerprints,
   GUARD_SETUP_STEPS,
   type GuardSetupOptions,
   type GuardSetupResult,
   type GuardSetupStepKey,
+  type GuardSetupCatalogSession,
+  type GuardSetupCatalogSessionInput,
+  type GuardSetupCatalogSessionResult,
+  type GuardSetupInterfaceProvider,
+  type GuardSetupInterfacesStep,
+  type GuardSetupInterfacesStepInput,
+  type GuardSetupInterfacesStepResult,
+  type GuardSetupSeedSession,
+  type GuardSetupSeedSessionInput,
+  type GuardSetupSeedSessionResult,
+  type GuardSetupAuthStep,
+  type GuardSetupAuthStepInput,
+  type GuardSetupAuthStepResult,
 } from './setup.js'
 
 export {
@@ -296,7 +322,6 @@ export {
   spawnExtractRunner,
   spawnGenerateRunner,
   spawnRecipeRunner,
-  spawnSeedRunner,
   spawnFidelityRunner,
   spawnTriageRunner,
   spawnFlowsRunner,
@@ -305,7 +330,6 @@ export {
   type ExtractRunner,
   type GenerateRunner,
   type RecipeRunner,
-  type SeedRunner,
   type FidelityRunner,
   type TriageRunner,
   type FlowsRunner,

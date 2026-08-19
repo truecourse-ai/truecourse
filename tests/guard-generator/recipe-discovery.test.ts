@@ -16,9 +16,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  computeRecipeFingerprint,
+} from '@truecourse/guard-runner'
+import {
   discoverRecipe,
   type RecipeDiscoveryPhase,
   type RecipeProposal,
+  type RecipeRepairContext,
+  type RecipeRepairFn,
   type RecipeRunner,
 } from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER, FIXTURE_API_SERVER_V2 } from './helpers.js'
@@ -567,5 +572,144 @@ describe('discoverRecipe — the live phase stream', () => {
       { kind: 'verifying', stage: 'build', revision: true },
       { kind: 'verifying', stage: 'entry probe', revision: true },
     ])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The repair SEAM (plan 03 step 9) — the agent session that replaced the
+// one-shot LLM fallback. Present, it takes over the whole failure path; absent,
+// everything above still holds byte for byte.
+// ---------------------------------------------------------------------------
+
+describe('discoverRecipe — the repair seam', () => {
+  /** A repo whose own declarations decide the answer (`start` boots the fixture). */
+  function apiRepo(startScript = 'node server.mjs'): string {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-repair-'))
+    repos.push(r)
+    fs.writeFileSync(
+      path.join(r, 'package.json'),
+      JSON.stringify(
+        { name: 'todos-api', version: '1.0.0', type: 'module', scripts: { start: startScript } },
+        null,
+        2,
+      ),
+    )
+    fs.copyFileSync(FIXTURE_API_SERVER, path.join(r, 'server.mjs'))
+    fs.copyFileSync(path.join(path.dirname(FIXTURE_API_SERVER), 'crash.mjs'), path.join(r, 'crash.mjs'))
+    return r
+  }
+
+  const surface = async () => [
+    { method: 'GET', path: '/health' },
+    { method: 'GET', path: '/todos' },
+  ]
+
+  /** A repair seam answering from a script, recording the context it was briefed on. */
+  function repairing(
+    ...answers: Awaited<ReturnType<RecipeRepairFn>>[]
+  ): { repair: RecipeRepairFn; contexts: RecipeRepairContext[] } {
+    const contexts: RecipeRepairContext[] = []
+    const repair: RecipeRepairFn = async (ctx) => {
+      contexts.push(ctx)
+      const answer = answers[contexts.length - 1]
+      if (!answer) throw new Error(`unexpected repair call #${contexts.length}`)
+      return answer
+    }
+    return { repair, contexts }
+  }
+
+  // The whole point of the seam: the loop runs ONLY on the failure path.
+  it('spends nothing when the deterministic proposal verifies', async () => {
+    const r = apiRepo()
+    const { repair, contexts } = repairing()
+
+    const res = await discoverRecipe(r, neverCalled, { routes: surface, repair })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('deterministic')
+    expect(contexts).toHaveLength(0)
+  })
+
+  it('replaces the one-shot fallback entirely — the legacy runner is never called', async () => {
+    const r = repo()
+    const { repair, contexts } = repairing({ proposal: GOOD, sessionRunId: '2026-run-1' })
+
+    const res = await discoverRecipe(r, neverCalled, { repair })
+
+    expect(res.status).toBe('discovered')
+    if (res.status !== 'discovered') return
+    expect(res.source).toBe('llm')
+    expect(res.sessionRunId).toBe('2026-run-1')
+    expect(contexts).toHaveLength(1)
+    expect(JSON.parse(fs.readFileSync(recipeFile(r), 'utf-8'))).toEqual(GOOD)
+  })
+
+  // The GATE OF RECORD is the fold, never the transcript: whatever the session's
+  // own `verify_recipe` showed, the engine re-runs the real verification.
+  it('re-verifies the returned proposal, and refuses it when that fails', async () => {
+    const r = repo()
+    const bad: RecipeProposal = { build: 'false', entry: ['node', FIXTURE_BIN] }
+    const { repair, contexts } = repairing({ proposal: bad, sessionRunId: 'run-2' })
+
+    const res = await discoverRecipe(r, neverCalled, { repair })
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    expect(res.reason).toMatch(/^build `false` failed/)
+    expect(res.proposal).toEqual(bad)
+    expect(res.sessionRunId).toBe('run-2')
+    // No second round: the session already iterated inside its own budget, and
+    // resume is the NEXT run's path.
+    expect(contexts).toHaveLength(1)
+    expect(fs.existsSync(recipeFile(r))).toBe(false)
+  })
+
+  it('briefs the session with the failed proposal and the engine verdict', async () => {
+    const r = apiRepo('node crash.mjs')
+    const { repair, contexts } = repairing({
+      proposal: { build: 'true', api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' } },
+    })
+
+    // Captured BEFORE the run: a discovered recipe is itself a fingerprint input.
+    const before = computeRecipeFingerprint(r)
+
+    const res = await discoverRecipe(r, neverCalled, { routes: surface, repair })
+
+    expect(res.status).toBe('discovered')
+    const ctx = contexts[0]
+    expect(ctx.failed?.stage).toBe('server boot')
+    expect(ctx.failed?.reason).toContain('fixture crash')
+    expect(ctx.failed?.proposal).toContain('crash.mjs')
+    expect(ctx.inputs.presentInputs).toContain('package.json')
+    // The cache key input — the same fingerprint the one-shot era keyed on.
+    expect(ctx.inputsFingerprint).toBe(before)
+    expect(ctx.composeGenerated).toBe(false)
+  })
+
+  // Same precedence rule as an unreachable one-shot model: the engine's own
+  // deterministic diagnostic leads, the session failure is the footnote.
+  it('leads with the deterministic diagnostic when the session settles nothing', async () => {
+    const r = apiRepo('node crash.mjs')
+    const { repair } = repairing({ error: 'the session ran out of turns without reaching an outcome' })
+
+    const res = await discoverRecipe(r, neverCalled, { routes: surface, repair })
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    expect(res.reason).toMatch(/^api server `node crash\.mjs` did not start[\s\S]*fixture crash/)
+    expect(res.reason).toContain('(the repair session could not settle a proposal: the session ran out of turns')
+    expect(fs.existsSync(recipeFile(r))).toBe(false)
+  })
+
+  it('reports the session failure alone when nothing deterministic was tried', async () => {
+    const r = repo()
+    const { repair } = repairing({ error: 'the provider failed (auth): 401' })
+
+    const res = await discoverRecipe(r, neverCalled, { repair })
+
+    expect(res.status).toBe('verify-failed')
+    if (res.status !== 'verify-failed') return
+    expect(res.reason).toBe('the provider failed (auth): 401')
   })
 })

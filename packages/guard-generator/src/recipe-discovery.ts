@@ -52,7 +52,13 @@ import {
   type RecipeRetryContext,
 } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
-import { proposeRecipe, detectEcosystems, type ApiRouteRef } from './recipe-propose.js'
+import {
+  proposeRecipe,
+  detectEcosystems,
+  DEV_SCRIPT_MARKERS,
+  SHELL_OPERATORS,
+  type ApiRouteRef,
+} from './recipe-propose.js'
 import { GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
 import type { RecipeRunner } from './runners.js'
 
@@ -113,10 +119,48 @@ export type RecipeDiscoveryResult =
       /** The generated datastore compose file, repo-root-relative, when
        *  discovery wrote one alongside the recipe. Both are artifacts to review. */
       composePath?: string
+      /** The sessions-store run the repair session ran under, when one did. */
+      sessionRunId?: string
     }
   // `proposal` is absent when the model never produced a valid one (invalid output
   // after one corrective re-ask, or a thrown call) — there's nothing to show.
-  | { status: 'verify-failed'; reason: string; proposal?: RecipeProposal }
+  | { status: 'verify-failed'; reason: string; proposal?: RecipeProposal; sessionRunId?: string }
+
+// ---------------------------------------------------------------------------
+// The repair seam (plan 03 step 9) — the agent session that replaced the
+// one-shot LLM fallback. Defined HERE (driver-agnostic types only) because the
+// session itself lives in `@truecourse/core`, which this package must not
+// depend on: core builds a `RecipeRepairFn` and injects it.
+// ---------------------------------------------------------------------------
+
+/** Everything the repair session's briefing states — the failed proposal, the
+ *  engine's own verdict, and the deterministic evidence discovery already has. */
+export interface RecipeRepairContext {
+  repoRoot: string
+  /** What the model proposer used to read: the root manifest + the app inventory. */
+  inputs: { packageJson: string; presentInputs: string[]; apps?: RecipeAppInventoryEntry[] }
+  /** `computeRecipeFingerprint(repoRoot)` at repair time — the cache key input. */
+  inputsFingerprint: string
+  /** The deterministic proposal the engine RAN and rejected, when one was tried. */
+  failed?: { proposal: string; stage: RecipeVerifyStage; reason: string }
+  /** The detected datastore dependency, when the analysis pass saw one. */
+  database: DatabaseDependencyHint | null
+  /** The datastore connection URLs the app's own source declares. */
+  datastoreUrls: readonly DatastoreUrlRef[]
+  /**
+   * True when discovery already GENERATED a compose datastore, verified it with
+   * the deterministic proposal, and reverted it — the session must be told, so
+   * it never re-advises what guard just tried.
+   */
+  composeGenerated: boolean
+}
+
+/** What the seam hands back: a proposal to fold-verify, or why there is none. */
+export type RecipeRepairResult =
+  | { proposal: RecipeProposal; sessionRunId?: string }
+  | { error: string; sessionRunId?: string }
+
+export type RecipeRepairFn = (ctx: RecipeRepairContext) => Promise<RecipeRepairResult>
 
 /** What the caller's analysis pass knows about the repo's datastore — the two
  *  fields the diagnostic names. A `null` provider result means "nothing detected". */
@@ -166,9 +210,24 @@ export interface DiscoverRecipeOptions {
    * surface subscribes here; without one, nothing changes.
    */
   onPhase?: (phase: RecipeDiscoveryPhase) => void
+  /**
+   * THE REPAIR SESSION (plan 03 step 9). When present it REPLACES the one-shot
+   * `proposeRecipeWithReask` + evidence-retry fallback: discovery hands the seam
+   * the failed proposal, the engine's verdict, and the deterministic evidence,
+   * and fold-verifies whatever comes back with `verifyProposal` REGARDLESS of
+   * what the session's transcript claims — the gate of record stays here. The
+   * seam owns its own caching (`guard/recipe`, same name+key as the legacy
+   * path, via the session cache); discovery's own cache read/write is bypassed
+   * so the entry is written exactly once. Absent ⇒ today's one-shot behavior,
+   * byte for byte (hosted `guard generate` and the test seams ride that path).
+   */
+  repair?: RecipeRepairFn
 }
 
-function recipeCacheKey(inputsFingerprint: string): string {
+/** The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`.
+ *  Exported so the repair session keeps the exact key (plan 03 step 9): a
+ *  proposal the one-shot era settled stays a hit in the session era. */
+export function recipeCacheKey(inputsFingerprint: string): string {
   return createHash('sha256').update(`${RECIPE_PROMPT_FINGERPRINT}::${inputsFingerprint}`).digest('hex')
 }
 
@@ -278,6 +337,74 @@ export async function discoverRecipe(
 
   const inputsFingerprint = computeRecipeFingerprint(repoRoot)
   const inputs = readDiscoveryInputs(repoRoot)
+
+  // ---- The repair session path (plan 03 step 9). -----------------------------
+  // Loop ONLY on the failure path: a deterministic proposal that verified never
+  // reaches here, so a clean repo spends zero sessions. The session frames the
+  // work as repair-to-green (the failed proposal + the engine's verdict lead its
+  // briefing) and iterates in its own working sandbox; the proposal it settles on
+  // is fold-verified HERE, in a fresh verification pass, whatever its transcript
+  // showed — the session's `verify_recipe` tool is its done-check, not the gate.
+  if (options.repair) {
+    const database = options.database ? await Promise.resolve(options.database()).catch(() => null) : null
+    const datastoreUrls = options.datastores ? await options.datastores() : []
+    options.onPhase?.({ kind: 'proposing', ...(deterministicStage ? { after: deterministicStage } : {}) })
+    const repaired = await options.repair({
+      repoRoot,
+      inputs,
+      inputsFingerprint,
+      ...(deterministicEvidence && deterministicStage
+        ? {
+            failed: {
+              proposal: deterministicEvidence.proposal,
+              stage: deterministicStage,
+              reason: deterministicFailure ?? deterministicEvidence.failure,
+            },
+          }
+        : {}),
+      database,
+      datastoreUrls,
+      composeGenerated: verifyContext.composeGenerated === true,
+    })
+    const sessionRunId = repaired.sessionRunId
+    if ('error' in repaired) {
+      // Same precedence rule as an unreachable one-shot model: the engine's own
+      // deterministic diagnostic leads, the session failure is the footnote.
+      return {
+        status: 'verify-failed',
+        reason: deterministicFailure
+          ? `${deterministicFailure}\n\n(the repair session could not settle a proposal: ${repaired.error})`
+          : repaired.error,
+        ...(sessionRunId ? { sessionRunId } : {}),
+      }
+    }
+    const repairedVerdict = await verifyProposal(repoRoot, repaired.proposal, verifying('model'))
+    if (!repairedVerdict.ok) {
+      // No second retry: the session already iterated inside its budget, and the
+      // resume path is the NEXT run's — not this one's.
+      return {
+        status: 'verify-failed',
+        reason: repairedVerdict.reason,
+        proposal: repaired.proposal,
+        ...(sessionRunId ? { sessionRunId } : {}),
+      }
+    }
+    const repairedRecipe: Recipe = {
+      ...(repaired.proposal.install ? { install: repaired.proposal.install } : {}),
+      build: repaired.proposal.build,
+      ...(repaired.proposal.entry ? { entry: repaired.proposal.entry } : {}),
+      ...(repaired.proposal.env ? { env: repaired.proposal.env } : {}),
+      ...(repaired.proposal.api ? { api: repaired.proposal.api } : {}),
+    }
+    return {
+      status: 'discovered',
+      recipe: repairedRecipe,
+      ...writeRecipeFile(repoRoot, repairedRecipe),
+      source: 'llm',
+      todos: [],
+      ...(sessionRunId ? { sessionRunId } : {}),
+    }
+  }
 
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
@@ -640,6 +767,52 @@ async function proposeRecipeWithReask(
   const reParsed = RecipeProposalSchema.safeParse(reRaw)
   if (reParsed.success) return { proposal: reParsed.data }
   return { error: `recipe proposal invalid after re-ask: ${flattenZodError(reParsed.error)}` }
+}
+
+// ---------------------------------------------------------------------------
+// The static proposal check (`check_recipe`, plan 03 step 9) — the cheap half
+// of the validator-as-tool pattern: everything that can be refused WITHOUT
+// executing anything. The schema itself is enforced by the session shell (the
+// tool's inputSchema IS `RecipeProposalSchema`); this adds the deterministic
+// proposer's own refusal rules so a session hears them in one turn instead of
+// discovering them minutes into a `verify_recipe`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The static complaints about a schema-valid proposal, empty when it is clean.
+ * No execution — `verifyProposal` is the expensive check, and this exists so a
+ * proposal that could never verify is refused for one turn's cost.
+ */
+export function staticProposalComplaints(proposal: RecipeProposal): string[] {
+  const complaints: string[] = []
+  const argvs: { label: string; argv: readonly string[] }[] = []
+  if (proposal.entry) argvs.push({ label: 'entry', argv: proposal.entry })
+  if (proposal.api?.serve) argvs.push({ label: 'api.serve', argv: proposal.api.serve })
+  for (const [name, server] of Object.entries(proposal.api?.servers ?? {})) {
+    argvs.push({ label: `api.servers.${name}.serve`, argv: server.serve })
+  }
+  for (const { label, argv } of argvs) {
+    for (const element of argv) {
+      const operator = SHELL_OPERATORS.find((op) => element.includes(op))
+      if (operator) {
+        complaints.push(
+          `${label} carries the shell operator \`${operator}\` in ${JSON.stringify(element)} — an argv is spawned directly, never through a shell, so a compound command cannot work there. Put shell composition in \`build\`/\`install\` (which ARE shell commands), or split the argv.`,
+        )
+      }
+    }
+  }
+  // Only the SERVE argvs are held to the watcher rule: a dev/watch process never
+  // exits ready and never serves a stable build, so it is not a server under test.
+  for (const { label, argv } of argvs.filter((a) => a.label !== 'entry')) {
+    const joined = argv.join(' ').toLowerCase()
+    const marker = DEV_SCRIPT_MARKERS.find((m) => joined.includes(m))
+    if (marker) {
+      complaints.push(
+        `${label} looks like a dev/watch command (\`${marker}\`) — a file watcher is not a server under test. Propose the production start of the BUILT server.`,
+      )
+    }
+  }
+  return complaints
 }
 
 function readDiscoveryInputs(repoRoot: string): {

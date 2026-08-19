@@ -65,10 +65,9 @@ import {
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
   staleAuthoredPlaceDiagnostics,
-  type InterfaceMergeDiagnostic,
 } from '@truecourse/guard-runner'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
-import type { InterfaceResource, InterfacesFile } from '@truecourse/shared'
+import type { InterfaceResource, InterfacesFile, MapperDiagnostic } from '@truecourse/shared'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
   AUTHORED_SURFACE,
@@ -169,7 +168,7 @@ export interface AuthorRunResult {
    * redirects is a session wasted — and is reported here rather than silently
    * dropped. Never stored; the merged catalog readers see is unchanged.
    */
-  diagnostics: InterfaceMergeDiagnostic[]
+  diagnostics: MapperDiagnostic[]
   spent: { turns: number; tokens: number; costUsd: number }
 }
 

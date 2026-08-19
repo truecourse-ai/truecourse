@@ -46,6 +46,7 @@ import {
   type GuardSetupReport,
   type Interface,
   type InterfacesFile,
+  type MapperDiagnostic,
 } from '@truecourse/shared'
 
 const TRUECOURSE_DIR = '.truecourse'
@@ -61,6 +62,7 @@ const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
 const INTERFACES_FILE = 'interfaces.json'
 const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json'
 const INTERFACE_FINDINGS_FILE = 'interfaces.findings.md'
+const SETUP_FINDINGS_FILE = 'setup.findings.md'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
@@ -121,6 +123,17 @@ export function guardAuthoredInterfacesPath(repoRoot: string): string {
  */
 export function guardInterfaceFindingsPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), INTERFACE_FINDINGS_FILE)
+}
+
+/**
+ * The SETUP FINDINGS LEDGER — where `guard setup`'s sessions (the dependency
+ * catalog, later the seed and auth sessions) append the code-vs-docs
+ * discrepancies they read. Committed for the interface ledger's reason: what it
+ * holds is a report about the REPOSITORY, not a record of a run. Keep it out of
+ * `GITIGNORE_CONTENTS`.
+ */
+export function guardSetupFindingsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), SETUP_FINDINGS_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -445,16 +458,11 @@ export function mergeRegistries<T extends { id: string }>(
  * One thing the two catalog halves disagree about, noticed at merge time and
  * REPORTED, never stored — a diagnostic is a statement about this working tree
  * and goes stale the moment the tree moves, so it lives in run reporting the way
- * the context pack does. The shape is the mapper's general `MapperDiagnostic`
- * (`{surface, kind, subject, detail}`) so the two fold into one stream.
+ * the context pack does. IS the general `MapperDiagnostic` union (shared owns
+ * the type precisely so this producer and the mapper's cli union fold into one
+ * stream without a package cycle); the alias survives for its callers' vocabulary.
  */
-export interface InterfaceMergeDiagnostic {
-  surface: string
-  kind: 'authored-place-not-derived'
-  /** The authored place id nothing derives any more. */
-  subject: string
-  detail: string
-}
+export type InterfaceMergeDiagnostic = MapperDiagnostic
 
 /**
  * The authored SCREENS the derivation no longer backs — stale places.

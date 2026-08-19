@@ -26,7 +26,7 @@
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { StepTracker } from "@truecourse/core/progress";
-import type { InterfaceProvider, RecipeRunner, SeedRunner } from "@truecourse/guard-generator";
+import type { GuardSetupInterfaceProvider, RecipeRunner } from "@truecourse/guard-generator";
 import type { GuardSetupReport } from "@truecourse/shared";
 import {
   guardSetupInProcess,
@@ -46,6 +46,8 @@ export interface RunGuardSetupOptions {
   cwd?: string;
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
+  /** Interfaces step: re-author places that already carry authored tasks. */
+  replace?: boolean;
   /** Skip the pre-flight cost confirm — and, with `--refresh`, consent to replacing the seed. */
   yes?: boolean;
   /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
@@ -53,8 +55,7 @@ export interface RunGuardSetupOptions {
   io?: string;
   /** Test seams (production spawns the transport / analyzes the tree). */
   recipeRunner?: RecipeRunner;
-  seedRunner?: SeedRunner;
-  interfaces?: InterfaceProvider;
+  interfaces?: GuardSetupInterfaceProvider;
   /** Test seam / explicit override for whether the terminal can prompt. */
   interactive?: boolean;
 }
@@ -75,7 +76,7 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
   // check (and the install that makes it the default) in API mode, nothing for the
   // mailbox. Setup's LLM stages come AFTER a build, a boot, and an analysis pass, so
   // finding out then would waste all of it.
-  if (!opts.recipeRunner && !opts.seedRunner) {
+  if (!opts.recipeRunner) {
     await preflightLlmOrExit(opts.llmTransport);
   }
 
@@ -93,8 +94,8 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
       llm: opts.llmTransport,
       io: opts.io,
       ...(opts.refresh ? { refresh: true } : {}),
+      ...(opts.replace ? { replace: true } : {}),
       ...(opts.recipeRunner ? { recipeRunner: opts.recipeRunner } : {}),
-      ...(opts.seedRunner ? { seedRunner: opts.seedRunner } : {}),
       ...(opts.interfaces ? { interfaces: opts.interfaces } : {}),
       onLlmEstimate: async (estimate) => {
         // ONE LINE, deliberately: setup is bounded at two calls, so the staged modal
@@ -105,7 +106,7 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
           0,
         );
         const cost = estimate.estimatedCostUsd != null ? ` (~$${estimate.estimatedCostUsd.toFixed(2)})` : "";
-        const line = `Setup makes up to ${calls} LLM call${calls === 1 ? "" : "s"}${cost} — the repo's own manifests are tried first, for free.`;
+        const line = `Setup's agent sessions may spend up to ${calls} model turn${calls === 1 ? "" : "s"}${cost} — deterministic derivations and warm caches run first, for free.`;
         if (autoApprove) {
           p.log.step(line);
           return true;

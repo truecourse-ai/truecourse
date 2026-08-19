@@ -60,6 +60,7 @@ export {
   loadRecipe,
   resolveEntry,
   computeRecipeFingerprint,
+  FINGERPRINT_INPUTS,
   resolveApiCredentials,
   credentialShapeWarning,
   warnCredentialShapes,
@@ -154,6 +155,7 @@ export {
   applySupplied,
   applySuppliedExpect,
   omitsOptionalPair,
+  externalServiceStates,
   SUPPLIED_DIR,
 } from './dependencies.js'
 export type {
@@ -360,6 +362,7 @@ export {
   guardInterfacesPath,
   guardAuthoredInterfacesPath,
   guardInterfaceFindingsPath,
+  guardSetupFindingsPath,
   scenariosDir,
   recipePath,
   manifestPath,

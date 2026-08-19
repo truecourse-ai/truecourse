@@ -318,6 +318,60 @@ function staleInstanceNote(
 }
 
 // ---------------------------------------------------------------------------
+// The catalog-first external-service read surface (plan 03 step 10 / §7.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per external SERVICE, whether this machine can reach it — the CATALOG's
+ * answer first, the recipe's `api.externals` declaration as the fallback.
+ *
+ * §7.6 makes the committed catalog the curated layer every read surface moves
+ * to (the externals view, generate's flow gating): a supplied catalog entry
+ * that names a service (`entry.services`) carries the registration and the
+ * instance overlay decides its state, no `api` block required. The recipe
+ * declaration keeps answering for the services only IT declares — the
+ * detection-era fallback the plan keeps — and when both name a service the
+ * catalog wins, because it is the layer setup now writes.
+ *
+ * A broken catalog file contributes nothing here (the recipe half is still
+ * true); loading it loudly stays `resolveDependencies`' own job.
+ */
+export function externalServiceStates(
+  repoRoot: string,
+  declared: Record<string, { baseUrlEnv: string }> | undefined,
+  opts: {
+    /** The recipe-resolved externals, when the caller already has them (avoids a
+     *  second overlay read). Absent ⇒ nothing recipe-side enters the map. */
+    recipeStates?: ReadonlyMap<string, DependencyState>
+    dismissedFlows?: ReadonlySet<string>
+  } = {},
+): Map<string, DependencyState> {
+  const states = new Map<string, DependencyState>()
+  for (const service of Object.keys(declared ?? {})) {
+    const recipeState = opts.recipeStates?.get(service)
+    if (recipeState) states.set(service, recipeState)
+  }
+  let resolved: ResolvedDependencies
+  try {
+    resolved = resolveDependencies(repoRoot, {
+      ...(opts.dismissedFlows ? { dismissedFlows: opts.dismissedFlows } : {}),
+    })
+  } catch {
+    return states
+  }
+  for (const dependency of resolved.dependencies) {
+    if (dependency.state === null) continue
+    for (const service of dependency.entry.services ?? []) {
+      // The catalog wins outright — including over a recipe declaration of the
+      // same service: one dependency entry may stand for several services, and
+      // its registration is where the user was told to put the account.
+      states.set(service, dependency.state)
+    }
+  }
+  return states
+}
+
+// ---------------------------------------------------------------------------
 // What a scenario binds
 // ---------------------------------------------------------------------------
 

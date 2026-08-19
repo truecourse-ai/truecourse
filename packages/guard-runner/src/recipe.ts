@@ -964,8 +964,12 @@ export interface LoadedRecipe {
  * nothing and keeps the fingerprint it had. The user's OWN compose files are
  * deliberately NOT here: they are the repo's, they move for reasons that have
  * nothing to do with guard, and a recipe that names one already folds that name.
+ *
+ * Exported for `guard setup`'s recipe-step fingerprint (plan 03 step 8), which
+ * hashes this exact list (the recipe file itself is folded separately below) —
+ * one source, so the two can never drift.
  */
-const FINGERPRINT_INPUTS: readonly string[] = [
+export const FINGERPRINT_INPUTS: readonly string[] = [
   'package.json',
   'pnpm-lock.yaml',
   'package-lock.json',

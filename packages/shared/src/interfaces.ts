@@ -1395,10 +1395,69 @@ export type Interface = z.infer<typeof InterfaceSchema>
 /**
  * How ONE surface's catalog was derived: `tree` = the analyzer's own artifacts
  * (the primary path, every surface), `probes` = the cli fallback ladder for a
- * framework no extractor recognizes. A degradation marker, not a quality claim.
+ * framework no extractor recognizes, `union` = both ran and were merged (the
+ * cli surface when the tree yielded commands AND the program was probed —
+ * tree wins descriptions, probes fill what the tree missed, disagreements are
+ * run-reported, never stored here). A degradation marker, not a quality claim.
+ * Additive: files written before `union` existed parse unchanged.
  */
-export const InterfaceCatalogSourceSchema = z.enum(['tree', 'probes'])
+export const InterfaceCatalogSourceSchema = z.enum(['tree', 'probes', 'union'])
 export type InterfaceCatalogSource = z.infer<typeof InterfaceCatalogSourceSchema>
+
+/**
+ * MAPPER DIAGNOSTICS — the general RUN-REPORTING shape for anything a mapping
+ * (or the derived∪authored catalog merge) noticed and did not settle itself. A
+ * diagnostic is a statement about THIS working tree at THIS moment: it goes
+ * stale the instant the tree moves, so it rides run results
+ * (`MapInterfacesResult`, `guard/setup.json`'s step rows) and NEVER enters the
+ * interface catalog or any fingerprint — the catalog schema forbids storing
+ * doc-vs-code discrepancies in interface data.
+ *
+ * Lives in shared (rather than `@truecourse/interface-mapper`, which
+ * re-exports it) because BOTH ends of the dependency edge produce one:
+ * the mapper's cli union and guard-runner's merge-time stale-place report —
+ * and guard-runner cannot import the mapper (the mapper depends on it).
+ */
+export const MapperDiagnosticKindSchema = z.enum([
+  /** The probe's help output documents a flag the tree derivation did not register. */
+  'tree-missing-flag',
+  /** The tree registers a flag the probe's help output does not list. */
+  'probe-missing-flag',
+  /** The probe's help output lists a command the tree does not register. */
+  'tree-missing-command',
+  /** The tree registers a command the probe's help output does not list. */
+  'probe-missing-command',
+  /** An authored screen whose id no derivation produces any more (merge-time). */
+  'authored-place-not-derived',
+])
+export type MapperDiagnosticKind = z.infer<typeof MapperDiagnosticKindSchema>
+
+/**
+ * One thing a mapping run reports. `subject` is the display identity — the
+ * thing as a user would name it (`relkit add --transport`, an authored place
+ * id); `detail` names BOTH sides of the disagreement in one sentence, because
+ * the reconcile session's briefing states each diagnostic verbatim and a
+ * one-sided detail would brief half a dispute.
+ *
+ * `command`/`flag` are the STRUCTURED identity of the cli kinds: the command's
+ * argv path (never the program name) and, for the flag kinds, the flag itself.
+ * `applyReconcileResolutions` matches on them — parsing `subject` back into
+ * its parts would break the moment a program name contains a space. Absent on
+ * kinds that are not about a cli command.
+ */
+export const MapperDiagnosticSchema = z
+  .object({
+    surface: GuardDriverIdSchema,
+    kind: MapperDiagnosticKindSchema,
+    /** Display identity, e.g. `relkit add --transport` or an authored place id. */
+    subject: z.string().min(1),
+    /** Both sides of the disagreement, one sentence. */
+    detail: z.string().min(1),
+    command: z.array(z.string()).readonly().optional(),
+    flag: z.string().optional(),
+  })
+  .strict()
+export type MapperDiagnostic = z.infer<typeof MapperDiagnosticSchema>
 
 /**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).

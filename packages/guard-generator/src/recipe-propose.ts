@@ -208,8 +208,10 @@ export function detectEcosystems(repoRoot: string): RecipeEcosystem[] {
 // JS / TS
 // ---------------------------------------------------------------------------
 
-/** Watch/dev markers: a watcher is not a server under test. */
-const DEV_SCRIPT_MARKERS = [
+/** Watch/dev markers: a watcher is not a server under test. Exported for the
+ *  static proposal check in `recipe-discovery.ts` (`staticProposalComplaints`),
+ *  so the refusal rule and the derivation share one list. */
+export const DEV_SCRIPT_MARKERS = [
   'nodemon',
   '--watch',
   'watch ',
@@ -223,8 +225,9 @@ const DEV_SCRIPT_MARKERS = [
   'react-scripts',
 ]
 
-/** Shell metacharacters an argv cannot carry — a compound command is not argv. */
-const SHELL_OPERATORS = ['&&', '||', '|', ';', '>', '<', '`', '$(', '&']
+/** Shell metacharacters an argv cannot carry — a compound command is not argv.
+ *  Exported for `staticProposalComplaints` in `recipe-discovery.ts` — one list. */
+export const SHELL_OPERATORS = ['&&', '||', '|', ';', '>', '<', '`', '$(', '&']
 
 /** Framework dependencies that mean "this package serves HTTP". */
 const JS_SERVER_DEPS = ['express', 'fastify', 'koa', '@hapi/hapi', '@nestjs/core', 'hono', 'restify', 'polka']

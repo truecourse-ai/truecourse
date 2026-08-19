@@ -62,6 +62,7 @@ import {
   formWebResources,
   type ApiSpecOperation,
   type CliProbeExec,
+  type MapperDiagnostic,
   type WebPlace,
 } from '@truecourse/interface-mapper';
 import { deriveOpenApiSections, isOpenApiDoc } from '@truecourse/shared/openapi';
@@ -123,6 +124,15 @@ export interface MapInterfacesResult {
    * app it is stubbing for. Same pass, same non-snapshot rule.
    */
   outboundRequests: OutboundRequest[];
+  /**
+   * What the surface derivations disagreed about — today the cli union's
+   * tree-vs-probe disputes (`deriveCliInterfaces`). Run reporting, exactly like
+   * `externalServices`: NEVER part of the snapshot and never fingerprinted — a
+   * diagnostic is a fact about this working tree at this moment, and the
+   * catalog schema forbids storing doc-vs-code discrepancies in interface
+   * data. The `guard-setup.reconcile-interfaces` session consumes these.
+   */
+  diagnostics: MapperDiagnostic[];
 }
 
 /**
@@ -160,6 +170,7 @@ export async function mapInterfaces(
     database: interfaces.database,
     datastoreUrls: interfaces.datastoreUrls,
     outboundRequests: interfaces.outboundRequests,
+    diagnostics: interfaces.diagnostics,
   };
 }
 
@@ -316,6 +327,8 @@ interface DerivedCatalog {
   database: SeedDraftDatabase | null;
   datastoreUrls: DatastoreUrlRef[];
   outboundRequests: OutboundRequest[];
+  /** Tree-vs-probe disputes off the cli union — run reporting, never snapshotted. */
+  diagnostics: MapperDiagnostic[];
 }
 
 async function deriveInterfaces(
@@ -335,6 +348,7 @@ async function deriveInterfaces(
       database: null,
       datastoreUrls: [],
       outboundRequests: [],
+      diagnostics: [],
     };
   }
 
@@ -344,6 +358,7 @@ async function deriveInterfaces(
   const interfaces: Interface[] = [];
   const webPlaces: WebPlace[] = [];
   const source: Record<string, InterfaceCatalogSource> = {};
+  const diagnostics: MapperDiagnostic[] = [];
 
   try {
     const cli = await deriveCliInterfaces({
@@ -352,6 +367,7 @@ async function deriveInterfaces(
     });
     interfaces.push(...cli.interfaces);
     source.cli = cli.source;
+    diagnostics.push(...cli.diagnostics);
   } catch (error) {
     log.warn(`interface mapping: cli derivation failed, cli catalog is empty (${errorText(error)})`);
   }
@@ -394,6 +410,7 @@ async function deriveInterfaces(
     // Degrades like every other derivation here: a collector that throws costs
     // authoring its grounding, never the run.
     outboundRequests: safely('outbound requests', () => collectOutboundRequests(fileAnalyses)),
+    diagnostics,
   };
 }
 

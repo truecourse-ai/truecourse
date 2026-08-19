@@ -416,12 +416,14 @@ guardCmd
   .command("setup")
   .description("Prepare the repo for guard: recipe, external APIs, and the data + auth seed")
   .option("--refresh", "Re-derive the recipe and re-draft the seed even when both exist")
+  .option("--replace", "Interfaces step: re-author web tasks on places that already carry them")
   .option("-y, --yes", "Skip the cost confirm (and, with --refresh, consent to replacing the seed)")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
   .action(async (options) => {
     await runGuardSetup({
       refresh: !!options.refresh,
+      replace: !!options.replace,
       yes: !!options.yes,
       llmTransport: options.llmTransport,
       io: options.io,

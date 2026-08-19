@@ -10,8 +10,10 @@
  * `InterfaceStep` envelope.
  */
 
-export { deriveCliInterfaces } from './derive.js'
+export { deriveCliInterfaces, unionCliInterfaces } from './derive.js'
 export type { DeriveCliInterfacesOptions, CliInterfaceCatalog } from './derive.js'
+
+export type { MapperDiagnostic, MapperDiagnosticKind } from './diagnostics.js'
 
 export { deriveCliInterfacesFromTree } from './cli-tree.js'
 

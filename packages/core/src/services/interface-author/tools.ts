@@ -79,7 +79,10 @@ function resolveInside(repoRoot: string, candidate: string): string {
   return target
 }
 
-function readFileTool(repoRoot: string): SessionTool {
+// Exported (additively) for the guard-setup sessions, which reuse the two
+// repo-reading tools verbatim (plan 03 step 9) — behavior for the authoring
+// session is unchanged.
+export function readFileTool(repoRoot: string): SessionTool {
   return defineSessionTool({
     name: 'read_file',
     description:
@@ -132,7 +135,7 @@ function readFileTool(repoRoot: string): SessionTool {
   })
 }
 
-function searchTool(repoRoot: string): SessionTool {
+export function searchTool(repoRoot: string): SessionTool {
   return defineSessionTool({
     name: 'search_repo',
     description:

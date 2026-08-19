@@ -36,7 +36,6 @@ import {
   FlowSynthesisSchema,
   RealizationMatchSchema,
   RecipeProposalSchema,
-  SeedProposalSchema,
 } from './schemas.js'
 import {
   EXTRACT_SYSTEM_PROMPT,
@@ -46,8 +45,6 @@ import {
   buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
-  SEED_SYSTEM_PROMPT,
-  buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   buildFidelityUserPrompt,
   FLOWS_SYSTEM_PROMPT,
@@ -59,7 +56,6 @@ import {
   type ExtractUserContext,
   type AuthorUserContext,
   type RecipeDiscoveryInput,
-  type SeedDraftInput,
   type FidelityUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
@@ -77,13 +73,11 @@ const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
 const FLOWS_RESPONSE_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
 const FLOWS_EPIC_RESPONSE_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
 const MATCH_RESPONSE_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
-const SEED_RESPONSE_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
-export type SeedRunner = (input: SeedDraftInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
 export type FlowsRunner = (input: FlowsUserContext) => Promise<unknown>
 export type FlowsEpicRunner = (input: FlowsEpicUserContext) => Promise<unknown>
@@ -257,33 +251,10 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
   }
 }
 
-/**
- * Seed drafting — ONE call per repo, and an expensive one: it writes a
- * whole script file, so it gets the authoring-tier ceiling rather than the recipe
- * proposer's two minutes.
- */
-export function spawnSeedRunner(opts: SpawnOptions = {}): SeedRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 900_000
-  return async (input) => {
-    const raw = await transport({
-      id: `guard.seed${input.retry ? ':retry' : ''}${input.correction ? ':correction' : ''}`,
-      stage: 'guard.seed',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: SEED_SYSTEM_PROMPT,
-      user: buildSeedUserPrompt(input),
-      responseFormat: 'json',
-      schema: SEED_RESPONSE_SCHEMA,
-      // A seed's `provides` names its credentials and fixtures as records (name →
-      // shape), which strict structured output cannot express — the schema stays a
-      // prompt hint and the engine's Zod validates the reply.
-      enforceSchema: false,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
+// The one-shot seed runner (`spawnSeedRunner`) is GONE (plan 03 retirement):
+// the seed is authored by the `guard-setup.seed` agent session in
+// `@truecourse/core`, which reuses this package's SEED_SYSTEM_PROMPT doctrine
+// and `buildSeedUserPrompt` grounding directly.
 
 export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
   const transport = opts.transport ?? cliTransport()

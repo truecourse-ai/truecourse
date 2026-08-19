@@ -112,6 +112,7 @@ import {
   type GuardInterfaceRow,
   type GuardInterfacesView,
   type GuardInterfaceSurface,
+  type InterfaceCatalogSource,
   type GuardLatest,
   type GuardExternalSetupIndex,
   type GuardManifest,
@@ -1936,7 +1937,7 @@ function interfaceReverseIndex(
  */
 function interfaceSurfaces(
   countByType: ReadonlyMap<string, number>,
-  source: Record<string, 'tree' | 'probes'> | undefined,
+  source: Record<string, InterfaceCatalogSource> | undefined,
   resourcesByArea: Record<string, readonly unknown[]> | undefined,
 ): GuardInterfaceSurface[] {
   return GUARD_DRIVERS.map((row) => {
