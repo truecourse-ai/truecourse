@@ -10,6 +10,11 @@
 export {
   generateGuards,
   workerCacheKey,
+  // Single-step mode (the CLI's `--only-<step>` flags): the pipeline's session
+  // steps in order. `@truecourse/core` enforces the cache-only replay of the
+  // prior ones against these.
+  GENERATE_SESSION_STEPS,
+  type GenerateStep,
   type GenerateGuardsOptions,
   type GuardGenerateResult,
   type GuardGenerateModels,

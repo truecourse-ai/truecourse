@@ -6362,3 +6362,61 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     (sessions overlap, folds never do, work-list order, the race policy, the
     briefed-with collision that is still refused, what the pool cannot brief,
     abort).
+
+109. **`guard generate --only-<step>` runs one session stage in isolation
+    (2026-08-20).** STATUS: BUILT.
+    `spec scan` got stepwise flags first (`--only-orchestrate | --only-curate |
+    --only-settle | --only-overlap`), for the same reason generate needs them:
+    against a real corpus a whole run is an hour of provider latency and one
+    verdict at the end, so a prompt change to ONE stage cannot be read without
+    paying for every stage after it — and a stage read through a completed run
+    is read through everything downstream reinterpreted it as. Generate now has
+    the same three flags, one per SESSION stage: `--only-extract`,
+    `--only-flows`, `--only-worker` (mutually exclusive; the fidelity judge is a
+    depth-1 CHILD of a worker session, so it has no flag of its own and prices
+    with the worker step).
+
+    **Prior steps replay, they never re-spend.** Each step's durable artifact is
+    its own outcome cache (`guard/extract-session`, `guard/flows`), so a later
+    step's seams run cache-only: served from the entry, and a MISS throws
+    `GenerateStepNotReadyError` naming the flag to run first. That is the whole
+    point of the loudness — silently re-running the prior step would spend the
+    sessions its own flag exists to spend, and would hide exactly the cache-key
+    drift a stepwise run is being used to expose. Later steps never start: the
+    engine returns before the next seam is called, so `--only-extract` does not
+    even pay for the (free, but not instant) interface mapping.
+
+    **Nothing durable is written until the FINAL step runs.** An earlier stop
+    touches no scenario file, no `scenarios/manifest.json`, no
+    `scenarios/flows.json` (single-step mode passes `write: false` through
+    `synthesizeFlows`), no `guard/auto-resolutions.json`, and the command
+    adapter writes no `guard/result.json` — a partial run's counts would read as
+    a whole run's in `guard status` and the dashboard. The result carries
+    `stoppedAfter` instead, and the CLI closes with what ran, the sessions-store
+    run dir the transcripts landed in, and the next flag. `--only-worker` is a
+    complete generate: it replays extraction and synthesis from cache and runs
+    every write.
+
+    **The estimate gate prices only the chosen step.** `guardMatch` rides the
+    worker step — it is the one pre-stage with a bill and both earlier steps
+    return before it, so quoting the worker without it would under-price the
+    run; `guardRecipe` rides nothing, because generate refuses to start without
+    the recipe `guard setup` committed.
+
+    **Deliberately not a step.** The deterministic stages between the sessions
+    (section planning, interface mapping, grounding, the recipe build) run as
+    needed to feed the chosen one. Interface mapping still re-derives the
+    gitignored `guard/interfaces.json` under `--only-flows` / `--only-worker`:
+    it is a working-tree derivation any mapping rewrites, not a generate output.
+
+    **As built**: `packages/guard-generator/src/generate.ts`
+    (`GENERATE_SESSION_STEPS`, `only`, the two early returns, the gated
+    `flows.json` write, `stoppedAfter`),
+    `packages/core/src/services/guard-generate/run.ts`
+    (`GenerateStepNotReadyError`, the pools' `cacheOnly` replay, `runDir()`),
+    `packages/core/src/commands/guard-in-process.ts` (the estimate scoping, the
+    report-write gate, `sessionsRunDir`),
+    `packages/core/src/services/llm/spec-estimate.ts` (`GENERATE_STEP_STAGES`),
+    `tools/cli/src/commands/guard.ts` + `tools/cli/src/index.ts` (the flags,
+    mutual exclusivity, the reduced checklist, the not-ready error, the
+    next-flag outro). Tests: `tests/core/guard-generate-steps.test.ts`.
