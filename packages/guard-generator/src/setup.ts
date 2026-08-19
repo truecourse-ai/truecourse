@@ -40,6 +40,13 @@
  * (`skipped`/`unchanged`). `refresh` forces every step; refreshing the SEED
  * additionally needs `confirmSeedReplace` to answer true, and the CLI's non-TTY path
  * answers false — a hand-edited seed script is never clobbered by a flag.
+ *
+ * SINGLE-STEP MODE (`only` / the CLI's `--only-<step>` flags): run one LLM-bearing
+ * step in isolation — prior steps replay from what they left on disk (never a
+ * session, never the live probe; a step nobody ever ran fails loud with
+ * {@link SetupStepNotReadyError}), later steps never start, and `guard/setup.json`
+ * is MERGED so the steps that did not run this time keep their record. See
+ * {@link GuardSetupOptions.only}.
  */
 
 import fs from 'node:fs'
@@ -94,6 +101,39 @@ import type { RecipeRunner } from './runners.js'
 const MAX_SPEC_EXCERPTS = 6
 const SPEC_EXCERPT_CHARS = 1500
 
+// ---------------------------------------------------------------------------
+// Single-step mode (`--only-<step>`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The setup steps that may spend an LLM session, in spine order — the five the
+ * `--only-<step>` flags select from. `detect` is NOT one of them: it is one
+ * deterministic `mapInterfaces` pass whose in-memory output every later step
+ * reads, so it always runs and the detection snapshot is always this run's.
+ */
+export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'interfaces', 'seed', 'auth'] as const
+export type GuardSetupOnlyStep = (typeof GUARD_SETUP_ONLY_STEPS)[number]
+
+/**
+ * A single-step run found a PRIOR step's evidence missing: replaying it would
+ * mean spending the sessions (or the boot, or the probe) that belong to that
+ * step's OWN flag. Deliberately loud — silently running it is exactly the
+ * blurring a stepwise run exists to prevent. The fix is always
+ * `truecourse guard setup --only-<step>`.
+ */
+export class SetupStepNotReadyError extends Error {
+  constructor(
+    readonly step: GuardSetupOnlyStep,
+    /** What is missing, in the words the user has to act on. */
+    readonly missing: string,
+  ) {
+    super(
+      `the ${step} step has not run (${missing}) — run \`truecourse guard setup --only-${step}\` first`,
+    )
+    this.name = 'SetupStepNotReadyError'
+  }
+}
+
 export interface GuardSetupOptions {
   repoRoot: string
   /** Interface mapping seam — generate's provider shape, optionally extended
@@ -104,6 +144,24 @@ export interface GuardSetupOptions {
   refresh?: boolean
   /** Interfaces step: re-author places that already carry authored tasks. */
   replace?: boolean
+  /**
+   * Single-step mode: run ONLY this step. Steps BEFORE it replay from what they
+   * left on disk — the recipe from `recipe.json` (no discovery, no repair
+   * session, no live endpoint probe), the soft steps from their row in
+   * `guard/setup.json` (their artifacts — the catalog, the authored tasks, the
+   * seed script — are read straight off the tree by whoever needs them, and each
+   * may legitimately be empty). A step nothing ever ran throws
+   * {@link SetupStepNotReadyError} rather than quietly spending it here. Steps
+   * AFTER it never start, `detect` always runs, and the persisted report merges
+   * over the previous one so the untouched steps keep their record.
+   *
+   * The one exception to the merge is a HARD failure, which only `--only-recipe`
+   * can reach (every other step replays the recipe rather than re-deriving it):
+   * a failed run reports the rows it reached and nothing else, exactly as a
+   * whole run does — a recipe that no longer holds is no basis for calling the
+   * steps that were computed against it settled.
+   */
+  only?: GuardSetupOnlyStep
   /**
    * Asked ONCE, and only when a refresh would REPLACE an existing `api.seed`. A seed
    * script is a committed, human-reviewed file: `--refresh` alone is not consent, and
@@ -330,6 +388,19 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const steps: GuardSetupTaxonomyStep[] = []
   const settled = settledFingerprints(repoRoot, opts.refresh === true)
 
+  // Single-step mode. `prior` is both the merge source and the evidence a soft
+  // step ever ran — a step that ran and produced nothing legitimately left no
+  // artifact behind, so the row is what says it happened.
+  const only = opts.only
+  const prior = only ? readGuardSetup(repoRoot) : null
+  const rank = (step: GuardSetupOnlyStep): number => GUARD_SETUP_ONLY_STEPS.indexOf(step)
+  /** Prior to the chosen step: replay from disk, never spend. */
+  const replayed = (step: GuardSetupOnlyStep): boolean => only !== undefined && rank(step) < rank(only)
+  /** After the chosen step: never starts. */
+  const later = (step: GuardSetupOnlyStep): boolean => only !== undefined && rank(step) > rank(only)
+  const ranBefore = (step: GuardSetupOnlyStep): boolean =>
+    (prior?.steps ?? []).some((row) => row.key === step)
+
   // ONE analysis pass feeds every step — memoized exactly as generate memoizes it.
   // Which STEP pays for it depends on the repo (the recipe step derives from the
   // route surface; a repo that already has one first needs it at detect), so the
@@ -354,7 +425,18 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const preexisting = reloadRecipe(repoRoot)
   let recipe: Recipe
   let recipeStep: GuardSetupRecipeStep
-  if (preexisting && settled('recipe') === recipeInputFp) {
+  if (replayed('recipe')) {
+    // Single-step mode, a later step: the recipe on disk IS the artifact every
+    // step downstream reads. Neither discovery nor the repair session nor the
+    // live probe runs — they belong to `--only-recipe` — and no row is pushed,
+    // so the merge below keeps the one the run that really verified it wrote.
+    if (!preexisting) {
+      throw new SetupStepNotReadyError('recipe', `no readable recipe at ${recipePath(repoRoot)}`)
+    }
+    recipe = preexisting
+    recipeStep = { status: 'ok', outcome: 'exists' }
+    opts.onStepDone?.('recipe', 'replayed from recipe.json — not re-derived, not probed')
+  } else if (preexisting && settled('recipe') === recipeInputFp) {
     // Settled: the subject is byte-identical to what the last run verified, so
     // neither discovery nor the live probe re-runs. `--refresh` bypasses this.
     recipe = preexisting
@@ -459,6 +541,18 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     ? validateCredentialSatisfies(credentials, openApiDocs)
     : { errors: [], warnings: [] }
 
+  /**
+   * Announce a step — and, in single-step mode, answer whether it runs at all.
+   * A step AFTER the chosen one never starts, so it is never announced either:
+   * a tracker must not tick work that did not happen.
+   */
+  const enter = (key: GuardSetupOnlyStep): boolean => {
+    if (later(key)) return false
+    opts.onStep?.(key)
+    phases.step(key)
+    return true
+  }
+
   // ---- Step 2: detect. Deterministic, free, no LLM — always runs. ----------
   opts.onStep?.('detect')
   phases.step('detect')
@@ -476,64 +570,72 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // ---- Step 3: the catalog — the externals skeleton (det) + the session. ---
   // SOFT throughout: the hard gate already held, and a catalog that could not be
   // classified is a reported step, never a failed setup.
-  opts.onStep?.('catalog')
-  phases.step('catalog')
   const catalogFpOf = (): string =>
     catalogFingerprint(detectionSnapshotJson, computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
-  const catalogFpPre = catalogFpOf()
-  let externalsStep: GuardSetupExternalsStep
-  if (settled('catalog') === catalogFpPre) {
-    // The skeleton is still run for the legacy report field — with unchanged
-    // detection and an unchanged recipe it derives nothing and writes nothing —
-    // but no session is spent.
-    externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
-    steps.push({ key: 'catalog', status: 'skipped', reason: 'unchanged', inputFingerprint: catalogFpPre })
-    opts.onStepDone?.('catalog', 'unchanged')
-  } else {
-    externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
-    if (opts.catalogSession) {
-      phases.enter({ running: 'classifying the dependency catalog', done: 'catalog session' })
-      const result = await opts.catalogSession({
-        repoRoot,
-        recipe: reloadRecipe(repoRoot) ?? recipe,
-        detected: detectedExternals,
-        database,
-        datastoreUrls,
-        skeleton: {
-          declared: externalsStep.declared,
-          alreadyDeclared: externalsStep.alreadyDeclared,
-          undeclarable: externalsStep.undeclarable,
-        },
-        fingerprint: catalogFpPre,
-      })
-      steps.push(
-        result.status === 'ok'
-          ? {
-              key: 'catalog',
-              status: 'ok',
-              // Post-write: the fold just moved dependencies.json (and the
-              // skeleton may have moved recipe.json), so the settled value is
-              // what an unchanged re-run will compute.
-              inputFingerprint: catalogFpOf(),
-              ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
-            }
-          : {
-              key: 'catalog',
-              status: 'failed',
-              reason: result.reason,
-              inputFingerprint: catalogFpPre,
-              ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
-            },
-      )
-      opts.onStepDone?.('catalog', catalogSummary(externalsStep, result))
+  let externalsStep: GuardSetupExternalsStep | undefined
+  if (enter('catalog')) {
+    const catalogFpPre = catalogFpOf()
+    if (replayed('catalog')) {
+      // Prior step: the catalog on disk stands as it is. Not even the
+      // deterministic skeleton runs — it WRITES `api.externals` into the recipe,
+      // and a step nobody chose must leave the tree alone.
+      if (!ranBefore('catalog')) {
+        throw new SetupStepNotReadyError('catalog', 'no catalog row in guard/setup.json')
+      }
+      opts.onStepDone?.('catalog', 'replayed — scenarios/dependencies.json stands as it is')
+    } else if (settled('catalog') === catalogFpPre) {
+      // The skeleton is still run for the legacy report field — with unchanged
+      // detection and an unchanged recipe it derives nothing and writes nothing —
+      // but no session is spent.
+      externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
+      steps.push({ key: 'catalog', status: 'skipped', reason: 'unchanged', inputFingerprint: catalogFpPre })
+      opts.onStepDone?.('catalog', 'unchanged')
     } else {
-      // No session wired (a test seam, or the deterministic-only edition): the
-      // deterministic half is the whole step.
-      steps.push({ key: 'catalog', status: 'ok', inputFingerprint: catalogFpOf() })
-      opts.onStepDone?.(
-        'catalog',
-        `${externalsStep.declared.length} declared · ${externalsStep.unprovided.length} awaiting an account`,
-      )
+      externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
+      if (opts.catalogSession) {
+        phases.enter({ running: 'classifying the dependency catalog', done: 'catalog session' })
+        const result = await opts.catalogSession({
+          repoRoot,
+          recipe: reloadRecipe(repoRoot) ?? recipe,
+          detected: detectedExternals,
+          database,
+          datastoreUrls,
+          skeleton: {
+            declared: externalsStep.declared,
+            alreadyDeclared: externalsStep.alreadyDeclared,
+            undeclarable: externalsStep.undeclarable,
+          },
+          fingerprint: catalogFpPre,
+        })
+        steps.push(
+          result.status === 'ok'
+            ? {
+                key: 'catalog',
+                status: 'ok',
+                // Post-write: the fold just moved dependencies.json (and the
+                // skeleton may have moved recipe.json), so the settled value is
+                // what an unchanged re-run will compute.
+                inputFingerprint: catalogFpOf(),
+                ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+              }
+            : {
+                key: 'catalog',
+                status: 'failed',
+                reason: result.reason,
+                inputFingerprint: catalogFpPre,
+                ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+              },
+        )
+        opts.onStepDone?.('catalog', catalogSummary(externalsStep, result))
+      } else {
+        // No session wired (a test seam, or the deterministic-only edition): the
+        // deterministic half is the whole step.
+        steps.push({ key: 'catalog', status: 'ok', inputFingerprint: catalogFpOf() })
+        opts.onStepDone?.(
+          'catalog',
+          `${externalsStep.declared.length} declared · ${externalsStep.unprovided.length} awaiting an account`,
+        )
+      }
     }
   }
 
@@ -544,45 +646,53 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // with the authored file missing (deleted, or a fresh clone that never
   // authored) is work, not a skip; `--replace` is an explicit re-author and
   // never skips either.
-  opts.onStep?.('interfaces')
-  phases.step('interfaces')
-  const interfacesFp = interfacesFingerprint(repoRoot)
-  const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
-  if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true) {
-    steps.push({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
-    opts.onStepDone?.('interfaces', 'unchanged')
-  } else if (opts.authorInterfaces) {
-    const result = await opts.authorInterfaces({
-      repoRoot,
-      fingerprint: interfacesFp,
-      refresh: opts.refresh === true,
-      replace: opts.replace === true,
-      recipe: reloadRecipe(repoRoot) ?? recipe,
-      interfaces: mapped.interfaces,
-      diagnostics: mapped.diagnostics,
-    })
-    steps.push({
-      key: 'interfaces',
-      status: result.status,
-      ...(result.reason ? { reason: result.reason } : {}),
-      inputFingerprint: interfacesFingerprint(repoRoot),
-      ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
-      // The step row is where run reporting lands (diagnostics are NEVER
-      // stored in the catalog, and 01-D left the CLI/dashboard silent on them).
-      ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
-      ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
-      ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
-    })
-    opts.onStepDone?.('interfaces', result.reason ?? result.status)
-  } else {
-    steps.push({
-      key: 'interfaces',
-      status: 'skipped',
-      reason:
-        'interface authoring is not wired into this run — run `truecourse guard interfaces author`, or inject the `authorInterfaces` seam (production does)',
-      inputFingerprint: interfacesFp,
-    })
-    opts.onStepDone?.('interfaces', 'not wired into this run')
+  if (enter('interfaces')) {
+    const interfacesFp = interfacesFingerprint(repoRoot)
+    const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
+    if (replayed('interfaces')) {
+      // Prior step: the merged catalog on disk — the derived half detect just
+      // re-wrote, plus whatever authored half is committed — is what the later
+      // steps read. No reconcile session, no authoring run.
+      if (!ranBefore('interfaces')) {
+        throw new SetupStepNotReadyError('interfaces', 'no interfaces row in guard/setup.json')
+      }
+      opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
+    } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true) {
+      steps.push({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
+      opts.onStepDone?.('interfaces', 'unchanged')
+    } else if (opts.authorInterfaces) {
+      const result = await opts.authorInterfaces({
+        repoRoot,
+        fingerprint: interfacesFp,
+        refresh: opts.refresh === true,
+        replace: opts.replace === true,
+        recipe: reloadRecipe(repoRoot) ?? recipe,
+        interfaces: mapped.interfaces,
+        diagnostics: mapped.diagnostics,
+      })
+      steps.push({
+        key: 'interfaces',
+        status: result.status,
+        ...(result.reason ? { reason: result.reason } : {}),
+        inputFingerprint: interfacesFingerprint(repoRoot),
+        ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+        // The step row is where run reporting lands (diagnostics are NEVER
+        // stored in the catalog, and 01-D left the CLI/dashboard silent on them).
+        ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
+        ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
+        ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
+      })
+      opts.onStepDone?.('interfaces', result.reason ?? result.status)
+    } else {
+      steps.push({
+        key: 'interfaces',
+        status: 'skipped',
+        reason:
+          'interface authoring is not wired into this run — run `truecourse guard interfaces author`, or inject the `authorInterfaces` seam (production does)',
+        inputFingerprint: interfacesFp,
+      })
+      opts.onStepDone?.('interfaces', 'not wired into this run')
+    }
   }
 
   // The recipe on disk may have changed under the catalog step (the skeleton is a
@@ -591,87 +701,100 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const current = reloadRecipe(repoRoot) ?? recipe
 
   // ---- Step 5: the one seed — data AND auth. SOFT. -------------------------
-  opts.onStep?.('seed')
-  phases.step('seed')
   const seedFpOf = (): string =>
     seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
-  const seedFpPre = seedFpOf()
-  let seedStep: GuardSetupSeedStep
-  if (settled('seed') === seedFpPre) {
-    const existingSeed = current.api?.seed
-    seedStep = existingSeed
-      ? {
-          status: 'ok',
-          outcome: 'exists',
-          command: existingSeed.command,
-          ...(existingSeed.script ? { scriptPath: existingSeed.script } : {}),
-          ...declaredNames(existingSeed),
-        }
-      : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
-    steps.push({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
-    opts.onStepDone?.('seed', 'unchanged')
-  } else {
-    const seedRun = await runSeedStep({
-      opts,
-      recipe: current,
-      database,
-      routes: routesFromInterfaces(mapped.interfaces),
-      schemes: collectSecuritySchemes(openApiDocs),
-      fingerprint: seedFpPre,
-      onPhase: (running, done) => phases.enter({ running, done }),
-    })
-    seedStep = seedRun.step
-    steps.push({
-      key: 'seed',
-      status: seedStep.status,
-      ...(seedStep.reason ? { reason: seedStep.reason } : {}),
-      // Post-write: a drafted seed moved recipe.json AND the script the recipe
-      // fingerprint folds, so the settled value is the tree it left behind.
-      inputFingerprint: seedFpOf(),
-      ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
-    })
-    opts.onStepDone?.('seed', seedSummary(seedStep))
+  let seedStep: GuardSetupSeedStep | undefined
+  if (enter('seed')) {
+    const seedFpPre = seedFpOf()
+    if (replayed('seed')) {
+      // Prior step: the seed the recipe declares (or the absence of one) is what
+      // the auth step runs against. Nothing is drafted, nothing is replaced.
+      if (!ranBefore('seed')) {
+        throw new SetupStepNotReadyError('seed', 'no seed row in guard/setup.json')
+      }
+      opts.onStepDone?.('seed', 'replayed — the declared `api.seed` stands as it is')
+    } else if (settled('seed') === seedFpPre) {
+      const existingSeed = current.api?.seed
+      seedStep = existingSeed
+        ? {
+            status: 'ok',
+            outcome: 'exists',
+            command: existingSeed.command,
+            ...(existingSeed.script ? { scriptPath: existingSeed.script } : {}),
+            ...declaredNames(existingSeed),
+          }
+        : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
+      steps.push({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
+      opts.onStepDone?.('seed', 'unchanged')
+    } else {
+      const seedRun = await runSeedStep({
+        opts,
+        recipe: current,
+        database,
+        routes: routesFromInterfaces(mapped.interfaces),
+        schemes: collectSecuritySchemes(openApiDocs),
+        fingerprint: seedFpPre,
+        onPhase: (running, done) => phases.enter({ running, done }),
+      })
+      seedStep = seedRun.step
+      steps.push({
+        key: 'seed',
+        status: seedStep.status,
+        ...(seedStep.reason ? { reason: seedStep.reason } : {}),
+        // Post-write: a drafted seed moved recipe.json AND the script the recipe
+        // fingerprint folds, so the settled value is the tree it left behind.
+        inputFingerprint: seedFpOf(),
+        ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
+      })
+      opts.onStepDone?.('seed', seedSummary(seedStep))
+    }
   }
 
   // ---- Step 6: auth. Framework row only until plan step 14 wires it. -------
   // The ONE step that may end `blocked` (a supplied credential waiting on a user
   // registration) without demoting the run.
-  opts.onStep?.('auth')
-  phases.step('auth')
-  const authFp = authFingerprint(repoRoot)
-  if (settled('auth') === authFp) {
-    steps.push({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
-    opts.onStepDone?.('auth', 'unchanged')
-  } else if (opts.verifyAuth) {
-    const result = await opts.verifyAuth({ repoRoot, recipe: reloadRecipe(repoRoot) ?? current, fingerprint: authFp })
-    steps.push({
-      key: 'auth',
-      status: result.status,
-      ...(result.reason ? { reason: result.reason } : {}),
-      inputFingerprint: authFingerprint(repoRoot),
-      ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
-    })
-    opts.onStepDone?.('auth', result.reason ?? result.status)
-  } else {
-    steps.push({
-      key: 'auth',
-      status: 'skipped',
-      reason:
-        'auth verification is not wired into setup yet — supplied auth entries are checked at run time (plan step 14 wires the proof session here)',
-      inputFingerprint: authFp,
-    })
-    opts.onStepDone?.('auth', 'not wired into setup yet')
+  if (enter('auth')) {
+    const authFp = authFingerprint(repoRoot)
+    if (settled('auth') === authFp) {
+      steps.push({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
+      opts.onStepDone?.('auth', 'unchanged')
+    } else if (opts.verifyAuth) {
+      const result = await opts.verifyAuth({ repoRoot, recipe: reloadRecipe(repoRoot) ?? current, fingerprint: authFp })
+      steps.push({
+        key: 'auth',
+        status: result.status,
+        ...(result.reason ? { reason: result.reason } : {}),
+        inputFingerprint: authFingerprint(repoRoot),
+        ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+      })
+      opts.onStepDone?.('auth', result.reason ?? result.status)
+    } else {
+      steps.push({
+        key: 'auth',
+        status: 'skipped',
+        reason:
+          'auth verification is not wired into setup yet — supplied auth entries are checked at run time (plan step 14 wires the proof session here)',
+        inputFingerprint: authFp,
+      })
+      opts.onStepDone?.('auth', 'not wired into setup yet')
+    }
   }
 
+  // The single-step MERGE: a run that ran one step must not erase the others'
+  // record — `guard status`, the externals view and skip-when-settled all read
+  // this file as a whole spine. Rows and blocks this run produced win; the rest
+  // carry forward. Detect always runs, so the detection snapshot is never stale.
+  const externals = externalsStep ?? (only ? prior?.externals : undefined)
+  const seed = seedStep ?? (only ? prior?.seed : undefined)
   return {
     recipe: reloadRecipe(repoRoot) ?? current,
     report: {
       ranAt: new Date().toISOString(),
       status: 'ok',
-      steps,
+      steps: only ? mergeStepSpine(steps, prior) : steps,
       recipe: recipeStep,
-      externals: externalsStep,
-      seed: seedStep,
+      ...(externals ? { externals } : {}),
+      ...(seed ? { seed } : {}),
       ...(credentialSchemes.errors.length > 0 || credentialSchemes.warnings.length > 0
         ? { credentialSchemes }
         : {}),
@@ -689,6 +812,25 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 // ---------------------------------------------------------------------------
 // Skip-when-settled: the step fingerprints (plan 03 step 8)
 // ---------------------------------------------------------------------------
+
+/**
+ * The spine a SINGLE-STEP run persists: this run's rows, plus the previous
+ * report's row for every step it did not touch, in taxonomy order. Without the
+ * carry-forward a `--only-seed` run would leave a one-row spine, and the next
+ * bare setup would re-derive the recipe and re-classify the catalog for nothing.
+ */
+function mergeStepSpine(
+  fresh: readonly GuardSetupTaxonomyStep[],
+  prior: GuardSetupReport | null,
+): GuardSetupTaxonomyStep[] {
+  const byKey = new Map(fresh.map((row) => [row.key, row]))
+  const out: GuardSetupTaxonomyStep[] = []
+  for (const { key } of GUARD_SETUP_STEPS) {
+    const row = byKey.get(key) ?? (prior?.steps ?? []).find((r) => r.key === key)
+    if (row) out.push(row)
+  }
+  return out
+}
 
 /**
  * sha256 over the present ecosystem manifests, path-tagged like the runner's —

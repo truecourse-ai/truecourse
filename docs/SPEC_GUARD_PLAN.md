@@ -6362,3 +6362,56 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     (sessions overlap, folds never do, work-list order, the race policy, the
     briefed-with collision that is still refused, what the pool cannot brief,
     abort).
+
+109. **`guard setup` runs one step at a time (2026-08-20).** STATUS: BUILT.
+    `spec scan` got `--only-<step>` first, for the same reason setup needs it:
+    against a real repository the interesting question is almost never "did the
+    whole stage work" but "does THIS step do the right thing", and a stage whose
+    only granularity is all-of-it makes every inspection cost the steps around
+    it — an app boot, a live probe, four session kinds. Five mutually exclusive
+    flags now select one of setup's LLM-bearing steps:
+    `--only-recipe | --only-catalog | --only-interfaces | --only-seed | --only-auth`.
+
+    **`detect` is not selectable, on purpose.** It is one `mapInterfaces` pass,
+    deterministic and LLM-free, and every later step reads its in-memory output
+    (the detection snapshot, the schema, the route surface). So it always runs,
+    and the persisted snapshot is always the current tree's — which is what
+    keeps `readGuardExternalsView` and `guard status` honest after a partial run.
+
+    **Earlier steps REPLAY, later ones never start.** The recipe step's replay is
+    `recipe.json` itself — loaded, never re-derived, and never re-probed (the
+    boot and the live call belong to `--only-recipe`). The soft steps replay as
+    "leave what is on disk alone": no externals skeleton write, no reconcile, no
+    authoring run, no seed draft. A step that never ran throws
+    `SetupStepNotReadyError`, naming the flag to run first — the same refusal
+    `ScanStepNotReadyError` makes, and for the same reason: silently running the
+    prior step is exactly the blurring stepwise runs exist to prevent.
+
+    **What counts as "it ran" differs by step, because the steps differ.** The
+    recipe's evidence is its artifact — every later step reads `recipe.json`
+    directly, and a hand-committed one is as good as a derived one. The catalog,
+    interfaces and seed steps can each legitimately produce NOTHING (a repo with
+    no third parties, no screens, no schema), so demanding an artifact would
+    abort runs that are perfectly ready; their evidence is the step's row in
+    `guard/setup.json`, which is the same record skip-when-settled already reads.
+
+    **The report MERGES.** A single-step run rewrites `guard/setup.json`, so
+    without a merge a `--only-seed` run would leave a one-row spine and the next
+    bare setup would re-derive the recipe and re-classify the catalog for
+    nothing. Rows and blocks this run produced win; every other step keeps the
+    previous report's row verbatim, fingerprints included. The chosen step keeps
+    its normal idempotence (`--refresh` forces it, `--replace` still means
+    re-author), and the pre-flight estimate prices that step's session kinds and
+    nothing else.
+
+    **As built**: `packages/guard-generator/src/setup.ts` (`GUARD_SETUP_ONLY_STEPS`,
+    `SetupStepNotReadyError`, the `only` option, the replay branches,
+    `mergeStepSpine`), `packages/guard-generator/src/index.ts`,
+    `packages/core/src/commands/guard-setup.ts` (the option, the scoped estimate,
+    the sessions-run dirs, the bounded tracker),
+    `packages/core/src/services/llm/spec-estimate.ts` (`estimateGuardSetup({ only })`),
+    `tools/cli/src/commands/guard-setup.ts` (the labels, the refusal, the
+    "Next:" pointer), `tools/cli/src/index.ts` (the five flags + mutual
+    exclusivity). Tests: `tests/core/guard-setup-steps.test.ts` (each flag's
+    isolation, the replayed recipe that is never probed, both refusals, the
+    merge under `--refresh`, the scoped estimate).

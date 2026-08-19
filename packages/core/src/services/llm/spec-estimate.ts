@@ -108,6 +108,7 @@ import {
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
   type FlowAreaDocInput,
   type FlowClaimInput,
+  type GuardSetupOnlyStep,
   type GuardWorkPlan,
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
@@ -952,11 +953,20 @@ const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
  *
  * ONE MODEL for every session (§3.4); expected turns are the provisional
  * per-kind constants, the ceiling is always the budget's hard limit.
+ *
+ * `only` (the `--only-<step>` flags) prices ONLY that step's kinds: prior steps
+ * replay from disk and later ones never start, so quoting them would ask the
+ * user to approve a bill this run cannot produce.
  */
 export async function estimateGuardSetup(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { refresh?: boolean; replace?: boolean; mode?: LlmTransportMode } = {},
+  opts: {
+    refresh?: boolean;
+    replace?: boolean;
+    mode?: LlmTransportMode;
+    only?: GuardSetupOnlyStep;
+  } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.mode);
   const refresh = opts.refresh === true;
@@ -1108,7 +1118,19 @@ export async function estimateGuardSetup(
       bound: 'one proof per supplied catalog entry; never cached (proof-class)',
     }),
   ];
-  return estimateStageTokens(withLabels(stages), 'preparation', prices);
+  // Single-step mode prices the chosen step's kinds and nothing else. The
+  // interfaces step owns TWO (the reconcile session and the authoring run).
+  const SETUP_STEP_KINDS: Record<GuardSetupOnlyStep, readonly string[]> = {
+    recipe: [RECIPE_REPAIR_SESSION_KIND],
+    catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
+    interfaces: [RECONCILE_INTERFACES_SESSION_KIND, INTERFACE_AUTHOR_SESSION_KIND],
+    seed: [SEED_SESSION_KIND],
+    auth: [AUTH_PROOF_SESSION_KIND],
+  };
+  const included = opts.only
+    ? stages.filter((s) => SETUP_STEP_KINDS[opts.only!].includes(s.stage))
+    : stages;
+  return estimateStageTokens(withLabels(included), 'preparation', prices);
 }
 
 /**

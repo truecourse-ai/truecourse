@@ -981,6 +981,10 @@ truecourse spec source remove <id>                # Delete a source's snapshot a
 truecourse guard setup                            # PREREQUISITE for generate: derive + prove the recipe, declare external APIs, draft the data/auth seed
 truecourse guard setup --refresh                  # Re-derive the recipe and re-draft the seed (asks before replacing an existing seed script)
 truecourse guard setup -y                         # Skip the cost confirm (and, with --refresh, consent to replacing the seed)
+truecourse guard setup --only-<step>              # Run ONE setup step in isolation: recipe | catalog | interfaces | seed | auth.
+                                                  # Earlier steps replay from what they left on disk (a step nobody ran aborts,
+                                                  # naming the flag to run first), later steps never start, detection always
+                                                  # re-runs, and setup.json keeps the untouched steps' rows.
 truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
 truecourse guard run --scenario <id>              # Run a single scenario
