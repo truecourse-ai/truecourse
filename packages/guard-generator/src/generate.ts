@@ -241,6 +241,17 @@ const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
 // Result + option types
 // ---------------------------------------------------------------------------
 
+/**
+ * The generate pipeline's three SESSION steps, in pipeline order — what the
+ * CLI's `--only-<step>` flags select (SPEC_GUARD_PLAN item 110, the `spec scan`
+ * template). The fidelity judge is a depth-1 CHILD of a worker session, so it
+ * has no step of its own; the deterministic stages between them (recipe load,
+ * section planning, interface mapping, realization matching, the build) are not
+ * steps either — they run as needed to feed the chosen one.
+ */
+export const GENERATE_SESSION_STEPS = ['extract', 'flows', 'worker'] as const
+export type GenerateStep = (typeof GENERATE_SESSION_STEPS)[number]
+
 export interface GeneratedScenarioInfo {
   id: string
   title: string
@@ -406,6 +417,16 @@ export interface GuardGenerateResult {
    * the recipe failed before a fingerprint existed.
    */
   recipeFingerprint?: string
+  /**
+   * Set in single-step mode ({@link GenerateGuardsOptions.only}) when the run
+   * stopped BEFORE the final step: the named step ran, later steps never
+   * started, and NOTHING durable was written — no scenario file, no
+   * `scenarios/manifest.json`, no `scenarios/flows.json`, no
+   * `guard/auto-resolutions.json` (and the command adapter writes no
+   * `guard/result.json`). Absent on a completed generate, including
+   * `only: 'worker'`, which runs through every write.
+   */
+  stoppedAfter?: GenerateStep
 }
 
 /**
@@ -511,6 +532,19 @@ export interface GenerateGuardsOptions {
    * curation is `dismissedFlows` and cost control is the estimate gate.
    */
   stopAfterFlows?: boolean
+  /**
+   * SINGLE-STEP MODE (the CLI's `--only-<step>` flags): run only this session
+   * step. Steps BEFORE it replay from their outcome caches — the SEAMS enforce
+   * that (a miss throws `GenerateStepNotReadyError` in `@truecourse/core`
+   * rather than silently spending the prior step's sessions); steps AFTER it
+   * never start; and every durable write is gated on the FINAL step (`worker`)
+   * running, so an earlier stop leaves the scenario corpus, `flows.json` and
+   * the manifest exactly as they were and returns {@link
+   * GuardGenerateResult.stoppedAfter}. The deterministic stages that feed the
+   * chosen step (section planning, interface mapping, matching, the build) run
+   * as needed.
+   */
+  only?: GenerateStep
   // --- the session seams (plan 04) — REQUIRED since the one-shot stage
   // retirement (step 20): they are THE extract / flows / author-adjudicate
   // paths. Injected by `@truecourse/core` (the engine cannot depend on it);
@@ -1095,6 +1129,49 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     .filter((d) => extractedDocs.has(d.doc) && !extractedClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)))
     .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
+  // Single-step early return (`--only-extract`): the extraction pool ran (or
+  // replayed), and nothing downstream starts — not even the free interface
+  // mapping below. No corpus file is touched; the step's durable artifact is
+  // its own outcome cache, which the next step replays from.
+  if (options.only === 'extract') {
+    return {
+      status: 'ok',
+      recipe: recipeMeta,
+      recipeFingerprint,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      // A warm re-run of this step spends nothing and has nothing to report.
+      noChanges: extractSummary.ran === 0,
+      written: [],
+      coverageGaps,
+      birthFindings: [],
+      errors,
+      extractionFailures,
+      llmFailures: [...audit.failures(), ...sessionTallies],
+      unadjudicated: [],
+      orphaned: orphanedSections,
+      birthPassed: 0,
+      orphanedDismissals,
+      orphanedFlowDismissals: [],
+      autoResolved: [],
+      flows: {
+        total: 0,
+        settled: 0,
+        unsettled: 0,
+        skipped: 0,
+        dismissed: 0,
+        orphaned: 0,
+        subsumed: 0,
+        noFlowClaims: 0,
+        unsettledAreas: [],
+      },
+      interfaces: { total: 0, bySurface: {} },
+      externalServices: [],
+      stoppedAfter: 'extract',
+    }
+  }
+
   // 4. Interfaces — deterministic, free, and independent of everything spec-side.
   const mapped = await interfacesOnce()
   const catalog = mapped.interfaces
@@ -1158,6 +1235,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     sessionGrounding: flowsGrounding,
     sessionDocs: docs,
     sectionFingerprints: new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s.fingerprint])),
+    // `flows.json` is a durable output, so single-step mode writes it only when
+    // the FINAL step runs — `--only-flows` computes the corpus, caches the
+    // sessions that produced it, and leaves the committed file alone.
+    ...(options.only !== undefined && options.only !== 'worker' ? { write: false } : {}),
     onArea: () => options.onFlowProgress?.(++areasDone, areas.length),
   })
   const flowsSessionLoss = (synthesis.sessionSummaries ?? []).find(isSystemicSessionLoss)
@@ -1237,7 +1318,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   const priorFlows = new Map((readManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]))
 
-  if (options.stopAfterFlows) {
+  // The flows stop — the internal `stopAfterFlows` test seam and single-step
+  // mode's `--only-flows` share it: everything spec-side ran, nothing was
+  // written (single-step mode also suppressed the `flows.json` write above).
+  if (options.stopAfterFlows || options.only === 'flows') {
     return {
       status: 'ok',
       recipe: recipeMeta,
@@ -1245,7 +1329,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       sectionsTotal: plan.sections.length,
       sectionsChanged: plan.work.length,
       skippedUnchanged: plan.sections.length - plan.work.length,
-      noChanges: false,
+      // Single-step mode: a warm re-run of the step spends nothing on either
+      // the replayed extraction or this step's own sessions.
+      noChanges: options.only === 'flows' && extractSummary.ran === 0 && synthesis.calls === 0,
       written: [],
       coverageGaps,
       birthFindings: [],
@@ -1262,6 +1348,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       flows: flowsReport,
       interfaces: interfacesReport,
       externalServices,
+      ...(options.only === 'flows' ? { stoppedAfter: 'flows' as const } : {}),
     }
   }
 

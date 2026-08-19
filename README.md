@@ -986,6 +986,10 @@ truecourse guard setup --only-<step>              # Run ONE setup step in isolat
                                                   # naming the flag to run first), later steps never start, detection always
                                                   # re-runs, and setup.json keeps the untouched steps' rows.
 truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
+truecourse guard generate --only-<step>           # Run ONE generate step in isolation: extract | flows | worker.
+                                                  # Prior steps replay from their outcome caches (a missing one aborts,
+                                                  # naming the flag to run first); only --only-worker writes anything —
+                                                  # the scenarios, scenarios/manifest.json, flows.json and guard/result.json.
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
 truecourse guard run --scenario <id>              # Run a single scenario
 truecourse guard run --verbose                    # List every scenario result (one ✓ line per pass; default shows failures only)
