@@ -139,3 +139,101 @@ describe('confluenceConnector', () => {
     ]);
   });
 });
+
+/**
+ * The mirror of the Jira connector's header contract. This suite exists because
+ * the header was first shipped on Jira alone: Confluence fetched `history` and
+ * never wrote it into the body, so its docs hashed identically to before and a
+ * re-sync reported nothing to process. Assert the CONTRACT the consolidator's
+ * date reader imposes, not the string.
+ */
+describe('confluenceConnector — metadata header contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const DATE_FIELDS = ['resolved', 'resolutiondate', 'updated', 'lastmodified', 'modified', 'date', 'created'];
+  const FIELD_LINE = /^\s*[-*]?\s*\*{0,2}([a-z][a-z _-]*?)\*{0,2}\s*[:=]\s*(.+?)\s*$/i;
+
+  /** The date the consolidator would take from this body, or undefined. */
+  function headerDate(body: string): string | undefined {
+    const found = new Map<string, string>();
+    for (const line of body.split('\n').slice(0, 40)) {
+      const m = FIELD_LINE.exec(line);
+      if (!m) continue;
+      const field = m[1].toLowerCase().replace(/[\s_-]/g, '');
+      if (!DATE_FIELDS.includes(field) || found.has(field)) continue;
+      const d = new Date(m[2]);
+      if (!Number.isNaN(d.getTime())) found.set(field, d.toISOString());
+    }
+    for (const field of DATE_FIELDS) {
+      const hit = found.get(field);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  function stubPage(page: Record<string, unknown>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(page), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      ),
+    );
+  }
+
+  const PAGE = {
+    id: '123',
+    title: 'Order cancellation policy',
+    version: { number: 3, when: '2026-08-19T19:09:08.426Z' },
+    history: { createdDate: '2026-08-19T19:08:41.489Z' },
+    body: { storage: { value: '<p>Users can cancel while Pending.</p>' } },
+  };
+
+  it('emits both dates where the consolidator reads them', async () => {
+    stubPage(PAGE);
+    const { markdown } = await confluenceConnector.fetch(CFG, '123');
+    expect(markdown.split('\n').slice(0, 40).join('\n')).toContain('Created:');
+    expect(markdown).toContain('Created: 2026-08-19T19:08:41.489Z');
+    expect(markdown).toContain('Updated: 2026-08-19T19:09:08.426Z');
+    // `updated` outranks `created`, so it is the one that orders the doc.
+    expect(headerDate(markdown)).toBe('2026-08-19T19:09:08.426Z');
+    // The page still reads as itself — the header sits between H1 and body.
+    expect(markdown.startsWith('# Order cancellation policy')).toBe(true);
+    expect(markdown).toContain('Users can cancel while Pending.');
+  });
+
+  it('carries no status — a page has no lifecycle, and version is an edit counter', async () => {
+    stubPage(PAGE);
+    const { markdown } = await confluenceConnector.fetch(CFG, '123');
+    expect(markdown).not.toContain('Status:');
+    expect(markdown).not.toContain('## Status history');
+    // The edit counter must never surface as a date.
+    expect(markdown).not.toContain('3');
+  });
+
+  it('omits a date the API did not return, and the block when it returned none', async () => {
+    stubPage({ ...PAGE, history: undefined });
+    const noCreated = await confluenceConnector.fetch(CFG, '123');
+    expect(noCreated.markdown).not.toContain('Created:');
+    expect(headerDate(noCreated.markdown)).toBe('2026-08-19T19:09:08.426Z');
+
+    stubPage({ ...PAGE, history: undefined, version: undefined });
+    const noDates = await confluenceConnector.fetch(CFG, '123');
+    expect(headerDate(noDates.markdown)).toBeUndefined();
+    // No stray blank block between the H1 and the body.
+    expect(noDates.markdown).toBe('# Order cancellation policy\n\nUsers can cancel while Pending.');
+  });
+
+  it('changes the body, so a re-sync re-processes the doc', async () => {
+    stubPage(PAGE);
+    const withDates = await confluenceConnector.fetch(CFG, '123');
+    stubPage({ ...PAGE, history: undefined, version: undefined });
+    const without = await confluenceConnector.fetch(CFG, '123');
+    // The regression this suite was written for: identical bodies hash the same,
+    // and the sync reports "nothing to process".
+    expect(withDates.markdown).not.toBe(without.markdown);
+  });
+});

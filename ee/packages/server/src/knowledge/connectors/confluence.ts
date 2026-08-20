@@ -92,6 +92,29 @@ function pageUrl(cfg: ConfluenceConfig, base: string, p: ConfluencePage): string
   return `${siteBase(cfg)}/wiki/spaces/${cfg.spaceKey}/pages/${p.id}`;
 }
 
+/** Normalize a timestamp to real ISO-8601, or drop it when it isn't one. */
+function isoOrUndefined(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+/**
+ * The metadata block the consolidator reads back out of the body. Its date
+ * readers scan only the first 40 lines and match `Name: value`, so these lead.
+ * A page has no lifecycle status, so — unlike a Jira issue — there is no
+ * `Status:` line and no history: a Confluence version is an edit counter, and
+ * the API exposes no per-revision reason worth carrying.
+ */
+function metadataBlock(page: ConfluencePage): string {
+  const lines: string[] = [];
+  const created = isoOrUndefined(page.history?.createdDate);
+  const updated = isoOrUndefined(page.version?.when);
+  if (created) lines.push(`Created: ${created}`);
+  if (updated) lines.push(`Updated: ${updated}`);
+  return lines.join('\n');
+}
+
 export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
   kind: 'confluence',
   name: 'Confluence',
@@ -145,7 +168,8 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
     );
     const title = page.title ?? `(untitled ${id})`;
     const body = storageXhtmlToMarkdown(page.body?.storage?.value ?? '');
+    const meta = metadataBlock(page);
     // Prepend the title as an H1 so a heading-less page still has a slice anchor.
-    return { title, markdown: `# ${title}\n\n${body}`.trim() };
+    return { title, markdown: [`# ${title}`, meta, body].filter(Boolean).join('\n\n').trim() };
   },
 };
