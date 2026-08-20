@@ -26,59 +26,23 @@ Note the trap is common, not exotic: `flag: invalid template` was on 8 of the 25
 
 The content itself was never the problem. Strapi's AI triage bot (`dosubot`) reviewed the same report and confirmed the mechanism in current `develop`, agreed with both proposed fixes, and suggested labels.
 
-## Per-repo template requirements
+## Per-repo rules live with the target
 
-Check the live template before filing each batch; these were read on 2026-08-19.
+The template sections, enforcement bots, label vocabulary and hard-won quirks for each target are in that target's own file:
 
-### strapi/strapi (`BUG_REPORT.yml`, enforced by a bot)
+- `targets/strapi/FILING.md` (strapi/strapi and strapi/documentation)
+- `targets/documenso/FILING.md`
+- `targets/caldiy/FILING.md` (calcom/cal.diy and calcom/help)
 
-`blank_issues_enabled: false`. The body must contain these as `### ` headers, spelled exactly, each with non-empty content:
+**Regenerate before every filing batch and read the diff.** Templates, workflows and label vocabularies drift, and a stale copy is what gets an issue auto-closed:
 
-```
-### Node Version
-### Package Manager
-### Package Manager Version
-### Strapi Version
-### Operating System
-### Database
-### Javascript or Typescript
-### Bug Description
-### Steps to Reproduce
-### Expected Behavior
+```bash
+python3 tools/fetch-filing-rules.py targets/<t> <owner>/<repo> [<owner>/<repo> ...]
 ```
 
-Plus a checklist with **both boxes checked**, one matching "checked ... duplicate" and one matching "Code of Conduct":
+The generated part covers private-vulnerability-reporting status, `blank_issues_enabled`, every template's required `### ` section headers, auto-titles and auto-labels, template-enforcing workflows and their triggers, and the labels actually in use on the 30 most recent issues. Below it, each file has a hand-written "Quirks learned by filing" section that the tool cannot detect; that section survives regeneration, so keep adding to it as we learn.
 
-```
-### Confirmation Checklist
-
-- [x] I have checked the existing [issues](https://github.com/strapi/strapi/issues) for duplicates.
-- [x] I agree to follow this project's [Code of Conduct](https://github.com/strapi/strapi/blob/develop/CODE_OF_CONDUCT.md).
-```
-
-Gotchas:
-- **Demote your own sub-headings to `####`.** The parser treats every `### ` line as a new section, so a stray `### Cause` inside Bug Description splits the section and can empty a required one.
-- Dropdown fields must use one of the template's option values (`Package Manager`: npm/yarn/pnpm/bun/Other; `Operating System`: MacOS, Linux (Debian/Ubuntu), Windows 11, Docker/Podman/LXC, ...; `Database`: SQLite/PostgreSQL/...; `Javascript or Typescript`: Javascript/Typescript).
-- `Strapi Version` must be a real version. "Latest" is explicitly rejected.
-- Code fences are handled correctly by the parser (content inside ``` is not scanned for headers), so request/response blocks are safe.
-
-The exact rules live in `.github/scripts/issue-template-check.ts` in that repo if it changes.
-
-### strapi/documentation
-
-Separate repo, separate form (`BUG_REPORT.yml`): auto-title prefix `[Bug]: `, auto-label `type: bug`. Fields: Link to the documentation page (required, a docs.strapi.io URL), Describe the bug (required), Additional context, Suggested improvements or fixes, Related issue(s)/PR(s). `blank_issues_enabled: false`. Product bugs are pushed back to strapi/strapi by its `config.yml`, so only file doc-text bugs here.
-
-### documenso/documenso
-
-`bug-report.yml`, label `bug` (the repo's real label is `type: bug`, maintainers relabel). Sections: Issue Description, Steps to Reproduce, Expected Behavior, Current Behavior, Screenshots, Operating System, Browser, Version, plus a checkbox block. `blank_issues_enabled: false`. For API-only findings put `n/a (API, self-hosted from source)` in Operating System / Browser rather than leaving them blank. **Do not open pull requests here**: CONTRIBUTING.md says external PRs are no longer merged and issues are the way to contribute. Commenting on an already-open community PR is still fine.
-
-### calcom/cal.diy
-
-Markdown template `bug_report.md` (not a form), label `🐛 bug`. Sections: Issue Summary, Steps to Reproduce, Actual Results, Expected Results, Technical details, Evidence. The template calls Evidence **"quite mandatory"**, so every issue needs a captured request/response, log excerpt or screenshot. `blank_issues_enabled: false`. Note calcom/cal.com is the same repository (renamed), so issue numbers are shared.
-
-### calcom/help
-
-No template, no CONTRIBUTING, no SECURITY. Doc fixes usually land as PRs from staff or the Mintlify bot. A plain issue naming the wrong sentence and the correct one works; a one-line PR is faster.
+Adding a new target is: create `targets/<name>/`, run the tool against its repo, read the output, and start a quirks section as you go.
 
 ## Labels
 
