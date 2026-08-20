@@ -195,21 +195,22 @@ describe('confluenceConnector — metadata header contract', () => {
   it('emits both dates where the consolidator reads them', async () => {
     stubPage(PAGE);
     const { markdown } = await confluenceConnector.fetch(CFG, '123');
-    expect(markdown.split('\n').slice(0, 40).join('\n')).toContain('Created:');
-    expect(markdown).toContain('Created: 2026-08-19T19:08:41.489Z');
-    expect(markdown).toContain('Updated: 2026-08-19T19:09:08.426Z');
+    expect(markdown.startsWith('---\n')).toBe(true);
+    expect(markdown.split('\n').slice(0, 40).join('\n')).toContain('created:');
+    expect(markdown).toContain('created: 2026-08-19T19:08:41.489Z');
+    expect(markdown).toContain('updated: 2026-08-19T19:09:08.426Z');
     // `updated` outranks `created`, so it is the one that orders the doc.
     expect(headerDate(markdown)).toBe('2026-08-19T19:09:08.426Z');
     // The page still reads as itself — the header sits between H1 and body.
-    expect(markdown.startsWith('# Order cancellation policy')).toBe(true);
+    expect(markdown).toContain('\n# Order cancellation policy');
     expect(markdown).toContain('Users can cancel while Pending.');
   });
 
   it('carries no status — a page has no lifecycle, and version is an edit counter', async () => {
     stubPage(PAGE);
     const { markdown } = await confluenceConnector.fetch(CFG, '123');
-    expect(markdown).not.toContain('Status:');
-    expect(markdown).not.toContain('## Status history');
+    expect(markdown).not.toContain('status:');
+    expect(markdown).not.toContain('status_history:');
     // The edit counter must never surface as a date.
     expect(markdown).not.toContain('3');
   });
@@ -217,7 +218,7 @@ describe('confluenceConnector — metadata header contract', () => {
   it('omits a date the API did not return, and the block when it returned none', async () => {
     stubPage({ ...PAGE, history: undefined });
     const noCreated = await confluenceConnector.fetch(CFG, '123');
-    expect(noCreated.markdown).not.toContain('Created:');
+    expect(noCreated.markdown).not.toContain('created:');
     expect(headerDate(noCreated.markdown)).toBe('2026-08-19T19:09:08.426Z');
 
     stubPage({ ...PAGE, history: undefined, version: undefined });

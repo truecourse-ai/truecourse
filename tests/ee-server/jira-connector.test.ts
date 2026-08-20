@@ -602,23 +602,24 @@ describe('jiraConnector — metadata header contract', () => {
 
   it('emits dates in the scanned window, preferring the resolution date', async () => {
     const md = await bodyOf(issue());
-    expect(md.split('\n').slice(0, 40).join('\n')).toContain('Created:');
+    expect(md.startsWith('---\n')).toBe(true);
+    expect(md.split('\n').slice(0, 40).join('\n')).toContain('created:');
     // `resolved` outranks `updated` and `created`.
     expect(headerDate(md)).toBe('2026-03-02T17:00:00.000Z');
-    expect(headerStatusLine(md)).toBe('Done');
+    expect(headerStatusLine(md)).toBe('"Done"');
   });
 
   it('normalizes Jira offsets to a Z form, since `-0700` is not portable', async () => {
     const md = await bodyOf(issue());
     // Jira emits `2026-03-02T10:00:00.000-0700`; the header must not pass it through.
     expect(md).not.toContain('-0700');
-    expect(md).toContain('Updated: 2026-03-02T17:00:00.000Z');
+    expect(md).toContain('updated: 2026-03-02T17:00:00.000Z');
   });
 
   it('falls back to the changelog when a closed issue has no resolution date', async () => {
     const md = await bodyOf(issue({ fields: { resolutiondate: null } }));
     // Taken from the last transition INTO the current done-category status.
-    expect(md).toContain('Resolved: 2026-03-02T17:00:00.000Z');
+    expect(md).toContain('resolved: 2026-03-02T17:00:00.000Z');
     expect(headerDate(md)).toBe('2026-03-02T17:00:00.000Z');
   });
 
@@ -631,20 +632,20 @@ describe('jiraConnector — metadata header contract', () => {
         },
       }),
     );
-    expect(md).not.toContain('Resolved:');
+    expect(md).not.toContain('resolved:');
     expect(headerDate(md)).toBe('2026-03-02T17:00:00.000Z');
-    expect(headerStatusLine(md)).toBe('In Progress');
+    expect(headerStatusLine(md)).toBe('"In Progress"');
   });
 
   it('renders status history as dated lines the date reader ignores', async () => {
     const md = await bodyOf(issue());
-    expect(md).toContain('## Status history');
-    expect(md).toContain('- 2026-01-05T16:00:00.000Z  To Do -> In Progress');
+    expect(md).toContain('status_history:');
+    expect(md).toContain('- "2026-01-05T16:00:00.000Z  To Do -> In Progress"');
     // A history line opens with the timestamp, so it can never match the
     // field-name group — the January transition must not outrank March.
     expect(headerDate(md)).not.toBe('2026-01-05T16:00:00.000Z');
     // …and the heading must not read as a status line.
-    expect(headerStatusLine('## Status history\n- 2026-01-05T16:00:00.000Z  To Do -> Done')).toBeUndefined();
+    expect(headerStatusLine('status_history:\n  - "2026-01-05T16:00:00.000Z  To Do -> Done"')).toBeUndefined();
   });
 
   it('re-fetches the changelog when the search embedded only part of it', async () => {
@@ -656,12 +657,31 @@ describe('jiraConnector — metadata header contract', () => {
     expect(calls.some((c) => String(c[0]).includes('/changelog?'))).toBe(true);
   });
 
+it('caps the history and says how many it dropped, rather than truncating silently', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      created: `2026-01-${String(i + 1).padStart(2, '0')}T09:00:00.000-0700`,
+      items: [STATUS_ITEM(`S${i}`, `S${i + 1}`)],
+    }));
+    const md = await bodyOf(issue({ changelog: { total: many.length, histories: many } }));
+    // Count inside the frontmatter only — the description carries bullets too.
+    const fm = md.split('---\n')[1] ?? '';
+    const entries = fm.split('\n').filter((l) => l.trim().startsWith('- '));
+    // 10 kept + one line naming what was dropped.
+    expect(entries).toHaveLength(11);
+    expect(md).toContain('15 earlier transitions omitted');
+    // The most recent survive — they carry where the issue settled.
+    expect(md).toContain('S24 -> S25');
+    expect(md).not.toContain('S0 -> S1');
+    // …and the block still leaves room in the 60-line relevance window.
+    expect(md.split('\n').findIndex((l) => l.startsWith('# ENG-1'))).toBeLessThan(20);
+  });
+
   it('omits the block entirely when an issue carries no metadata', async () => {
     stubSearch([{ id: '10001', key: 'ENG-1', fields: { summary: 'Bare', description: description() } }]);
     const map = await jiraConnector.fetchMany!(CFG, ['10001']);
     const md = map.get('10001')!.markdown;
-    expect(md).not.toContain('Status:');
-    expect(md).not.toContain('## Status history');
+    expect(md).not.toContain('status:');
+    expect(md).not.toContain('status_history:');
     expect(headerDate(md)).toBeUndefined();
   });
 });

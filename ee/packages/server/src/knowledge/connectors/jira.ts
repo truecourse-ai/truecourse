@@ -263,37 +263,68 @@ function resolvedAt(issue: JiraIssue, changes: StatusChange[]): string | undefin
 }
 
 /**
- * The metadata block the consolidator reads back out of the body. `parseDocDate`
- * and `parseDocStatus` scan only the first 40 lines and match `Name: value`, so
- * the dated fields lead and the history follows. History lines deliberately open
- * with the timestamp: a line starting with a date-field NAME would be picked up
- * as the doc's own date, and the FIRST occurrence of a field wins.
+ * Transitions kept in the header. The block sits ahead of the description, and
+ * the relevance classifier only reads the doc's first 60 lines — an uncapped
+ * history on a long-lived issue fills that window with a transition list and the
+ * issue reads as status tracking, so its requirements never reach extraction.
+ * The most recent are kept: they carry where the issue settled.
  */
-function metadataBlock(issue: JiraIssue, changes: StatusChange[]): string {
+const HISTORY_LIMIT = 10;
+
+/** YAML-quote a value that could otherwise parse as something else. */
+function yamlValue(raw: string): string {
+  return `"${raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The metadata the consolidator reads back out of the doc, as YAML frontmatter.
+ *
+ * Frontmatter rather than visible body text for two reasons: a reader opening
+ * the doc wants the ticket, not our bookkeeping, and every markdown renderer
+ * already hides it. The consolidator's readers are unaffected — they scan the
+ * first 40 lines for `name: value`, which is exactly frontmatter's shape.
+ *
+ * Key names are the ones those readers know (`created`/`updated`/`resolved`/
+ * `status`). `status_history` deliberately is not one of them, and its entries
+ * open with a timestamp: an entry beginning with a date-field NAME would be read
+ * as the doc's own date, and the first occurrence of a field wins.
+ */
+function frontmatter(issue: JiraIssue, changes: StatusChange[]): string {
   const lines: string[] = [];
   const created = isoOrUndefined(issue.fields?.created);
   const updated = isoOrUndefined(issue.fields?.updated);
   const resolved = resolvedAt(issue, changes);
   const status = issue.fields?.status?.name;
-  if (created) lines.push(`Created: ${created}`);
-  if (updated) lines.push(`Updated: ${updated}`);
-  if (resolved) lines.push(`Resolved: ${resolved}`);
-  if (status) lines.push(`Status: ${status}`);
+  if (created) lines.push(`created: ${created}`);
+  if (updated) lines.push(`updated: ${updated}`);
+  if (resolved) lines.push(`resolved: ${resolved}`);
+  if (status) lines.push(`status: ${yamlValue(status)}`);
   if (lines.length === 0) return '';
-  const history = changes.map((c) => `- ${c.at}  ${c.from || '(none)'} -> ${c.to}`);
-  return history.length > 0
-    ? `${lines.join('\n')}\n\n## Status history\n${history.join('\n')}`
-    : lines.join('\n');
+
+  if (changes.length > 0) {
+    lines.push('status_history:');
+    const kept = changes.slice(-HISTORY_LIMIT);
+    const dropped = changes.length - kept.length;
+    // Say what was dropped rather than truncating silently — a short list would
+    // otherwise read as the issue's whole history.
+    if (dropped > 0) lines.push(`  - ${yamlValue(`… ${dropped} earlier transitions omitted`)}`);
+    for (const c of kept) {
+      lines.push(`  - ${yamlValue(`${c.at}  ${c.from || '(none)'} -> ${c.to}`)}`);
+    }
+  }
+  return `---\n${lines.join('\n')}\n---`;
 }
 
-/** Build one issue's document body: `# KEY: summary` H1, the metadata block, the description. */
+/** Build one issue's document: frontmatter, the `# KEY: summary` H1, the description. */
 function toDocContent(issue: JiraIssue, changes: StatusChange[] = []): DocContent {
   const key = issue.key ?? String(issue.id);
   const title = `${key}: ${issue.fields?.summary ?? ''}`;
   const body = adfToMarkdown(issue.fields?.description);
-  const meta = metadataBlock(issue, changes);
-  // Prepend the title as an H1 so a heading-less description still has a slice anchor.
-  return { title, markdown: [`# ${title}`, meta, body].filter(Boolean).join('\n\n').trim() };
+  // The H1 anchors the slicer, so a heading-less description still has one.
+  return {
+    title,
+    markdown: [frontmatter(issue, changes), `# ${title}`, body].filter(Boolean).join('\n\n').trim(),
+  };
 }
 
 /** `/search/jql` query string for a JQL sweep (paginates on nextPageToken). */
