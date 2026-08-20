@@ -61,8 +61,8 @@ export const knowledgeDocuments = pgTable(
      * put a date there because it has no version counter, Confluence puts an
      * edit counter, and nothing downstream should have to know which.
      */
-    sourceCreatedAt: ts('source_created_at'),
-    sourceUpdatedAt: ts('source_updated_at'),
+    externalCreatedAt: ts('external_created_at'),
+    externalUpdatedAt: ts('external_updated_at'),
     /** sha256 of the body at last sync — the incremental-sync diff key. */
     contentHash: text('content_hash').notNull(),
     /**

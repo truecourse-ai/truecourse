@@ -24,8 +24,8 @@ export interface KnowledgeDocRow {
   url: string | null;
   version: string | null;
   /** Creation / last-modification time in the source tool; null when it exposes none. */
-  sourceCreatedAt: string | null;
-  sourceUpdatedAt: string | null;
+  externalCreatedAt: string | null;
+  externalUpdatedAt: string | null;
   contentHash: string;
   /** sha256 of the body the last process consolidated; null until first processed. */
   processedHash: string | null;
@@ -87,8 +87,8 @@ export class PgKnowledgeStore {
         title: row.title,
         url: row.url,
         version: row.version,
-        sourceCreatedAt: row.sourceCreatedAt,
-        sourceUpdatedAt: row.sourceUpdatedAt,
+        externalCreatedAt: row.externalCreatedAt,
+        externalUpdatedAt: row.externalUpdatedAt,
         contentHash: row.contentHash,
         lastSyncedAt: now,
         createdAt: now,
@@ -104,8 +104,8 @@ export class PgKnowledgeStore {
           title: row.title,
           url: row.url,
           version: row.version,
-          sourceCreatedAt: row.sourceCreatedAt,
-          sourceUpdatedAt: row.sourceUpdatedAt,
+          externalCreatedAt: row.externalCreatedAt,
+          externalUpdatedAt: row.externalUpdatedAt,
           contentHash: row.contentHash,
           lastSyncedAt: now,
         },
@@ -153,8 +153,8 @@ export class PgKnowledgeStore {
         title: r.title,
         url: r.url,
         version: r.version,
-        sourceCreatedAt: r.sourceCreatedAt,
-        sourceUpdatedAt: r.sourceUpdatedAt,
+        externalCreatedAt: r.externalCreatedAt,
+        externalUpdatedAt: r.externalUpdatedAt,
         contentHash: r.contentHash,
         processedHash: r.processedHash,
         lastSyncedAt: r.lastSyncedAt,
@@ -204,8 +204,8 @@ export class PgKnowledgeStore {
         title: r.title,
         url: r.url,
         version: r.version,
-        sourceCreatedAt: r.sourceCreatedAt,
-        sourceUpdatedAt: r.sourceUpdatedAt,
+        externalCreatedAt: r.externalCreatedAt,
+        externalUpdatedAt: r.externalUpdatedAt,
         contentHash: r.contentHash,
         processedHash: r.processedHash,
         lastSyncedAt: r.lastSyncedAt,
@@ -236,8 +236,8 @@ export class PgKnowledgeStore {
       title: r.title,
       url: r.url,
       version: r.version,
-      sourceCreatedAt: r.sourceCreatedAt,
-      sourceUpdatedAt: r.sourceUpdatedAt,
+      externalCreatedAt: r.externalCreatedAt,
+      externalUpdatedAt: r.externalUpdatedAt,
       contentHash: r.contentHash,
       processedHash: r.processedHash,
       lastSyncedAt: r.lastSyncedAt,

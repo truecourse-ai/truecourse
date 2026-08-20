@@ -1,0 +1,2 @@
+ALTER TABLE "knowledge_documents" ADD COLUMN "external_created_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "knowledge_documents" ADD COLUMN "external_updated_at" timestamp with time zone;

@@ -67,8 +67,8 @@ export interface SyncDoc {
   title: string;
   url: string | null;
   version: string | null;
-  sourceCreatedAt: string | null;
-  sourceUpdatedAt: string | null;
+  externalCreatedAt: string | null;
+  externalUpdatedAt: string | null;
   contentHash: string;
   doc: WorkspaceDocInput;
 }
@@ -83,8 +83,8 @@ function toSyncDoc(kind: string, ref: DocRef, content: DocContent): SyncDoc {
     url: ref.url,
     version: ref.version ?? null,
     // The dates in their own columns, not smuggled through `version`.
-    sourceCreatedAt: isoOrNull(ref.createdAt),
-    sourceUpdatedAt: isoOrNull(ref.updatedAt),
+    externalCreatedAt: isoOrNull(ref.createdAt),
+    externalUpdatedAt: isoOrNull(ref.updatedAt),
     contentHash: sha256(Buffer.from(content.markdown, 'utf-8')),
     doc: {
       docPath: connectorDocPath(kind, ref.id),
@@ -183,8 +183,8 @@ async function reconcileLedgerSlice(
       title: d.title,
       url: d.url,
       version: d.version,
-      sourceCreatedAt: d.sourceCreatedAt,
-      sourceUpdatedAt: d.sourceUpdatedAt,
+      externalCreatedAt: d.externalCreatedAt,
+      externalUpdatedAt: d.externalUpdatedAt,
       contentHash: d.contentHash,
     });
   }
@@ -256,7 +256,7 @@ export async function processWorkspaceKnowledge(
     docs.push({
       docPath: row.docPath,
       markdown,
-      lastTouched: row.sourceUpdatedAt ?? row.lastSyncedAt,
+      lastTouched: row.externalUpdatedAt ?? row.lastSyncedAt,
     });
     consolidated.push({ docPath: row.docPath, processedHash: row.contentHash });
     bySource[row.sourceKind] = (bySource[row.sourceKind] ?? 0) + 1;

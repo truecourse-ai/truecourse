@@ -53,7 +53,7 @@ export function createSpecInheritanceHook(deps: InheritanceDeps): SpecInheritanc
     for (const row of rows) {
       const markdown = await deps.knowledge.getDocBody(org, row.contentHash);
       if (markdown == null) continue; // a body somehow absent → skip it, not the whole layer
-      docs.push({ docPath: row.docPath, markdown, lastTouched: row.sourceUpdatedAt ?? undefined });
+      docs.push({ docPath: row.docPath, markdown, lastTouched: row.externalUpdatedAt ?? undefined });
     }
     if (docs.length === 0) return null;
 

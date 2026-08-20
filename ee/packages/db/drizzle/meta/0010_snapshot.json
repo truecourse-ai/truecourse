@@ -1,5 +1,5 @@
 {
-  "id": "6bcef121-619a-4586-a7bc-3c27ab8fa77f",
+  "id": "4aa309e8-1c83-4304-aeee-87ff1edaefc6",
   "prevId": "3cd4f65c-b1dc-4f91-850b-299f1e21c491",
   "version": "7",
   "dialect": "postgresql",
@@ -995,14 +995,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "source_created_at": {
-          "name": "source_created_at",
+        "external_created_at": {
+          "name": "external_created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "source_updated_at": {
-          "name": "source_updated_at",
+        "external_updated_at": {
+          "name": "external_updated_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
