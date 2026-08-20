@@ -154,3 +154,13 @@ Note: the source clones under the old session scratchpad lost their `.git` direc
 Documenso automation observed on both filings: `github-actions[bot]` applies `status: triage` within ~15s and posts a first-issue welcome comment at ~20s. Friendly, not enforcing. Nothing to act on.
 
 Day total 2026-08-20: 2 public issues (documenso), which is the cadence ceiling. The D1 advisory remains available today because private advisories are exempt.
+- Strapi "set: null returns success and clears nothing" (S3) -> https://github.com/strapi/strapi/issues/27432
+- Strapi "MCP create and update replies report every to-many relation as an empty array" (S4) -> https://github.com/strapi/strapi/issues/27433
+
+Both filed 2026-08-20 after the two earlier Strapi reports produced fixes (PRs 27420 and 27423, both verified by re-running the pipeline against them). S3 was a commitment made publicly in the 27423 comment. S4 was timed against PR 26990, which is open and actively rewriting shape-relations.ts (+113/-19) and collection-handlers.ts, the exact culprits, so its author can fold the fix in rather than carry the bug forward.
+
+Day total 2026-08-20: 4 public issues (2 documenso, 2 strapi), 1 private advisory, 2 PR verification comments.
+
+Both opened clean and were labelled within two minutes. Label lesson repeated, this time against a suggestion of ours that was wrong: dosubot labelled 27432 `source: core:database`, not the `core:content-manager` our body proposed, because the `toAssocs` culprit lives in `packages/core/database`. The MCP surface is frequently just the messenger; derive the source label from the culprit path, not from where the symptom was observed.
+
+dosubot's comment on 27433 independently reached the same timing conclusion we did: PR 26990 is rewriting `shape-relations.ts` without addressing this defect, so folding a fix in before it merges keeps the bug from surviving the rewrite.

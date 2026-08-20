@@ -66,5 +66,13 @@
   "routeSuggestion": "public issue",
   "policyBasis": "CONTRIBUTING.md: \"Strapi is using GitHub issues to manage bugs. We keep a close eye on them. Before filing a new issue, try to ensure your problem does not already exist.\" .github/ISSUE_TEMPLATE/config.yml sets blank_issues_enabled: false, so the report must go through BUG_REPORT.yml, whose required fields are Node version, package manager + version, exact Strapi version (\"Latest\" is not a valid response), OS, database, JS/TS, Bug Description, Steps to Reproduce, Expected Behavior, and both confirmation checkboxes.",
   "confidence": "high",
-  "notes": "Cross-reference open PR #26990 in the issue body: it is actively reworking shape-relations.ts and its author is the right person to fold in either fix (pass a non-count populate from the MCP write handlers, or make reduceToIdentity refuse to translate { count: N } into []). Scope is broader than 'update': the same count-shaped default populate is used by create, publish, unpublish and discard_draft on collection types. Single types are NOT affected (single-type-handlers.ts:116-118 passes an explicit populate), which is a useful contrast for the report. The write itself is correct; only the reply is false, so this is a wrong-confirmation bug, not data loss."
+  "notes": "Cross-reference open PR #26990 in the issue body: it is actively reworking shape-relations.ts and its author is the right person to fold in either fix (pass a non-count populate from the MCP write handlers, or make reduceToIdentity refuse to translate { count: N } into []). Scope is broader than 'update': the same count-shaped default populate is used by create, publish, unpublish and discard_draft on collection types. Single types are NOT affected (single-type-handlers.ts:116-118 passes an explicit populate), which is a useful contrast for the report. The write itself is correct; only the reply is false, so this is a wrong-confirmation bug, not data loss.",
+  "filed": {
+    "url": "https://github.com/strapi/strapi/issues/27433",
+    "at": "2026-08-20",
+    "account": "truecourse-agent",
+    "note": "filed while PR 26990 is actively rewriting shape-relations.ts and collection-handlers.ts, so its author can fold the fix in",
+    "labels_applied": "issue: bug, severity: high, source: core:content-manager, version: 5",
+    "bot_confirmation": "dosubot verified both code paths, endorsed the explicit-populate fix, and independently noted that PR 26990 touches shape-relations.ts without fixing this, so folding it in before that PR merges prevents the defect surviving the rewrite"
+  }
 }
