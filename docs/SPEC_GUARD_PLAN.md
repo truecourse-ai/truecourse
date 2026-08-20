@@ -6472,3 +6472,89 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `tools/cli/src/commands/guard.ts` + `tools/cli/src/index.ts` (the flags,
     mutual exclusivity, the reduced checklist, the not-ready error, the
     next-flag outro). Tests: `tests/core/guard-generate-steps.test.ts`.
+
+111. **Conflict-resolution prune keys on doc existence, never on flag
+    matching (2026-08-20).** STATUS: BUILT.
+    The 2026-08-20 reference-corpus validation (cal.diy / documenso / strapi)
+    caught `pruneOrphanedConflictResolutions` deleting user-authored,
+    code-verified verdicts on every corpus write: cal.diy 6→1 rows, documenso
+    14→3. The old prune keyed staleness on "matches no currently flagged
+    overlap" — but the overlap session is a stochastic judge (~50–60% pair
+    recall run-to-run), and when it DOES re-flag a pair it re-excerpts the
+    quotes (drifted on 6 of 6 re-flagged pairs), so `resolutionMatchesConflict`'s
+    quote identity orphaned 16 of 20 stored verdicts in one scan. The
+    "cheaply re-derivable" premise the prune stood on is false.
+
+    Now: prune deletes ONLY a resolution naming a doc that left the corpus
+    (deterministic staleness). Everything else stays, dormant —
+    `orphanedConflictResolutions` still surfaces unmatched rows honestly, and a
+    new `dormantResolutionForPair` (shared) offers a re-flagged pair's stored
+    verdict as a one-command reapply hint on the OPEN conflict (`spec conflicts
+    list`/`show` + scan outro; `--json` carries `dormant`). Deliberately NOT
+    auto-honored: a genuinely new dispute between the same docs must not be
+    swallowed by an old verdict. As built:
+    `packages/spec-consolidator/src/curate.ts`,
+    `packages/shared/src/spec/overlap-resolution.ts`,
+    `tools/cli/src/commands/spec-conflicts.ts`, `tools/cli/src/commands/spec.ts`.
+    Tests: `tests/spec-consolidator/prune-conflict-resolutions.test.ts`,
+    `tests/shared/overlap-resolution.test.ts`.
+
+112. **Settle pushes back on a no-op settlement over a fragmented vocabulary
+    (2026-08-20).** STATUS: BUILT.
+    Same validation run, step 3: after the label→docs-map fix (`194af5dc`) the
+    settle sessions stopped timing out and started RUBBER-STAMPING — empty
+    draft to `check_settlement` on turn 1, zero `read_doc` calls, and the
+    checker answered "valid… produce it as the outcome". Net settlement across
+    all three repos: one trivial merge against 34–46 minted labels; with no
+    manualAreas pins the corpus grounds out at 25/34/26 areas (reference
+    6/4/5).
+
+    Now: `check_settlement` refuses the FIRST no-op draft (no merges, no
+    subdivisions, no collapse verdicts) over a fragmented vocabulary
+    (`FRAGMENTED_CONCERNS_MIN = 12` concerns, or ≥ half single-doc labels at 6+)
+    with the vocabulary's shape in numbers plus deterministic morphological
+    near-name candidates (per-token plural fold, token-sort equality — hints to
+    judge, never auto-merged). An identical resubmit passes, so a deliberate
+    "nothing to merge" still finishes in budget — one refusal cycle, the same
+    pattern as the outcome precondition. The system prompt and briefing gained
+    the grain rule (single-doc subtopics fold into their umbrella; "don't merge
+    when in doubt" scoped to distinct topics, not granularity). Prompt
+    fingerprint rides the settle cache key, so existing caches self-invalidate.
+    Papercut fixed alongside: a warm-cache `--only-<step>` run now prints the
+    step's replayed stats (docs/areas/verdicts) instead of a bare "Nothing to
+    run". As built: `packages/core/src/services/spec-scan/settle-areas.ts`,
+    `tools/cli/src/commands/spec.ts`. Tests: `tests/core/spec-scan-settle.test.ts`.
+
+113. **Cross-axis area grouping has no lever.** STATUS: OPEN.
+    The reference corpora group docs by AUDIENCE/SURFACE, not topic: documenso's
+    recipients docs split into `signing-concepts` (`concepts/recipient-roles.md`),
+    `signing-web` (`users/documents/add-recipients.md`) and `signing-api`
+    (`developers/api/recipients.md`); cal.diy splits `bookings-api` from
+    `bookings-help`. The settlement vocabulary operates on TOPIC labels — a
+    concern merge unifies topics (putting all three recipients docs in ONE area,
+    the opposite of the reference), and a subdivision splits one oversized label
+    — so no sequence of merges/subdivisions expresses "regroup every topic's
+    docs by the surface they document". Today only `manualAreas` pins express an
+    audience grouping; item 112's pushback cannot close this gap, it only stops
+    under-merging within the topic axis. A lever would let the settle session
+    assign docs wholesale to named areas (schema + validation + fold + briefing
+    + estimate) — deliberately deferred 2026-08-20 to keep the scan fixes
+    shippable. Related: overlap recall is ~50–60% per scan (cal.diy 3/6,
+    documenso 10/17 of reference pairs) — tracked, contained by item 111 (a
+    missed pair no longer destroys its stored verdict).
+
+114. **manualAreas pins are immune to settle merges (2026-08-20).** STATUS:
+    BUILT. Caught by the same day's fresh full-pipeline validation run:
+    strapi's settle session merged `content-manager →
+    admin-panel-configuration`, and `groupByArea` folded the user's pinned
+    area id through the settle vocab map too (`canonicalizeIds(override,
+    vocab)`), so the pinned `core/content-manager` area came out renamed —
+    a pin's id flapping with LLM nondeterminism, and decisions.json no
+    longer matching the corpus it produced. Pins are the human's final word,
+    applied after settle; now they slug-normalize (static aliases included)
+    but never pass through the dynamic vocab map, so merges keep unifying
+    MINTED labels while user-stated ids stay literal. The deliberate
+    trade-off: a pin written in a drifted label stays its own area instead
+    of folding into the settled one — that is what a pin means. As built:
+    `packages/spec-consolidator/src/area-grouper.ts`. Test:
+    `tests/spec-consolidator/area-grouper.test.ts` (pin-vs-merge case).

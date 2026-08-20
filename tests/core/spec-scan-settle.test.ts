@@ -15,10 +15,12 @@ import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import {
   BRIEFED_DOCS_PER_LABEL_MAX,
+  FRAGMENTED_CONCERNS_MIN,
   SETTLE_AREAS_SESSION_KIND,
   SUBDIVISION_DOC_THRESHOLD,
   applySettlement,
   collectAreaVocab,
+  nearNameCandidates,
   settleAreasBriefing,
   settleAreasCacheKey,
   settleAreasGate,
@@ -340,6 +342,94 @@ describe('the settle session definition', () => {
     ).toBe(settleAreasCacheKey(sameLabelsMoreDocs))
     // The instructions tail (step 6) moves it too.
     expect(settleAreasCacheKey(one, ['fp'])).not.toBe(settleAreasCacheKey(one))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// the empty-draft pushback (the 2026-08-20 reference runs: sessions sent an
+// empty draft on turn 1, read nothing, and the checker blessed it)
+// ---------------------------------------------------------------------------
+
+describe('check_settlement — one pushback on a no-op draft over a fragmented vocabulary', () => {
+  const EMPTY: AreaSettlement = { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] }
+
+  /** A fragmented single-doc-per-concern vocabulary of `n` concerns. */
+  const fragmented = (n: number) => {
+    const rows: Record<string, [string, string][]> = {}
+    for (let i = 0; i < n; i += 1) rows[`docs/d${i}.md`] = [['core', `topic-${i}`]]
+    return collectAreaVocab(tagMap(rows))
+  }
+
+  const checkTool = (vocab: ReturnType<typeof collectAreaVocab>) => {
+    const def = settleAreasSessionDef({ vocab, universe: buildScanUniverse([]) })
+    const tool = def.tools.find((t) => t.name === 'check_settlement')
+    if (!tool) throw new Error('check_settlement missing')
+    return tool
+  }
+
+  it('refuses the FIRST empty draft with the vocabulary shape, passes the deliberate resubmit', async () => {
+    const tool = checkTool(fragmented(FRAGMENTED_CONCERNS_MIN))
+    const first = await tool.execute(EMPTY, {} as never)
+    expect(first.isError).toBe(true)
+    expect(first.content).toContain('under-merged')
+    expect(first.content).toContain(`${FRAGMENTED_CONCERNS_MIN} concerns`)
+    // Same empty draft again — a deliberate "nothing to merge" still finishes.
+    const second = await tool.execute(EMPTY, {} as never)
+    expect(second.isError).toBeUndefined()
+    expect(second.content).toContain('Produce it as the outcome')
+  })
+
+  it('a draft that does real work is never pushed back', async () => {
+    const vocab = fragmented(FRAGMENTED_CONCERNS_MIN)
+    const tool = checkTool(vocab)
+    const merged: AreaSettlement = { ...EMPTY, concernMerges: { 'topic-1': 'topic-0' } }
+    const res = await tool.execute(merged, {} as never)
+    expect(res.isError).toBeUndefined()
+  })
+
+  it('a small vocabulary passes an empty draft immediately', async () => {
+    const tool = checkTool(fragmented(3))
+    const res = await tool.execute(EMPTY, {} as never)
+    expect(res.isError).toBeUndefined()
+  })
+
+  it('a collapse-to-core verdict counts as work, not a no-op', async () => {
+    const rows: Record<string, [string, string][]> = {}
+    for (let i = 0; i < FRAGMENTED_CONCERNS_MIN; i += 1) rows[`docs/d${i}.md`] = [['booking', `topic-${i}`]]
+    const tool = checkTool(collectAreaVocab(tagMap(rows)))
+    const collapsing: AreaSettlement = {
+      ...EMPTY,
+      productVerdicts: [{ product: 'booking', verdict: 'collapse-to-core' }],
+    }
+    const res = await tool.execute(collapsing, {} as never)
+    expect(res.isError).toBeUndefined()
+  })
+
+  it('nearNameCandidates groups pure morphological variants and nothing else', () => {
+    const vocab = collectAreaVocab(
+      tagMap({
+        'a.md': [['core', 'bookings-attendees']],
+        'b.md': [['core', 'booking-attendees']],
+        'c.md': [['core', 'attendees-booking']],
+        'd.md': [['core', 'slots']],
+        'e.md': [['core', 'recipients']],
+      }),
+    )
+    expect(nearNameCandidates(vocab)).toEqual([
+      ['attendees-booking', 'booking-attendees', 'bookings-attendees'],
+    ])
+  })
+
+  it('the pushback names the morphological candidates', async () => {
+    const rows: Record<string, [string, string][]> = {
+      'x.md': [['core', 'bookings-attendees']],
+      'y.md': [['core', 'booking-attendees']],
+    }
+    for (let i = 0; i < FRAGMENTED_CONCERNS_MIN; i += 1) rows[`docs/d${i}.md`] = [['core', `topic-${i}`]]
+    const tool = checkTool(collectAreaVocab(tagMap(rows)))
+    const res = await tool.execute(EMPTY, {} as never)
+    expect(res.isError).toBe(true)
+    expect(res.content).toContain('booking-attendees  ↔  bookings-attendees')
   })
 })
 

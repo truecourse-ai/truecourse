@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildCorpusConflicts,
+  dormantResolutionForPair,
   openConflicts,
   orphanedConflictResolutions,
   suppressedClaims,
@@ -310,6 +311,48 @@ describe('section-scoped conflict resolutions — dispute matching, verdicts, cl
 
   it('normalizeQuote folds markdown markers + whitespace', () => {
     expect(normalizeQuote('  `rm`  Deletes\nthe  task. ')).toBe('rm deletes the task.');
+  });
+
+  describe('dormantResolutionForPair — the reapply hint for quote-drifted verdicts', () => {
+    const conflict = () => buildCorpusConflicts(disputed(), {})[0];
+
+    it('finds a same-pair verdict whose quotes drifted (does not match the dispute)', () => {
+      const drifted: ConflictResolutionLike = {
+        ...pickReadme,
+        // The overlap session re-excerpted both sides — same dispute, new bytes.
+        quoteA: 'rm permanently deletes the task. Restore is not possible.',
+        quoteB: 'rm archives the task.',
+      };
+      const c = conflict();
+      const decisions = { conflictResolutions: [drifted] };
+      // Not resolved (quote identity is precise, deliberately)…
+      expect(openConflicts(disputed(), decisions)).toHaveLength(1);
+      // …but surfaced as the pair's dormant verdict.
+      expect(dormantResolutionForPair(decisions, c.a, c.b, c.sections)).toBe(drifted);
+    });
+
+    it('matches the pair in EITHER doc order', () => {
+      const drifted: ConflictResolutionLike = {
+        ...pickReadme,
+        docA: 'docs/SPEC.md',
+        quoteA: 'drifted',
+        docB: 'README.md',
+        quoteB: 'also drifted',
+      };
+      const c = conflict();
+      expect(dormantResolutionForPair({ conflictResolutions: [drifted] }, c.a, c.b, c.sections)).toBe(drifted);
+    });
+
+    it('returns nothing when the resolution MATCHES the dispute (it resolves, no hint)', () => {
+      const c = conflict();
+      expect(dormantResolutionForPair({ conflictResolutions: [pickReadme] }, c.a, c.b, c.sections)).toBeUndefined();
+    });
+
+    it('returns nothing for a different doc pair', () => {
+      const other: ConflictResolutionLike = { ...pickReadme, docB: 'docs/OTHER.md' };
+      const c = conflict();
+      expect(dormantResolutionForPair({ conflictResolutions: [other] }, c.a, c.b, c.sections)).toBeUndefined();
+    });
   });
 });
 

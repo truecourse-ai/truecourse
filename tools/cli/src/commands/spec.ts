@@ -14,7 +14,7 @@
 
 import * as p from "@clack/prompts";
 import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
-import { buildCorpusConflicts, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
+import { buildCorpusConflicts, dormantResolutionForPair, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
 import { LlmStageFailureError, type StageTransportTally } from "@truecourse/shared/llm";
 import { StepTracker } from "@truecourse/core/progress";
 import {
@@ -139,11 +139,22 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   });
   renderer.dispose();
   if (noChanges) {
-    p.log.success(
-      opts.only
-        ? `Nothing to run — the ${SCAN_STEP_LABEL[opts.only]} step is already settled (its inputs are unchanged).`
-        : "Nothing changed — no new or updated docs since the last scan; corpus is up to date.",
-    );
+    if (opts.only) {
+      p.log.success(`Nothing to run — the ${SCAN_STEP_LABEL[opts.only]} step is already settled (its inputs are unchanged).`);
+      // The cache replay still computed the step's result — show it, or a warm
+      // re-run reveals nothing (inspecting the result is a step run's point).
+      const s = curate.stats;
+      if (opts.only === "orchestrate") {
+        const verdicts = curate.decisions.scopeVerdicts ?? [];
+        p.log.step(`verdicts    ${verdicts.length} scope verdict${verdicts.length === 1 ? "" : "s"} (.truecourse/specs/decisions.json)`);
+      } else {
+        p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept`);
+        if (opts.only !== "curate") p.log.step(`areas       ${s.areaCount}`);
+        if (opts.only === "overlap") p.log.step(`overlaps    ${s.overlapFlags}`);
+      }
+    } else {
+      p.log.success("Nothing changed — no new or updated docs since the last scan; corpus is up to date.");
+    }
     p.outro("Done.");
     return;
   }
@@ -232,7 +243,10 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     p.log.message("");
     p.log.message("Open overlaps (two docs may disagree — pick a side or dismiss with `spec conflicts resolve`):");
     for (const o of open.slice(0, 10)) {
-      p.log.message(`  • ${o.area}:  ${o.a}  ↔  ${o.b}`);
+      // A dormant verdict = this pair was resolved before and re-flagged with
+      // drifted quotes — one `spec conflicts resolve` reapplies it.
+      const dormant = dormantResolutionForPair(curate.decisions, o.a, o.b, o.sections);
+      p.log.message(`  • ${o.area}:  ${o.a}  ↔  ${o.b}${dormant ? "   (has a previous verdict — see `spec conflicts list`)" : ""}`);
     }
     if (open.length > 10) {
       p.log.message(`  … (+${open.length - 10} more)`);

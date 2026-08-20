@@ -157,7 +157,7 @@ export const SETTLE_AREAS_SYSTEM_PROMPT = `You settle the AREA VOCABULARY that e
 
 You decide FOUR things:
 
-1. CONCERN MERGES — cluster concern labels that mean the SAME thing and map every non-canonical one to the canonical one ("authentication" → "auth"; "appointment" → "appointments"). Canonical targets MUST be labels from the briefing; never invent a merge target. Prefer the shortest / plainest member. When in doubt, DO NOT merge — a wrong merge is worse than a near-duplicate.
+1. CONCERN MERGES — cluster concern labels that mean the SAME thing and map every non-canonical one to the canonical one ("authentication" → "auth"; "appointment" → "appointments"). Canonical targets MUST be labels from the briefing; never invent a merge target. Prefer the shortest / plainest member. When two labels are genuinely DISTINCT topics, do not merge them — a wrong merge is worse than a near-duplicate. But granularity is not distinctness: a subtopic label carrying a doc or two of a broader concern ("recipient-roles" beside "recipients", "field-validation" beside "fields") belongs under its umbrella — merge it.
 
 2. PRODUCT MERGES — the same, on the product axis ("booking-app" → "booking"). Here one extra target is legal: "core". Mapping a product to core says it never was a separate product — its docs describe the one system, and its concerns join core's.
 
@@ -170,7 +170,7 @@ You decide FOUR things:
 
 VALIDATE BEFORE YOU FINISH: call \`check_settlement\` with your complete draft. It runs the exact checks the run applies — missing product verdicts, merge targets not in the briefing, incomplete subdivision assignments — and a problem it finds costs one turn here instead of your whole settlement at the outcome.
 
-The outcome is one object: { "concernMerges": {...}, "productMerges": {...}, "productVerdicts": [...], "subdivisions": [...] }. Empty containers are fine — an already-settled vocabulary is a normal outcome.`
+The outcome is one object: { "concernMerges": {...}, "productMerges": {...}, "productVerdicts": [...], "subdivisions": [...] }. Empty containers are fine where there is truly nothing to do, but judge the GRAIN before you decide that: docs cluster into a handful of areas, so a vocabulary of dozens of concerns over a few dozen docs — most labels carrying one or two docs — is UNDER-MERGED, not settled. An empty settlement on such a vocabulary is almost always wrong; read a few docs and fold the subtopics into their umbrellas first.`
 
 /** Exported for the step-7 estimate rework (probe the REAL keys). */
 export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SYSTEM_PROMPT)
@@ -313,7 +313,81 @@ export function applySettlement(settlement: AreaSettlement, vocab: AreaVocabView
   return { vocab: map, reassignments }
 }
 
+/**
+ * The empty-draft pushback thresholds: a vocabulary at least this fragmented
+ * gets ONE refusal when the session's first `check_settlement` draft does no
+ * work at all. (The 2026-08-20 reference runs showed sessions rubber-stamping:
+ * empty draft on turn 1, zero doc reads, 34–46 concern labels left standing.)
+ */
+export const FRAGMENTED_CONCERNS_MIN = 12
+export const FRAGMENTED_SINGLETON_SHARE = 0.5
+const FRAGMENTED_SINGLETON_FLOOR = 6
+
+/** A settlement that changes nothing: no merges, no subdivisions, no collapse. */
+const isNoOpSettlement = (s: AreaSettlement): boolean =>
+  Object.keys(s.concernMerges).length === 0 &&
+  Object.keys(s.productMerges).length === 0 &&
+  s.subdivisions.length === 0 &&
+  !s.productVerdicts.some((v) => v.verdict === 'collapse-to-core')
+
+/** Is the concern vocabulary fragmented enough that a no-op draft earns pushback? */
+function fragmentedVocab(vocab: AreaVocabView): boolean {
+  const n = vocab.concerns.size
+  if (n >= FRAGMENTED_CONCERNS_MIN) return true
+  if (n < FRAGMENTED_SINGLETON_FLOOR) return false
+  const singletons = [...vocab.concerns.values()].filter((refs) => refs.length <= 1).length
+  return singletons >= n * FRAGMENTED_SINGLETON_SHARE
+}
+
+/** Crude per-token plural fold (`bookings`→`booking`, `entities`→`entity`). */
+const singularToken = (t: string): string =>
+  t.length > 3 && t.endsWith('ies')
+    ? `${t.slice(0, -3)}y`
+    : t.length > 2 && t.endsWith('s') && !t.endsWith('ss')
+      ? t.slice(0, -1)
+      : t
+
+/** Morphological key: hyphen tokens plural-folded and sorted, so pure name
+ *  variants collide (`bookings-attendees` ≡ `booking-attendees`). */
+const morphKey = (label: string): string => label.split('-').map(singularToken).sort().join('-')
+
+/** Concern-label groups that are morphological variants of one another —
+ *  deterministic MUST-LOOK candidates for the pushback (never auto-merged). */
+export function nearNameCandidates(vocab: AreaVocabView): string[][] {
+  const groups = new Map<string, string[]>()
+  for (const label of vocab.concerns.keys()) {
+    const key = morphKey(label)
+    const list = groups.get(key)
+    if (list) list.push(label)
+    else groups.set(key, [label])
+  }
+  return [...groups.values()].filter((g) => g.length > 1).map((g) => g.sort())
+}
+
+/** The one-refusal pushback text: the vocabulary's shape, stated as numbers. */
+function emptyDraftPushback(vocab: AreaVocabView): string {
+  const n = vocab.concerns.size
+  const docs = new Set([...vocab.concerns.values()].flat()).size
+  const singletons = [...vocab.concerns.values()].filter((refs) => refs.length <= 1).length
+  const candidates = nearNameCandidates(vocab)
+  const candidateLines =
+    candidates.length > 0
+      ? `\nName variants that look like the same label (judge each — never merge blindly):\n${candidates.map((g) => `- ${g.join('  ↔  ')}`).join('\n')}`
+      : ''
+  return (
+    `An empty settlement over THIS vocabulary is almost certainly under-merged: ${n} concerns over ${docs} docs, ${singletons} carrying a single doc. ` +
+    `Docs cluster into a handful of areas — most single-doc labels are subtopics of a broader concern and belong under its umbrella. ` +
+    `Read a few docs (\`read_doc\`), fold subtopics into their umbrellas, and check again.${candidateLines}\n` +
+    `If after looking you still judge every label a genuinely distinct topic, resubmit the same empty draft and it will pass.`
+  )
+}
+
 function checkSettlementTool(vocab: AreaVocabView): SessionTool {
+  // One refusal cycle, mirroring the outcomePrecondition below: the FIRST
+  // no-op draft on a fragmented vocabulary is pushed back with the numbers;
+  // an identical resubmit passes, so a deliberate "nothing to merge" still
+  // finishes inside budget.
+  let pushedBack = false
   return defineSessionTool({
     name: 'check_settlement',
     description:
@@ -325,6 +399,10 @@ function checkSettlementTool(vocab: AreaVocabView): SessionTool {
     async execute(args) {
       const errors = validateSettlement(args, vocab)
       if (errors.length === 0) {
+        if (!pushedBack && isNoOpSettlement(args) && fragmentedVocab(vocab)) {
+          pushedBack = true
+          return { content: emptyDraftPushback(vocab), isError: true }
+        }
         return {
           content: `The settlement is valid: ${Object.keys(args.productMerges).length + Object.keys(args.concernMerges).length} merge(s), ${args.productVerdicts.length} verdict(s), ${args.subdivisions.length} subdivision(s). Produce it as the outcome.`,
         }
@@ -440,10 +518,18 @@ export function settleAreasBriefing(
       ...vocab.overThreshold.map((label) => `  ${label}`),
     )
   }
+  const singletons = [...vocab.concerns.values()].filter((refs) => refs.length <= 1).length
   lines.push(
     '',
     'Merge what names the same thing, give every non-core product its verdict,',
     'subdivide an oversized concern only when it genuinely bundles distinct slices.',
+    ...(singletons > 0
+      ? [
+          `Mind the grain: ${singletons} of ${vocab.concerns.size} concerns carry a single doc — docs cluster`,
+          'into a handful of areas, so most single-doc labels are subtopics that belong',
+          'under a broader concern from the briefing. Only genuinely distinct topics stay apart.',
+        ]
+      : []),
     'Check the draft with `check_settlement`, then produce the outcome.',
   )
   return lines.join('\n')

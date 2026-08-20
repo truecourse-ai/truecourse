@@ -375,6 +375,26 @@ function resolutionMatchesConflict(
   return anchorMatch(a) && anchorMatch(b);
 }
 
+/**
+ * A stored resolution for THIS doc pair that does NOT match the conflict's
+ * precise dispute identity — the pair was re-flagged with drifted quotes (the
+ * overlap session excerpts the same disagreement differently on every scan),
+ * or an earlier dispute between these docs was resolved and a new one flagged.
+ * Surfaces show it as a reapply HINT on the open conflict; it never resolves
+ * anything by itself (a genuinely new dispute must not be swallowed by an old
+ * verdict).
+ */
+export function dormantResolutionForPair(
+  decisions: DecisionsLike,
+  a: string,
+  b: string,
+  sections: readonly OverlapSectionLike[] | undefined,
+): ConflictResolutionLike | undefined {
+  return (decisions.conflictResolutions ?? []).find(
+    (r) => samePair(r.docA, r.docB, a, b) && !resolutionMatchesConflict(r, a, b, sections),
+  );
+}
+
 /** The first stored resolution matching this conflict, or `undefined`. */
 function matchResolution(
   decisions: DecisionsLike,
