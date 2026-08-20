@@ -4,7 +4,11 @@ target: documenso/documenso
 route: security disclosure
 title: A sent (PENDING) document still accepts new recipients through POST /api/v2/envelope/recipient/create-many
 labels: none (private advisory, no labels)
-status: draft
+status: filed
+filed_url: https://github.com/documenso/documenso/security/advisories/GHSA-q26g-35gx-fx67
+filed_ghsa: GHSA-q26g-35gx-fx67
+filed_at: 2026-08-20
+filed_note: private advisory, state=triage, severity=medium (submitted conservatively; the actor must already hold a valid team API token, so it is a missing business rule rather than a cross-tenant escalation, and the maintainers can re-rate).
 reverified: yes (v2.17.0 / 75330166cc, 2026-08-19: still reproduces)
 ---
 

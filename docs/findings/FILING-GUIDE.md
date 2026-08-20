@@ -109,29 +109,23 @@ python3 tools/redact-transcript.py <files...> -o /tmp/redacted
 
 Always re-scan what actually left the machine, not just what the tool generated.
 
-## Pace, and not getting flagged
+## Positioning, and pace
 
-The filing account is new and has no history, which is exactly the profile GitHub's abuse detection treats as suspicious. A suspension would take every filed issue down with it, so pace matters more than throughput.
+**We file openly as an agent.** The account is `truecourse-agent`, every report closes by saying it was found by a pipeline reading the product's own documentation against a live instance, and security reports carry an explicit AI-usage disclosure. Nothing here is disguised as human work, and it must not be. If a maintainer asks how a finding was produced, tell them plainly.
 
-- **At most 2 to 3 public issues per day**, alternating repos rather than concentrating on one.
-- **Private security advisories are exempt.** They are not public content, so they add no spam signal, and they are usually the highest-value item anyway. File them with the API rather than the web form when the repo has private reporting enabled:
+That means the reason to pace is **not** to look human. It is three other things:
 
-```bash
-gh api repos/<owner>/<repo>/private-vulnerability-reporting          # {"enabled":true}
-gh api -X POST repos/<owner>/<repo>/security-advisories/reports --input payload.json \
-  --jq '{ghsa_id, state, html_url}'
-```
+1. **GitHub's abuse heuristics do not read intent.** They pattern-match on account age and content-creation rate. A young account can be flagged whether or not it is honest about what it is, and a suspension takes every filed report down with it. This is a mechanical constraint to route around.
+2. **Maintainer bandwidth is finite.** Dropping a dozen reports on a tracker at once is inconsiderate even when every one is correct. Responsiveness is a resource: on the first target, two reports produced two fixes inside a day. Do not exhaust that.
+3. **Every report has to be worth a maintainer's time.** This is the real limit, and it does not scale with volume. A verified, reproduced, root-caused report earns the next one a reading; a thin one costs credit for the whole batch.
 
-  The payload takes `summary`, `description` (the full report body), `severity`, and a `vulnerabilities` array naming the affected package and version range. The reply's `state` is `triage` and the advisory is visible only to the maintainers and the reporter.
-- **Give the account a profile** before a long campaign: avatar, bio, profile README saying what it files. Cheap, and it changes how both the heuristics and the maintainers read it.
-- **Accept the reporter credit.** After submitting an advisory, GitHub offers the reporting account a pending credit (`type: reporter`). Standing decision: accept it. If the maintainers publish the advisory, `truecourse-agent` is then listed in its Credits section, which carries through to the GitHub Advisory Database and any CVE record. That is durable public evidence that the pipeline finds real security defects, it accrues to the agent account rather than to a personal one, and it gives a new account genuine standing. Note Strapi's SECURITY.md treats credit as opt-in with "no credit" as the default, so state the preference in the report body too. Accepting is UI-only, there is no API endpoint; the API can only read the state:
+Working rules that follow:
 
-```bash
-gh api repos/<owner>/<repo>/security-advisories/<GHSA-ID> \
-  --jq '.credits_detailed[] | "\(.user.login) \(.type) \(.state)"'
-```
-
-- **Hold a sibling public issue when a private advisory covers the same code.** Filing the docs-side issue for a finding whose security half is still in triage would disclose it early.
+- **2 to 3 public issues a day**, alternating targets, until the account has a track record. Revisit once it does; the constraint is heuristics and courtesy, not a rule of nature.
+- **Private advisories are exempt.** They are not public content and carry no abuse signal.
+- **PR comments and follow-ups on live threads are cheap.** A follow-up arising from an active conversation reads differently from a cold report, both to a human and to the heuristics.
+- **A promise made in a thread is a commitment.** If a comment says a separate issue will be opened, open it.
+- **Give the account a real profile.** Since it files openly as an agent, its profile should say so: what the pipeline does, that a human reviews before filing, and how to reach a person. That is the honest version of "looks legitimate", and it is worth more than any pacing trick.
 
 ## The filing procedure
 
