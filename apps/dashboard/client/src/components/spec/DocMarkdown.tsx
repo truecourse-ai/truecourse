@@ -194,6 +194,20 @@ function splitSections(source: string): Section[] {
   return sections;
 }
 
+/**
+ * Drop a leading YAML frontmatter block. It is metadata a doc states about
+ * itself — a synced ticket's dates and status, a repo doc's own header — and a
+ * reader wants the document, not its bookkeeping. Stripping is a rendering
+ * concern only: the block stays in the source every consumer downstream reads.
+ *
+ * Deliberately narrow. The fence must open on the very first line, and only the
+ * first block is removed, so a `---` rule inside the prose is left alone.
+ */
+function stripFrontmatter(source: string): string {
+  const m = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(source);
+  return m ? source.slice(m[0].length).replace(/^\r?\n/, '') : source;
+}
+
 export function DocMarkdown({
   source,
   highlight = [],
@@ -206,6 +220,7 @@ export function DocMarkdown({
   highlightPreamble?: boolean;
 }): ReactNode {
   const hl = new Set(highlight.map(norm));
+  source = stripFrontmatter(source);
 
   if (hl.size === 0 && !highlightPreamble) {
     return (

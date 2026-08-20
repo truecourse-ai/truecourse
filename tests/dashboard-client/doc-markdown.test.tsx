@@ -120,3 +120,55 @@ describe('DocMarkdown — what the directive syntax must not touch', () => {
     expect(container.querySelector('[data-admonition]')).toBeNull();
   });
 });
+
+/**
+ * A synced ticket states its dates and status as YAML frontmatter, and a reader
+ * opening the doc wants the ticket rather than our bookkeeping. The renderer is
+ * the only place that hides it — the block stays in the source everything
+ * downstream reads, so these guard the presentation contract, not the data.
+ */
+describe('DocMarkdown — YAML frontmatter', () => {
+  const FM = [
+    '---',
+    'created: 2026-07-09T20:35:49.691Z',
+    'updated: 2026-08-19T18:30:01.773Z',
+    'status: "Done"',
+    'status_history:',
+    '  - "2026-07-09T20:35:56.078Z  To Do -> Done"',
+    '---',
+    '',
+    '# KAN-2: Idempotent order creation',
+    '',
+    'Order creation must be idempotent.',
+  ].join('\n');
+
+  it('hides the block and renders the document that follows', () => {
+    render(<DocMarkdown source={FM} />);
+    expect(screen.queryByText(/created:/)).toBeNull();
+    expect(screen.queryByText(/status_history:/)).toBeNull();
+    expect(screen.queryByText(/To Do -> Done/)).toBeNull();
+    expect(screen.getByRole('heading', { name: 'KAN-2: Idempotent order creation' })).toBeTruthy();
+    expect(screen.getByText('Order creation must be idempotent.')).toBeTruthy();
+  });
+
+  it('hides it on the highlighted path too, where the doc is split by section', () => {
+    render(<DocMarkdown source={FM} highlight={['KAN-2: Idempotent order creation']} />);
+    expect(screen.queryByText(/created:/)).toBeNull();
+    expect(screen.getByText('Order creation must be idempotent.')).toBeTruthy();
+  });
+
+  it('leaves a horizontal rule inside the prose alone', () => {
+    const { container } = render(
+      <DocMarkdown source={['# Title', '', 'before', '', '---', '', 'after'].join('\n')} />,
+    );
+    expect(screen.getByText('before')).toBeTruthy();
+    expect(screen.getByText('after')).toBeTruthy();
+    expect(container.querySelector('hr')).toBeTruthy();
+  });
+
+  it('only strips a fence that opens the document', () => {
+    render(<DocMarkdown source={['intro', '', '---', 'created: 2026-01-01', '---'].join('\n')} />);
+    // Not frontmatter — it is prose that happens to look like it.
+    expect(screen.getByText(/created: 2026-01-01/)).toBeTruthy();
+  });
+});
