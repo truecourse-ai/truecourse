@@ -68,5 +68,10 @@
   "routeSuggestion": "public issue",
   "policyBasis": "CONTRIBUTING.md: 'The most useful contribution is a detailed issue. Treat it like a spec.' plus '#3026: Most new PRs will be closed with a request to open an issue instead.' The fix is a small one and the temptation is to send a patch; the policy says do not.",
   "confidence": "high",
-  "notes": "The issue should say the fix is already written elsewhere in the repo: createEnvelopeFields can call the same per-type validators that set-fields-for-document.ts:136-195 calls, and should throw AppError(AppErrorCode.INVALID_REQUEST) so the API answers 400, rather than the bare `new Error(errors.join(', '))` the setFields path throws today (which surfaces as a 500 even where the rules ARE enforced). Two scope facts to state: the same unvalidated service also backs the v1 POST /document/field/create-many, so this is not v2-only; and the doc states the rule as a product-wide invariant, repeating it in five separate Rules lists, so it cannot be dismissed as a stray sentence. Report only the observed TEXT case as observed and list the other eight as expected-but-unverified, or re-run them first if the live step covers it."
+  "notes": "The issue should say the fix is already written elsewhere in the repo: createEnvelopeFields can call the same per-type validators that set-fields-for-document.ts:136-195 calls, and should throw AppError(AppErrorCode.INVALID_REQUEST) so the API answers 400, rather than the bare `new Error(errors.join(', '))` the setFields path throws today (which surfaces as a 500 even where the rules ARE enforced). Two scope facts to state: the same unvalidated service also backs the v1 POST /document/field/create-many, so this is not v2-only; and the doc states the rule as a product-wide invariant, repeating it in five separate Rules lists, so it cannot be dismissed as a stray sentence. Report only the observed TEXT case as observed and list the other eight as expected-but-unverified, or re-run them first if the live step covers it.",
+  "filed": {
+    "url": "https://github.com/documenso/documenso/issues/3290",
+    "at": "2026-08-20",
+    "account": "truecourse-agent"
+  }
 }

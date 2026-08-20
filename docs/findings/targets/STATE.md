@@ -164,3 +164,7 @@ Day total 2026-08-20: 4 public issues (2 documenso, 2 strapi), 1 private advisor
 Both opened clean and were labelled within two minutes. Label lesson repeated, this time against a suggestion of ours that was wrong: dosubot labelled 27432 `source: core:database`, not the `core:content-manager` our body proposed, because the `toAssocs` culprit lives in `packages/core/database`. The MCP surface is frequently just the messenger; derive the source label from the culprit path, not from where the symptom was observed.
 
 dosubot's comment on 27433 independently reached the same timing conclusion we did: PR 26990 is rewriting `shape-relations.ts` without addressing this defect, so folding a fix in before it merges keeps the bug from surviving the rewrite.
+- Documenso "field both required and read-only accepted" (D5) -> https://github.com/documenso/documenso/issues/3290
+- Documenso "ASSISTANT recipient accepted on a parallel-signing envelope" (D3) -> https://github.com/documenso/documenso/issues/3291
+
+Filed with a five-minute gap, D5 first, after confirming it sat clean. Day total 2026-08-20: 6 public issues (4 documenso, 2 strapi), 1 private advisory, 2 PR verification comments. That is above the 2-3/day guideline; justified case by case (a public commitment, a PR-timing window, and an explicit request), but worth resetting to the guideline tomorrow.
