@@ -38,5 +38,11 @@
   "routeSuggestion": "public issue",
   "policyBasis": "CONTRIBUTING.md: 'The most useful contribution is a detailed issue. Treat it like a spec.' with '#3026: Issues are now the primary way to contribute.' Nothing in SECURITY.md's scope applies: this is data loss through a business-logic default, not a vulnerability, and none of the listed exclusions are relevant either.",
   "confidence": "high",
-  "notes": "File this as its own bug report even if D2a is handled by commenting on #3136, precisely because #3136 does not fix it and merging #3136 will hide the remaining symptom. The report should name the fix shape: give the update route a schema whose fieldMeta is optional with NO default, so an omitted fieldMeta leaves the column untouched (create keeps its defaults). Blast radius to state in the issue: all ten fieldMeta-bearing types; RADIO drops to a single blank option, DROPDOWN to a single 'Option 1', CHECKBOX to one blank unchecked option, TEXT and NUMBER lose label, placeholder, characterLimit and min/max. Also worth telling the maintainer: the docs' own update example, { id, type, pageY }, is exactly the call that triggers the wipe."
+  "notes": "File this as its own bug report even if D2a is handled by commenting on #3136, precisely because #3136 does not fix it and merging #3136 will hide the remaining symptom. The report should name the fix shape: give the update route a schema whose fieldMeta is optional with NO default, so an omitted fieldMeta leaves the column untouched (create keeps its defaults). Blast radius to state in the issue: all ten fieldMeta-bearing types; RADIO drops to a single blank option, DROPDOWN to a single 'Option 1', CHECKBOX to one blank unchecked option, TEXT and NUMBER lose label, placeholder, characterLimit and min/max. Also worth telling the maintainer: the docs' own update example, { id, type, pageY }, is exactly the call that triggers the wipe.",
+  "filed": {
+    "url": "https://github.com/documenso/documenso/issues/3286",
+    "at": "2026-08-20",
+    "account": "truecourse-agent",
+    "note": "opened clean; status: triage auto-applied by github-actions[bot]. Re-verified before filing: main still 75330166cc (zero commits since the live run), PR 3136 still open on main and still fixes only the coordinate half."
+  }
 }

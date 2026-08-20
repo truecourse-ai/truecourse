@@ -141,3 +141,16 @@ Rules adopted:
 - At this cadence the remaining 43 drafts clear in roughly two weeks.
 
 - GHSA-h3c5-gq5q-4q3m: reporter credit ACCEPTED for truecourse-agent (2026-08-19). Standing policy from here: accept the reporter credit on every advisory. If Strapi publishes it, the account is credited on the advisory, in the GitHub Advisory Database and in any CVE record.
+
+## 2026-08-20
+
+Pre-filing re-verification (documenso): `main` is still `75330166cc` = v2.17.0, `ahead_by: 0` since the live re-run, so yesterday's reproduction applies to today's code unchanged. PRs 3136-3139 unchanged (3136 still open on main, still only the coordinate half). Five new upstream issues since 2026-08-19, none overlapping ours.
+
+- Documenso "update-many resets fieldMeta to type defaults" (D2b) -> https://github.com/documenso/documenso/issues/3286 (OPEN, filed 2026-08-20 as truecourse-agent). Opened clean; `status: triage` auto-applied as expected. Filed first of the Documenso batch deliberately: it is silent data loss, and if PR 3136 merges first the loud symptom disappears while this half survives, so the body warns whoever merges it.
+
+Note: the source clones under the old session scratchpad lost their `.git` directories during the 2026-08-19 disk crunch. They are working trees only now. Upstream checks were done through the GitHub API instead, which is authoritative for "has upstream moved". A future source-level re-check, and the Cal.diy live re-run, both need a fresh clone; 29 GB free as of today.
+- Documenso "reject returns 200 but the envelope still reads PENDING" (D4) -> https://github.com/documenso/documenso/issues/3287 (OPEN, filed 2026-08-20 as truecourse-agent). Filed after watching 3286 stay clean for five minutes.
+
+Documenso automation observed on both filings: `github-actions[bot]` applies `status: triage` within ~15s and posts a first-issue welcome comment at ~20s. Friendly, not enforcing. Nothing to act on.
+
+Day total 2026-08-20: 2 public issues (documenso), which is the cadence ceiling. The D1 advisory remains available today because private advisories are exempt.

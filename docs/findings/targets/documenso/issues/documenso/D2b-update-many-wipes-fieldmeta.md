@@ -4,17 +4,17 @@ target: documenso/documenso
 route: public issue
 title: POST /api/v2/envelope/field/update-many resets a field's fieldMeta to type defaults when fieldMeta is omitted
 labels: bug (template default; the repo's actual label is "type: bug")
-status: draft
+status: filed
+filed_url: https://github.com/documenso/documenso/issues/3286
+filed_at: 2026-08-20
+format_note: Body matches documenso bug-report.yml labels exactly (### Issue Description / Steps to Reproduce / Expected Behavior / Current Behavior / Operating System [e.g., Windows 10] / Browser [e.g., Chrome, Firefox] / Version [e.g., 2.13.0] + the checkbox block). No enforcing bot on this repo, but matching keeps a triager oriented.
 reverified: yes (v2.17.0 / 75330166cc, 2026-08-19: still reproduces)
 ---
-
-# POST /api/v2/envelope/field/update-many resets a field's fieldMeta to type defaults when fieldMeta is omitted
-
-## Issue Description
+### Issue Description
 
 The Fields API documents `update-many` as a partial update: change one property of one field in a single request. In practice, any `update-many` call that does not resend the complete `fieldMeta` overwrites the stored configuration with the type's default metadata, behind a 200 that echoes the wiped state as though it were the update result. A TEXT field loses its label, placeholder, required flag and character limit; a RADIO field's option list becomes a single blank option, a CHECKBOX's becomes one blank unchecked option, a DROPDOWN's becomes a single "Option 1". There is no way to avoid it from the client side: `type` is the schema's union discriminator and is therefore mandatory on an update, so the default is always materialised. The documented update example, `{ id, type, pageY }`, is exactly the call that triggers it.
 
-### Documentation
+#### Documentation
 
 https://docs.documenso.com/docs/developers/api/fields, "Update Fields":
 
@@ -37,7 +37,7 @@ and the response the page shows for that partial update:
 
 Nothing on the page says a partial update discards the rest of the field's configuration.
 
-### Cause
+#### Cause
 
 `ZEnvelopeFieldAndMetaSchema` gives every fieldMeta-bearing member a create-time default: https://github.com/documenso/documenso/blob/3cf2963cd03d8b24770b7490bdb20e596baa5d65/packages/lib/types/field-meta.ts#L403-L448. All ten members read `fieldMeta: Z<Type>FieldMeta.optional().default(FIELD_<TYPE>_META_DEFAULT_VALUES)` (SIGNATURE, INITIALS, NAME, EMAIL, DATE, TEXT, NUMBER, RADIO, CHECKBOX, DROPDOWN). The update route consumes that schema (`packages/trpc/server/envelope-router/envelope-fields/update-envelope-fields.types.ts:18`), so an omitted `fieldMeta` arrives at the service as the full default object rather than as `undefined`, and the service writes it unconditionally inside `tx.field.update`: https://github.com/documenso/documenso/blob/75330166cc00b29c14399bc2e391e4b4d8080c00/packages/lib/server-only/field/update-envelope-fields.ts#L136.
 
@@ -47,14 +47,18 @@ Still present at today's head, `75330166cc` (v2.17.0): both `field-meta.ts` and 
 
 Fix shape: give the update route a schema whose `fieldMeta` is optional with no default, so an omitted `fieldMeta` leaves the column untouched, and leave create's defaults alone.
 
-### Related
+#### Suggested labels
+
+`type: bug`
+
+#### Related
 
 - PR #3136 fixes the sibling defect on the same endpoint (the route validates `page` / `positionX` / `positionY` while the service reads `pageNumber` / `pageX` / `pageY`, so a move is a silent no-op). It covers the coordinate half only. Its current diff still forwards `fieldMeta: field.fieldMeta`, the zod-defaulted value, so with #3136 merged a move would work and the field's configuration would still be wiped. Merging it makes the endpoint look fixed while this defect stays.
 - The audit log written by `diffFieldChanges` records the fieldMeta reset, so the loss is visible in the audit trail even though nothing surfaces it to the caller.
 
 Found by TrueCourse running the published API docs against a live instance; the full transcript (requests, responses, server log) is available on request.
 
-## Steps to Reproduce
+### Steps to Reproduce
 
 Build tested: v2.16.0 (tag `v2.16.0`, `3cf2963cd03d8b24770b7490bdb20e596baa5d65`), built and run from source: `npm ci`, `npx turbo run build --filter=@documenso/remix`, `npm run start -w @documenso/remix`, against Postgres 17, with `NEXT_PRIVATE_JOBS_PROVIDER=local` and `NEXT_PUBLIC_UPLOAD_TRANSPORT=database`. Every call carries a team API token: `Authorization: <token>`. Ids below are from the recorded run.
 
@@ -89,11 +93,11 @@ Build tested: v2.16.0 (tag `v2.16.0`, `3cf2963cd03d8b24770b7490bdb20e596baa5d65`
 
 Re-tested live on v2.17.0 (75330166cc, 2026-08-19): still reproduces, unchanged. The same 200 replaced {label:'Job Title', placeholder:'Enter your job title', required:true, characterLimit:40, textAlign:'left'} with the text-type defaults.
 
-## Expected Behavior
+### Expected Behavior
 
 An `update-many` call that does not carry `fieldMeta` leaves the field's stored `fieldMeta` untouched. After step 4 the field still reads `{"label":"Job Title","placeholder":"Enter your job title","required":true,"type":"text","characterLimit":40,"textAlign":"left"}`.
 
-## Current Behavior
+### Current Behavior
 
 Step 4 returns HTTP 200 and the stored configuration is gone:
 
@@ -107,14 +111,21 @@ The blast radius is all ten fieldMeta-bearing types. RADIO drops to `values: [{i
 
 The same response also shows the coordinate no-op that PR #3136 addresses: `positionY` is still `"20"` after a request that asked for 60.
 
-## Operating System
+### Operating System [e.g., Windows 10]
 
 n/a (API, self-hosted from source)
 
-## Browser
+### Browser [e.g., Chrome, Firefox]
 
 n/a (API)
 
-## Version
+### Version [e.g., 2.13.0]
 
 2.16.0 (tested; tag `v2.16.0` = `3cf2963cd03d8b24770b7490bdb20e596baa5d65`), re-checked in source against 2.17.0 (`75330166cc00b29c14399bc2e391e4b4d8080c00`), where the culprit files are byte-identical.
+
+### Please check the boxes that apply to this issue report.
+
+- [x] I have searched the existing issues to make sure this is not a duplicate.
+- [x] I have provided clear steps to reproduce the issue.
+- [x] I have included the relevant environment information.
+- [x] I understand that this is a voluntary contribution and that there is no guarantee of resolution.
