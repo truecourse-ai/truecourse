@@ -59,7 +59,7 @@ import {
   type GuardDoc,
   type GuardSessionSummary,
 } from '@truecourse/guard-generator'
-import { createSessionRun, type SessionRunStore } from '../../lib/sessions-store.js'
+import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js'
 import { resolveCommitSha } from '../../lib/repo-ref.js'
 import { createConfiguredSessionDriver } from '../llm/session-driver.js'
 import type { LlmTransportFlag } from '../../config/global-config.js'
@@ -164,6 +164,10 @@ export interface CreateGuardGenerateSeamsOptions {
   concurrency?: number
   /** Every transcript event as it is persisted — the CLI's live line. */
   onSessionEvent?: (workItem: string, event: SessionEvent) => void
+  /** The (lazily created) sessions-store run record just came into being —
+   *  fired on first session acquire; never on a fully-cached run. The CLI
+   *  prints the dashboard "watch live" deep link from it. */
+  onRunStarted?: (info: SessionRunStartedInfo) => void
   /**
    * Single-step mode: the ONE step whose sessions may run. Every PRIOR step's
    * pool becomes a cache-only replay — served from its outcome cache, and a
@@ -408,6 +412,7 @@ export function createGuardGenerateSessionSeams(
     })
     run = store
     runIdentity = { runId: store.runId, dir: store.dir }
+    opts.onRunStarted?.({ command: 'guard-generate', runId: store.runId, dir: store.dir })
     return { run: store, driver }
   }
   // An injected driver (`opts.driver`, the test seam) brings its own

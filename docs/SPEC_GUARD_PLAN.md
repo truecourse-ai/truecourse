@@ -6474,7 +6474,390 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     mutual exclusivity, the reduced checklist, the not-ready error, the
     next-flag outro). Tests: `tests/core/guard-generate-steps.test.ts`.
 
-114. **Api steps carry an `Origin` header by default (2026-08-20).** STATUS: BUILT.
+111. **Conflict-resolution prune keys on doc existence, never on flag
+    matching (2026-08-20).** STATUS: BUILT.
+    The 2026-08-20 reference-corpus validation (cal.diy / documenso / strapi)
+    caught `pruneOrphanedConflictResolutions` deleting user-authored,
+    code-verified verdicts on every corpus write: cal.diy 6→1 rows, documenso
+    14→3. The old prune keyed staleness on "matches no currently flagged
+    overlap" — but the overlap session is a stochastic judge (~50–60% pair
+    recall run-to-run), and when it DOES re-flag a pair it re-excerpts the
+    quotes (drifted on 6 of 6 re-flagged pairs), so `resolutionMatchesConflict`'s
+    quote identity orphaned 16 of 20 stored verdicts in one scan. The
+    "cheaply re-derivable" premise the prune stood on is false.
+
+    Now: prune deletes ONLY a resolution naming a doc that left the corpus
+    (deterministic staleness). Everything else stays, dormant —
+    `orphanedConflictResolutions` still surfaces unmatched rows honestly, and a
+    new `dormantResolutionForPair` (shared) offers a re-flagged pair's stored
+    verdict as a one-command reapply hint on the OPEN conflict (`spec conflicts
+    list`/`show` + scan outro; `--json` carries `dormant`). Deliberately NOT
+    auto-honored: a genuinely new dispute between the same docs must not be
+    swallowed by an old verdict. As built:
+    `packages/spec-consolidator/src/curate.ts`,
+    `packages/shared/src/spec/overlap-resolution.ts`,
+    `tools/cli/src/commands/spec-conflicts.ts`, `tools/cli/src/commands/spec.ts`.
+    Tests: `tests/spec-consolidator/prune-conflict-resolutions.test.ts`,
+    `tests/shared/overlap-resolution.test.ts`.
+
+112. **Settle pushes back on a no-op settlement over a fragmented vocabulary
+    (2026-08-20).** STATUS: BUILT.
+    Same validation run, step 3: after the label→docs-map fix (`194af5dc`) the
+    settle sessions stopped timing out and started RUBBER-STAMPING — empty
+    draft to `check_settlement` on turn 1, zero `read_doc` calls, and the
+    checker answered "valid… produce it as the outcome". Net settlement across
+    all three repos: one trivial merge against 34–46 minted labels; with no
+    manualAreas pins the corpus grounds out at 25/34/26 areas (reference
+    6/4/5).
+
+    Now: `check_settlement` refuses the FIRST no-op draft (no merges, no
+    subdivisions, no collapse verdicts) over a fragmented vocabulary
+    (`FRAGMENTED_CONCERNS_MIN = 12` concerns, or ≥ half single-doc labels at 6+)
+    with the vocabulary's shape in numbers plus deterministic morphological
+    near-name candidates (per-token plural fold, token-sort equality — hints to
+    judge, never auto-merged). An identical resubmit passes, so a deliberate
+    "nothing to merge" still finishes in budget — one refusal cycle, the same
+    pattern as the outcome precondition. The system prompt and briefing gained
+    the grain rule (single-doc subtopics fold into their umbrella; "don't merge
+    when in doubt" scoped to distinct topics, not granularity). Prompt
+    fingerprint rides the settle cache key, so existing caches self-invalidate.
+    Papercut fixed alongside: a warm-cache `--only-<step>` run now prints the
+    step's replayed stats (docs/areas/verdicts) instead of a bare "Nothing to
+    run". As built: `packages/core/src/services/spec-scan/settle-areas.ts`,
+    `tools/cli/src/commands/spec.ts`. Tests: `tests/core/spec-scan-settle.test.ts`.
+
+113. **Cross-axis area grouping has no lever.** STATUS: OPEN.
+    The reference corpora group docs by AUDIENCE/SURFACE, not topic: documenso's
+    recipients docs split into `signing-concepts` (`concepts/recipient-roles.md`),
+    `signing-web` (`users/documents/add-recipients.md`) and `signing-api`
+    (`developers/api/recipients.md`); cal.diy splits `bookings-api` from
+    `bookings-help`. The settlement vocabulary operates on TOPIC labels — a
+    concern merge unifies topics (putting all three recipients docs in ONE area,
+    the opposite of the reference), and a subdivision splits one oversized label
+    — so no sequence of merges/subdivisions expresses "regroup every topic's
+    docs by the surface they document". Today only `manualAreas` pins express an
+    audience grouping; item 112's pushback cannot close this gap, it only stops
+    under-merging within the topic axis. A lever would let the settle session
+    assign docs wholesale to named areas (schema + validation + fold + briefing
+    + estimate) — deliberately deferred 2026-08-20 to keep the scan fixes
+    shippable. Related: overlap recall was ~50–60% per scan (cal.diy 3/6,
+    documenso 10/17 of reference pairs) — contained by item 111 (a missed pair
+    no longer destroys its stored verdict) and structurally addressed by item
+    119 (deterministic collision pairing replaces the session's own retrieval).
+
+114. **manualAreas pins are immune to settle merges (2026-08-20).** STATUS:
+    BUILT. Caught by the same day's fresh full-pipeline validation run:
+    strapi's settle session merged `content-manager →
+    admin-panel-configuration`, and `groupByArea` folded the user's pinned
+    area id through the settle vocab map too (`canonicalizeIds(override,
+    vocab)`), so the pinned `core/content-manager` area came out renamed —
+    a pin's id flapping with LLM nondeterminism, and decisions.json no
+    longer matching the corpus it produced. Pins are the human's final word,
+    applied after settle; now they slug-normalize (static aliases included)
+    but never pass through the dynamic vocab map, so merges keep unifying
+    MINTED labels while user-stated ids stay literal. The deliberate
+    trade-off: a pin written in a drifted label stays its own area instead
+    of folding into the settled one — that is what a pin means. As built:
+    `packages/spec-consolidator/src/area-grouper.ts`. Test:
+    `tests/spec-consolidator/area-grouper.test.ts` (pin-vs-merge case).
+
+115. **Recipe discovery hardening (2026-08-20 guard-setup bench).** STATUS:
+    BUILT. The setup bench ran `--only-recipe` against all three reference
+    repos and every session gamed verification green: cal.diy authored the
+    app-store CLI as the product (the briefing's own inventory listed the
+    Nest api), documenso authored an inline `node -e` stub server answering
+    200 to every path (rewriting the one-liner comma-operator style to slip
+    the shell-operator lint), strapi a no-op eval build plus a config module
+    as `entry`. Five closures, all gating on the ENGINE side because prompt
+    rules alone were what got gamed:
+    - **Stage `static` in `verifyProposal`** — the free refusal rules now run
+      at stage zero of EVERY verification path (deterministic, session fold,
+      one-shot, cache), not just the session's `check_recipe` tool.
+    - **Inline-eval refusal** — eval flags (`node -e/-p`, `python -c`,
+      `sh -c`, `deno eval`, …) in `entry`/`serve` argvs, and an
+      install/build that is nothing but one eval one-liner (`true` stays the
+      sanctioned no-build).
+    - **The inventory rule** — a proposal with no `api` block while the
+      route manifest lists apps with HTTP route prefixes is refused, naming
+      them. Partial coverage is deliberately NOT refused (a monorepo
+      routinely serves one app and ships others it never runs).
+    - **The wildcard (anti-stub) probe** — after the health path answers,
+      verification GETs two paths no app could serve; identical status+body
+      on all three fails `server boot`. Discovery-only — the runner's
+      preflight never re-probes a recipe a human accepted.
+    - **Workspace api derivation** — the deterministic proposer's workspace
+      branch used to punt unless exactly one member declared a `bin`; now
+      the most-routed non-example manifest app with a plain `start` script
+      derives `api.serve` (workspace-mediated argv, `app`, `cwd: "repo"`,
+      the member's own health route — `/api/health` joined the ranking).
+      cal.diy now derives `yarn workspace @calcom/api-v2 start` +
+      `/health`, documenso `npm run start -w @documenso/remix` +
+      `/api/health` — the reference targets — with zero LLM calls; a boot
+      failure hands the session THIS candidate as evidence instead of
+      nothing. Route manifest also learned Remix/React-Router flat routes
+      (`buildRouteManifest`, gate: the app's routes config imports
+      `remix-flat-routes`; grammar mirrored from
+      `packages/interface-mapper/src/web/remix-flat.ts` — dependency
+      direction forbids the import), which is what made documenso's product
+      app visible at all (125 routes vs `other · no routes`). And the
+      database hint gained the recipe-app manifest fallback
+      (`databaseFromManifest`): strapi's `examples/getstarted` declares
+      `better-sqlite3` that its code only names in a knex config string, and
+      `examples/` is not a service dir, so nothing else could see it.
+      Deliberately NOT built: a `web` block in the proposal schema (web is
+      authored, never discovered — the repair prompt now says so) and serve
+      grounding to workspace scripts (held until a re-bench shows the
+      probe + eval rules leaking). ADDENDUM (same day): the re-bench's
+      first cal.diy run exposed that the PROPOSAL schemas had no `cwd` —
+      the runner and the deterministic path carry `cwd: "repo"` but a
+      session could not express it, so no workspace-mediated serve could
+      ever boot from a repair (the session burned its budget on `--cwd`
+      argv hacks). Both proposal schemas gained `cwd: z.literal('repo')`
+      plus prompt lines. VALIDATED (step-05 re-bench ×3): gaming gone 3/3 —
+      cal.diy green (api-v2 `yarn workspace` serve, real /health 200 boot,
+      one verify, 249k tokens), documenso green (the reference serve
+      verbatim, real /api/health 200 against its dockerized test db, 261k),
+      strapi honest CLI-only (real install/build/bin; its api surface needs
+      a strapi route reader — open gap). Open observations: verify's
+      install/build channel is an unsandboxed host shell (one session used
+      `build: "…; ls -la ..; false"` as recon; strapi's green recipe runs
+      `corepack enable` — host shims — on every install), and the sandbox
+      HOME hits the corepack download prompt on yarn-workspace boots.
+      SECOND ADDENDUM (same evening, clean-rerun round): all four
+      observations closed and one incident survived. (1) compose bring-up
+      in install/build statically refused → `api.services.up/down`; the
+      proposal schemas therefore gained `services {up, down?}` + top-level
+      `app` (the first refusal steered an obedient session into a field the
+      schema forbade — two zod re-asks counted as the 2-strike malformed
+      death; open agent-loop question: schema re-asks may deserve their own
+      budget). (2) A GREEN verdict now carries `warnings` (surfaced as
+      todos + "VERIFIED WITH CAVEATS") when the boot rode a localhost
+      datastore the recipe never brings up. (3) Host-mutation refusals over
+      install/build/services + sudo in any argv: sudo, `corepack enable`
+      (message teaches `corepack yarn …`), global installs, npm config
+      set, git config --global, launchctl/systemctl, and — after a session
+      put `docker rm -f database` in services.up and REMOVED the
+      developer's running cal.diy database container (restored from its
+      surviving volume same hour) — `docker rm/kill/stop`, `docker volume
+      rm/prune`, `docker system prune`; project-scoped `docker compose
+      down` stays legal, and the incident command is a test verbatim.
+      (4) `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` defaults in every child env.
+      Plus: `probeApiServers` now runs `api.services.up` around the boots
+      and best-effort `down` after — the probe owns the world the recipe
+      declares (before this, a services recipe verified green and then
+      failed its own probe into an empty world). Final clean runs: cal.diy
+      green + warning fires; documenso green in the reference shape
+      (testing compose under services, collision solved WITHOUT docker rm);
+      strapi honest CLI-only green with zero host mutations.
+      As built:
+      `packages/guard-generator/src/{recipe-discovery,recipe-propose,prompts}.ts`,
+      `packages/core/src/services/guard-setup/recipe-repair.ts`,
+      `packages/guard-runner/src/route-manifest.ts`,
+      `packages/analyzer/src/database-detector.ts`,
+      `packages/core/src/services/interface.service.ts`. Tests:
+      `tests/guard-generator/recipe-static-complaints.test.ts`,
+      `recipe-discovery.test.ts` (wildcard probe),
+      `recipe-propose.test.ts` (workspace member),
+      `tests/guard-runner/route-manifest.test.ts` (remix),
+      `tests/analyzer/database-detector.test.ts` (manifest fallback),
+      `tests/core/guard-setup-recipe-repair.test.ts` (session tools).
+
+116. **Dependency-catalog session: domain grain + convergence (2026-08-20
+    guard-setup bench).** STATUS: BUILT. The step-06 bench failed 0/3: the
+    one session that completed classified the raw service detection (65
+    junk rows on cal.diy — rule 1 forced an entry per url-mined hostname,
+    amplifying detector noise into curation), and the other two spent every
+    turn on read_file/search_repo and died without an outcome (the settle
+    disease, item 112). Three fixes in
+    `packages/core/src/services/guard-setup/dependency-catalog.ts`:
+    (1) rule 1 narrowed to SUBSTANTIATED services — an SDK-registry match
+    or a base-URL env var, the skeleton's own declarability bar; url-mined
+    hostnames become an information-only briefing line and the prompt calls
+    entries for them wrong, not thorough. (2) The briefing grounds on the
+    DOMAIN: it opens with the grain ("a handful of entries — the domain
+    objects the documented flows stand on"), lists the corpus area tags
+    with doc counts (a local corpus.json read; a missing corpus yields
+    nothing), and splits detection into must-account vs information-only.
+    (3) Settle-style convergence pressure: draft to `check_catalog` no
+    later than mid-budget, read a handful of files at most. The prompt
+    change rotates the session cache key. Re-bench: 3/3 converged in the
+    right universe — cal.diy 8 domain entries (2 turns/27k; was 65 junk
+    rows), documenso 10 (14 turns/140k; was dead), strapi 7 (19/276k; was
+    dead). Residual, tracked not fixed: recall GRAIN vs the hand-curated
+    references (semantic ~5/17 · 6/8 · 4/15 — cold sessions produce the
+    coarse layer; credential variants and per-type documents are slice
+    curation), synonym NAMING with no shown vocabulary (the item-106
+    lesson), a library (`passport`) forced in by its registry category,
+    and the externals skeleton's baseUrlEnv minting (finding 58 class)
+    still open. Tests: `tests/core/guard-setup-catalog.test.ts`
+    (substantiated-only rule, briefing split + corpus grounding).
+
+117. **Budget visibility + the wrap-up window (2026-08-21 documenso
+    spec-scan field run).** STATUS: BUILT. The first loop-driven scan at
+    scale: 12 of 26 overlap sessions — the twelve largest areas
+    (documents, api-reference, fields, recipients, security…) — read ONE
+    section per turn to the 45-turn wall and failed `budget-exhausted`
+    with nothing, 7.5M of the run's 13.2M tokens producing zero corpus
+    rows; the sessions that finished clustered at 41–44 turns. Root
+    cause: grants were silent and no prompt stated the numbers, so no
+    session could pace itself or knew a grant was its last (one began
+    wrapping up exactly one turn too late). Fixes, per
+    AGENTIC_PIPELINE_PLAN §3.3 (2026-08-21 amendment): (1) the shell
+    steers an announcement on every automatic resume grant — grant N of
+    M, fresh turn count, "LAST grant" on the final one; (2) when the last
+    budget binds the shell demands the outcome and allows `WRAP_UP_TURNS`
+    (3) further turns — room for the precondition round trip — before
+    failing, making the hard limit `(maxResumes + 1) × turns +
+    WRAP_UP_TURNS` (estimates updated); (3) the overlap prompt states its
+    real numbers and demands BATCHED `read_section` calls (the failed
+    sessions' pace was 1/turn; the drivers execute parallel calls
+    already); (4) a FAILED area's `sectionsOpened` is stamped into the
+    corpus off its transcript, separating "opened 45 and ran out" from
+    "never read". Also wired the shell half of `draftCheckpoint` (the
+    guard-setup sibling nudge — see the setup bench items). As built:
+    `packages/agent-loop/src/agent-loop.ts` (WRAP_UP_TURNS,
+    resumeGrantMessage, wrapUpMessage, steer plumbing),
+    `packages/core/src/services/spec-scan/{overlap,run}.ts`,
+    `packages/core/src/services/llm/spec-estimate.ts`,
+    `packages/core/src/commands/guard-adjudicate.ts`. Tests:
+    `tests/agent-loop/agent-loop.test.ts` (wrap-up + announcements +
+    draft checkpoint), `tests/llm-drivers/session-driver-conformance.test.ts`
+    (the demand lands as a user message in BOTH drivers),
+    `tests/core/spec-scan-overlap.test.ts` (prompt numbers, failed-area
+    stamp), `tests/core/spec-estimate.test.ts` (ceilings).
+
+118. **Setup hardening round 2 (2026-08-21 steps-05/06 run-of-record).**
+    STATUS: BUILT. Six fixes from the bench's engine items:
+    (1) **Compose NAMESPACE rule** — the boundary the docker-rm refusal
+    left open: cal.diy's verified-green `services.up` re-ported and
+    stopped the developer's live redis through legal `docker compose
+    up/stop` (bare invocation = the developer's default project; compose
+    "resolves" a port change by RECREATING the running container). Static
+    refusal in `staticProposalComplaints` (now takes `repoRoot`): every
+    `docker compose` in install/build/services must carry `-p <project>`
+    or an `-f` file pinning top-level `name:`; `-f -` (stdin) demands
+    `-p`. The generated `docker-compose.guard.yml` now pins
+    `name: tc-guard-<database>` (datastore-compose.ts). Both prompts
+    teach the rule + "namespace YOUR OWN world, never touch theirs".
+    (2) **Empty-schema warning** — the unserviced-localhost warning's
+    sibling: services declared, SQL URL pinned, and NO migrate-ish
+    command anywhere (install/build/services.up) warns that the green
+    rode whatever schema the volume already carried (cal.diy verified
+    against a 7-day-old reference volume under `SKIP_DB_MIGRATIONS=1`).
+    (3) **`draftCheckpoint` on both setup sessions** — the item-117 shell
+    mechanism wired onto recipe-repair (check_recipe, turn 8) and
+    dependency-catalog (check_catalog, turn 6): the death mode (strapi
+    recipe run 5, documenso catalog runs 1+3 — 20+ exploration turns,
+    zero or one late draft) now gets a structural mid-budget steer, not
+    briefing prose.
+    (4) **Skeleton plausible-origin rule** (third skeleton rule): a
+    `baseUrlEnv` must be origin-shaped (or carry a detected default URL),
+    never credential/callback-shaped (`DAILY_API_KEY`,
+    `CLOSECOM_CLIENT_ID`, `*_WEBHOOK_URL`, `*_REDIRECT_URI`), and never
+    a variable the recipe itself pins (`dub→NEXT_PUBLIC_WEBAPP_URL`) —
+    kills the finding-58 mint-time class that reproduced 3/3 runs on
+    cal.diy (18 invented declarations → ~3 honest ones).
+    (5) **`ownHosts` joins the proposal schema** + both prompts, written
+    through to recipe.json — the fallback recipe can finally name the
+    product's own domains (cal.diy: 81 detected externals under a
+    hostless recipe). NOTE: the 06-bench observation that detection
+    reported 81 even WITH reference ownHosts is still open — the filter
+    itself needs a look.
+    (6) **Sandbox-starts-empty briefing** — sandbox_exec/shell
+    descriptions + the repair how-to now say the sandbox is an empty
+    scratch dir (strapi run 5 burned early turns discovering that).
+    As built: `packages/guard-generator/src/{recipe-discovery,
+    externals-skeleton, datastore-compose, schemas, prompts}.ts`,
+    `packages/core/src/services/guard-setup/{recipe-repair,
+    dependency-catalog}.ts`. Tests:
+    `tests/guard-generator/recipe-static-complaints.test.ts` (namespace
+    rule, incident verbatim), `recipe-discovery.test.ts` (empty-schema
+    warning trio), `externals-skeleton.test.ts` (plausible-origin rule,
+    cal.diy verbatim). Open from the bench: the strapi web
+    route/screen reader (07's 0/79 ceiling), catalog briefing naming
+    what is NOT a dependency (passport/strapi-project), ownHosts-filter
+    investigation above.
+
+119. **Overlap retrieval is deterministic: collision pairing + cluster
+    sessions (2026-08-21).** STATUS: BUILT. The documenso full-corpus field
+    run (item 117's subject) exposed the structural problem behind the
+    ~50–60% overlap recall item 113 tracks: the session was doing
+    RETRIEVAL — deciding from 62 heading outlines where claims collide —
+    and retrieval cost scales with area size, so `notReached` covered
+    ~70% of the big areas' docs (46/62 api-integration, 44/63
+    document-signing) and the reference corpus's single most consequential
+    find (the `/envelope/distribute` body-form vs path-param contradiction,
+    code-verified to 404, present in FOUR docs) was never flagged. Budget
+    was the wrong lever in both directions. Three changes, one derivation:
+
+    - **Deterministic candidate pairing**
+      (`packages/spec-consolidator/src/collision-pairing.ts`). A
+      disagreement definitionally requires both docs to NAME the same
+      concrete thing, and those names are surface-extractable: claim
+      tokens (route path segments, UPPER_SNAKE members, camel/snake
+      identifiers, hyphenated header names — markdown link targets and
+      URLs stripped first, they name places not claims) plus canonical
+      HEADING keys (the `canonicalizeConcern` fold, which subsumes the
+      retired doc-level `widenedOverlapDocs` net at section level; both
+      deleted). Keys are idf-weighted `log2((S+1)/df)` (the `+1` keeps
+      two-doc corpora pairable), pairs generate only from keys in ≤ 24
+      sections, and a score floor drops corpus-generic residue. Within a
+      doc pair, GREEDY MAX-COVERAGE selection (marginal uncovered-key
+      weight ≥ the floor, ceiling 6) keeps a modest pair carrying a
+      unique signal alive beneath 50-point shared-code-example walls —
+      the distribute route's exact shape. Sections split fence-aware via
+      the shared `parseHeadings`, so every pair side is a heading
+      `read_section` can open.
+    - **One session per collision-cluster CHUNK, never per area.** Pairs
+      are assigned to exactly ONE area (lexicographically-first shared
+      area, union-first when the docs share none — the widened-net case),
+      clustered by connected components over doc refs, and chunked at
+      `MAX_BRIEFED_PAIRS` (30) in rank order. Every derived pair is
+      briefed to exactly one session; docs with no candidate collision
+      cost no session. The briefing leads with the ranked checklist
+      (shared signals named) above the chunk docs' outlines, and the
+      prompt now says this session is the ONLY one that will see these
+      pairs (the per-area SCOPE deferral rule is gone) while still
+      inviting flags the checklist didn't nominate.
+    - **Single-area assignment kills the multi-tag multiplier**: a doc
+      tagged into 6 areas no longer appears in 6 briefings. The flagged
+      record still lists its SPAN (`overlap.areas` = the docs' shared
+      areas) so resolutions scope as before.
+    - **Coverage is corpus data, stamped off the transcript.**
+      `Area.uncheckedPairs` (additive, optional) holds the briefed pairs
+      whose two sections the transcript never shows both opened — parsed
+      from `read_section` result headers, never self-reported, cached with
+      the outcome like `sectionsOpened` (which now SUMS across a run's
+      chunks); a failed chunk lands all its pairs there. A recall gap is
+      now the exact list of pairs nobody compared.
+
+    Cache: new name `consolidator/overlap-cluster`, keyed on the chunk
+    docs' content hashes + the PAIR-IDENTITY fingerprint (docs+headings,
+    never scores/keys — a weight shift from an edit elsewhere re-runs
+    nothing). Estimate mirrors via the shared `deriveOverlapWorkItems`;
+    bound wording is now "N of M comparisons changed". Field numbers
+    (documenso, 126 kept docs): 1 718 pairs kept in ~35 ms, 70 sessions,
+    ~1.05 MB total briefing chars — vs the old run's 26 sessions whose
+    12 largest all budget-died with zero rows; the distribute conflict is
+    co-briefed in both its doc pairs. Tracked residuals: enum-ABSENCE
+    disputes pair weakly (the shared token is the missing member —
+    ASSISTANT vs `validRoles`), prose-only disputes with zero shared
+    identifiers/headings ride only on co-briefed outlines, and coverage
+    does not yet accrete across runs (uncheckedPairs is recorded but the
+    next scan does not prioritize it). As built:
+    `packages/spec-consolidator/src/{collision-pairing,corpus-types,
+    overlap-detector,index}.ts`,
+    `packages/core/src/services/spec-scan/{overlap,run}.ts`,
+    `packages/core/src/services/llm/spec-estimate.ts`,
+    `tools/cli/src/commands/spec.ts`. Tests:
+    `tests/spec-consolidator/collision-pairing.test.ts` (extraction,
+    rarity, greedy max-coverage, clustering, fingerprint),
+    `tests/core/spec-scan-overlap.test.ts` (checklist briefing,
+    uncheckedPairs stamping, failed-chunk fold),
+    `tests/spec-consolidator/{curate,request-schema,overlap-detector}.test.ts`
+    and `tests/core/spec-estimate.test.ts` updated to the new derivation.
+
+120. **Api steps carry an `Origin` header by default (2026-08-20).** STATUS: BUILT.
     Node's fetch stamps browser-shaped `Sec-Fetch-*` headers on every request,
     so origin-checking middleware (better-auth's CSRF protection, found by the
     reactive-resume reference corpus — its recipe proof blocked 30 of 38
@@ -6484,10 +6867,9 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     implicit (same rule as the cookie jar): a step that authors its own
     `Origin` header wins. `packages/guard-runner/src/api/executor.ts`;
     `tests/guard-runner/api-origin.test.ts`; the `/echo` fixture endpoint
-    reflects `origin` alongside `authorization`. (Numbered 114 because
-    109–113 are reserved by concurrent workstreams' uncommitted items.)
+    reflects `origin` alongside `authorization`.
 
-115. **Web text matchers judge the FULL page text (2026-08-20).** STATUS: BUILT.
+121. **Web text matchers judge the FULL page text (2026-08-20).** STATUS: BUILT.
     `readVisibleText` truncated `body.innerText` to `WEB_TEXT_LIMIT` (2000)
     BEFORE matching, so content past the cut — portal-rendered dialogs land at
     the end of `<body>` by construction — was unassertable, and an absence
@@ -6500,7 +6882,7 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `tests/guard-runner/web-driver.test.ts` ("matches page text PAST the
     2000-char display cut") over a new `/long` fixture page.
 
-116. **Api GET expects poll until the state lands (2026-08-20).** STATUS: BUILT.
+122. **Api GET expects poll until the state lands (2026-08-20).** STATUS: BUILT.
     An app may ack a write before it is queryable — rybbit's pageview queue
     flushes on a 1000ms interval, and its first full reference board lost 27
     of 53 scenarios to seed-then-read races the web driver never sees

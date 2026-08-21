@@ -13,6 +13,7 @@ import {
   openSessionRun,
   reconcileSessionsStore,
   sessionRunDir,
+  toPublicRunRecord,
 } from '../../packages/core/src/lib/sessions-store.js';
 import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths.js';
 import { RunRecordSchema, SessionCommandSchema } from '../../packages/agent-loop/src/index';
@@ -107,6 +108,21 @@ describe('sessions store', () => {
     expect(typeof finished.finishedAt).toBe('string');
     // A dead endpoint must not be advertised.
     expect(finished.endpoint).toBeUndefined();
+  });
+
+  it('persists the run-level progress checklist and serves it to browsers', () => {
+    const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
+    run.setProgress([
+      { key: 'discover', label: 'Discovering docs', status: 'done', detail: '142 docs' },
+      { key: 'tag', label: 'Tagging doc areas', status: 'active' },
+    ]);
+    const reopened = openSessionRun(repo, 'spec-scan', run.runId);
+    expect(reopened.record().progress).toEqual([
+      { key: 'discover', label: 'Discovering docs', status: 'done', detail: '142 docs' },
+      { key: 'tag', label: 'Tagging doc areas', status: 'active' },
+    ]);
+    // toPublicRunRecord strips endpoint/pid only — progress reaches the UI.
+    expect(toPublicRunRecord(reopened.record()).progress).toHaveLength(2);
   });
 
   it('reopens an existing run for resume and lists runs newest first', async () => {

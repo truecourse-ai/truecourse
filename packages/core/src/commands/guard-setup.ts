@@ -61,7 +61,7 @@ import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
-import { sessionRunDir } from '../lib/sessions-store.js';
+import { sessionRunDir, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import {
   buildAuthProof,
   buildCatalogSession,
@@ -105,6 +105,12 @@ export interface GuardSetupInProcessOptions {
   refresh?: boolean;
   /** Interfaces step: re-author places that already carry authored tasks. */
   replace?: boolean;
+  /**
+   * A sessions-store run record just came into being — setup's own (lazy, on
+   * first session) and the nested interfaces step's alike, so the CLI can print
+   * a "watch live" deep link for each. Never fires on a run spending no sessions.
+   */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
    * Single-step mode (the CLI's `--only-<step>` flags): run only this step —
    * prior steps replay from what they left on disk (a step nobody ran throws
@@ -301,6 +307,7 @@ export async function guardSetupInProcess(
     ? createGuardSetupSessionContext({
         repoRoot,
         ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
+        ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
       })
     : null;
   const transportFlag = options.llm === 'cli' || options.llm === 'api' ? options.llm : undefined;
@@ -335,6 +342,7 @@ export async function guardSetupInProcess(
               replace: authorOpts.replace,
               ...(transportFlag ? { transport: transportFlag } : {}),
               ...(options.signal ? { signal: options.signal } : {}),
+              ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });
             interfacesRunId = run.runId;

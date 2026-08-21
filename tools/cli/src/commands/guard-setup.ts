@@ -42,7 +42,7 @@ import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
-import { isInteractive } from "./helpers.js";
+import { isInteractive, printWatchLive, resolveDashboardUrl } from "./helpers.js";
 import { provisionExternals } from "./guard-setup-externals.js";
 
 export interface RunGuardSetupOptions {
@@ -73,7 +73,8 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro(opts.only ? `Guard setup — ${SETUP_STEP_LABEL[opts.only]} only` : "Guard setup");
   await requireGitRepo(repoRoot);
-  await registerProject(repoRoot);
+  const project = await registerProject(repoRoot);
+  const dashboardUrl = await resolveDashboardUrl();
 
   if (opts.llmTransport === "agent" && !opts.io) {
     p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
@@ -115,6 +116,9 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
       ...(opts.only ? { only: opts.only } : {}),
       ...(opts.recipeRunner ? { recipeRunner: opts.recipeRunner } : {}),
       ...(opts.interfaces ? { interfaces: opts.interfaces } : {}),
+      // Fires per run record this invocation opens (setup's own and the nested
+      // interfaces step's) — each gets its exact-run deep link.
+      onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
       onLlmEstimate: async (estimate) => {
         // ONE LINE, deliberately: setup is bounded at two calls, so the staged modal
         // the big pipelines render would be more ceremony than the spend it describes.

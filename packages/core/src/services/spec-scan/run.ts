@@ -13,7 +13,8 @@
  *   → `spec-scan.curate-doc`   one session per doc   (pool)
  *   → `spec-scan.settle-areas` ≤1 session per corpus (barrier, concurrency 1)
  *   → groupByArea (det)
- *   → `spec-scan.overlap`      one session per area  (pool)
+ *   → deriveOverlapWorkItems (det — claim-token/heading pairing, item 119)
+ *   → `spec-scan.overlap`      one session per collision cluster (pool)
  *   → verify pointers + cross-area dedup (det) → assemble → write.
  *
  * The orchestrator's standing `instructions` ride EVERY downstream session's
@@ -75,11 +76,11 @@ import {
   readSourcesFile,
   resolveRepoIdentity,
   verifyOverlapSections,
-  widenedOverlapDocs,
   writeCorpus,
   writeDecisions,
   type Area,
   type AreaTag,
+  type CandidatePair,
   type CuratedCorpus,
   type CurateResult,
   type CurateStats,
@@ -125,10 +126,14 @@ import {
   OVERLAP_SESSION_CACHE_NAME,
   OVERLAP_SESSION_KIND,
   OverlapOutcomeSchema,
+  deriveOverlapWorkItems,
   overlapBriefing,
   overlapSessionCacheKey,
   overlapSessionDef,
   overlapWorkItem,
+  openedSectionKey,
+  pairRecord,
+  uncheckedBriefedPairs,
   type OverlapWorkItem,
 } from './overlap.js'
 import {
@@ -799,7 +804,7 @@ export async function runSpecScanSessions(
       cacheKey: () => settleAreasCacheKey(vocabView, instructionParts),
       schema: AreaSettlementSchema,
       session: () => settleAreasSessionDef({ vocab: vocabView, universe }),
-      briefing: () => settleAreasBriefing(vocabView, instructions),
+      briefing: () => settleAreasBriefing(vocabView, universe, instructions),
       driver: opts.driver,
       persistence: opts.persistence,
       concurrency: 1,
@@ -864,23 +869,51 @@ export async function runSpecScanSessions(
     )
   }
 
-  // ---- Overlap sessions (one per area) -------------------------------------
-  const overlapItems: OverlapWorkItem[] = []
-  if (opts.disableOverlapDetection !== true) {
-    for (const area of grouped.areas) {
-      const byPath = new Map(keptProse.map((d) => [d.path, d]))
-      const docs = area.docRefs.map((ref) => byPath.get(ref)).filter((d): d is DocCandidate => d !== undefined)
-      const widened = widenedOverlapDocs(area, keptProse, vocabMap)
-      // No possible pair, no session: the area needs at least two docs to
-      // disagree, its own or one of its own beside a widened outsider.
-      if (docs.length + widened.length < 2 || docs.length === 0) continue
-      overlapItems.push({ areaId: area.id, concern: area.concern, docs, widened })
+  // ---- Overlap sessions (one per collision cluster, item 119) --------------
+  // Retrieval is deterministic: global claim-token/heading pairing over the
+  // kept docs, each pair assigned to exactly ONE area, connected components
+  // per area — a doc with no candidate collision costs no session at all.
+  const overlapItems: OverlapWorkItem[] =
+    opts.disableOverlapDetection === true ? [] : deriveOverlapWorkItems(grouped.areas, keptProse, vocabMap)
+
+  // Which areas each doc landed in — the SPAN a flagged pair still records
+  // (`overlap.areas`) even though the pair is judged in one area only.
+  const areaIdsByDoc = new Map<string, string[]>()
+  for (const area of grouped.areas) {
+    for (const ref of area.docRefs) {
+      const list = areaIdsByDoc.get(ref) ?? []
+      list.push(area.id)
+      areaIdsByDoc.set(ref, list)
     }
+  }
+  const spannedAreas = (a: string, b: string, assigned: string): string[] => {
+    const bSet = new Set(areaIdsByDoc.get(b) ?? [])
+    const shared = (areaIdsByDoc.get(a) ?? []).filter((id) => bSet.has(id)).sort()
+    return shared.length > 0 ? shared : [assigned]
   }
 
   const overlapEntries: Array<{ area: string; overlap: Overlap }> = []
-  const notReachedByArea = new Map<string, string[]>()
+  const notReachedByArea = new Map<string, Set<string>>()
   const sectionsOpenedByArea = new Map<string, number>()
+  const uncheckedPairsByArea = new Map<string, CandidatePair[]>()
+  const addUnchecked = (areaId: string, records: readonly CandidatePair[]): void => {
+    if (records.length === 0) return
+    const list = uncheckedPairsByArea.get(areaId) ?? []
+    list.push(...records)
+    uncheckedPairsByArea.set(areaId, list)
+  }
+  const addNotReached = (areaId: string, refs: readonly string[]): void => {
+    if (refs.length === 0) return
+    const set = notReachedByArea.get(areaId) ?? new Set<string>()
+    for (const ref of refs) set.add(ref)
+    notReachedByArea.set(areaId, set)
+  }
+  // Sums across a run's clusters; a legacy cache entry without the stamp
+  // contributes nothing (absent means unknown, and a partial sum is still an
+  // honest floor).
+  const addSectionsOpened = (areaId: string, n: number): void => {
+    sectionsOpenedByArea.set(areaId, (sectionsOpenedByArea.get(areaId) ?? 0) + n)
+  }
   const bodyOf = (ref: string): string | undefined => {
     const d = universe.byPath.get(ref)
     return d ? docBody(d) : undefined
@@ -890,7 +923,7 @@ export async function runSpecScanSessions(
     kind: OVERLAP_SESSION_KIND,
     cacheName: OVERLAP_SESSION_CACHE_NAME,
     items: overlapItems,
-    workItem: (item) => overlapWorkItem(item.areaId),
+    workItem: (item) => overlapWorkItem(item.areaId, item.cluster),
     cacheKey: (item) => overlapSessionCacheKey(item, instructionParts),
     schema: OverlapOutcomeSchema,
     session: (item) => overlapSessionDef({ item, universe }),
@@ -902,23 +935,37 @@ export async function runSpecScanSessions(
     ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
     ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
     ...(opts.now ? { now: opts.now } : {}),
-    // The skim signal is counted off the TRANSCRIPT, never self-reported: the
-    // stamp overwrites anything the session claimed, and it lands in the
-    // CACHED value — so a fully-cached re-run keeps the corpus's
-    // `sectionsOpened` instead of silently dropping it.
-    finalizeOutput: (_item, output, sessionId) => ({
-      ...output,
-      sectionsOpened: countSectionsOpened(opts.persistence, sessionId),
-    }),
+    // The skim signal AND the pair coverage are counted off the TRANSCRIPT,
+    // never self-reported: the stamps overwrite anything the session claimed,
+    // and they land in the CACHED value — so a fully-cached re-run keeps the
+    // corpus's `sectionsOpened`/`uncheckedPairs` instead of silently dropping
+    // them. A briefed pair counts as examined only when BOTH its sections
+    // were opened.
+    finalizeOutput: (item, output, sessionId) => {
+      const opened = openedSections(opts.persistence, sessionId)
+      return {
+        ...output,
+        sectionsOpened: countSectionsOpened(opts.persistence, sessionId),
+        uncheckedPairs: uncheckedBriefedPairs(item.pairs, opened).map(pairRecord),
+      }
+    },
     fold: (item, result) => {
       if (result.outcome.status === 'failed') {
-        // Fail-open per area: no flags, the failure is tallied, and EVERY doc
-        // of the area lands in notReached — a budget-exhausted area reads as
-        // "not covered", in the corpus, never as a log line.
-        notReachedByArea.set(item.areaId, item.docs.map((d) => d.path))
+        // Fail-open per cluster chunk: no flags, the failure is tallied, every
+        // doc of the chunk lands in notReached and every briefed pair in
+        // uncheckedPairs — a budget-exhausted session reads as "not covered",
+        // in the corpus, never as a log line. The skim signal is stamped here
+        // too (a failure has a transcript even though it has no outcome), so
+        // the corpus separates "opened 45 sections and still ran out" from
+        // "never really read".
+        addNotReached(item.areaId, item.docs.map((d) => d.path))
+        addUnchecked(item.areaId, item.pairs.map(pairRecord))
+        if (result.sessionId !== undefined) {
+          addSectionsOpened(item.areaId, countSectionsOpened(opts.persistence, result.sessionId))
+        }
         return
       }
-      const briefed = new Set([...item.docs, ...item.widened].map((d) => d.path))
+      const briefed = new Set(item.docs.map((d) => d.path))
       for (const flagged of result.outcome.output.overlaps) {
         // The fold's own validation — never trust the transcript: a pointer to
         // a doc the session was not briefed on is dropped; every kept pointer
@@ -929,18 +976,24 @@ export async function runSpecScanSessions(
         const verified = verifyOverlapSections({ docs: [a, b], note: flagged.note, sections, bodyOf })
         overlapEntries.push({
           area: item.areaId,
-          overlap: { docs: [a, b], note: flagged.note, sections: verified, areas: [], review: flagged.review },
+          overlap: {
+            docs: [a, b],
+            note: flagged.note,
+            sections: verified,
+            areas: spannedAreas(a, b, item.areaId),
+            review: flagged.review,
+          },
         })
       }
-      const notReached = result.outcome.output.notReached.filter((ref) => briefed.has(ref))
-      if (notReached.length > 0) notReachedByArea.set(item.areaId, notReached)
-      // Fresh and cached alike: the run stamped `sectionsOpened` into the
-      // value before it entered the cache (finalizeOutput above). Absent only
-      // on a legacy entry cached before the stamp existed — no signal, until
-      // that area re-runs.
+      addNotReached(item.areaId, result.outcome.output.notReached.filter((ref) => briefed.has(ref)))
+      // Fresh and cached alike: the run stamped `sectionsOpened` and
+      // `uncheckedPairs` into the value before it entered the cache
+      // (finalizeOutput above). Absent only on a legacy entry cached before
+      // the stamps existed — no signal, until that cluster re-runs.
       if (result.outcome.output.sectionsOpened !== undefined) {
-        sectionsOpenedByArea.set(item.areaId, result.outcome.output.sectionsOpened)
+        addSectionsOpened(item.areaId, result.outcome.output.sectionsOpened)
       }
+      addUnchecked(item.areaId, result.outcome.output.uncheckedPairs ?? [])
     },
   })
   assertKindHealthy(overlapSummary)
@@ -961,11 +1014,13 @@ export async function runSpecScanSessions(
   const areas: Area[] = grouped.areas.map((a) => {
     const notReached = notReachedByArea.get(a.id)
     const sectionsOpened = sectionsOpenedByArea.get(a.id)
+    const uncheckedPairs = uncheckedPairsByArea.get(a.id)
     return {
       ...a,
       overlaps: overlapsByArea.get(a.id) ?? [],
-      ...(notReached && notReached.length > 0 ? { notReached } : {}),
+      ...(notReached && notReached.size > 0 ? { notReached: [...notReached].sort() } : {}),
       ...(sectionsOpened !== undefined ? { sectionsOpened } : {}),
+      ...(uncheckedPairs && uncheckedPairs.length > 0 ? { uncheckedPairs } : {}),
     }
   })
 
@@ -1053,4 +1108,26 @@ function countSectionsOpened(persistence: SessionPersistence, sessionId: string)
     .readEvents(sessionId)
     .filter((event) => event.type === 'tool-result' && event.toolName === 'read_section' && event.isError !== true)
     .length
+}
+
+/**
+ * The sections a session actually opened, keyed for pair-coverage matching
+ * (`openedSectionKey`), read off the TRANSCRIPT: every successful
+ * `read_section` result opens with the run's own header line
+ * (`--- <doc> · <heading> ---`, `lead` for a null heading), so the set is a
+ * parse of what the tool really answered — never what the session claims.
+ */
+function openedSections(persistence: SessionPersistence, sessionId: string): Set<string> {
+  const opened = new Set<string>()
+  for (const event of persistence.readEvents(sessionId)) {
+    if (event.type !== 'tool-result' || event.toolName !== 'read_section' || event.isError === true) continue
+    const header = /^--- (.+) ---$/.exec(event.content.split('\n', 1)[0])
+    if (!header) continue
+    const sep = header[1].indexOf(' · ')
+    if (sep === -1) continue
+    const doc = header[1].slice(0, sep)
+    const heading = header[1].slice(sep + 3)
+    opened.add(openedSectionKey(doc, heading === 'lead' ? null : heading))
+  }
+  return opened
 }

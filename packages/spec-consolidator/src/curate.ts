@@ -12,8 +12,8 @@
  * - {@link CurateStats} / {@link CurateResult} — the CLI and dashboard read
  *   exactly these fields off a scan, whichever engine produced it;
  * - {@link readCorpusDecisions} — the decisions read the run curates with;
- * - {@link pruneOrphanedConflictResolutions} — drop stored verdicts the fresh
- *   corpus no longer disputes, in the same write cycle the corpus rides;
+ * - {@link pruneOrphanedConflictResolutions} — drop stored verdicts whose docs
+ *   left the corpus, in the same write cycle the corpus rides;
  * - {@link autoApplyHighConfidenceRecommendations} — apply the session judge's
  *   high-confidence recommendations as `resolvedBy: 'auto'` verdicts.
  */
@@ -23,7 +23,6 @@ import path from 'node:path';
 import { type StageTransportTally } from '@truecourse/shared/llm';
 import {
   buildCorpusConflicts,
-  orphanedConflictResolutions,
   type CorpusConflict,
 } from '@truecourse/shared';
 import { writeDecisions } from './orchestrator.js';
@@ -107,21 +106,24 @@ export interface CurateResult {
 }
 
 /**
- * Drop stored conflict verdicts the freshly written corpus no longer flags a
- * dispute for, in the SAME write cycle the corpus rides — so `decisions.json`
- * never accumulates bookkeeping about disputes that stopped existing (the docs
- * were reconciled, the section moved, the sentence was rewritten).
+ * Drop stored conflict verdicts whose DOCS left the corpus, in the SAME write
+ * cycle the corpus rides. That is the only staleness this prune acts on: a
+ * resolution naming a doc the corpus no longer holds cannot ever match a
+ * flagged dispute again, so dropping it is deterministic and safe.
  *
- * Pruning is safe because a verdict is CHEAPLY RE-DERIVABLE: if the same
- * disagreement re-emerges, the next scan flags it again and the user resolves it
- * again. A rare re-ask is a smaller cost than a permanent pile of stranded
- * verdicts every surface has to explain.
+ * A resolution that merely matches no CURRENT overlap flag is KEPT, dormant.
+ * This function used to prune those too, on the premise that a verdict is
+ * cheaply re-derivable — the next scan would flag the same dispute and the user
+ * would resolve it again. The 2026-08-20 reference-corpus runs falsified that:
+ * the overlap session is a stochastic judge (~50–60% pair recall run-to-run),
+ * and when it DOES re-flag a pair it excerpts the quotes differently (drifted
+ * quotes on 6 of 6 re-flagged pairs), so `resolutionMatchesConflict`'s
+ * quote-keyed identity orphaned 16 of 20 code-verified user verdicts in one
+ * scan — and deleted them. Dormant rows instead stay in `decisions.json`
+ * (surfaced by `orphanedConflictResolutions` and offered as reapply hints on
+ * re-flagged pairs via `dormantResolutionForPair`).
  *
- * "Orphaned" is not decided here: {@link orphanedConflictResolutions} is the ONE
- * live resolved-derivation (the same `buildCorpusConflicts` +
- * `resolutionMatchesConflict` dispute identity the gate, the CLI and the dashboard
- * read), so a verdict is pruned exactly when every surface would have called it
- * stranded. The returned entries are the caller's own array elements, so identity
+ * The returned entries are the caller's own array elements, so identity
  * filtering keeps the survivors byte-identical. Writes only when something is
  * actually dropped — an unchanged decisions file is left untouched.
  */
@@ -132,12 +134,10 @@ export function pruneOrphanedConflictResolutions(
 ): DecisionsFile {
   const stored = decisions.conflictResolutions ?? [];
   if (stored.length === 0) return decisions;
-  const orphans = new Set<unknown>(orphanedConflictResolutions(corpus, decisions));
-  if (orphans.size === 0) return decisions;
-  const pruned: DecisionsFile = {
-    ...decisions,
-    conflictResolutions: stored.filter((r) => !orphans.has(r)),
-  };
+  const docs = new Set(corpus.docs.map((d) => d.ref));
+  const kept = stored.filter((r) => docs.has(r.docA) && docs.has(r.docB));
+  if (kept.length === stored.length) return decisions;
+  const pruned: DecisionsFile = { ...decisions, conflictResolutions: kept };
   writeDecisions(repoRoot, pruned);
   return pruned;
 }

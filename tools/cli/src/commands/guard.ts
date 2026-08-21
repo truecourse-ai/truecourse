@@ -55,6 +55,7 @@ import {
 } from "@truecourse/shared";
 import type { GuardCoveragePlainStatus, GuardGapDisplayKind } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
+import { printWatchLive, resolveDashboardUrl } from "./helpers.js";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { clip, flowInstanceLine } from "../lib/guard-flow-format.js";
 import { requireGitRepo } from "./git-guard.js";
@@ -361,7 +362,8 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro(opts.only ? `Guard generate — ${GENERATE_STEP_LABEL[opts.only]} only` : "Guard generate");
   await requireGitRepo(repoRoot);
-  await registerProject(repoRoot);
+  const project = await registerProject(repoRoot);
+  const dashboardUrl = await resolveDashboardUrl();
 
   if (opts.llmTransport === "agent") {
     // The generate pipeline's LLM stages run as agent SESSIONS (plan 04) — the
@@ -394,6 +396,9 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       llm: opts.llmTransport,
       io: opts.io,
       ...(opts.only ? { only: opts.only } : {}),
+      // Fires when the (lazily created) run record exists — never on a
+      // fully-cached run, which opens none.
+      onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
       onEstimatePhase: estimateSpinnerPhase(),
       onLlmEstimate: (est) => {
         estimatedCostUsd = est.estimatedCostUsd;

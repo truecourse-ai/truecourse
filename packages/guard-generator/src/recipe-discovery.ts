@@ -42,6 +42,7 @@ import {
   DEFAULT_API_READY_TIMEOUT_MS,
   BUILD_PASSTHROUGH,
   type Recipe,
+  type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import type { DatastoreUrlRef } from '@truecourse/shared'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
@@ -82,8 +83,9 @@ const SERVICES_TIMEOUT_MS = DEFAULT_BUILD_TIMEOUT_MS
 export type RecipeDiscoverySource = 'deterministic' | 'llm'
 
 /** The steps verification runs, in order — each one names itself in its diagnostic
- *  and in the progress phase, so a reader never has to guess which one is running. */
-export type RecipeVerifyStage = 'install' | 'build' | 'entry probe' | 'services' | 'server boot'
+ *  and in the progress phase, so a reader never has to guess which one is running.
+ *  `static` is stage zero: the free refusal rules, rejected before anything runs. */
+export type RecipeVerifyStage = 'static' | 'install' | 'build' | 'entry probe' | 'services' | 'server boot'
 
 /**
  * What discovery is doing RIGHT NOW. Everything here is minutes-long (an install, a
@@ -278,9 +280,15 @@ export async function discoverRecipe(
   // failed — memoized here so the deterministic proposal and the model's retries
   // share one answer (and one analysis pass).
   let databaseOnce: Promise<DatabaseDependencyHint | null> | null = null
-  const verifyContext: VerifyContext = options.database
-    ? { database: () => (databaseOnce ??= Promise.resolve(options.database!()).catch(() => null)) }
-    : {}
+  // Read once, before the deterministic pass: the model briefing needs it later,
+  // and the static inventory rule holds EVERY proposal to it from the start.
+  const inputs = readDiscoveryInputs(repoRoot)
+  const verifyContext: VerifyContext = {
+    ...(options.database
+      ? { database: () => (databaseOnce ??= Promise.resolve(options.database!()).catch(() => null)) }
+      : {}),
+    ...(inputs.apps ? { apps: inputs.apps } : {}),
+  }
   // Verification reports the STAGE it is in; whether that is a re-verification is
   // discovery's own knowledge, so it is added on the way out. Built per call so each
   // round sees whatever `verifyContext` has learned by then (`composeGenerated`).
@@ -303,6 +311,7 @@ export async function discoverRecipe(
   const derived = proposeRecipe(repoRoot, {
     routes: options.routes ? [...(await options.routes())] : undefined,
     datastores: options.datastores ? [...(await options.datastores())] : undefined,
+    ...(inputs.manifestApps ? { manifestApps: inputs.manifestApps } : {}),
   })
   if (derived.ok) {
     // The generated datastore must be ON DISK before verification: the `services.up`
@@ -318,7 +327,7 @@ export async function discoverRecipe(
         recipe: derived.recipe,
         ...writeRecipeFile(repoRoot, derived.recipe),
         source: 'deterministic',
-        todos: derived.todos,
+        todos: [...derived.todos, ...(verdict.warnings ?? [])],
         ...(compose ? { composePath: compose.rel } : {}),
       }
     }
@@ -336,7 +345,6 @@ export async function discoverRecipe(
   }
 
   const inputsFingerprint = computeRecipeFingerprint(repoRoot)
-  const inputs = readDiscoveryInputs(repoRoot)
 
   // ---- The repair session path (plan 03 step 9). -----------------------------
   // Loop ONLY on the failure path: a deterministic proposal that verified never
@@ -395,13 +403,14 @@ export async function discoverRecipe(
       ...(repaired.proposal.entry ? { entry: repaired.proposal.entry } : {}),
       ...(repaired.proposal.env ? { env: repaired.proposal.env } : {}),
       ...(repaired.proposal.api ? { api: repaired.proposal.api } : {}),
+      ...(repaired.proposal.ownHosts ? { ownHosts: repaired.proposal.ownHosts } : {}),
     }
     return {
       status: 'discovered',
       recipe: repairedRecipe,
       ...writeRecipeFile(repoRoot, repairedRecipe),
       source: 'llm',
-      todos: [],
+      todos: repairedVerdict.warnings ?? [],
       ...(sessionRunId ? { sessionRunId } : {}),
     }
   }
@@ -464,11 +473,18 @@ export async function discoverRecipe(
     ...(proposal.entry ? { entry: proposal.entry } : {}),
     ...(proposal.env ? { env: proposal.env } : {}),
     // The proposed api block is a subset of the runner's `api` schema, so it is
-    // written through as-is; the richer fields (credentials, seed, services) are
-    // never model-proposed.
+    // written through as-is; the richer fields (credentials, seed) are never
+    // model-proposed.
     ...(proposal.api ? { api: proposal.api } : {}),
+    ...(proposal.ownHosts ? { ownHosts: proposal.ownHosts } : {}),
   }
-  return { status: 'discovered', recipe, ...writeRecipeFile(repoRoot, recipe), source: 'llm', todos: [] }
+  return {
+    status: 'discovered',
+    recipe,
+    ...writeRecipeFile(repoRoot, recipe),
+    source: 'llm',
+    todos: verdict.ok ? (verdict.warnings ?? []) : [],
+  }
 }
 
 /** Write the verified recipe and report where it landed + the fingerprint it now
@@ -507,7 +523,13 @@ function writeComposeFile(repoRoot: string, plan: ComposePlan): { rel: string; r
 /** One proposal's deterministic verdict: it verified, or the engine's report on why
  *  not, tagged with the stage that produced it (the reason already names it in prose;
  *  `stage` is the same fact a caller can branch on without reading the text). */
-export type ProposalVerdict = { ok: true } | { ok: false; reason: string; stage: RecipeVerifyStage }
+export type ProposalVerdict =
+  /** `warnings` (present only when non-empty): true-but-fragile facts a green
+   *  verdict must not swallow — e.g. the boot leaned on a localhost datastore
+   *  the recipe never brings up. Surfaced as todos and in the session's
+   *  verify_recipe result. */
+  | { ok: true; warnings?: string[] }
+  | { ok: false; reason: string; stage: RecipeVerifyStage }
 
 /**
  * What verification READS — the fields both proposal shapes share. Structural, so
@@ -563,6 +585,47 @@ function proposalServers(api: NonNullable<VerifiableProposal['api']>): Verifiabl
   return Object.entries(api.servers ?? {}).map(([name, server]) => ({ name, ...server }))
 }
 
+/** The wildcard probe's answer: `stub` when the booted server answered the health
+ *  path and two unservable paths byte-identically. Inconclusive probes (a fetch
+ *  error, a timeout) are NOT stubs — the boot already proved health answers. */
+type WildcardVerdict = { stub: boolean }
+
+/** How much of a response body the wildcard probe compares. A stub's body is a
+ *  constant; real per-path content diverges long before this. */
+const WILDCARD_BODY_CAP = 2_048
+const WILDCARD_FETCH_TIMEOUT_MS = 5_000
+
+async function wildcardResponse(baseUrl: string, path_: string): Promise<string | null> {
+  try {
+    const res = await fetch(new URL(path_, baseUrl), {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(WILDCARD_FETCH_TIMEOUT_MS),
+    })
+    const body = (await res.text()).slice(0, WILDCARD_BODY_CAP)
+    return `${res.status}\n${body}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The anti-stub check: GET the health path and two paths no application could
+ * declare. Identical status+body on all three means the server answers every
+ * path the same — a hand-rolled 200-everything stub, not the app under test.
+ * Ran only here in DISCOVERY; the runner's preflight never re-probes a recipe a
+ * human has already accepted.
+ */
+async function probeWildcard(baseUrl: string, healthPath: string): Promise<WildcardVerdict> {
+  const health = await wildcardResponse(baseUrl, healthPath)
+  if (health === null) return { stub: false }
+  const nonce = createHash('sha256').update(`${baseUrl}${Date.now()}`).digest('hex').slice(0, 12)
+  const [a, b] = await Promise.all([
+    wildcardResponse(baseUrl, `/tc-guard-verify-${nonce}`),
+    wildcardResponse(baseUrl, `/tc-guard-verify-${nonce}/deeper/still`),
+  ])
+  return { stub: a !== null && b !== null && a === health && b === health }
+}
+
 /** What verification may consult when composing a failure diagnostic, and where it
  *  reports the stage it is in. Lazy: a proposal that verifies never resolves any of it. */
 export type VerifyContext = {
@@ -575,6 +638,14 @@ export type VerifyContext = {
   composeGenerated?: boolean
   /** Fires as each stage STARTS. Every one of them can run for minutes. */
   onPhase?: (phase: { stage: RecipeVerifyStage; server?: string }) => void
+  /**
+   * The workspace app inventory (the same one the model's briefing shows).
+   * When present, the static stage refuses a proposal that declares no `api`
+   * block while the inventory lists apps with HTTP route prefixes — the cal.com
+   * failure mode: an entry-only CLI recipe for a repo whose documented surface
+   * is its HTTP services.
+   */
+  apps?: readonly RecipeAppInventoryEntry[]
 }
 
 /**
@@ -591,6 +662,19 @@ export async function verifyProposal(
   proposal: VerifiableProposal,
   context: VerifyContext = {},
 ): Promise<ProposalVerdict> {
+  // Stage zero: the free refusal rules, so a proposal the engine would never
+  // accept is rejected before minutes of install/build run — and so EVERY path a
+  // proposal can arrive by (deterministic, session outcome, one-shot, cache) is
+  // held to the same rules, not just the session's `check_recipe` tool.
+  const complaints = staticProposalComplaints(proposal, context.apps, repoRoot)
+  if (complaints.length > 0) {
+    return {
+      ok: false,
+      stage: 'static',
+      reason: `refused before anything ran:\n- ${complaints.join('\n- ')}`,
+    }
+  }
+
   // The optional install step runs BEFORE the verification build, exactly as the
   // runner will run it — a proposal whose install fails is never written.
   if (proposal.install) {
@@ -671,15 +755,33 @@ export async function verifyProposal(
       const servers = proposalServers(api)
       for (const server of servers) {
         context.onPhase?.({ stage: 'server boot', ...(servers.length > 1 ? { server: server.name } : {}) })
+        // The wildcard probe runs while the server is still up (`onReady`). A
+        // trivial stub answers every path with the health response byte for byte;
+        // a real app — even an SPA with a catch-all — serves per-path content.
+        let wildcard: WildcardVerdict | null = null
+        const healthPath = server.healthPath ?? DEFAULT_API_HEALTH_PATH
         const boot = await preflightApiServer({
           resolvedServe: resolveEntry(repoRoot, server.serve),
           displayServe: server.serve,
           ...(server.cwd === 'repo' ? { cwd: repoRoot } : {}),
           recipeEnv: { ...(proposal.env ?? {}), ...(api.env ?? {}), ...(server.env ?? {}) },
-          healthPath: server.healthPath ?? DEFAULT_API_HEALTH_PATH,
+          healthPath,
           readyTimeoutMs: DEFAULT_API_READY_TIMEOUT_MS,
           ...(servers.length > 1 ? { label: server.name } : {}),
+          onReady: async (baseUrl) => {
+            wildcard = await probeWildcard(baseUrl, healthPath)
+          },
         })
+        if (boot.ok && wildcard !== null && (wildcard as WildcardVerdict).stub) {
+          return {
+            ok: false,
+            stage: 'server boot',
+            reason:
+              `api server \`${server.serve.join(' ')}\` answered ${healthPath} and two paths it cannot possibly serve ` +
+              `with the identical response — a server that answers every path the same is not the application this ` +
+              `repository ships. Propose the repo's OWN server (its start script or built entrypoint), not a stand-in.`,
+          }
+        }
         if (boot.ok) continue
         const bootReason = `api server \`${server.serve.join(' ')}\` did not start: ${boot.stderr}`
         // The datastore story, when there is one to tell: the analyzer saw a
@@ -712,8 +814,71 @@ export async function verifyProposal(
       }
     }
   }
-  return { ok: true }
+  const warnings = proposalWarnings(proposal)
+  return warnings.length > 0 ? { ok: true, warnings } : { ok: true }
 }
+
+/** Datastore URL env values pointing at THIS machine — a boot that succeeded on
+ *  them succeeded because something local happened to be running. */
+const LOCAL_DATASTORE_URL = /^(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^@/]*@?(?:localhost|127\.0\.0\.1)\b/i
+
+/**
+ * True-but-fragile facts about a proposal that VERIFIED — the boot leaned on a
+ * localhost datastore it never brings up (`api.services` absent), so the green
+ * is this machine's, not the recipe's (cal.diy 2026-08-20: the boot rode the
+ * developer's already-running :5450 postgres).
+ */
+function proposalWarnings(proposal: VerifiableProposal): string[] {
+  const api = proposal.api
+  if (!api) return []
+  const layers: Record<string, string>[] = [
+    proposal.env ?? {},
+    api.env ?? {},
+    ...Object.values(api.servers ?? {}).map((s) => s.env ?? {}),
+  ]
+  const urls = new Set<string>()
+  const sqlUrls = new Set<string>()
+  for (const layer of layers) {
+    for (const value of Object.values(layer)) {
+      const trimmed = value.trim()
+      if (LOCAL_DATASTORE_URL.test(trimmed)) urls.add(trimmed)
+      if (SQL_DATASTORE_URL.test(trimmed)) sqlUrls.add(trimmed)
+    }
+  }
+  if (!api.services) {
+    if (urls.size === 0) return []
+    return [
+      `the recipe points at localhost datastore(s) it never brings up (${[...urls].slice(0, 3).join(', ')}) and ` +
+      `declares no \`api.services\` — the boot passed because something on THIS machine happened to be running. ` +
+      `On a clean host it will die at boot. Declare the bring-up under \`api.services.up\`/\`down\` ` +
+      `(a compose file the repo ships, or guard's generated one).`,
+    ]
+  }
+  // Services declared, but no schema step among them: the sibling fragility
+  // (cal.diy 2026-08-21). The compose brings the database container up, nothing
+  // ever migrates it, and the boot verified against whatever schema the volume
+  // ALREADY carried — a clean host gets an empty database and the health probe
+  // can still answer 200.
+  const commands = [proposal.install, proposal.build, api.services.up, api.services.down]
+    .filter((c): c is string => typeof c === 'string')
+    .join('\n')
+  if (sqlUrls.size > 0 && !MIGRATE_STEP.test(commands)) {
+    return [
+      `\`api.services\` brings the datastore up but NO command anywhere in the recipe (install, build, ` +
+      `services.up) runs a schema/migration step — the boot verified against whatever schema the datastore's ` +
+      `volume already carried, and a clean host gets an EMPTY database behind a green health probe. Run the ` +
+      `repo's migrate/deploy step inside \`api.services.up\` after the bring-up.`,
+    ]
+  }
+  return []
+}
+
+/** SQL datastore URLs — the stores whose empty-schema state a health probe hides. */
+const SQL_DATASTORE_URL = /^(?:postgres(?:ql)?|mysql):\/\//i
+
+/** A schema/migration step by any of the common spellings (`prisma migrate`,
+ *  `db-deploy`, `db:push`, `knex migrate`, plain `migrations` scripts…). */
+const MIGRATE_STEP = /migrat|db-deploy|db:deploy|db[:-]push|db\s+push|schema:sync/i
 
 /**
  * The guided failure text for a server that would not boot on a repo the analyzer
@@ -783,7 +948,135 @@ async function proposeRecipeWithReask(
  * No execution — `verifyProposal` is the expensive check, and this exists so a
  * proposal that could never verify is refused for one turn's cost.
  */
-export function staticProposalComplaints(proposal: RecipeProposal): string[] {
+/** Eval flags per interpreter — an argv driving one of these runs INLINE code,
+ *  not anything the repository ships. `deno` spells it as the `eval` subcommand. */
+const INLINE_EVAL_FLAGS: Record<string, readonly string[]> = {
+  node: ['-e', '--eval', '-p', '--print'],
+  nodejs: ['-e', '--eval', '-p', '--print'],
+  bun: ['-e', '--eval', '-p', '--print'],
+  deno: ['eval'],
+  python: ['-c'],
+  python3: ['-c'],
+  ruby: ['-e'],
+  perl: ['-e', '-E'],
+  sh: ['-c'],
+  bash: ['-c'],
+  zsh: ['-c'],
+  dash: ['-c'],
+}
+
+/** The `label runs inline code` complaint for one argv, or null when it does not. */
+function inlineEvalComplaint(label: string, argv: readonly string[]): string | null {
+  const interpreter = path.basename(argv[0] ?? '')
+  const flags = INLINE_EVAL_FLAGS[interpreter]
+  if (!flags) return null
+  const flag = argv.slice(1).find((el) => flags.includes(el))
+  if (!flag) return null
+  return (
+    `${label} runs inline code (\`${interpreter} ${flag} …\`) instead of something this repository ships — ` +
+    `the thing under test must be the repo's own file or script, so a hand-written stand-in proves nothing. ` +
+    `Point the argv at a file in the repository.`
+  )
+}
+
+/** An install/build that is nothing but one interpreter-eval one-liner builds
+ *  nothing. `true` is the honest way to declare "no build". */
+const INLINE_EVAL_SHELL = /^\s*(?:node|nodejs|bun|python3?|ruby|perl)\s+(?:-e|--eval|-p|--print|-c|-E)\b|^\s*deno\s+eval\b/
+
+/** Datastore bring-up spelled as a build step. It works once and then leaks: the
+ *  runner tears down `api.services.down`, never whatever a build left running
+ *  (documenso 2026-08-20: a compose db container survived verification). */
+const COMPOSE_UP_SHELL = /\bdocker(?:\s+|-)compose\b[^|;&]*\bup\b/
+
+/** Command fragments that mutate the HOST outside the repository. An
+ *  install/build runs as a real shell in the working tree, so these execute for
+ *  real — and a recipe commits every future run to them. */
+const HOST_MUTATION_PATTERNS: { pattern: RegExp; what: string }[] = [
+  { pattern: /\bsudo\b/, what: '`sudo`' },
+  { pattern: /\bcorepack\s+enable\b/, what: '`corepack enable` (writes yarn/pnpm shims beside the node binary — invoke the pinned manager WITHOUT enabling shims: `corepack yarn install …`)' },
+  { pattern: /\b(?:npm|pnpm)\s+(?:i|install|add)\b[^|;&]*(?:\s-g\b|\s--global\b)/, what: 'a global package install' },
+  { pattern: /\byarn\s+global\b/, what: '`yarn global`' },
+  { pattern: /\bbrew\s+install\b/, what: '`brew install`' },
+  { pattern: /\bnpm\s+config\s+set\b/, what: '`npm config set`' },
+  { pattern: /\bgit\s+config\s+--global\b/, what: '`git config --global`' },
+  { pattern: /\b(?:launchctl|systemctl)\b/, what: 'a service-manager command' },
+  // `docker compose down` is project-scoped and fine; `docker rm -f <name>`
+  // reaches across EVERY project on the machine. The 2026-08-20 documenso
+  // session put `docker rm -f database` in services.up to free a container
+  // name its compose wanted — and removed the developer's running cal.diy
+  // database. A name collision is the USER's to resolve, never the recipe's.
+  { pattern: /\bdocker\s+(?:container\s+)?(?:rm|kill|stop)\b/, what: '`docker rm/kill/stop` (it targets containers by GLOBAL name — other projects\' containers included; resolve a name collision by asking, never by removing)' },
+  { pattern: /\bdocker\s+volume\s+(?:rm|prune)\b/, what: '`docker volume rm/prune`' },
+  { pattern: /\bdocker\s+system\s+prune\b/, what: '`docker system prune`' },
+]
+
+/** Each `docker compose` / `docker-compose` invocation in a shell command, up to
+ *  the next shell operator — enough of the argv to find its `-p`/`-f` flags. The
+ *  lookbehind keeps `my-docker compose` wrappers from matching: the command must
+ *  BE docker. */
+const DOCKER_COMPOSE_CALL = /(?<![\w-])docker(?:\s+|-)compose\b([^|;&]*)/g
+
+/**
+ * The compose NAMESPACE rule — the boundary the `docker rm/kill/stop` refusal
+ * left open (cal.diy 2026-08-21): `docker compose up/stop` with no explicit
+ * project attaches to the repository's DEFAULT compose project — the
+ * developer's own live stack — and compose "resolves" a port or config change
+ * by RECREATING the running container (a verified recipe re-ported the
+ * developer's running redis to a new port and left it stopped, through this
+ * exact channel). A compose invocation in a recipe channel must therefore be
+ * namespaced: `-p <project>`, or an `-f` file that pins a top-level `name:`
+ * (the repo's dedicated test composes do; its dev compose does not).
+ *
+ * Returns one complaint per un-namespaced invocation. `repoRoot` grounds the
+ * `-f` file check; without it (older callers, unit contexts) a file reference
+ * cannot be verified and is treated as unpinned — conservative on purpose.
+ */
+function composeNamespaceComplaints(label: string, command: string, repoRoot?: string): string[] {
+  const complaints: string[] = []
+  for (const match of command.matchAll(DOCKER_COMPOSE_CALL)) {
+    const tokens = (match[1] ?? '').trim().split(/\s+/).filter(Boolean)
+    let hasProject = false
+    const files: string[] = []
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i]!
+      if (t === '-p' || t === '--project-name') { hasProject = true; i++ }
+      else if (t.startsWith('--project-name=')) hasProject = true
+      else if (t === '-f' || t === '--file') { const v = tokens[i + 1]; if (v) files.push(v); i++ }
+      else if (t.startsWith('--file=')) files.push(t.slice('--file='.length))
+    }
+    if (hasProject) continue
+    const pinsName = (file: string): boolean => {
+      if (file === '-') return false // stdin — nothing to inspect; demand `-p`
+      if (!repoRoot) return false
+      try {
+        return /^name:\s*\S/m.test(fs.readFileSync(path.resolve(repoRoot, file), 'utf-8'))
+      } catch {
+        return false
+      }
+    }
+    if (files.length > 0 && files.some(pinsName)) continue
+    const why =
+      files.length === 0
+        ? 'no `-f` file and no `-p` project'
+        : `the file(s) it names (${files.join(', ')}) pin no top-level \`name:\``
+    complaints.push(
+      `${label} runs \`docker compose\` without an explicit project namespace (${why}) — it attaches to the ` +
+      `repository's DEFAULT compose project, i.e. the developer's own stack, and compose resolves a port or ` +
+      `config change by RECREATING a running container (this is how a verified recipe once re-ported and stopped ` +
+      `the developer's live redis). Namespace it: pass \`-p <dedicated-project>\`, or point \`-f\` at a compose ` +
+      `file that declares a top-level \`name:\` (a dedicated test compose, never the dev compose).`,
+    )
+  }
+  return complaints
+}
+
+export function staticProposalComplaints(
+  proposal: VerifiableProposal,
+  apps?: readonly RecipeAppInventoryEntry[],
+  /** Grounds the compose-namespace rule's `-f` file check; absent ⇒ a file
+   *  reference cannot be verified and counts as unpinned (conservative). */
+  repoRoot?: string,
+): string[] {
   const complaints: string[] = []
   const argvs: { label: string; argv: readonly string[] }[] = []
   if (proposal.entry) argvs.push({ label: 'entry', argv: proposal.entry })
@@ -800,6 +1093,8 @@ export function staticProposalComplaints(proposal: RecipeProposal): string[] {
         )
       }
     }
+    const inline = inlineEvalComplaint(label, argv)
+    if (inline) complaints.push(inline)
   }
   // Only the SERVE argvs are held to the watcher rule: a dev/watch process never
   // exits ready and never serves a stable build, so it is not a server under test.
@@ -812,6 +1107,81 @@ export function staticProposalComplaints(proposal: RecipeProposal): string[] {
       )
     }
   }
+  // An eval one-liner as the WHOLE install/build is a no-op wearing a build's
+  // clothes. Only the pure form is refused — a compound command that happens to
+  // start with `node -e` is doing something more, and `true` stays the sanctioned
+  // "this repo needs no build".
+  for (const [label, command] of [['install', proposal.install], ['build', proposal.build]] as const) {
+    if (!command) continue
+    if (INLINE_EVAL_SHELL.test(command) && !SHELL_OPERATORS.some((op) => command.includes(op))) {
+      complaints.push(
+        `${label} is an inline eval one-liner (\`${command}\`) — it ${label === 'build' ? 'builds' : 'installs'} nothing. ` +
+        `Use the repo's own ${label} script, or \`true\` when the repository genuinely needs no ${label} step.`,
+      )
+    }
+    // Datastore bring-up belongs in `api.services.up` (with a `down`), never in a
+    // build: the runner tears down services, but whatever a build starts leaks.
+    if (COMPOSE_UP_SHELL.test(command)) {
+      complaints.push(
+        `${label} brings up docker compose services — that is world SETUP, not a ${label}. Move the bring-up to ` +
+        `\`api.services.up\` (and its stop to \`api.services.down\`) so the runner owns the lifecycle; a compose ` +
+        `left running by a ${label} is never torn down.`,
+      )
+    }
+    // Host mutations: an install/build runs as a real shell in the working tree.
+    for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
+      if (pattern.test(command)) {
+        complaints.push(
+          `${label} runs ${what} — it mutates the machine OUTSIDE this repository, and the recipe would commit ` +
+          `every future run to that. An install/build may only touch the repo's own working tree.`,
+        )
+      }
+    }
+    complaints.push(...composeNamespaceComplaints(label, command, repoRoot))
+  }
+  // `services.up`/`down` ARE the compose home, but the host-mutation rules hold
+  // there too — bringing up the repo's own datastore never needs to escalate or
+  // write outside the repo.
+  const services = proposal.api?.services
+  for (const [label, command] of [['api.services.up', services?.up], ['api.services.down', services?.down]] as const) {
+    if (!command) continue
+    complaints.push(...composeNamespaceComplaints(label, command, repoRoot))
+    for (const { pattern, what } of HOST_MUTATION_PATTERNS) {
+      if (pattern.test(command)) {
+        complaints.push(
+          `${label} runs ${what} — it mutates the machine OUTSIDE this repository. Services bring-up may only ` +
+          `run what the repo ships (its compose file, its scripts).`,
+        )
+      }
+    }
+  }
+  // `sudo` has no place in any argv either — a server or CLI under test never
+  // escalates the host.
+  for (const { label, argv } of argvs) {
+    if (argv.includes('sudo')) {
+      complaints.push(`${label} invokes \`sudo\` — nothing under test may escalate on the host.`)
+    }
+  }
+  // The inventory rule: a workspace that ships HTTP services and a proposal that
+  // declares no api block is the cal.com failure — every documented endpoint
+  // lands untestable while the recipe reads green. Partial coverage is NOT
+  // refused (a monorepo routinely serves one app and ships others it never
+  // runs); only the claim that there is no server at all.
+  if (!proposal.api && apps) {
+    const routed = apps.filter((a) => a.prefixes.length > 0)
+    if (routed.length > 0) {
+      const listed = routed
+        .slice(0, 4)
+        .map((a) => `${a.dir} (serves ${a.prefixes.slice(0, 3).join(', ')})`)
+        .join('; ')
+      complaints.push(
+        `the workspace ships ${routed.length} HTTP service(s) this proposal does not declare: ${listed}` +
+        `${routed.length > 4 ? '; …' : ''} — a recipe with no \`api\` block leaves every documented endpoint ` +
+        `untestable. Declare the server(s) under \`api.serve\` or \`api.servers\` (an \`entry\`-only recipe is ` +
+        `only right for a repository whose product is the CLI).`,
+      )
+    }
+  }
   return complaints
 }
 
@@ -819,6 +1189,9 @@ function readDiscoveryInputs(repoRoot: string): {
   packageJson: string
   presentInputs: string[]
   apps?: RecipeAppInventoryEntry[]
+  /** The raw manifest apps (routes included) — the deterministic proposer's
+   *  workspace branch reads these; the briefing gets the trimmed `apps` view. */
+  manifestApps?: RouteManifestApp[]
 } {
   const pkgPath = path.join(repoRoot, 'package.json')
   const packageJson = fs.existsSync(pkgPath) ? fs.readFileSync(pkgPath, 'utf-8') : '(no package.json)'
@@ -826,13 +1199,18 @@ function readDiscoveryInputs(repoRoot: string): {
   // The workspace app inventory. A single-package repo yields none and the
   // prompt is byte-identical to what it was; a monorepo gets the one fact that lets
   // the model propose `api.servers` at all — that a second HTTP service exists.
-  const apps = buildRouteManifest(repoRoot).apps.map((app) => ({
+  const manifestApps = buildRouteManifest(repoRoot).apps
+  const apps = manifestApps.map((app) => ({
     dir: app.dir,
     ...(app.pkg ? { pkg: app.pkg } : {}),
     framework: app.framework,
     prefixes: app.prefixes.slice(0, 6),
   }))
-  return { packageJson, presentInputs, ...(apps.length > 0 ? { apps } : {}) }
+  return {
+    packageJson,
+    presentInputs,
+    ...(apps.length > 0 ? { apps, manifestApps } : {}),
+  }
 }
 
 /**

@@ -137,6 +137,12 @@ export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
     env.FORCE_COLOR = '0'
   }
 
+  // Corepack must never stop a child on its interactive "about to download"
+  // prompt — every spawn here is non-interactive, and the prompt killed real
+  // server boots (cal.diy, 2026-08-20). A default, so a recipe can still
+  // override it below.
+  env.COREPACK_ENABLE_DOWNLOAD_PROMPT = '0'
+
   // Declared additions, recipe then scenario (scenario wins).
   if (opts.recipeEnv) Object.assign(env, opts.recipeEnv)
   if (opts.scenarioEnv) Object.assign(env, opts.scenarioEnv)

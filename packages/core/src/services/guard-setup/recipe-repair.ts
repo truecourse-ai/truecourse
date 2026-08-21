@@ -32,6 +32,7 @@ import {
   verifyProposal,
   RecipeProposalSchema,
   type RecipeProposal,
+  type RecipeAppInventoryEntry,
   type RecipeRepairContext,
   type RecipeRepairFn,
 } from '@truecourse/guard-generator';
@@ -60,6 +61,9 @@ export interface RecipeRepairSessionInput {
   repoRoot: string;
   /** The session's ONE working sandbox — installs/builds accumulate across calls. */
   sandbox: WorkingSandbox;
+  /** The workspace app inventory the briefing shows — `check_recipe`/`verify_recipe`
+   *  hold drafts to it (the entry-only-despite-HTTP-services refusal). */
+  apps?: readonly RecipeAppInventoryEntry[];
 }
 
 export function recipeRepairSessionDef(input: RecipeRepairSessionInput): SessionDef<RecipeProposal> {
@@ -76,6 +80,15 @@ export function recipeRepairSessionDef(input: RecipeRepairSessionInput): Session
       tool: 'verify_recipe',
       message:
         'Outcome refused: you never ran `verify_recipe` in this session. Run it on your complete proposal now — it is the exact install→build→probe→boot verification the engine will re-run on your outcome, so a failure it finds costs one turn to fix here instead of the whole run. Fix anything it reports, then call `outcome` again.',
+    },
+    // The in-flight sibling (2026-08-21 bench: strapi's session spent 30 turns
+    // exploring, drafted once with the budget nearly gone, and died at the
+    // ceiling — the outcome precondition never even got to fire).
+    draftCheckpoint: {
+      tool: 'check_recipe',
+      afterTurn: 8,
+      message:
+        '[checkpoint] You have spent more than half your first turn grant without drafting. Run `check_recipe` on your best current proposal NOW — it is free and static, and its refusals steer better than more reading. Iterate from the draft; do not return to open-ended exploration.',
     },
   };
 }
@@ -158,8 +171,8 @@ function buildRepairTools(input: RecipeRepairSessionInput): SessionTool[] {
     searchTool(input.repoRoot),
     sandboxExecTool(input.sandbox),
     sandboxShellTool(input.sandbox),
-    checkRecipeTool(),
-    verifyRecipeTool(input.repoRoot),
+    checkRecipeTool(input.repoRoot, input.apps),
+    verifyRecipeTool(input.repoRoot, input.apps),
   ];
 }
 
@@ -167,7 +180,7 @@ function sandboxExecTool(sandbox: WorkingSandbox): SessionTool {
   return defineSessionTool({
     name: 'sandbox_exec',
     description:
-      'Run one argv in YOUR working sandbox (no shell — a compound command needs `sandbox_shell`). The sandbox persists across your calls: what one call installs or builds, the next call sees. cwd is sandbox-relative.',
+      'Run one argv in YOUR working sandbox (no shell — a compound command needs `sandbox_shell`). The sandbox STARTS EMPTY — a scratch directory with an isolated HOME, NOT the repository checkout; repo files are only reachable through `read_file`/`search_repo`. It persists across your calls: what one call installs or builds, the next call sees. cwd is sandbox-relative.',
     kind: 'sandbox-exec',
     readOnly: false,
     destructive: false,
@@ -202,7 +215,7 @@ function sandboxShellTool(sandbox: WorkingSandbox): SessionTool {
   return defineSessionTool({
     name: 'sandbox_shell',
     description:
-      'Run one shell command in YOUR working sandbox (install/build class: combined output, 600s default timeout). Same persistent sandbox as `sandbox_exec`.',
+      'Run one shell command in YOUR working sandbox (install/build class: combined output, 600s default timeout). Same persistent, STARTS-EMPTY sandbox as `sandbox_exec` — not the repository checkout.',
     kind: 'sandbox-shell',
     readOnly: false,
     destructive: false,
@@ -232,17 +245,17 @@ function sandboxShellTool(sandbox: WorkingSandbox): SessionTool {
   });
 }
 
-function checkRecipeTool(): SessionTool {
+function checkRecipeTool(repoRoot: string, apps?: readonly RecipeAppInventoryEntry[]): SessionTool {
   return defineSessionTool({
     name: 'check_recipe',
     description:
-      'Statically check a recipe proposal — the schema (enforced on the arguments) plus the engine\'s own refusal rules (shell operators in an argv, dev/watch serve commands). No execution; free. Run `verify_recipe` for the real proof.',
+      'Statically check a recipe proposal — the schema (enforced on the arguments) plus the engine\'s own refusal rules (shell operators in an argv, dev/watch serve commands, inline-eval stand-ins, an entry-only recipe for a workspace that ships HTTP services). No execution; free. Run `verify_recipe` for the real proof.',
     kind: 'check-recipe',
     readOnly: true,
     destructive: false,
     inputSchema: RecipeProposalSchema,
     async execute(args) {
-      const complaints = staticProposalComplaints(args);
+      const complaints = staticProposalComplaints(args, apps, repoRoot);
       if (complaints.length === 0) {
         return {
           content:
@@ -254,7 +267,7 @@ function checkRecipeTool(): SessionTool {
   });
 }
 
-function verifyRecipeTool(repoRoot: string): SessionTool {
+function verifyRecipeTool(repoRoot: string, apps?: readonly RecipeAppInventoryEntry[]): SessionTool {
   return defineSessionTool({
     name: 'verify_recipe',
     description:
@@ -265,11 +278,13 @@ function verifyRecipeTool(repoRoot: string): SessionTool {
     inputSchema: RecipeProposalSchema,
     async execute(args) {
       try {
-        const verdict = await verifyProposal(repoRoot, args);
+        const verdict = await verifyProposal(repoRoot, args, apps ? { apps } : {});
         if (verdict.ok) {
+          const caveats = verdict.warnings?.length
+            ? `\n\nVERIFIED WITH CAVEATS — fix these before the outcome if you can:\n- ${verdict.warnings.join('\n- ')}`
+            : '';
           return {
-            content:
-              'VERIFIED: install, build, the entry probe and the server boot all passed. Produce this proposal as the outcome.',
+            content: `VERIFIED: install, build, the entry probe and the server boot all passed. Produce this proposal as the outcome.${caveats}`,
           };
         }
         return { content: `failed at ${verdict.stage}: ${clipOutput(verdict.reason)}`, isError: true };
@@ -313,7 +328,12 @@ export function buildRecipeRepair(
             const results = await runSessionPool<RecipeRepairContext, RecipeProposal>({
               items: [ctx],
               workItem: () => 'recipe-repair',
-              session: () => recipeRepairSessionDef({ repoRoot: ctx.repoRoot, sandbox }),
+              session: () =>
+                recipeRepairSessionDef({
+                  repoRoot: ctx.repoRoot,
+                  sandbox,
+                  ...(ctx.inputs.apps ? { apps: ctx.inputs.apps } : {}),
+                }),
               briefing: () => [recipeRepairBriefing(ctx)],
               driver,
               persistence,
@@ -395,12 +415,14 @@ A deterministic proposal derived from the repository's own manifests FAILED the 
 
 # The shape you produce
 
-One JSON object: optional \`install\` (shell), \`build\` (shell), optional \`entry\` (argv array — a CLI entrypoint), optional \`api\` (\`serve\` argv + optional \`healthPath\`/\`env\`, or a \`servers\` map + \`defaultServer\` for a multi-service workspace). At least one of \`entry\`/\`api\`. \`\${PORT}\` in serve argv/env is substituted at boot. An argv is spawned WITHOUT a shell — no \`&&\`, no pipes; shell composition belongs in \`install\`/\`build\`. Never a dev/watch command as a server.
+One JSON object: optional \`install\` (shell), \`build\` (shell), optional \`entry\` (argv array — a CLI entrypoint), optional \`api\` (\`serve\` argv + optional \`healthPath\`/\`env\`/\`app\`/\`cwd\`/\`services\`, or a \`servers\` map + \`defaultServer\` for a multi-service workspace), optional \`ownHosts\` (the product's OWN hostnames — "acme.com", "api.acme.com" — so detection stops reporting the app's own domains as external services; declare them when the repo's docs or env make them plain). A repo whose server needs a datastore declares the repo's OWN bring-up under \`api.services\` — \`{"up": "docker compose -f <repo compose file> up -d --wait …", "down": "docker compose -f … stop"}\` — never inside \`build\`; the runner owns that lifecycle. Namespace EVERY \`docker compose\` invocation — \`-p <dedicated-project>\`, or an \`-f\` file that pins a top-level \`name:\` (a dedicated test compose): a bare \`docker compose up/stop\` attaches to the repository's DEFAULT compose project, i.e. the developer's own running stack, and is refused statically; a name or port collision with a running container is resolved by NAMESPACING YOUR OWN WORLD, never by touching theirs. When the app pins a SQL datastore, run the repo's schema/migration step inside \`api.services.up\` after the bring-up — a compose that only starts an empty database boots a server with no schema behind a green health probe. At least one of \`entry\`/\`api\`. \`\${PORT}\` in serve argv/env is substituted at boot. An argv is spawned WITHOUT a shell — no \`&&\`, no pipes; shell composition belongs in \`install\`/\`build\`. Never a dev/watch command as a server. A serve boots in a THROWAWAY directory by default — a workspace-mediated argv (\`yarn workspace …\`, \`npm run -w …\`) needs \`"cwd": "repo"\` to run from the repo root, never an argv hack.
+
+Everything the recipe runs must be something THIS REPOSITORY ships. A hand-written stand-in — an inline \`node -e\` server, an entry that merely loads a module and exits, a build that builds nothing — is a WRONG answer even when verification passes: the point of the recipe is the app under test, and green on a stand-in tests nothing. When the workspace inventory lists apps with HTTP route prefixes, the recipe declares their server(s); when the real server will not boot, keep working THAT failure — a session that ends without a green proposal is an honest result the engine reports, while a green stand-in poisons every scenario built on it. (The \`web\` browser surface is authored later by hand — never bend \`api\` into serving a docs site or demo to stand in for it.)
 
 # How to work
 
 - The engine's report first. It lists what was actually found (the files next to a missing entry, the build's own error tail). Answer IT.
-- \`read_file\` / \`search_repo\` read the repository. \`sandbox_exec\` / \`sandbox_shell\` run commands in YOUR OWN persistent sandbox — a scratch world with an isolated HOME, not the repository checkout; use it to test tool availability and theories cheaply. The verification itself installs and builds the real tree — you never need to reproduce that by hand.
+- \`read_file\` / \`search_repo\` read the repository. \`sandbox_exec\` / \`sandbox_shell\` run commands in YOUR OWN persistent sandbox — a scratch world with an isolated HOME that STARTS EMPTY (no repo files; \`ls\` on turn one shows nothing, which is expected — do not spend turns discovering it); use it to test tool availability and theories cheaply. The verification itself installs and builds the real tree — you never need to reproduce that by hand.
 - \`check_recipe\` is free and static: run it on a draft early.
 - \`verify_recipe\` is the REAL verification — install → build → entry probe → services → server boot, minutes of work. Run it on your complete proposal before you produce the outcome; the engine re-runs exactly it on whatever you return, so an outcome it has not passed is an outcome that will be refused.
 - A dependency-free CLI may need NO install at all; an install demanding a lockfile the repo does not commit needs the non-frozen form. Omitting a wrong step is a valid repair — verification still proves the entry answers.

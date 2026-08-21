@@ -20,6 +20,7 @@ import {
 } from '@truecourse/guard-runner'
 import {
   discoverRecipe,
+  verifyProposal,
   type RecipeDiscoveryPhase,
   type RecipeProposal,
   type RecipeRepairContext,
@@ -373,6 +374,117 @@ describe('discoverRecipe — api proposals', () => {
     // The server's own stderr is the evidence — not just "it didn't answer".
     expect(evidence).toMatch(/Cannot find module/)
     expect(fs.existsSync(recipeFile(r))).toBe(true)
+  })
+})
+
+describe('verifyProposal — the wildcard (anti-stub) probe', () => {
+  /** A 200-everything stub — what the 2026-08-20 bench saw a session author to
+   *  game the health probe. Answers every path with the identical body. */
+  const STUB = `import http from 'node:http'
+http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok') })
+  .listen(process.env.PORT)
+`
+
+  it('rejects a server that answers every path identically', async () => {
+    const r = repo()
+    fs.writeFileSync(path.join(r, 'stub.mjs'), STUB)
+
+    const verdict = await verifyProposal(r, {
+      build: 'true',
+      api: { serve: ['node', path.join(r, 'stub.mjs')], healthPath: '/llms.txt' },
+    })
+
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.stage).toBe('server boot')
+    expect(verdict.reason).toMatch(/identical|not the application/)
+  })
+
+  it('accepts a real server — per-path content is never mistaken for a stub', async () => {
+    const r = repo()
+
+    const verdict = await verifyProposal(r, {
+      build: 'true',
+      api: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health' },
+    })
+
+    expect(verdict).toEqual({ ok: true })
+  })
+
+  // A green that leaned on a datastore the recipe never brings up is THIS
+  // machine's green, not the recipe's — the verdict says so instead of
+  // swallowing it (cal.diy 2026-08-20: the boot rode the dev's :5450 postgres).
+  it('a verified boot that rides an unserviced localhost datastore carries a warning', async () => {
+    const r = repo()
+
+    const verdict = await verifyProposal(r, {
+      build: 'true',
+      api: {
+        serve: ['node', FIXTURE_API_SERVER],
+        healthPath: '/health',
+        env: { DATABASE_URL: 'postgresql://postgres:@localhost:5450/calendso' },
+      },
+    })
+
+    expect(verdict.ok).toBe(true)
+    if (!verdict.ok) return
+    expect(verdict.warnings).toHaveLength(1)
+    expect(verdict.warnings![0]).toContain('api.services')
+  })
+
+  // The sibling fragility (cal.diy 2026-08-21): services bring the database
+  // container up but nothing ever migrates it — the boot verified against
+  // whatever schema the volume already carried, and a clean host gets an empty
+  // database behind a green health probe.
+  it('a green with services but NO migrate step anywhere warns about the empty schema', async () => {
+    const r = repo()
+
+    const verdict = await verifyProposal(r, {
+      build: 'true',
+      api: {
+        serve: ['node', FIXTURE_API_SERVER],
+        healthPath: '/health',
+        env: { DATABASE_URL: 'postgresql://postgres:@localhost:5450/calendso' },
+        services: { up: 'echo bring the database up', down: 'echo stop it' },
+      },
+    })
+
+    expect(verdict.ok).toBe(true)
+    if (!verdict.ok) return
+    expect(verdict.warnings).toHaveLength(1)
+    expect(verdict.warnings![0]).toContain('schema/migration')
+  })
+
+  it('a migrate step anywhere in the recipe silences the empty-schema warning', async () => {
+    const r = repo()
+
+    const verdict = await verifyProposal(r, {
+      build: 'true',
+      api: {
+        serve: ['node', FIXTURE_API_SERVER],
+        healthPath: '/health',
+        env: { DATABASE_URL: 'postgresql://postgres:@localhost:5450/calendso' },
+        services: { up: 'echo up && echo prisma migrate deploy', down: 'echo stop' },
+      },
+    })
+
+    expect(verdict).toEqual({ ok: true })
+  })
+
+  it('a redis-only pin under services warns nothing — no schema to migrate', async () => {
+    const r = repo()
+
+    const verdict = await verifyProposal(r, {
+      build: 'true',
+      api: {
+        serve: ['node', FIXTURE_API_SERVER],
+        healthPath: '/health',
+        env: { REDIS_URL: 'redis://localhost:6379' },
+        services: { up: 'echo up', down: 'echo down' },
+      },
+    })
+
+    expect(verdict).toEqual({ ok: true })
   })
 })
 

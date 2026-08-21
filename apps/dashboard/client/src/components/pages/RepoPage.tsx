@@ -1452,9 +1452,9 @@ function RepoPageInner() {
               onOpenFlow={openGuardFlow}
             />
           ) : leftTab === 'activity' ? (
-            // Agentic runs + sessions + live transcripts/chat (plan §3.6–§3.9).
-            // UI MOCK: hand-written data, no server reads.
-            <SessionsActivityView />
+            // Agentic runs + sessions + live transcripts (plan §3.6–§3.9),
+            // deep-linked by ?run=<runId> — the CLI's "Watch live" URL.
+            <SessionsActivityView repoId={repoId} />
           ) : leftTab === 'guarddrifts' ? (
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardDriftsView

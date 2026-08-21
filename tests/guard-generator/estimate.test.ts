@@ -13,6 +13,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runnableDriverIds } from '@truecourse/shared'
+import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index'
 import { setCacheEntry } from '@truecourse/llm'
 import { estimateGuardTokens } from '../../packages/core/src/services/llm/spec-estimate.js'
 import {
@@ -151,8 +152,8 @@ describe('estimateGuardTokens — the session stages', () => {
     const extractStage = stages.get(EXTRACT_SESSION_KIND)!
     // One doc in the universe, none cached: one session. The range is TURNS —
     // floored at one per session, ceilinged at the budget's hard limit.
-    const ceiling = (EXTRACT_SESSION_BUDGET.maxResumes + 1) * EXTRACT_SESSION_BUDGET.turns
-    expect(ceiling).toBe(20)
+    const ceiling = (EXTRACT_SESSION_BUDGET.maxResumes + 1) * EXTRACT_SESSION_BUDGET.turns + WRAP_UP_TURNS
+    expect(ceiling).toBe(23)
     expect(extractStage.callsRange).toEqual({ low: 1, high: 1 * ceiling })
     expect(extractStage.label).toBe('Extracting claims')
     expect(extractStage.bound).toBe('1 of 1 doc changed')
@@ -170,13 +171,13 @@ describe('estimateGuardTokens — the session stages', () => {
     // Cold: the flow count is a synthesis output, bounded by the runnable claims
     // (2 sections × 3.5) over the recipe's one prepared surface (cli).
     const boundFlows = Math.ceil(2 * 3.5)
-    const ceiling = (FLOW_WORKER_BUDGET.maxResumes + 1) * FLOW_WORKER_BUDGET.turns
-    expect(ceiling).toBe(50)
+    const ceiling = (FLOW_WORKER_BUDGET.maxResumes + 1) * FLOW_WORKER_BUDGET.turns + WRAP_UP_TURNS
+    expect(ceiling).toBe(53)
     expect(workerStage.callsRange).toEqual({ low: boundFlows, high: boundFlows * 1 * ceiling })
     expect(workerStage.bound).toContain('flows ≤ runnable claims')
     // The fidelity CHILD is 0..one per worker, at ITS budget's ceiling (5 turns).
     const fidelity = stages.get(FIDELITY_SESSION_KIND)!
-    expect(fidelity.callsRange).toEqual({ low: 0, high: boundFlows * 5 })
+    expect(fidelity.callsRange).toEqual({ low: 0, high: boundFlows * (5 + WRAP_UP_TURNS) })
     expect(fidelity.bound).toBe('one review per green submission')
   })
 
@@ -206,13 +207,13 @@ describe('estimateGuardTokens — the session stages', () => {
     // digests, unknowable offline). Expected = 3 sessions × 4 turns; the floor is
     // one turn per area session, the ceiling all three at the budget's limit.
     expect(stage.calls).toBe(3 * 4)
-    expect(stage.callsRange).toEqual({ low: 2, high: 3 * 24 })
+    expect(stage.callsRange).toEqual({ low: 2, high: 3 * 27 })
   })
 
   it('a single-area repo needs no epic pass', async () => {
     const stage = (await stagesOf(coldRepo())).get(FLOWS_SESSION_KIND)!
     expect(stage.calls).toBe(1 * 4)
-    expect(stage.callsRange).toEqual({ low: 1, high: 24 })
+    expect(stage.callsRange).toEqual({ low: 1, high: 27 })
   })
 })
 
@@ -239,7 +240,7 @@ describe('estimateGuardTokens — cache awareness', () => {
   it('the flows key the estimate probes is the key the run’s seam would use', async () => {
     const r = coldRepo()
     await warmExtractCache(r)
-    expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 24 })
+    expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 27 })
 
     // The areas the RUN hands its synthesis seam — the seam keys on exactly these.
     const areas: FlowSynthesisArea[] = []
@@ -303,7 +304,7 @@ describe('estimateGuardTokens — cache awareness', () => {
 
     const after = await areaFor()
     expect(flowsSessionCacheKey(after)).not.toBe(flowsSessionCacheKey(before))
-    expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 24 })
+    expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 27 })
   })
 
   it('after a full generate nothing is left to do ⇒ the estimate is empty and the confirm is skipped', async () => {
@@ -340,7 +341,7 @@ describe('estimateGuardTokens — cache awareness', () => {
 
     const stages = await stagesOf(r)
     expect(stages.get('guardMatch')!.calls).toBe(1)
-    expect(stages.get(FLOW_WORKER_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 50 })
+    expect(stages.get(FLOW_WORKER_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 53 })
     // Nothing spec-side moved, so extraction and synthesis stay silent.
     expect(stages.has(EXTRACT_SESSION_KIND)).toBe(false)
     expect(stages.has(FLOWS_SESSION_KIND)).toBe(false)

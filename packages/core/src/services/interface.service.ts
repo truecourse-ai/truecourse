@@ -31,6 +31,7 @@ import {
   analyzeFile,
   collectDatastoreUrls,
   collectOutboundRequests,
+  databaseFromManifest,
   detectDatabases,
   detectExternalServices,
   deriveOwnHosts,
@@ -542,7 +543,17 @@ function detectDatabaseContext(
     // the schema is the whole grounding, and a repo can carry both (a cache and a
     // relational store) with only one of them parseable.
     const primary = databases.find((d) => d.tables.length > 0) ?? databases[0];
-    if (!primary) return null;
+    if (!primary) {
+      // The recipe-app fallback: when no detected service surfaced a driver, the
+      // dirs the recipe itself declares as the app under test get a manifest
+      // scan. strapi's `examples/getstarted` declares `better-sqlite3` while its
+      // code only names the driver in a knex config string — invisible to both
+      // the import scan and the service manifest scan (`examples/` is not a
+      // service dir). Type and driver only; there is no schema to parse.
+      const fromRecipe = recipeAppDatabase(repoPath);
+      if (!fromRecipe) return null;
+      return { ...fromRecipe, tables: [], relations: [], appImports: [] };
+    }
     return {
       type: primary.type,
       driver: primary.driver,
@@ -558,6 +569,29 @@ function detectDatabaseContext(
     log.warn(`interface mapping: database detection failed, no seed grounding (${errorText(error)})`);
     return null;
   }
+}
+
+/** The database the recipe's own app dirs declare in their manifests — the
+ *  fallback grounding when nothing else detected one. An unreadable recipe
+ *  claims nothing, exactly like `repoOwnHosts`. */
+function recipeAppDatabase(repoPath: string): { type: string; driver: string } | null {
+  let recipe;
+  try {
+    recipe = loadRecipe(repoPath, recipePath(repoPath))?.recipe;
+  } catch {
+    return null;
+  }
+  if (!recipe) return null;
+  const dirs = [
+    recipe.api?.app,
+    ...Object.values(recipe.api?.servers ?? {}).map((s) => s.app),
+    recipe.web?.app,
+  ].filter((d): d is string => typeof d === 'string' && d.length > 0);
+  for (const dir of [...new Set(dirs)]) {
+    const found = databaseFromManifest(path.resolve(repoPath, dir));
+    if (found) return found;
+  }
+  return null;
 }
 
 /** How many import lines the draft prompt is shown — enough to establish the

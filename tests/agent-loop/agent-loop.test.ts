@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
   defineSessionTool,
+  resumeGrantMessage,
   runAgentLoop,
   SessionToolArgsError,
+  WRAP_UP_TURNS,
+  wrapUpMessage,
   type DriverCapabilities,
   type DriverResult,
   type RawPayload,
@@ -203,11 +206,14 @@ describe('runAgentLoop completion', () => {
   });
 
   it('budget-exhausts when the turn budget binds on the only grant', async () => {
-    // The driver would happily keep going; the shell must interrupt it.
-    const { driver } = fakeDriver(async ({ emit, interrupted }) => {
+    // The driver would happily keep going; the shell demands the outcome
+    // (the wrap-up window), then interrupts when the window also runs out.
+    let seenSteers: string[] = [];
+    const { driver } = fakeDriver(async ({ emit, interrupted, steers }) => {
       for (let i = 0; i < 20 && !interrupted(); i++) {
         await emit({ type: 'assistant-turn', text: `turn ${i}`, usage: usage(10) });
       }
+      seenSteers = steers;
       return endedWithoutOutcome();
     });
     const { persistence } = memoryPersistence();
@@ -228,19 +234,74 @@ describe('runAgentLoop completion', () => {
       retryability: 'none',
     });
     expect(outcome.resumable).toBe(true);
-    expect(outcome.spent.turns).toBe(2);
+    // The wrap-up demand was steered when the budget bound, and the window's
+    // turns are recorded honestly: hard limit = turns + WRAP_UP_TURNS.
+    expect(seenSteers).toEqual([wrapUpMessage()]);
+    expect(outcome.spent.turns).toBe(2 + WRAP_UP_TURNS);
     expect(persistence.readEvents('s1').at(-1)).toMatchObject({
       type: 'failure',
       failure: { kind: 'budget-exhausted' },
     });
   });
 
+  it('an outcome delivered inside the wrap-up window completes the session', async () => {
+    const { driver } = fakeDriver(async ({ emit, steers, interrupted }) => {
+      // Reads until the shell demands the outcome, then delivers it.
+      for (let i = 0; i < 20 && steers.length === 0 && !interrupted(); i++) {
+        await emit({ type: 'assistant-turn', text: `reading ${i}`, usage: usage(10) });
+      }
+      await emit({ type: 'assistant-turn', text: 'wrapping up', usage: usage(10) });
+      return { kind: 'outcome', value: { verdict: 'partial-but-real' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: makeDef({ budget: { turns: 2, maxResumes: 0, tokenCeiling: 1_000_000 } }),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    if (outcome.status !== 'completed') throw new Error('unreachable');
+    expect(outcome.output).toEqual({ verdict: 'partial-but-real' });
+    expect(outcome.spent.turns).toBe(3); // 2 budget + 1 wrap-up turn
+  });
+
+  it('the wrap-up demand names the outcome-precondition tool', async () => {
+    let seenSteers: string[] = [];
+    const { driver } = fakeDriver(async ({ emit, interrupted, steers }) => {
+      for (let i = 0; i < 20 && !interrupted(); i++) {
+        await emit({ type: 'assistant-turn', text: `turn ${i}`, usage: usage(10) });
+      }
+      seenSteers = steers;
+      return endedWithoutOutcome();
+    });
+    const { persistence } = memoryPersistence();
+    await runAgentLoop({
+      def: makeDef({
+        budget: { turns: 1, maxResumes: 0, tokenCeiling: 1_000_000 },
+        outcomePrecondition: { tool: 'check_findings', message: 'run it' },
+      }),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+    expect(seenSteers).toEqual([wrapUpMessage('check_findings')]);
+    expect(seenSteers[0]).toContain('check_findings');
+  });
+
   it('grants a fresh budget automatically up to maxResumes, without interrupting', async () => {
-    const { driver } = fakeDriver(async ({ emit, interrupted }) => {
+    let seenSteers: string[] = [];
+    const { driver } = fakeDriver(async ({ emit, interrupted, steers }) => {
       for (let i = 0; i < 3; i++) {
         await emit({ type: 'assistant-turn', text: `turn ${i}`, usage: usage(10) });
         if (interrupted()) return endedWithoutOutcome();
       }
+      seenSteers = steers;
       return { kind: 'outcome', value: { verdict: 'keep' } };
     });
     const { persistence } = memoryPersistence();
@@ -262,6 +323,9 @@ describe('runAgentLoop completion', () => {
     // The grant lands right after the exhausting second turn.
     const types = persistence.readEvents('s1').map((e) => e.type);
     expect(types.indexOf('resume-grant')).toBe(types.lastIndexOf('assistant-turn') - 1);
+    // The grant is ANNOUNCED — and grant 1 of 1 says it is the last.
+    expect(seenSteers).toEqual([resumeGrantMessage(1, 1, 2)]);
+    expect(seenSteers[0]).toContain('LAST grant');
   });
 
   it('budget-exhausts only when the LAST grant binds', async () => {
@@ -284,8 +348,8 @@ describe('runAgentLoop completion', () => {
     expect(outcome.status).toBe('failed');
     if (outcome.status !== 'failed') throw new Error('unreachable');
     expect(outcome.failure.kind).toBe('budget-exhausted');
-    // Hard limit = (maxResumes + 1) × turns.
-    expect(outcome.spent.turns).toBe(2);
+    // Hard limit = (maxResumes + 1) × turns + the wrap-up window.
+    expect(outcome.spent.turns).toBe(2 + WRAP_UP_TURNS);
     expect(persistence.readEvents('s1').filter((e) => e.type === 'resume-grant')).toHaveLength(1);
   });
 
@@ -1092,12 +1156,49 @@ describe('runAgentLoop outcome precondition', () => {
   });
 
   it('does not refuse an outcome the shell has already decided to stop for', async () => {
-    // The budget interrupt fired on the very turn that produced the outcome:
-    // there is no budget left to comply in, so it stands on its own merits.
+    // The context-ceiling interrupt fired on the very turn that produced the
+    // outcome: there is no room left to comply in, so it stands on its own
+    // merits. (A bound turn BUDGET no longer stops the session outright — the
+    // wrap-up window gives it room, so the refusal round trip fires there.)
     const { driver, runs } = fakeDriver(async (ctx) => {
       await ingest(ctx);
-      await ctx.emit({ type: 'assistant-turn', text: 'last turn', usage: usage(10) });
+      await ctx.emit({ type: 'assistant-turn', text: 'last turn', usage: usage(2000) });
       return { kind: 'outcome', value: { verdict: 'unchecked' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: gated({ budget: { turns: 10, maxResumes: 0, tokenCeiling: 1000 } }),
+      workItem: 'w',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    expect(runs).toHaveLength(1);
+  });
+
+  it('the wrap-up window leaves room for the precondition round trip', async () => {
+    // Budget binds → wrap-up demand → premature outcome → refusal → required
+    // tool → outcome, all inside the window: the session completes.
+    let run = 0;
+    const { driver, runs } = fakeDriver(async (ctx) => {
+      run += 1;
+      await ingest(ctx);
+      if (run === 1) {
+        await ctx.emit({ type: 'assistant-turn', text: 'reading to the wall', usage: usage(10) });
+        // The wrap-up demand was steered; deliver an (unchecked) outcome.
+        await ctx.emit({ type: 'assistant-turn', text: 'draft', usage: usage(10) });
+        return { kind: 'outcome', value: { verdict: 'premature' } };
+      }
+      await ctx.emit({
+        type: 'assistant-turn',
+        toolCall: { name: 'check_draft', args: {} },
+        usage: usage(10),
+      });
+      await ctx.emit({ type: 'tool-result', toolName: 'check_draft', content: 'ok' });
+      return { kind: 'outcome', value: { verdict: 'checked' } };
     });
     const { persistence } = memoryPersistence();
     const outcome = await runAgentLoop({
@@ -1110,7 +1211,12 @@ describe('runAgentLoop outcome precondition', () => {
     }).outcome;
 
     expect(outcome.status).toBe('completed');
-    expect(runs).toHaveLength(1);
+    if (outcome.status !== 'completed') throw new Error('unreachable');
+    expect(outcome.output).toEqual({ verdict: 'checked' });
+    expect(runs).toHaveLength(2);
+    // 1 budget turn + 2 window turns (draft, then the required tool) — done
+    // with a wrap-up turn to spare.
+    expect(outcome.spent.turns).toBe(3);
   });
 
   it('counts a tool-result carried by the resumed-from transcript', async () => {
@@ -1164,6 +1270,96 @@ describe('runAgentLoop outcome precondition', () => {
 
     expect(outcome.status).toBe('completed');
     expect(runs).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the draft checkpoint (outcomePrecondition's in-flight sibling)
+// ---------------------------------------------------------------------------
+
+describe('runAgentLoop draft checkpoint', () => {
+  const CHECKPOINT = { tool: 'check_draft', afterTurn: 2, message: 'Draft something and check it NOW.' };
+  const checked = (overrides?: Partial<SessionDef<Outcome>>) =>
+    makeDef({ draftCheckpoint: CHECKPOINT, ...overrides });
+
+  it('steers the nudge once when afterTurn passes with no tool-result', async () => {
+    let seenSteers: string[] = [];
+    const { driver } = fakeDriver(async ({ emit, steers }) => {
+      for (let i = 0; i < 4; i++) {
+        await emit({ type: 'assistant-turn', text: `exploring ${i}`, usage: usage(10) });
+      }
+      seenSteers = steers;
+      return { kind: 'outcome', value: { verdict: 'late but done' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: checked(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    // Fired exactly once, at the afterTurn boundary — turns 3 and 4 add nothing.
+    expect(seenSteers).toEqual([CHECKPOINT.message]);
+  });
+
+  it('stays silent when the tool ran before afterTurn', async () => {
+    let seenSteers: string[] = [];
+    const { driver } = fakeDriver(async ({ emit, steers }) => {
+      await emit({ type: 'assistant-turn', toolCall: { name: 'check_draft', args: {} }, usage: usage(10) });
+      await emit({ type: 'tool-result', toolName: 'check_draft', content: 'ok' });
+      for (let i = 0; i < 3; i++) {
+        await emit({ type: 'assistant-turn', text: `refining ${i}`, usage: usage(10) });
+      }
+      seenSteers = steers;
+      return { kind: 'outcome', value: { verdict: 'drafted early' } };
+    });
+    const { persistence } = memoryPersistence();
+    const outcome = await runAgentLoop({
+      def: checked(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    expect(seenSteers).toEqual([]);
+  });
+
+  it('counts a tool-result carried by the resumed-from transcript', async () => {
+    const { persistence } = memoryPersistence();
+    persistence.appendEvent('s1', {
+      type: 'tool-result',
+      toolName: 'check_draft',
+      content: 'ok',
+      seq: 0,
+      ts: '2026-08-21T00:00:00.000Z',
+    });
+    let seenSteers: string[] = [];
+    const { driver } = fakeDriver(async ({ emit, steers }) => {
+      for (let i = 0; i < 3; i++) {
+        await emit({ type: 'assistant-turn', text: `resumed ${i}`, usage: usage(10) });
+      }
+      seenSteers = steers;
+      return { kind: 'outcome', value: { verdict: 'resumed' } };
+    });
+    const outcome = await runAgentLoop({
+      def: checked(),
+      workItem: 'w',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 's2',
+      resume: { of: 's1' },
+    }).outcome;
+
+    expect(outcome.status).toBe('completed');
+    expect(seenSteers).toEqual([]);
   });
 });
 

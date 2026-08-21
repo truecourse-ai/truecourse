@@ -83,6 +83,23 @@ describe('groupByArea', () => {
     expect(areas.map((a) => a.id)).toEqual(['capacity-app/events']);
   });
 
+  it('a vocab merge folds minted tags but NEVER renames a pinned area', () => {
+    // The strapi 2026-08-20 regression: settle merged
+    // `content-manager → admin-panel-configuration`, and the pin was folded
+    // through the map too — the user's stated area id must stay literal.
+    const docs = [doc('pinned.md'), doc('minted.md')];
+    const tags = new Map<string, DocAreaTags>([
+      ['pinned.md', { tags: [{ product: 'core', concern: 'content-manager' }] }],
+      ['minted.md', { tags: [{ product: 'core', concern: 'content-manager' }] }],
+    ]);
+    const manual: ManualArea[] = [{ doc: 'pinned.md', areas: ['core/content-manager'] }];
+    const vocab = { products: {}, concerns: { 'content-manager': 'admin-panel-configuration' } };
+    const { docs: corpusDocs, areas } = groupByArea(docs, tags, manual, vocab);
+    expect(corpusDocs.find((d) => d.ref === 'pinned.md')?.areaTags).toEqual(['core/content-manager']);
+    expect(corpusDocs.find((d) => d.ref === 'minted.md')?.areaTags).toEqual(['core/admin-panel-configuration']);
+    expect(areas.map((a) => a.id)).toEqual(['core/admin-panel-configuration', 'core/content-manager']);
+  });
+
   it('produces a stable, sorted area + docRef ordering', () => {
     const docs = [doc('z.md'), doc('a.md')];
     const tags = new Map<string, DocAreaTags>([

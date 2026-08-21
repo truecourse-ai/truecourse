@@ -72,6 +72,7 @@ import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
 import { createGuardGenerateSessionSeams } from '../services/guard-generate/index.js';
+import type { SessionRunStartedInfo } from '../lib/sessions-store.js';
 export { GenerateStepNotReadyError } from '../services/guard-generate/index.js';
 export { GENERATE_SESSION_STEPS, type GenerateStep } from '@truecourse/guard-generator';
 import { readGuardRecipeCard } from './guard-read.js';
@@ -212,6 +213,12 @@ export interface GuardGenerateInProcessOptions {
    * curation is `dismissedFlows` and cost control is the estimate gate.
    */
   stopAfterFlows?: boolean;
+  /**
+   * The (lazily created) sessions-store run record just came into being —
+   * fired on first session; never on a fully-cached run. The CLI prints the
+   * dashboard "watch live" deep link from it.
+   */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
    * Single-step mode (the CLI's `--only-<step>` flags): run only this session
    * step's sessions — prior steps replay from their outcome caches (a miss
@@ -395,6 +402,7 @@ export async function guardGenerateInProcess(
       : createGuardGenerateSessionSeams({
           repoRoot,
           ...(options.llm ? { transport: options.llm } : {}),
+          ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
           // Single-step mode: the seams enforce the cache-only replay of every
           // step before the chosen one (the engine enforces the stop after it).
           ...(options.only ? { only: options.only } : {}),

@@ -27,7 +27,8 @@ import type { PlaceResult, StateReconciliation } from "@truecourse/core/services
 import { INTERFACE_AUTHOR_BUDGET, defaultAuthorConcurrency } from "@truecourse/core/services/interface-author";
 import { assertSessionBackendReady } from "@truecourse/core/services/llm/session-driver";
 import { preflightLlmOrExit, type LlmTransportFlag } from "../lib/claude-preflight.js";
-import { isInteractive } from "./helpers.js";
+import { isInteractive, printWatchLive, resolveDashboardUrl } from "./helpers.js";
+import { registerProject } from "@truecourse/core/config/registry";
 
 export interface RunGuardInterfacesOptions {
   cwd?: string;
@@ -65,6 +66,8 @@ export async function runGuardInterfacesAuthor(
 ): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro("Author interfaces");
+  const project = await registerProject(repoRoot);
+  const dashboardUrl = await resolveDashboardUrl();
 
   if (opts.llmTransport === "agent") {
     p.log.error(
@@ -148,6 +151,7 @@ export async function runGuardInterfacesAuthor(
       ...(opts.replace !== undefined ? { replace: opts.replace } : {}),
       ...(opts.llmTransport ? { transport: opts.llmTransport } : {}),
       concurrency,
+      onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
       onStatus: (message) => spinner.message(message),
       onProgress: (event) => {
         if (event.kind === "place-start") live.start(event.placeId, event.total);

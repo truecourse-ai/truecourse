@@ -14,7 +14,7 @@
  */
 
 import yaml from 'js-yaml';
-import type { SessionEvent } from '@truecourse/agent-loop';
+import { WRAP_UP_TURNS, type SessionEvent } from '@truecourse/agent-loop';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import {
   evidenceRelPath,
@@ -36,7 +36,7 @@ import {
   type GuardScenarioDiagnosis,
 } from '@truecourse/shared';
 import path from 'node:path';
-import { createSessionRun } from '../lib/sessions-store.js';
+import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
 import {
@@ -326,7 +326,7 @@ export interface GuardAdjudicationPlan {
   sessions: number;
   /** Expected turns per session (provisional constant). */
   expectedTurns: number;
-  /** The hard per-session ceiling (`turns × (maxResumes + 1)`). */
+  /** The hard per-session ceiling (`turns × (maxResumes + 1)` + the shell's wrap-up window). */
   maxTurnsPerSession: number;
 }
 
@@ -347,7 +347,7 @@ export async function planGuardAdjudication(
     cached: prepared.cached.size,
     sessions: prepared.sessionItems.length,
     expectedTurns: ADJUDICATE_EXPECTED_TURNS,
-    maxTurnsPerSession: ADJUDICATE_BUDGET.turns * (ADJUDICATE_BUDGET.maxResumes + 1),
+    maxTurnsPerSession: ADJUDICATE_BUDGET.turns * (ADJUDICATE_BUDGET.maxResumes + 1) + WRAP_UP_TURNS,
   };
 }
 
@@ -380,6 +380,9 @@ export interface RunGuardAdjudicationOptions {
   onSessionEvent?: (scenarioId: string, event: SessionEvent) => void;
   /** What the run is doing before/around the sessions — the phase line. */
   onStatus?: (message: string) => void;
+  /** The sessions-store run record just came into being (only when there are
+   *  session items) — the CLI prints the "watch live" deep link from it. */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
 }
 
 export interface GuardAdjudicationVerdictRow {
@@ -458,6 +461,7 @@ export async function runGuardAdjudication(
     const run = createSessionRun(repoRoot, { command: 'guard-adjudicate', gitRef });
     sessionRunId = run.runId;
     runDir = run.dir;
+    opts.onRunStarted?.({ command: 'guard-adjudicate', runId: run.runId, dir: run.dir });
     const { driver, mode, attribution } = createConfiguredSessionDriver({
       ...(opts.transport ? { transport: opts.transport } : {}),
       cwd: repoRoot,

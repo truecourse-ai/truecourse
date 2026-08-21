@@ -43,10 +43,14 @@ function doc(p: string, content = `body of ${p}`): DocCandidate {
   };
 }
 
+// The kept docs carry pairwise-shared claim tokens so the deterministic
+// collision pairing (item 119) nominates every within-area pair — without a
+// shared identifier or heading, a doc pair costs no session and can flag
+// nothing. The bodies keep the `body of <path>` line the flag() quotes pin.
 const DOCS = [
-  doc('docs/users-v1.md'),
-  doc('docs/users-v2.md'),
-  doc('docs/auth.md'),
+  doc('docs/users-v1.md', 'body of docs/users-v1.md\n\nUses `userList`, `userQuota`, `authRealm`, `authScope`.\n'),
+  doc('docs/users-v2.md', 'body of docs/users-v2.md\n\nUses `userList`, `userQuota`, `sessionKey`, `sessionTtl`.\n'),
+  doc('docs/auth.md', 'body of docs/auth.md\n\nUses `authRealm`, `authScope`, `sessionKey`, `sessionTtl`.\n'),
   doc('notes/scratch.md'),
 ];
 
@@ -86,23 +90,22 @@ const flag = (a: string, b: string, review: unknown = REVIEW): OverlapFlag => ({
   review,
 });
 
-/** Every within-area pair of an area's docs, flagged. */
-const allPairs = (refs: readonly string[], review?: unknown): OverlapFlag[] => {
-  const out: OverlapFlag[] = [];
-  for (let i = 0; i < refs.length; i += 1) {
-    for (let j = i + 1; j < refs.length; j += 1) out.push(flag(refs[i], refs[j], review));
-  }
-  return out;
-};
+/** The doc pairs of a briefing's CANDIDATE COLLISIONS checklist, in order. */
+const checklistPairs = (briefing: string): Array<[string, string]> =>
+  [...briefing.matchAll(/^ {2}\d+\. (\S+) · .+? {2}<-> {2}(\S+) · /gm)].map((m) => [m[1], m[2]]);
+
+/** Every briefed candidate pair, flagged — the shape of an obedient session. */
+const allPairs = (briefing: string, review?: unknown): OverlapFlag[] =>
+  checklistPairs(briefing).map(([a, b]) => flag(a, b, review));
 
 /**
- * The scan's three session kinds, scripted. `curate` answers per doc; `overlaps`
- * answers per area (default: flag every within-area pair); the settlement is
- * always the empty one.
+ * The scan's three session kinds, scripted. `curate` answers per doc;
+ * `overlaps` answers per cluster session (default: flag every pair of the
+ * briefed checklist); the settlement is always the empty one.
  */
 function scanScript(opts: {
   curate: (call: StubCall) => unknown;
-  overlaps?: (areaId: string, briefedDocs: string[]) => OverlapFlag[];
+  overlaps?: (areaId: string, briefedDocs: string[], briefing: string) => OverlapFlag[];
 }): StubScript {
   return async (call) => {
     if (call.kind === 'spec-scan.settle-areas') {
@@ -111,9 +114,9 @@ function scanScript(opts: {
     }
     if (call.kind === 'spec-scan.overlap') {
       const areaId = areaOf(call.briefing);
-      const briefed = [...call.briefing.matchAll(/^--- (?:outside )?doc: (\S+)  ·/gm)].map((m) => m[1]);
+      const briefed = [...call.briefing.matchAll(/^--- doc: (\S+)  ·/gm)].map((m) => m[1]);
       await call.emit(toolResult('check_findings', 'valid'));
-      return outcome({ overlaps: opts.overlaps?.(areaId, briefed) ?? [], notReached: [] });
+      return outcome({ overlaps: opts.overlaps?.(areaId, briefed, call.briefing) ?? [], notReached: [] });
     }
     return outcome(opts.curate(call));
   };
@@ -159,7 +162,7 @@ interface RunExtra {
   repoIdentity?: Parameters<typeof runSpecScanSessions>[0]['repoIdentity'];
   disableOverlapDetection?: boolean;
   driver?: SessionDriver;
-  overlaps?: (areaId: string, briefedDocs: string[]) => OverlapFlag[];
+  overlaps?: (areaId: string, briefedDocs: string[], briefing: string) => OverlapFlag[];
   curate?: (call: StubCall) => unknown;
 }
 
@@ -170,7 +173,7 @@ function run(extra: RunExtra = {}) {
     stubDriver(
       scanScript({
         curate: curate ?? CURATE_BY_PATH,
-        overlaps: overlaps ?? ((_area, briefed) => allPairs(briefed)),
+        overlaps: overlaps ?? ((_area, _briefed, briefing) => allPairs(briefing)),
       }),
     ).driver;
   return runSpecScanSessions({
@@ -203,8 +206,9 @@ describe('the scan run', () => {
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/auth.md', 'docs/users-v1.md', 'docs/users-v2.md']);
 
-    // Every within-area pair the session flagged reached the corpus.
-    const overlapPairs = usersArea.overlaps.map((o) => o.docs);
+    // Every nominated pair the session flagged reached the corpus, under the
+    // ONE area each pair was assigned to (all three pairs share users-entity).
+    const overlapPairs = usersArea.overlaps.map((o) => [...o.docs].sort());
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
     expect(overlapPairs).toContainEqual(['docs/users-v1.md', 'docs/users-v2.md']);
@@ -317,12 +321,15 @@ describe('the scan run — overlap adjudication', () => {
     ]);
   });
 
-  // The window MATRIX is gone: however large the docs, an area costs ONE session.
-  it('costs one overlap session per area, whatever the docs weigh', async () => {
+  // The window MATRIX is gone: however large the docs, a collision cluster
+  // costs ONE session (the shared `## Defaults` heading pairs them).
+  it('costs one overlap session per cluster, whatever the docs weigh', async () => {
     const big = (name: string): string =>
-      [`# ${name}`, ...Array.from({ length: 4000 }, (_, i) => `${name} setting ${i} defaults to auto.`)].join(
-        '\n',
-      );
+      [
+        `# ${name}`,
+        '## Defaults',
+        ...Array.from({ length: 4000 }, (_, i) => `${name} setting ${i} defaults to auto.`),
+      ].join('\n');
     const DOCS_BIG = [doc('docs/gateway.md', big('gateway')), doc('docs/ingress.md', big('ingress'))];
     const stub = stubDriver(
       scanScript({

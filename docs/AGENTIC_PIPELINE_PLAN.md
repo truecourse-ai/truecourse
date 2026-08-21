@@ -401,6 +401,38 @@ session that exhausts the LAST budget fails exactly as this section
 already requires — `budget-exhausted`, naming what it did not reach.
 Resume grants time, never leniency.
 
+**Budget visibility + the wrap-up window (decision 2026-08-21, the
+documenso spec-scan field run).** The first loop-driven scan at scale
+showed what silent grants cost: 12 of 26 overlap sessions — the twelve
+largest areas — read one section per turn to the 45-turn wall and failed
+with NOTHING, 7.5M of the run's 13.2M tokens spent for zero corpus rows,
+and one session began wrapping up exactly one turn too late. A session
+that cannot see its budget cannot honor a budget contract, and a
+`budget-exhausted` that discards every disagreement the session found is
+not the "real result" this section promised. Two amendments, both owned
+by the shell so every session kind inherits them:
+
+- **Grants are announced.** Each automatic resume grant is steered into
+  the session as a user message naming grant N of M, the fresh turn
+  count, and — on the last — that no more follow. Session prompts state
+  their own numbers too (the overlap session's budget contract now
+  does); the announcement is what makes "last grant" actionable.
+- **Exhaustion opens a wrap-up window, not a trapdoor.** When the last
+  grant's budget binds, the shell steers an outcome demand (naming the
+  `outcomePrecondition` tool when one is declared) and allows
+  `WRAP_UP_TURNS` (3) further turns — enough for the refusal → required
+  tool → outcome round trip — before failing `budget-exhausted`. An
+  outcome delivered inside the window is an ordinary completion with an
+  honest `notReached`. The hard limit becomes
+  `(maxResumes + 1) × budget + WRAP_UP_TURNS`, still hard, still never
+  negotiable at runtime; the estimates' turn ceilings include it.
+
+The same shell also carries `draftCheckpoint` (2026-08-21, from the
+guard-setup bench): `outcomePrecondition`'s in-flight sibling — a
+one-shot steered nudge when the session's `afterTurn`-th turn completes
+with no result from the named draft tool, for session kinds whose
+failure mode is pure exploration with no draft to salvage.
+
 **Module placement (revised 2026-08-17; package split settled with
 Sarkis the same day).** ONE package defines the loop:
 `packages/agent-loop` holds the session contract (transcript events,
@@ -1183,12 +1215,28 @@ all run over the orchestrator's kept scope.
   two values, which is exactly the single-area, single-product shape the
   reference has — the corpus whose invented `truecourse` product is the
   defect §6.2 records. Prompt: reconcile the emergent area vocabulary of
-  this corpus. Inputs: the product and concern label sets, and nothing
-  else — today's normalizer is cached on the vocabulary set alone, so a
-  doc edit that does not move a label is free, and that property is kept
-  by keeping doc-level detail OUT of the inputs. Tools: look up which
-  docs carry a label, and read a doc (to decide whether two labels
-  really name one concept) — tool calls do not enter the cache key.
+  this corpus. Inputs: the product and concern label sets WITH THE DOCS
+  THAT CARRY EACH (amended 2026-08-20 — see below); tools: read a doc (to
+  decide whether two labels really name one concept), and the full doc
+  list of one label whose briefed list was cut short.
+
+  **The label→docs map rides the briefing** (amendment 2026-08-20, the
+  documenso field run). The original inputs were the label SETS alone,
+  with the map behind a `docs_with_label` tool, to keep the cache keyed on
+  the vocabulary and nothing else. On a 45-concern vocabulary that failed
+  outright, twice: the session correctly went to judge the merge
+  candidates from their docs, spent all 16 turns (8 × one resume) calling
+  the tool one label at a time, and produced NO settlement — the run
+  fell open to one area per concern. The rule of item 106 applies here
+  too: data the session certainly needs rides the briefing, not a tool. So
+  the briefing now lists every label with its docs (path + title), capped
+  per label and shrinking as the vocabulary grows, and the tool survives
+  only as the escape hatch for a cut list (an oversized subdivision
+  candidate). The cache key follows the briefing, as it must: the docs
+  behind a label are keyed too, so a corpus that gained, lost or re-tagged
+  a doc settles again. The property that mattered is untouched — a doc
+  EDIT still moves no key, because content never enters it.
+
   Done: the concern merges, the product merges, a verdict on every
   non-`core` product — justified, naming the second separately-deployed
   application, or collapsed to `core` — and the SUBDIVISIONS (below). That
@@ -1217,8 +1265,12 @@ all run over the orchestrator's kept scope.
   label is a curation act; a division imposed on a dead session's area is
   the unrecordable gap that principle refuses.
 - **Overlap session** (one per area, turn budget 15, `maxResumes` 2 — a
-  hard limit of 45 turns). Prompt: find the real overlaps and conflicting
-  statements among this area's docs.
+  hard limit of 45 turns plus §3.3's wrap-up window). Prompt: find the
+  real overlaps and conflicting statements among this area's docs — and
+  the budget contract itself, WITH its numbers, demanding batched
+  `read_section` calls (several per turn) and an early outcome over a
+  read-to-the-wall (2026-08-21: a session that cannot see its budget
+  reads one section per turn until it dies).
   Inputs: the area's kept docs PLUS the heading-widened outside docs, as
   titles and outlines, not full contents. The widening stays: the doc
   sessions label independently, so the same subject lands under
@@ -1231,7 +1283,10 @@ all run over the orchestrator's kept scope.
   detector, and it is the one signal no budget can supply: a session that
   declines to read never exhausts anything, so `notReached: []` proves
   nothing on its own. It belongs in the corpus beside the completeness
-  fields, not in a log line. It absorbs
+  fields, not in a log line — for FAILED sessions too (2026-08-21): a
+  failure has a transcript even though it has no outcome, and the stamp
+  separates "opened 45 sections and still ran out" from "never really
+  read". It absorbs
   today's separate verify pass, which exists only because detection runs
   on a cheap model and over-flags, so a stronger model re-reads each
   flag with full context; §3.4 retires that split, and one flagship
@@ -1301,16 +1356,31 @@ the one model's prices:
   BEFORE the doc sessions, so it cannot know whether re-tagging will
   actually move a label or leave a non-`core` product standing — the
   same honesty §7.7 applies to a recipe that may verify clean.
-- **overlap** — 1 × [2, 45] per area whose doc set (its kept docs plus
+- **overlap** — 1 × [2, 48] per area whose doc set (its kept docs plus
   its heading-widened members) holds at least one changed doc: budget 15,
-  and the ceiling is the hard limit `(maxResumes + 1) × budget` because a
-  resume is invisible to the caller and its turns are real spend (§3.3).
+  and the ceiling is the hard limit `(maxResumes + 1) × budget +
+  WRAP_UP_TURNS` because a resume is invisible to the caller and its
+  turns — the wrap-up window's included — are real spend (§3.3).
   Re-tagging can move a doc between areas, so this counts the areas
   visible before the run; a doc that changes areas re-runs both. The
   ceiling is wide on purpose and the range must be PRESENTED as a range
   (§3.5): the field run's areas are mostly tiny — median 3 docs, 13 of 103
   above 20 — so the typical area closes in one budget with no resume, and
   quoting an average here would sell a bill the large areas then break.
+
+FIELD EVIDENCE 2026-08-21 (documenso, 127 docs / 26 areas — the first
+loop-driven run at scale, the re-check §6.5 asked for): `maxResumes` 2
+was NOT enough as the run stood — 12 of 26 areas (every area past ~17
+docs) exhausted all 45 turns at ONE `read_section` per turn, and the
+sessions that finished clustered at 41–44 turns. The diagnosis was
+budget blindness and unbatched reads, not budget size, so the numbers
+stay: the fix is §3.3's grant announcements + wrap-up window plus the
+prompt now stating the numbers and demanding batched reads (several
+`read_section` calls per turn). Re-measure the exhaustion rate on the
+next scale run before touching `maxResumes`. Subdivision did not bind
+where it should have: `core/documents` stood at 48 docs — above the
+40-doc threshold — and the settle session left it whole; watch whether
+that recurs before concluding anything about the threshold.
 
 Deterministic steps — discovery, grouping, the heading-widened
 membership net, persistence — estimate as free.

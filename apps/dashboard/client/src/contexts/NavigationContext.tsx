@@ -51,6 +51,9 @@ const TAB_SCOPED_PARAMS = [
   'gjourney',
   'gclaim',
   'gview',
+  // Activity tab: the selected agent-sessions run + session.
+  'run',
+  'ses',
 ];
 
 /** Map the retired `?gview` sub-view onto the Guard section's tabs. */

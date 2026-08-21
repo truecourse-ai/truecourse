@@ -21,7 +21,15 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { generateText, jsonSchema, tool, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
+import {
+  generateText,
+  jsonSchema,
+  tool,
+  type LanguageModel,
+  type ModelMessage,
+  type SystemModelMessage,
+  type ToolSet,
+} from 'ai';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodTypeAny } from 'zod';
 import type {
@@ -380,21 +388,28 @@ async function callModel(
   // keys its cache per request leaves all of them unmarked.
   const breakpoint = rt.tuning.breakpoint;
   const sharedEnd = rt.sharedPrefix - 1;
-  const prompt: ModelMessage[] = [
-    {
-      role: 'system',
-      content: def.systemPrompt,
-      ...(breakpoint ? { providerOptions: breakpoint } : {}),
-    },
-    ...messages.map((m, i) =>
-      breakpoint && (i === messages.length - 1 || i === sharedEnd)
-        ? ({ ...m, providerOptions: { ...m.providerOptions, ...breakpoint } } as ModelMessage)
-        : m,
-    ),
-  ];
+  // The system prompt rides the SDK's `system` option, never `messages`: a
+  // system role inside `messages` earns an "…can be a security risk…" warning
+  // on stderr for every call, which garbles the CLI's progress output. As a
+  // `SystemModelMessage` (not a bare string) it still carries its cache
+  // breakpoint, and the SDK prepends it as the first message of the provider
+  // prompt — so the request on the wire is unchanged. Resume changes nothing
+  // either: the system prompt has always come from the session DEF, and
+  // `rebuildHistory` never emits a system message.
+  const system: SystemModelMessage = {
+    role: 'system',
+    content: def.systemPrompt,
+    ...(breakpoint ? { providerOptions: breakpoint } : {}),
+  };
+  const prompt: ModelMessage[] = messages.map((m, i) =>
+    breakpoint && (i === messages.length - 1 || i === sharedEnd)
+      ? ({ ...m, providerOptions: { ...m.providerOptions, ...breakpoint } } as ModelMessage)
+      : m,
+  );
   const run = (candidate: { model: LanguageModel; modelId: string }) =>
     generateText({
       model: candidate.model,
+      system,
       messages: prompt,
       tools,
       abortSignal: signal,

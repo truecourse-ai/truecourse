@@ -18,6 +18,7 @@ import specRouter from './routes/spec.js';
 import specSourcesRouter from './routes/spec-sources.js';
 import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
+import sessionsRouter from './routes/sessions.js';
 import capabilitiesRouter from './routes/capabilities.js';
 import { enterpriseAuthGate } from './middleware/ee-auth.js';
 import { getPublicRouters, getProtectedRouters } from './ee-loader.js';
@@ -85,6 +86,7 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
   app.use('/api/repos', projectResolver, specSourcesRouter);
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
+  app.use('/api/repos', projectResolver, sessionsRouter);
   app.use('/api/rules', rulesRouter);
 
   app.use(errorHandler);

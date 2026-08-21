@@ -34,6 +34,7 @@ import {
 } from '../../packages/core/src/services/spec-scan/overlap.js';
 import { SPEC_SCAN_ORCHESTRATE_SESSION_KIND } from '../../packages/core/src/services/spec-scan/orchestrate.js';
 import { writeGlobalConfig } from '../../packages/core/src/config/global-config.js';
+import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index.js';
 import type {
   DriverResult,
   SessionDriver,
@@ -380,7 +381,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     const curate = stage(est, CURATE_DOC_SESSION_KIND)!;
     expect(curate.callsRange).toEqual({
       low: K,
-      high: K * (CURATE_DOC_BUDGET.maxResumes + 1) * CURATE_DOC_BUDGET.turns,
+      high: K * ((CURATE_DOC_BUDGET.maxResumes + 1) * CURATE_DOC_BUDGET.turns + WRAP_UP_TURNS),
     });
     expect(curate.expectedCalls).toBe(K * 2); // EXPECTED_TURNS['spec-scan.curate-doc']
 
@@ -388,7 +389,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     const settle = stage(est, SETTLE_AREAS_SESSION_KIND)!;
     expect(settle.callsRange).toEqual({
       low: 0,
-      high: (SETTLE_AREAS_BUDGET.maxResumes + 1) * SETTLE_AREAS_BUDGET.turns,
+      high: (SETTLE_AREAS_BUDGET.maxResumes + 1) * SETTLE_AREAS_BUDGET.turns + WRAP_UP_TURNS,
     });
     expect(settle.expectedCalls).toBe(4); // EXPECTED_TURNS['spec-scan.settle-areas']
   });
@@ -398,7 +399,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
     const est = await estimateScanTokens(repo);
     const overlap = stage(est, OVERLAP_SESSION_KIND)!;
-    const ceiling = (OVERLAP_SESSION_BUDGET.maxResumes + 1) * OVERLAP_SESSION_BUDGET.turns;
+    const ceiling = (OVERLAP_SESSION_BUDGET.maxResumes + 1) * OVERLAP_SESSION_BUDGET.turns + WRAP_UP_TURNS;
     const areas = overlap.callsRange!.high / ceiling;
     expect(Number.isInteger(areas)).toBe(true);
     expect(areas).toBeGreaterThan(0);
@@ -447,7 +448,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
 
     const cold = await estimateScanTokens(repo);
     expect(stage(cold, OVERLAP_SESSION_KIND)!.bound).toMatch(
-      /^~\d+ of ~\d+ areas? changed \(changed docs may reshape areas\)$/,
+      /^~\d+ of ~\d+ comparisons? changed \(changed docs may reshape clusters\)$/,
     );
 
     // One changed doc is enough to re-open the question: its verdict can move a
@@ -457,7 +458,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect(stage(await estimateScanTokens(repo), OVERLAP_SESSION_KIND)!.bound).toContain('~');
   });
 
-  it('states an EXACT `N of M areas changed` once every doc verdict is settled', async () => {
+  it('states an EXACT `N of M comparisons changed` once every doc verdict is settled', async () => {
     writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
     writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
     // The workspace-sync shape: curate + settle warmed, overlap never run. Every
@@ -466,7 +467,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
 
     const est = await estimateScanTokens(repo);
     const overlap = stage(est, OVERLAP_SESSION_KIND)!;
-    expect(overlap.bound).toMatch(/^\d+ of \d+ areas? changed$/);
+    expect(overlap.bound).toMatch(/^\d+ of \d+ comparisons? changed$/);
     expect(overlap.bound).not.toContain('~');
     // Exact means the LOW bound is the real cache-miss count, not a heuristic.
     expect(overlap.callsRange!.low).toBe(1);

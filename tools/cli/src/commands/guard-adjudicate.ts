@@ -24,7 +24,8 @@ import {
 } from "@truecourse/core/commands/guard-adjudicate";
 import { assertSessionBackendReady } from "@truecourse/core/services/llm/session-driver";
 import { preflightLlmOrExit, type LlmTransportFlag } from "../lib/claude-preflight.js";
-import { isInteractive } from "./helpers.js";
+import { isInteractive, printWatchLive, resolveDashboardUrl } from "./helpers.js";
+import { registerProject } from "@truecourse/core/config/registry";
 
 export interface RunGuardAdjudicateOptions {
   cwd?: string;
@@ -43,6 +44,8 @@ export interface RunGuardAdjudicateOptions {
 export async function runGuardAdjudicate(opts: RunGuardAdjudicateOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro("Adjudicate failures");
+  const project = await registerProject(repoRoot);
+  const dashboardUrl = await resolveDashboardUrl();
 
   if (opts.llmTransport === "agent") {
     p.log.error(
@@ -146,6 +149,7 @@ export async function runGuardAdjudicate(opts: RunGuardAdjudicateOptions = {}): 
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       ...(opts.llmTransport ? { transport: opts.llmTransport } : {}),
       ...(opts.report !== undefined ? { report: opts.report } : {}),
+      onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
       onStatus: (message) => spinner.message(message),
       onProgress: (event) => {
         if (event.kind === "session-start") {

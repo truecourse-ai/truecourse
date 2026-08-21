@@ -96,6 +96,35 @@ describe('probeApiServers', () => {
     expect(probes[0].status).toBe(404)
   }, 60_000)
 
+  // The probe owns the world the recipe declares, exactly like verification does:
+  // documenso 2026-08-20 verified green (services up around the boot) and then
+  // FAILED the probe, because the probe booted into a world nobody brought up.
+  it('runs api.services.up before the boot and down after it', async () => {
+    const r = fixtureRepo()
+    const upMarker = path.join(r, 'world.up')
+    const downMarker = path.join(r, 'world.down')
+    const recipe = recipeFor(r, {
+      services: { up: `touch ${upMarker}`, down: `touch ${downMarker}` },
+    })
+
+    const probes = await probeApiServers({ repoRoot: r, recipe })
+
+    expect(probes[0]?.ok).toBe(true)
+    expect(fs.existsSync(upMarker)).toBe(true)
+    expect(fs.existsSync(downMarker)).toBe(true)
+  })
+
+  it('a services.up that fails reports every server unreachable WITH the services error — no boot is attempted', async () => {
+    const r = fixtureRepo()
+    const recipe = recipeFor(r, { services: { up: 'false' } })
+
+    const probes = await probeApiServers({ repoRoot: r, recipe })
+
+    expect(probes).toHaveLength(1)
+    expect(probes[0]?.ok).toBe(false)
+    expect(probes[0]?.error).toMatch(/api\.services/)
+  })
+
   it('FAILS when the server does not boot at all', async () => {
     const r = fixtureRepo()
     const recipe = {

@@ -41,7 +41,7 @@ import type { SessionDriver, UserInputQuestion } from '@truecourse/agent-loop';
 import { runSpecScanSessions, type ScanStep } from '../services/spec-scan/run.js';
 export { SCAN_STEPS, ScanStepNotReadyError, type ScanStep } from '../services/spec-scan/run.js';
 import { normalizeScopePath } from '../services/spec-scan/orchestrate.js';
-import { createSessionRun } from '../lib/sessions-store.js';
+import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import {
   createConfiguredSessionDriver,
@@ -392,6 +392,12 @@ export interface CurateInProcessOptions {
    */
   onQuestion?: (workItem: string, question: UserInputQuestion) => void;
   /**
+   * The sessions-store run record was just created (post-estimate-confirm,
+   * before any session runs). The CLI prints the dashboard "watch live" deep
+   * link from it.
+   */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
+  /**
    * Test seam / EE injection: run the sessions on THIS driver instead of the
    * configured one. Tests pass a scripted driver; production passes none.
    */
@@ -444,6 +450,13 @@ export async function curateInProcess(
   // Created after the estimate gate, so a declined scan leaves no run record.
   const gitRef = await resolveCommitSha(repoRoot);
   const run = createSessionRun(repoRoot, { command: 'spec-scan', gitRef });
+  options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
+  // Mirror the step checklist into the run record: the CLI renders the tracker
+  // locally, but the dashboard can only see what run.json carries, and the
+  // early phases (discover/tag) have no sessions to show progress through.
+  tracker?.tap((p) => {
+    if (p.steps) run.setProgress(p.steps);
+  });
 
   // The driver, LAZILY: a fully-cached re-scan resolves nothing (so an edition
   // that cannot construct a driver offline still re-scans for free), and the

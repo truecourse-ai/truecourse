@@ -22,6 +22,7 @@ import path from 'node:path'
 import { resetKvCacheStore } from '@truecourse/llm'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import {
+  OVERLAP_SESSION_BUDGET,
   OVERLAP_SESSION_CACHE_NAME,
   OVERLAP_SESSION_KIND,
   OVERLAP_SESSION_SYSTEM_PROMPT,
@@ -555,8 +556,10 @@ describe('validateOverlapFindings', () => {
       item: {
         areaId: 'core/auth',
         concern: 'auth',
+        cluster: 0,
         docs: [briefed.get('docs/auth.md')!, briefed.get('docs/session.md')!],
-        widened: [],
+        pairs: [],
+        overflow: [],
       },
       universe,
     })
@@ -614,6 +617,24 @@ describe('OVERLAP_SESSION_SYSTEM_PROMPT', () => {
   it('states the budget contract that makes notReached honest', () => {
     expect(p).toContain('notReached')
     expect(p).toMatch(/An honest `notReached` is part of a correct outcome/i)
+  })
+
+  it('states the candidate-checklist contract: pairs are leads, unopened pairs are recorded, and no other session sees them', () => {
+    expect(p).toContain('CANDIDATE COLLISIONS')
+    expect(p).toMatch(/ranked leads, not verdicts/i)
+    expect(p).toMatch(/recorded in the corpus as UNCHECKED/)
+    expect(p).toMatch(/the ONLY one that will ever see these pairs/i)
+    expect(p).toMatch(/never defer one to "another area's session"/i)
+  })
+
+  it('states the REAL budget numbers and demands batched reads (2026-08-21: a budget-blind session reads to the wall)', () => {
+    expect(p).toContain(`${OVERLAP_SESSION_BUDGET.turns} turns per budget grant`)
+    expect(p).toContain(`${OVERLAP_SESSION_BUDGET.maxResumes} automatic resume grants`)
+    expect(p).toContain(
+      `${(OVERLAP_SESSION_BUDGET.maxResumes + 1) * OVERLAP_SESSION_BUDGET.turns} turns at the absolute most`,
+    )
+    expect(p).toMatch(/BATCH your reads/i)
+    expect(p).toMatch(/SEVERAL `read_section` calls in one message/i)
   })
 })
 
@@ -703,10 +724,10 @@ describe('cross-area dedup and the confidence auto-apply', () => {
 })
 
 // ---------------------------------------------------------------------------
-// briefing: the widened net, and which areas get a session at all
+// briefing: the candidate checklist, and which clusters get a session at all
 // ---------------------------------------------------------------------------
 
-describe('the widened candidate net', () => {
+describe('the collision-pair checklist', () => {
   beforeEach(() => {
     writeDocs({
       'docs/auth.md': AUTH_MD,
@@ -724,7 +745,7 @@ describe('the widened candidate net', () => {
     'docs/solo.md': [{ product: 'core', concern: 'solo' }],
   }
 
-  it('briefs the outside doc under its own header, and skips areas with no possible pair', async () => {
+  it('briefs the ranked pairs — the heading fold pulls the outside doc into the cluster — and spends nothing on pairless docs', async () => {
     const briefings = new Map<string, string>()
     const { result } = await runScan({
       tagging: TAGGING,
@@ -733,22 +754,29 @@ describe('the widened candidate net', () => {
         return { kind: 'outcome', value: { overlaps: [], notReached: [] } }
       },
     })
-    // core/auth: two own docs + the heading-widened outsider.
+    // ONE cluster: `## Token lifetime` pairs auth↔session, and notes.md's
+    // `## Authentication` canonicalizes to `auth` — the same fold the retired
+    // widened net used, now at section level — pairing it with auth.md's H1.
+    // The pair's docs share no area, so it lands in the union's first
+    // (core/auth), which is where the whole connected component is judged.
     const auth = briefings.get('core/auth')!
+    expect(auth).toContain('CANDIDATE COLLISIONS')
+    expect(auth).toContain('docs/auth.md · Token lifetime  <->  docs/session.md · Token lifetime')
+    expect(auth).toContain('docs/auth.md · Auth  <->  docs/notes.md · Authentication')
     expect(auth).toContain('--- doc: docs/auth.md')
     expect(auth).toContain('--- doc: docs/session.md')
-    expect(auth).toContain("Outside docs whose headings match this area's concern")
-    expect(auth).toContain('--- outside doc: docs/notes.md')
+    expect(auth).toContain('--- doc: docs/notes.md')
 
-    // core/notes is a ONE-doc area: docs/auth.md has no `## Notes` heading, so
-    // nothing widens into it and no session is spent. Same for core/solo.
+    // docs/solo.md shares no rare key and no canonical heading with anything:
+    // it enters no pair, so it costs no session and appears in no briefing.
+    expect(auth).not.toContain('docs/solo.md')
     expect([...briefings.keys()].sort()).toEqual(['core/auth'])
     expect(result.sessions.find((s) => s.kind === OVERLAP_SESSION_KIND)).toMatchObject({ ran: 1 })
   })
 
-  it('spends a session on a ONE-doc area that a widened outsider can be compared with', async () => {
-    // `docs/solo.md` gains a `## Notes` heading, so it widens into core/notes —
-    // one own doc plus one outsider is a pair, and the area gets its session.
+  it('a new canonical-heading collision mints its own cluster session', async () => {
+    // `docs/solo.md` gains a `## Notes` heading, so it now pairs with
+    // notes.md's H1 — a second connected component, assigned core/notes.
     writeDocs({ 'docs/solo.md': `${SOLO_MD}\n## Notes\n\nNotes live in notes.md.\n` })
     const seenAreas: string[] = []
     await runScan({
@@ -756,12 +784,78 @@ describe('the widened candidate net', () => {
       overlap: async (areaId, input) => {
         seenAreas.push(areaId)
         if (areaId === 'core/notes') {
-          expect(openingOf(input)).toContain('--- outside doc: docs/solo.md')
+          expect(openingOf(input)).toContain('docs/notes.md · Notes  <->  docs/solo.md · Notes')
         }
         return { kind: 'outcome', value: { overlaps: [], notReached: [] } }
       },
     })
     expect(seenAreas.sort()).toEqual(['core/auth', 'core/notes'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uncheckedPairs — pair coverage counted off the transcript, never claimed
+// ---------------------------------------------------------------------------
+
+describe('uncheckedPairs', () => {
+  beforeEach(() => {
+    writeDocs({ 'docs/auth.md': AUTH_MD, 'docs/session.md': SESSION_MD })
+    coverScope()
+  })
+
+  const TAGGING: Tagging = {
+    'docs/auth.md': [{ product: 'core', concern: 'auth' }],
+    'docs/session.md': [{ product: 'core', concern: 'auth' }],
+  }
+  const PAIR = {
+    a: { doc: 'docs/auth.md', heading: 'Token lifetime' },
+    b: { doc: 'docs/session.md', heading: 'Token lifetime' },
+  }
+
+  it('a pair whose two sections were both opened is checked — nothing recorded', async () => {
+    const { result } = await runScan({
+      tagging: TAGGING,
+      overlap: async (_areaId, input) => {
+        await callTool(input, 'read_section', { doc: 'docs/auth.md', heading: 'Token lifetime' })
+        await callTool(input, 'read_section', { doc: 'docs/session.md', heading: 'Token lifetime' })
+        const draft: OverlapOutcome = { overlaps: [], notReached: [] }
+        await callTool(input, 'check_findings', draft)
+        return { kind: 'outcome', value: draft }
+      },
+    })
+    const area = result.corpus.areas.find((a) => a.id === 'core/auth')!
+    expect(area.uncheckedPairs).toBeUndefined()
+  })
+
+  it('a pair with only ONE side opened lands in the corpus as unchecked — a self-report cannot clear it', async () => {
+    const { result } = await runScan({
+      tagging: TAGGING,
+      overlap: async (_areaId, input) => {
+        await callTool(input, 'read_section', { doc: 'docs/auth.md', heading: 'Token lifetime' })
+        const draft: OverlapOutcome = { overlaps: [], notReached: [] }
+        await callTool(input, 'check_findings', draft)
+        // The session claims full coverage; the transcript shows one side.
+        return { kind: 'outcome', value: { ...draft, uncheckedPairs: [] } }
+      },
+    })
+    const area = result.corpus.areas.find((a) => a.id === 'core/auth')!
+    expect(area.uncheckedPairs).toHaveLength(1)
+    expect(area.uncheckedPairs![0]).toMatchObject(PAIR)
+    // …and it round-trips through corpus.json.
+    expect(readCorpus(repo)!.areas.find((a) => a.id === 'core/auth')!.uncheckedPairs).toHaveLength(1)
+  })
+
+  it('a FAILED cluster lands every briefed pair in uncheckedPairs', async () => {
+    const { result } = await runScan({
+      tagging: TAGGING,
+      overlap: async () => ({
+        kind: 'failure',
+        failure: { kind: 'budget-exhausted', notReached: 'outcome', retryability: 'none' },
+      }),
+    })
+    const area = result.corpus.areas.find((a) => a.id === 'core/auth')!
+    expect(area.uncheckedPairs).toHaveLength(1)
+    expect(area.uncheckedPairs![0]).toMatchObject(PAIR)
   })
 })
 
@@ -943,6 +1037,23 @@ describe('a failed overlap session', () => {
     expect(result.stats.llmFailures).toContainEqual(
       expect.objectContaining({ stage: OVERLAP_SESSION_KIND, attempts: 1, failures: 1 }),
     )
+  })
+
+  it('stamps sectionsOpened for the FAILED area too — "read 1 and ran out" is not "never read"', async () => {
+    const { result } = await runScan({
+      tagging: TAGGING,
+      overlap: async (_areaId, input) => {
+        await callTool(input, 'read_section', { doc: 'docs/auth.md', heading: 'Token lifetime' })
+        return {
+          kind: 'failure',
+          failure: { kind: 'budget-exhausted', notReached: 'outcome', retryability: 'none' },
+        }
+      },
+    })
+    const area = result.corpus.areas.find((a) => a.id === 'core/auth')!
+    expect(area.notReached?.sort()).toEqual(['docs/auth.md', 'docs/session.md'])
+    expect(area.sectionsOpened).toBe(1)
+    expect(readCorpus(repo)!.areas.find((a) => a.id === 'core/auth')!.sectionsOpened).toBe(1)
   })
 
   it('aborts the run BEFORE the corpus write when every overlap session dies of transport', async () => {

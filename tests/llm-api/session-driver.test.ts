@@ -248,6 +248,36 @@ describe('api session driver', () => {
     expect(handle.status()).toBe('completed');
   });
 
+  // The system prompt rides `generateText`'s `system` option, never inside
+  // `messages`: the SDK warns on stderr about every prompt whose messages carry
+  // a system role ("…can be a security risk… Use the system option instead"),
+  // twice per call, which on a 30-doc scan buried the CLI spinner under ~60
+  // lines. The provider still receives one leading system message — that
+  // assertion is the point: the request is unchanged, only the channel moved.
+  it('sends the system prompt through the `system` option, warning-free', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const scripted = scriptedModel([
+        { content: [call('probe', { value: 'hi' })] },
+        { content: [outcomeCall({ verdict: 'keep' })] },
+      ]);
+      buildModelMock.mockReturnValue(scripted.model);
+      const { handle } = runSession(createApiSessionDriver(cfg));
+      await handle.done;
+
+      const systemWarnings = warn.mock.calls
+        .flat()
+        .filter((arg) => typeof arg === 'string' && arg.includes('System messages in the prompt'));
+      expect(systemWarnings).toEqual([]);
+      // …and every turn still opens with the session's system prompt.
+      for (const c of scripted.calls) {
+        expect(promptSummary(c.prompt)[0]).toBe('system=you curate docs');
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('places cache breakpoints on the system prompt and the moving tail', async () => {
     const scripted = scriptedModel([{ content: [outcomeCall({ verdict: 'keep' })] }]);
     buildModelMock.mockReturnValue(scripted.model);
@@ -509,12 +539,23 @@ describe('api session driver', () => {
     const result = await handle.done;
 
     expect(result.kind).toBe('outcome');
-    const prompt = promptSummary(scripted.calls[0].prompt).join('|');
+    const summary = promptSummary(scripted.calls[0].prompt);
+    const prompt = summary.join('|');
     expect(prompt).toContain('user=go');
     expect(prompt).toContain('tool-call:probe');
     expect(prompt).toContain('tool-result:probe');
     // New observations append AFTER the rebuilt history.
     expect(prompt).toContain('and one new observation');
+    // A resume rebuilds the CONVERSATION only — the system prompt comes from
+    // the session def, still first and still exactly once (the transcript's
+    // `session-start` carries a `systemPrompt` field that must not re-enter as
+    // a message).
+    expect(summary[0]).toBe('system=you curate docs');
+    expect(summary.filter((m) => m.startsWith('system='))).toHaveLength(1);
+    const first = scripted.calls[0].prompt[0] as {
+      providerOptions?: { anthropic?: { cacheControl?: { type: string } } };
+    };
+    expect(first.providerOptions?.anthropic?.cacheControl).toEqual({ type: 'ephemeral' });
   });
 });
 

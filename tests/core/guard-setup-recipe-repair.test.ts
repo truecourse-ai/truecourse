@@ -169,6 +169,34 @@ describe('recipeRepairSessionDef', () => {
     expect(clean.content).toMatch(/verify_recipe/);
   });
 
+  // The 2026-08-20 bench rules, live in the session's own tools: the inventory
+  // refusal fires in check_recipe with the briefing's own app list, and
+  // verify_recipe refuses an inline-eval stand-in STATICALLY — one turn, not
+  // minutes of install/build spent proving a stub green.
+  it('check_recipe holds a draft to the workspace inventory; verify_recipe refuses a stub without running it', async () => {
+    const sandbox = createWorkingSandbox();
+    cleanup.push(() => sandbox.cleanup());
+    const apps = [
+      { dir: 'apps/api/v2', framework: 'nest' as const, prefixes: ['/health', '/v2'] },
+    ];
+    const def = recipeRepairSessionDef({ repoRoot: process.cwd(), sandbox, apps });
+    const check = def.tools.find((t) => t.name === 'check_recipe')!;
+    const verify = def.tools.find((t) => t.name === 'verify_recipe')!;
+
+    const entryOnly = await check.execute({ build: 'true', entry: ['node', 'bin.mjs'] }, ctx);
+    expect(entryOnly.isError).toBe(true);
+    expect(entryOnly.content).toContain('apps/api/v2');
+
+    const started = Date.now();
+    const stub = await verify.execute(
+      { build: 'true', api: { serve: ['node', '-e', 'serve()'], healthPath: '/x' } },
+      ctx,
+    );
+    expect(stub.isError).toBe(true);
+    expect(stub.content).toMatch(/static.*inline code/s);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
   // Sandbox containment: the session's world is its own, and a cwd that climbs
   // out of it is refused rather than silently resolved against the checkout.
   it('sandbox_exec refuses a cwd that escapes the sandbox', async () => {
