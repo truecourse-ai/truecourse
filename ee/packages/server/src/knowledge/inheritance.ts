@@ -18,6 +18,7 @@
 import type { GateStore } from '@truecourse/ee-github-app';
 import { PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
+import { lastTouchedOf } from './sync.js';
 import type {
   SpecInheritanceHook,
   WorkspaceInheritanceDoc,
@@ -53,7 +54,7 @@ export function createSpecInheritanceHook(deps: InheritanceDeps): SpecInheritanc
     for (const row of rows) {
       const markdown = await deps.knowledge.getDocBody(org, row.contentHash);
       if (markdown == null) continue; // a body somehow absent → skip it, not the whole layer
-      docs.push({ docPath: row.docPath, markdown, lastTouched: row.externalUpdatedAt ?? undefined });
+      docs.push({ docPath: row.docPath, markdown, lastTouched: lastTouchedOf(row) });
     }
     if (docs.length === 0) return null;
 

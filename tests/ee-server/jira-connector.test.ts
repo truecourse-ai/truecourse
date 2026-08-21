@@ -676,6 +676,30 @@ it('caps the history and says how many it dropped, rather than truncating silent
     expect(md.split('\n').findIndex((l) => l.startsWith('# ENG-1'))).toBeLessThan(20);
   });
 
+it('leaves updatedAt absent when the issue states none, rather than inventing one', async () => {
+    stubSearch([{ id: '10001', key: 'ENG-1', fields: { summary: 'No dates' } }]);
+    const refs = await jiraConnector.list(CFG);
+    // A substituted epoch would parse as a real date, persist as one, and lose
+    // every ordering contest — a doc nobody dated must simply not be dated.
+    expect(refs[0].updatedAt).toBeUndefined();
+  });
+
+  it('re-fetches when the search gave no changelog total to verify against', async () => {
+    // Jira carried a changelog but omitted `total`: the inline copy cannot be
+    // shown whole, and what a clipped copy drops is the EARLIEST transitions.
+    const md = await bodyOf(issue({ changelog: { histories: [FULL_HISTORY[1]] } }));
+    expect(md).toContain('To Do -> In Progress');
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.some((c) => String(c[0]).includes('/changelog?'))).toBe(true);
+  });
+
+  it('does not re-fetch an issue the search carried no changelog for', async () => {
+    const md = await bodyOf(issue({ changelog: undefined }));
+    expect(md).not.toContain('status_history:');
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(calls.some((c) => String(c[0]).includes('/changelog?'))).toBe(false);
+  });
+
   it('omits the block entirely when an issue carries no metadata', async () => {
     stubSearch([{ id: '10001', key: 'ENG-1', fields: { summary: 'Bare', description: description() } }]);
     const map = await jiraConnector.fetchMany!(CFG, ['10001']);

@@ -210,9 +210,15 @@ function statusChanges(entries: JiraChangelogEntry[]): StatusChange[] {
  * missing, which is exactly the part the header needs.
  */
 function inlineChangelog(issue: JiraIssue): { entries: JiraChangelogEntry[]; truncated: boolean } {
-  const entries = issue.changelog?.histories ?? [];
-  const total = issue.changelog?.total;
-  return { entries, truncated: typeof total === 'number' && total > entries.length };
+  const changelog = issue.changelog;
+  const entries = changelog?.histories ?? [];
+  // An issue the search never carried a changelog for has nothing to be short of.
+  if (!changelog) return { entries, truncated: false };
+  // `total` is what proves the inline copy is whole. Without it we cannot tell a
+  // complete history from a clipped one, and the missing entries would be the
+  // EARLIEST — the ones the resolved-date fallback reads. Unverified means
+  // re-fetch: the call is bounded and only fires when Jira omits the count.
+  return { entries, truncated: changelog.total === undefined || changelog.total > entries.length };
 }
 
 /** One page of the per-issue changelog endpoint (`values`, not `histories`). */
@@ -373,7 +379,7 @@ export const jiraConnector: KnowledgeConnector<JiraConfig> = {
         const key = issue.key ?? String(issue.id);
         // Jira has no version counter — `updated` bumps on every edit, so it
         // serves as both the version marker and the newest-wins timestamp.
-        const updated = issue.fields?.updated ?? '1970-01-01T00:00:00.000Z';
+        const updated = issue.fields?.updated;
         refs.push({
           id: String(issue.id),
           title: `${key}: ${issue.fields?.summary ?? ''}`,

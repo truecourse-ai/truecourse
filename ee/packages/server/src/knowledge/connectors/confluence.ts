@@ -152,7 +152,7 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
           title: p.title ?? `(untitled ${p.id})`,
           url: pageUrl(cfg, base, p),
           version: p.version?.number != null ? String(p.version.number) : undefined,
-          updatedAt: p.version?.when ?? '1970-01-01T00:00:00.000Z',
+          updatedAt: p.version?.when,
           createdAt: p.history?.createdDate,
         });
       }

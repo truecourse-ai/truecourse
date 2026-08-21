@@ -192,6 +192,15 @@ describe('confluenceConnector — metadata header contract', () => {
     body: { storage: { value: '<p>Users can cancel while Pending.</p>' } },
   };
 
+it('leaves updatedAt absent when the page states none, rather than inventing one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ results: [{ id: '1', title: 'Undated' }], _links: {} }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+    const refs = await confluenceConnector.list(CFG);
+    expect(refs[0].updatedAt).toBeUndefined();
+  });
+
   it('emits both dates where the consolidator reads them', async () => {
     stubPage(PAGE);
     const { markdown } = await confluenceConnector.fetch(CFG, '123');

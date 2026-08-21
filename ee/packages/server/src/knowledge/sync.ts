@@ -62,6 +62,19 @@ function isoOrNull(value: string | undefined): string | null {
   return Number.isNaN(when.getTime()) ? null : when.toISOString();
 }
 
+/**
+ * The date that orders a ledger doc against the rest of the corpus: what the
+ * SOURCE last said, falling back to when we synced it.
+ *
+ * One function because both materialization paths need the same answer and had
+ * drifted — the workspace scan fell back, the repo inheritance path did not, so
+ * a row predating the source-date columns was stamped with the write instant
+ * there and read as newer than every doc it should have lost to.
+ */
+export function lastTouchedOf(row: { externalUpdatedAt: string | null; lastSyncedAt: string }): string {
+  return row.externalUpdatedAt ?? row.lastSyncedAt;
+}
+
 export interface SyncDoc {
   externalId: string;
   title: string;
@@ -250,14 +263,7 @@ export async function processWorkspaceKnowledge(
     loaded += 1;
     await progress?.(loaded, total, SYNC_MSG_FETCH);
     if (markdown == null) continue;
-    // The SOURCE's date orders the corpus. `lastSyncedAt` is the same instant for
-    // every doc in a run, so it can only be the fallback for a row that predates
-    // the source-date columns.
-    docs.push({
-      docPath: row.docPath,
-      markdown,
-      lastTouched: row.externalUpdatedAt ?? row.lastSyncedAt,
-    });
+    docs.push({ docPath: row.docPath, markdown, lastTouched: lastTouchedOf(row) });
     consolidated.push({ docPath: row.docPath, processedHash: row.contentHash });
     bySource[row.sourceKind] = (bySource[row.sourceKind] ?? 0) + 1;
   }
