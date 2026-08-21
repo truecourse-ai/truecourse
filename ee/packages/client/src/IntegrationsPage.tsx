@@ -23,6 +23,7 @@ import type {
   IntegrationConnectorStatus,
   IntegrationPendingEstimate,
   IntegrationPendingView,
+  IntegrationRevealResponse,
   IntegrationsResponse,
 } from '@truecourse/shared';
 import { getJson, postJson, delJson } from './api';
@@ -155,9 +156,15 @@ export default function IntegrationsPage() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const { activeJobFor, activeJobs, onJobSettled } = useJobs();
 
+  // TEMPORARY — server-advertised token reveal (TRUECOURSE_ALLOW_TOKEN_REVEAL).
+  const [revealEnabled, setRevealEnabled] = useState(false);
+
   const load = useCallback(() => {
     getJson<IntegrationsResponse>('/api/ee/integrations')
-      .then((r) => setConnectors(r.connectors))
+      .then((r) => {
+        setConnectors(r.connectors);
+        setRevealEnabled(r.revealEnabled === true);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(() => {
@@ -312,6 +319,7 @@ export default function IntegrationsPage() {
       {active && (
         <ConnectorDrawer
           connector={active}
+          revealEnabled={revealEnabled}
           onClose={() => setConfiguring(null)}
           onChanged={load}
         />
@@ -346,10 +354,12 @@ function Banner({ tone, children }: { tone: 'error' | 'ok'; children: ReactNode 
 
 function ConnectorDrawer({
   connector,
+  revealEnabled,
   onClose,
   onChanged,
 }: {
   connector: IntegrationConnectorStatus;
+  revealEnabled: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -361,11 +371,31 @@ function ConnectorDrawer({
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // TEMPORARY — the revealed plaintext token. Component state only: never
+  // persisted, and dropped as soon as the drawer closes.
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState(false);
 
   const conn = connector.connection;
   const set = (k: string, v: string) => setValues((s) => ({ ...s, [k]: v }));
   const payload = { kind: connector.kind, values };
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+
+  const reveal = async () => {
+    setRevealing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await postJson<IntegrationRevealResponse>(
+        `/api/ee/integrations/${connector.kind}/reveal`,
+      );
+      setRevealed(r.token);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setRevealing(false);
+    }
+  };
 
   const test = async () => {
     setTesting(true);
@@ -435,6 +465,39 @@ function ConnectorDrawer({
           </label>
         ))}
       </div>
+
+      {/* TEMPORARY — token recovery. Only rendered when the deployment sets
+          TRUECOURSE_ALLOW_TOKEN_REVEAL=1 and a token is actually stored. */}
+      {revealEnabled && conn?.hasToken && (
+        <div className="mt-4 rounded border border-amber-500/40 bg-amber-500/10 p-3">
+          {revealed === null ? (
+            <button
+              type="button"
+              onClick={reveal}
+              disabled={revealing}
+              className="text-sm font-medium text-amber-400 hover:underline disabled:opacity-50"
+            >
+              {revealing ? 'Revealing…' : 'Reveal stored token'}
+            </button>
+          ) : (
+            <>
+              <div className="text-xs text-amber-400">
+                Stored token — copy it now, it is not shown again after this drawer closes.
+              </div>
+              <code className="mt-2 block break-all rounded bg-background px-2 py-1.5 font-mono text-sm text-foreground select-all">
+                {revealed}
+              </code>
+              <button
+                type="button"
+                onClick={() => setRevealed(null)}
+                className="mt-2 text-xs text-muted-foreground hover:underline"
+              >
+                Hide
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="mt-6 flex flex-wrap gap-2">
         <button

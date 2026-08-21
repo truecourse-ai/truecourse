@@ -27,6 +27,16 @@ export interface IntegrationConnection {
   token: string | undefined;
 }
 
+/**
+ * Outcome of a plaintext-token read. A key/ciphertext mismatch is a REPORTABLE
+ * state, not an exception: rows copied between environments carry a blob the
+ * local `TRUECOURSE_SECRET_KEY` cannot authenticate, and the caller needs to
+ * say so rather than 500.
+ */
+export type RevealTokenResult =
+  | { ok: true; token: string }
+  | { ok: false; reason: 'no-connection' | 'no-token' | 'undecryptable' };
+
 export interface SaveIntegrationInput {
   config: Record<string, string>;
   /** Omitted ⇒ keep the stored token. */
@@ -82,6 +92,23 @@ export class IntegrationStore {
       config: (row.config as Record<string, string>) ?? {},
       token: row.tokenEnc ? decryptSecret(row.tokenEnc, this.masterSecret) : undefined,
     };
+  }
+
+  /**
+   * The stored token in PLAINTEXT, for the operator-facing reveal route. Kept
+   * distinct from `getConnection` so the one caller that deliberately surfaces
+   * a secret is greppable, and so a mismatched master secret comes back as
+   * `undecryptable` instead of throwing.
+   */
+  async revealToken(orgId: string, provider: string): Promise<RevealTokenResult> {
+    const row = await this.getRow(orgId, provider);
+    if (!row) return { ok: false, reason: 'no-connection' };
+    if (!row.tokenEnc) return { ok: false, reason: 'no-token' };
+    try {
+      return { ok: true, token: decryptSecret(row.tokenEnc, this.masterSecret) };
+    } catch {
+      return { ok: false, reason: 'undecryptable' };
+    }
   }
 
   async save(orgId: string, provider: string, input: SaveIntegrationInput): Promise<void> {

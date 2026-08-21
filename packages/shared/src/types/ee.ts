@@ -281,6 +281,17 @@ export interface IntegrationConnectorStatus {
 
 export interface IntegrationsResponse {
   connectors: IntegrationConnectorStatus[]
+  /**
+   * TEMPORARY — whether this deployment allows revealing a stored token in
+   * plaintext (`TRUECOURSE_ALLOW_TOKEN_REVEAL=1`). Absent/false ⇒ the UI hides
+   * the Reveal action and the route 404s.
+   */
+  revealEnabled?: boolean
+}
+
+/** TEMPORARY — plaintext token from `POST /api/ee/integrations/:kind/reveal`. */
+export interface IntegrationRevealResponse {
+  token: string
 }
 
 /** Save/test payload; the secret field omitted ⇒ keep the stored token. */
