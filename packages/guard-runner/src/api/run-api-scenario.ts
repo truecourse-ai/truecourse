@@ -51,7 +51,7 @@ import {
   type ApiServerHandle,
   type StartApiServerResult,
 } from './server.js'
-import { executeApiRequest, type ApiStepCapture } from './executor.js'
+import { API_EXPECT_POLL_MS, API_EXPECT_SETTLE_MS, executeApiRequest, type ApiStepCapture } from './executor.js'
 import { CookieJar } from './cookies.js'
 import { evaluateApiExpect, parseJsonBody, type ApiExpectMismatch } from './expect.js'
 import {
@@ -779,7 +779,8 @@ export async function runApiScenario(
           throw e
         }
 
-        const capture = await executeApiRequest({
+        const pollDeadline = Date.now() + Math.min(ctx.stepTimeoutMs, API_EXPECT_SETTLE_MS)
+        let capture = await executeApiRequest({
           baseUrl: server.baseUrl,
           request,
           timeoutMs: ctx.stepTimeoutMs,
@@ -856,16 +857,48 @@ export async function runApiScenario(
           responseSchema = resolved.schema
         }
 
-        const normBody = normText(capture.bodyText)
-        const mismatch = evaluateApiExpect({
-          expect: stepExpect,
-          status: capture.status,
-          headers: capture.headers,
-          bodyText: normBody,
-          rawBodyText: capture.bodyText,
-          normalizeText: normText,
-          responseSchema,
-        })
+        const judge = (c: ApiStepCapture) =>
+          evaluateApiExpect({
+            expect: stepExpect,
+            status: c.status,
+            headers: c.headers,
+            bodyText: normText(c.bodyText),
+            rawBodyText: c.bodyText,
+            normalizeText: normText,
+            responseSchema,
+          })
+        let mismatch = judge(capture)
+
+        // Idempotent reads poll the way web expects do: an app may ack a write
+        // before it is queryable (queued flushes, eventual consistency), so a
+        // GET/HEAD whose expectation does not hold yet is re-issued every
+        // API_EXPECT_POLL_MS until it holds or the step budget runs out — the
+        // last observation is the judgment. Mutating methods are never
+        // replayed; their single observation stands. A re-issue that cannot
+        // complete keeps the previous real observation rather than erroring.
+        if (mismatch && (request.method === 'GET' || request.method === 'HEAD')) {
+          while (mismatch && Date.now() + API_EXPECT_POLL_MS < pollDeadline && !ctx.signal?.aborted) {
+            await new Promise((resolve) => setTimeout(resolve, API_EXPECT_POLL_MS))
+            const again = await executeApiRequest({
+              baseUrl: server.baseUrl,
+              request,
+              timeoutMs: Math.max(1, pollDeadline - Date.now()),
+              signal: ctx.signal,
+              cookies,
+            })
+            if (again.requestError || again.timedOut) break
+            ctx.onStep?.({
+              status: again.status,
+              bodyEmpty: again.bodyText.length === 0,
+              timedOut: again.timedOut,
+              requestLine: `${step.request.method.toUpperCase()} ${step.request.path}`,
+              durationMs: again.durationMs,
+            })
+            capture = again
+            mismatch = judge(again)
+          }
+          if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+        }
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
           // A 404 on a path ANOTHER workspace app serves is infrastructure, not

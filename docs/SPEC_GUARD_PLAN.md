@@ -6388,3 +6388,22 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `packages/guard-runner/src/web/executor.ts`; regression test
     `tests/guard-runner/web-driver.test.ts` ("matches page text PAST the
     2000-char display cut") over a new `/long` fixture page.
+
+116. **Api GET expects poll until the state lands (2026-08-20).** STATUS: BUILT.
+    An app may ack a write before it is queryable — rybbit's pageview queue
+    flushes on a 1000ms interval, and its first full reference board lost 27
+    of 53 scenarios to seed-then-read races the web driver never sees
+    (navigation costs seconds; an api read costs milliseconds). Both api
+    paths (the sandbox step driver and the pure-api scenario runner) now
+    re-issue an idempotent read (GET/HEAD) whose expectation does not hold
+    yet, every `API_EXPECT_POLL_MS` (100ms) until it holds or the
+    `API_EXPECT_SETTLE_MS` window (5s, capped by the step budget) closes —
+    the last observation is the judgment, mirroring the web driver's
+    poll-on-observable-state semantics. Mutating methods are never replayed;
+    their single observation stands. The settle window is deliberate: it
+    covers ack-to-queryable lag while a legitimately-wrong GET assertion
+    still fails in seconds (the first cut polled the whole step budget and
+    stalled every deliberate red — and 12 suite tests — at their timeouts).
+    `packages/guard-runner/src/{drivers/api-driver.ts,api/run-api-scenario.ts,api/executor.ts}`;
+    regression `tests/guard-runner/api-eventual.test.ts` over the fixture's
+    new `/eventual` pair (ack now, readable 400ms later).

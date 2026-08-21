@@ -33,7 +33,7 @@ import type {
 } from '@truecourse/shared'
 import { describeApiCommand, describeApiExpect, isApiRequestStep } from '@truecourse/shared'
 import { CookieJar } from '../api/cookies.js'
-import { executeApiRequest, type ApiStepCapture } from '../api/executor.js'
+import { API_EXPECT_POLL_MS, API_EXPECT_SETTLE_MS, executeApiRequest, type ApiStepCapture } from '../api/executor.js'
 import { observeApiExpect, parseJsonBody, type ApiCheck } from '../api/expect.js'
 import { captureValueToString, lookupJsonPath, JSON_PATH_MISS } from '../api/vars.js'
 import { stepExcerpt, type EvidenceStep } from '../evidence.js'
@@ -102,40 +102,58 @@ export function apiStepDriver(opts: ApiStepDriverOptions): StepDriver {
       const repeat = resolved.repeat ?? 1
       let last: { capture: ApiStepCapture; checks: ApiCheck[] } | null = null
 
-      for (let iteration = 1; iteration <= repeat; iteration++) {
-        const capture = await executeApiRequest({
-          baseUrl: surface.server.baseUrl,
-          request: resolved.request,
-          timeoutMs: ctx.stepTimeoutMs,
-          ...(ctx.signal ? { signal: ctx.signal } : {}),
-          cookies,
-        })
-        if (ctx.signal?.aborted) return { status: 'aborted' }
+      // Idempotent reads poll the way web expects do: an app may ack a write
+      // before it is queryable (queued flushes, eventual consistency), so a GET
+      // whose expectation does not hold yet is re-issued until it holds or the
+      // settle window closes — the last observation is the judgment. Mutating
+      // methods are never replayed; their single observation stands, as before.
+      const pollable = resolved.request.method === 'GET' || resolved.request.method === 'HEAD'
+      const stepDeadline = Date.now() + ctx.stepTimeoutMs
+      const settleDeadline = Date.now() + Math.min(ctx.stepTimeoutMs, API_EXPECT_SETTLE_MS)
 
-        // A request that never completed is INFRASTRUCTURE: the surface was
-        // health-checked before the first step, so a refused connection or a timeout
-        // says the machine went away, not that the app is wrong.
-        if (capture.requestError || capture.timedOut) {
-          return {
-            status: 'error',
-            records: [
-              apiStepRecord(ctx.stepIndex, resolved, capture, [], ctx.normText, undefined, repeat, iteration),
-            ],
-            expected: STEP_TO_RUN,
-            message: capture.timedOut
-              ? `request timed out after ${ctx.stepTimeoutMs}ms`
-              : `request failed: ${capture.requestError}`,
+      for (let iteration = 1; iteration <= repeat; iteration++) {
+        let capture: ApiStepCapture
+        let observed: ReturnType<typeof observeApiExpect>
+        for (;;) {
+          capture = await executeApiRequest({
+            baseUrl: surface.server.baseUrl,
+            request: resolved.request,
+            timeoutMs: Math.max(1, stepDeadline - Date.now()),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+            cookies,
+          })
+          if (ctx.signal?.aborted) return { status: 'aborted' }
+
+          // A request that never completed is INFRASTRUCTURE: the surface was
+          // health-checked before the first step, so a refused connection or a timeout
+          // says the machine went away, not that the app is wrong.
+          if (capture.requestError || capture.timedOut) {
+            return {
+              status: 'error',
+              records: [
+                apiStepRecord(ctx.stepIndex, resolved, capture, [], ctx.normText, undefined, repeat, iteration),
+              ],
+              expected: STEP_TO_RUN,
+              message: capture.timedOut
+                ? `request timed out after ${ctx.stepTimeoutMs}ms`
+                : `request failed: ${capture.requestError}`,
+            }
           }
+
+          observed = observeApiExpect({
+            expect: resolved.expect,
+            status: capture.status,
+            headers: capture.headers,
+            bodyText: ctx.normText(capture.bodyText),
+            rawBodyText: capture.bodyText,
+            normalizeText: ctx.normText,
+          })
+          if (!observed.mismatch || !pollable) break
+          if (Date.now() + API_EXPECT_POLL_MS >= settleDeadline) break
+          await new Promise((resolve) => setTimeout(resolve, API_EXPECT_POLL_MS))
         }
 
-        const { checks, mismatch } = observeApiExpect({
-          expect: resolved.expect,
-          status: capture.status,
-          headers: capture.headers,
-          bodyText: ctx.normText(capture.bodyText),
-          rawBodyText: capture.bodyText,
-          normalizeText: ctx.normText,
-        })
+        const { checks, mismatch } = observed
         last = { capture, checks }
         if (mismatch) {
           const excerpt = stepExcerpt(capture.bodyText)

@@ -155,6 +155,8 @@ const send = (res, status, payload, extraHeaders = {}) => {
 // and the calls that use it live inside ONE scenario, against ONE server.
 const sessions = new Map()
 let nextSession = 1
+/** When `/eventual/arm` was last hit — `/eventual` reads `ready` 400ms later. */
+let eventualArmedAt = null
 
 /** The `sid` cookie value on an incoming request, or ''. */
 const readSid = (req) => {
@@ -229,6 +231,17 @@ const server = http.createServer(async (req, res) => {
     await new Promise((r) => setTimeout(r, HOLD_MS))
     fs.unlinkSync(marker)
     return send(res, 200, { concurrency: live })
+  }
+
+  // EVENTUAL CONSISTENCY in miniature: `arm` acks immediately, but the flag it
+  // sets only reads back `ready` 400ms later — the shape of a queued flush. The
+  // api driver's GET-expect polling is proved against this pair.
+  if (req.method === 'POST' && url.pathname === '/eventual/arm') {
+    eventualArmedAt = Date.now()
+    return send(res, 200, { armed: true })
+  }
+  if (req.method === 'GET' && url.pathname === '/eventual') {
+    return send(res, 200, { ready: eventualArmedAt !== null && Date.now() - eventualArmedAt >= 400 })
   }
 
   // Reflects the Authorization header into the body AND logs it to stderr — the two
