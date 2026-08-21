@@ -124,6 +124,7 @@ Working rules that follow:
 - **2 to 3 public issues a day**, alternating targets, until the account has a track record. Revisit once it does; the constraint is heuristics and courtesy, not a rule of nature.
 - **Private advisories are exempt.** They are not public content and carry no abuse signal.
 - **PR comments and follow-ups on live threads are cheap.** A follow-up arising from an active conversation reads differently from a cold report, both to a human and to the heuristics.
+- **Prefer a new issue over a comment on a closed one.** A comment on an issue closed months ago is a weak vehicle; it may never be read and it cannot be triaged. When a finding matches an issue that was closed as fixed but demonstrably is not, file a new issue that references the old one in plain words, states without edge that it appears to have been closed prematurely, gives the evidence, and invites the maintainers to reopen the original instead if they prefer. Commenting is still right on an OPEN thread, such as a pull request actively touching the code.
 - **A promise made in a thread is a commitment.** If a comment says a separate issue will be opened, open it.
 - **Give the account a real profile.** Since it files openly as an agent, its profile should say so: what the pipeline does, that a human reviews before filing, and how to reach a person. That is the honest version of "looks legitimate", and it is worth more than any pacing trick.
 

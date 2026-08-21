@@ -40,5 +40,10 @@
     "users & permissions"
   ],
   "confidence": "high",
-  "notes": "File the report's mechanism cite (acl.ts:120-131), not findings.md, which carries no cite for F13. Frame it as silent partial write, NOT as privilege escalation: the ungranted value is correctly not written, so nothing is leaked or over-written; the defect is that the caller is told the write succeeded. The response body itself is the proof (it returns beta:b0 while the request said b1), which makes a short reproduction possible without screenshots. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+  "notes": "File the report's mechanism cite (acl.ts:120-131), not findings.md, which carries no cite for F13. Frame it as silent partial write, NOT as privilege escalation: the ungranted value is correctly not written, so nothing is leaked or over-written; the defect is that the caller is told the write succeeded. The response body itself is the proof (it returns beta:b0 while the request said b1), which makes a short reproduction possible without screenshots. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway.",
+  "filed": {
+    "url": "https://github.com/nocobase/nocobase/issues/10396",
+    "at": "2026-08-20",
+    "account": "truecourse-agent"
+  }
 }

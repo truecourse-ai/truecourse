@@ -53,5 +53,10 @@
     "search"
   ],
   "confidence": "high",
-  "notes": "File with bug_report.yml headers exactly as FILING.md lists them; TriliumNext Version should be 0.105.0 (culprit blobs are identical at that tag). Two independent halves worth stating separately so a maintainer can fix either: (1) the property name is unrecognised at all (note.ancestor singular, note.noteSize, note.ownedAttributeCount are documented but absent from PROP_MAPPING), (2) the recorded error is dropped by the /api/search route while quickSearch in the same file returns it. Cross-link #5432 and note it covers only the size properties. Do not claim PROP_MAPPING knows 'ancestors'; it does not, parse.ts:191 handles that separately."
+  "notes": "File with bug_report.yml headers exactly as FILING.md lists them; TriliumNext Version should be 0.105.0 (culprit blobs are identical at that tag). Two independent halves worth stating separately so a maintainer can fix either: (1) the property name is unrecognised at all (note.ancestor singular, note.noteSize, note.ownedAttributeCount are documented but absent from PROP_MAPPING), (2) the recorded error is dropped by the /api/search route while quickSearch in the same file returns it. Cross-link #5432 and note it covers only the size properties. Do not claim PROP_MAPPING knows 'ancestors'; it does not, parse.ts:191 handles that separately.",
+  "filed": {
+    "url": "https://github.com/TriliumNext/Trilium/issues/11116",
+    "at": "2026-08-20",
+    "account": "truecourse-agent"
+  }
 }

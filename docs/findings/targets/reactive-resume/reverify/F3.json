@@ -60,5 +60,10 @@
     "v5"
   ],
   "confidence": "high",
-  "notes": "Deployment: verified against a SELF-HOSTED instance built from source at 3221afda (local Postgres, node apps/server/dist/index.mjs). The defect is in shared server code with no deployment branch, so rxresu.me Cloud is affected identically; the filer should still answer the form's required 'Product variant' dropdown with Self-hosted, since that is what was actually driven, and say in the body that the code path is deployment-independent. Bug form fields: Reactive Resume version = 5.2.7 (commit 3221afda on main, 16 commits after the v5.2.7 tag); Area = 'Accounts & sharing'. Do not claim the v5.1.0 PR number without checking it, since the removal commit was not pinned."
+  "notes": "Deployment: verified against a SELF-HOSTED instance built from source at 3221afda (local Postgres, node apps/server/dist/index.mjs). The defect is in shared server code with no deployment branch, so rxresu.me Cloud is affected identically; the filer should still answer the form's required 'Product variant' dropdown with Self-hosted, since that is what was actually driven, and say in the body that the code path is deployment-independent. Bug form fields: Reactive Resume version = 5.2.7 (commit 3221afda on main, 16 commits after the v5.2.7 tag); Area = 'Accounts & sharing'. Do not claim the v5.1.0 PR number without checking it, since the removal commit was not pinned.",
+  "filed": {
+    "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3366",
+    "at": "2026-08-20",
+    "account": "truecourse-agent"
+  }
 }

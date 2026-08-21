@@ -194,3 +194,16 @@ Three findings gained detail worth filing: the password dialog carries HTML `min
 43 findings re-run across four products, 43 still reproduce, zero fixed, zero could-not-reproduce. Combined with strapi (13) and documenso (15, of which 2 fixed), that is 71 findings executed against live instances by us rather than taken on report.
 
 Host left clean after all four: zero containers, zero leftover run volumes, all four clones showing no tracked modifications. Disk 15 GB free.
+
+## First filings on the four new targets (2026-08-20)
+
+One issue per repo, top finding each, every body matched to that repo's own template (two YAML forms with required dropdowns, two markdown templates with different section styles). All four templates were regenerated and diffed against the morning copy before drafting; all unchanged.
+
+- Trilium F8 -> https://github.com/TriliumNext/Trilium/issues/11116
+- rybbit R1 -> https://github.com/rybbit-io/rybbit/issues/1132
+- NocoBase F13 -> https://github.com/nocobase/nocobase/issues/10396
+- Reactive-Resume F3 -> https://github.com/amruthpillai/reactive-resume/issues/3366
+
+Two corrections made while drafting, both against the handover: rybbit's cache key is at `auth-utils.ts:168`, not `:169`; and the Trilium collapse chain is now fully traced rather than described by symptom (parse records the error and returns undefined, the note and not branches discard the already-parsed filter with it, AndExp filters falsy entries and returns TrueExp when nothing survives, and TrueExp returns its input set unchanged, which is why a failed query matches everything).
+
+Route policy change recorded in the guide: prefer a new issue over a comment on a long-closed one, since a comment on a closed issue cannot be triaged and may never be read. Commenting remains right on an open thread such as an active pull request.
