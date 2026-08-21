@@ -21,7 +21,7 @@
 
 import path from 'node:path';
 import type { SessionDriver, SessionFailure, SessionPersistence } from '@truecourse/agent-loop';
-import { createSessionRun, type SessionRunStore } from '../../lib/sessions-store.js';
+import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js';
 import { resolveCommitSha } from '../../lib/repo-ref.js';
 import { createConfiguredSessionDriver } from '../llm/session-driver.js';
 import type { LlmTransportFlag } from '../../config/global-config.js';
@@ -77,6 +77,9 @@ export function describeSessionFailure(failure: SessionFailure): string {
 export function createGuardSetupSessionContext(opts: {
   repoRoot: string;
   transport?: LlmTransportFlag;
+  /** The (lazily created) run record just came into being — fired on first
+   *  acquire; never on a run that spends no sessions. */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
 }): GuardSetupSessionContext {
   let acquired: Promise<{ run: SessionRunStore; driver: SessionDriver }> | null = null;
   let run: SessionRunStore | null = null;
@@ -99,6 +102,7 @@ export function createGuardSetupSessionContext(opts: {
       ...(attribution.fallbackModel ? { fallbackModel: attribution.fallbackModel } : {}),
     });
     run = store;
+    opts.onRunStarted?.({ command: 'guard-setup', runId: store.runId, dir: store.dir });
     return { run: store, driver };
   };
 

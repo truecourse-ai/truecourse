@@ -40,7 +40,7 @@ import {
 } from '@truecourse/shared/llm';
 import type { SessionEvent } from '@truecourse/agent-loop';
 import path from 'node:path';
-import { createSessionRun } from '../lib/sessions-store.js';
+import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import {
   createConfiguredApiTransport,
@@ -115,6 +115,9 @@ export interface RunGuardInterfaceAuthorOptions {
   onSessionEvent?: (placeId: string, event: SessionEvent) => void;
   /** What the run is doing before the first session starts — the context pass. */
   onStatus?: (message: string) => void;
+  /** The sessions-store run record was just created — the CLI prints the
+   *  dashboard "watch live" deep link from it. */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
 }
 
 export interface GuardInterfaceAuthorRun extends AuthorRunResult {
@@ -152,6 +155,7 @@ export async function runGuardInterfaceAuthoring(
   const { repoRoot } = opts;
   const gitRef = await resolveCommitSha(repoRoot);
   const run = createSessionRun(repoRoot, { command: 'guard-interfaces', gitRef });
+  opts.onRunStarted?.({ command: 'guard-interfaces', runId: run.runId, dir: run.dir });
   const { driver, mode, attribution } = createConfiguredSessionDriver({
     ...(opts.transport ? { transport: opts.transport } : {}),
     cwd: repoRoot,

@@ -36,7 +36,7 @@ import {
   type GuardScenarioDiagnosis,
 } from '@truecourse/shared';
 import path from 'node:path';
-import { createSessionRun } from '../lib/sessions-store.js';
+import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
 import {
@@ -380,6 +380,9 @@ export interface RunGuardAdjudicationOptions {
   onSessionEvent?: (scenarioId: string, event: SessionEvent) => void;
   /** What the run is doing before/around the sessions — the phase line. */
   onStatus?: (message: string) => void;
+  /** The sessions-store run record just came into being (only when there are
+   *  session items) — the CLI prints the "watch live" deep link from it. */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
 }
 
 export interface GuardAdjudicationVerdictRow {
@@ -458,6 +461,7 @@ export async function runGuardAdjudication(
     const run = createSessionRun(repoRoot, { command: 'guard-adjudicate', gitRef });
     sessionRunId = run.runId;
     runDir = run.dir;
+    opts.onRunStarted?.({ command: 'guard-adjudicate', runId: run.runId, dir: run.dir });
     const { driver, mode, attribution } = createConfiguredSessionDriver({
       ...(opts.transport ? { transport: opts.transport } : {}),
       cwd: repoRoot,

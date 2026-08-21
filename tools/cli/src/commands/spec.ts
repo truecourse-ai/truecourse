@@ -29,7 +29,7 @@ import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { estimateSpinnerPhase, promptLlmEstimate } from "./llm-prompt.js";
 import { requireGitRepo } from "./git-guard.js";
-import { getServerUrl } from "./helpers.js";
+import { activityUrl, printWatchLive, resolveDashboardUrl } from "./helpers.js";
 
 export interface RunSpecOptions {
   cwd?: string;
@@ -73,7 +73,11 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   // so the corpus it produces is visible in the dashboard's project list. The
   // entry's slug is also the dashboard deep link the question line points at.
   const project = await registerProject(root);
-  const activityUrl = `${getServerUrl()}/repos/${project.slug}?tab=activity`;
+  const dashboardUrl = await resolveDashboardUrl();
+  // Filled by onRunStarted below; question lines deep-link to the exact run
+  // once it exists, and to the Activity tab before that.
+  let scanRunId: string | undefined;
+  const activityLink = (): string => activityUrl(dashboardUrl, project.slug, scanRunId);
   // The relevance + area-tag stages shell out to `claude`; an expired login would
   // fail every doc. Probe once up front — or, in API mode, validate the provider
   // config instead (the `agent` transport answers via the mailbox: neither applies).
@@ -98,12 +102,18 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     ...(opts.only ? { only: opts.only } : {}),
     onEstimatePhase: estimateSpinnerPhase(),
     onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Scan" } }),
+    // The run record exists (post-confirm, pre-sessions): print the §3.6
+    // "watch live" deep link to the exact run, unconditionally.
+    onRunStarted: (info) => {
+      scanRunId = info.runId;
+      printWatchLive(dashboardUrl, project.slug, info.runId);
+    },
     // A scan session asked a question (§3.7 — the interactive scope
     // orchestrator). The CLI never blocks on it: print the dashboard deep link
     // where it can be answered; unanswered it lands in pendingQuestions below.
     onQuestion: (_workItem, question) => {
       p.log.warn(`Scan question: ${question.header} — ${question.question}`);
-      p.log.message(`  Answer it in the dashboard: ${activityUrl}`);
+      p.log.message(`  Answer it in the dashboard: ${activityLink()}`);
     },
   }).catch((e: unknown) => {
     renderer.dispose();
@@ -214,7 +224,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
       `${pendingQuestions.length} scan question${pendingQuestions.length === 1 ? "" : "s"} went unanswered — the scan proceeded on defaults:`,
     );
     for (const q of pendingQuestions) p.log.message(`  • ${q.header}: ${q.question}`);
-    p.log.message(`  Answer them in the dashboard (${activityUrl}), then re-run \`truecourse spec scan\`.`);
+    p.log.message(`  Answer them in the dashboard (${activityLink()}), then re-run \`truecourse spec scan\`.`);
   }
   if (scanFindings.length > 0) {
     p.log.step(`Scan findings (from the scope orchestrator):`);
