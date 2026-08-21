@@ -76,6 +76,19 @@ export async function executeApiRequest(opts: ExecuteApiRequestOptions): Promise
     if (cookieHeader) headers.cookie = cookieHeader
   }
 
+  // Node's fetch stamps browser-shaped `Sec-Fetch-*` headers on every request,
+  // so origin-checking middleware (better-auth CSRF protection, for one) reads
+  // the call as a browser request and refuses state-changing paths that carry
+  // no `Origin`. Default it to the server's own origin — a step that writes its
+  // OWN `Origin` header wins (explicit beats implicit), same as the cookie jar.
+  if (!Object.keys(headers).some((h) => h.toLowerCase() === 'origin')) {
+    try {
+      headers.origin = new URL(opts.baseUrl).origin
+    } catch {
+      // A malformed baseUrl fails at fetch below with its real error, not here.
+    }
+  }
+
   try {
     const res = await fetch(`${opts.baseUrl}${request.path}`, {
       method: request.method,

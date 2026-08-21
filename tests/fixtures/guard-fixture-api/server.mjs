@@ -239,7 +239,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { authorization: auth })
   }
 
-  // Reflects the request back — path, query params, Authorization header, and body.
+  // Reflects the request back — path, query params, Authorization and Origin headers, and body.
   // Used to prove fixture placeholders reached the wire in path/query/body, and that
   // a seed-provided credential reached the header.
   if (url.pathname === '/echo' || url.pathname.startsWith('/echo/')) {
@@ -248,6 +248,7 @@ const server = http.createServer(async (req, res) => {
       path: url.pathname,
       query: Object.fromEntries(url.searchParams),
       authorization: req.headers['authorization'] ?? '',
+      origin: req.headers['origin'] ?? '',
       body,
     })
   }

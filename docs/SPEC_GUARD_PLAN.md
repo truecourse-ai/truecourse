@@ -6362,3 +6362,16 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     (sessions overlap, folds never do, work-list order, the race policy, the
     briefed-with collision that is still refused, what the pool cannot brief,
     abort).
+
+114. **Api steps carry an `Origin` header by default (2026-08-20).** STATUS: BUILT.
+    Node's fetch stamps browser-shaped `Sec-Fetch-*` headers on every request,
+    so origin-checking middleware (better-auth's CSRF protection, found by the
+    reactive-resume reference corpus — its recipe proof blocked 30 of 38
+    scenarios on 403 `MISSING_OR_NULL_ORIGIN`) reads a bare api step as a
+    browser call and refuses state-changing paths that carry no `Origin`. The
+    executor now defaults `Origin` to the server's own origin, explicit beats
+    implicit (same rule as the cookie jar): a step that authors its own
+    `Origin` header wins. `packages/guard-runner/src/api/executor.ts`;
+    `tests/guard-runner/api-origin.test.ts`; the `/echo` fixture endpoint
+    reflects `origin` alongside `authorization`. (Numbered 114 because
+    109–113 are reserved by concurrent workstreams' uncommitted items.)
