@@ -137,6 +137,9 @@ async function seedLedger(
       title: `Doc ${r.externalId}`,
       url: null,
       version: r.version ?? null,
+      // The ledger row as it stands before a sync carries source dates.
+      externalCreatedAt: null,
+      externalUpdatedAt: null,
       contentHash: hash(r.markdown),
       lastSyncedAt: '2026-01-01T00:00:00Z',
     });
@@ -164,6 +167,8 @@ async function seedStored(
       title: `Doc ${d.id}`,
       url: null,
       version: null,
+      externalCreatedAt: null,
+      externalUpdatedAt: null,
       contentHash: h,
     });
   }
