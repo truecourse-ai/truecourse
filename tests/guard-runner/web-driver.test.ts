@@ -157,6 +157,33 @@ describe('the web driver', () => {
   )
 
   it(
+    'matches page text PAST the 2000-char display cut — and a negative matcher cannot pass on it',
+    async () => {
+      // Content at the END of a long body is the shape of a portal-rendered
+      // dialog. A head-truncated read once made it unassertable (a `contains`
+      // could never pass) AND let an absence regex pass falsely.
+      const found = await run(repo, [
+        { driver: 'web', navigate: '/long', expect: { text: { contains: 'PAST-THE-CUT-MARKER' } } },
+      ])
+      expect(found.outcome).toBe('pass')
+
+      const falseGreen = await run(
+        repo,
+        [
+          {
+            driver: 'web',
+            navigate: '/long',
+            expect: { text: { matches: '^(?![\\s\\S]*PAST-THE-CUT-MARKER)' } },
+          },
+        ],
+        'web.flow.cli.2',
+      )
+      expect(falseGreen.outcome).toBe('fail')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
     'clicks a link (navigation) and a button (an in-page text change)',
     async () => {
       const result = await run(repo, [

@@ -127,6 +127,16 @@ const HOME = page(
 </form>`,
 )
 
+// A body far past WEB_TEXT_LIMIT (2000 chars) with the deciding content at the
+// END — the shape of a portal-rendered dialog. Proves matchers judge the FULL
+// visible text, not a head-truncated cut.
+const LONG = page(
+  'Long',
+  `<h1>Long page</h1>
+<p>${'lorem ipsum '.repeat(300)}</p>
+<p>PAST-THE-CUT-MARKER</p>`,
+)
+
 const SLOW = page(
   'Slow',
   `<h1>Slow</h1>
@@ -382,6 +392,8 @@ const server = http.createServer(async (req, res) => {
         ? notesPage(url)
         : url.pathname === '/slow-text'
           ? SLOW
+          : url.pathname === '/long'
+            ? LONG
           : url.pathname === '/controls'
             ? CONTROLS
             : url.pathname === '/capture'

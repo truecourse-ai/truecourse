@@ -6375,3 +6375,16 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `tests/guard-runner/api-origin.test.ts`; the `/echo` fixture endpoint
     reflects `origin` alongside `authorization`. (Numbered 114 because
     109–113 are reserved by concurrent workstreams' uncommitted items.)
+
+115. **Web text matchers judge the FULL page text (2026-08-20).** STATUS: BUILT.
+    `readVisibleText` truncated `body.innerText` to `WEB_TEXT_LIMIT` (2000)
+    BEFORE matching, so content past the cut — portal-rendered dialogs land at
+    the end of `<body>` by construction — was unassertable, and an absence
+    matcher could pass against content it never saw (a live false green on the
+    reactive-resume reference board; independently confirmed as G14 on the
+    trilium board, deciding 7+ reds each). Matchers now receive the whole
+    string; WEB_TEXT_LIMIT survives purely as the display/storage width at the
+    reporting sites (expect actuals, mismatch details, capture records).
+    `packages/guard-runner/src/web/executor.ts`; regression test
+    `tests/guard-runner/web-driver.test.ts` ("matches page text PAST the
+    2000-char display cut") over a new `/long` fixture page.

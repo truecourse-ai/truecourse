@@ -147,11 +147,17 @@ export function pageAddress(page: Page): string {
   }
 }
 
-/** What the page shows a reader, head-truncated — the web driver's "stdout". */
+/**
+ * What the page shows a reader, in FULL — the web driver's "stdout". Matchers
+ * judge this whole string: truncating here once made every portal-rendered
+ * dialog (which lands at the end of `<body>`) unassertable past the cut, and
+ * let a negative matcher pass against content it never saw. WEB_TEXT_LIMIT is
+ * a display/storage width, applied where text is reported, never where it is
+ * matched.
+ */
 async function readVisibleText(page: Page): Promise<string> {
   try {
-    const text = await page.locator('body').innerText({ timeout: 1_000 })
-    return text.slice(0, WEB_TEXT_LIMIT)
+    return await page.locator('body').innerText({ timeout: 1_000 })
   } catch {
     return ''
   }
@@ -235,7 +241,7 @@ async function targetMismatch(
           ]
         : []),
       '--- visible page text ---',
-      text,
+      truncate(text, WEB_TEXT_LIMIT),
     ],
   }
 }
@@ -540,7 +546,7 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
                       ]
                     : []),
                   '--- visible page text ---',
-                  await readVisibleText(page),
+                  truncate(await readVisibleText(page), WEB_TEXT_LIMIT),
                 ],
               },
         )
@@ -676,7 +682,7 @@ async function readOneCapture(
       subject: 'capture',
       expected,
       actual,
-      detail: [expected, actual, '--- visible page text ---', await readVisibleText(page)],
+      detail: [expected, actual, '--- visible page text ---', truncate(await readVisibleText(page), WEB_TEXT_LIMIT)],
     },
   })
 
