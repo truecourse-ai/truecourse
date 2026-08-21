@@ -1,0 +1,45 @@
+{
+  "id": "R10",
+  "repo": "rybbit-io/rybbit",
+  "target": "rybbit",
+  "checkedAt": "2026-08-20",
+  "title": "A lowercase country code is refused with a 400 rather than normalised, though the doc says country codes are stored as uppercase",
+  "statement": "filter-traffic.mdx closes its country-exclusions section with 'Country codes are stored as uppercase values in the dashboard and API', which reads as a normalisation promise about what happens to what you enter. The site-config write path validates with a /^[A-Z]{2}$/ regex and never uppercases, so 'us' and 'Us' are rejected with a 400 and the whole config write fails. The read path compares case-insensitively, so the strictness exists purely at the boundary.",
+  "scenario": {
+    "id": "country-exclusion-cannot-reach-a-private-address.api.1",
+    "failingStep": 5,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T20-29-27Z_d9522689/country-exclusion-cannot-reach-a-private-address.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 10, both halves. Site 39: CONTROL PUT /config with 'US' returns 200 and GET /excluded-countries reads back ['US']. PROBE PUT /config with 'us' returns 400 {\"success\":false,\"error\":\"Invalid request data\", \"details\":{\"fieldErrors\":{\"excludedCountries\":[\"Country code must be a 2-letter ISO code (e.g., US, GB, CN)\"]}}}, and mixed-case 'Us' gives the same. The stored config is unchanged after both refusals. The report also corrects the attribution: the normalisation promise is filter-traffic.mdx:48, not site-settings.mdx, whose country section (:89-91) neither promises nor denies normalisation, and the corpus scenario binds filter-traffic.mdx section country-exclusions, which is the right doc. The board scenario fails at step 5 with 400 where 200 was expected."
+  },
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/content/docs/(docs)/filter-traffic.mdx",
+      "server/src/api/sites/updateSiteConfig.ts",
+      "server/src/services/sites/siteExclusionDecision.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/rybbit-io/rybbit/blob/613cd0153c77e4fcd32235dd051f44257368b6e8/server/src/api/sites/updateSiteConfig.ts#L18-L21",
+    "permalinkToday": "https://github.com/rybbit-io/rybbit/blob/64f8c4fb7f394bdfe9379717de8e6c21758b1ac2/server/src/api/sites/updateSiteConfig.ts#L18-L21",
+    "howDecided": "git log 613cd015..HEAD on all three files returns nothing. At HEAD updateSiteConfig.ts:18-21 still reads .string().trim().length(2).regex(/^[A-Z]{2}$/, \"Country code must be a 2-letter ISO code (e.g., US, GB, CN)\") with no .toUpperCase() anywhere in the chain; filter-traffic.mdx:48 still reads 'Country codes are stored as uppercase values in the dashboard and API.'; and the read path at siteExclusionDecision.ts:189-192 still compares country.toUpperCase() === countryIso.toUpperCase(), so matching is already case-insensitive once a value is stored."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo rybbit-io/rybbit --created '>=2026-08-15' --limit 60  (0 results)",
+      "gh api --paginate 'repos/rybbit-io/rybbit/issues?state=all&per_page=100' (not a search; 1044 items, 320 non-PR issues, numbers 1 to 1131 with 87 gaps) then a local regex scan of every issue title plus body",
+      "local regex over all 320 issues: country code|excludedCountries|lowercase  ->  1 hit, #273 ('Uppercase characters in domain lead to CORS errors'), which is about domains not country codes and is unrelated"
+    ]
+  },
+  "reevaluation": "The finding stands, source untouched, still unreported. It is the smallest of the ten and should be filed as such. The argument that makes it more than pedantry is the asymmetry re-verification confirmed at HEAD: the read path already uppercases both sides before comparing, so the system is case-insensitive everywhere except the one place a human types, and the failure is not a field-level warning but a 400 that rejects the entire site-config write, taking any other valid changes in the same request with it. The fix is one .toUpperCase() in the zod chain, or one sentence in the doc. Note for the filer that the report corrected the doc attribution: the promise is filter-traffic.mdx:48, and quoting site-settings.mdx instead would be quoting a page that says nothing about normalisation.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Report section 10 (a deliberate red; the report gives it no F id). Doc-side or one-line code fix. The docs live in this same repo under docs/content/docs, so there is no separate docs repo and no 'docs repo issue' route: a doc fix here is a one-line PR against rybbit-io/rybbit. Five of the ten findings (R6, R7, R8, R9, R10) are doc-side. Filing five separate doc issues would burn maintainer patience for little gain; consider one consolidated 'documentation does not match behaviour' issue listing all five with file and line, or a single PR. Quote filter-traffic.mdx:48 exactly, since the claim rests on reading 'are stored as uppercase' as a promise about normalisation; if a maintainer reads it as merely descriptive the finding degrades to a suggestion, so state the interpretation openly rather than assuming it. The strongest supporting fact is that siteExclusionDecision.ts:189-192 already compares case-insensitively at read time. Mention that the 400 fails the whole config write, not just the one field. Do not file this alone if it is the only thing going upstream that day; it is the natural tail of a consolidated docs issue. rybbit-io/rybbit applies NO labels: all 40 most recent issues carry an empty label array, and both templates declare labels: ''. Do not add a 'Suggested labels' line here; there is no vocabulary to copy and it would only add noise. The bug template is a classic markdown template with bold headers (**Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop**, **Smartphone**, **Additional context**), not a YAML form, and no template-enforcing workflow exists, so there is no auto-close bot to trip."
+}

@@ -1,0 +1,45 @@
+{
+  "id": "F11.2",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "fields:create with a field interface and no data type answers 500 unsupported field type null",
+  "statement": "The manual says each field interface carries a default data type (Number defaults to double). The API applies no such default: POST /api/collections/<c>/fields:create {name, interface:'number'} answers 500 unsupported field type null. The identical request with type:'double' answers 200, so the default the manual describes exists only in the browser form.",
+  "scenario": {
+    "id": "a-field-interface-carries-a-default-data-type-and-allows-others.api.1",
+    "failingStep": 3,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/a-field-interface-carries-a-default-data-type-and-allows-others.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 4. Probe and control both quoted verbatim. The report ADDS the mechanism cite (database.ts:779, a bare Error rather than a typed one, which is why koa renders it 500 and not 400)."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/core/database/src/database.ts",
+      "docs/docs/en/data-sources/data-modeling/collection-fields/index.md"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/core/database/src/database.ts#L777-L780",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/core/database/src/database.ts#L777-L780",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase \"unsupported field type\""
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. database.ts has no commit since the tested SHA and line 779 still reads throw Error(`unsupported field type ${type}`) inside `if (!Field)`. The doc sentence is still verbatim at docs/docs/en/data-sources/data-modeling/collection-fields/index.md:64. The symptom search returned four older items and none is this bug (#8143 and #9627 are upgrade start-up failures, #9983 is an external data-source UI fix, #2837 is a 2023 render failure). Two defects are stacked here and a filer should say so: the missing interface-to-type default, and the untyped Error that turns a bad request into a 500. Either one alone is filable; together they make one clean report.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug"
+  ],
+  "confidence": "high",
+  "notes": "Ask for the 400 first and the default second: a maintainer may reasonably answer that type is required at the API and that the doc sentence describes the form, in which case unsupported field type null is still a 500 where a 400 belongs. Quote the doc line so the interface-default half is anchored to their own text. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

@@ -1,0 +1,88 @@
+{
+  "id": "F9",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "Documented resume bounds are silently coerced instead of rejected: a PATCH with an out-of-range value returns 200 and stores something else",
+  "statement": "The published JSON Resume schema gives metadata.template as an enum of fifteen names, page.format as an enum of three, page.marginX as 0 to 100 and typography fontSize with its own range. Those fields carry Zod .catch() defaults, so a write that violates the documented bound never reaches the 400 path: the API answers 200 with no error, warning or message and the stored document silently becomes something the client never sent. Fields without a .catch() do 400 correctly and leave the value untouched, so the write path and the error path both work; the .catch() is what removes the validation.",
+  "scenario": {
+    "id": "the-resume-document-refuses-values-outside-the-documented-bounds.api.1",
+    "failingStep": 3,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/the-resume-document-refuses-values-outside-the-documented-bounds.api.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED, and broader than the corpus recorded",
+    "note": "The corpus said 'template is the hole' and that every other documented bound is enforced. That is false at this SHA. Because the scenario aborts at step 3, steps 4 and 5 had never executed; driving all 15 bounds by hand produced three 200s with silent rewrites (template 'tcverify-no-such-template' to onyx; page.format 'a3' to a4 off a non-default 'letter'; page.marginX 500 to 14 off a non-default 40; typography.body.fontSize 999 to 11 off a non-default 20) and twelve correct 400s that left state unchanged. One thing the corpus got right and worth keeping: /basics/email accepting 'not-an-email-address' is NOT a bug, since basicsSchema.email is a plain z.string() at data.ts:89 and the doc publishes it as a plain string."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/schema/src/resume/data.ts",
+      "packages/schema/src/templates.ts",
+      "packages/api/src/features/resume/resume-data-validation.ts",
+      "docs/guides/json-resume-schema.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/schema/src/resume/data.ts#L627-L630",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/schema/src/resume/data.ts#L627-L630",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: data.ts:627-630 is still `template: templateSchema.catch(\"onyx\").describe(...)`, with templateSchema the fifteen-name z.enum at templates.ts:3-18. The other coercion sites are unchanged at their recorded lines: fontSize :417, lineHeight :422, marginX :457, marginY :458, format :462, locale :466, the page booleans :467/:468/:472. One count correction: `grep -c '\\.catch(' packages/schema/src/resume/data.ts` returns 34 at this SHA, not the 30 the report and the cross-product summary state, and `grep -o` confirms 34 occurrences on 34 distinct lines. Since head is the tested commit the file cannot have changed, so 30 was simply an undercount in the report."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "AmruthPillai/Reactive-Resume#3174",
+        "kind": "issue",
+        "stateAtReport": "open",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Re-read in full including comments. Still open, and now carries labels bug / area: rendering / deployment: cloud / status: confirmed, so a maintainer has accepted the silent-discard framing on a neighbouring surface. Title 'Inputting a large line height causes custom rules deletion'. A comment from MrTig-afk on 2026-08-15 reports that the broad version no longer reproduces on v5.2.6 (styleRulesSchema now validates rules independently) but that a rule whose only property is out of range is still dropped silently, and proposes either clamping or telling the user which property was rejected. Same family as F9, different surface (style rules, not the documented metadata bounds), so related and not a duplicate."
+      }
+    ],
+    "newItems": [
+      {
+        "number": 3082,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3082",
+        "state": "closed",
+        "title": "[Feature] Max values for fields that can break the preview.",
+        "createdAt": "2026-05-18",
+        "relation": "related",
+        "note": "Closed as completed, labels enhancement / area: rendering. The request that motivated the bounds: 'Could you add maximum values for fields like line height? I've twice made the page unusable by entering 115 instead of 1.15.' The bounds exist; F9 is that they are unenforced on the API path because .catch() swallows the failure. Strong context to cite."
+      },
+      {
+        "number": 2818,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/2818",
+        "state": "closed",
+        "title": "[Bug] API key silently fails with HTTP 200 and error body instead of proper 4xx",
+        "createdAt": "2026-03-18",
+        "relation": "related",
+        "note": "Closed as completed. Precedent that '200 where a 4xx belongs' is treated as a bug in this repo, on a different endpoint."
+      },
+      {
+        "number": 3260,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3260",
+        "state": "closed",
+        "title": "[Bug] Unable to save padding or margin in style rules",
+        "createdAt": "2026-07-16",
+        "relation": "related",
+        "note": "Closed as completed. Silent rollback of style rules, but the reported mechanism is a 'Synced in another tab' conflict, not schema coercion. Adjacent only."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'silently'",
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'out of range value accepted 200'",
+      "non-search sweep: 800-item local issue list grepped for silent|validat|schema|coerc"
+    ]
+  },
+  "reevaluation": "Stands, and it is the second strongest finding here. Nothing moved in source because head is the tested commit, and nothing moved on #3174 since the report except that it now carries status: confirmed and deployment: cloud, which helps rather than hurts: a maintainer has already agreed that silently discarding invalid input is a defect in the adjacent style-rules path, so the same argument on the documented metadata bounds should land. Two adjustments a filer must make. First, drop the 'thirty' figure: the file has 34 .catch( lines at this SHA, and it is safer to say 'more than thirty coercion sites in the resume schema, of which at least four sit on bounds the published JSON schema advertises' than to quote a number that a maintainer will recount. Second, the corpus's original 'template is the hole' sentence is wrong and must not be filed; the four demonstrated coercions are the finding.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: integrations",
+    "v5"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda over HTTP with a cookie-jar fetch client sending Origin, against /api/openapi/resumes. Server-side schema code with no deployment branch, so Cloud is affected identically. Product variant = Self-hosted; Area = 'API & integrations'; version 5.2.7 (commit 3221afda). Include the four exact request/response pairs (each shown moving OFF a non-default value first, which is what proves a rewrite rather than a no-op) and the matching 400 controls, since a maintainer will otherwise assume the whole schema is unvalidated. Cross-link #3174 as the same class on the style-rules surface and #3082 as the request that added the bounds."
+}

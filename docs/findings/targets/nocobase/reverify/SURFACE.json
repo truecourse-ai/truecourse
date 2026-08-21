@@ -1,0 +1,45 @@
+{
+  "id": "SURFACE",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "The Add-route drawer's Title input has no accessible name",
+  "statement": "In the Add new route drawer the Title input renders as a bare <input class=\"ant-input\"> with no id, name, aria-label, aria-labelledby or placeholder, and element.labels.length is 0. The visible *Title: text is not associated with the control, so getByRole('textbox', {name: /Title/}) matches nothing while getByRole('textbox') matches the input.",
+  "scenario": {
+    "id": "a-route-can-be-created-without-showing-in-the-menu.web.1",
+    "failingStep": 6,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/a-route-can-be-created-without-showing-in-the-menu.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 15. The caveat matters: on playwright-core 1.62.1 getByLabel('Title') returns 1, which looks like a refutation but is not, because the match is the form-item wrapper and fill() on it errors with Element is not an <input>. The decisive probe is getByRole with a name option."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/plugins/@nocobase/plugin-client/src/client/routesTableSchema.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/plugins/@nocobase/plugin-client/src/client/routesTableSchema.tsx#L264-L270",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/plugins/@nocobase/plugin-client/src/client/routesTableSchema.tsx#L264-L270",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase accessibility in:title"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged in source: routesTableSchema.tsx has no commit since the tested SHA and the Title field at 264-270 is still a plain Formily schema with title, FormItem decorator and Input component and no x-component-props carrying an id or aria-label. The accessibility search returned zero titled issues in the entire tracker, so this is unreported and there is no established a11y conversation to join. What has changed is my read of its scope: the mechanism is the shared FormItem decorator rather than this drawer, so the same missing association almost certainly affects every Formily-driven input in the product. This pass did not verify a second form, so the scope claim is unproven and must not be asserted as fact.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "enhancement"
+  ],
+  "confidence": "medium",
+  "notes": "Before filing, spend five minutes checking two or three other Formily forms (the Create-collection drawer is the obvious one). If the missing label association is systemic, file ONE issue about the FormItem decorator with the route drawer as the example, which is far more useful than a per-field report; if it is somehow specific to this drawer, file the narrow one. Confidence is medium only because the scope is unresolved, not because the observation is in doubt: the raw markup and element.labels.length are unambiguous. This is the lowest-priority item of the twelve to file, and a reasonable candidate to hold back if the batch needs trimming. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

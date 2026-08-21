@@ -1,0 +1,69 @@
+{
+  "id": "R9",
+  "repo": "rybbit-io/rybbit",
+  "target": "rybbit",
+  "checkedAt": "2026-08-20",
+  "title": "Journeys are pageviews-only, though journeys.mdx says each node is a page or an event",
+  "statement": "journeys.mdx says each bar in the journey visualization represents a page or an event. The journeys query filters the session's actions to AND type = 'pageview', so of the nine event types the product ingests, eight can never appear as a node. A custom event fired between two pageviews is ingested, is queryable through the events endpoints, and is simply absent from the journey that walks straight past it.",
+  "scenario": {
+    "id": "journeys-render-the-paths-visitors-walk.api.1",
+    "failingStep": 11,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T20-29-27Z_d9522689/journeys-render-the-paths-visitors-walk.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 9, both halves. One session walks /start, then the custom event signup_clicked, then /middle, then /end, each 1.2 s apart so the ordering cannot be a same-second tie (see R2). CONTROL GET /events/names returns [{\"eventName\":\"signup_clicked\",\"count\":1}], proving the event is stored and queryable. PROBE GET /journeys?steps=4 returns {\"journeys\":[{\"path\":[\"/start\",\"/middle\",\"/end\"],\"count\":1,\"percentage\":100}]}. The board scenario fails at step 11 expecting the journey body to contain the event name."
+  },
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/content/docs/(docs)/feature-guides/journeys.mdx",
+      "server/src/api/analytics/getJourneys.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/rybbit-io/rybbit/blob/613cd0153c77e4fcd32235dd051f44257368b6e8/server/src/api/analytics/getJourneys.ts#L74",
+    "permalinkToday": "https://github.com/rybbit-io/rybbit/blob/64f8c4fb7f394bdfe9379717de8e6c21758b1ac2/server/src/api/analytics/getJourneys.ts#L74",
+    "howDecided": "git log 613cd015..HEAD on both files returns nothing. At HEAD getJourneys.ts:74 still reads \"AND type = 'pageview'\" inside the per-session events WHERE clause, and journeys.mdx:13 still reads 'Each bar represents a page or event. Its height indicates how many users reached that point.'"
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "rybbit-io/rybbit#540",
+        "kind": "issue",
+        "stateAtReport": "open",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Incorrect URL redirection in Journeys with multiple sites in one org. Unrelated to node types; last updated 2025-09-10."
+      },
+      {
+        "ref": "rybbit-io/rybbit#770",
+        "kind": "issue",
+        "stateAtReport": "open",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Referrer selection lists all pages instead of entry pages only. Unrelated; last updated 2025-12-12."
+      },
+      {
+        "ref": "rybbit-io/rybbit#784",
+        "kind": "issue",
+        "stateAtReport": "open",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Journey page hides different host urls. Nearest neighbour by area, still about hosts not event nodes; last updated 2026-01-03."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo rybbit-io/rybbit --created '>=2026-08-15' --limit 60  (0 results)",
+      "gh api --paginate 'repos/rybbit-io/rybbit/issues?state=all&per_page=100' (not a search; 1044 items, 320 non-PR issues, numbers 1 to 1131 with 87 gaps) then a local regex scan of every issue title plus body",
+      "local regex over all 320 issues: journey  ->  6 hits (#922, #920, #784, #770, #540, #145); the three open journeys issues are the cited ones and none is about event nodes"
+    ]
+  },
+  "reevaluation": "The finding stands, source untouched, still unreported, and the three open journeys issues the report cited are all unchanged and all about something else. The interesting question for a filer is which way the fix should go, and we should not presume: including eight more event types as journey nodes would change what the visualization means and could make it unreadable for a busy site, so 'the doc should say pages' is at least as likely an outcome as 'the query should include events', and both are legitimate. That makes this a report about a promise, not a demand for a feature. Severity is low, confidence in the observation is high. Because #784 is open and in the same area, cross-link it so a maintainer triaging journeys sees the whole picture at once.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Report section 9 (a deliberate red; the report gives it no F id). Doc-side finding with a possible product reading. The docs live in this same repo under docs/content/docs, so there is no separate docs repo and no 'docs repo issue' route: a doc fix here is a one-line PR against rybbit-io/rybbit. Five of the ten findings (R6, R7, R8, R9, R10) are doc-side. Filing five separate doc issues would burn maintainer patience for little gain; consider one consolidated 'documentation does not match behaviour' issue listing all five with file and line, or a single PR. Present it neutrally: quote journeys.mdx:13, quote getJourneys.ts:74, show the control (the event is stored and queryable through /events/names) and the probe (it is absent from the journey), and let the maintainers choose whether the doc or the query is wrong. Cross-link #784 as an open neighbour. Do not argue for including all nine event types; autocapture types in particular (input_change, form_submit) would flood a journey, and #1031 shows the maintainers already think about how autocapture types are stored. rybbit-io/rybbit applies NO labels: all 40 most recent issues carry an empty label array, and both templates declare labels: ''. Do not add a 'Suggested labels' line here; there is no vocabulary to copy and it would only add noise. The bug template is a classic markdown template with bold headers (**Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop**, **Smartphone**, **Additional context**), not a YAML form, and no template-enforcing workflow exists, so there is no auto-close bot to trip."
+}

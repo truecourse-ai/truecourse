@@ -1,0 +1,45 @@
+{
+  "id": "F10",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "The identifier rule the manual states is enforced only in the browser; the API creates tables and columns that break it",
+  "statement": "Two manual pages state that a collection name and a field name support letters, numbers and underscores and must start with a letter. The browser form enforces it (x-validator: uid, and the drawer shows the same sentence). The API does not: POST /api/collections:create {name:'9tcbad'} and a following fields:create {name:'9bad'} both answer 200 and are materialized in postgres as a real table and a real column.",
+  "scenario": {
+    "id": "a-collection-name-is-chosen-once-and-then-fixed.api.1",
+    "failingStep": 2,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/a-collection-name-is-chosen-once-and-then-fixed.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 3, both halves. The browser control is stronger than the source cite: typing 9tcbad into the Create-collection drawer produces the form error This field is invalid and no Submit. A second scenario covers the field half: a-field-identifier-is-validated-once-and-then-fixed.api.1, failing step 7."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/core/client/src/collection-manager/templates/properties/index.ts",
+      "docs/docs/en/data-sources/data-source-main/general-collection.md",
+      "docs/docs/en/data-sources/data-modeling/collection-fields/system-info/created-by.md"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/core/client/src/collection-manager/templates/properties/index.ts#L24-L31",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/core/client/src/collection-manager/templates/properties/index.ts#L24-L31",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Neither the client template nor either doc page has a commit since the tested SHA: 'x-validator': 'uid' is still at properties/index.ts:28 with the product's own description on 29-30, and the two doc sentences are verbatim at general-collection.md:35 and created-by.md:34. Nothing new on the tracker. One scope caution that changes how this should be written: the report demonstrates that a non-conforming identifier is accepted and materialized, and it does NOT demonstrate SQL injection or any other exploit, since the name reaches postgres quoted. File it as an unenforced documented constraint, not as a security issue.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug"
+  ],
+  "confidence": "high",
+  "notes": "Do not route to security disclosure and do not hint at injection: no injection was demonstrated and implying one would be the kind of overclaim that costs the batch credit. The clean ask is that collections:create and fields:create apply the same uid rule server-side, or that the manual say the rule is a form convention. Two scenarios back this finding, one per half; cite both halves in one issue rather than filing twice. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

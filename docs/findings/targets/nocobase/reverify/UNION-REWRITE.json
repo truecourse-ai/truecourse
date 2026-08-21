@@ -1,0 +1,71 @@
+{
+  "id": "UNION-REWRITE",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "Under default role mode X-Role: __union__ is silently rewritten to the user's first role instead of being refused",
+  "statement": "Every role name a user does not hold is refused with 401 ROLE_NOT_FOUND_FOR_USER. The single exception is __union__ under the default role mode: setCurrentRole rewrites it to userRoles[0] and rewrites the request header too, so the request runs as a role the caller never named and answers 200. The caller cannot tell from the response that a substitution happened.",
+  "scenario": {
+    "id": "roles-are-used-one-at-a-time-under-independent-roles.api.1",
+    "failingStep": 6,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/roles-are-used-one-at-a-time-under-independent-roles.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 7. Two-role user tcunion: the __union__ answer is byte-identical to the tcuniona answer (3 rows, no sex column). Control 1: X-Role: admin and X-Role: tcnosuchrole both 401. Control 2: flipping to allow-use-union and re-issuing the SAME request returns 4 rows with both age and sex, which proves the default-mode answer was one role's answer and not a union that happened to look like it. No F-number in findings.md; tracked as run-classification.md section 9.6 and board row 13."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/plugins/@nocobase/plugin-acl/src/server/middlewares/setCurrentRole.ts",
+      "packages/plugins/@nocobase/plugin-acl/src/server/constants.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/plugins/@nocobase/plugin-acl/src/server/middlewares/setCurrentRole.ts#L55-L58",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/plugins/@nocobase/plugin-acl/src/server/middlewares/setCurrentRole.ts#L55-L58",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "nocobase/nocobase#9632",
+        "kind": "pr",
+        "stateAtReport": "closed (union code fix, unrelated)",
+        "stateToday": "closed, merged 2026-06-01",
+        "changedSinceReport": false,
+        "note": "fix(plugin-acl): preserve union default role members. Predates the tested SHA and does not touch the rewrite branch."
+      },
+      {
+        "ref": "nocobase/nocobase#9611",
+        "kind": "pr",
+        "stateAtReport": "closed",
+        "stateToday": "closed 2026-06-24",
+        "changedSinceReport": false,
+        "note": "roles union variable in v2; unrelated code fix, predates the tested SHA."
+      },
+      {
+        "ref": "nocobase/nocobase#7198",
+        "kind": "pr",
+        "stateAtReport": "closed",
+        "stateToday": "closed 2025-07-13",
+        "changedSinceReport": false,
+        "note": "role-union delete with root; unrelated, 2025."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase \"__union__\""
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. setCurrentRole.ts has no commit since the tested SHA; lines 55-58 still rewrite currentRole, ctx.state.currentRole and ctx.headers['x-role'] to userRoles[0].name, and lines 74-81 still 401 every other unheld name. UNION_ROLE_KEY is still '__union__' at constants.ts:10. The __union__ symptom search returned only #9632 (already cited, unchanged) and an unrelated LDAP regression, so nothing new. One scope point a filer must get right: the substituted role is one the caller DOES hold, so this is not a privilege escalation. It is a silent substitution where the same middleware refuses every comparable input.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "users & permissions"
+  ],
+  "confidence": "high",
+  "notes": "Do NOT file this as a security issue and do not imply escalation: userRoles[0] is always a role the caller holds, so the effective permissions are a subset of the union the caller asked for. The report's Control 2 (same request, allow-use-union mode, 4 rows with an extra column) is the load-bearing evidence, because without it a maintainer can say the answer WAS the union. Include it. Ask for 401 for consistency with the other branch, or a documented statement that __union__ degrades under default mode. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

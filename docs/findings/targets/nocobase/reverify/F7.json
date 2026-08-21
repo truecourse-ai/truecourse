@@ -1,0 +1,45 @@
+{
+  "id": "F7",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "routes/index.md lists four route types; the Add-route form offers a different four",
+  "statement": "The manual says the system supports four route types: Group, Page, Tab and Link. The desktop Add new drawer offers Group, Classic page (v1), Modern page (v2) and Link. Page has been split into two entries and no longer exists under that name on the desktop form, and Tab is not on the form at all.",
+  "scenario": {
+    "id": "the-route-type-list-is-what-the-add-route-form-offers.web.1",
+    "failingStep": 7,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/the-route-type-list-is-what-the-add-route-form-offers.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 12. The drawer's radio options were read as accessible names and the full drawer text quoted verbatim; getByRole('radio', {name:'Page', exact:true}) returns 0."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/docs/en/routes/index.md",
+      "packages/plugins/@nocobase/plugin-client/src/client/routesTableSchema.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/plugins/@nocobase/plugin-client/src/client/routesTableSchema.tsx#L249-L258",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/plugins/@nocobase/plugin-client/src/client/routesTableSchema.tsx#L249-L258",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase \"Classic page\""
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Neither routes/index.md nor routesTableSchema.tsx has a commit since the tested SHA. The doc list is verbatim at routes/index.md:19-24 and the Radio.Group is verbatim at routesTableSchema.tsx:249-258, where the Page label survives only under isMobile. The Classic page search returned ten items, all about v1 versus v2 behaviour (IME input, menu isolation, migration) and none about the documented type list. Unreported. The Tab half deserves a sentence of care in the body: tab is a real route type in the data model, it is just not offered by this drawer, so the accurate claim is that the manual describes a chooser that does not exist rather than that tab routes do not exist.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "documentation"
+  ],
+  "confidence": "high",
+  "notes": "Write the Tab half precisely: the drawer does not offer it, which is not the same as the type being gone. The verbatim drawer text in the report is short enough to paste whole and is the best possible evidence for a docs issue. Translations of routes/index.md exist under the other docs/docs/<lang>/ trees and carry the same list. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

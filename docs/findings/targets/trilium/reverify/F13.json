@@ -1,0 +1,56 @@
+{
+  "id": "F13",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "The \"Search now\" button on a saved search creates a new empty search note instead of running the saved search",
+  "statement": "The manual says the results of a saved search appear as sub-notes under the saved search note, but a saved search stores zero children and never executes itself; opening it shows \"Search has not been executed yet.\" with a single \"Search now\" button. That button is rendered with triggerCommand=\"searchNotes\" and no payload, so searchNotesCommand receives searchString and ancestorNoteId as undefined, calls createSearchNote and navigates to a brand-new, differently-numbered, empty search note whose result list is every note in the instance. The one control offered for running the saved search does not run the saved search.",
+  "scenario": {
+    "id": "a-search-backed-collection-shows-notes-from-across-the-tree.web.1",
+    "failingStep": 17,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/a-search-backed-collection-shows-notes-from-across-the-tree.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 6, verified on both the API surface and the DOM with Playwright and a real login. API: POST /api/tree/load shows 0 children for the saved search while GET /api/search-note/<id> returns the two correct hits, so the query is valid and results are in-memory only. DOM: clicking \"Search now\" changed the URL from .../d0s8l7o7eYqA to .../AGR89wJRYmVx, a new note titled 'Search: ' with 3 attributes instead of 4 and a 23-note (empty-query) result list. Also recorded: adding a second searchString label rather than updating the born-empty one leaves the empty original winning."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "apps/client/src/widgets/search_result.tsx",
+      "apps/client/src/components/root_command_executor.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/apps/client/src/widgets/search_result.tsx#L50-L53",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/apps/client/src/widgets/search_result.tsx#L50-L53",
+    "howDecided": "No commit touches either file between the tested commit and head; both blobs are identical at tested, head and v0.105.0. Re-read at head: search_result.tsx:26 still only reports the flag (`else if (!note?.searchResultsLoaded) setState(SearchResultState.NOT_EXECUTED)`) with nothing in the widget triggering a load, and :52 is still `<Button text={t(\"search_result.search_now\")} triggerCommand=\"searchNotes\" />` with no payload; root_command_executor.ts:37-49 still creates a new search note via dateNoteService.createSearchNote({ searchString, ancestorNoteId }). Open PR #10633 does modify search_result.tsx, but only the GOT_RESULTS branch (a new SearchResultsList for viewType 'list') and the highlighted-token types; the NOT_EXECUTED branch and its payload-less Button are untouched, so the bug survives that PR."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "TriliumNext/Trilium#5658",
+        "kind": "issue",
+        "stateAtReport": "open (feature request)",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Read in full: it is a feature request that opening a saved search should auto-execute it, quoting the OLDER message 'Search has not been executed yet. Click on \"Search\" button above to see the results.' It asks for auto-run and explicitly refers to the Search button in the Search Parameters panel above, which works. It says nothing about the newer 'Search now' button inside the result widget, and nothing about that button navigating to a different, empty search note. It covers the auto-execute half of F13 only; the broken control is unreported."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium '\"Search has not been executed yet\"'",
+      "gh search issues --repo TriliumNext/Trilium 'saved search button creates new search note'"
+    ]
+  },
+  "reevaluation": "Stands. Both culprit files are byte-identical to the tested commit and to release v0.105.0, and PR #10633's edits to search_result.tsx deliberately leave the NOT_EXECUTED branch alone. The upstream claim in the report holds up on a full read of #5658: it is labelled effort-low and search, it is framed as a feature, and its quoted UI string predates the current 'Search now' button, so it cannot be read as covering it. The right framing for filing is the bug, not the feature: the button is a control that claims to run this search and instead abandons it for a new empty one, which is worse than no button. Keep the docs mismatch (Saved Search.md:2 promises results appear as sub-notes) as supporting context rather than the headline, since #5658 already argues that side.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "State: Triage",
+    "UI",
+    "search"
+  ],
+  "confidence": "high",
+  "notes": "File as a UI bug about the 'Search now' button; cross-link #5658 and say explicitly that it covers auto-execution on open, not this. The reproduction is short and visual, so attach the before/after URL pair (same note id vs new note id) rather than a transcript; FILING-GUIDE allows screenshots where the finding is visual. The fix is small and worth naming: pass searchString and ancestorNoteId to the command, or give the widget a refresh trigger, instead of a payload-less triggerCommand=\"searchNotes\"."
+}

@@ -1,0 +1,89 @@
+{
+  "target": "rybbit",
+  "repo": "rybbit-io/rybbit",
+  "tested": "613cd0153c77e4fcd32235dd051f44257368b6e8",
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "checkedAt": "2026-08-20",
+  "findings": [
+    {
+      "id": "R1",
+      "title": "Creating a site never invalidates sitesAccessCache, so the creator is 403 Forbidden on that site for up to 15 seconds (issue #980, closed as completed, is not fixed)",
+      "route": "comment on existing issue #980",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Strongest of the wave: a maintainer-closed 'completed' issue whose behaviour is provably still in master, ten board reds, a live thread to continue rather than a cold report, and a four-millisecond write-then-read contradiction as evidence."
+    },
+    {
+      "id": "R2",
+      "title": "Whole-second event timestamps plus a strict > comparison make same-second funnel steps never convert, and make a two-page visit's exit page read as its entry page",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Sharpest pure product bug: silently wrong analytics on two surfaces from one root cause, with a control that isolates the single variable, and a same-day commit in which the project itself calls second resolution too coarse."
+    },
+    {
+      "id": "R3",
+      "title": "A date-range window's upper bound is a strict < against whole-second now(), so an event stamped in the current second is invisible to every date-range surface while realtime already shows it",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Deterministic, not the flake the corpus recorded, and two surfaces of the same product disagree by construction four lines apart in one switch. File after R2 so the two timing reports do not arrive together."
+    },
+    {
+      "id": "R5",
+      "title": "The Pages tab silently drops every pageview whose page_title is empty, though the docs say it shows every URL on the site",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Needs no timing, no race and no environment: two pageviews, one missing from a tab documented as showing every URL. The easiest of the set for a maintainer to confirm in a minute."
+    },
+    {
+      "id": "R4",
+      "title": "/api/track answers {\"success\":true} before the event is queryable, an undocumented consistency window of up to about one second",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "medium",
+      "priorityNote": "Well measured but the framing decides it: file as an undocumented consistency window, not as a queue bug, or it closes as working as intended. Ranked below R5 for that reason, not for evidence quality."
+    },
+    {
+      "id": "R6",
+      "title": "The Traffic Sources doc names the channels Search and Social, but the product stores Organic Search and Organic Social, so filtering by the documented name matches nothing",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Best of the doc-side five: the product contradicts itself in two in-repo files, and following the doc literally empties the dashboard. Lead any consolidated docs issue with this one."
+    },
+    {
+      "id": "R9",
+      "title": "Journeys are pageviews-only, though journeys.mdx says each node is a page or an event",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Clean promise-versus-behaviour with an open neighbour (#784) to cross-link, but the right fix direction is genuinely the maintainers' call, so it carries less force than R6."
+    },
+    {
+      "id": "R8",
+      "title": "The filter-traffic doc's evaluation order lists five exclusion kinds; the code evaluates seven, and the two undocumented ones silently block traffic",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Silent traffic dropping for a kind the doc's own list omits, and the correct seven-item list already exists in-repo at siteExclusionDecision.ts:40, which makes the fix a copy."
+    },
+    {
+      "id": "R7",
+      "title": "The Sessions doc says each session displays a Bounce Status, but no session field of any name carries it",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "A documented per-session field the product does not ship. True and cheap to fix, but the thinnest claim on its own; best as a section of a consolidated docs issue."
+    },
+    {
+      "id": "R10",
+      "title": "A lowercase country code is refused with a 400 rather than normalised, though the doc says country codes are stored as uppercase",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Smallest of the ten. Rests on reading 'stored as uppercase' as a normalisation promise, so it is the one finding whose force depends on an interpretation; file it as the tail of a docs issue, never alone."
+    }
+  ]
+}

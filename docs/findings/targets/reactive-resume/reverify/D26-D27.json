@@ -1,0 +1,66 @@
+{
+  "id": "D26-D27",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The fitting-content guide tells you to click a section heading and toggle a Hidden switch; the click collapses the section and no such switch exists",
+  "statement": "Two instructions in the same guide describe a control that is not in the product. It says to click a section heading in the left sidebar and change the Columns setting, and to hide a section by clicking the heading and toggling the Hidden switch. Clicking the heading opens nothing; it collapses the accordion and removes the section's own content from the page, which is the opposite of what the reader is told. No switch named Hidden exists in the document before or after the click. Both settings do exist, behind the section's Section options menu, which offers Add a new item, Hide, Rename, Columns and Reset.",
+  "scenario": {
+    "id": "hide-a-section-and-lay-it-out-in-two-columns.web.1",
+    "failingStep": 14,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/hide-a-section-and-lay-it-out-in-two-columns.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Before the click: 8 switches on the page, all with empty names; getByRole('switch', {name:'Hidden'}) 0; page text contains 'Hidden' false. After clicking heading 'Experience' exactly as instructed: switches still 8, Hidden switch still 0, dialogs opened 0, menus opened 0, lines that appeared [], lines that DISAPPEARED ['Cascade Studios','Senior Game Developer','Add a new experience']. Control: the real path works, Section options then Columns then 2 Columns persists as data.sections.experience.columns = 2, and the hide affordance exists as a menu item named Hide; the hidden property is real in the data model."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/guides/fitting-content-on-a-page.mdx",
+      "apps/web/src/routes/builder/$resumeId/-sidebar/left/shared/section-menu.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/docs/guides/fitting-content-on-a-page.mdx#L58",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/docs/guides/fitting-content-on-a-page.mdx#L58",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: fitting-content-on-a-page.mdx:58 'In the left sidebar, find the section you want to adjust, click on the section heading (not an item), and change the **Columns** setting.' and :129 'To hide a section, click on the section heading in the left sidebar and toggle the **Hidden** switch.' Both unchanged. `grep -rn 'Hidden' apps/web/src` at this SHA finds the word only as a proficiency-level label for level zero (packages-side level/combobox.tsx:15, dialogs/resume/sections/skill.tsx:208, dialogs/resume/sections/language.tsx:127) and never as a switch on a section. The real affordance is the menu item at -sidebar/left/shared/section-menu.tsx:138, which renders Show or Hide depending on section.hidden."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 2921,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/2921",
+        "state": "open",
+        "title": "[Feature] Improve builder UI for hidden resume sections",
+        "createdAt": "2026-04-26",
+        "relation": "related",
+        "note": "Open, labels enhancement / area: builder / status: ACCEPTED, last updated 2026-08-16. The maintainer has already accepted that the hidden-section UI needs work, which is the surface this guide misdescribes. Not a duplicate (it asks for a better UI, not for the docs to match the current one) but the single most useful cross-link in the batch: it shows the guide may have been written against an intended UI that was never built."
+      },
+      {
+        "number": 3081,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3081",
+        "state": "closed",
+        "title": "[Bug] Hidden Summary background color still stays",
+        "createdAt": "2026-05-18",
+        "relation": "related",
+        "note": "Closed as completed. A rendering bug for hidden sections, unrelated to the control's existence. Recorded so it is not re-searched."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'Hidden switch section heading'",
+      "non-search sweep: 800-item local issue list grepped for hidden|column|section"
+    ]
+  },
+  "reevaluation": "Stands, and of the five documentation findings this is the one that actively harms a reader: following :129 literally makes the section's content vanish from the sidebar, which looks like the hide worked, when in fact nothing was hidden and the accordion merely collapsed. That is a user who believes a section is hidden from their published resume when it is not. Scope grew slightly on re-check because of #2921, open and marked status: accepted since 2026-08-16: the guide plausibly documents a hidden-section UI that was planned and never shipped, which is worth saying in the report because it points at the better fix (build the switch, or rewrite the two sentences to name Section options). Confidence high on both halves; both were measured with before-and-after accessibility snapshots and a working control.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: builder"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda; docs and client code are variant-neutral, so Cloud behaves the same. Product variant = Self-hosted; Area = 'Resume builder & data'; version 5.2.7 (commit 3221afda). Batch into the single '[Bug] Docs: ...' issue described in D13's notes and lead it with this item, since it is the one that misleads rather than merely omits. Cross-link #2921 and say explicitly that this is a documentation report, not a duplicate feature request, or a triager who sees the same words will close it as one."
+}

@@ -1,0 +1,56 @@
+{
+  "id": "F11",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "PUT /api/notes/<noteId>/clone-to-branch/<branchId> with no request body returns 500 and leaks a minified variable name to the caller",
+  "statement": "cloneNoteToBranch destructures `const { prefix } = req.body` without a guard, and express.json() leaves req.body undefined when no JSON body is sent, so a bodyless request answers HTTP 500 with the message \"Cannot destructure property 'prefix' of 'e.body' as it is undefined.\" That is an internal error where a 400 belongs, and the message exposes the bundler's minified identifier. The identical request with {\"prefix\": null} succeeds, and the sibling cloneNoteToParentNote has the same unguarded shape.",
+  "scenario": {
+    "id": "note-properties-are-searchable.api.1",
+    "failingStep": null,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/note-properties-are-searchable.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 7. No board red: it surfaced while authoring step 13 of note-properties-are-searchable.api.1, the corpus's only bodyless clone step (that scenario's recorded board failure at step 16 is F9, not this). Control: same note, same branch, same session, body {\"prefix\": null} returns 200 with a branchId."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/routes/api/cloning.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/routes/api/cloning.ts#L5-L17",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/routes/api/cloning.ts#L5-L17",
+    "howDecided": "No commit touches routes/api/cloning.ts between the tested commit and head; the blob is identical at tested, head and v0.105.0. Re-read at head: the unguarded `const { prefix } = req.body;` is still at :7 in cloneNoteToBranch and at :14 in cloneNoteToParentNote. The in-repo counterexample the report cites has moved: undeleteNote's `const { fallbackParentNoteId } = req.body ?? {};` is at routes/api/notes.ts:219 today, not :213, and it is followed at :221-222 by an explicit ValidationError on a bad type, which is a better model to point at than the report noted."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 8636,
+        "url": "https://github.com/TriliumNext/Trilium/issues/8636",
+        "state": "closed",
+        "title": "Anthropic LLM provider fails to list models: \"Cannot destructure property 'baseUrl' of 'e.body' as it is undefined\"",
+        "createdAt": "2026-02-06T09:26:03Z",
+        "relation": "related",
+        "note": "Not this route, but the identical defect class and the identical leaked-minified-identifier message shape on a different endpoint. Closed 2026-02-22 as not_planned, so the class was never addressed repo-wide. Useful to cite as precedent that this failure mode has been seen before and left open."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'clone-to-branch'",
+      "gh search issues --repo TriliumNext/Trilium '\"Cannot destructure property\"'"
+    ]
+  },
+  "reevaluation": "Stands and is unreported for this route. Source is unchanged and shipped in v0.105.0. One thing did turn up that the report did not have: #8636 shows the exact same 'Cannot destructure property X of e.body' failure on the LLM-provider route, filed in February and closed as not_planned. That cuts both ways for the filer: it proves the pattern is real and recurring, and it warns that a narrowly framed report of the same shape has already been declined once, so the issue should be framed around the missing 400-vs-500 guard on the cloning routes (both of them) with the undeleteNote guard as the in-repo precedent, rather than around the error string. Severity is low-to-moderate: no data loss, no auth bypass, but any client that omits an optional body gets an opaque 500.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "State: Triage",
+    "BE",
+    "Difficulty: Easy"
+  ],
+  "confidence": "high",
+  "notes": "Cite routes/api/notes.ts:219-222 (today's numbers, not the report's :213) as the pattern the codebase already uses. Cover both cloning.ts:7 and :14 in one issue. Mention #8636 as prior art but do not lean on it as a duplicate; it was closed not_planned and its subject is the LLM route. Consider filing this together with F12 if the maintainers prefer one 'unguarded req.body returns 500' issue."
+}

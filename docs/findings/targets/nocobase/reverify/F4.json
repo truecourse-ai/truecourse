@@ -1,0 +1,69 @@
+{
+  "id": "F4",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "union.md's mixed rows and columns example prints two rows per role under filters that admit three, in both directions",
+  "statement": "In the Mixed Rows and Columns example, Role A's filter is Age < 30 and its table lists Jack 23 and Lily 29, omitting Jade at 27. Role B's filter is Name contains Ja and its table lists Jade and James, omitting Jack. Both omissions contradict the filters printed immediately above them and the example's own merged table, which lists all four rows.",
+  "scenario": {
+    "id": "role-union-merges-rows-and-columns-separately.api.1",
+    "failingStep": 4,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/role-union-merges-rows-and-columns-separately.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 9. The fixture was built to the manual exactly and both directions were probed: Role A alone returns Jack, Lily and Jade; Role B alone returns Jack, Jade and James. The second direction is the one the corpus board never reached. Control: the merge itself is correct and the three Summary rules hold, so the defect is confined to the two per-role tables."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/docs/en/users-permissions/acl/union.md"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/docs/docs/en/users-permissions/acl/union.md#L138-L163",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/docs/docs/en/users-permissions/acl/union.md#L138-L163",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "nocobase/nocobase#9611",
+        "kind": "pr",
+        "stateAtReport": "unrelated code fix",
+        "stateToday": "closed, merged 2026-06-24",
+        "changedSinceReport": false,
+        "note": "Union variable handling in v2; touches code, not union.md."
+      },
+      {
+        "ref": "nocobase/nocobase#9632",
+        "kind": "pr",
+        "stateAtReport": "unrelated code fix",
+        "stateToday": "closed, merged 2026-06-01",
+        "changedSinceReport": false,
+        "note": "Union default role members; touches code, not union.md."
+      },
+      {
+        "ref": "nocobase/nocobase#7198",
+        "kind": "pr",
+        "stateAtReport": "unrelated code fix",
+        "stateToday": "closed 2025-07-13",
+        "changedSinceReport": false,
+        "note": "Role-union delete with root; unrelated."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. union.md has no commit since the tested SHA and the two tables are verbatim at lines 142-145 and 149-152, under the section heading at 138, with the merged four-row table at 156-161. The three cited union PRs are all still closed, all predate the tested SHA and all touch code rather than this page, exactly as the report said. This is the cheapest correct finding in the batch: a reader can verify it by arithmetic on the page itself without running anything, because 27 is less than 30 and Jack contains Ja.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "documentation",
+    "users & permissions"
+  ],
+  "confidence": "high",
+  "notes": "Docs live in this same repo under docs/docs/en/, so there is no separate docs repo to route to; the translations under docs/docs/{cn,de,es,fr,id,pt,ru,vi}/users-permissions/acl/union.md carry the same tables and will need the same correction, which is worth mentioning so the fix is not made in English only. Consider merging this with the other doc-drift findings if the maintainers ask for fewer issues, but it is the one that stands best alone. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

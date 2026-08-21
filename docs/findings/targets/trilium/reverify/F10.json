@@ -1,0 +1,69 @@
+{
+  "id": "F10",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "A multi-word = query in quick search is a substring compare, so a longer title matches what the manual calls an exact match",
+  "statement": "Quick search's leading = is documented as an exact match on the title or content. For a single word it behaves that way, but when the compared value contains a space the comparator falls into a branch that returns normalizedVal.includes(normalizedCompared), a substring test. A note titled \"Tchello17 world extra\" therefore matches the query =Tchello17 world. Adding a space silently changes the semantics from equals to contains.",
+  "scenario": {
+    "id": "the-exact-match-operator-in-quick-search.api.1",
+    "failingStep": 16,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/the-exact-match-operator-in-quick-search.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 4. Control (a) is the discriminator: with notes 'Tcsolo17' and 'Tcsolo17extra' both present, =Tcsolo17 returns only the exact one, so the operator, the route and the titles are all fine for a single word. The comparator source was confirmed verbatim including the comment stating the intent."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/services/search/services/build_comparator.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/services/search/services/build_comparator.ts#L15-L32",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/services/search/services/build_comparator.ts#L15-L32",
+    "howDecided": "No commit touches build_comparator.ts between the tested commit and head; the blob is identical at tested, head and v0.105.0. Re-read at head: the '=' comparator at :15-32 still contains `if (normalizedCompared.includes(\" \")) return normalizedVal.includes(normalizedCompared);` at :26-28. Open PR #10633 rewrites this operator to strict normalised full-value equality (`\"=\": (comparedValue) => (val) => normalizeSearchText(val) === normalizeSearchText(comparedValue)`) and moves the old word/phrase behaviour to an internal, non-user-typable \"word=\" operator that parse.ts uses only for the leading-'=' fulltext title path, so that PR does fix this finding."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "TriliumNext/Trilium#9422",
+        "kind": "issue",
+        "stateAtReport": "open",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Read in full this pass: labels Type: Documentation and search, filed against 0.102.2, last updated 2026-05-02. It quotes the same manual lines the report quotes and states the behaviour accurately in the reporter's own words ('=A B match either exact A or exact B, again as part of the target text'), so it genuinely covers this finding rather than a sliver of it. It frames the question as docs-versus-implementation and does not name build_comparator.ts, which is the only thing the report adds."
+      },
+      {
+        "ref": "TriliumNext/Trilium#10633",
+        "kind": "pr",
+        "stateAtReport": "open (closes #9422)",
+        "stateToday": "open, unmerged, mergeable_state clean, updated 2026-08-19",
+        "changedSinceReport": false,
+        "note": "Confirmed at the file level to change '=' to strict full-value equality; it also updates both Quick search.md and Search.md, which is the documentation half of #9422."
+      }
+    ],
+    "newItems": [
+      {
+        "number": 10616,
+        "url": "https://github.com/TriliumNext/Trilium/issues/10616",
+        "state": "open",
+        "title": "Search Issues",
+        "createdAt": "2026-07-22T13:05:28Z",
+        "relation": "related",
+        "note": "Reports a neighbouring exact-word problem (a word inside brackets is not found by the = prefix, which #10633 addresses with punctuation-aware tokenisation). Not the multi-word substring case, so related rather than duplicate."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'exact match operator title equals'",
+      "gh search issues --repo TriliumNext/Trilium 'fuzzy search'"
+    ]
+  },
+  "reevaluation": "The finding still reproduces on main and in v0.105.0, but it is both accurately reported (#9422, open) and fixed in a clean, actively updated open PR (#10633, which also rewrites the two doc pages). Nothing moved since the report and nothing new was filed. The report's only increment over #9422 is naming the line, and #10633 already changed that line, so a new issue or a comment would add close to nothing and would spend account credit that FILING-GUIDE says is finite. If #10633 stalls, the correct follow-up is a comment on #9422 pointing at build_comparator.ts:26-28, not a new issue.",
+  "routeSuggestion": "skip: reported (TriliumNext/Trilium#9422)",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Nothing to file. Watch #10633: if it merges, this closes with it; if it is closed unmerged, revisit and comment on #9422 with the exact line. Do not fold this into the F7 PR comment as a separate point, since the PR already handles it."
+}

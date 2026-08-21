@@ -1,0 +1,77 @@
+{
+  "id": "F7",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "The fuzzy operators ~= and ~* never lex, so a fuzzy query silently degrades to a label-existence or match-everything query",
+  "statement": "The manual documents #title ~= trilim and #content ~* progra as fuzzy operators with a minimum term length and a maximum edit distance. In the lexer a bare '~' unconditionally starts a new attribute token, so it can never become the first character of a two-character operator, parseLabel never sees ~= or ~*, and the query falls through to label existence. The comparators for both operators exist and are correct but are unreachable from the query language. The operand is not merely mis-ranked, it is not consulted at all: #tcfuzzy ~= qqqqqqq, which shares no character with either stored value, still returns both labelled notes, and note.content ~* zzzzznotpresent returns the whole tree.",
+  "scenario": {
+    "id": "fuzzy-search-tolerates-a-typo.api.1",
+    "failingStep": 9,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/fuzzy-search-tolerates-a-typo.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 1. Controls show the label, the values and the comparator machinery are all sound: '=' splits the two notes correctly and bare label existence returns both, so only '~' fails. One divergence recorded: #9426 reports 'Unrecognized expression books' for note.title ~= Books, but on this build the property-path forms answer 200 [] silently and note.content ~* answers 200 with the whole tree, so the visible-error half of the original finding does not reproduce here."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/services/search/services/lex.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/services/search/services/lex.ts#L96-L105",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/services/search/services/lex.ts#L96-L105",
+    "howDecided": "No commit touches lex.ts between the tested commit and head; the blob is identical at tested, head and v0.105.0. Re-read at head: :96-105 still contains the unconditional `if (chr === \"#\" || chr === \"~\") { ... currentWord = chr; continue; }`. Not fixed on main. Open PR #10633 contains the exact fix as a single 12-line hunk inserted at :93-105, adding `if (chr === \"~\" && fulltextEnded && (str[i+1] === \"=\" || str[i+1] === \"*\"))` to emit the two-character operator; PR #9508 is a standalone fix for the same thing but is unmerged with mergeable_state 'dirty' and untouched since 2026-07-13."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "TriliumNext/Trilium#9426",
+        "kind": "issue",
+        "stateAtReport": "open",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Still open, labels State: Triage / awaiting feedback / search, last updated 2026-05-02, 3 comments. Reported against 0.102.2 and its entire body is three quoted ERROR messages (Unrecognized expression, Misplaced or incomplete expression). On 0.105.0 none of those errors appear; the same queries answer 200 with [] or with the whole tree. So the issue covers the defect but its stated symptom is stale, and a maintainer checking it today could wrongly conclude it was fixed."
+      },
+      {
+        "ref": "TriliumNext/Trilium#9508",
+        "kind": "pr",
+        "stateAtReport": "open, unmerged",
+        "stateToday": "open, unmerged, mergeable_state dirty",
+        "changedSinceReport": false,
+        "note": "Titled 'fix(search): tokenize ~= and ~* as single fuzzy-match operators', says Fixes #9426. Not updated since 2026-07-13 and now conflicting with main; effectively superseded by #10633."
+      },
+      {
+        "ref": "TriliumNext/Trilium#10633",
+        "kind": "pr",
+        "stateAtReport": "open (search overhaul, closes #9426)",
+        "stateToday": "open, unmerged, mergeable_state clean, updated 2026-08-19",
+        "changedSinceReport": false,
+        "note": "Verified this pass at the file level: its lex.ts hunk is exactly the fix for this finding. It is the live thread (updated the day before the current release) and the only one that is mergeable."
+      }
+    ],
+    "newItems": [
+      {
+        "number": 10616,
+        "url": "https://github.com/TriliumNext/Trilium/issues/10616",
+        "state": "open",
+        "title": "Search Issues",
+        "createdAt": "2026-07-22T13:05:28Z",
+        "relation": "related",
+        "note": "The umbrella search-quality issue that PR #10633 answers. It reports fuzzy inconsistency by example (sync finds Send, but combinef does not find combined) plus ranking, highlighting and navigation complaints. It does not name the ~= / ~* operators or the lexer, so it is adjacent rather than a duplicate."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'fuzzy search'",
+      "gh search issues --repo TriliumNext/Trilium --created '>=2026-08-01'"
+    ]
+  },
+  "reevaluation": "The finding still reproduces on main and in release v0.105.0, but it is reported and a mergeable fix is in flight, so a new issue would be a duplicate. Nothing moved since the report: #9426 open and untouched since May, #9508 open and now conflicting, #10633 open, clean and freshly updated. Two things are worth contributing rather than filing. First, #9426's symptom is stale: it quotes error messages that 0.105.0 no longer produces, and the current behaviour is silent (200 [] for the property-path form, the whole tree for note.content ~*), which is both harder to notice and easy to mistake for a fix. Second, the report's decisive probe is stronger than anything on the thread: ~= with an operand sharing no character with either stored value still returns both notes, which shows the operand is never consulted, not merely mis-scored. Both belong on the live PR thread, which FILING-GUIDE treats as cheap and welcome.",
+  "routeSuggestion": "comment on existing PR 10633",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Do not open a new issue. The comment should confirm the defect is live in v0.105.0, quote the ~= qqqqqqq probe and the note.content ~* whole-tree answer, and state that the PR's lex.ts hunk is the fix. If a second action is wanted, add the same correction to #9426 so its stale error-message symptom does not get it closed as fixed. Note that #10633 does NOT fix F6, F8, F9 or F13 even though it edits three of the same files; check the per-file analysis in those JSONs before claiming otherwise on the thread."
+}

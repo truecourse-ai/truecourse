@@ -1,0 +1,41 @@
+{
+  "id": "S2",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "install -f drops everything and then refuses to reinstall",
+  "statement": "The original claim was that `nocobase install -f` drops the schema and then hits the `app is installed` guard, leaving an empty, unusable database. This did not happen. Across six runs, including one against the fully-used instance the corpus describes, install -f dropped and then fully reinstalled every time: exit 0, 100 tables, a new root account each run, zero occurrences of the refusal warning in the logs, and a server that booted and signed in afterwards.",
+  "scenario": {
+    "id": null,
+    "failingStep": null,
+    "evidencePath": null
+  },
+  "handVerified": {
+    "verdict": "NOT REPRODUCED",
+    "note": "Report section 2. The cite is accurate (application.ts:1031-1039, isInstalled at :1025-1029), so the claimed failure requires isInstalled() to answer true after the drop. It answers false, because db.clean({drop:true}) really removes both applicationVersion and collections, and control falls through to the full reinstall. Runs 1 to 5 against a stock database and run 6 against a fully-used one all reinstalled; grep -c 'app is installed' was 0 in every log with LOGGER_LEVEL=warn, and users.createdAt advanced on every run. Control: after run 6 the server booted, /api/__health_check answered 200 and auth:signIn answered 200."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/core/server/src/application.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/core/server/src/application.ts#L1025-L1039",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/core/server/src/application.ts#L1025-L1039",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19"
+    ]
+  },
+  "reevaluation": "The source is unchanged (no commit on application.ts since the tested SHA; isInstalled is still at 1025-1029 and install at 1031 onwards, with db.clean({drop:true}) at 1034 and the `app is installed` guard at 1036-1039) and re-reading it only reinforces the report's conclusion: for the claimed refusal to occur, the drop would have to leave one of the two sentinel tables behind, and it does not. The finding is disposed of, not merely unreproduced-today. The half that survives is that install -f is destructive, which is what --force means and which the CLI already implies, so there is no defect there either. The report's own hypothesis is the most likely explanation of the corpus observations: two of the three recorded S2 symptoms (104 tables with no seeded data, and a run that dropped everything and exited 0 having recreated nothing) are the shape S1 would produce on this longer code path, and the report's SOCKET_PATH note gives a second confounder, since a mis-sized socket path silently routes a supposedly-live-server install down the cold CLI path. Nothing on the tracker bears on it.",
+  "routeSuggestion": "skip: not a finding",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "This is the entry that exists so nobody re-files this by mistake. If S2 resurfaces in a later corpus run, it is NOT a new finding: it was probed six times on a clean instance on 2026-08-21, including once against the exact fully-used state the corpus describes, and it reinstalled correctly every time. The refusal branch at application.ts:1036 is unreachable after db.clean({drop:true}) because the clean removes both tables that isInstalled() checks. Before re-opening it, someone must produce a log containing the string `app is installed` from an `install -f` run; without that line the branch was not taken and the symptom has another cause. Check S1 and the SOCKET_PATH trap first."
+}

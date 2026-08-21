@@ -1,0 +1,71 @@
+{
+  "id": "F7",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "FormControl stamps the label's target id on a non-labelable wrapper, so Slug, Tags and Sidebar Width have no accessible name",
+  "statement": "FormLabel renders `htmlFor={`${id}-form-item`}` and FormControl puts that same id on whatever element the render prop's root happens to be. Where the render prop is a wrapper rather than the real control the id lands on a <fieldset> (Slug), a <div> (Tags) or a div[role=group] slider root (Sidebar Width), none of which a <label> can name, so the actual input, chip field and slider thumb are anonymous to assistive technology and to any name-based query. Correctly wired fields on the same pages resolve normally, so the pattern, not the page, is the fault.",
+  "scenario": {
+    "id": "create-a-resume-from-the-dashboard.web.1",
+    "failingStep": 6,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/create-a-resume-from-the-dashboard.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Headline reproduced to the character: label \"Name\" for=_r_3a_-form-item resolves to INPUT, label \"Slug\" to FIELDSET, label \"Tags\" to DIV, and \"Sidebar Width\" to DIV[role=group]. The report explicitly corrected TWO sub-claims of the corpus write-up that must NOT be filed: (a) it is not 'fifteen anonymous spinbuttons', there are 15 spinbuttons of which exactly 2 are anonymous (Picture Size and the Sidebar Width numeric); (b) 3 of the 5 cited call sites are not instances (typography.tsx:155 and :189 use the correct InputGroup > FormControl render={InputGroupInput} nesting and measure as correctly named; api-key/create.tsx:224 is a bare read-only InputGroup with no FormControl at all). The same pass found a second, different defect family instead: FormLabels whose for= names an id no element in the document carries (Picture > Size, Basics > Website), and a duplicate DOM id (_r_jv_-form-item appears twice) because layout/index.tsx puts two FormControls inside one FormItem."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/ui/src/components/form.tsx",
+      "packages/ui/src/components/input-group.tsx",
+      "packages/ui/src/components/slider.tsx",
+      "apps/web/src/components/input/chip-input.tsx",
+      "apps/web/src/dialogs/resume/index.tsx",
+      "apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/layout/index.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/ui/src/components/form.tsx#L30-L61",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/ui/src/components/form.tsx#L30-L61",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today with the report's corrected line numbers, all exact: form.tsx:30-42 FormLabel with htmlFor at :38; form.tsx:44-61 FormControl with `id: `${id}-form-item`` at :52. The three genuine call sites are unchanged: dialogs/resume/index.tsx:393-395 FormControl render={<InputGroup>} for Slug, dialogs/resume/index.tsx:425-433 FormControl render={<ChipInput ...>} for Tags, and layout/index.tsx:71-84 FormControl render={<Slider ...>} plus :86-88 a second FormControl on the same FormItem."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "AmruthPillai/Reactive-Resume#2844",
+        "kind": "issue",
+        "stateAtReport": "open",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Re-read in full. Still open, labels enhancement / status: needs info / area: builder, last updated 2026-08-16. The report's characterisation is right and is now verifiable from the body: it asks for heading levels, semantic bullets and image alt text in the RENDERED RESUME output, a different surface from the builder's form controls. Its only comment, from amruthpillai on 2026-08-16, asks the reporter to 'narrow this to a concrete remaining accessibility problem and include the affected output, current behavior, expected behavior, and acceptance criteria' before triage continues, which is exactly the shape F7 already has."
+      }
+    ],
+    "newItems": [
+      {
+        "number": 2298,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/2298",
+        "state": "closed",
+        "title": "Accessibility Issues (homepage): Missing Button Names and Incorrect Heading Order",
+        "createdAt": "2025-05-10",
+        "relation": "related",
+        "note": "Same class of defect ('buttons do not have accessible names') but on the v4 marketing homepage, closed as completed. Not a duplicate; useful only as precedent that named-control reports are accepted in this tracker."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'screen reader'",
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'aria-label accessible name'",
+      "non-search sweep: 800-item local issue list grepped for accessib|aria|screen ?reader|a11y|label"
+    ]
+  },
+  "reevaluation": "The finding stands exactly as re-verified, and the tracker position is unchanged: #2844 is the only accessibility item open and it is about the rendered resume document, not the builder chrome. The maintainer's 2026-08-16 request on that thread actually improves the case for filing: he asked for a narrow, concrete accessibility problem with current behaviour, expected behaviour and acceptance criteria, which is what this finding is. The filing must carry the report's corrections rather than the corpus's original wording, or the first maintainer to open the builder will find 13 correctly-named spinbuttons and two accurate call sites among the five and discount the whole report. Confidence is high on the headline and on the two extra families, which were measured live rather than read out of the source.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: builder"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda in headless Chromium via playwright-core 1.62.1, using Playwright's own accessibility computation. Pure client-side rendering with no deployment branch, so Cloud is affected identically; answer 'Product variant' with Self-hosted and say so. File the corrected statement only: three named controls (Slug, Tags, Sidebar Width slider), plus the dangling-for= family (Picture > Size, Basics > Website) and the duplicate _r_jv_-form-item id. Do NOT repeat 'fifteen anonymous spinbuttons' or the typography.tsx / api-key call sites. Cross-link #2844 and note it is a different surface so a triager does not close this as a duplicate. Area = 'Resume builder & data'; version 5.2.7 (commit 3221afda)."
+}

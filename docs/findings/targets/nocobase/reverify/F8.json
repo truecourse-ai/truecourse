@@ -1,0 +1,72 @@
+{
+  "id": "F8",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "The Create-collection menu offers six of the collection types the manuals enumerate and renames the database-view entry",
+  "statement": "Three manual pages enumerate collection types in three different vocabularies. The shipped Create-collection menu offers six: General, Calendar, Tree, File, SQL and Connect to database view. Comment, Expression, Connect external data and Inheritance are absent, and the database-view entry ships as Connect to database view, which matches none of the three names the manuals use (Connect a database view, Database view collection, Database view).",
+  "scenario": {
+    "id": "the-create-collection-menu-offers-the-documented-collection-types.web.1",
+    "failingStep": 10,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/the-create-collection-menu-offers-the-documented-collection-types.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 13, with a CORRECTION a filer must carry: findings.md's prose says PR #10009 removed Calendar among others, but Calendar collection IS on the menu at this SHA, as findings.md's own comparison table already showed. The table is right and the narrative sentence is wrong. The absent set is Comment, Expression, Connect external data and Inheritance."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/core/client/src/collection-manager/collectionPlugin.ts",
+      "packages/core/client/src/collection-manager/templates/view.tsx",
+      "docs/docs/en/data-sources/index.md",
+      "docs/docs/en/data-sources/data-modeling/index.md",
+      "docs/docs/en/data-sources/data-source-main/index.md"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/core/client/src/collection-manager/collectionPlugin.ts#L185-L192",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/core/client/src/collection-manager/collectionPlugin.ts#L185-L192",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "nocobase/nocobase#10009",
+        "kind": "pr",
+        "stateAtReport": "merged 2026-07-07",
+        "stateToday": "closed, merged 2026-07-07T03:42:53Z, base branch next",
+        "changedSinceReport": false,
+        "note": "fix(data-source-manager): hide deprecated v2 collection templates. Makes the removals deliberate and leaves the handbook alone. Base was next, not main, but its effect is present on main at the tested SHA."
+      },
+      {
+        "ref": "nocobase/nocobase#10286",
+        "kind": "pr",
+        "stateAtReport": "closed, not merged",
+        "stateToday": "closed 2026-08-05, merged false, base main",
+        "changedSinceReport": false,
+        "note": "fix(data-source): mark collection FDW deprecated. Confirmed closed without merging."
+      },
+      {
+        "ref": "nocobase/nocobase#9930",
+        "kind": "pr",
+        "stateAtReport": "open draft, Chinese docs only",
+        "stateToday": "open, still draft, last updated 2026-07-12, base develop",
+        "changedSinceReport": false,
+        "note": "docs: restructure data sources documentation. Stale for over a month; do not wait on it."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. None of the two source files nor the three doc pages has a commit since the tested SHA; collectionPlugin.ts:185-192 still registers exactly General, Sql, Tree and View from core (with Calendar and File contributed by their plugins, giving the observed six) and view.tsx:17 still carries title = '{{t(\"Connect to database view\")}}'. The three doc enumerations are verbatim at data-sources/index.md:48-57, data-modeling/index.md:41-52 and data-source-main/index.md:81-87. All three cited PRs are exactly where the report left them. The important framing consequence of #10009 is that the removals are deliberate, so the filable claim is narrower than the finding's title suggests: it is that the manuals were never updated to match a deliberate product decision, plus the one-word name mismatch.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "documentation"
+  ],
+  "confidence": "high",
+  "notes": "Do NOT file this as missing features. #10009 deliberately hid the deprecated v2 templates, so asking for Comment or Expression back would be rejected on sight. File it as a docs issue: three pages enumerate collection types in three vocabularies, none of which matches the shipped menu, and the shipped label is Connect to database view. Carry the report's Calendar correction; filing findings.md's prose verbatim would put a factual error in the issue. #9930 is an open draft restructuring the same docs, so mention it as possibly-overlapping work rather than as a duplicate. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

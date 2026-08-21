@@ -1,0 +1,44 @@
+{
+  "id": "F9",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "routes/index.md promises desktop and mobile endpoints; the route manager has one",
+  "statement": "The route manager page is documented as supporting desktop and mobile endpoints. At /admin/settings/routes/desktop the page has a single horizontal-nav entry, Desktop routes, and no Mobile routes entry. The only Mobile routes label in the tree is a tab inside the ACL permission drawer, contributed by the mobile plugin's addPermissionsSettingsUI, not a second endpoint of the route manager.",
+  "scenario": {
+    "id": "a-page-route-is-created-and-reaches-both-the-menu-and-its-page.web.1",
+    "failingStep": 6,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/a-page-route-is-created-and-reaches-both-the-menu-and-its-page.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 14. Control: the mobile plugin is enabled and builtIn on a stock install, so the absence is not a disabled-plugin artefact. The report adds a structural nuance: findings.md calls Desktop routes a tab, but it is an ant-menu item and getByRole('tab') finds nothing on the page, so a scenario written against the tab role would fail for the wrong reason."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/docs/en/routes/index.md",
+      "packages/plugins/@nocobase/plugin-mobile/src/client/index.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/docs/docs/en/routes/index.md#L9",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/docs/docs/en/routes/index.md#L9",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Neither file has a commit since the tested SHA: the doc sentence is verbatim at routes/index.md:9 and the only Mobile routes label is still the permission-drawer tab at plugin-mobile/src/client/index.tsx:274, inside addPermissionsSettingsUI at :262. Nothing new on the tracker. One honest limitation to carry into the body: this pass verified that the route manager page shows no mobile entry, and did not establish whether mobile routes are reachable by some other path in this version, so the claim to file is that the documented sentence does not describe this page.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "documentation"
+  ],
+  "confidence": "high",
+  "notes": "Do not repeat findings.md's tab wording: the control is an ant-menu item, and a maintainer who checks with getByRole('tab') will find nothing and may dismiss the report. Say single horizontal-nav entry. Ask whether the mobile endpoint moved or the sentence is stale, which is a cheap question for a maintainer to answer and keeps the report from asserting more than was verified. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

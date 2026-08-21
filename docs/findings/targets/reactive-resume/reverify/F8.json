@@ -1,0 +1,47 @@
+{
+  "id": "F8",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The dashboard's Sort by and Filter by comboboxes have no accessible name",
+  "statement": "The dashboard control strip renders visible Sort by and Filter by <Label>s, but they are plain labels with no htmlFor, and the Combobox triggers beside them carry no aria-label and no aria-labelledby. A combobox takes no accessible name from its contents, so both list controls are unnameable and unreachable by role-plus-name; the search field on the same strip is correctly named, which shows the strip itself is fine.",
+  "scenario": {
+    "id": "filter-the-dashboard-by-a-tag.web.1",
+    "failingStep": 7,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/filter-the-dashboard-by-a-tag.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Both comboboxes present, both with ariaLabel null and ariaLabelledby null; getByRole('combobox', {name:/sort/i}) and {name:/filter/i} both 0; every <label> on the dashboard has htmlFor null. Control: getByRole('textbox', {name:'Search resumes...'}) resolves to 1. Second failing scenario: sort-the-dashboard-from-the-sort-menu.web.1 at step 5."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "apps/web/src/routes/dashboard/resumes/index.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/dashboard/resumes/index.tsx#L106-L136",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/dashboard/resumes/index.tsx#L106-L136",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: index.tsx:106-108 is the bare <Label> wrapping <Trans>Sort by</Trans>, :109-118 the <Combobox> with only placeholder={t`Sort by`}, :124-126 the Filter by <Label> and :127-136 its multiple <Combobox>. No FormItem, so no htmlFor is attempted; no aria-label or aria-labelledby anywhere in the block."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'sort filter dropdown label missing'",
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'aria-label accessible name'",
+      "non-search sweep: 800-item local issue list grepped for accessib|aria|screen ?reader|a11y|label"
+    ]
+  },
+  "reevaluation": "Stands unchanged and is the cheapest fix in the batch: two aria-label attributes, or an htmlFor plus an id on each trigger. It is a genuinely different root cause from F7 (there is no FormItem here at all, so nothing even tries to associate the label), which is why it is kept as its own finding rather than folded into F7's mechanism paragraph. Nothing in the tracker touches it: the only accessibility items are #2844 (rendered resume) and the closed v4-era #2298 (homepage). Severity is low individually but it sits on the first screen every signed-in user sees.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: builder"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda in headless Chromium; client-only code, so Cloud is affected identically. Filing shape: this is a second accessibility issue and the FILING-GUIDE caps public issues at 2 to 3 a day, so either file it the day after F7 or, if a maintainer responds to F7 asking for the full set, add it there as a second section. Do not file both in the same hour. Area = 'Resume builder & data'; version 5.2.7 (commit 3221afda)."
+}

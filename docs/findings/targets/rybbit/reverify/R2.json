@@ -1,0 +1,58 @@
+{
+  "id": "R2",
+  "repo": "rybbit-io/rybbit",
+  "target": "rybbit",
+  "checkedAt": "2026-08-20",
+  "title": "Whole-second event timestamps plus a strict > comparison make same-second funnel steps never convert, and make a two-page visit's exit page read as its entry page",
+  "statement": "Rybbit stamps every event server-side and stores it in a ClickHouse DateTime column, which is whole-second resolution, and /api/track accepts no timestamp of its own. The funnel query advances a session only on a strict inequality (sa.timestamp > s.step_time), so two funnel-step events that land in the same wall-clock second count the session at step 1 and report 0 at step 2, sending a genuine completer to Dropped Off. The entry_page and exit_page ordering has no tie-break either, so a two-page visit inside one second reports its entry page as its exit page. Nothing in the funnel or definitions docs says a funnel needs a second between steps.",
+  "scenario": {
+    "id": "a-two-step-funnel-reports-its-conversion-and-its-dropoff.api.1",
+    "failingStep": 10,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T20-29-27Z_d9522689/a-two-step-funnel-reports-its-conversion-and-its-dropoff.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 2, both halves, with ClickHouse queried directly so 'same second' is read rather than inferred. Funnel PROBE (site 10): two visitors do /cart then /checkout with no gap, all four rows stamped 2026-08-20 22:19:05, POST /funnels/analyze returns step 1 sessions 2 conversion 100, step 2 sessions 0 conversion 0 dropoff 100. CONTROL (site 11), identical but 1500 ms apart: step 2 sessions 2 conversion 100. Entry/exit PROBE (site 12): one visitor, /blog/article then /checkout, both stamped 22:19:08, entry_page and exit_page BOTH answer /blog/article. CONTROL (site 13), same two pageviews 2000 ms apart: entry /blog/article, exit /checkout. Six board scenarios red. One cite corrected: the row_number tie-break is getMetric.ts:206, not :205 (:205 is the leadInFrame line above it)."
+  },
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "server/src/db/clickhouse/schema/core.ts",
+      "server/src/api/analytics/funnels/getFunnel.ts",
+      "server/src/api/analytics/getMetric.ts",
+      "server/src/services/tracker/utils.ts",
+      "server/src/services/tracker/pageviewQueue.ts"
+    ],
+    "commitsOnCulpritFiles": [
+      {
+        "sha": "c65b3931",
+        "date": "2026-08-20",
+        "title": "perf(clickhouse): cut mutation-driven parts-lock contention on the hot ingest path",
+        "pr": "#1131",
+        "touchesCulpritLines": false,
+        "effect": "Adds a session_replay_metadata_v2 aggregating table at core.ts:322 and below and repoints its readers. The events table DDL at core.ts:85-92, including 'timestamp DateTime' at :89, is untouched. The new replay table deliberately uses DateTime64(3) because, in the commit's own words, second-resolution columns would floor a 900 ms replay to 0, which is the same resolution argument this finding makes about the events table, applied to a different table."
+      }
+    ],
+    "fix": null,
+    "permalinkTested": "https://github.com/rybbit-io/rybbit/blob/613cd0153c77e4fcd32235dd051f44257368b6e8/server/src/api/analytics/funnels/getFunnel.ts#L71",
+    "permalinkToday": "https://github.com/rybbit-io/rybbit/blob/64f8c4fb7f394bdfe9379717de8e6c21758b1ac2/server/src/api/analytics/funnels/getFunnel.ts#L71",
+    "howDecided": "git log 613cd015..HEAD on getFunnel.ts, getMetric.ts, tracker/utils.ts and pageviewQueue.ts returns nothing. core.ts was touched once, by c65b3931, whose single relevant change is the new replay table far below the events DDL. Re-read at HEAD, every culprit line is byte-identical: core.ts:89 'timestamp DateTime,'; getFunnel.ts:71 'sa.timestamp > s${index + 1}.step_time'; getMetric.ts:206 'row_number() OVER (PARTITION BY session_id ORDER BY timestamp ${orderDirection}) as row_num' with no secondary key; tracker/utils.ts:152 'timestamp: trackingRequest.receivedAt.toISOString()'; pageviewQueue.ts:83 'DateTime.fromISO(pv.timestamp).toFormat(\"yyyy-MM-dd HH:mm:ss\")', which is where the sub-second part is discarded."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo rybbit-io/rybbit --created '>=2026-08-15' --limit 60  (0 results)",
+      "gh search issues --repo rybbit-io/rybbit 'funnel conversion same second timestamp' --limit 25  (0 results)",
+      "gh search issues --repo rybbit-io/rybbit 'funnel dropoff' --limit 25  (0 results)",
+      "gh api --paginate 'repos/rybbit-io/rybbit/issues?state=all&per_page=100' (not a search; 1044 items, 320 non-PR issues, numbers 1 to 1131 with 87 gaps) then a local regex scan of every issue title plus body",
+      "local regex over all 320 issues: same second|whole second|timestamp resolution|funnel.{0,60}(0%|zero|not counting|dropoff)|exit page.{0,40}entry  ->  0 hits"
+    ]
+  },
+  "reevaluation": "The finding stands, unchanged in source and still unreported. No issue in the repo's entire history matches the symptom, and no open PR touches the funnel query or the entry/exit ordering. Confidence is high because the report has a clean control on both halves: the only variable between 0 percent and 100 percent conversion is whether the two events shared a second, and ClickHouse was read directly to establish that. One point of extra leverage appeared during re-verification: the c65b3931 commit landed hours before this check and its own inline comment justifies DateTime64(3) for the new replay metadata table on the grounds that a second-resolution column would floor a 900 ms replay to 0, so the maintainers already accept the resolution argument in a neighbouring table. That makes the report easier to land and is worth citing. Severity is unchanged and is best described as silent wrong analytics rather than an error: nothing fails, the numbers are simply wrong, which is worse for a product whose entire output is numbers. The likely real-world trigger is fast machine-to-machine tracking and any single-page app firing two pageviews within a second of each other.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Report id F6, hand-verification report section 2. Six board scenarios: a-two-step-funnel-reports-its-conversion-and-its-dropoff.api.1 (step 10), a-custom-event-funnel-step-matches-by-name.api.1 (7), a-funnel-step-can-be-labelled-and-narrowed.api.1 (8), the-sessions-behind-a-funnel-step.api.1 (8), entry-and-exit-pages-of-a-two-page-visit.api.1 (7), a-goal-card-and-the-sessions-that-converted-it.web.1 (8). File the funnel half as the headline and the entry/exit half as a second section of the same issue; they are one root cause (whole-second storage) with two visible symptoms, and splitting them would read as two thin reports. Lead with the two transcripts side by side, since the control is what makes it undeniable. Cite c65b3931 / PR #1131 as evidence the project already treats second resolution as too coarse elsewhere. Suggesting a fix is fine but keep it short: the honest options are widening events.timestamp to DateTime64(3) (a migration, and the ingest path would have to stop calling toFormat('yyyy-MM-dd HH:mm:ss')), or adding a deterministic tie-break so equal timestamps still order, and the maintainers are better placed than we are to choose. rybbit-io/rybbit applies NO labels: all 40 most recent issues carry an empty label array, and both templates declare labels: ''. Do not add a 'Suggested labels' line here; there is no vocabulary to copy and it would only add noise. The bug template is a classic markdown template with bold headers (**Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop**, **Smartphone**, **Additional context**), not a YAML form, and no template-enforcing workflow exists, so there is no auto-close bot to trip."
+}

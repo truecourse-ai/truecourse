@@ -1,0 +1,46 @@
+{
+  "id": "F17",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "Note titles are never HTML-sanitised on the create or rename path, contradicting the manual's statement that HTML in a title is stripped for security",
+  "statement": "Title.md states that for security any HTML in a note title is stripped automatically so the title is always treated as plain text. In practice a title supplied to POST /api/notes/<parent>/children or PUT /api/notes/<id>/title is stored byte-for-byte, script tags included, and reads back verbatim from independent endpoints. sanitizeHtml is present and working, but it is called only inside getNewNoteTitle, the #titleTemplate deriver, which createNewNote invokes only when no title was supplied, so it sits on the one path a user typing a title can never take.",
+  "scenario": {
+    "id": "a-note-title-may-be-empty-and-unbounded.web.1",
+    "failingStep": 8,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/a-note-title-may-be-empty-and-unbounded.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 9, confirmed on both the creation and the rename path, read back from GET /api/notes/<id> and POST /api/tree/load. Control: a child created with no title key at all under a parent labelled #titleTemplate had <script>x</script> stripped to x, proving sanitizeHtml is wired up and working on the derived path only. The report also notes the doc is imprecise even there, since <b> survives sanitisation, and that the tree escapes on render so this is not a live XSS in the tree. The scenario's recorded board failure at step 8 is a selector-ambiguity wall (G18), not this finding, which was designed as red L3-6 and settled by probe."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/services/notes.ts",
+      "packages/trilium-core/src/routes/api/notes.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/services/notes.ts#L227-L231",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/services/notes.ts#L227-L231",
+    "howDecided": "No commit touches either file between the tested commit and head; both blobs are identical at tested, head and v0.105.0, as is the doc page Title.md. Re-read at head: getNewNoteTitle at services/notes.ts:163 with its lone `title = sanitizeHtml(title)` at :185, createNewNote calling it only under `if (params.title === null || params.title === undefined)` at :229-231, and changeTitle assigning `note.title = title;` raw at routes/api/notes.ts:285. Additionally checked this pass, which the report did not: the share theme renders titles through EJS `<%= %>` (packages/share-theme/src/templates/page.ejs:56, :122, :165, :193 and tree_item.ejs:18), which escapes, so the public share surface does not turn the stored HTML into markup either."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'note title HTML sanitize XSS'",
+      "gh search issues --repo TriliumNext/Trilium 'title stripped plain text HTML'"
+    ]
+  },
+  "reevaluation": "Stands and is unreported. Source and doc are both unchanged and shipped in v0.105.0. The routing question is whether this is a vulnerability, and this pass narrows it further toward no: the report already established that the note tree escapes on render, and reading the share theme this pass shows the public share pages escape titles through EJS as well, so no render path was found that turns the stored markup into live HTML. What remains is real but is a correctness and defence-in-depth problem: the documentation makes an explicit security claim (\"For security, any HTML in the title is stripped automatically\") that the implementation does not honour, so anyone building a script, an export, a theme or a third-party consumer on that promise is relying on something that is not true. Scope note the filer must keep: the doc is inaccurate in the other direction too, since sanitizeHtml leaves <b> intact on the derived path, so the honest ask is either to sanitise on the user paths or to correct the manual, not to claim an XSS.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "State: Triage",
+    "BE"
+  ],
+  "confidence": "medium",
+  "notes": "Confidence is medium on the ROUTE, not the facts; the facts are high confidence. Do not file this as an advisory or claim XSS: no unescaped render path was found in the tree or the share theme. If the filer or a maintainer does find a path that renders a title as HTML (a custom share template, a PDF or HTML export, a theme, the mobile client), re-route immediately to security disclosure, which this repo supports (private vulnerability reporting is enabled per FILING.md). Frame the issue as documentation-versus-behaviour with a defence-in-depth ask, cite the #titleTemplate control as proof the sanitiser exists and works, and state the <b> caveat honestly so the report is not overclaiming."
+}

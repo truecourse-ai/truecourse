@@ -1,0 +1,81 @@
+{
+  "id": "R1",
+  "repo": "rybbit-io/rybbit",
+  "target": "rybbit",
+  "checkedAt": "2026-08-20",
+  "title": "Creating a site never invalidates sitesAccessCache, so the creator is 403 Forbidden on that site for up to 15 seconds (issue #980, closed as completed, is not fixed)",
+  "statement": "POST /organizations/:organizationId/sites returns 201, but the per-user sites-access cache that every site-scoped authorization check reads is not invalidated, so for up to its 15 second TTL the creator's own follow-up calls on the new site answer 403 Forbidden. The API docs promise a key tied to the user account grants access to all sites in the organization, and the identical request succeeds unchanged after 16 seconds. Upstream #980 was closed 'completed' on 2026-05-22 with 'Will be fixed in the next version!', and the fix is still absent.",
+  "scenario": {
+    "id": "an-excluded-path-is-accepted-but-never-stored.api.1",
+    "failingStep": 3,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T20-29-27Z_d9522689/an-excluded-path-is-accepted-but-never-stored.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 1. Both cache keys carry the defect. `${userId}:false` (goals, funnels, GET /sites/:id/excluded-*): site created, immediate POST /api/sites/5/goals -> 403, same call after 16 s idle -> 201. A PUT /config on a new site at +16121 ms succeeded and the GET /api/sites/7/excluded-paths of that same write at +16125 ms was 403, four milliseconds apart, same cookie, same site. `${userId}:true` (PUT /config) needed a second, non-system-admin account because requireSiteAdminAccess short-circuits for better-auth system admins before touching the cache, and the first user in a fresh database is auto-promoted (auth.ts:358-360); with that account, PUT /api/sites/9/config -> 403 then 200 after 16 s. The report also corrects run-classification.md rows 9 and 10: the failing request in those two scenarios is the excluded-* GET at step 3, not the PUT at step 2, which succeeds. Ten board scenarios red on this."
+  },
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "server/src/api/sites/addSite.ts",
+      "server/src/lib/auth-utils.ts",
+      "server/src/lib/auth-middleware.ts",
+      "server/src/lib/auth.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/rybbit-io/rybbit/blob/613cd0153c77e4fcd32235dd051f44257368b6e8/server/src/lib/auth-utils.ts#L122-L126",
+    "permalinkToday": "https://github.com/rybbit-io/rybbit/blob/64f8c4fb7f394bdfe9379717de8e6c21758b1ac2/server/src/lib/auth-utils.ts#L122-L126",
+    "howDecided": "git log 613cd015..HEAD on all four files returns nothing: not one of the four commits since the tested commit touches them. At HEAD the cache is still auth-utils.ts:122-126 (NodeCache, stdTTL 15), invalidateSitesAccessCache is still auth-utils.ts:297-300, and grep -rn over server/src (tests excluded) lists exactly eight call sites, byte-identical to the tested commit: auth.ts:180, auth.ts:566, auth.ts:589, memberAccess/updateMemberSiteAccess.ts:86, sites/applySiteMove.ts:35, teams/createTeam.ts:97, teams/updateTeam.ts:114, teams/deleteTeam.ts:38. server/src/api/sites/addSite.ts, the handler behind POST /organizations/:organizationId/sites, still neither imports nor calls it."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "rybbit-io/rybbit#980",
+        "kind": "issue",
+        "stateAtReport": "closed (completed) 2026-05-22",
+        "stateToday": "closed (completed) 2026-05-22",
+        "changedSinceReport": false,
+        "note": "Untouched since the report: closed_at and updated_at are both 2026-05-22T14:25:32Z and the issue still has exactly one comment, goldflag (COLLABORATOR) 'Will be fixed in the next version!'. No reopen, no linked PR, no labels. The reporter hit it on Rybbit Cloud with both API-key and session-cookie auth; verification hit the same mechanism self-hosted, so the report and the repro share one root cause."
+      },
+      {
+        "ref": "rybbit-io/rybbit#858",
+        "kind": "issue",
+        "stateAtReport": "closed (completed)",
+        "stateToday": "closed (completed)",
+        "changedSinceReport": false,
+        "note": "API-key rate limit returns 403 not 429. Adjacent only, recorded by the report so it is not re-searched. Last updated 2026-02-20."
+      },
+      {
+        "ref": "rybbit-io/rybbit#939",
+        "kind": "issue",
+        "stateAtReport": "closed (completed)",
+        "stateToday": "closed (completed)",
+        "changedSinceReport": false,
+        "note": "500 on a missing page param. Adjacent only. Last updated 2026-03-18."
+      },
+      {
+        "ref": "rybbit-io/rybbit#1031",
+        "kind": "issue",
+        "stateAtReport": "closed (completed)",
+        "stateToday": "closed (completed)",
+        "changedSinceReport": false,
+        "note": "Autocapture events as goal or funnel targets. Adjacent only. Last updated 2026-07-27."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo rybbit-io/rybbit --created '>=2026-08-15' --limit 60  (0 results)",
+      "gh search issues --repo rybbit-io/rybbit '\"no access to site\"' --limit 25  (1 result: #980)",
+      "gh search issues --repo rybbit-io/rybbit '403 site access cache' --limit 25  (0 results)",
+      "gh api --paginate 'repos/rybbit-io/rybbit/issues?state=all&per_page=100' (not a search; 1044 items, 320 non-PR issues, numbers 1 to 1131 with 87 gaps) then a local regex scan of every issue title plus body",
+      "local regex over all 320 issues: sitesAccessCache|no access to site|403.{0,40}(site|goal|funnel)|freshly.created site|newly created site  ->  1 hit, #980"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged and the report's upstream claim is exactly right: #980 is closed as completed and the behaviour it describes is still in master today. Nothing moved on the issue since 2026-05-22, no PR references the creation path, and the culprit files have had zero commits since the tested commit. Worth knowing for the follow-up: the only auth-utils.ts change anywhere near the close date is 672a65c5 (2026-05-21, 'Enhance funnel and goal deletion logic with site ID validation'), which lands the day before the close and adds site-id validation to deleteFunnel, deleteGoal and updateGoal plus formatting churn in getSitesUserHasAccessTo. It adds no invalidation on any creation path, which is the most likely explanation for a good-faith close that did not fix the reported symptom. The latest release tag is v2.8.0 (2026-07-26), which is an ancestor of the tested commit, so the shipped release carries the defect too, and the tested commit itself is in no tag. Scope and severity are if anything wider than #980 records: the reporter saw it only on POST /goal and POST /funnel, whereas the defect covers every route behind requireSiteAccess (including the GET /sites/:id/excluded-* family) and, for any org owner who is not a better-auth system admin, every route behind requireSiteAdminAccess. The failure direction is fail-closed (a legitimate user is denied), so this is a correctness and usability defect on an authorization path, not a privilege escalation, and it does not need a security channel.",
+  "routeSuggestion": "comment on existing issue #980",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Report id F5, hand-verification report section 1. Ten board scenarios: step 2 of a-custom-event-goal-counts-only-its-own-event.api.1, a-goal-follows-the-dashboards-range-and-filters.api.1, a-goal-narrowed-by-an-event-property.api.1, a-page-goal-counts-the-sessions-that-reached-its-path.api.1, a-page-goal-pattern-matches-one-segment-or-many.api.1, an-incomplete-goal-is-refused.api.1, six-goal-types-and-six-funnel-step-types.api.1, a-funnel-refuses-fewer-than-two-steps.api.1; and step 3 of an-excluded-path-is-accepted-but-never-stored.api.1 and ip-exclusions-in-every-supported-format.api.1. ROUTE DETAIL, read this first. Do not open a fresh issue: reopen the conversation on #980 by commenting there. Our filing account is an outside contributor and cannot reopen an issue closed by someone else, so the comment has to give a maintainer everything needed to reopen it themselves. Include, in this order: (1) the one-line claim that #980 is not fixed in master at 64f8c4fb7f394bdfe9379717de8e6c21758b1ac2; (2) the root cause with permalinks, that addSite.ts never calls invalidateSitesAccessCache while eight other paths do, and the cache at auth-utils.ts:122-126 has stdTTL 15; (3) the timed repro and its control, create a site then POST /api/sites/<new>/goals immediately -> 403, idle 16 s -> 201, nothing else changed; (4) the four-millisecond pair, PUT /api/sites/<new>/config -> 200 at +16121 ms, GET /api/sites/<new>/excluded-paths -> 403 at +16125 ms, which is the sharpest single piece of evidence because write and read of the same site disagree in the same breath; (5) the two independently-keyed halves, and that a better-auth system admin (the first user in a fresh database, auth.ts:358-360) can never observe the `${userId}:true` half, which is a plausible reason an internal check looked green; (6) that the reporter's own symptom set is a subset, since the whole requireSiteAccess surface is affected. Do not speculate about what the 'next version' fix was; say only that no commit on the creation path exists and cite 672a65c5 as the nearest change, phrased as a question rather than an accusation. Keep the tone of someone continuing a thread, not filing a complaint. Security intake for this repo, checked today: GitHub private vulnerability reporting is DISABLED, so a GitHub advisory is not an available route. SECURITY.md names email hello@rybbit.com and supports the 2.x line only; docs/public/security.txt repeats Contact: mailto:hello@rybbit.com and states no bounty. Note also that rybbit-io/rybbit#898 ('Authorization bypass: subscription data exposure + API key restricted site access bypass', open since 2026-02-20) shows security-shaped reports do get filed publicly on this tracker. rybbit-io/rybbit applies NO labels: all 40 most recent issues carry an empty label array, and both templates declare labels: ''. Do not add a 'Suggested labels' line here; there is no vocabulary to copy and it would only add noise. The bug template is a classic markdown template with bold headers (**Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop**, **Smartphone**, **Additional context**), not a YAML form, and no template-enforcing workflow exists, so there is no auto-close bot to trip."
+}

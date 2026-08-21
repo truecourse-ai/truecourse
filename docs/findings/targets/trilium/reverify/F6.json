@@ -1,0 +1,46 @@
+{
+  "id": "F6",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "The search lexer strips commas even inside quotes, so no comma-bearing label value (including #geolocation) can be matched by equality",
+  "statement": "The search lexer treats ',' as an operator character and, after the quoted-string branch has closed, discards every comma it sees regardless of lexer state, quoted or not. A label value like the documented #geolocation=\"48.8583,2.2945\" is therefore lexed as 48.85832.2945 and matches nothing that was ever stored, in every quoting form including the double-quoted one the Geo Map manual explicitly instructs the user to type. The query answers HTTP 200 with an empty list, with no error and no warning. A backslash-escaped comma does match, but escaping is not mentioned anywhere in the geo-map or search documentation.",
+  "scenario": {
+    "id": "a-geo-map-marks-the-children-that-carry-a-geolocation.web.1",
+    "failingStep": 7,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/a-geo-map-marks-the-children-that-carry-a-geolocation.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 5. Stored value read back first as [\"48.8583,2.2945\"] to rule out a write problem; all three quoting forms answered 200 []. Controls: label-existence returns the note, an identically shaped quoted equality on a comma-free value matches, and the contains operator *=* reaches the note. The escape hatch #geolocation=\"48.8583\\,2.2945\" was verified to match. The report also corrects findings.md: its *= probe was mislabelled, *= is ends-with, so its empty answer there was correct and not a comma effect; the conclusion is unaffected."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/services/search/services/lex.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/services/search/services/lex.ts#L125-L127",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/services/search/services/lex.ts#L125-L127",
+    "howDecided": "No commit touches lex.ts between the tested commit and head; the blob is identical at tested, head and v0.105.0. Re-read at head: line 16 still declares ',' an operator character in isSymbolAnOperator, the `} else if (!quotes) {` branch still opens at :91 and closes at :123, and :125-127 `if (chr === \",\") { continue; }` still sits after that close, so it runs in every lexer state including inside quotes. Open PR #10633 does patch lex.ts, but with a single hunk at :93-105 that adds two-character fuzzy-operator handling; it does not touch the comma line, so that PR does not fix this."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'comma geolocation'",
+      "gh search issues --repo TriliumNext/Trilium 'comma search attribute value'"
+    ]
+  },
+  "reevaluation": "Stands and remains unreported; both searches returned nothing and the recency sweep of every issue created since 2026-08-01 contains nothing related. Source is unchanged and shipped in v0.105.0. The impact is broader than the geo map: any label whose value contains a comma is unreachable by equality, and the Geo Map page (:72-74 and :157) is the documentation that tells users to store precisely such a value and to wrap it in quotes, so the manual walks the user into the failure. Confidence is high because the mechanism is a single unconditional `continue` three lines below the close of the unquoted branch, and because the escaped form matching proves the rest of the pipeline is sound.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "State: Triage",
+    "BE",
+    "search"
+  ],
+  "confidence": "high",
+  "notes": "Lead with the geo-map instruction, because it makes the report self-evidently a bug rather than a preference: the manual tells the user to write #geolocation=\"lat,lon\" and that exact value is unsearchable. Do not repeat findings.md's *= probe as evidence; *= is ends-with (build_comparator.ts:46) and its empty answer is correct. Use *=* if a contrast operator is needed. Mention the backslash escape as an undocumented workaround, not as the fix."
+}

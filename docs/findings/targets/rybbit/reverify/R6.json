@@ -1,0 +1,45 @@
+{
+  "id": "R6",
+  "repo": "rybbit-io/rybbit",
+  "target": "rybbit",
+  "checkedAt": "2026-08-20",
+  "title": "The Traffic Sources doc names the channels Search and Social, but the product stores Organic Search and Organic Social, so filtering by the documented name matches nothing",
+  "statement": "main-tab.mdx lists the traffic-source channels as Direct, Search, Social and Referral and instructs the reader to click any source to filter the entire dashboard to that traffic. The channel classifier returns GA4 names, so a Google visit is stored as 'Organic Search' and a Twitter visit as 'Organic Social', and the schema's own enumeration of stored channel values contains neither 'Search' nor 'Social'. Following the documented instruction literally narrows the dashboard to zero.",
+  "scenario": {
+    "id": "a-filter-narrows-the-whole-dashboard.api.1",
+    "failingStep": 7,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T20-29-27Z_d9522689/a-filter-narrows-the-whole-dashboard.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 3, doc drift. Site 14, one visit from a Google search and one from Twitter. GET /metric?parameter=channel returns exactly 'Organic Search' and 'Organic Social'. Filtering channel == 'Search' gives sessions 0 pageviews 0 users 0; 'Social' gives 0; 'Organic Search' gives 1; 'Organic Social' gives 1; and 'Referral' and 'Direct' give 0 because neither visit was one. Two of the doc's four names are wrong. Cite corrected: the doc lines are 35-43, not 37-43. The board scenario fails at step 7 expecting data.sessions 1 and getting 0."
+  },
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/content/docs/(docs)/feature-guides/main-tab.mdx",
+      "server/src/services/tracker/getChannel.ts",
+      "server/src/api/analytics/utils/eventSchema.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/rybbit-io/rybbit/blob/613cd0153c77e4fcd32235dd051f44257368b6e8/docs/content/docs/%28docs%29/feature-guides/main-tab.mdx#L35-L43",
+    "permalinkToday": "https://github.com/rybbit-io/rybbit/blob/64f8c4fb7f394bdfe9379717de8e6c21758b1ac2/docs/content/docs/%28docs%29/feature-guides/main-tab.mdx#L35-L43",
+    "howDecided": "git log 613cd015..HEAD on all three files returns nothing. At HEAD main-tab.mdx:35-43 still reads '## Traffic Sources' with the four bullets Direct (:38), Search (:39), Social (:40), Referral (:41) and the instruction at :43; getChannel.ts still returns 'Organic Search' (:238, and :35) and 'Organic Social' (:240, :260, :289) with no code path producing a bare 'Search' or 'Social'; and eventSchema.ts:16 still enumerates the stored channel set (Direct, Internal, Cross-Network, Paid AI, Paid Search, Paid Social, Paid Video, Paid Shopping, Display, Paid Influencer, Paid Audio, Paid Unknown, AI, Organic Search, Organic Social, Organic Video, Organic Shopping, Email, SMS, News, Productivity, Affiliate, Referral, Audio, Push, Influencer, Content, Event, Unknown) without either name."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo rybbit-io/rybbit --created '>=2026-08-15' --limit 60  (0 results)",
+      "gh api --paginate 'repos/rybbit-io/rybbit/issues?state=all&per_page=100' (not a search; 1044 items, 320 non-PR issues, numbers 1 to 1131 with 87 gaps) then a local regex scan of every issue title plus body",
+      "local regex over all 320 issues: Organic Search|Organic Social|channel.{0,30}(filter|name)  ->  5 hits (#1024, #959, #922, #877, #368), none about the documented channel names; #959 is session duration in the channel filter view and is the closest, still unrelated"
+    ]
+  },
+  "reevaluation": "The finding stands, source untouched, still unreported. The strongest thing about it is that eventSchema.ts:16 is itself a documentation artefact, an in-repo enumeration of every stored channel value, and it disagrees with the user-facing doc, so the product contradicts itself in two files without needing the live probe at all. The probe still matters because it shows the consequence rather than the discrepancy: a reader who follows main-tab.mdx literally sees an empty dashboard and has no way to know the name is simply wrong. The fix is a two-word doc edit, so this is cheap for a maintainer to accept, and the docs live in this repo, which means it can be a PR rather than an issue. Confidence high; the only judgement call is whether upstream would rather rename the stored values, which would be a much larger change and is not what we should ask for.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Report id F7, hand-verification report section 3. Doc-side finding. The docs live in this same repo under docs/content/docs, so there is no separate docs repo and no 'docs repo issue' route: a doc fix here is a one-line PR against rybbit-io/rybbit. Five of the ten findings (R6, R7, R8, R9, R10) are doc-side. Filing five separate doc issues would burn maintainer patience for little gain; consider one consolidated 'documentation does not match behaviour' issue listing all five with file and line, or a single PR. If filed alone, keep it to the doc quote, the observed channel values, and the six-line filter table showing which names match and which do not; the table is the entire argument. Ask only for the doc to use the stored names, and cite eventSchema.ts:16 as the in-repo list to copy from. Do not propose renaming the stored values: they are the GA4 names, other channels in the same family (Paid Search, Paid Social, Organic Video) depend on the convention, and asking for that would turn a two-word fix into a migration. rybbit-io/rybbit applies NO labels: all 40 most recent issues carry an empty label array, and both templates declare labels: ''. Do not add a 'Suggested labels' line here; there is no vocabulary to copy and it would only add noise. The bug template is a classic markdown template with bold headers (**Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop**, **Smartphone**, **Additional context**), not a YAML form, and no template-enforcing workflow exists, so there is no auto-close bot to trip."
+}

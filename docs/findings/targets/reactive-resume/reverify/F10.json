@@ -1,0 +1,64 @@
+{
+  "id": "F10",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "A stylesheet with no @version directive compiles with a warning and still applies",
+  "statement": "Omitting the @version line from a Semantic CSS stylesheet produces the status 'Valid with warnings' and the message 'Version-one stylesheets should start with @version 1;', and the stylesheet is applied in full: a versionless sheet exports byte-identically to the same sheet under @version 1;, while a genuinely fatal @version 2; exports byte-identically to having no stylesheet at all. MISSING_VERSION_DIRECTIVE is simply not in the compiler's fatal set.",
+  "scenario": {
+    "id": "the-custom-styles-editor-refuses-what-semantic-css-does-not-support.web.1",
+    "failingStep": null,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/the-custom-styles-editor-refuses-what-semantic-css-does-not-support.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Both halves confirmed, including 'the stylesheet still applies', proved by four PDF exports: versionless 238691 bytes equals @version 1; 238691 bytes, and @version 2; 238747 bytes equals no stylesheet 238747 bytes. Note the report itself records that this produced NO board red: the scenario passes only because it was re-authored onto @version 2;, which is a genuinely fatal code."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/resume/src/stylesheet/compile.ts",
+      "packages/resume/src/stylesheet/diagnostics.ts",
+      "packages/pdf/src/semantic/resolve.ts",
+      "docs/applying-custom-styles.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/resume/src/stylesheet/compile.ts#L45-L49",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/resume/src/stylesheet/compile.ts#L45-L49",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today with the report's corrected numbers: compile.ts:45-49 pushes MISSING_VERSION_DIRECTIVE at severity 'warning'; diagnostics.ts:125-131 lists the five fatal codes (DUPLICATE_VERSION_DIRECTIVE, INVALID_VERSION, RESOURCE_LIMIT, UNSUPPORTED_VERSION, VERSION_MISMATCH) and MISSING_VERSION_DIRECTIVE is not among them; resolve.ts:126-133 drops to EMPTY_PRESENTATION only on a fatal diagnostic. The doc sentences are unchanged at applying-custom-styles.mdx:46 and :305-307."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 3291,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3291",
+        "state": "open",
+        "title": "[Bug] Custom Styles not working",
+        "createdAt": "2026-08-03",
+        "relation": "related",
+        "note": "Open, Cloud. A stylesheet that correctly starts with @version 1; does not take effect until a browser refresh. Same editor, unrelated mechanism; checked precisely because it would have been a duplicate if it were about the directive."
+      },
+      {
+        "number": 3348,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3348",
+        "state": "open",
+        "title": "Semantic CSS color has no effect on section heading text or icon",
+        "createdAt": "2026-08-18",
+        "relation": "related",
+        "note": "Open, Cloud, version 5.2.6. Also correctly uses @version 1;. Included only to record that the recent Semantic CSS issues were read and none concerns the version directive."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume '@version stylesheet'",
+      "non-search sweep: 800-item local issue list, and the bodies of #3291, #3293, #3295, #3348 read in full"
+    ]
+  },
+  "reevaluation": "The observation is exactly right and reproduces, but on re-reading the two doc sentences it is measured against, this is not drift and there is nothing here a maintainer can act on. applying-custom-styles.mdx:46 is an instruction ('Keep @version 1; at the start of every stylesheet'), not a promise that omitting it is fatal, and :305-307 describes what happens on a fatal version error without claiming that a missing directive is one. The product's behaviour agrees with both: it nudges you toward the directive with a warning whose text is nearly the doc's own sentence, and it reserves fatality for actual version errors. The report's own cross-reference records that this produced no board red, and the one scenario in the area passes only because it was re-authored onto @version 2;. Filing it would put a maintainer through a reproduction to arrive at 'working as designed', which is precisely the kind of report that spends credit for the rest of the batch. Confidence in the source reading is high; confidence that it is a defect is low, and that is the reason for the skip.",
+  "routeSuggestion": "skip: not a finding",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda through the builder's own Custom Styles editor and its Download PDF, with four exports compared by byte length (the SHA-256s differ because a PDF carries a creation timestamp). Recorded as verified-but-not-filable rather than dropped, so the observation survives if the docs are ever tightened to say the directive is required, at which point the same evidence becomes a real drift report. If anyone does revive it, note the report's stale cite: the corpus gave compile.ts:44-48; the block is :45-49."
+}

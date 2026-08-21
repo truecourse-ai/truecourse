@@ -1,0 +1,57 @@
+{
+  "id": "D25",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The choosing-a-template guide says to browse the templates in the sidebar section, but the section shows only the current template and the gallery is an undocumented modal",
+  "statement": "The guide's two steps say to expand the Template section in the right sidebar and then browse the available templates and click the one you want. The section contains exactly one preview, of the template already in use, plus its heading, description and tag chips. All fifteen templates live in a Template Gallery dialog that opens by clicking that single preview, and the guide never mentions the dialog or the click that opens it.",
+  "scenario": {
+    "id": "switch-the-resume-template-from-the-gallery.web.1",
+    "failingStep": 16,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/switch-the-resume-template-from-the-gallery.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "In the Template section: four imgs, only one named ('Azurill', the current template); getByRole('img', {name:'Chikorita'}) 0; the section text never says gallery. Control: clicking the single preview opens a dialog headed 'Template Gallery' whose named imgs are all fifteen templates, so the gallery is real and reachable, just undocumented."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/template.tsx",
+      "docs/guides/choosing-a-template.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/template.tsx#L26-L44",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/template.tsx#L26-L44",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: template.tsx:26-28 defines onOpenTemplateGallery as `openDialog(\"resume.template.gallery\", undefined)`, and :32-44 renders exactly one Button whose onClick is that handler and whose only content is `<img src={metadata.imageUrl} alt={metadata.name} />` for the CURRENT template, plus a swap icon overlay. There is no list, no grid and no second trigger in the section. The doc steps are unchanged at choosing-a-template.mdx:27 and :36."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 3247,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3247",
+        "state": "open",
+        "title": "[Feature] More viewing options on the résumé page.",
+        "createdAt": "2026-07-10",
+        "relation": "related",
+        "note": "Open enhancement about dashboard thumbnail sizes that happens to reference the template gallery's smaller thumbnails as the desired look. Not about the guide; recorded because it is the only tracker item mentioning the gallery."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'template gallery'",
+      "non-search sweep: 800-item local issue list grepped for gallery|template switch"
+    ]
+  },
+  "reevaluation": "Stands. The user-facing cost is real but bounded: the swap icon overlaid on the preview is a reasonably discoverable affordance, so most readers will find the gallery even though the guide does not name it, which is why this ranks below D13 and D26/D27 rather than beside them. The fix is one sentence in choosing-a-template.mdx step 2 telling the reader to click the current template's preview to open the Template Gallery. Confidence high: the section's entire accessibility tree was captured and the gallery was opened as the control.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: builder"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda; docs and client code are variant-neutral, so Cloud behaves the same. Batch into the single '[Bug] Docs: ...' issue described in D13's notes. Also worth mentioning in that issue, since it is the same sentence's fault: the guide's screenshot at choosing-a-template.mdx:29 is captioned as the sidebar template section and the next Frame is captioned 'selecting a new template from the gallery', so the guide's own images already show the modal the prose never names."
+}

@@ -1,0 +1,47 @@
+{
+  "id": "D2",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The download dialog closes the instant an export starts, so its spinner and disabled states can never be seen",
+  "statement": "The export guide says that while an export is running the trigger button and the format buttons show a spinner and stay disabled until the file is ready. The dialog's run() helper calls setOpen(false) before it invokes the export, so the format buttons unmount roughly 400 ms after the click and 420 ms before the file arrives, and for the brief window they survive they still read disabled: false. The spinner and disabled props the guide describes are really in the code and are structurally unreachable.",
+  "scenario": {
+    "id": "open-the-download-dialog-and-see-its-four-formats.web.1",
+    "failingStep": 17,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/open-the-download-dialog-and-see-its-four-formats.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Polled at about 50 ms: at 243, 297 and 350 ms the dialog was open with Download DOCX present and disabled false; by 403 ms the dialog was gone and no format button was on the page; the file landed at 823 ms with the dialog absent. Control: before the press all four format buttons existed and were enabled."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "apps/web/src/features/resume/export/download-dialog.tsx",
+      "docs/guides/exporting-your-resume.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/features/resume/export/download-dialog.tsx#L77-L80",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/features/resume/export/download-dialog.tsx#L77-L80",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: download-dialog.tsx:77-80 is still `const run = (action) => { setOpen(false); void action(); };`. The unreachable states are all present: :133 renders `isExporting ? <CircleNotchIcon className=\"size-5 animate-spin\" /> : <FilePdfIcon .../>`, and disabled={isExporting} sits at :141 (PDF), :159 (DOCX) and :177 (Markdown). One small cite correction to the report: it listed :141, :159, :178, :196; today the isExporting guards are :141, :159 and :177, and the JSON button near :196 is guarded by disabled={jsonDisabled}, not by isExporting. The doc sentence is unchanged at exporting-your-resume.mdx:38."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'download dialog spinner disabled'",
+      "non-search sweep: 800-item local issue list grepped for download|export|spinner"
+    ]
+  },
+  "reevaluation": "Stands, and it is better than a documentation mismatch: the spinner icon and all three disabled guards were deliberately written, so someone intended exactly the behaviour the guide documents and one line defeats it. That makes it a one-line product fix (close the dialog when the export settles, or keep it open and let the existing isExporting state do its job) rather than a doc edit, and it gives the report a clear ask. Nothing in the tracker touches it; the download-related issues in the last seven months are all about PDF content or failure, not about the dialog's feedback.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: builder"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda in headless Chromium with acceptDownloads; client-only code, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Templates, preview & export'; version 5.2.7 (commit 3221afda). Lead with the dead code (the spinner at :133 and the guards at :141/:159/:177) rather than with the doc sentence, because that is what makes the intended behaviour unambiguous. Include the polling table, since a maintainer reproducing by eye will just see the dialog close and may not notice the buttons were never disabled."
+}

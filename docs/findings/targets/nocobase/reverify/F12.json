@@ -1,0 +1,45 @@
+{
+  "id": "F12",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "A view:own role makes every union read against a collection with no createdById answer an opaque 403",
+  "statement": "Under allow-use-union role mode, adding a role whose strategy is view:own to a user turns X-Role: __union__ reads of a collection with no createdById column from 200 into 403 No permissions. The merged action carries the own-scope filter into checkFilterParams, which throws NoPermissionError('createdById field not found'), and the ACL middleware rewrites every NoPermissionError to the same opaque string, so the response names nothing. Collections created through collections:create preset no system fields, and the shipped member role is exactly view:own, so this is the answer a stock member gets from every API-created collection.",
+  "scenario": {
+    "id": "role-union-merges-the-rows-either-role-may-see.api.1",
+    "failingStep": 7,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/role-union-merges-the-rows-either-role-may-see.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 10, both directions plus three controls. Control 3 is the decisive one: adding a createdById column to the same collection and re-issuing the identical request turns 403 into 200, which isolates the mechanism to one column. The report's cross-reference table says failing step 6; the board resolved that SEED-class red and the scenario now fails at step 7, which is what guard/LATEST.json records. Step 7 is the number to use."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/core/acl/src/acl.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/core/acl/src/acl.ts#L645-L656",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/core/acl/src/acl.ts#L645-L656",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase \"createdById field not found\""
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. acl.ts has no commit since the tested SHA: checkFilterParams is still at 645-656 with the throw at 655, the core middleware still calls it at 482, and the catch still collapses every NoPermissionError to ctx.throw(403, 'No permissions'). One cite correction this pass makes: the report puts that catch at acl.ts:528-535; at both the tested SHA and today it is acl.ts:530-537. The exact-phrase search for createdById field not found returned zero results across the entire tracker, which is unusually clean evidence that the message has never surfaced to a user, precisely because the middleware swallows it.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "users & permissions"
+  ],
+  "confidence": "high",
+  "notes": "Correct the cite to acl.ts:530-537 for the catch block; the report's 528-535 is off by two. There are two asks and a filer should separate them: (1) the opaque 403 should carry its reason, which is a one-line change and would have made this diagnosable without source reading; (2) an own-scoped grant against a collection with no createdById arguably should return an empty set rather than deny. Ask for (1) firmly and raise (2) as a question, since (2) is a design call. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

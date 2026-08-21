@@ -1,0 +1,81 @@
+{
+  "target": "trilium",
+  "repo": "TriliumNext/Trilium",
+  "tested": "3a73bc352d9cfb5ad63134e3fb997214d5846208",
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "checkedAt": "2026-08-20",
+  "findings": [
+    {
+      "id": "F8",
+      "title": "A search using an unrecognised note property silently returns every note in the tree, including root and _hidden",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Strongest: silent whole-tree results from a one-letter typo, the manual's own example is the typo, unreported, and the fix is two lines."
+    },
+    {
+      "id": "F9",
+      "title": "A search whose text starts with '#' never loads note sizes from the database, so identical queries answer differently depending on search history; note.revisionCount is always 0",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Second: order-dependent search results (the same query answers differently depending on what was searched before it) plus a second, unconditionally dead property; the corrected mechanism is unreported and is worse than the original claim."
+    },
+    {
+      "id": "F13",
+      "title": "The \"Search now\" button on a saved search creates a new empty search note instead of running the saved search",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Third: a visible, one-click-reproducible UI bug where the only control offered for running a saved search runs a different search; unreported and independent of the feature request that partially overlaps it."
+    },
+    {
+      "id": "F6",
+      "title": "The search lexer strips commas even inside quotes, so no comma-bearing label value (including #geolocation) can be matched by equality",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Fourth: the manual instructs users to author exactly the value that cannot be searched, unreported, with a one-line cause and an undocumented escape hatch."
+    },
+    {
+      "id": "F12",
+      "title": "POST /api/notes/<parent>/children without a content key returns 500 for every note type, while a missing title is silently defaulted",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Fifth: an unreported API robustness defect, broader than originally recorded (every note type, not just book), with a one-line fix and an internal inconsistency that argues it."
+    },
+    {
+      "id": "F11",
+      "title": "PUT /api/notes/<noteId>/clone-to-branch/<branchId> with no request body returns 500 and leaks a minified variable name to the caller",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Sixth: same family as F12 and equally cheap to fix, ranked lower only because it also leaks a minified variable name and the repo has already declined a same-class report once."
+    },
+    {
+      "id": "F17",
+      "title": "Note titles are never HTML-sanitised on the create or rename path, contradicting the manual's statement that HTML in a title is stripped for security",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "medium",
+      "priorityNote": "Seventh: a documented security promise the code does not keep, but no exploitable render path was found, so it files as a correctness and defence-in-depth issue rather than an advisory."
+    },
+    {
+      "id": "F7",
+      "title": "The fuzzy operators ~= and ~* never lex, so a fuzzy query silently degrades to a label-existence or match-everything query",
+      "route": "comment on existing PR 10633",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Eighth: already reported and already fixed in an open PR, so the value left is a PR comment confirming it on the current release and correcting the stale symptom on the tracking issue."
+    },
+    {
+      "id": "F10",
+      "title": "A multi-word = query in quick search is a substring compare, so a longer title matches what the manual calls an exact match",
+      "route": "skip: reported (TriliumNext/Trilium#9422)",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Last: accurately reported already and fixed by a mergeable open PR, so there is nothing left to file."
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "target": "reactive-resume",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "tested": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "checkedAt": "2026-08-20",
+  "sourceDrift": "none: origin/main head today IS the tested commit 3221afda (Sync Translations from Crowdin, #3365, 2026-08-20), confirmed via gh api repos/AmruthPillai/Reactive-Resume/commits/main. Zero commits landed since the hand verification, so every finding's source status is 'unchanged' by construction and each entry re-reads the culprit lines rather than diffing. The tree is 16 commits past the v5.2.7 tag, so nothing here is in a release yet beyond 5.2.7's content.",
+  "trackerCoverage": "19 GitHub search calls across 13 findings (cap 26), each preceded by sleep 20, no rate limits hit and no retries needed. Backed by a non-search sweep: gh api repos/.../issues over 8 pages, 800 issues and PRs back to 2026-01-23, grepped locally per finding. Every finding the report called unreported is still unreported; nothing new has been filed since 2026-08-19 (#3361) that touches any of them. Three cited items re-checked: #2844 open and unchanged apart from a 2026-08-16 maintainer request for concrete a11y detail, #3174 open and now labelled status: confirmed, #3008 open and unchanged.",
+  "deploymentNote": "Every finding was verified against a SELF-HOSTED instance built from source at 3221afda (local Postgres 18, node apps/server/dist/index.mjs, headless Chromium). The bug form's required 'Product variant' dropdown must therefore read Self-hosted on every filing. All thirteen sit in code with no deployment branch, so rxresu.me Cloud is expected to behave identically, and each JSON says so in its notes. One exception worth stating in the body: F4's dedup key differs by deployment, because clientKeyFromHeaders prefers a trusted-proxy IP and only falls back to the user-agent plus language fingerprint that was actually measured here. On labels: no suggestedLabels list carries `deployment: cloud` or `deployment: self-hosted`, and that is deliberate. Both labels are in the repo's live vocabulary (19 and 3 uses in the last 30 issues), but triagers use them to scope a problem to one variant, and every finding here is variant-independent. Suggesting `deployment: self-hosted` because that is where it was driven would wrongly narrow the report; leave the deployment label to the triager and let the body carry the reasoning.",
+  "findings": [
+    {
+      "id": "F3",
+      "title": "The Downloads statistic is permanently zero: nothing in the codebase ever increments it",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Strongest in the product and the one to file first: a shipped, visible, documented metric with working SQL and no writer, proved end to end (the visitor really received resume.pdf while the counter stayed 0), and now anchored in git since the increment existed at v5.0.0/v5.0.1 in the server-side printer path that v5.1.0 deleted. Zero tracker overlap across three searches and an 800-item sweep."
+    },
+    {
+      "id": "F9",
+      "title": "Documented resume bounds are silently coerced instead of rejected: a PATCH with an out-of-range value returns 200 and stores something else",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Second: data-integrity adjacent, affects any API client, and four bounds were driven live with matching 400 controls. Lands on ground a maintainer has already conceded, since #3174 carries status: confirmed for the same silent-discard shape on style rules. File the class, drop the corpus's 'template is the hole' sentence, and do not quote the 30 figure (34 at this SHA)."
+    },
+    {
+      "id": "D2",
+      "title": "The download dialog closes the instant an export starts, so its spinner and disabled states can never be seen",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Third: a one-line product fix whose intent is undeniable, since the spinner icon and all three disabled guards are written and unreachable. Cheapest maintainer win in the batch and it needs no argument about what the docs meant."
+    },
+    {
+      "id": "F7",
+      "title": "FormControl stamps the label's target id on a non-labelable wrapper, so Slug, Tags and Sidebar Width have no accessible name",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Fourth: a real component-level accessibility defect with three named controls and two extra families found live. The maintainer asked on #2844 for exactly this shape on 2026-08-16 (concrete problem, current and expected behaviour, acceptance criteria). Must be filed with the report's corrections, not the corpus's wording."
+    },
+    {
+      "id": "D26-D27",
+      "title": "The fitting-content guide tells you to click a section heading and toggle a Hidden switch; the click collapses the section and no such switch exists",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Fifth and the lead item of the combined docs issue: the only documentation finding that actively misleads, since following it makes the section's content vanish and looks like a successful hide. #2921 is open and status: accepted on the same surface, so it may document a UI that was never built."
+    },
+    {
+      "id": "D13",
+      "title": "The version-history guide says Cmd/Ctrl+Z undoes a restore, but a restore clears the undo stack and the app's own confirm dialog says so",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Sixth: the cleanest docs fix anywhere in the batch, because the correct sentence already exists in the product at version-history.tsx:46 and contradicts the guide. Zero reproduction burden. Second item in the combined docs issue."
+    },
+    {
+      "id": "D8",
+      "title": "The set-password prompt is a single unlabelled field with no confirmation and no hint of the 6 to 64 character rule the server enforces",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Seventh: promoted above the remaining docs items because this pass found the range is genuinely enforced at dto/resume.ts:75, which turns it from a wording mismatch into a dialog that implements less validation than the API requires, on a credential gating a published document."
+    },
+    {
+      "id": "F8",
+      "title": "The dashboard's Sort by and Filter by comboboxes have no accessible name",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Eighth: correct and trivially fixable (two aria-labels) but it is the second accessibility issue, and the filing guide caps public issues at 2 to 3 a day. File it a day after F7 or fold it into that thread if the maintainer engages."
+    },
+    {
+      "id": "D14",
+      "title": "A template switch is an ordinary debounced autosave, not a snapshot moment, and when it does snapshot the row is labelled Manual save",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Ninth: real drift and now two wrong sentences rather than one, but only in the sharpened form. The corpus's original claim is refutable in a minute on a fresh resume, so the sharpened statement is mandatory. Third item in the combined docs issue."
+    },
+    {
+      "id": "D25",
+      "title": "The choosing-a-template guide says to browse templates in the sidebar section, but the section shows only the current template and the gallery is an undocumented modal",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Tenth: a true omission, softened by the swap-icon overlay making the gallery reasonably discoverable, and by the guide's own screenshot caption already naming the gallery. One sentence to fix. Fourth item in the combined docs issue."
+    },
+    {
+      "id": "F4",
+      "title": "Public resume views are deduplicated per client per hour, but the guide says every load is counted",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Eleventh: mechanism is certain but the dedup is deliberate and documented in the source, so the likely outcome is a docs edit rather than a code change. File it for the guide's specific and wrong list, and carry the proxy-IP nuance, which is the part that could matter on Cloud."
+    },
+    {
+      "id": "D24",
+      "title": "The page-format guides spell the option Free-Form; the app renders Free-form",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Twelfth: a one-token inconsistency. A line item inside the combined docs issue and never an issue of its own; suggest changing the guides, not the translated app string."
+    },
+    {
+      "id": "F10",
+      "title": "A stylesheet with no @version directive compiles with a warning and still applies",
+      "route": "skip: not a finding",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Last, and not for filing. The behaviour is exactly as verified but the doc sentences it is measured against do not promise fatality, so product and docs agree; the report itself records no board red. Kept on file in case the docs are ever tightened to say the directive is required."
+    }
+  ]
+}

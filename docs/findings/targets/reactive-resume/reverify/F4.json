@@ -1,0 +1,48 @@
+{
+  "id": "F4",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "Public resume views are deduplicated per client per hour, but the guide says every load is counted",
+  "statement": "The sharing guide states \"A view is counted each time someone loads your public resume page\" and lists direct visits, links and QR scans as included. In fact the server counts a viewer at most once per hour: view-dedup.ts holds an in-process Map keyed on the resume id plus a client key, with a one hour window, so three loads by one client register one view and lastViewedAt freezes at the first load. A distinct client does increment, so the counter works; it counts visitors per hour, not loads.",
+  "scenario": {
+    "id": "a-public-visit-is-counted-in-the-statistics.web.1",
+    "failingStep": 11,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/a-public-visit-is-counted-in-the-statistics.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Three loads by one browser context produced views=1 with lastViewedAt frozen at the first load. Control: two further clients with different user-agent and accept-language fingerprints took the counter to 2 then 3, so the dedup key, not the counter, is what suppresses the repeats."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/api/src/features/resume/view-dedup.ts",
+      "packages/api/src/features/resume/service.ts",
+      "docs/guides/sharing-your-resume-publicly.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/api/src/features/resume/view-dedup.ts#L6-L7",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/api/src/features/resume/view-dedup.ts#L6-L7",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so no diff analysis was possible or needed; instead every culprit line was re-read in the working tree at that commit and quoted back with today's line numbers. permalinkTested and permalinkToday are therefore the same URL by construction. Re-read today: view-dedup.ts:6 `const WINDOW_MS = 60 * 60 * 1000; // 1 hour`, :7 `MAX_ENTRIES = 50_000`, :15-27 shouldCountView, :31-45 clientKeyFromHeaders (trusted proxy IP first, then `fp:<user-agent 0..64>:<accept-language 0..16>`). The call site is unchanged at service.ts:547-552. The doc sentence is unchanged at docs/guides/sharing-your-resume-publicly.mdx:102."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'view count deduplicated'",
+      "non-search sweep: 800-item local issue list grepped for view count|statistic|analytic|counter"
+    ]
+  },
+  "reevaluation": "The finding stands, but its character should be stated honestly when filed: the dedup is deliberate, not accidental. view-dedup.ts:3-5 documents the design (single-instance Map, swap for Redis SETNX+EXPIRE when scaling out) and the bound, so a maintainer will reasonably say the code is working as intended and that the guide is the half that is wrong. That is the right framing and it is still worth filing, because the guide's list of what counts is specific and wrong. One consequence deserves its own sentence and was not in the report: the dedup key is the trusted-proxy client IP when such a header is present, and only falls back to the user-agent plus language fingerprint when it is not. The verification ran with no proxy, so it exercised the fingerprint branch. On a proxied deployment the key is the IP, so several genuinely distinct visitors sharing one NAT or corporate egress collapse into a single view per hour, which is a stronger statement than the docs mismatch alone.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: account"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda with NO trusted-proxy header, so the fingerprint branch of clientKeyFromHeaders was the one exercised. On rxresu.me Cloud, which sits behind a proxy, the key would be `ip:<client-ip>` instead: same one-hour window, but distinct visitors behind a shared IP are collapsed rather than distinct browsers being separated. The filer must say which branch was measured, because a maintainer on Cloud will otherwise not reproduce the fingerprint behaviour. File the docs sentence as the primary claim and the shared-IP consequence as a secondary observation, not as a confirmed Cloud defect, since Cloud was not driven. Product variant = Self-hosted; Area = 'Accounts & sharing'; version 5.2.7 (commit 3221afda)."
+}

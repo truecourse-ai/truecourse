@@ -1,0 +1,53 @@
+{
+  "id": "S1",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "Gateway.run starts the CLI command with an unawaited promise, so the process's only awaited handle resolves mid-install",
+  "statement": "In the cold CLI path, initializeGateway awaits only Gateway.run, and Gateway.run fires mainApp.runAsCLI(...).then(...).catch(...) without awaiting it, so run resolves as soon as the chain is registered. This is a real floating promise in the source. It was NOT observed to truncate an install: fifteen cold installs, six idle, six under eight-way CPU contention and three idle again, all exited 0 in 6 to 10 seconds with an identical, complete 100-table database.",
+  "scenario": {
+    "id": null,
+    "failingStep": null,
+    "evidencePath": null
+  },
+  "handVerified": {
+    "verdict": "PARTIAL",
+    "note": "Report section 1. The mechanism is present exactly as described and every cite is accurate. The race did not land in 15 attempts. The report also disposes of the one apparent trace of it: three tables (aiEmployees, aiSkills, rolesAiEmployees) differ between a cold install and an IPC install, but booting the server on the cold-installed database seeds them and the two snapshots then match byte for byte across all 100 tables, so the cold install is complete. No board scenario exists for this; it is a layer-4 install-path finding."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/core/server/src/gateway/index.ts",
+      "packages/core/app/src/index.ts",
+      "packages/core/server/src/commands/install.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/core/server/src/gateway/index.ts#L707-L726",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/core/server/src/gateway/index.ts#L707-L726",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 10391,
+        "url": "https://github.com/nocobase/nocobase/issues/10391",
+        "state": "closed",
+        "title": "yarn nocobase upgrade \u5347\u7ea7\u4e0d\u6210\u529f 2.1.41 \u5347\u7ea7\u5230 2.1.43",
+        "createdAt": "2026-08-19",
+        "relation": "related",
+        "note": "A two-line report that upgrade fails between the versions around the tested SHA, with no log, no exit code and no diagnosis. Closed as completed on 2026-08-20. It is upgrade rather than install and carries nothing that would corroborate or refute this finding."
+      }
+    ],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19"
+    ]
+  },
+  "reevaluation": "The source half stands exactly as the report describes and is unchanged: no commit has touched any of the three files since the tested SHA, app/src/index.ts:13-19 still awaits only Gateway.getInstance().run(...), gateway/index.ts:707-726 still registers the runAsCLI chain without awaiting it (today's runAsCLI call is at line 708, inside the statement that begins at 707), and commands/install.ts:16 still declares .ipc(). The question the brief asks me to answer is whether a source-only race with zero observed occurrences is worth filing, and my answer is no. What a bug report can offer here is a floating promise plus an explicit admission that fifteen attempts, including deliberate loop-timing pressure, produced fifteen complete installs. A maintainer's most likely and most reasonable response is that the process stays alive on the database and IPC handles for the duration of the install, which is precisely why it never fired, and that is not a defect report so much as a code-hygiene observation. Under this pipeline's own premise, which is product behaviour against a documented contract, there is no behavioural divergence here and no doc contract at all. Filing it would spend batch credit that the twelve confirmed findings need.",
+  "routeSuggestion": "skip: not a finding",
+  "suggestedLabels": [],
+  "confidence": "medium",
+  "notes": "Read this route carefully: skip does NOT mean the code defect is imaginary. The floating promise at gateway/index.ts:707-726 is real, unchanged, and would be fixed by one await. What is missing is any observed failure, and this pipeline files observed divergences. Do not re-file it as written. If it is ever picked up again, there is one adjacent claim that looks provable in a single command and that this pass did NOT verify by execution: neither gateway/index.ts nor application.ts contains any process.exit or exitCode assignment, and the catch at gateway/index.ts:714-726 logs the error and stops the app on the main thread, so a failing cold `nocobase install` appears to exit 0. If that is confirmed by running an install against an unreachable database, it is a crisp, CI-relevant bug that stands on its own and does not depend on the race ever firing. Do not file that claim on the code reading alone. One environment trap from the report is worth preserving for anyone who retries: SOCKET_PATH must stay under the 104-byte sun_path limit or the gateway fails to bind with a misleading EADDRINUSE and every install silently takes the cold CLI path instead of the IPC one."
+}

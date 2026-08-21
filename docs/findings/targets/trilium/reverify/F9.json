@@ -1,0 +1,56 @@
+{
+  "id": "F9",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "A search whose text starts with '#' never loads note sizes from the database, so identical queries answer differently depending on search history; note.revisionCount is always 0",
+  "statement": "findResultsWithQuery short-circuits any query whose trimmed text starts with '#' straight into performSearch, bypassing findResultsWithExpression, which is the only caller of loadNeededInfoFromDatabase(). The size properties (contentSize, contentAndAttachmentsSize, contentAndAttachmentsAndRevisionsSize) therefore read undefined off the becca note and match nothing for '#'-leading queries, while the same comparison in a query that does not start with '#' answers correctly. Because loadNeededInfoFromDatabase() writes the values onto the becca notes and nothing clears them, one non-'#' query anywhere in the process permanently fixes every subsequent '#' query for the life of that server: the same query answers differently depending on what was searched before it. Separately and unconditionally, note.revisionCount is always 0 on every path, because it is initialised to 0 and then incremented only inside `if (noteRevision && noteRevision.revisionCount)`, a guard a falsy 0 can never pass.",
+  "scenario": {
+    "id": "note-properties-are-searchable.api.1",
+    "failingStep": 16,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/note-properties-are-searchable.api.1"
+  },
+  "handVerified": {
+    "verdict": "PARTIAL",
+    "note": "Report section 3. The symptom reproduced exactly, but the stated mechanism and scope were WRONG and were corrected. findings.md attributed it to 'progressive search skipped' via orderBy; orderBy is innocent (loadNeededInfoFromDatabase runs at search.ts:244, before the orderBy branch at :249). findings.md also claimed 'not even >= 0' works; on a cold process 'note.contentSize >= 0' with no leading '#' returns all 25 notes and 'note.contentSize > 0' returns the 15 with content, both correct. The corrected statement is the two-part one above, established with a full cold-start transcript on a freshly restarted server. FILE THE CORRECTED STATEMENT, NEVER THE ORIGINAL."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/services/search/services/search.ts",
+      "packages/trilium-core/src/services/search/expressions/property_comparison.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/services/search/services/search.ts#L425-L436",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/services/search/services/search.ts#L425-L436",
+    "howDecided": "No commit touches search.ts between the tested commit and head; the blob is identical at tested, head and v0.105.0. Re-read at head: search.ts:427-429 still computes `const isPureExpressionQuery = query.trim().startsWith('#')` and :431-433 still returns performSearch(...) for it; findResultsWithExpression at :242-244 is still the only caller of loadNeededInfoFromDatabase() (:117); :149 still sets revisionCount = 0 and :231-232 still guard the increment with `if (noteRevision && noteRevision.revisionCount)`; property_comparison.ts:76 still sets searchContext.dbLoadNeeded = true. Open PR #10633 rewrites large parts of search.ts, but its hunks cover old lines 1-5, 10-16, 20-74, 290-295, 303-309, 462-473, 528+; old lines 117-245 and 415-440 fall in no hunk, so neither the '#' short-circuit nor the revisionCount arithmetic is fixed by that PR."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "TriliumNext/Trilium#5432",
+        "kind": "issue",
+        "stateAtReport": "open (partial)",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Covers only the user-visible 'note.contentSize returns nothing' half, on 0.90.12, with no mechanism. It does not mention the leading-'#' dependence, does not mention that the same query starts working after any non-'#' query has run in the process, and does not mention revisionCount at all. Both of those are the substance of the corrected finding."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'contentSize noteSize search'",
+      "gh search issues --repo TriliumNext/Trilium 'revisionCount'"
+    ]
+  },
+  "reevaluation": "The corrected statement stands and is filable; it is a stronger and more specific finding than the one originally recorded, and the part that matters most (search results that depend on process history) is entirely unreported. Source is unchanged from the tested commit and identical in release v0.105.0. #5432 has not moved and, read in full, only asserts that two size properties return nothing on a four-year-old version, with no root cause; a maintainer could reasonably fail to reproduce it today if they happen to run a non-'#' query first, which is exactly why the order-dependence needs saying out loud. Open PR #10633 does not touch either culprit region. The one scope note for the filer: 'noteSize' as such is not a PROP_MAPPING key at all, so a query on note.noteSize is F8 (whole-tree degradation), not this finding; keep the two apart or the report will be confusing.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "State: Triage",
+    "BE",
+    "search"
+  ],
+  "confidence": "high",
+  "notes": "PARTIAL handling: file the corrected two-part statement only. Do NOT repeat findings.md's 'orderBy / progressive search skipped' explanation (disproved: same orderBy, opposite answers, decided purely by the leading '#') and do NOT claim 'not even >= 0 works' (it does work without a leading '#'). Reproduction must specify a freshly restarted server, because a warm process hides half the bug. Cross-link #5432 and state plainly which part of it this explains. The two halves have independent fixes (honour dbLoadNeeded on the pure-expression path; initialise revisionCount so the increment guard can pass, or increment unconditionally) so consider whether the maintainers would prefer two issues."
+}

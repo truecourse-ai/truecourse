@@ -1,0 +1,45 @@
+{
+  "id": "F12",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "POST /api/notes/<parent>/children without a content key returns 500 for every note type, while a missing title is silently defaulted",
+  "statement": "createNewNote throws a bare Error(\"Note content must be set\") when params.content is null or undefined, which surfaces to the caller as HTTP 500 rather than a 400. Passing an empty string is accepted, so omitting the key and sending \"\" differ only in the status code the caller gets. The line directly above defaults a missing title instead of failing, so the same function treats one missing field as recoverable and the neighbouring one as fatal.",
+  "scenario": {
+    "id": "the-read-only-label-covers-more-note-types-than-labels-md-lists.web.1",
+    "failingStep": null,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/the-read-only-label-covers-more-note-types-than-labels-md-lists.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 8, and LARGER than findings.md stated: findings.md frames it as a book-type defect, but a plain text note without content 500s identically, so it is a defect of createNewNote for every type. Control: the same request with \"content\": \"\" returns 200. No board red; the finding surfaced while authoring this scenario, whose own step-13 failure on the board is an unrelated read-only assertion."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/services/notes.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/services/notes.ts#L223-L236",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/services/notes.ts#L223-L236",
+    "howDecided": "No commit touches services/notes.ts between the tested commit and head; the blob is identical at tested, head and v0.105.0. Re-read at head: createNewNote at :223, the title default at :229-231, and the bare `throw new Error(`Note content must be set`)` at :234 are all present and unchanged, with no ValidationError anywhere on that path."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'Note content must be set'"
+    ]
+  },
+  "reevaluation": "Stands, unreported, and with the widened scope the report established. The exact-symptom search returns nothing and the sweep of issues created since 2026-08-01 contains nothing related. Source is unchanged and shipped in v0.105.0. Severity is moderate rather than high: it is an API-shape defect, not data loss, and any caller that sends content=\"\" is unaffected. What makes it worth a maintainer's minute is the internal inconsistency, which is also the fix: throw a ValidationError so the caller gets 400, or default content the way title is defaulted one line above. Note for the filer that the report's generalisation (any type, not book) should be stated up front, because filing it as a book bug would understate it and invite a narrow fix.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "State: Triage",
+    "BE",
+    "Difficulty: Easy"
+  ],
+  "confidence": "high",
+  "notes": "File the generalised statement (every type), not findings.md's book-specific framing. Pair it in the filer's queue with F11: both are unguarded-input 500s on note routes and a maintainer may want them as one issue titled around 400-vs-500 on the notes API, but they are in different files with different fixes, so filing separately is defensible. Point at the title default two lines above as the in-repo precedent."
+}

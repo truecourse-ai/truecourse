@@ -1,0 +1,55 @@
+{
+  "id": "F5",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "The docs tell users to click a UI Builder button; the shipped control is named UI Editor and UI Builder appears nowhere",
+  "statement": "interface-builder/index.md tells the reader to click the UI Builder button to toggle between Edit and View mode. The application's own empty-state text says to click the UI Editor icon, and the control's accessible name is UI Editor. The string UI Builder does not appear anywhere in the rendered application.",
+  "scenario": {
+    "id": "the-ui-builder-button-arrives-with-the-configure-interface-permission.web.1",
+    "failingStep": 9,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/the-ui-builder-button-arrives-with-the-configure-interface-permission.web.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 11. The accessible names of every top-bar control were enumerated: UI Editor, highlight, setting, bell, question-circle, user. getByLabel('UI Builder') returns 0 and getByTitle('UI Editor') returns 1. The report corrects the findings.md cite for the v2 topbar from :378 to :381."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/docs/en/interface-builder/index.md",
+      "packages/core/client/src/schema-component/core/DesignableSwitch.tsx",
+      "packages/core/client-v2/src/flow/models/topbar/TopbarActionModel.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/docs/docs/en/interface-builder/index.md#L5",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/docs/docs/en/interface-builder/index.md#L5",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "nocobase/nocobase#7758",
+        "kind": "pr",
+        "stateAtReport": "open, touches the docs nav label only",
+        "stateToday": "open, not merged, base develop, last updated 2026-01-05",
+        "changedSinceReport": false,
+        "note": "A translation PR that includes the UI Builder nav label. It does not address the button-name drift and has been idle for over seven months."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase \"UI Builder\" in:title"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. None of the three files has a commit since the tested SHA: the doc sentence is verbatim at interface-builder/index.md:5 (and the page title is # UI Builder at :1), DesignableSwitch.tsx:44 still renders Tooltip title={t('UI Editor')}, and TopbarActionModel.tsx:381 still sets tooltip = tExpr('UI Editor'), confirming the report's :378 to :381 correction. The UI Builder title search returned five items, four of which are feature or docs PRs that predate the tested SHA (#10105 docs, #9526, #9331, #9254 API work) and the fifth is the already-cited #7758. Unreported.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "documentation"
+  ],
+  "confidence": "high",
+  "notes": "Use the corrected cite TopbarActionModel.tsx:381. The page's own H1 is UI Builder as well, so the fix is a naming decision across the page rather than one word, and a maintainer may prefer to rename the control instead of the doc; say the drift plainly and let them pick. Do not comment on #7758: it is a stale translation PR on develop and would bury the report. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

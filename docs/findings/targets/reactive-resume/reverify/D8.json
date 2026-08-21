@@ -1,0 +1,59 @@
+{
+  "id": "D8",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The set-password prompt is a single unlabelled field with no confirmation and no hint of the 6 to 64 character rule the server enforces",
+  "statement": "The sharing guide says to type a password of 6 to 64 characters and confirm it. The prompt that opens from Set Password contains exactly one input, no second field, no mention of the length rule, and the word Confirm appears nowhere on the page. The range is real and is enforced on the server, so a short password is rejected by the API rather than caught in the dialog; the only client-side guard is an empty-string check.",
+  "scenario": {
+    "id": "put-a-password-in-front-of-the-public-resume.web.1",
+    "failingStep": 16,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/put-a-password-in-front-of-the-public-resume.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "The whole alertdialog read: heading, one paragraph, one textbox, Cancel, Set Password. Password inputs in the prompt 1, all inputs in the prompt 1, page inputs 45 before to 46 after. Page text contains 'Confirm Password' false, contains 'Confirm' false, contains '6-64' false. Control: the prompt did open and did render a type=password input, so the absence is of the confirm field specifically. The report also noted that the single field is itself anonymous (ariaLabel null, label null), which is the F7 family."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/sharing.tsx",
+      "packages/api/src/dto/resume.ts",
+      "packages/api/src/features/resume/sharing.ts",
+      "docs/guides/sharing-your-resume-publicly.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/sharing.tsx#L55-L67",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/sharing.tsx#L55-L67",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: sharing.tsx:55-59 opens a single prompt() with one field of type 'password', and the only client-side validation is :67, `if (!password) return toast.add({ ... 'Password cannot be empty.' })`. New this pass, and it strengthens the finding: the 6 to 64 range the guide quotes is genuine and server-enforced, at packages/api/src/dto/resume.ts:75, `input: resumeSchema.pick({ id: true }).extend({ password: z.string().min(6).max(64) })`, and the API description at packages/api/src/features/resume/sharing.ts:37 states 'The password must be between 6 and 64 characters.' So the doc is accurate about the constraint and the dialog is the half that does not implement it. The doc sentence is unchanged at sharing-your-resume-publicly.mdx:134."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 2711,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/2711",
+        "state": "closed",
+        "title": "[Bug]  Public access password issue",
+        "createdAt": "2026-02-11",
+        "relation": "related",
+        "note": "Closed as completed, v5 era. Checked because the title is close; it concerns public-access password behaviour, not the set-password dialog's fields."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'confirm password public resume'",
+      "non-search sweep: 800-item local issue list grepped for password|confirm"
+    ]
+  },
+  "reevaluation": "Stands, and its framing improves on what the report had. Because dto/resume.ts:75 really does enforce min(6).max(64), this is not a documentation error to be edited away: the guide describes the intended flow and the dialog implements less than half of it, so a user typing a five-character password gets a server rejection instead of an inline hint, and a user who mistypes has no confirmation field to catch it on a value they cannot read back. That makes it a product gap with a clear ask (a second field, or at minimum surface the length rule in the prompt). Severity is low to moderate, but it sits on a credential that gates access to a published document. Unreported: one search plus the full local sweep found nothing.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: account"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda; both the dialog and the DTO are shared code, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Accounts & sharing'; version 5.2.7 (commit 3221afda). File the server-enforced range as the anchor: it turns 'the docs say confirm and there is no confirm' into 'the dialog omits validation the API already requires'. The anonymous password field belongs to F7 and should be mentioned in one line here at most, not made the headline."
+}

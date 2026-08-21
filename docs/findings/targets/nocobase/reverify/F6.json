@@ -1,0 +1,49 @@
+{
+  "id": "F6",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "New menu items are accessible by default is true only of the two seeded roles; API-minted roles get allowNewMenu false",
+  "statement": "The permissions manual states that new menu items are accessible by default and that the setting is enabled by default. It is enabled because the installer writes allowNewMenu: true literally into the admin and member seed records. The roles column has no defaultValue, and neither POST /api/roles:create nor the New role drawer supplies one, so every role a user creates starts with allowNewMenu: false.",
+  "scenario": {
+    "id": "new-menu-items-are-accessible-by-default.api.1",
+    "failingStep": 5,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/new-menu-items-are-accessible-by-default.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 8, both halves. roles:create returned allowNewMenu:false and roles:get confirmed it persisted. Control: admin and member are both true and root is false, a third data point the finding did not mention and which does not change it. The report corrects the findings.md cite for the column from :78-81 to :77-80."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/plugins/@nocobase/plugin-acl/src/server/collections/roles.ts",
+      "packages/plugins/@nocobase/plugin-acl/src/server/server.ts",
+      "packages/plugins/@nocobase/plugin-acl/src/client/NewRole.tsx",
+      "docs/docs/en/users-permissions/acl/permissions.md"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/plugins/@nocobase/plugin-acl/src/server/collections/roles.ts#L77-L80",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/plugins/@nocobase/plugin-acl/src/server/collections/roles.ts#L77-L80",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase allowNewMenu"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged and the report's cite correction is right. None of the three source files nor permissions.md has a commit since the tested SHA. At today's head the allowNewMenu column object is roles.ts:77-80 with no defaultValue, allowNewMenu: true is written literally at server.ts:451 (admin) and server.ts:458 (member), and NewRole.tsx:46-47 still returns only name and snippets. The doc sentence is verbatim at permissions.md:19. The allowNewMenu search returned two unrelated items (#9281 approval form rendering, #249 from 2022). Unreported.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "users & permissions",
+    "documentation"
+  ],
+  "confidence": "high",
+  "notes": "Use the corrected cite roles.ts:77-80, not findings.md's :78-81. The one-line fix (defaultValue: true on the column) is worth naming, but flag the compatibility question honestly: changing the default changes the meaning of every existing role row that is false because nothing set it. An equally valid resolution is a doc change, so offer both. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

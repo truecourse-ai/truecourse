@@ -1,0 +1,58 @@
+{
+  "id": "D24",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The page-format guides spell the option Free-Form; the app renders Free-form",
+  "statement": "Two guides name the third page format Free-Form with a capital F on both words, roughly twenty times between them, including in the step that tells the reader to pick it from the Format dropdown. The dropdown renders Free-form. The other two options, A4 and Letter, match the guides exactly, which is what makes this a claim about the spelling rather than about the control.",
+  "scenario": {
+    "id": "change-the-page-format.web.1",
+    "failingStep": 14,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/change-the-page-format.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "The Page section's Format combobox opened live rendered exactly ['A4','Letter','Free-form']; page text contains 'Free-Form' false, contains 'Free-form' true."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "docs/guides/selecting-page-format.mdx",
+      "docs/guides/fitting-content-on-a-page.mdx",
+      "apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/page.tsx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/page.tsx#L130",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/page.tsx#L130",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: page.tsx:130 is `{ value: \"free-form\", label: t`Free-form` }`, and page.tsx:122 even carries the translator context string 'Page Format (A4, Letter, Free-form)' in the same lower-case f. The doc spelling is unchanged and pervasive: selecting-page-format.mdx uses Free-Form at :3, :6, :32, :34, :42, :46, :57, :60, :80, :101, :102, :104, :108, :129, :133, :140, :141, :154, :160, and fitting-content-on-a-page.mdx at :25, :27, :29, :36, :39, :137."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 2991,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/2991",
+        "state": "closed",
+        "title": "[Bug] Free Form Page format is not available in the latest version (v5.1.0)",
+        "createdAt": "2026-05-08",
+        "relation": "related",
+        "note": "Closed as completed. About the option's availability after the v5.1.0 rendering migration, not its spelling. Recorded because a search for Free-Form surfaces it first and it is not a duplicate."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'Free-Form'",
+      "non-search sweep: 800-item local issue list grepped for free.?form|page format"
+    ]
+  },
+  "reevaluation": "Stands, and it is the smallest item in the batch: a one-token inconsistency across two guides. It is worth a line inside a combined documentation issue and is not worth an issue of its own; on its own a maintainer would reasonably read it as noise. Worth noting which side should move: the app string is the one users see and it is already lower-case in the translator context comment at page.tsx:122, so the guides are the side to change, which also avoids touching a translated string and every locale that has already translated it.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: localization"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda; docs and the client string are variant-neutral, so Cloud shows the same. Batch into the single '[Bug] Docs: ...' issue described in D13's notes and rank it last inside that issue. Do NOT file separately. Suggest fixing the guides rather than the app string, since changing the app string invalidates existing Crowdin translations."
+}

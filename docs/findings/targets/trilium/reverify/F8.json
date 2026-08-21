@@ -1,0 +1,57 @@
+{
+  "id": "F8",
+  "repo": "TriliumNext/Trilium",
+  "target": "trilium",
+  "checkedAt": "2026-08-20",
+  "title": "A search using an unrecognised note property silently returns every note in the tree, including root and _hidden",
+  "statement": "A query naming a note property that is not in PROP_MAPPING (for example note.ancestor.title, the singular spelling the manual itself uses in its negation example, or note.noteSize and note.ownedAttributeCount, both of which the manual lists as searchable) does not error and does not return nothing: it drops the whole expression and answers HTTP 200 with every note in the instance, root and _hidden included. The parser does record an \"Unrecognized note property\" error, but the /api/search route never reads it, so the caller sees a plausible-looking result list with no indication the query failed. The recognised plural spelling note.ancestors.title behaves perfectly on the same note, so one letter is the difference between one note and the entire tree.",
+  "scenario": {
+    "id": "boolean-expressions-group-and-negate-a-search.api.1",
+    "failingStep": 24,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-17-13Z_c8ab1d48/boolean-expressions-group-and-negate-a-search.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 2. Cold-server probe: '#tcprop8 AND not(note.ancestor.title = tcbox)' returned 25 ids including root and _hidden; note.noteSize and note.ownedAttributeCount behaved the same. Controls with the plural note.ancestors.title returned the correct single note. The report also corrects findings.md: PROP_MAPPING does NOT contain 'ancestors' (parse.ts handles it separately), and the parse.ts error is at line 249, not 250."
+  },
+  "defaultHead": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/trilium-core/src/services/search/expressions/property_comparison.ts",
+      "packages/trilium-core/src/services/search/services/parse.ts",
+      "packages/trilium-core/src/routes/api/search.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/TriliumNext/Trilium/blob/3a73bc352d9cfb5ad63134e3fb997214d5846208/packages/trilium-core/src/routes/api/search.ts#L105-L116",
+    "permalinkToday": "https://github.com/TriliumNext/Trilium/blob/86a9715b09b4fc523764eee3e2ba08b5f58ef12b/packages/trilium-core/src/routes/api/search.ts#L105-L116",
+    "howDecided": "git log 3a73bc35..origin/main on all three culprit files is empty; blob hashes are identical at tested, head and v0.105.0. Re-read at head: PROP_MAPPING (property_comparison.ts:11-37) still has no 'ancestor', 'ancestors', 'notesize' or 'ownedattributecount'; parse.ts:249 still calls searchContext.addError(`Unrecognized note property ...`); routes/api/search.ts:105-116 (`function search`) still returns findResultsWithQuery(...).map(sr => sr.noteId) and never reads searchContext.getError(), while the sibling quickSearch at :119-130 does return `error`. Open PR #10633 rewrites quickSearch in this same file but leaves `function search` untouched and does not touch property_comparison.ts at all."
+  },
+  "tracker": {
+    "citedItems": [
+      {
+        "ref": "TriliumNext/Trilium#5432",
+        "kind": "issue",
+        "stateAtReport": "open (partial: noteSize/contentSize only)",
+        "stateToday": "open",
+        "changedSinceReport": false,
+        "note": "Body is two screenshots and one sentence: note.noteSize and note.contentSize 'don't work' in Note Search, on 0.90.12. It reports empty results, not the match-everything degradation, and says nothing about note.ancestor, about the error being recorded and discarded, or about any other property. It covers a sliver of F8 at most."
+      }
+    ],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo TriliumNext/Trilium 'note property search returns all notes'",
+      "gh search issues --repo TriliumNext/Trilium 'note.ancestor'"
+    ]
+  },
+  "reevaluation": "Stands unchanged and unreported. Source is byte-identical to the tested commit and to shipped release v0.105.0, so a maintainer reproducing on the current release will see exactly what the report saw. Nothing moved upstream: #5432 is still open and still only claims that two size properties return nothing. Open PR #10633 edits routes/api/search.ts but only the quickSearch handler and the new details endpoint; the plain `search` handler that swallows the error is untouched, and property_comparison.ts is not in the PR at all, so #10633 does not fix this. If anything the severity reads higher now than at report time: the manual's own negation example at Search.md:130 spells the property in the singular, so a user copying documentation gets the whole tree back, and a not(...) filter that silently inverts into match-everything is a correctness trap for any script or saved search built on it.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "State: Triage",
+    "BE",
+    "search"
+  ],
+  "confidence": "high",
+  "notes": "File with bug_report.yml headers exactly as FILING.md lists them; TriliumNext Version should be 0.105.0 (culprit blobs are identical at that tag). Two independent halves worth stating separately so a maintainer can fix either: (1) the property name is unrecognised at all (note.ancestor singular, note.noteSize, note.ownedAttributeCount are documented but absent from PROP_MAPPING), (2) the recorded error is dropped by the /api/search route while quickSearch in the same file returns it. Cross-link #5432 and note it covers only the size properties. Do not claim PROP_MAPPING knows 'ancestors'; it does not, parse.ts:191 handles that separately."
+}

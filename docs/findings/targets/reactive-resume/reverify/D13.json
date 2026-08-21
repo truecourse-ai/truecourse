@@ -1,0 +1,68 @@
+{
+  "id": "D13",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The version-history guide says Cmd/Ctrl+Z undoes a restore, but a restore clears the undo stack and the app's own confirm dialog says so",
+  "statement": "The guide's restore bullet says that if you change your mind you can restore the pre-restore version or press Cmd/Ctrl+Z to undo the restore. The second half never works: restoring installs the server copy through replaceResumeFromServer, which treats any data difference as a rebase and empties the undo and redo stacks, so the dock's Undo is disabled and the keystroke is a no-op. The product already states the opposite of the guide in its own restore confirmation, which reads 'Earlier versions are kept; the builder's undo history is reset.'",
+  "scenario": {
+    "id": "restore-an-earlier-version.web.1",
+    "failingStep": 16,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/restore-an-earlier-version.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Control first: after an ordinary edit the dock's Undo is enabled (disabled false) and the page shows Saved. Probe: after restoring, Undo disabled true, and Cmd/Ctrl+Z (both modifiers sent) left the headline at the restored v1. The guide's other half IS honoured: 'Before restore' is a real row and the pre-restore state is restorable like any other, which is what narrows the red to the Cmd/Ctrl+Z clause."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "apps/web/src/features/resume/builder/draft.ts",
+      "apps/web/src/routes/builder/$resumeId/-components/version-history.tsx",
+      "docs/guides/undoing-changes-and-version-history.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/features/resume/builder/draft.ts#L367-L388",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/apps/web/src/features/resume/builder/draft.ts#L367-L388",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Mechanism pinned this pass, which the report had left implicit. version-history.tsx:42-57 is handleRestore: it confirms, calls restoreVersion, then calls replaceResumeFromServer(restored). draft.ts:367-388 is that action: `const isRebase = !current || !isEqual(current.data, resume.data); if (isRebase) resetHistoryRuntime();` followed by `state.undoStack = []; state.redoStack = []; state.canUndo = false; state.canRedo = false;`. A restore always changes data, so it is always a rebase. The corroborating string is version-history.tsx:46, the confirm dialog's own description: 'Earlier versions are kept; the builder's undo history is reset.' The doc sentence is unchanged at undoing-changes-and-version-history.mdx:79."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 3111,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3111",
+        "state": "closed",
+        "title": "[Feature] Resume version snapshots — save, name, and restore resume versions",
+        "createdAt": "2026-05-27",
+        "relation": "related",
+        "note": "Closed as completed. The request that produced the version-history feature these docs describe. Useful as the origin thread, not a duplicate."
+      },
+      {
+        "number": 3018,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3018",
+        "state": "closed",
+        "title": "[Bug] Undo/redo functionality stopped working after 5.1.x update",
+        "createdAt": "2026-05-09",
+        "relation": "related",
+        "note": "Closed as not planned. Undo broken generally after 5.1.x, not undo-after-restore. Checked because a triager may reach for it."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'undo after restore version'",
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'undo redo restore'",
+      "non-search sweep: 800-item local issue list grepped for undo|version history|restore|snapshot"
+    ]
+  },
+  "reevaluation": "Stands, and it is the cleanest documentation fix in the batch because the product itself already contains the correct sentence. The guide promises Cmd/Ctrl+Z will undo a restore while the confirm dialog the user must click through two seconds earlier tells them the undo history is reset. There is no ambiguity to argue about and no reproduction burden on the maintainer: the fix is to delete or rewrite one clause in undoing-changes-and-version-history.mdx:79 to match version-history.tsx:46. Confidence is high on both the behaviour and the mechanism, the latter now pinned to draft.ts:367-388 rather than inferred.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: builder"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda; the docs are variant-neutral and the store is client code, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Resume builder & data'; version 5.2.7 (commit 3221afda). FILING SHAPE: this is one of five documentation-side findings (D13, D14, D24, D25, D26/D27). The repo has accepted docs issues through the bug form before, for example #3055 '[Bug] Docs: remove reference link to Using Custom CSS', closed as completed. Batch all five into ONE '[Bug] Docs: ...' issue with a short item per guide sentence rather than filing five, and lead with this one and D26/D27, which are the two that will actively mislead a user."
+}

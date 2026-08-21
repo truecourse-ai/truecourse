@@ -1,0 +1,64 @@
+{
+  "id": "F3",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "The Downloads statistic is permanently zero: nothing in the codebase ever increments it",
+  "statement": "The sharing guide publishes Downloads as \"Number of times a visitor downloaded your resume as a PDF\" and the builder's Statistics panel ships the tile, its sparkline and a \"Last downloaded on\" caption. No code path ever writes the counter: resumeService.statistics.increment accepts a downloads flag and has working SQL for both the totals and the daily table, but the single call site in the repository passes views: true only, and `downloads: true` appears nowhere in apps/ or packages/. An anonymous visitor who presses Download PDF on the public page verifiably receives resume.pdf while downloads stays 0 and lastDownloadedAt stays null.",
+  "scenario": {
+    "id": "the-downloads-metric-counts-a-visitors-pdf.web.1",
+    "failingStep": 6,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/the-downloads-metric-counts-a-visitors-pdf.web.1/"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Confirmed and strengthened. The corpus had said \"whether the visitor's file ever arrives is not observable here\"; with acceptDownloads it is observable and it does arrive (a real Playwright download event for resume.pdf), so the visitor genuinely received the file the doc is counting. Control on the same request: views moved 0 to 1 and lastViewedAt went from null to a timestamp."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/api/src/features/resume/service.ts",
+      "packages/api/src/features/resume/statistics.ts",
+      "packages/db/src/schema/resume.ts",
+      "packages/api/src/features/resume/access-policy.ts",
+      "apps/web/src/routes/builder/$resumeId/-sidebar/right/sections/statistics.tsx",
+      "docs/guides/sharing-your-resume-publicly.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/api/src/features/resume/service.ts#L550",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/api/src/features/resume/service.ts#L550",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so no diff analysis was possible or needed; instead every culprit line was re-read in the working tree at that commit and quoted back with today's line numbers. permalinkTested and permalinkToday are therefore the same URL by construction. Re-read today: service.ts:550 is still `await resumeService.statistics.increment({ id: resume.id, views: true });` and is still the only non-test call site (`grep -rn \"statistics.increment\" apps/ packages/` returns service.ts:550 plus service.test.ts:887 and :895). `grep -rn \"downloads: true\" apps/ packages/` returns zero matches. service.ts:238-276 still carries the unreachable downloads SQL; statistics.ts:22 still publishes the field in the procedure output schema; statistics.tsx:64-68 still renders the tile, sparkline and \"Last downloaded on\" caption. New regression evidence found this pass: at tag v5.0.0 and v5.0.1 the increment DID exist, at src/integrations/orpc/router/printer.ts:27 (v5.0.0) and :22 (v5.0.1), as `statistics.increment({ id: input.id, downloads: true })`; that whole server-side printer path (router/printer.ts, services/printer.ts, routes/printer/$resumeId.tsx, utils/printer-token.ts) is absent from the tree at v5.1.0 and every tag since, which corroborates the corpus's \"likely cause is the v5.1.0 move of PDF generation to the client\". The exact removal commit was not pinned: a `git log -S` walk over the full history exceeds what this blobless clone can lazily fetch, and no repair was attempted. A full clone running `git log -S \"downloads: true\" --all` would settle the sha and PR number."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [
+      {
+        "number": 3360,
+        "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3360",
+        "state": "open",
+        "title": "Sharing: Add a toggle to disable download feature",
+        "createdAt": "2026-08-19",
+        "relation": "related",
+        "note": "Open enhancement in the same Sharing surface (labels: enhancement, status: needs triage, area: account, deployment: cloud). It asks to suppress downloads, not to count them, so it is not a duplicate; worth cross-linking because both touch the same panel."
+      }
+    ],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'downloads statistics counter'",
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'lastDownloadedAt'",
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'downloads always zero'",
+      "non-search sweep: gh api repos/.../issues?state=all over 8 pages, 800 issues+PRs back to 2026-01-23, grepped locally for download|statistic|analytic|view count|counter"
+    ]
+  },
+  "reevaluation": "The finding stands unchanged and is the strongest in this product. Head is the tested commit, so nothing could have moved, and every cite re-read exactly. Its scope grew slightly this pass: the regression is now anchored in git rather than inferred, since the increment demonstrably existed at v5.0.0 and v5.0.1 in the server-side printer router and that entire path is gone from v5.1.0 onward. Severity is moderate but the report is unusually clean: a shipped, visible, documented metric that is structurally incapable of moving, with a working SQL implementation and an access-policy comment (access-policy.ts:69-77) that still instructs call sites to gate downloads on a helper no call site uses. The tracker is clear: three searches and an 800-item local sweep back to January found nothing about the downloads counter, so the report's 'unreported' claim holds.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: account",
+    "v5"
+  ],
+  "confidence": "high",
+  "notes": "Deployment: verified against a SELF-HOSTED instance built from source at 3221afda (local Postgres, node apps/server/dist/index.mjs). The defect is in shared server code with no deployment branch, so rxresu.me Cloud is affected identically; the filer should still answer the form's required 'Product variant' dropdown with Self-hosted, since that is what was actually driven, and say in the body that the code path is deployment-independent. Bug form fields: Reactive Resume version = 5.2.7 (commit 3221afda on main, 16 commits after the v5.2.7 tag); Area = 'Accounts & sharing'. Do not claim the v5.1.0 PR number without checking it, since the removal commit was not pinned."
+}

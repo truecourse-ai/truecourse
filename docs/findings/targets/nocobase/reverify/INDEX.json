@@ -1,0 +1,130 @@
+{
+  "target": "nocobase",
+  "repo": "nocobase/nocobase",
+  "tested": "d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014",
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "checkedAt": "2026-08-20",
+  "findings": [
+    {
+      "id": "F13",
+      "title": "Updating a field the role's Edit grant does not cover returns 200 and silently discards the value",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Strongest in the batch: one hook, a mechanism the report proved from the response body itself, and the product's own 403 path showing it knows how to refuse. File first."
+    },
+    {
+      "id": "F11.1",
+      "title": "A data request to a destroyed collection answers 500 TypeError where the same API answers 404 for an unknown name",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Crisp API bug with a two-line fix and a control (404 for an unknown name) that makes the expected behaviour the product's own, not an opinion."
+    },
+    {
+      "id": "F11.2",
+      "title": "fields:create with a field interface and no data type answers 500 unsupported field type null",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Same family, equally crisp, and anchored to a doc sentence about interface defaults. Pairs naturally with F11.1 as the second API report."
+    },
+    {
+      "id": "UNION-REWRITE",
+      "title": "Under default role mode X-Role: __union__ is silently rewritten to the user's first role instead of being refused",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Clear inconsistency inside one middleware, with a mode-flip control that forecloses the obvious rebuttal. Slightly behind the 500s only because the fix is a design call."
+    },
+    {
+      "id": "F12",
+      "title": "A view:own role makes every union read against a collection with no createdById answer an opaque 403",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Well isolated (403 to 200 on the strength of one column) and it hits the shipped member role, but it carries two asks and more setup, so it reads longer."
+    },
+    {
+      "id": "F10",
+      "title": "The identifier rule the manual states is enforced only in the browser; the API creates tables and columns that break it",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "High confidence and a strong browser-side control; ranked below the others because the ask is a policy question (enforce server-side or soften the doc) rather than a bug fix."
+    },
+    {
+      "id": "F6",
+      "title": "New menu items are accessible by default is true only of the two seeded roles; API-minted roles get allowNewMenu false",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Doc plus code, verified both ways, but the fix has a backwards-compatibility question that a maintainer must decide, which slows it down."
+    },
+    {
+      "id": "F4",
+      "title": "union.md's mixed rows and columns example prints two rows per role under filters that admit three, in both directions",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "The cheapest correct finding here: verifiable by arithmetic on the page itself. Highest ratio of certainty to maintainer effort of any docs item."
+    },
+    {
+      "id": "F7",
+      "title": "routes/index.md lists four route types; the Add-route form offers a different four",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Verbatim drawer text against a verbatim doc list. Easy to accept, easy to fix."
+    },
+    {
+      "id": "F8",
+      "title": "The Create-collection menu offers six of the collection types the manuals enumerate and renames the database-view entry",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Certain but the narrowest ask, because #10009 made the removals deliberate; it must be filed as docs-not-updated, and #9930 may already overlap it."
+    },
+    {
+      "id": "F5",
+      "title": "The docs tell users to click a UI Builder button; the shipped control is named UI Editor and UI Builder appears nowhere",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Trivially checkable and trivially fixable, ranked here only because it is one word and the maintainer may prefer to rename the control instead."
+    },
+    {
+      "id": "F9",
+      "title": "routes/index.md promises desktop and mobile endpoints; the route manager has one",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Solid, but the honest claim is narrower than the finding title (the page has no mobile entry; whether mobile routes moved elsewhere was not established)."
+    },
+    {
+      "id": "SURFACE",
+      "title": "The Add-route drawer's Title input has no accessible name",
+      "route": "public issue",
+      "source": "unchanged",
+      "confidence": "medium",
+      "priorityNote": "Real and unambiguous at the DOM level, but its scope is probably systemic and unverified, so check two other forms before filing, and hold it back first if the batch needs trimming."
+    },
+    {
+      "id": "S1",
+      "title": "Gateway.run starts the CLI command with an unawaited promise, so the process's only awaited handle resolves mid-install",
+      "route": "skip: not a finding",
+      "source": "unchanged",
+      "confidence": "medium",
+      "priorityNote": "Do not file. The floating promise is real and unchanged, but fifteen installs produced fifteen complete databases, and an unobserved race is not what this pipeline files."
+    },
+    {
+      "id": "S2",
+      "title": "install -f drops everything and then refuses to reinstall",
+      "route": "skip: not a finding",
+      "source": "unchanged",
+      "confidence": "high",
+      "priorityNote": "Do not file, and do not re-open without a log line reading `app is installed`. Six probes, six correct reinstalls; the refusal branch is unreachable after the drop."
+    }
+  ],
+  "batchNotes": "Source drift is nil for this target: the only three commits between d8d8cb4b and 032a4f69 are two lerna version bumps (24a620efb8, 032a4f6913, touching lerna.json and packages/*/package.json only) and one changelog commit (ba00bcebc2). Every culprit file in all fifteen findings has zero commits since the tested SHA, and every culprit line was re-read at head and matches. Tracker drift is nil as well: a whole-repo sweep for anything created since 2026-08-19 returned five items and none duplicates anything here, and all seven cited issues/PRs (#7758, #10009, #10286, #9930, #9611, #9632, #7198) are exactly where the report left them. Two cite corrections this pass makes on top of the report's own two: the NoPermissionError catch is acl.ts:530-537, not 528-535 (F12), and the runAsCLI call sits at gateway/index.ts:708 inside the statement beginning at 707 (S1). Filing shape: twelve public issues in nocobase/nocobase plus SURFACE if its scope checks out, and two skips. Docs live in this same repo under docs/docs/en/, so there is no docs repo to route to, and every English page cited has translated siblings under docs/docs/<lang>/ that carry the same text. Six of the twelve are doc-drift (F4, F5, F7, F8, F9, and half of F6 and F10); if the maintainers push back on volume, F5, F7 and F9 could be consolidated into one issue about the interface-builder and routes pages describing controls the product does not have."
+}

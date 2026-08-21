@@ -1,0 +1,43 @@
+{
+  "id": "R4",
+  "repo": "rybbit-io/rybbit",
+  "target": "rybbit",
+  "checkedAt": "2026-08-20",
+  "title": "/api/track answers {\"success\":true} before the event is queryable, an undocumented consistency window of up to about one second",
+  "statement": "Pageviews are buffered in an in-process queue that flushes on a 1000 ms interval or at 5000 rows, and /api/track returns {\"success\":true} as soon as the event is queued, not when it is readable. Measured at random phase over 12 rounds, the gap between the ack and the first non-zero read ran 30 to 972 ms, median 555 ms, and 12 of 12 reads issued 10 to 24 ms after the 200 answered pageviews: 0. Nothing in the API or tracking documentation names a consistency window, so an integrator that tracks and then reads back reasonably concludes the event was lost.",
+  "scenario": {
+    "id": "no board scenario (it is why seven corpus scenarios carry a polled-GET precondition step)",
+    "failingStep": null,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T20-29-27Z_d9522689"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 5, confirmed and measured. 12 rounds, each a fresh site with a random 0 to 1000 ms delay to decorrelate the caller from the queue's own interval timer, one POST /api/track, then an immediate read followed by a 25 ms poll of GET /overview?past_minutes_start=5&past_minutes_end=0. Sorted ack-to-queryable: 30, 81, 184, 260, 300, 494, 555, 687, 702, 760, 939, 972 ms. The distribution is uniform across the 1000 ms interval, exactly as the mechanism predicts. The report adds a methodology note worth keeping: a fixed-phase caller beats against the queue's fixed-phase interval timer and understates the window about threefold, so this must be measured at random phase."
+  },
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "server/src/services/tracker/pageviewQueue.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/rybbit-io/rybbit/blob/613cd0153c77e4fcd32235dd051f44257368b6e8/server/src/services/tracker/pageviewQueue.ts#L15-L16",
+    "permalinkToday": "https://github.com/rybbit-io/rybbit/blob/64f8c4fb7f394bdfe9379717de8e6c21758b1ac2/server/src/services/tracker/pageviewQueue.ts#L15-L16",
+    "howDecided": "git log 613cd015..HEAD on pageviewQueue.ts returns nothing. At HEAD the constants are still PAGEVIEW_BATCH_SIZE = 5000 (:15) and PAGEVIEW_FLUSH_INTERVAL_MS = 1000 (:16), still wired as batchSize (:28) and interval (:29) on the PageviewQueue class, unchanged from the tested commit. No open PR touches the queue; PR #710 ('Re-queue failed pageview batch for retry on next interval', open since 2025-11-22) is about retry on failure, not about the ack contract, and would if anything widen the window."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo rybbit-io/rybbit --created '>=2026-08-15' --limit 60  (0 results)",
+      "gh api --paginate 'repos/rybbit-io/rybbit/issues?state=all&per_page=100' (not a search; 1044 items, 320 non-PR issues, numbers 1 to 1131 with 87 gaps) then a local regex scan of every issue title plus body",
+      "local regex over all 320 issues: /api/track.{0,60}(delay|not appear|missing)|event.{0,40}not (yet )?(appear|visible|queryable)|batch.{0,30}flush  ->  1 hit, #971, which is bot filtering in Android WebView and unrelated"
+    ]
+  },
+  "reevaluation": "The finding stands and the source is untouched, but this is the one finding in the set whose framing decides whether it lands. Asynchronous batching is a deliberate, sensible design for an analytics ingest path, and a maintainer can close 'the queue is async' as working as intended in one line. What is genuinely defensible is the contract, not the queue: {\"success\":true} is indistinguishable from durable-and-readable, no documentation names a window, and the practical proof that the window bites is that seven scenarios in our own corpus had to grow polled-GET preconditions to be stable at all. So file it as a documentation and API-contract gap with a measurement attached, not as a bug in the queue. Severity is low for a browser-tag user and real for anyone driving the API from a script or a test, which is a growing constituency given the MCP server the #980 reporter was using. Confidence is medium: the measurement is solid and reproducible, the judgement that upstream will treat it as a defect is not.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [],
+  "confidence": "medium",
+  "notes": "Report id F10, hand-verification report section 5. FRAME THIS AS DOCS, not as a queue bug, or it gets a one-line close. Title it around the undocumented window (for example 'POST /api/track acknowledges before the event is queryable; the consistency window is undocumented'). Ask for two concrete things: a sentence in docs/content/docs/api naming the window and its bound, and a note that a read-after-track needs a poll. Lead with the 12-round table because the uniform spread across exactly the 1000 ms flush interval is what proves the mechanism rather than a coincidence, and include the random-phase caveat so a maintainer who re-measures at fixed phase and gets a narrower spread does not conclude we exaggerated. Do not ask for synchronous inserts; that would be a bad change to an ingest path and asking for it would cost credibility. Consider pairing this with R3 in the same conversation only if a maintainer raises timing generally; otherwise keep them separate, since R3 is a genuine inconsistency between two surfaces and this is a contract gap. rybbit-io/rybbit applies NO labels: all 40 most recent issues carry an empty label array, and both templates declare labels: ''. Do not add a 'Suggested labels' line here; there is no vocabulary to copy and it would only add noise. The bug template is a classic markdown template with bold headers (**Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop**, **Smartphone**, **Additional context**), not a YAML form, and no template-enforcing workflow exists, so there is no auto-close bot to trip."
+}

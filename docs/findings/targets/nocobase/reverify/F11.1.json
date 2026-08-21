@@ -1,0 +1,45 @@
+{
+  "id": "F11.1",
+  "repo": "nocobase/nocobase",
+  "target": "nocobase",
+  "checkedAt": "2026-08-20",
+  "title": "A data request to a destroyed collection answers 500 TypeError where the same API answers 404 for an unknown name",
+  "statement": "After POST /api/collections:destroy removes a collection, GET /api/<name>:list answers 500 Cannot read properties of undefined (reading 'collection'). The resourcer route outlives the collection, so getRepositoryFromParams returns undefined and listWithPagination dereferences it. A name that never existed answers 404 on the same API, so 404 is the product's own answer for an absent collection.",
+  "scenario": {
+    "id": "collections-are-listed-filtered-and-deleted-with-their-tables.api.1",
+    "failingStep": 10,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T21-40-00Z_618f561c/collections-are-listed-filtered-and-deleted-with-their-tables.api.1"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 5. Full create, populate, list, destroy, list sequence reproduced; the table really is gone from postgres, so the destroy is correct and only the follow-up read is wrong. Control: GET /api/tcneverexisted:list is 404. The report ADDS both mechanism cites and matched them to the live server's own stack frame (actions/list.js:66:46)."
+  },
+  "defaultHead": "032a4f6913be912f57462d605cbd0bde97b599c6",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/core/actions/src/actions/list.ts",
+      "packages/core/actions/src/utils.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/nocobase/nocobase/blob/d8d8cb4b12cbe41b6c0b9412bbaa8aa294947014/packages/core/actions/src/actions/list.ts#L37",
+    "permalinkToday": "https://github.com/nocobase/nocobase/blob/032a4f6913be912f57462d605cbd0bde97b599c6/packages/core/actions/src/actions/list.ts#L37",
+    "howDecided": "git log d8d8cb4b..origin/main -- <culprit files> returned 0 commits for every file in this finding. The only three commits since the tested SHA are 24a620efb8 and 032a4f6913 (lerna version bumps, packages/*/package.json and lerna.json only) and ba00bcebc2 (CHANGELOG.md, CHANGELOG.zh-CN.md). The culprit lines were then re-read at origin/main and match the report's quotes."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "repo:nocobase/nocobase created:>=2026-08-19",
+      "repo:nocobase/nocobase \"reading 'collection'\""
+    ]
+  },
+  "reevaluation": "The finding stands unchanged. Neither actions/list.ts nor actions/utils.ts has a commit since the tested SHA. At today's head list.ts:37 still reads `let { simplePaginate } = repository.collection?.options || {};` and utils.ts:26-39 still ends at `return ctx.db.getRepository<Repository>(resourceName)` with no undefined guard, so the optional chain guards .options one level too deep while repository itself is the undefined one. The symptom search found eight older items containing the phrase reading 'collection' and none is this bug: they are upgrade crashes (#6176, #2547), a data-source block placeholder fix (#9699), a view sync error (#9075) and an export action (#8666). Unreported and unfixed.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug"
+  ],
+  "confidence": "high",
+  "notes": "The fix is two lines and worth proposing in the body: guard repository in listWithPagination, or better, have getRepositoryFromParams throw a 404 when the resource has no repository, which also fixes get, update and destroy on a destroyed collection (NOT verified for those actions by this pass, so do not claim them). The 404 control is what makes the report unarguable; lead with it. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+}

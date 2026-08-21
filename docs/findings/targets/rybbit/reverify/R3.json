@@ -1,0 +1,43 @@
+{
+  "id": "R3",
+  "repo": "rybbit-io/rybbit",
+  "target": "rybbit",
+  "checkedAt": "2026-08-20",
+  "title": "A date-range window's upper bound is a strict < against whole-second now(), so an event stamped in the current second is invisible to every date-range surface while realtime already shows it",
+  "statement": "The 'date' branch of the analytics time window bounds the range with `AND column < toTimeZone(now(), 'UTC')` whenever the end date is today. Both sides are whole seconds, so an event stamped at second N is excluded from a Today window for the remainder of second N. The pastMinutes branch four lines below uses an inclusive `<=`, so the realtime surface and every date-range surface disagree about the current second by construction: the dashboard renders 'No sessions found' while realtime shows the visitor.",
+  "scenario": {
+    "id": "no stable board scenario (the red roams across the four web date-range readers)",
+    "failingStep": null,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T20-29-27Z_d9522689"
+  },
+  "handVerified": {
+    "verdict": "CONFIRMED",
+    "note": "Report section 6, and this is the finding the hand-verification UPGRADED. The corpus had it as a roughly 1-in-20 board flake with a 100 to 250 ms gap. Hand-verification reproduced it on demand, 7 of 8 rounds, with gaps up to 934 ms, by parking the write just after a wall-clock second boundary and then polling both windows in parallel every 40 ms from the moment of the ack. Round 6, site 21: event stamped 42 ms into its second, past_minutes window returned the session at +84 ms while the identical date_range query returned {\"data\":[]} until +1018 ms, a 934 ms divergence. Round 3 is the negative control the mechanism predicts: its flush landed at +1102 ms, i.e. already in the NEXT second, so the strict bound had moved past the row and both windows agreed within 1 ms. Cite corrected: the case \"date\" block is :283-302, not :288-300."
+  },
+  "defaultHead": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "server/src/api/analytics/utils/timeWindow.ts"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/rybbit-io/rybbit/blob/613cd0153c77e4fcd32235dd051f44257368b6e8/server/src/api/analytics/utils/timeWindow.ts#L283-L308",
+    "permalinkToday": "https://github.com/rybbit-io/rybbit/blob/64f8c4fb7f394bdfe9379717de8e6c21758b1ac2/server/src/api/analytics/utils/timeWindow.ts#L283-L308",
+    "howDecided": "git log 613cd015..HEAD on timeWindow.ts returns nothing. Re-read at HEAD the whereClause case \"date\" block runs :283-301, the strict upper bound `AND ${column} < if(` is at :293, `toTimeZone(now(), 'UTC')` is at :295, and the inclusive pastMinutes bound `AND ${column} > ... AND ${column} <= ...` is at :307-308, all byte-identical to the tested commit. Two commits since the tested commit look adjacent by title and are not: PR #1130 (64f8c4fb, 'Fix period chart axes ending a bucket early, add past-minutes time navigation') is entirely client-side, moving a chart's x-axis max from the period's final millisecond to the start of its final bucket in client/src/lib/time.ts and client/src/components/charts/timeSeriesChartUtils.ts, and 3fca2772 adjusts date ranges for past-minutes mode in the GSC and PDF export helpers. Neither goes near the server SQL bound. The server-side time window unification (PR #1119, merge 9c66672b) is an ancestor of the tested commit, so this bound survived that refactor."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo rybbit-io/rybbit --created '>=2026-08-15' --limit 60  (0 results)",
+      "gh api --paginate 'repos/rybbit-io/rybbit/issues?state=all&per_page=100' (not a search; 1044 items, 320 non-PR issues, numbers 1 to 1131 with 87 gaps) then a local regex scan of every issue title plus body",
+      "local regex over all 320 issues: realtime.{0,60}(today|date range|dashboard)|today.{0,40}(empty|no sessions|missing)|no sessions found  ->  0 hits"
+    ]
+  },
+  "reevaluation": "The finding stands and its severity is higher than the corpus recorded. This is the one finding whose statement CHANGED during hand-verification and the JSON must carry the corrected version: it is not an intermittent flake. The deterministic trigger is that the event lands EARLY in its wall-clock second (the report's rounds were stamped 39 to 67 ms in), because the strict bound then has almost the whole remainder of that second in which to hide the row; park the write just after a second boundary and it reproduces at will, 7 of 8 rounds, with gaps up to 934 ms. The single round that did not diverge is the mechanism's own negative control, not noise: its flush slipped into the next second, by which point now() had already moved past the row. The 1-in-20 rate and 100 to 250 ms gap the corpus measured are what an unaligned caller sees, not the ceiling. Nothing has changed in source or on the tracker. The nearest neighbour is PR #1130, merged hours before this check, whose title mentions past-minutes and time bounds; a filer should pre-empt the obvious 'didn't we just fix that' by saying plainly that #1130 is client-side chart axis rendering and does not touch server/src/api/analytics/utils/timeWindow.ts.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [],
+  "confidence": "high",
+  "notes": "Report id F11, hand-verification report section 6. STATEMENT CORRECTION, load-bearing: file this as deterministic, never as a flake or an intermittent race. The reproducible trigger sentence is: park the track call just after a wall-clock second boundary so the event is stamped a few tens of milliseconds into its second, then poll GET /api/sites/<id>/sessions with start_date=end_date=today and the same endpoint with past_minutes_start=5&past_minutes_end=0 in parallel; the past-minutes window returns the session within about 100 ms while the date-range window returns {\"data\":[]} until the next second ticks. Give the round 6 numbers (stamped +42 ms, past_minutes visible at +84 ms, date_range visible at +1018 ms) and the round 3 negative control, because a maintainer who sees the control will trust the rest. The two-branch quote is the whole argument: strict < at timeWindow.ts:293 against toTimeZone(now(), 'UTC') at :295 versus inclusive <= at :307-308, four lines apart in one switch. Explicitly rule out PR #1130 in the body. Note this finding has no stable board scenario, so there is no single evidence transcript to point at; the eight-round table in the hand-verification report is the evidence. rybbit-io/rybbit applies NO labels: all 40 most recent issues carry an empty label array, and both templates declare labels: ''. Do not add a 'Suggested labels' line here; there is no vocabulary to copy and it would only add noise. The bug template is a classic markdown template with bold headers (**Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop**, **Smartphone**, **Additional context**), not a YAML form, and no template-enforcing workflow exists, so there is no auto-close bot to trip."
+}

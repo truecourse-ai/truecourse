@@ -1,0 +1,47 @@
+{
+  "id": "D14",
+  "repo": "AmruthPillai/Reactive-Resume",
+  "target": "reactive-resume",
+  "checkedAt": "2026-08-20",
+  "title": "A template switch is an ordinary debounced autosave, not a snapshot moment, and when it does snapshot the row is labelled Manual save",
+  "statement": "SHARPENED STATEMENT, FILE THIS ONE. The version-history guide lists 'when you switch templates' among the key moments Reactive Resume automatically snapshots at, and says each snapshot carries a label describing what triggered it. Neither holds. A template switch is not a distinct trigger at all: it goes down the ordinary resume-update path, which calls maybeSnapshotOnSave with the fixed label 'Manual save', and that helper returns without writing whenever the newest existing snapshot is younger than the two-minute SNAPSHOT_THROTTLE_MS. So whether a switch is recorded depends only on the clock: with no recent snapshot it writes one row, labelled Manual save and never naming a template; within two minutes of any previous save, which is the normal case once you have touched the builder at all, it writes nothing. The code comment on that branch says as much: the debounced milestone 'Covers template switches and typing.'",
+  "scenario": {
+    "id": "a-template-switch-takes-a-snapshot.web.1",
+    "failingStep": 15,
+    "evidencePath": ".truecourse/guard/evidence/2026-08-20T15-26-15Z_b65ea4ee/a-template-switch-takes-a-snapshot.web.1/"
+  },
+  "handVerified": {
+    "verdict": "PARTIAL",
+    "note": "The report downgraded the corpus's original wording and the correction is the whole point of this entry. Corpus original, which must NOT be filed: 'a template switch writes NO new version row (the save is throttled out of snapshotting)'. That is true only of the state the scenario is in. Probe A, a resume that already carried a snapshot: versions before ['AI edit'], template after the switch bronzor, page showed Saved, versions after ['AI edit'] with no new row; control, an explicit checkpointing write seconds later DID add a row. Probe B, a virgin resume with no snapshot: versions [] before, ['Manual save'] after switch 1, and still ['Manual save'] after switches 2 and 3 seconds later. So a switch can write a row, it is labelled Manual save, and the throttle swallows the rest."
+  },
+  "defaultHead": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+  "source": {
+    "status": "unchanged",
+    "culpritFiles": [
+      "packages/api/src/features/resume/service.ts",
+      "docs/guides/undoing-changes-and-version-history.mdx"
+    ],
+    "commitsOnCulpritFiles": [],
+    "fix": null,
+    "permalinkTested": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/api/src/features/resume/service.ts#L669-L678",
+    "permalinkToday": "https://github.com/AmruthPillai/Reactive-Resume/blob/3221afda9ddfb03d6cce87927b0ce47338b4cfa8/packages/api/src/features/resume/service.ts#L669-L678",
+    "howDecided": "Today's origin/main head, read with `gh api repos/AmruthPillai/Reactive-Resume/commits/main`, is 3221afda, the same commit the 2026-08-21 hand verification tested. Zero commits landed in between, so there was no diff to analyse; every culprit line was re-read in the working tree at that commit instead. permalinkTested and permalinkToday are the same URL by construction. Re-read today: service.ts:67-69 is the comment plus `const SNAPSHOT_THROTTLE_MS = 2 * 60 * 1000;`, with the comment stating that explicit milestones (import, AI edit, restore) always checkpoint; service.ts:107 is `if (latest && Date.now() - latest.createdAt.getTime() < SNAPSHOT_THROTTLE_MS) return;`; service.ts:669-678 is the update path's `if (input.data !== undefined && !input.skipAutoSnapshot) { await maybeSnapshotOnSave({ ..., label: \"Manual save\" }); }` under the comment 'Covers template switches and typing.' The doc sentences are unchanged at undoing-changes-and-version-history.mdx:44-47 (the key-moments list) and :57 (the label promise). The scenario yaml confirms the shape of the red: its step-10 note says the preparatory edit exists precisely so everything after it happens inside the throttle window, and its final assertion is deliberately only that a SECOND row exists, whatever its label."
+  },
+  "tracker": {
+    "citedItems": [],
+    "newItems": [],
+    "queries": [
+      "gh search issues --repo AmruthPillai/Reactive-Resume 'Manual save snapshot template'",
+      "non-search sweep: 800-item local issue list grepped for undo|version history|restore|snapshot"
+    ]
+  },
+  "reevaluation": "The drift is real and filable, but only in the sharpened form above, and the sharpening actually widens it rather than weakening it: instead of one wrong bullet there are two wrong sentences, since :57's promise that every snapshot carries 'a label describing what triggered it' is not honoured for this trigger either, the row always reading Manual save. The corpus's original claim would have been refuted in one minute by any maintainer who tried it on a fresh resume, which is exactly the sort of thing that discredits an otherwise sound batch, so the JSON statement field above carries the sharpened wording verbatim and the original is recorded only inside handVerified as the thing not to file. Confidence high: mechanism read at three separate lines and both probe branches driven.",
+  "routeSuggestion": "public issue",
+  "suggestedLabels": [
+    "bug",
+    "status: needs triage",
+    "area: builder"
+  ],
+  "confidence": "high",
+  "notes": "FILE THE SHARPENED STATEMENT, NOT THE ORIGINAL. The original ('a template switch writes NO new version row') is wrong on a resume with no recent snapshot and must not appear in any issue body. Deployment: verified against SELF-HOSTED at 3221afda; the throttle is server code with no deployment branch, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Resume builder & data'; version 5.2.7 (commit 3221afda). Batch with the other four documentation items into the single '[Bug] Docs: ...' issue described in D13's notes. The concrete ask is small: drop 'when you switch templates' from the key-moments list, or make the switch pass an explicit milestone label the way import, AI edit and restore already do."
+}
