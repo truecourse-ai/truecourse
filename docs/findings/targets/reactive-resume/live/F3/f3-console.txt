@@ -1,0 +1,15 @@
+F3 resume f3-82540078 (01a02257-4634-74f9-9e76-8bcc7784c47b) published at http://127.0.0.1:54490/guardowner/f3-82540078
+
+F3 stats BEFORE any visit:              {"isPublic":true,"views":0,"downloads":0,"lastViewedAt":null,"lastDownloadedAt":null}
+F3 visitor loaded public page; cookies: 0
+F3 stats AFTER visitor load (control):  {"isPublic":true,"views":1,"downloads":0,"lastViewedAt":"2026-08-21T03:22:21.178Z","lastDownloadedAt":null}
+F3 'Download PDF' buttons on the public page: 2
+F3 clicked Download PDF; page text now: f3-82540078 Game Developer | Unity & Unreal Engine Specialist Download PDF f3-82540078 Game Developer | Unity & Unreal Engine Specialist david.kowalski@email.com +1 (555) 291-4756 Seattle, WA davidkowalski.games github.c
+F3 browser download event:              download event: resume.pdf
+F3 downloaded file:                     241590 bytes, magic="%PDF-" -> /Users/musheghgevorgyan/repos/truecourse/docs/findings/targets/reactive-resume/live/F3/download-resume.pdf
+F3 console warnings/errors:             ["warning: Buffer is not defined"] (total 4)
+F3 stats AFTER visitor Download PDF:    {"isPublic":true,"views":1,"downloads":0,"lastViewedAt":"2026-08-21T03:22:21.178Z","lastDownloadedAt":null}
+F3 daily statistics:                    [{"date":"2026-07-23","views":0,"downloads":0},{"date":"2026-07-24","views":0,"downloads":0},{"date":"2026-07-25","views":0,"downloads":0},{"date":"2026-07-26","views":0,"downloads":0},{"date":"2026-07-27","views":0,"downloads":0},{"date":"2026-07-28","views":0,"downloads":0},{"date":"2026-07-29","v
+
+F3 VERDICT downloads / lastDownloadedAt: 0 / null
+F3 CONTROL views / lastViewedAt:         1 / "2026-08-21T03:22:21.178Z"

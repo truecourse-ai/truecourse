@@ -1,0 +1,71 @@
+{
+  "checkedAt": "2026-08-21T03:29:41.981Z",
+  "steps": [
+    {
+      "label": "sharing section aria snapshot (before)",
+      "snapshot": "- heading \"Toggle Sharing section\" [level=3]:\n  - button \"Toggle Sharing section\" [expanded]:\n    - img\n- img\n- heading \"Sharing\" [level=2]\n- region \"Toggle Sharing section\":\n  - switch \"Allow Public Access Anyone with the link can view and download the resume.\"\n  - text: Allow Public Access Anyone with the link can view and download the resume."
+    },
+    {
+      "label": "password prompt aria snapshot",
+      "snapshot": "- alertdialog \"Protect your resume from unauthorized access with a password\":\n  - heading \"Protect your resume from unauthorized access with a password\" [level=2]\n  - paragraph: Anyone visiting the resume's public URL must enter this password to access it.\n  - textbox\n  - button \"Cancel\"\n  - button \"Set Password\""
+    },
+    {
+      "label": "prompt measurements",
+      "measurements": {
+        "password inputs in the prompt": 1,
+        "ALL inputs in the prompt": 1,
+        "inputs on the whole page: before -> after": "45 -> 46",
+        "page text contains \"Confirm Password\"": false,
+        "page text contains \"Confirm\"": false,
+        "getByLabel('Confirm Password').count()": 0,
+        "page text contains \"6-64\"": false,
+        "page text contains \"6 to 64\"": false
+      },
+      "inputAttrs": [
+        {
+          "type": "password",
+          "placeholder": "",
+          "ariaLabel": null,
+          "minLength": 6,
+          "maxLength": 64,
+          "label": null
+        }
+      ]
+    },
+    {
+      "label": "dialog with a 3-char password",
+      "promptStillOpen": 0,
+      "hasPasswordAfter": false,
+      "toastLine": "Optionally, set a password so that only people with the password can view your resume through the link."
+    },
+    {
+      "label": "CONTROL API enforces the documented range",
+      "shortPassword": {
+        "status": 400,
+        "body": {
+          "defined": false,
+          "code": "BAD_REQUEST",
+          "status": 400,
+          "message": "Input validation failed",
+          "data": {
+            "issues": [
+              {
+                "origin": "string",
+                "code": "too_small",
+                "minimum": 6,
+                "inclusive": true,
+                "path": [
+                  "password"
+                ],
+                "message": "Too small: expected string to have >=6 characters"
+              }
+            ]
+          }
+        }
+      },
+      "validPassword": {
+        "status": 200
+      }
+    }
+  ]
+}

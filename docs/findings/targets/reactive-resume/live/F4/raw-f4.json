@@ -1,0 +1,74 @@
+{
+  "checkedAt": "2026-08-21T03:22:54.856Z",
+  "steps": [
+    {
+      "label": "stats BEFORE",
+      "response": {
+        "isPublic": true,
+        "views": 0,
+        "downloads": 0,
+        "lastViewedAt": null,
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "stats after visitor LOAD 1",
+      "url": "http://127.0.0.1:54490/guardowner/f4-82574999",
+      "response": {
+        "isPublic": true,
+        "views": 1,
+        "downloads": 0,
+        "lastViewedAt": "2026-08-21T03:22:56.040Z",
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "stats after visitor LOAD 2",
+      "url": "http://127.0.0.1:54490/guardowner/f4-82574999",
+      "response": {
+        "isPublic": true,
+        "views": 1,
+        "downloads": 0,
+        "lastViewedAt": "2026-08-21T03:22:56.040Z",
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "stats after visitor LOAD 3",
+      "url": "http://127.0.0.1:54490/guardowner/f4-82574999?tcverify=third-load",
+      "response": {
+        "isPublic": true,
+        "views": 1,
+        "downloads": 0,
+        "lastViewedAt": "2026-08-21T03:22:56.040Z",
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "CONTROL distinct client",
+      "userAgent": "TCVerify-DistinctVisitor/1.0",
+      "acceptLanguage": "de-DE",
+      "publicReadStatus": 200,
+      "response": {
+        "isPublic": true,
+        "views": 2,
+        "downloads": 0,
+        "lastViewedAt": "2026-08-21T03:23:04.910Z",
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "CONTROL third client",
+      "userAgent": "TCVerify-ThirdVisitor/1.0",
+      "acceptLanguage": "fr-FR",
+      "publicReadStatus": 200,
+      "response": {
+        "isPublic": true,
+        "views": 3,
+        "downloads": 0,
+        "lastViewedAt": "2026-08-21T03:23:05.538Z",
+        "lastDownloadedAt": null
+      }
+    }
+  ]
+}

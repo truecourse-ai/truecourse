@@ -1,0 +1,707 @@
+{
+  "base": "http://127.0.0.1:14100",
+  "at": "2026-08-21T03:06:08.644Z",
+  "finding": "F13",
+  "rows": {
+    "before": "1|a0|b0",
+    "afterProbe": "1|a1|b0",
+    "afterC1": "1|a1|b0",
+    "afterC2": "1|a1|b0"
+  },
+  "users": {
+    "tcflduser": 3,
+    "tcviewuser": 4
+  },
+  "transcript": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "admin@nocobase.com",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:17.577Z",
+              "updatedAt": "2026-08-21T03:05:17.577Z",
+              "mainDepartmentId": null,
+              "id": 1,
+              "nickname": "Super Admin",
+              "username": "nocobase",
+              "email": "admin@nocobase.com",
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": null,
+              "updatedById": null
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTU2Nywic2lnbkluVGltZSI6MTc4NzI4MTU2NzI4OSwiZXhwIjoxNzg3MzY3OTY3LCJqdGkiOiJjNTZkYjNhNC02NDJiLTQ1ZmQtYjcwOC1iMWI2MGM5YmI4MDUifQ.w-IdmZpsr-JdPjfAlqlXtu2P3aHR_lw2Yut7LyiuuJo"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "tcfld",
+          "title": "TC Fields",
+          "template": "general"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "inherit": false,
+            "hidden": false,
+            "key": "9n9kdy5bh48",
+            "name": "tcfld",
+            "title": "TC Fields",
+            "description": null,
+            "template": "general",
+            "createdAt": false,
+            "createdBy": false,
+            "updatedAt": false,
+            "updatedBy": false,
+            "filterTargetKey": "id",
+            "unavailableActions": []
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections/tcfld/fields:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "alpha",
+          "type": "string",
+          "interface": "input"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "key": "e42qip0mbkh",
+            "name": "alpha",
+            "type": "string",
+            "interface": "input",
+            "collectionName": "tcfld",
+            "description": null,
+            "parentKey": null,
+            "reverseKey": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections/tcfld/fields:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "beta",
+          "type": "string",
+          "interface": "input"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "key": "ch1avjyd0uz",
+            "name": "beta",
+            "type": "string",
+            "interface": "input",
+            "collectionName": "tcfld",
+            "description": null,
+            "parentKey": null,
+            "reverseKey": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/tcfld:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "alpha": "a0",
+          "beta": "b0"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "id": 1,
+            "alpha": "a0",
+            "beta": "b0"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/collections/tcfld/fields:list?paginate=false",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "key": "ch1avjyd0uz",
+              "name": "beta",
+              "type": "string",
+              "interface": "input",
+              "description": null,
+              "collectionName": "tcfld",
+              "parentKey": null,
+              "reverseKey": null
+            },
+            {
+              "key": "e42qip0mbkh",
+              "name": "alpha",
+              "type": "string",
+              "interface": "input",
+              "description": null,
+              "collectionName": "tcfld",
+              "parentKey": null,
+              "reverseKey": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "tcfldr",
+          "title": "TC Field Role",
+          "snippets": [
+            "!ui.*",
+            "!pm",
+            "!pm.*"
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "default": false,
+            "hidden": false,
+            "name": "tcfldr",
+            "title": "TC Field Role",
+            "snippets": [
+              "!pm",
+              "!pm.*",
+              "!ui.*"
+            ],
+            "updatedAt": "2026-08-21T03:06:07.535Z",
+            "createdAt": "2026-08-21T03:06:07.535Z",
+            "allowNewMenu": false,
+            "allowNewMobileMenu": false,
+            "allowNewAiEmployee": true,
+            "description": null,
+            "strategy": null,
+            "allowConfigure": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles/tcfldr/dataSourceResources:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "tcfld",
+          "dataSourceKey": "main",
+          "usingActionsConfig": true,
+          "actions": [
+            {
+              "name": "view",
+              "fields": [
+                "id",
+                "alpha",
+                "beta"
+              ]
+            },
+            {
+              "name": "update",
+              "fields": [
+                "alpha"
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "id": 382221821739008,
+            "roleName": "tcfldr",
+            "name": "tcfld",
+            "dataSourceKey": "main",
+            "usingActionsConfig": true,
+            "updatedAt": "2026-08-21T03:06:07.568Z",
+            "createdAt": "2026-08-21T03:06:07.568Z",
+            "actions": [
+              {
+                "id": 382221821739009,
+                "name": "view",
+                "fields": [
+                  "alpha",
+                  "beta",
+                  "id"
+                ],
+                "rolesResourceId": 382221821739008,
+                "updatedAt": "2026-08-21T03:06:07.572Z",
+                "createdAt": "2026-08-21T03:06:07.572Z",
+                "scopeId": null
+              },
+              {
+                "id": 382221821739010,
+                "name": "update",
+                "fields": [
+                  "alpha"
+                ],
+                "rolesResourceId": 382221821739008,
+                "updatedAt": "2026-08-21T03:06:07.574Z",
+                "createdAt": "2026-08-21T03:06:07.574Z",
+                "scopeId": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "tcvieworr",
+          "title": "TC View Only Role",
+          "snippets": [
+            "!ui.*",
+            "!pm",
+            "!pm.*"
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "default": false,
+            "hidden": false,
+            "name": "tcvieworr",
+            "title": "TC View Only Role",
+            "snippets": [
+              "!pm",
+              "!pm.*",
+              "!ui.*"
+            ],
+            "updatedAt": "2026-08-21T03:06:07.590Z",
+            "createdAt": "2026-08-21T03:06:07.590Z",
+            "allowNewMenu": false,
+            "allowNewMobileMenu": false,
+            "allowNewAiEmployee": true,
+            "description": null,
+            "strategy": null,
+            "allowConfigure": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles/tcvieworr/dataSourceResources:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "tcfld",
+          "dataSourceKey": "main",
+          "usingActionsConfig": true,
+          "actions": [
+            {
+              "name": "view",
+              "fields": [
+                "id",
+                "alpha",
+                "beta"
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "id": 382221821739011,
+            "roleName": "tcvieworr",
+            "name": "tcfld",
+            "dataSourceKey": "main",
+            "usingActionsConfig": true,
+            "updatedAt": "2026-08-21T03:06:07.617Z",
+            "createdAt": "2026-08-21T03:06:07.617Z",
+            "actions": [
+              {
+                "id": 382221821739012,
+                "name": "view",
+                "fields": [
+                  "alpha",
+                  "beta",
+                  "id"
+                ],
+                "rolesResourceId": 382221821739011,
+                "updatedAt": "2026-08-21T03:06:07.620Z",
+                "createdAt": "2026-08-21T03:06:07.620Z",
+                "scopeId": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/users:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "username": "tcflduser",
+          "password": "TcGuard1!",
+          "nickname": "TC Field User",
+          "roles": [
+            "tcfldr"
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "createdAt": "2026-08-21T03:06:07.630Z",
+            "updatedAt": "2026-08-21T03:06:07.630Z",
+            "systemSettings": {},
+            "id": 3,
+            "username": "tcflduser",
+            "nickname": "TC Field User",
+            "createdById": 1,
+            "updatedById": 1,
+            "mainDepartmentId": null,
+            "email": null,
+            "phone": null,
+            "passwordChangeTz": null,
+            "appLang": null,
+            "roles": [
+              {
+                "createdAt": "2026-08-21T03:06:07.535Z",
+                "updatedAt": "2026-08-21T03:06:07.535Z",
+                "name": "tcfldr",
+                "title": "TC Field Role",
+                "description": null,
+                "strategy": null,
+                "default": false,
+                "hidden": false,
+                "allowConfigure": null,
+                "allowNewMenu": false,
+                "snippets": [
+                  "!pm",
+                  "!pm.*",
+                  "!ui.*"
+                ],
+                "allowNewMobileMenu": false,
+                "allowNewAiEmployee": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/users:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "username": "tcviewuser",
+          "password": "TcGuard1!",
+          "nickname": "TC View User",
+          "roles": [
+            "tcvieworr"
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "createdAt": "2026-08-21T03:06:07.690Z",
+            "updatedAt": "2026-08-21T03:06:07.690Z",
+            "systemSettings": {},
+            "id": 4,
+            "username": "tcviewuser",
+            "nickname": "TC View User",
+            "createdById": 1,
+            "updatedById": 1,
+            "mainDepartmentId": null,
+            "email": null,
+            "phone": null,
+            "passwordChangeTz": null,
+            "appLang": null,
+            "roles": [
+              {
+                "createdAt": "2026-08-21T03:06:07.590Z",
+                "updatedAt": "2026-08-21T03:06:07.590Z",
+                "name": "tcvieworr",
+                "title": "TC View Only Role",
+                "description": null,
+                "strategy": null,
+                "default": false,
+                "hidden": false,
+                "allowConfigure": null,
+                "allowNewMenu": false,
+                "snippets": [
+                  "!pm",
+                  "!pm.*",
+                  "!ui.*"
+                ],
+                "allowNewMobileMenu": false,
+                "allowNewAiEmployee": true
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcflduser",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:06:07.630Z",
+              "updatedAt": "2026-08-21T03:06:07.630Z",
+              "mainDepartmentId": null,
+              "id": 3,
+              "nickname": "TC Field User",
+              "username": "tcflduser",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjMsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTU2Nywic2lnbkluVGltZSI6MTc4NzI4MTU2Nzk0NywiZXhwIjoxNzg3MzY3OTY3LCJqdGkiOiJiNzM2YTQzYS1mZGZjLTRiNzAtYTZhNy1kMTk1ZGI5YmQwZTQifQ.NhmQcvCPx41rK08zUTNZNFj8-d0Ho3SlrCw0o5G24bI"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcviewuser",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:06:07.690Z",
+              "updatedAt": "2026-08-21T03:06:07.690Z",
+              "mainDepartmentId": null,
+              "id": 4,
+              "nickname": "TC View User",
+              "username": "tcviewuser",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjQsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTU2Nywic2lnbkluVGltZSI6MTc4NzI4MTU2Nzk5OCwiZXhwIjoxNzg3MzY3OTY3LCJqdGkiOiIxNTk2YWYzMi0yMjkxLTRhMjMtYTBhMi04ZTBlNDE3MmI4YTIifQ.FrH1a9DcaUo_CNXngo962cmh3JTBdM-S4OROuwOVH6M"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/tcfld:update?filterByTk=1",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcfldr",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "alpha": "a1",
+          "beta": "b1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "id": 1,
+              "alpha": "a1",
+              "beta": "b0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/tcfld:update?filterByTk=1",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcfldr",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "beta": "b2"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "id": 1,
+              "alpha": "a1",
+              "beta": "b0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/tcfld:update?filterByTk=1",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcvieworr",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "alpha": "zzz"
+        }
+      },
+      "response": {
+        "status": 403,
+        "statusText": "Forbidden",
+        "body": {
+          "errors": [
+            {
+              "message": "No permissions"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

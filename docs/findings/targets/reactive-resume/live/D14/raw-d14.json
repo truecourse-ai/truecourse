@@ -1,0 +1,24 @@
+{
+  "checkedAt": "2026-08-21T03:34:12.167Z",
+  "steps": [
+    {
+      "label": "PROBE B virgin resume",
+      "resumeId": "01a02262-2817-702f-b69b-5cadd3d230c3",
+      "versionsAfterSwitch1": [
+        "Manual save"
+      ],
+      "versionsAfterSwitch3": [
+        "Manual save"
+      ],
+      "finalTemplate": "gengar"
+    },
+    {
+      "label": "PROBE A resume with an existing snapshot",
+      "resumeId": "01a02262-8ee9-7774-a2dd-db49f8ea032b",
+      "versionsAfterSwitch": [
+        "AI edit",
+        "AI edit"
+      ]
+    }
+  ]
+}

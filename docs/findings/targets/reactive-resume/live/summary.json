@@ -1,0 +1,71 @@
+{
+  "target": "reactive-resume",
+  "build": {
+    "sha": "3221afda9ddfb03d6cce87927b0ce47338b4cfa8",
+    "date": "2026-08-20",
+    "branch": "main"
+  },
+  "checkedAt": "2026-08-20",
+  "findings": {
+    "F3": {
+      "verdict": "still reproduces",
+      "evidence": "live/F3/repro.md, live/F3/raw-f3.json, live/F3/download-resume.pdf",
+      "note": "End to end. An anonymous visitor (cookies: 0) pressed Download PDF on the public page and a real Playwright download event fired for resume.pdf — saved, 241590 bytes, magic %PDF-. downloads stayed 0 and lastDownloadedAt stayed null. Control in the same session: views 0 to 1 and lastViewedAt null to 2026-08-21T03:22:21.178Z, so the statistics path demonstrably works and only the download half is dead. grep -rn 'downloads: true' apps/ packages/ returns 0 matches; the sole statistics.increment call site is service.ts:550 passing views: true."
+    },
+    "F4": {
+      "verdict": "still reproduces",
+      "evidence": "live/F4/repro.md, live/F4/raw-f4.json",
+      "note": "Three loads by one browser context gave views=1 with lastViewedAt frozen at the first load. Control: two clients with distinct user-agent + accept-language fingerprints took it to 2 then 3. Sequence 0-1-1-1-2-3. WINDOW_MS = 60*60*1000 at view-dedup.ts:6. On this direct-to-loopback run the key was the fingerprint; on a proxied deploy clientKeyFromHeaders prefers the trusted-proxy IP, which collapses every visitor into one hourly bucket."
+    },
+    "F7": {
+      "verdict": "still reproduces",
+      "evidence": "live/F7/repro.md, live/F7/raw-f7.json",
+      "note": "label 'Name' -> INPUT, 'Slug' -> FIELDSET, 'Tags' -> DIV, 'Sidebar Width' -> DIV[role=group]; the slider is an INPUT with aria-label and aria-labelledby both null. The corrected counts hold: 15 spinbuttons of which exactly 2 are anonymous (Picture Size, Sidebar Width numeric), not 15 anonymous. Second family reproduced: labels 'Size' and 'Website' point at ids no element carries (target=NOTHING). Duplicate DOM id reproduced: _r_jv_-form-item appears twice from two FormControls in one FormItem. Controls: getByLabel('Name')=1, getByRole('spinbutton',{name:'Font Size'})=2."
+    },
+    "F8": {
+      "verdict": "still reproduces",
+      "evidence": "live/F8/repro.md, live/F8/raw-f8.json, live/F8/dashboard-control-strip.png",
+      "note": "Two comboboxes on the dashboard, both with ariaLabel null and ariaLabelledby null; getByRole('combobox',{name:/sort/i}) and {name:/filter/i} both 0; both visible <label>s have htmlFor null. Control: getByRole('textbox',{name:'Search resumes...'}) = 1."
+    },
+    "F9": {
+      "verdict": "still reproduces",
+      "evidence": "live/F9/repro.md, live/F9/raw-f9-requests.json",
+      "note": "A class, not a field. All four documented bounds coerce silently with a 200 and no diagnostic, each driven off a non-default value first: template 'tcverify-no-such-template' -> onyx (off chikorita); page.format 'a3' -> a4 (off letter); page.marginX 500 -> 14 (off 40); typography.body.fontSize 999 -> 11 (off 20). Controls: an in-enum template persists, and the bounds without a .catch() 400 correctly and leave state untouched — the full 15-bound sweep split 3 x 200 / 12 x 4xx. /basics/email accepting 'not-an-email-address' is correctly NOT a bug (data.ts:89 is a plain z.string()). MEASURED .catch( count in packages/schema/src/resume/data.ts = 34 on 34 distinct lines, confirming the re-verify and not the report's 30."
+    },
+    "D2": {
+      "verdict": "still reproduces",
+      "evidence": "live/D2/repro.md, live/D2/raw-d2.json",
+      "note": "Polled every ~25 ms: the format buttons read disabled: false at every sample for the ~290 ms they survive, the dialog never carried a spinner, by 316 ms no format button was on the page, and the dialog was absent when the file arrived. Control: all four buttons present and enabled before the press. This machine produced the PDF in 171 ms rather than the original 823 ms, which changes the arithmetic and not the finding. Cite correction confirmed: the isExporting guards are :141, :159 and :177; the JSON button near :196 is guarded by jsonDisabled."
+    },
+    "D8": {
+      "verdict": "still reproduces",
+      "evidence": "live/D8/repro.md, live/D8/raw-d8.json",
+      "note": "The whole alertdialog is heading, one paragraph, one textbox, Cancel, Set Password. Password inputs 1, all inputs 1, page inputs 45 -> 46. Page text contains 'Confirm' false and '6-64' false. Control: the API really enforces the documented range at dto/resume.ts:75 — PUT password 'abc' -> 400 too_small minimum 6, 'sixchars' -> 200. Stronger this pass: the field carries HTML minLength=6/maxLength=64 but they are unenforced in a prompt — typing 'abc' and pressing Set Password closed the dialog, left hasPassword false and showed no explanation."
+    },
+    "D13": {
+      "verdict": "still reproduces",
+      "evidence": "live/D13/repro.md, live/D13/raw-d13.json",
+      "note": "Control first: after an ordinary edit Undo is enabled (disabled false) and the page shows Saved. Probe: after the restore Undo is disabled (true) and Cmd/Ctrl+Z, both modifiers sent, left the headline at the restored v1. The app's own confirm dialog was captured verbatim and contradicts the guide: 'Earlier versions are kept; the builder's undo history is reset.' (version-history.tsx:46). The guide's other half is honoured — versions read ['Restored version','Before restore','AI edit']."
+    },
+    "D14": {
+      "verdict": "still reproduces",
+      "evidence": "live/D14/repro.md, live/D14/raw-d14.json",
+      "note": "Sharpened statement only, and it holds exactly. Probe B, a virgin resume: versions [] before; switch 1 through the real Template Gallery wrote ONE row labelled 'Manual save' that never names a template; switches 2 and 3 seconds later persisted the template but wrote nothing, swallowed by the two-minute SNAPSHOT_THROTTLE_MS. Probe A, a resume already carrying an 'AI edit' snapshot: the switch persisted and the list did not grow; control, an explicit checkpointing write seconds later did add a row. The corpus's original 'a template switch writes NO new version row' must not be filed."
+    },
+    "D24": {
+      "verdict": "still reproduces",
+      "evidence": "live/D24/repro.md, live/D24/raw-d24.json, live/D24/format-options.png",
+      "note": "The Format combobox rendered exactly ['A4','Letter','Free-form']; page text contains 'Free-Form' false and 'Free-form' true. Docs use the capital-F spelling 28 times across selecting-page-format.mdx and fitting-content-on-a-page.mdx. Control: A4 and Letter match the guides exactly, so the claim is about the third option's spelling."
+    },
+    "D25": {
+      "verdict": "still reproduces",
+      "evidence": "live/D25/repro.md, live/D25/raw-d25.json, live/D25/template-gallery-modal.png",
+      "note": "The Template section holds exactly one preview — the template already in use — plus a heading, a description and four tag chips. getByRole('img',{name:'Chikorita'}) in the section is 0 and the section text never says 'gallery'. Control: clicking that single preview opens a modal headed 'Template Gallery' carrying all fifteen templates by name, so the gallery is real and reachable but undocumented."
+    },
+    "D26-D27": {
+      "verdict": "still reproduces",
+      "evidence": "live/D26-D27/repro.md, live/D26-D27/raw-d26-d27.json",
+      "note": "No Hidden switch exists before or after the click: 8 switches on the page, named (resolving aria-labelledby as well as aria-label) Full Width x4, Allow Public Access, Hide Link Underline, Hide Icons, Hide Section Icons; getByRole('switch',{name:'Hidden'}) 0 throughout and the page text never contains the word. Clicking the section heading opened nothing — 0 dialogs, 0 menus, no lines appeared. Refinement on the collapse detail: clicking the <h2> heading does nothing at all (aria-expanded true to true), while the separate 'Toggle Experience section' chevron is what collapses it and removes exactly ['Cascade Studios','Senior Game Developer','Add a new experience']. Control: Section options -> Columns -> 2 Columns persists as sections.experience.columns = 2, and the hide affordance exists as a menu item named Hide."
+    }
+  }
+}

@@ -1,0 +1,45 @@
+=== F9 · PROBES: four documented bounds, each moved OFF its default first ===
+
+set  /metadata/template = "chikorita"                 -> 200  stored="chikorita"
+PROBE /metadata/template = "tcverify-no-such-template" -> 200  stored="onyx"
+      response body carried any diagnostic?           no
+      full 200 body: {"id":"01a02256-3989-76db-a9f3-1db04ca8224b","name":"f9-82471292","slug":"f9-82471292","tags":[],"isPublic":false,"isLocked":false,"data":{"picture":{"hidden":false,"url":"/photos/sample-picture.jpg",
+
+set  /metadata/page/format = "letter"                 -> 200  stored="letter"
+PROBE /metadata/page/format = "a3"                    -> 200  stored="a4"   (doc enum: a4, letter, free-form)
+
+set  /metadata/page/marginX = 40                      -> 200  stored=40
+PROBE /metadata/page/marginX = 500                    -> 200  stored=14   (doc: min 0, max 100)
+
+set  /metadata/typography/body/fontSize = 20          -> 200  stored=20
+PROBE /metadata/typography/body/fontSize = 999        -> 200  stored=11   (doc: min 6, max 24)
+
+=== F9 · CONTROL 1: an in-enum value persists (the write path works) ===
+CONTROL /metadata/template = "bronzor"                -> 200  stored="bronzor"
+
+=== F9 · CONTROL 2: bounds WITHOUT a .catch() 400 correctly and preserve state ===
+set  /metadata/page/gapX = 7                          -> 200  stored=7
+CONTROL /metadata/page/gapX = -5                      -> 400  stored=7  <- unchanged
+CONTROL 400 body: {"defined":true,"code":"INVALID_PATCH_OPERATIONS","status":400,"message":"Patch produced invalid resume data: [\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": true,\n    \"path\": [\n      \"metadata\",\n      \"page\",\n      \"gapX\"\n    ],\n    \"message\": 
+
+=== F9 · the full 15-bound sweep the corpus scenario asserts ===
+/metadata/template                     replace  200  before="bronzor"    after="onyx"       200 SILENTLY REWRITTEN
+/metadata/page/format                  replace  200  before="a4"         after="a4"         200 no-op
+/metadata/page/marginX                 replace  200  before=14           after=14           200 no-op
+/metadata/page/gapX                    replace  400  before=7            after=7            400 unchanged
+/picture/size                          replace  400  before=100          after=100          400 unchanged
+/picture/rotation                      replace  400  before=0            after=0            400 unchanged
+/picture/aspectRatio                   replace  400  before=1            after=1            400 unchanged
+/picture/borderRadius                  replace  400  before=0            after=0            400 unchanged
+/metadata/design/level/type            replace  400  before="icon"       after="icon"       400 unchanged
+/metadata/stylesheet/mode              replace  400  before="semantic"   after="semantic"   400 unchanged
+/metadata/typography/body/fontFamily   remove   400  before="IBM Plex Serif" after="IBM Plex Serif" 400 unchanged
+/basics                                remove   400  before={"name":"f9-82471292","headline":"Game Developer | Unity & Unreal Engine Specialist","email":"david.kowalski@email.com","phone":"+1 (555) 291-4756","location":"Seattle, WA","website":{"url":"https://davidkowalski.games","label":"davidkowalski.games"},"customFields":[{"id":"019bef5a-0477-77e0-968b-5d0e2ecb34e3","icon":"github-logo","text":"github.com/dkowalski-dev","link":"https://github.com/dkowalski-dev"},{"id":"019bef5a-93e4-7746-ad39-3a132360f823","icon":"game-controller","text":"itch.io/dkowalski","link":"https://itch.io/dkowalski"}]} after={"name":"f9-82471292","headline":"Game Developer | Unity & Unreal Engine Specialist","email":"david.kowalski@email.com","phone":"+1 (555) 291-4756","location":"Seattle, WA","website":{"url":"https://davidkowalski.games","label":"davidkowalski.games"},"customFields":[{"id":"019bef5a-0477-77e0-968b-5d0e2ecb34e3","icon":"github-logo","text":"github.com/dkowalski-dev","link":"https://github.com/dkowalski-dev"},{"id":"019bef5a-93e4-7746-ad39-3a132360f823","icon":"game-controller","text":"itch.io/dkowalski","link":"https://itch.io/dkowalski"}]} 400 unchanged
+/metadata/typography                   remove   400  before={"body":{"fontFamily":"IBM Plex Serif","fontWeights":["400","600"],"fontSize":11,"lineHeight":1.5},"heading":{"fontFamily":"Fira Sans Condensed","fontWeights":["500"],"fontSize":12,"lineHeight":1.5}} after={"body":{"fontFamily":"IBM Plex Serif","fontWeights":["400","600"],"fontSize":11,"lineHeight":1.5},"heading":{"fontFamily":"Fira Sans Condensed","fontWeights":["500"],"fontSize":12,"lineHeight":1.5}} 400 unchanged
+/picture/shadowWidth                   remove   400  before=0            after=0            400 unchanged
+/basics/email                          remove   400  before="david.kowalski@email.com" after="david.kowalski@email.com" 400 unchanged
+
+200s: 3   4xx: 12   (of 15 bounds driven)
+
+=== F9 · the non-bug the report flags: /basics/email is a plain z.string() ===
+/basics/email = "not-an-email-address"                -> 200  stored="not-an-email-address"  (data.ts:89 is z.string(); the doc publishes a plain string -> NOT a bug)

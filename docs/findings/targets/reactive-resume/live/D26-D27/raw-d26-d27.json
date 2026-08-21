@@ -1,0 +1,64 @@
+{
+  "checkedAt": "2026-08-21T03:36:48.267Z",
+  "steps": [
+    {
+      "label": "experience section BEFORE",
+      "snapshot": "- heading \"Toggle Experience section\" [level=3]:\n  - button \"Toggle Experience section\" [expanded]:\n    - img\n- button \"Pick an icon\": \n- heading \"Experience\" [level=2]\n- button \"Section options\":\n  - img\n- region \"Toggle Experience section\":\n  - list:\n    - listitem:\n      - img\n      - button \"Cascade Studios Senior Game Developer\"\n      - button \"Options for Cascade Studios\":\n        - img\n  - button \"Add a new experience\":\n    - img\n    - text: Add a new experience"
+    },
+    {
+      "label": "heading click",
+      "before": {
+        "switches": 8,
+        "names": [
+          "Full Width",
+          "Full Width",
+          "Full Width",
+          "Full Width",
+          "Allow Public AccessAnyone with the link can view and download the resume.",
+          "Hide Link Underline",
+          "Hide Icons",
+          "Hide Section Icons"
+        ],
+        "hiddenSwitch": 0,
+        "textHasHidden": false
+      },
+      "after": {
+        "switches": 8,
+        "hiddenSwitch": 0,
+        "dialogs": 0,
+        "menus": 0,
+        "appeared": [],
+        "disappeared": [],
+        "sectionExpandedBefore": "true",
+        "sectionExpandedAfter": "true",
+        "sectionLinesDisappeared": [],
+        "toggleButtonExpandedAfter": "false",
+        "toggleButtonLinesDisappeared": [
+          "Cascade Studios",
+          "Senior Game Developer",
+          "Add a new experience"
+        ]
+      }
+    },
+    {
+      "label": "CONTROL real path",
+      "menuItems": [
+        "Add a new item",
+        "Hide",
+        "Rename",
+        "Columns",
+        "Reset"
+      ],
+      "columnRadios": [
+        "1 Column",
+        "2 Columns",
+        "3 Columns",
+        "4 Columns",
+        "5 Columns",
+        "6 Columns"
+      ],
+      "storedColumns": 2,
+      "storedHidden": false
+    }
+  ]
+}

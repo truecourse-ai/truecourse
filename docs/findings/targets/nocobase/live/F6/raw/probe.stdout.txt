@@ -1,0 +1,25 @@
+PROBE  POST /api/roles:create {"name":"tcnm1","title":"TC New Menu 1"} -> 200 {"data":{"default":false,"hidden":false,"snippets":["!pm","!pm.*","!ui.*"],"name":"tcnm1","title":"TC New Menu 1","updatedAt":"2026-08-21T03:06:20.750Z","createdAt":"2026-08-21T03:06:20.750Z","allowNewMenu":false,"allowNewMobileMenu":false,"allowNewAiEmployee":true,"description":null,"strategy":null,"allowConfigure":null}}
+PROBE  GET /api/roles:get?filterByTk=tcnm1 -> 200 {"data":{"createdAt":"2026-08-21T03:06:20.750Z","updatedAt":"2026-08-21T03:06:20.750Z","name":"tcnm1","title":"TC New Menu 1","description":null,"strategy":null,"default":false,"hidden":false,"allowConfigure":null,"allowNewMenu":false,"snippets":["!pm","!pm.*","!ui.*"],"allowNewMobileMenu":false,"allowNewAiEmployee":true}}
+allowNewMenu on the api-minted role: false
+
+CTRL   GET /api/roles:list?paginate=false
+  admin      | allowNewMenu= true  | default= false | strategy= {"actions":["create","view","update","destroy","export","importXlsx"]}
+  member     | allowNewMenu= true  | default= true | strategy= {"actions":["view:own"]}
+  root       | allowNewMenu= false | default= false | strategy= null
+  tcfldr     | allowNewMenu= false | default= false | strategy= null
+  tcnm1      | allowNewMenu= false | default= false | strategy= null
+  tcuniona   | allowNewMenu= false | default= false | strategy= null
+  tcunionb   | allowNewMenu= false | default= false | strategy= null
+  tcvieworr  | allowNewMenu= false | default= false | strategy= null
+
+raw postgres:
+admin | allowNewMenu=true | default=false
+member | allowNewMenu=true | default=true
+root | allowNewMenu=false | default=false
+tcfldr | allowNewMenu=false | default=false
+tcnm1 | allowNewMenu=false | default=false
+tcuniona | allowNewMenu=false | default=false
+tcunionb | allowNewMenu=false | default=false
+tcvieworr | allowNewMenu=false | default=false
+
+[saved] /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/nocobase-live/raw/F6.json

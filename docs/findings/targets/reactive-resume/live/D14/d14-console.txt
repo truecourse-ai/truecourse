@@ -1,0 +1,27 @@
+=== D14 · PROBE B: a VIRGIN resume with no snapshot at all (the sharpened statement) ===
+
+B versions before any switch              []
+B template before any switch              azurill
+B template after SWITCH 1                 bronzor
+B page shows "Saved"                      true
+B versions after SWITCH 1                 ["Manual save"]   <- a row DID appear
+B template after SWITCH 2                 chikorita
+B versions after SWITCH 2 (seconds later) ["Manual save"]   <- no second row
+B template after SWITCH 3                 gengar
+B versions after SWITCH 3                 ["Manual save"]   <- still none
+
+B the one row's label is ["Manual save"] — it never names a template.
+
+
+=== D14 · PROBE A: a resume that ALREADY carries a snapshot (the corpus's situation) ===
+
+A versions before the switch              ["AI edit"]
+A template after the switch               bronzor      (the switch really happened)
+A page shows "Saved"                      true
+A versions AFTER the template switch      ["AI edit"]  <- no new row
+A CONTROL versions after a checkpointing write  ["AI edit","AI edit"]
+
+Mechanism (service.ts:67-69, :107, :669-678): a template switch goes down the ORDINARY update path,
+which calls maybeSnapshotOnSave with the fixed label "Manual save" and returns without writing when the
+newest snapshot is younger than SNAPSHOT_THROTTLE_MS (2 min). The comment on that branch says the
+debounced milestone "Covers template switches and typing."

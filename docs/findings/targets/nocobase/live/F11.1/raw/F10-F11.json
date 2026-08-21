@@ -1,0 +1,356 @@
+{
+  "base": "http://127.0.0.1:14100",
+  "at": "2026-08-21T03:06:14.823Z",
+  "findings": [
+    "F10",
+    "F11.1",
+    "F11.2"
+  ],
+  "postgres": {
+    "table_9tcbad": "9tcbad",
+    "columns_9tcbad": "id (bigint)\n9bad (character varying)",
+    "tcdestroy_tables_after_destroy": "0"
+  },
+  "statuses": {
+    "F10 collections:create 9tcbad": 200,
+    "F10 fields:create 9bad": 200,
+    "F11.2 no type": 500,
+    "F11.2 with type": 200,
+    "F11.1 destroyed list": 500,
+    "F11.1 never existed list": 404
+  },
+  "transcript": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "admin@nocobase.com",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:17.577Z",
+              "updatedAt": "2026-08-21T03:05:17.577Z",
+              "mainDepartmentId": null,
+              "id": 1,
+              "nickname": "Super Admin",
+              "username": "nocobase",
+              "email": "admin@nocobase.com",
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": null,
+              "updatedById": null
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTU3NCwic2lnbkluVGltZSI6MTc4NzI4MTU3NDIwMSwiZXhwIjoxNzg3MzY3OTc0LCJqdGkiOiI4M2ZkZjAxNy0wY2FkLTQyNTUtOWQ3MS03ZGQzOWZiOTQyZDgifQ.fYj_HRfqTuL4L7mCAYh4A1UUp6QuELNXEBkHZk7cUlA"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "9tcbad",
+          "title": "TC Bad Name",
+          "template": "general"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "inherit": false,
+            "hidden": false,
+            "key": "16j176ucalm",
+            "name": "9tcbad",
+            "title": "TC Bad Name",
+            "description": null,
+            "template": "general",
+            "createdAt": false,
+            "createdBy": false,
+            "updatedAt": false,
+            "updatedBy": false,
+            "filterTargetKey": "id",
+            "unavailableActions": []
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections/9tcbad/fields:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "9bad",
+          "type": "string",
+          "interface": "input"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "key": "xuguq66zcwl",
+            "name": "9bad",
+            "type": "string",
+            "interface": "input",
+            "collectionName": "9tcbad",
+            "description": null,
+            "parentKey": null,
+            "reverseKey": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections/9tcbad/fields:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "amount",
+          "interface": "number"
+        }
+      },
+      "response": {
+        "status": 500,
+        "statusText": "Internal Server Error",
+        "body": {
+          "errors": [
+            {
+              "message": "unsupported field type null"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections/9tcbad/fields:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "amount2",
+          "type": "double",
+          "interface": "number"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "key": "53xebcq5fbl",
+            "name": "amount2",
+            "type": "double",
+            "interface": "number",
+            "collectionName": "9tcbad",
+            "description": null,
+            "parentKey": null,
+            "reverseKey": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "tcdestroy",
+          "title": "TC Destroy",
+          "template": "general"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "inherit": false,
+            "hidden": false,
+            "key": "bsl94w5in4q",
+            "name": "tcdestroy",
+            "title": "TC Destroy",
+            "description": null,
+            "template": "general",
+            "createdAt": false,
+            "createdBy": false,
+            "updatedAt": false,
+            "updatedBy": false,
+            "filterTargetKey": "id",
+            "unavailableActions": []
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections/tcdestroy/fields:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "label",
+          "type": "string",
+          "interface": "input"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "key": "uyzw8wqfz33",
+            "name": "label",
+            "type": "string",
+            "interface": "input",
+            "collectionName": "tcdestroy",
+            "description": null,
+            "parentKey": null,
+            "reverseKey": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/tcdestroy:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "label": "row one"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "id": 1,
+            "label": "row one"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcdestroy:list",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "id": 1,
+              "label": "row one"
+            }
+          ],
+          "meta": {
+            "count": 1,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections:destroy?filterByTk=tcdestroy",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": 1
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcdestroy:list",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 500,
+        "statusText": "Internal Server Error",
+        "body": {
+          "errors": [
+            {
+              "message": "Cannot read properties of undefined (reading 'collection')"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcneverexisted:list",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 404,
+        "statusText": "Not Found",
+        "body": "Not Found"
+      }
+    }
+  ]
+}

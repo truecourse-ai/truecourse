@@ -1,0 +1,27 @@
+{
+  "headerSelectorsTried": {
+    ".ant-layout-header": 2,
+    "header": 2,
+    "[class*=\"header\"]": 12
+  },
+  "titles": [
+    "UI Editor"
+  ],
+  "testids": [
+    "ui-editor-button",
+    "plugin-settings-button",
+    "help-button",
+    "user-center-button"
+  ],
+  "icons": [
+    "highlight",
+    "setting",
+    "bell",
+    "question-circle",
+    "user",
+    "highlight"
+  ],
+  "getByTitleUIEditor": 1,
+  "getByLabelUIBuilder": 0,
+  "uiEditorButtonTestId": 1
+}

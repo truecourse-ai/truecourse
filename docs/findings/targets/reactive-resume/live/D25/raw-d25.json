@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-08-21T03:33:33.651Z",
+  "steps": [
+    {
+      "label": "template section aria snapshot",
+      "snapshot": "- heading \"Toggle Template section\" [level=3]:\n  - button \"Toggle Template section\" [expanded]:\n    - img\n- img\n- heading \"Template\" [level=2]\n- region \"Toggle Template section\":\n  - button \"Azurill\":\n    - img \"Azurill\"\n    - img\n  - heading \"Azurill\" [level=3]\n  - paragraph: Two-column with a bold colored sidebar and skill bars; great for creative or tech roles where visual flair is welcome.\n  - text: Two-column Creative Tech Visual flair"
+    },
+    {
+      "label": "section measurements",
+      "section": {
+        "imgs in the Template SECTION": 1,
+        "  of which carry a name (alt)": 1,
+        "  the named one(s)": "[\"Azurill\"]",
+        "section: getByRole('img', {name: 'Chikorita'})": 0,
+        "section text mentions \"gallery\"": "no",
+        "whole page, imgs named Chikorita (gallery closed)": 0
+      },
+      "gallery": {
+        "dialog heading": "Template Gallery",
+        "CONTROL inside the gallery: img 'Chikorita'": 1,
+        "every named img in the gallery": "[\"Azurill\",\"Bronzor\",\"Chikorita\",\"Ditgar\",\"Ditto\",\"Gengar\",\"Glalie\",\"Kakuna\",\"Lapras\",\"Leafish\",\"Meowth\",\"Onyx\",\"Pikachu\",\"Rhyhorn\",\"Scizor\"]",
+        "page text says \"Template Gallery\"": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+382221718257665|all|{{t("All records")}}||{}
+382221718257666|own|{{t("Own records")}}||{"createdById":"{{ ctx.state.currentUser.id }}"}
+382221739229184|52szc3hbpbp|TC Union A · rows1 · Age < 30|tcunionrows1|{"$and":[{"age":{"$lt":30}}]}
+382221739229185|vy2j6pecbh5|TC Union B · rows1 · Age > 25|tcunionrows1|{"$and":[{"age":{"$gt":25}}]}
+382221739229186|8llut09h4uv|TC Union A · rows2 · Age < 30|tcunionrows2|{"$and":[{"age":{"$lt":30}}]}
+382221739229187|lb9z471w7rj|TC Union B · rows2 · Name contains Ja|tcunionrows2|{"$and":[{"name":{"$includes":"Ja"}}]}
+382221739229188|p5wahnjupce|TC Union A · mixed · Age < 30|tcunionmixed|{"$and":[{"age":{"$lt":30}}]}
+382221739229189|b65779lvtqb|TC Union B · mixed · Name contains Ja|tcunionmixed|{"$and":[{"name":{"$includes":"Ja"}}]}

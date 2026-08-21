@@ -1,0 +1,23 @@
+D13 resume 01a0225f-afd1-73de-b0d8-bcce8c81e0e4; headline set to dh-83091405-v1; versions now ["AI edit"]
+
+=== D13 · CONTROL first: Undo IS enabled after an ordinary edit ===
+BASELINE Undo disabled on a freshly opened builder?   true
+CONTROL  page shows "Saved"                           true
+CONTROL  Undo disabled after an ordinary edit?        false   <- enabled
+CONTROL  stored headline                              dh-83091405-v2
+
+=== D13 · PROBE: restore the earlier snapshot ===
+version menu rows                                     ["AI edit\nnow"]
+a Confirm control stands between the row and the resume  1
+the confirm dialog, verbatim:
+- alertdialog "Restore this version?":
+  - heading "Restore this version?" [level=2]
+  - paragraph: Earlier versions are kept; the builder's undo history is reset.
+  - button "Cancel"
+  - button "Confirm"
+PROBE restored headline is on the page                true
+PROBE stored headline after the restore               dh-83091405-v1
+PROBE Undo disabled AFTER the restore?                true    <- disabled
+PROBE headline after pressing Cmd/Ctrl+Z              dh-83091405-v1  (unchanged — the keystroke is a no-op)
+PROBE the restored headline is still on the page      true
+versions endpoint                                     ["Restored version","Before restore","AI edit"]

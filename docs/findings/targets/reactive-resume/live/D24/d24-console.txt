@@ -1,0 +1,6 @@
+=== D24 · PROBE: the Page section's Format combobox, opened live ===
+
+format combobox trigger text                     A4
+the three rendered options (verbatim)            ["A4","Letter","Free-form"]
+page text contains "Free-Form" (doc spelling)    false
+page text contains "Free-form" (rendered)        true

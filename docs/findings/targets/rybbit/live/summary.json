@@ -1,0 +1,61 @@
+{
+  "target": "rybbit",
+  "build": {
+    "sha": "64f8c4fb7f394bdfe9379717de8e6c21758b1ac2",
+    "date": "2026-08-20",
+    "branch": "master"
+  },
+  "checkedAt": "2026-08-20",
+  "findings": {
+    "R1": {
+      "verdict": "still reproduces",
+      "evidence": "R1/repro.md, R1/r1.log, R1/r1.json",
+      "note": "All three halves. userId:false write side: POST /sites/2/goals and /funnels -> 403 immediately after creating site 2, 201 after idling 16 s. userId:false read side: PUT /sites/4/config -> 200 and GET /sites/4/excluded-paths -> 403 ten milliseconds later, 200 after 16 s. userId:true admin side proved with a second signed-up account (role \"user\", own organization): PUT /sites/6/config -> 403 immediately, 200 after 16 s. 403 window measured at 15451 ms. addSite.ts still never calls invalidateSitesAccessCache at this SHA, so issue #980 (closed \"completed\") is not fixed."
+    },
+    "R2": {
+      "verdict": "still reproduces",
+      "evidence": "R2/repro.md, R2/r2.log, R2/r2.json",
+      "note": "Both halves, each with a control isolating the single variable. Funnel: four rows in ONE ClickHouse second (2026-08-21 02:37:42) give step 2 sessions=0, dropoff_rate=100; the same events 1500 ms apart give sessions=2, conversion_rate=100. Entry/exit: two pageviews tied on 02:37:46 make exit_page report /blog/article, the entry page; 2000 ms apart it correctly reports /checkout."
+    },
+    "R3": {
+      "verdict": "still reproduces",
+      "evidence": "R3/repro.md, R3/r3.log, R3/r3.json",
+      "note": "Deterministic, not a flake: 10 of 10 rounds divergent, gaps 533-601 ms (all ten: 601, 556, 588, 575, 577, 586, 533, 571, 576, 582). Each round parked ~30 ms after a second boundary; past_minutes held the session at 386-452 ms while the identical date_range query returned {\"data\":[]} until 970-1040 ms, i.e. the next second boundary. The hand-verification measured 7 of 8 with gaps to 934 ms; the smaller ceiling here is because this host's pageview queue flushed later in the second, leaving less of it to hide in."
+    },
+    "R4": {
+      "verdict": "still reproduces",
+      "evidence": "R4/repro.md, R4/r4.log, R4/r4.json",
+      "note": "12 rounds at random phase. 12 of 12 immediate read-backs (issued 23-32 ms after the 200) answered pageviews: 0. Ack to queryable, sorted: 101, 256, 289, 347, 359, 434, 473, 571, 632, 723, 762, 926 ms; min 101, median 454, max 926. Hand-verification measured 30-972 ms, median 555 ms, also 12/12."
+    },
+    "R5": {
+      "verdict": "still reproduces",
+      "evidence": "R5/repro.md, R5/r5.log, R5/r5.json, R5/r5-pages-tab.png, R5/r5-pages-tab.txt, R5/web.json",
+      "note": "GET /sites/33/page-titles returned 1 row (/pricing) for a site with two pageviews; metric?parameter=pathname returned 2 and /overview counted pageviews: 2. Additionally proved in Chromium: the rendered Pages tab shows only the Pricing row and its own footer reads \"Showing 1 to 1 of 1 pages\"; the untitled /docs/getting-started appears nowhere in the page text."
+    },
+    "R6": {
+      "verdict": "still reproduces",
+      "evidence": "R6/repro.md, R6/r6.log, R6/r6.json",
+      "note": "Stored channels are Organic Search and Organic Social. Filtering /overview by the documented names returns nothing: Search -> sessions=0, Social -> sessions=0, while Organic Search -> sessions=1 and Organic Social -> sessions=1. Referral and Direct also 0. main-tab.mdx:35-43 unchanged at this SHA."
+    },
+    "R7": {
+      "verdict": "still reproduces",
+      "evidence": "R7/repro.md, R7/r7.log, R7/r7.json, R7/r7-sessions-tab.png, R7/r7-sessions-tab.txt, R7/web.json",
+      "note": "Both halves. GET /sites/35/sessions returned 2 rows with 41 keys and no key matching /bounc/i; the whole response body does not contain the substring \"bounc\". One row is a genuine bounce (pageviews=1). CONTROL: /overview reports bounce_rate: 50, so the metric exists and only the per-session field is missing. Additionally proved in Chromium: both visits render on the Sessions tab and the word \"Bounce\" appears nowhere on the page."
+    },
+    "R8": {
+      "verdict": "still reproduces",
+      "evidence": "R8/repro.md, R8/r8.log, R8/r8.json",
+      "note": "Both halves, and the doc still omits two kinds rather than one. filter-traffic.mdx:120-130 lists five; SiteExclusionReason names seven (ip, asn, country, path, query_param, hostname, user_agent) and all seven are evaluated. PROBE: POST /api/track with querystring ?preview=1 -> 200 {\"success\":true,\"message\":\"Event not tracked - query param excluded\"}. CONTROL: ?utm_source=x -> 200 {\"success\":true}. grep for \"query param\" and for ASN over filter-traffic.mdx and site-settings.mdx returns nothing."
+    },
+    "R9": {
+      "verdict": "still reproduces",
+      "evidence": "R9/repro.md, R9/r9.log, R9/r9.json",
+      "note": "Both halves. getJourneys.ts:74 still filters AND type = 'pageview'. CONTROL: GET /sites/37/events/names -> {\"data\":[{\"eventName\":\"signup_clicked\",\"count\":1}]}, so the event is stored and queryable and sits between two pages of the walk. PROBE: GET /sites/37/journeys?steps=4 -> {\"journeys\":[{\"path\":[\"/start\",\"/middle\",\"/end\"],\"count\":1,\"percentage\":100}]}, a three-node path for a four-step request."
+    },
+    "R10": {
+      "verdict": "still reproduces",
+      "evidence": "R10/repro.md, R10/r10.log, R10/r10.json",
+      "note": "Both halves. CONTROL: excludedCountries [\"US\"] -> 200, reads back [\"US\"]. PROBE: [\"us\"] -> 400 {\"fieldErrors\":{\"excludedCountries\":[\"Country code must be a 2-letter ISO code (e.g., US, GB, CN)\"]}}; [\"Us\"] -> the same 400. The stored list is untouched by the refusals. filter-traffic.mdx:48 still says \"Country codes are stored as uppercase values in the dashboard and API\" and updateSiteConfig.ts still validates /^[A-Z]{2}$/ without uppercasing. Incidental R1 sighting: the read-back waited 10427 ms for the sitesAccessCache window."
+    }
+  }
+}

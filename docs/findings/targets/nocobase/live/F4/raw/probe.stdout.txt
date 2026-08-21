@@ -1,0 +1,15 @@
+fixture rows (raw postgres):
+1|Jack|23|Man
+2|Lily|29|Woman
+3|Jade|27|Woman
+4|James|31|Man
+scopes (raw postgres):
+
+PROBE  Role A alone   GET /api/tcunionmixed:list?sort=id  X-Role: tcuniona -> 200 {"data":[{"age":23,"name":"Jack","id":1},{"age":29,"name":"Lily","id":2},{"age":27,"name":"Jade","id":3}],"meta":{"count":3,"page":1,"pageSize":20,"totalPage":1}}
+rows: 3 names: Jack, Lily, Jade
+PROBE  Role B alone   GET /api/tcunionmixed:list?sort=id  X-Role: tcunionb -> 200 {"data":[{"name":"Jack","sex":"Man","id":1},{"name":"Jade","sex":"Woman","id":3},{"name":"James","sex":"Man","id":4}],"meta":{"count":3,"page":1,"pageSize":20,"totalPage":1}}
+rows: 3 names: Jack, Jade, James
+CTRL   the merge       GET /api/tcunionmixed:list?sort=id  X-Role: __union__ -> 200 {"data":[{"name":"Jack","sex":"Man","id":1,"age":23},{"name":"Lily","sex":"Woman","id":2,"age":29},{"name":"Jade","sex":"Woman","id":3,"age":27},{"name":"James","sex":"Man","id":4,"age":31}],"meta":{"count":4,"page":1,"pageSize":20,"totalPage":1}}
+rows: 4
+
+[saved] /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/nocobase-live/raw/F4.json

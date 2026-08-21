@@ -1,0 +1,593 @@
+{
+  "checkedAt": "2026-08-21T03:28:08.583Z",
+  "steps": [
+    {
+      "label": "download-dialog aria snapshot",
+      "snapshot": "- dialog \"Download\":\n  - heading \"Download\" [level=2]\n  - paragraph: Export your resume or cover letter in the format you need.\n  - tablist:\n    - tab \"Resume\" [selected]:\n      - img\n      - text: Resume\n    - tab \"Cover letter\":\n      - img\n      - text: Cover letter\n  - img\n  - heading \"PDF\" [level=3]\n  - paragraph: Best for applications, sharing, and printing.\n  - button \"Download PDF\":\n    - img\n    - text: Download\n  - img\n  - heading \"DOCX\" [level=3]\n  - paragraph: Editable in Word, Google Docs, and Pages.\n  - button \"Download DOCX\":\n    - img\n    - text: Download\n  - img\n  - heading \"Markdown\" [level=3]\n  - paragraph: Plain text, ideal for AI tools and quick edits.\n  - button \"Download Markdown\":\n    - img\n    - text: Download\n  - img\n  - heading \"JSON\" [level=3]\n  - paragraph: Full resume data for backup or import.\n  - button \"Download JSON\":\n    - img\n    - text: Download\n  - button \"Close\":\n    - img\n    - text: Close"
+    },
+    {
+      "label": "CONTROL before the press",
+      "before": {
+        "Download PDF": {
+          "present": 1,
+          "disabled": false
+        },
+        "Download DOCX": {
+          "present": 1,
+          "disabled": false
+        },
+        "Download Markdown": {
+          "present": 1,
+          "disabled": false
+        },
+        "Download JSON": {
+          "present": 1,
+          "disabled": false
+        }
+      }
+    },
+    {
+      "label": "poll after pressing Download PDF",
+      "samples": [
+        {
+          "t": 179,
+          "dialog": true,
+          "docxPresent": true,
+          "docxDisabled": false,
+          "spinner": false
+        },
+        {
+          "t": 207,
+          "dialog": true,
+          "docxPresent": true,
+          "docxDisabled": false,
+          "spinner": false
+        },
+        {
+          "t": 234,
+          "dialog": true,
+          "docxPresent": true,
+          "docxDisabled": false,
+          "spinner": false
+        },
+        {
+          "t": 262,
+          "dialog": true,
+          "docxPresent": true,
+          "docxDisabled": false,
+          "spinner": false
+        },
+        {
+          "t": 288,
+          "dialog": true,
+          "docxPresent": true,
+          "docxDisabled": false,
+          "spinner": false
+        },
+        {
+          "t": 316,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 343,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 370,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 398,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 425,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 454,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 484,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 511,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 541,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 573,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 606,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 638,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 667,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 694,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 724,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 754,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 783,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 811,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 839,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 868,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 897,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 924,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 952,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 978,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1004,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1032,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1059,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1088,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1117,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1146,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1191,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1222,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1251,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1281,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1312,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1340,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1372,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1403,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1432,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1461,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1490,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1519,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1550,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1580,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1613,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1646,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1678,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1710,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1742,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1770,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1798,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1831,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1860,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1890,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1922,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1951,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 1982,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2010,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2037,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2064,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2092,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2122,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2154,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2186,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2218,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2247,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2275,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2303,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2331,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2360,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2387,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2415,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2449,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        },
+        {
+          "t": 2481,
+          "dialog": false,
+          "docxPresent": false,
+          "docxDisabled": null,
+          "spinner": false
+        }
+      ],
+      "downloadAtMs": 171,
+      "downloadName": "d2-82888714.pdf",
+      "dialogAtArrival": 0,
+      "everDisabled": false,
+      "everSpinner": false
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "checkedAt": "2026-08-21T03:23:29.228Z",
+  "steps": [
+    {
+      "label": "aria snapshot (control strip lines)",
+      "snapshot": [
+        "  - separator",
+        "  - text: Sort by",
+        "  - combobox:",
+        "  - text: Filter by",
+        "  - combobox:",
+        "    - text: Filter by",
+        "    - textbox \"Search resumes...\""
+      ]
+    },
+    {
+      "label": "queries",
+      "results": {
+        "combobox count on dashboard": 2,
+        "getByRole('combobox', {name: /sort/i})": 0,
+        "getByRole('combobox', {name: /filter/i})": 0,
+        "getByRole('combobox', {name: 'Last Updated'})": 0,
+        "getByLabel('Sort by')": 0,
+        "getByLabel('Filter by')": 0
+      },
+      "comboAttrs": [
+        {
+          "tag": "BUTTON",
+          "ariaLabel": null,
+          "ariaLabelledby": null,
+          "id": "base-ui-_r_4_",
+          "text": "Last Updated"
+        },
+        {
+          "tag": "BUTTON",
+          "ariaLabel": null,
+          "ariaLabelledby": null,
+          "id": "base-ui-_r_7_",
+          "text": "Filter by"
+        }
+      ],
+      "labels": [
+        {
+          "text": "Sort by",
+          "htmlFor": null
+        },
+        {
+          "text": "Filter by",
+          "htmlFor": null
+        }
+      ],
+      "controlSearchField": 1
+    }
+  ]
+}

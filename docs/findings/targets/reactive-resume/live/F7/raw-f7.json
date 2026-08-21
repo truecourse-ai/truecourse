@@ -1,0 +1,384 @@
+{
+  "checkedAt": "2026-08-21T03:27:10.721Z",
+  "steps": [
+    {
+      "label": "create-dialog aria snapshot",
+      "snapshot": "- dialog \"Create a new resume\":\n  - heading \"Create a new resume\" [level=2]:\n    - img\n    - text: Create a new resume\n  - paragraph: Start building your resume by giving it a name.\n  - text: Name\n  - textbox \"Name\"\n  - button \"Generate a random name\":\n    - img\n  - paragraph: \"Tip: You can name the resume referring to the position you are applying for.\"\n  - text: Slug\n  - group:\n    - group: http://127.0.0.1:54490/guardowner/\n    - textbox\n  - paragraph: This is a URL-friendly name for your resume.\n  - text: Tags\n  - textbox \"Add keyword\":\n    - /placeholder: Add a keyword...\n  - status\n  - paragraph: Press Enter or , to add or save the current keyword.\n  - paragraph: Tags can be used to categorize your resume by keywords.\n  - group \"Create resume with options\":\n    - button \"Create\"\n    - button:\n      - img\n  - button \"Close\":\n    - img\n    - text: Close"
+    },
+    {
+      "label": "create-dialog queries",
+      "queries": {
+        "getByLabel('Name').count()": 1,
+        "getByLabel('Slug').count()": 0,
+        "getByLabel('Tags').count()": 0,
+        "CONTROL getByRole('textbox', {name:'Name', exact:true})": 1,
+        "getByRole('textbox', {name:'Slug'})": 0
+      },
+      "labelMap": [
+        {
+          "label": "Name",
+          "htmlFor": "_r_3h_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Slug",
+          "htmlFor": "_r_3j_-form-item",
+          "target": "FIELDSET"
+        },
+        {
+          "label": "Tags",
+          "htmlFor": "_r_3l_-form-item",
+          "target": "DIV"
+        }
+      ]
+    },
+    {
+      "label": "builder",
+      "sliderInfo": {
+        "getByRole('slider', {name: 'Sidebar Width'})": 0,
+        "sliders on the page": 1
+      },
+      "sliderAttrs": [
+        {
+          "tag": "INPUT",
+          "ariaLabel": null,
+          "ariaLabelledby": null,
+          "id": "base-ui-_r_k3_"
+        }
+      ],
+      "spinbuttons": [
+        {
+          "name": "",
+          "value": "100"
+        },
+        {
+          "name": "Rotation",
+          "value": "0"
+        },
+        {
+          "name": "Aspect Ratio",
+          "value": "1"
+        },
+        {
+          "name": "Border Radius",
+          "value": "0"
+        },
+        {
+          "name": "Border Width",
+          "value": "0"
+        },
+        {
+          "name": "Shadow Width",
+          "value": "0"
+        },
+        {
+          "name": "",
+          "value": "30"
+        },
+        {
+          "name": "Font Size",
+          "value": "10"
+        },
+        {
+          "name": "Line Height",
+          "value": "1.5"
+        },
+        {
+          "name": "Font Size",
+          "value": "12"
+        },
+        {
+          "name": "Line Height",
+          "value": "1.5"
+        },
+        {
+          "name": "Margin (Horizontal)",
+          "value": "16"
+        },
+        {
+          "name": "Margin (Vertical)",
+          "value": "16"
+        },
+        {
+          "name": "Spacing (Horizontal)",
+          "value": "12"
+        },
+        {
+          "name": "Spacing (Vertical)",
+          "value": "8"
+        }
+      ],
+      "anonymousSpinbuttons": 2,
+      "brokenLabels": [
+        {
+          "label": "Size",
+          "htmlFor": "_r_1v_-form-item",
+          "target": "NOTHING"
+        },
+        {
+          "label": "Website",
+          "htmlFor": "_r_2v_-form-item",
+          "target": "NOTHING"
+        },
+        {
+          "label": "Sidebar Width",
+          "htmlFor": "_r_jv_-form-item",
+          "target": "DIV[role=group]"
+        },
+        {
+          "label": "Font Family",
+          "htmlFor": "_r_kf_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Font Weights",
+          "htmlFor": "_r_kj_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Font Family",
+          "htmlFor": "_r_kr_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Font Weight",
+          "htmlFor": "_r_kv_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Icon",
+          "htmlFor": "_r_lr_-form-item",
+          "target": "BUTTON"
+        },
+        {
+          "label": "Type",
+          "htmlFor": "_r_lu_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Language",
+          "htmlFor": "_r_m9_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Format",
+          "htmlFor": "_r_md_-form-item",
+          "target": "BUTTON[role=combobox]"
+        }
+      ],
+      "duplicateIds": [
+        [
+          "_r_jv_-form-item",
+          2
+        ]
+      ],
+      "allLabels": [
+        {
+          "label": "URL",
+          "htmlFor": "_r_1t_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Size",
+          "htmlFor": "_r_1v_-form-item",
+          "target": "NOTHING"
+        },
+        {
+          "label": "Rotation",
+          "htmlFor": "_r_21_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Aspect Ratio",
+          "htmlFor": "_r_23_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Border Radius",
+          "htmlFor": "_r_25_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Border Width",
+          "htmlFor": "_r_2a_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Shadow Width",
+          "htmlFor": "_r_2f_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Name",
+          "htmlFor": "_r_2l_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Headline",
+          "htmlFor": "_r_2n_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Email",
+          "htmlFor": "_r_2p_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Phone",
+          "htmlFor": "_r_2r_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Location",
+          "htmlFor": "_r_2t_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Website",
+          "htmlFor": "_r_2v_-form-item",
+          "target": "NOTHING"
+        },
+        {
+          "label": "Full Width",
+          "htmlFor": "_r_h3_",
+          "target": "INPUT"
+        },
+        {
+          "label": "Full Width",
+          "htmlFor": "_r_i0_",
+          "target": "INPUT"
+        },
+        {
+          "label": "Full Width",
+          "htmlFor": "_r_j2_",
+          "target": "INPUT"
+        },
+        {
+          "label": "Full Width",
+          "htmlFor": "_r_jl_",
+          "target": "INPUT"
+        },
+        {
+          "label": "Sidebar Width",
+          "htmlFor": "_r_jv_-form-item",
+          "target": "DIV[role=group]"
+        },
+        {
+          "label": "Allow Public AccessAnyone with",
+          "htmlFor": "sharing-switch",
+          "target": "INPUT"
+        },
+        {
+          "label": "Font Family",
+          "htmlFor": "_r_kf_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Font Weights",
+          "htmlFor": "_r_kj_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Font Size",
+          "htmlFor": "_r_kn_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Line Height",
+          "htmlFor": "_r_kp_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Font Family",
+          "htmlFor": "_r_kr_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Font Weight",
+          "htmlFor": "_r_kv_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Font Size",
+          "htmlFor": "_r_l3_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Line Height",
+          "htmlFor": "_r_l5_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Primary Color",
+          "htmlFor": "_r_le_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Text Color",
+          "htmlFor": "_r_li_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Background Color",
+          "htmlFor": "_r_lm_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Icon",
+          "htmlFor": "_r_lr_-form-item",
+          "target": "BUTTON"
+        },
+        {
+          "label": "Type",
+          "htmlFor": "_r_lu_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Language",
+          "htmlFor": "_r_m9_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Format",
+          "htmlFor": "_r_md_-form-item",
+          "target": "BUTTON[role=combobox]"
+        },
+        {
+          "label": "Margin (Horizontal)",
+          "htmlFor": "_r_mh_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Margin (Vertical)",
+          "htmlFor": "_r_mj_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Spacing (Horizontal)",
+          "htmlFor": "_r_ml_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Spacing (Vertical)",
+          "htmlFor": "_r_mn_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Hide Link Underline",
+          "htmlFor": "_r_mp_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Hide Icons",
+          "htmlFor": "_r_mt_-form-item",
+          "target": "INPUT"
+        },
+        {
+          "label": "Hide Section Icons",
+          "htmlFor": "_r_n1_-form-item",
+          "target": "INPUT"
+        }
+      ]
+    }
+  ]
+}

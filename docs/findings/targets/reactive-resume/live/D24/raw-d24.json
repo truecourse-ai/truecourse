@@ -1,0 +1,17 @@
+{
+  "checkedAt": "2026-08-21T03:35:23.933Z",
+  "steps": [
+    {
+      "label": "format combobox",
+      "triggerText": "A4",
+      "options": [
+        "A4",
+        "Letter",
+        "Free-form"
+      ],
+      "docSpellingPresent": false,
+      "renderedSpellingPresent": true,
+      "labelFor": "_r_md_-form-item"
+    }
+  ]
+}

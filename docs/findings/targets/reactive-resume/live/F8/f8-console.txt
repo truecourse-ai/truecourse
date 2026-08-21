@@ -1,0 +1,41 @@
+F8 dashboard URL: http://127.0.0.1:54490/dashboard/resumes
+
+=== F8 · PROBE: Playwright's aria snapshot of the dashboard control strip ===
+  - separator
+  - text: Sort by
+  - combobox:
+  - text: Filter by
+  - combobox:
+    - text: Filter by
+    - textbox "Search resumes..."
+
+combobox count on dashboard                      2
+getByRole('combobox', {name: /sort/i})           0
+getByRole('combobox', {name: /filter/i})         0
+getByRole('combobox', {name: 'Last Updated'})    0
+getByLabel('Sort by')                            0
+getByLabel('Filter by')                          0
+
+combobox attributes:
+[
+ {
+  "tag": "BUTTON",
+  "ariaLabel": null,
+  "ariaLabelledby": null,
+  "id": "base-ui-_r_4_",
+  "text": "Last Updated"
+ },
+ {
+  "tag": "BUTTON",
+  "ariaLabel": null,
+  "ariaLabelledby": null,
+  "id": "base-ui-_r_7_",
+  "text": "Filter by"
+ }
+]
+
+every <label> on the dashboard:
+[{"text":"Sort by","htmlFor":null},{"text":"Filter by","htmlFor":null}]
+
+=== F8 · CONTROL: the search field on the SAME strip is addressable ===
+getByRole('textbox', {name: 'Search resumes...'})  1

@@ -1,0 +1,369 @@
+{
+  "base": "http://127.0.0.1:14100",
+  "at": "2026-08-21T03:06:20.960Z",
+  "finding": "F6",
+  "minted": {
+    "name": "tcnm1",
+    "allowNewMenu": false
+  },
+  "roles": [
+    {
+      "name": "admin",
+      "allowNewMenu": true,
+      "default": false,
+      "strategy": {
+        "actions": [
+          "create",
+          "view",
+          "update",
+          "destroy",
+          "export",
+          "importXlsx"
+        ]
+      }
+    },
+    {
+      "name": "member",
+      "allowNewMenu": true,
+      "default": true,
+      "strategy": {
+        "actions": [
+          "view:own"
+        ]
+      }
+    },
+    {
+      "name": "root",
+      "allowNewMenu": false,
+      "default": false,
+      "strategy": null
+    },
+    {
+      "name": "tcfldr",
+      "allowNewMenu": false,
+      "default": false,
+      "strategy": null
+    },
+    {
+      "name": "tcnm1",
+      "allowNewMenu": false,
+      "default": false,
+      "strategy": null
+    },
+    {
+      "name": "tcuniona",
+      "allowNewMenu": false,
+      "default": false,
+      "strategy": null
+    },
+    {
+      "name": "tcunionb",
+      "allowNewMenu": false,
+      "default": false,
+      "strategy": null
+    },
+    {
+      "name": "tcvieworr",
+      "allowNewMenu": false,
+      "default": false,
+      "strategy": null
+    }
+  ],
+  "transcript": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "admin@nocobase.com",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:17.577Z",
+              "updatedAt": "2026-08-21T03:05:17.577Z",
+              "mainDepartmentId": null,
+              "id": 1,
+              "nickname": "Super Admin",
+              "username": "nocobase",
+              "email": "admin@nocobase.com",
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": null,
+              "updatedById": null
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTU4MCwic2lnbkluVGltZSI6MTc4NzI4MTU4MDcyMSwiZXhwIjoxNzg3MzY3OTgwLCJqdGkiOiI3MTAyNDE3OS0xMzFlLTQ4OGUtOTg1OS0xMmY5NjIyODZiM2EifQ.UR32-YNwR14k80mJN18XeXgGS-fU9ayLq5k8EjL--vI"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "tcnm1",
+          "title": "TC New Menu 1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "default": false,
+            "hidden": false,
+            "snippets": [
+              "!pm",
+              "!pm.*",
+              "!ui.*"
+            ],
+            "name": "tcnm1",
+            "title": "TC New Menu 1",
+            "updatedAt": "2026-08-21T03:06:20.750Z",
+            "createdAt": "2026-08-21T03:06:20.750Z",
+            "allowNewMenu": false,
+            "allowNewMobileMenu": false,
+            "allowNewAiEmployee": true,
+            "description": null,
+            "strategy": null,
+            "allowConfigure": null
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/roles:get?filterByTk=tcnm1",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "createdAt": "2026-08-21T03:06:20.750Z",
+            "updatedAt": "2026-08-21T03:06:20.750Z",
+            "name": "tcnm1",
+            "title": "TC New Menu 1",
+            "description": null,
+            "strategy": null,
+            "default": false,
+            "hidden": false,
+            "allowConfigure": null,
+            "allowNewMenu": false,
+            "snippets": [
+              "!pm",
+              "!pm.*",
+              "!ui.*"
+            ],
+            "allowNewMobileMenu": false,
+            "allowNewAiEmployee": true
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/roles:list?paginate=false",
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "createdAt": "2026-08-21T03:05:17.549Z",
+              "updatedAt": "2026-08-21T03:05:18.269Z",
+              "name": "admin",
+              "title": "{{t(\"Admin\")}}",
+              "description": null,
+              "strategy": {
+                "actions": [
+                  "create",
+                  "view",
+                  "update",
+                  "destroy",
+                  "export",
+                  "importXlsx"
+                ]
+              },
+              "default": false,
+              "hidden": false,
+              "allowConfigure": true,
+              "allowNewMenu": true,
+              "snippets": [
+                "pm",
+                "pm.*",
+                "ui.*"
+              ],
+              "allowNewMobileMenu": true,
+              "allowNewAiEmployee": true
+            },
+            {
+              "createdAt": "2026-08-21T03:05:17.557Z",
+              "updatedAt": "2026-08-21T03:05:17.557Z",
+              "name": "member",
+              "title": "{{t(\"Member\")}}",
+              "description": null,
+              "strategy": {
+                "actions": [
+                  "view:own"
+                ]
+              },
+              "default": true,
+              "hidden": false,
+              "allowConfigure": null,
+              "allowNewMenu": true,
+              "snippets": [
+                "!pm",
+                "!pm.*",
+                "!ui.*"
+              ],
+              "allowNewMobileMenu": true,
+              "allowNewAiEmployee": true
+            },
+            {
+              "createdAt": "2026-08-21T03:05:17.541Z",
+              "updatedAt": "2026-08-21T03:05:17.541Z",
+              "name": "root",
+              "title": "{{t(\"Root\")}}",
+              "description": null,
+              "strategy": null,
+              "default": false,
+              "hidden": true,
+              "allowConfigure": null,
+              "allowNewMenu": false,
+              "snippets": [
+                "pm",
+                "pm.*",
+                "ui.*"
+              ],
+              "allowNewMobileMenu": false,
+              "allowNewAiEmployee": true
+            },
+            {
+              "createdAt": "2026-08-21T03:06:07.535Z",
+              "updatedAt": "2026-08-21T03:06:07.535Z",
+              "name": "tcfldr",
+              "title": "TC Field Role",
+              "description": null,
+              "strategy": null,
+              "default": false,
+              "hidden": false,
+              "allowConfigure": null,
+              "allowNewMenu": false,
+              "snippets": [
+                "!pm",
+                "!pm.*",
+                "!ui.*"
+              ],
+              "allowNewMobileMenu": false,
+              "allowNewAiEmployee": true
+            },
+            {
+              "createdAt": "2026-08-21T03:06:20.750Z",
+              "updatedAt": "2026-08-21T03:06:20.750Z",
+              "name": "tcnm1",
+              "title": "TC New Menu 1",
+              "description": null,
+              "strategy": null,
+              "default": false,
+              "hidden": false,
+              "allowConfigure": null,
+              "allowNewMenu": false,
+              "snippets": [
+                "!pm",
+                "!pm.*",
+                "!ui.*"
+              ],
+              "allowNewMobileMenu": false,
+              "allowNewAiEmployee": true
+            },
+            {
+              "createdAt": "2026-08-21T03:05:27.091Z",
+              "updatedAt": "2026-08-21T03:05:27.091Z",
+              "name": "tcuniona",
+              "title": "TC Union Role A",
+              "description": null,
+              "strategy": null,
+              "default": false,
+              "hidden": false,
+              "allowConfigure": null,
+              "allowNewMenu": false,
+              "snippets": [
+                "!pm",
+                "!pm.*",
+                "!ui.*"
+              ],
+              "allowNewMobileMenu": false,
+              "allowNewAiEmployee": true
+            },
+            {
+              "createdAt": "2026-08-21T03:05:27.147Z",
+              "updatedAt": "2026-08-21T03:05:27.147Z",
+              "name": "tcunionb",
+              "title": "TC Union Role B",
+              "description": null,
+              "strategy": null,
+              "default": false,
+              "hidden": false,
+              "allowConfigure": null,
+              "allowNewMenu": false,
+              "snippets": [
+                "!pm",
+                "!pm.*",
+                "!ui.*"
+              ],
+              "allowNewMobileMenu": false,
+              "allowNewAiEmployee": true
+            },
+            {
+              "createdAt": "2026-08-21T03:06:07.590Z",
+              "updatedAt": "2026-08-21T03:06:07.590Z",
+              "name": "tcvieworr",
+              "title": "TC View Only Role",
+              "description": null,
+              "strategy": null,
+              "default": false,
+              "hidden": false,
+              "allowConfigure": null,
+              "allowNewMenu": false,
+              "snippets": [
+                "!pm",
+                "!pm.*",
+                "!ui.*"
+              ],
+              "allowNewMobileMenu": false,
+              "allowNewAiEmployee": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

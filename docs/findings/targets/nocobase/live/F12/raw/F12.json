@@ -1,0 +1,557 @@
+{
+  "base": "http://127.0.0.1:14100",
+  "at": "2026-08-21T03:08:58.738Z",
+  "finding": "F12",
+  "results": {
+    "twoRoles": 200,
+    "threeRoles": 403,
+    "memberRemoved": 200,
+    "singleRoleWithThree": 200,
+    "afterCreatedById": 200
+  },
+  "columnsAfter": "id, name, age, sex, createdById",
+  "transcript": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "admin@nocobase.com",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:17.577Z",
+              "updatedAt": "2026-08-21T03:05:17.577Z",
+              "mainDepartmentId": null,
+              "id": 1,
+              "nickname": "Super Admin",
+              "username": "nocobase",
+              "email": "admin@nocobase.com",
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": null,
+              "updatedById": null
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTczNywic2lnbkluVGltZSI6MTc4NzI4MTczNzUwNiwiZXhwIjoxNzg3MzY4MTM3LCJqdGkiOiI3NmZhN2Y5Ny0zNGViLTQ0ZDYtYWIyYy1lNzI1ZDczYjYxY2MifQ.dVminRobJFfrUkHpGRSSQkpmOXY4ISy8UwwYKLNJkz4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTczNywic2lnbkluVGltZSI6MTc4NzI4MTczNzY3MiwiZXhwIjoxNzg3MzY4MTM3LCJqdGkiOiIxOTljMTYzMS00NzY0LTQ0OGItYjUyYS05ZjI3Y2ZhNWJmZGYifQ.dVDgYHjspinfZV5M6gUNJ8Kg0fyvMEvPFhJAzc_0VrA"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "name": "Jack",
+              "sex": "Man",
+              "id": 1,
+              "age": 23
+            },
+            {
+              "name": "Lily",
+              "sex": "Woman",
+              "id": 2,
+              "age": 29
+            },
+            {
+              "name": "Jade",
+              "sex": "Woman",
+              "id": 3,
+              "age": 27
+            },
+            {
+              "name": "James",
+              "sex": "Man",
+              "id": 4,
+              "age": 31
+            }
+          ],
+          "meta": {
+            "count": 4,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles/member/users:add",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": [
+          2
+        ]
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {}
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTczNywic2lnbkluVGltZSI6MTc4NzI4MTczNzg1MywiZXhwIjoxNzg3MzY4MTM3LCJqdGkiOiIwYjg3ZmQ3YS0wMDVkLTRlZjktODVmOC03NWJlMjJlZTBlMTEifQ.wzL797ZuM7MiqbVQZ1btIxDP7OI0chnBDNfx6DoXO7c"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 403,
+        "statusText": "Forbidden",
+        "body": {
+          "errors": [
+            {
+              "message": "No permissions"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles/member/users:remove",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": [
+          2
+        ]
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {}
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTczOCwic2lnbkluVGltZSI6MTc4NzI4MTczODAzMCwiZXhwIjoxNzg3MzY4MTM4LCJqdGkiOiJjOWY1NzdjYy03ZTc2LTQxNjItYjY3OC0yODcxNzQ2Y2E3OGUifQ.rxxUMyGZjPkTW8P0AixvnhY2oc7KQXw8GtZJlyr0mC0"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "name": "Jack",
+              "sex": "Man",
+              "id": 1,
+              "age": 23
+            },
+            {
+              "name": "Lily",
+              "sex": "Woman",
+              "id": 2,
+              "age": 29
+            },
+            {
+              "name": "Jade",
+              "sex": "Woman",
+              "id": 3,
+              "age": 27
+            },
+            {
+              "name": "James",
+              "sex": "Man",
+              "id": 4,
+              "age": 31
+            }
+          ],
+          "meta": {
+            "count": 4,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles/member/users:add",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": [
+          2
+        ]
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {}
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTczOCwic2lnbkluVGltZSI6MTc4NzI4MTczODIxMCwiZXhwIjoxNzg3MzY4MTM4LCJqdGkiOiJmMTNjNTc1NC0yODUzLTQ3NDktOWEyMS03OWU1N2MxYzFlNzIifQ.TJdJvD4GrHTfC4OcsX95_3CnSE5nvE2WNnO9SmIf3F4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcuniona"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "age": 23,
+              "name": "Jack",
+              "id": 1
+            },
+            {
+              "age": 29,
+              "name": "Lily",
+              "id": 2
+            },
+            {
+              "age": 27,
+              "name": "Jade",
+              "id": 3
+            }
+          ],
+          "meta": {
+            "count": 3,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/collections/tcunionmixed/fields:create",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "name": "createdBy",
+          "type": "belongsTo",
+          "interface": "createdBy",
+          "target": "users",
+          "foreignKey": "createdById",
+          "targetKey": "id",
+          "uiSchema": {
+            "type": "object",
+            "title": "Created by",
+            "x-component": "AssociationField"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "key": "h1bxigeido0",
+            "name": "createdBy",
+            "type": "belongsTo",
+            "interface": "createdBy",
+            "collectionName": "tcunionmixed",
+            "description": null,
+            "parentKey": null,
+            "reverseKey": null,
+            "target": "users",
+            "foreignKey": "createdById",
+            "targetKey": "id",
+            "uiSchema": {
+              "type": "object",
+              "title": "Created by",
+              "x-component": "AssociationField"
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTczOCwic2lnbkluVGltZSI6MTc4NzI4MTczODU5OCwiZXhwIjoxNzg3MzY4MTM4LCJqdGkiOiI2ZDc3ZDllMi1jYWNhLTRjNDgtODFjZS1kODY5MzMzMzY0MTkifQ.2GYGXR8GdwZdVdTB2_ZfCXtBSRSr7_voewvyBTgAdu4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "id": 1,
+              "name": "Jack",
+              "age": 23,
+              "sex": "Man",
+              "createdById": null
+            },
+            {
+              "id": 2,
+              "name": "Lily",
+              "age": 29,
+              "sex": "Woman",
+              "createdById": null
+            },
+            {
+              "id": 3,
+              "name": "Jade",
+              "age": 27,
+              "sex": "Woman",
+              "createdById": null
+            },
+            {
+              "id": 4,
+              "name": "James",
+              "age": 31,
+              "sex": "Man",
+              "createdById": null
+            }
+          ],
+          "meta": {
+            "count": 4,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    }
+  ]
+}

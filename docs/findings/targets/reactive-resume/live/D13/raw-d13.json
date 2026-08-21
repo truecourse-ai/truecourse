@@ -1,0 +1,30 @@
+{
+  "checkedAt": "2026-08-21T03:31:31.274Z",
+  "steps": [
+    {
+      "label": "CONTROL ordinary edit",
+      "undoDisabled": false,
+      "storedHeadline": "dh-83091405-v2"
+    },
+    {
+      "label": "restore confirm dialog",
+      "rows": [
+        "AI edit\nnow"
+      ],
+      "snapshot": "- alertdialog \"Restore this version?\":\n  - heading \"Restore this version?\" [level=2]\n  - paragraph: Earlier versions are kept; the builder's undo history is reset.\n  - button \"Cancel\"\n  - button \"Confirm\""
+    },
+    {
+      "label": "PROBE restore",
+      "pageHasV1": true,
+      "storedAfter": "dh-83091405-v1",
+      "undoDisabledAfterRestore": true,
+      "headlineAfterCmdZ": "dh-83091405-v1",
+      "versionsAfter": [
+        "Restored version",
+        "Before restore",
+        "AI edit"
+      ],
+      "productsOwnConfirmString": "Earlier versions are kept; the builder's undo history is reset. (version-history.tsx:46)"
+    }
+  ]
+}

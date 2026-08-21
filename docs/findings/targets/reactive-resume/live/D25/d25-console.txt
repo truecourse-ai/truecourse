@@ -1,0 +1,26 @@
+=== D25 · PROBE: the Template SECTION (#sidebar-template), verbatim ===
+- heading "Toggle Template section" [level=3]:
+  - button "Toggle Template section" [expanded]:
+    - img
+- img
+- heading "Template" [level=2]
+- region "Toggle Template section":
+  - button "Azurill":
+    - img "Azurill"
+    - img
+  - heading "Azurill" [level=3]
+  - paragraph: Two-column with a bold colored sidebar and skill bars; great for creative or tech roles where visual flair is welcome.
+  - text: Two-column Creative Tech Visual flair
+
+imgs in the Template SECTION                       1
+  of which carry a name (alt)                      1
+  the named one(s)                                 ["Azurill"]
+section: getByRole('img', {name: 'Chikorita'})     0
+section text mentions "gallery"                    no
+whole page, imgs named Chikorita (gallery closed)  0
+
+=== D25 · CONTROL: the gallery is real, and it is a MODAL ===
+dialog heading                                 Template Gallery
+CONTROL inside the gallery: img 'Chikorita'    1
+every named img in the gallery                 ["Azurill","Bronzor","Chikorita","Ditgar","Ditto","Gengar","Glalie","Kakuna","Lapras","Leafish","Meowth","Onyx","Pikachu","Rhyhorn","Scizor"]
+page text says "Template Gallery"              true

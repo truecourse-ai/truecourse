@@ -1,0 +1,209 @@
+{
+  "checkedAt": "2026-08-21T03:22:19.950Z",
+  "base": "http://127.0.0.1:54490",
+  "steps": [
+    {
+      "label": "stats BEFORE any visit",
+      "request": "GET /api/openapi/resumes/01a02257-4634-74f9-9e76-8bcc7784c47b/statistics",
+      "response": {
+        "isPublic": true,
+        "views": 0,
+        "downloads": 0,
+        "lastViewedAt": null,
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "visitor page load",
+      "url": "http://127.0.0.1:54490/guardowner/f3-82540078",
+      "cookieCount": 0
+    },
+    {
+      "label": "stats AFTER visitor load (CONTROL)",
+      "response": {
+        "isPublic": true,
+        "views": 1,
+        "downloads": 0,
+        "lastViewedAt": "2026-08-21T03:22:21.178Z",
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "download event",
+      "download": {
+        "event": "download",
+        "suggestedFilename": "resume.pdf",
+        "url": "blob:http://127.0.0.1:54490/4fe36b87-8543-4674-a01b-14c0531587a3",
+        "savedTo": "/Users/musheghgevorgyan/repos/truecourse/docs/findings/targets/reactive-resume/live/F3/download-resume.pdf",
+        "bytes": 241590,
+        "magic": "%PDF-"
+      },
+      "error": null
+    },
+    {
+      "label": "stats AFTER visitor Download PDF",
+      "response": {
+        "isPublic": true,
+        "views": 1,
+        "downloads": 0,
+        "lastViewedAt": "2026-08-21T03:22:21.178Z",
+        "lastDownloadedAt": null
+      }
+    },
+    {
+      "label": "daily statistics",
+      "response": [
+        {
+          "date": "2026-07-23",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-24",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-25",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-26",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-27",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-28",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-29",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-30",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-07-31",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-01",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-02",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-03",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-04",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-05",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-06",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-07",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-08",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-09",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-10",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-11",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-12",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-13",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-14",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-15",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-16",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-17",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-18",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-19",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-20",
+          "views": 0,
+          "downloads": 0
+        },
+        {
+          "date": "2026-08-21",
+          "views": 1,
+          "downloads": 0
+        }
+      ]
+    }
+  ]
+}

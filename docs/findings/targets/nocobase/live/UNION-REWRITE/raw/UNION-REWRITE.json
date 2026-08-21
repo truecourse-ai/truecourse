@@ -1,0 +1,586 @@
+{
+  "base": "http://127.0.0.1:14100",
+  "at": "2026-08-21T03:08:28.706Z",
+  "finding": "UNION-REWRITE",
+  "roleMode": {
+    "before": "default",
+    "after": "allow-use-union"
+  },
+  "byteIdentical": true,
+  "rawTexts": {
+    "asA": "{\"data\":[{\"age\":23,\"name\":\"Jack\",\"id\":1},{\"age\":29,\"name\":\"Lily\",\"id\":2},{\"age\":27,\"name\":\"Jade\",\"id\":3}],\"meta\":{\"count\":3,\"page\":1,\"pageSize\":20,\"totalPage\":1}}",
+    "asUnionDefaultMode": "{\"data\":[{\"age\":23,\"name\":\"Jack\",\"id\":1},{\"age\":29,\"name\":\"Lily\",\"id\":2},{\"age\":27,\"name\":\"Jade\",\"id\":3}],\"meta\":{\"count\":3,\"page\":1,\"pageSize\":20,\"totalPage\":1}}",
+    "asUnionAllowUseUnion": "{\"data\":[{\"name\":\"Jack\",\"sex\":\"Man\",\"id\":1,\"age\":23},{\"name\":\"Lily\",\"sex\":\"Woman\",\"id\":2,\"age\":29},{\"name\":\"Jade\",\"sex\":\"Woman\",\"id\":3,\"age\":27},{\"name\":\"James\",\"sex\":\"Man\",\"id\":4,\"age\":31}],\"meta\":{\"count\":4,\"page\":1,\"pageSize\":20,\"totalPage\":1}}"
+  },
+  "transcript": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTcwOCwic2lnbkluVGltZSI6MTc4NzI4MTcwODMwMSwiZXhwIjoxNzg3MzY4MTA4LCJqdGkiOiI4N2FiNjY5ZC1jYzEzLTRlYjQtYWI1Mi0xZDMzZGMxNTZmZTIifQ.homlojG4gEgBGNC5SRlaOI4FR2VYAlYLUnmLcsEP7q4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcuniona"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "age": 23,
+              "name": "Jack",
+              "id": 1
+            },
+            {
+              "age": 29,
+              "name": "Lily",
+              "id": 2
+            },
+            {
+              "age": 27,
+              "name": "Jade",
+              "id": 3
+            }
+          ],
+          "meta": {
+            "count": 3,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "age": 23,
+              "name": "Jack",
+              "id": 1
+            },
+            {
+              "age": 29,
+              "name": "Lily",
+              "id": 2
+            },
+            {
+              "age": 27,
+              "name": "Jade",
+              "id": 3
+            }
+          ],
+          "meta": {
+            "count": 3,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/roles:check",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "roles": [
+              "tcuniona"
+            ],
+            "strategy": {},
+            "actions": {
+              "tcunionrows1:view": {
+                "own": false,
+                "filter": {
+                  "$and": [
+                    {
+                      "age": {
+                        "$lt": 30
+                      }
+                    }
+                  ]
+                },
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              },
+              "tcunionrows2:view": {
+                "own": false,
+                "filter": {
+                  "$and": [
+                    {
+                      "age": {
+                        "$lt": 30
+                      }
+                    }
+                  ]
+                },
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              },
+              "tcunioncols:view": {
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              },
+              "tcunionmixed:view": {
+                "own": false,
+                "filter": {
+                  "$and": [
+                    {
+                      "age": {
+                        "$lt": 30
+                      }
+                    }
+                  ]
+                },
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              }
+            },
+            "snippets": [
+              "!pm",
+              "!pm.*",
+              "!ui.*"
+            ],
+            "resources": [
+              "tcunionrows1",
+              "tcunionrows2",
+              "tcunioncols",
+              "tcunionmixed"
+            ],
+            "role": "tcuniona",
+            "roleMode": "default",
+            "availableActions": [
+              "create",
+              "view",
+              "update",
+              "destroy",
+              "export",
+              "importXlsx",
+              "trigger",
+              "triggerNew"
+            ],
+            "actionAlias": {
+              "create": "create",
+              "firstOrCreate": "create",
+              "updateOrCreate": "create",
+              "get": "view",
+              "list": "view",
+              "query": "view",
+              "update": "update",
+              "move": "update",
+              "destroy": "destroy",
+              "export": "export",
+              "exportAttachments": "export"
+            },
+            "allowAll": false,
+            "allowConfigure": false,
+            "allowMenuItemIds": [],
+            "allowAnonymous": false,
+            "uiButtonSchemasBlacklist": []
+          },
+          "meta": {
+            "dataSources": {}
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/roles:check",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcuniona"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "roles": [
+              "tcuniona"
+            ],
+            "strategy": {},
+            "actions": {
+              "tcunionrows1:view": {
+                "own": false,
+                "filter": {
+                  "$and": [
+                    {
+                      "age": {
+                        "$lt": 30
+                      }
+                    }
+                  ]
+                },
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              },
+              "tcunionrows2:view": {
+                "own": false,
+                "filter": {
+                  "$and": [
+                    {
+                      "age": {
+                        "$lt": 30
+                      }
+                    }
+                  ]
+                },
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              },
+              "tcunioncols:view": {
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              },
+              "tcunionmixed:view": {
+                "own": false,
+                "filter": {
+                  "$and": [
+                    {
+                      "age": {
+                        "$lt": 30
+                      }
+                    }
+                  ]
+                },
+                "appends": [],
+                "fields": [
+                  "age",
+                  "name",
+                  "id"
+                ]
+              }
+            },
+            "snippets": [
+              "!pm",
+              "!pm.*",
+              "!ui.*"
+            ],
+            "resources": [
+              "tcunionrows1",
+              "tcunionrows2",
+              "tcunioncols",
+              "tcunionmixed"
+            ],
+            "role": "tcuniona",
+            "roleMode": "default",
+            "availableActions": [
+              "create",
+              "view",
+              "update",
+              "destroy",
+              "export",
+              "importXlsx",
+              "trigger",
+              "triggerNew"
+            ],
+            "actionAlias": {
+              "create": "create",
+              "firstOrCreate": "create",
+              "updateOrCreate": "create",
+              "get": "view",
+              "list": "view",
+              "query": "view",
+              "update": "update",
+              "move": "update",
+              "destroy": "destroy",
+              "export": "export",
+              "exportAttachments": "export"
+            },
+            "allowAll": false,
+            "allowConfigure": false,
+            "allowMenuItemIds": [],
+            "allowAnonymous": false,
+            "uiButtonSchemasBlacklist": []
+          },
+          "meta": {
+            "dataSources": {}
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "admin"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 401,
+        "statusText": "Unauthorized",
+        "body": {
+          "errors": [
+            {
+              "message": "The role does not belong to the user",
+              "code": "ROLE_NOT_FOUND_FOR_USER"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcnosuchrole"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 401,
+        "statusText": "Unauthorized",
+        "body": {
+          "errors": [
+            {
+              "message": "The role does not belong to the user",
+              "code": "ROLE_NOT_FOUND_FOR_USER"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "admin@nocobase.com",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:17.577Z",
+              "updatedAt": "2026-08-21T03:05:17.577Z",
+              "mainDepartmentId": null,
+              "id": 1,
+              "nickname": "Super Admin",
+              "username": "nocobase",
+              "email": "admin@nocobase.com",
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": null,
+              "updatedById": null
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTcwOCwic2lnbkluVGltZSI6MTc4NzI4MTcwODUyNCwiZXhwIjoxNzg3MzY4MTA4LCJqdGkiOiIxMGE4MGM3Ny0xZGE0LTRiM2ItYmI5My1lY2MyNGE2NDk1MTUifQ.H_VIj-6xqwH7T9SzI5pNMRifS1q8L6PtaKtdqbr8tpE"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/roles:setSystemRoleMode",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "roleMode": "allow-use-union"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {}
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTcwOCwic2lnbkluVGltZSI6MTc4NzI4MTcwODY4OSwiZXhwIjoxNzg3MzY4MTA4LCJqdGkiOiJiMzZiY2NjYS1kZWM0LTQ2YzUtODJiYi03ZDYyYmQyMjZiZWYifQ.0WGPrLKMql0GRQ3GMoqEO-Tzo-shkl2YNlYVlXK6mOU"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "name": "Jack",
+              "sex": "Man",
+              "id": 1,
+              "age": 23
+            },
+            {
+              "name": "Lily",
+              "sex": "Woman",
+              "id": 2,
+              "age": 29
+            },
+            {
+              "name": "Jade",
+              "sex": "Woman",
+              "id": 3,
+              "age": 27
+            },
+            {
+              "name": "James",
+              "sex": "Man",
+              "id": 4,
+              "age": 31
+            }
+          ],
+          "meta": {
+            "count": 4,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    }
+  ]
+}

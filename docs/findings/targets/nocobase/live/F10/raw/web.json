@@ -1,0 +1,116 @@
+{
+  "base": "http://127.0.0.1:14100",
+  "at": "2026-08-21T03:07:29.189Z",
+  "chromium": "/Users/musheghgevorgyan/Library/Caches/ms-playwright/chromium-1194/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+  "playwrightCore": "1.62.1",
+  "F5": {
+    "bodyText": "No pages yet, please configure first\nClick the \"UI Editor\" icon in the upper right corner to enter the UI Editor mode",
+    "bodyContainsUIBuilder": false,
+    "bodyContainsUIEditor": true,
+    "builderEls": 0,
+    "editorEls": 1,
+    "topbarNames": [],
+    "getByLabelUIBuilder": 0,
+    "getByTitleUIEditor": 1,
+    "htmlContainsUIBuilder": false
+  },
+  "F9": {
+    "tablistCount": 0,
+    "tabRoleCount": 0,
+    "containsDesktopRoutes": true,
+    "containsMobileRoutes": false,
+    "horizontalMenuItems": [
+      "Desktop routes"
+    ],
+    "bodyText": "Plugin manager\nData sources\nUsers & Permissions\nWorkflow\nAI employees\nAPI documentation\nAPI keys\nAuthentication\nBackup manager\nVariables and secrets\nFile manager\nLicense settings\nLogger\nNotification manager\nRoutes\nSecurity\nSystem settings\nTheme editor\nUI templates\nVerification\nRoutes\nDesktop routes\nFilter\nRefresh\nDelete\nHide in menu\nShow in menu\nAdd new\n\t\nTitle\n\t\nType\n\t\nShow in menu\n\t\nPath\n\t\nActions\n\n\n \n\t\n \n\t\n \n\t\n \n\t\n \n\t\n \n\n\nNo data\n\n\n1\n20 / page"
+  },
+  "F7": {
+    "radioAccessibleNames": [
+      "Group",
+      "Classic page (v1)",
+      "Modern page (v2)",
+      "Link"
+    ],
+    "pageExactRadioCount": 0,
+    "drawerText": "Add new\n*Type:\nGroup\nClassic page (v1)\nModern page (v2)\nLink\n*Title:\nIcon:\nSelect icon\nShow in menu:\nEnable page tabs:\nCancel\nSubmit"
+  },
+  "SURFACE": {
+    "textInputCount": 1,
+    "firstInputMarkup": "<input class=\"ant-input css-17h1pxo\" type=\"text\" value=\"\" style=\"\">",
+    "labelsLength": 0,
+    "getByRoleTextbox": 1,
+    "getByRoleTextboxNameTitle": 0,
+    "getByRoleTextboxNameTitleFullwidthColon": 0,
+    "getByRoleTextboxNameTitleRegex": 0,
+    "getByLabelTitle": 1,
+    "getByLabelTitleExact": 0,
+    "fillViaGetByLabel": "Error: locator.fill: Error: Element is not an <input>, <textarea>, <select> or [contenteditable] and does not have a role allowing [aria-readonly]",
+    "fillByPositionValue": "tc-surface"
+  },
+  "F8": {
+    "menuItems": [
+      "General collection",
+      "Calendar collection",
+      "Tree collection",
+      "File collection",
+      "SQL collection",
+      "Connect to database view"
+    ],
+    "count": 6,
+    "submenuTitles": [],
+    "menuitemRoleNames": [
+      "Plugin manager",
+      "Data sources",
+      "Users & Permissions",
+      "Workflow",
+      "AI employees",
+      "API documentation",
+      "API keys",
+      "Authentication",
+      "Backup manager",
+      "Variables and secrets",
+      "File manager",
+      "License settings",
+      "Logger",
+      "Notification manager",
+      "Routes",
+      "Security",
+      "System settings",
+      "Theme editor",
+      "UI templates",
+      "Verification",
+      "Collections",
+      "General collection",
+      "Calendar collection",
+      "Tree collection",
+      "File collection",
+      "SQL collection",
+      "Connect to database view"
+    ],
+    "vocabulary": {
+      "General collection": "PRESENT",
+      "Calendar collection": "PRESENT",
+      "Comment collection": "ABSENT",
+      "Tree collection": "PRESENT",
+      "File collection": "PRESENT",
+      "SQL collection": "PRESENT",
+      "Connect a database view": "ABSENT",
+      "Database view collection": "ABSENT",
+      "Connect external data": "ABSENT",
+      "Expression collection": "ABSENT",
+      "Inheritance collection": "ABSENT",
+      "Connect to database view": "PRESENT"
+    }
+  },
+  "F10_browser": {
+    "drawerText": "Create collection\nCollection template: General collection\n*Collection display name:\n*Collection name:\nRandomly generated and can be modified. Support letters, numbers and underscores, must start with a letter.\nInherits:\nCategories:\nDescription:\nUse simple pagination mode\nSkip getting the total number of table records during paging to speed up loading. It is recommended to enable this option for data tables with a large amount of data\nPreset fields\n:\n\tField\tInterface\tDescription\n\n \n\t\n \n\t\n \n\t\n \n\n\n\tID\t\nSnowflake ID (53-bit)\n\tPrimary key, distributed uniqueness, time-ordering\n\n\tCreated at\tCreated at\tStore the creation time of each record\n\n\tCreated by\tCreated by\tStore the creation user of each record\n\n\tLast updated at\tLast updated at\tStore the last update time of each record\n\n\tLast updated by\tLast updated by\tStore the last update user of each record\nCancel\nSubmit",
+    "collectionNameFieldValueBefore": "t_uet0iceqkoz",
+    "typed": "9tcbad",
+    "validationErrors": [
+      "This field is invalid"
+    ],
+    "submitButtons": 0,
+    "disabledButtons": 0,
+    "drawerMentionsRule": true
+  }
+}

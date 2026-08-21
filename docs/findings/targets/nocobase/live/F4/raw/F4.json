@@ -1,0 +1,220 @@
+{
+  "base": "http://127.0.0.1:14100",
+  "at": "2026-08-21T03:08:35.941Z",
+  "finding": "F4",
+  "roleMode": "allow-use-union",
+  "roleA": {
+    "count": 3,
+    "names": [
+      "Jack",
+      "Lily",
+      "Jade"
+    ]
+  },
+  "roleB": {
+    "count": 3,
+    "names": [
+      "Jack",
+      "Jade",
+      "James"
+    ]
+  },
+  "merged": {
+    "count": 4,
+    "rows": [
+      {
+        "name": "Jack",
+        "sex": "Man",
+        "id": 1,
+        "age": 23
+      },
+      {
+        "name": "Lily",
+        "sex": "Woman",
+        "id": 2,
+        "age": 29
+      },
+      {
+        "name": "Jade",
+        "sex": "Woman",
+        "id": 3,
+        "age": 27
+      },
+      {
+        "name": "James",
+        "sex": "Man",
+        "id": 4,
+        "age": 31
+      }
+    ]
+  },
+  "transcript": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/auth:signIn",
+        "headers": {
+          "X-Authenticator": "basic",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "account": "tcunion",
+          "password": "TcGuard1!"
+        }
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": {
+            "user": {
+              "createdAt": "2026-08-21T03:05:27.200Z",
+              "updatedAt": "2026-08-21T03:05:27.200Z",
+              "mainDepartmentId": null,
+              "id": 2,
+              "nickname": "TC Union User",
+              "username": "tcunion",
+              "email": null,
+              "phone": null,
+              "passwordChangeTz": null,
+              "appLang": null,
+              "systemSettings": {},
+              "createdById": 1,
+              "updatedById": 1
+            },
+            "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjIsInRlbXAiOnRydWUsImlhdCI6MTc4NzI4MTcxNSwic2lnbkluVGltZSI6MTc4NzI4MTcxNTc4NSwiZXhwIjoxNzg3MzY4MTE1LCJqdGkiOiI0ZTgwMGY1OC02YzJjLTQ1MDAtYTlkMC1hMWIzNDYwZWM4MzUifQ.TcB0NxDLPCDE64J3XpktcgaeXicLNVyIfwDHYbD1pGI"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcuniona"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "age": 23,
+              "name": "Jack",
+              "id": 1
+            },
+            {
+              "age": 29,
+              "name": "Lily",
+              "id": 2
+            },
+            {
+              "age": 27,
+              "name": "Jade",
+              "id": 3
+            }
+          ],
+          "meta": {
+            "count": 3,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "tcunionb"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "name": "Jack",
+              "sex": "Man",
+              "id": 1
+            },
+            {
+              "name": "Jade",
+              "sex": "Woman",
+              "id": 3
+            },
+            {
+              "name": "James",
+              "sex": "Man",
+              "id": 4
+            }
+          ],
+          "meta": {
+            "count": 3,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/tcunionmixed:list?sort=id",
+        "headers": {
+          "Authorization": "Bearer <token>",
+          "X-Role": "__union__"
+        },
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "statusText": "OK",
+        "body": {
+          "data": [
+            {
+              "name": "Jack",
+              "sex": "Man",
+              "id": 1,
+              "age": 23
+            },
+            {
+              "name": "Lily",
+              "sex": "Woman",
+              "id": 2,
+              "age": 29
+            },
+            {
+              "name": "Jade",
+              "sex": "Woman",
+              "id": 3,
+              "age": 27
+            },
+            {
+              "name": "James",
+              "sex": "Man",
+              "id": 4,
+              "age": 31
+            }
+          ],
+          "meta": {
+            "count": 4,
+            "page": 1,
+            "pageSize": 20,
+            "totalPage": 1
+          }
+        }
+      }
+    }
+  ]
+}

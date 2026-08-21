@@ -1,0 +1,14 @@
+signed in as admin
+tcfld fields: beta,alpha
+rolesUsers: tcflduser|tcfldr
+tcviewuser|tcvieworr
+
+row before (raw postgres): 1|a0|b0
+PROBE  POST /api/tcfld:update?filterByTk=1 X-Role: tcfldr {"alpha":"a1","beta":"b1"} -> 200 {"data":[{"id":1,"alpha":"a1","beta":"b0"}]}
+row after (raw postgres): 1|a1|b0
+CTRL1  POST /api/tcfld:update?filterByTk=1 X-Role: tcfldr {"beta":"b2"} -> 200 {"data":[{"id":1,"alpha":"a1","beta":"b0"}]}
+row after (raw postgres): 1|a1|b0
+CTRL2  POST /api/tcfld:update?filterByTk=1 X-Role: tcvieworr {"alpha":"zzz"} -> 403 {"errors":[{"message":"No permissions"}]}
+row after (raw postgres): 1|a1|b0
+
+[saved] /private/tmp/claude-501/-Users-musheghgevorgyan-repos-truecourse/ace1ded0-15bd-489a-81e7-579caf056682/scratchpad/nocobase-live/raw/F13.json

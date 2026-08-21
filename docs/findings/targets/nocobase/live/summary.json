@@ -1,0 +1,76 @@
+{
+  "target": "nocobase",
+  "build": {
+    "sha": "032a4f6913be912f57462d605cbd0bde97b599c6",
+    "date": "2026-08-21",
+    "branch": "main"
+  },
+  "checkedAt": "2026-08-20",
+  "findings": {
+    "F13": {
+      "verdict": "still reproduces",
+      "evidence": "F13/repro.md, F13/raw/F13.json",
+      "note": "POST /api/tcfld:update?filterByTk=1 with X-Role: tcfldr and {\"alpha\":\"a1\",\"beta\":\"b1\"} answered 200 {\"data\":[{\"id\":1,\"alpha\":\"a1\",\"beta\":\"b0\"}]} and postgres kept 1|a1|b0. Control 1: sending only the ungranted field is a 200 no-op. Control 2 (the essential one): role tcvieworr, which has no update grant at all, got 403 No permissions on the identical write, so refusal exists at the action level and the silence is specific to a partial grant. Mechanism acl.ts:120-131 re-read at this sha, unchanged."
+    },
+    "UNION-REWRITE": {
+      "verdict": "still reproduces",
+      "evidence": "UNION-REWRITE/repro.md, UNION-REWRITE/raw/UNION-REWRITE.json",
+      "note": "roleMode was default. GET /api/tcunionmixed:list?sort=id under X-Role: __union__ was byte-identical to the same request under X-Role: tcuniona (3 rows, no sex), and GET /api/roles:check under X-Role: __union__ reported role tcuniona. Control 1: X-Role: admin and X-Role: tcnosuchrole both 401 ROLE_NOT_FOUND_FOR_USER. Control 2: after roles:setSystemRoleMode to allow-use-union the same header returned 4 rows carrying age and sex. Mechanism setCurrentRole.ts:55-58 unchanged."
+    },
+    "F11.1": {
+      "verdict": "still reproduces",
+      "evidence": "F11.1/repro.md, F11.1/raw/F10-F11.json",
+      "note": "GET /api/tcdestroy:list after collections:destroy answered 500 {\"errors\":[{\"message\":\"Cannot read properties of undefined (reading 'collection')\"}]} with the table confirmed gone from information_schema. Control: GET /api/tcneverexisted:list answered 404 Not Found. Mechanism actions/utils.ts:26-39 plus actions/list.ts:37 unchanged."
+    },
+    "F11.2": {
+      "verdict": "still reproduces",
+      "evidence": "F11.2/repro.md, F11.2/raw/F10-F11.json",
+      "note": "POST /api/collections/9tcbad/fields:create {\"name\":\"amount\",\"interface\":\"number\"} answered 500 {\"errors\":[{\"message\":\"unsupported field type null\"}]}. Control: the same request with \"type\":\"double\" answered 200. Mechanism database.ts:779, an untyped Error, unchanged."
+    },
+    "F10": {
+      "verdict": "still reproduces",
+      "evidence": "F10/repro.md, F10/raw/F10-F11.json, F10/raw/web.json, F10/raw/f10-name-invalid.png",
+      "note": "collections:create {\"name\":\"9tcbad\"} answered 200 and fields:create {\"name\":\"9bad\"} answered 200; both are materialized in postgres as table 9tcbad with columns id (bigint) and 9bad (character varying). Browser control: the Create-collection drawer carries the manual's own sentence, and typing 9tcbad produced the form error This field is invalid with 0 Submit buttons reachable by role."
+    },
+    "F12": {
+      "verdict": "still reproduces",
+      "evidence": "F12/repro.md, F12/raw/F12.json, F12/raw/scopes.txt",
+      "note": "Under allow-use-union: two roles gave 200 with 4 rows; adding member (strategy view:own) gave 403 No permissions; removing member restored 200; with all three roles held X-Role: tcuniona still gave 200 with its 3 rows; adding a createdById column to tcunionmixed flipped the identical union read back to 200 with 4 rows. Mechanism acl.ts:645-656 and the catch at acl.ts:530-537 unchanged."
+    },
+    "F4": {
+      "verdict": "still reproduces",
+      "evidence": "F4/repro.md, F4/raw/F4.json, F4/raw/scopes.txt",
+      "note": "Role A alone (Age < 30, columns name/age) returned 3 rows Jack, Lily, Jade where union.md's table prints 2; Role B alone (Name contains Ja, columns name/sex) returned 3 rows Jack, Jade, James where its table prints 2. Control: the merged read returned exactly the manual's merged table, 4 rows with both age and sex, so only the two per-role tables are wrong."
+    },
+    "F8": {
+      "verdict": "still reproduces",
+      "evidence": "F8/repro.md, F8/raw/web.json, F8/raw/f8-create-menu.png",
+      "note": "The Create-collection dropdown offers exactly six items: General collection, Calendar collection, Tree collection, File collection, SQL collection, Connect to database view. Absent: Comment collection, Expression collection, Connect external data, Inheritance collection, and all three doc spellings of the database-view entry. Confirms the report's correction: Calendar IS on the menu at this sha, so findings.md's narrative sentence is wrong and its comparison table is right."
+    },
+    "F6": {
+      "verdict": "still reproduces",
+      "evidence": "F6/repro.md, F6/raw/F6.json",
+      "note": "POST /api/roles:create {\"name\":\"tcnm1\"} returned allowNewMenu:false and roles:get confirmed it. Control: roles:list shows admin true, member true (default), root false, and every api-minted role on the instance false. Same reading straight from postgres. Cite correction confirmed: the allowNewMenu column object is roles.ts:77-80, not :78-81."
+    },
+    "F5": {
+      "verdict": "still reproduces",
+      "evidence": "F5/repro.md, F5/raw/web.json, F5/raw/F5-topbar.json, F5/raw/f5-admin.png",
+      "note": "/admin body text is exactly: No pages yet, please configure first / Click the \"UI Editor\" icon in the upper right corner to enter the UI Editor mode. The only title attribute in the whole document is UI Editor; getByTitle('UI Editor') 1, getByLabel('UI Builder') 0, and the page HTML does not contain the string UI Builder at all. Cite correction confirmed: TopbarActionModel.tsx:378 is the testId line, the tooltip is :381."
+    },
+    "F7": {
+      "verdict": "still reproduces",
+      "evidence": "F7/repro.md, F7/raw/web.json, F7/raw/f7-add-route-drawer.png",
+      "note": "The Add-new drawer's Type radios are Group, Classic page (v1), Modern page (v2), Link. getByRole('radio', {name:'Page', exact:true}) returned 0, and Tab is not on the form at all, against routes/index.md's four types Group, Page, Tab, Link. Mechanism routesTableSchema.tsx:249-258 unchanged."
+    },
+    "F9": {
+      "verdict": "still reproduces",
+      "evidence": "F9/repro.md, F9/raw/web.json, F9/raw/mobile-plugin.txt, F9/raw/f9-routes.png",
+      "note": "/admin/settings/routes/desktop has [role=tablist] 0 and getByRole('tab') 0; its horizontal nav has the single entry Desktop routes and the page text does not contain Mobile routes. Control: applicationPlugins shows mobile enabled=t builtIn=t, so this is not a disabled plugin. Nuance kept: the entry is an ant-menu item, not an ant-tabs tab, so a scenario asserting by tab role fails for the wrong reason."
+    },
+    "SURFACE": {
+      "verdict": "still reproduces",
+      "evidence": "SURFACE/repro.md, SURFACE/raw/web.json, SURFACE/raw/surface-title.png",
+      "note": "The drawer's only text input is <input class=\"ant-input css-17h1pxo\" type=\"text\" value=\"\"> with no id, name, aria-label, aria-labelledby or placeholder, and element.labels.length is 0. getByRole('textbox') 1 but getByRole('textbox', {name:'Title'}) 0, also 0 for the full-width colon and for /Title/. The trap reproduced too: getByLabel('Title') returns 1 and fill() through it errors with Element is not an <input>, <textarea>, <select> or [contenteditable]; filling by position works, so the control exists and simply has no name."
+    }
+  }
+}

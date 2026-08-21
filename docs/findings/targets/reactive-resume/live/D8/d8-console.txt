@@ -1,0 +1,61 @@
+=== D8 · the Sharing section, before ===
+- heading "Toggle Sharing section" [level=3]:
+  - button "Toggle Sharing section" [expanded]:
+    - img
+- img
+- heading "Sharing" [level=2]
+- region "Toggle Sharing section":
+  - switch "Allow Public Access Anyone with the link can view and download the resume."
+  - text: Allow Public Access Anyone with the link can view and download the resume.
+
+after Allow Public Access, section:
+- heading "Toggle Sharing section" [level=3]:
+  - button "Toggle Sharing section" [expanded]:
+    - img
+- img
+- heading "Sharing" [level=2]
+- region "Toggle Sharing section":
+  - switch "Allow Public Access Anyone with the link can view and download the resume." [checked]
+  - text: Allow Public Access Anyone with the link can view and download the resume. URL
+  - textbox "URL": http://127.0.0.1:54490/guardowner/d8-82982114
+  - button "Copy URL":
+    - img
+  - paragraph: Optionally, set a password so that only people with the password can view your resume through the link.
+  - button "Set Password":
+    - img
+    - text: Set Password
+
+'Set Password' buttons: 1
+
+=== D8 · PROBE: the whole prompt, verbatim from Playwright's accessibility tree ===
+- alertdialog "Protect your resume from unauthorized access with a password":
+  - heading "Protect your resume from unauthorized access with a password" [level=2]
+  - paragraph: Anyone visiting the resume's public URL must enter this password to access it.
+  - textbox
+  - button "Cancel"
+  - button "Set Password"
+
+password inputs in the prompt                1
+ALL inputs in the prompt                     1
+inputs on the whole page: before -> after    45 -> 46
+page text contains "Confirm Password"        false
+page text contains "Confirm"                 false
+getByLabel('Confirm Password').count()       0
+page text contains "6-64"                    false
+page text contains "6 to 64"                 false
+
+the single field's attributes: [{"type":"password","placeholder":"","ariaLabel":null,"minLength":6,"maxLength":64,"label":null}]
+  (F7 family: that one field is itself anonymous — ariaLabel null, label null)
+
+=== D8 · does the DIALOG itself block a 3-character password? ===
+typed "abc" (3 chars) and pressed Set Password
+  prompt still open afterwards:        0
+  resume.hasPassword after the attempt: false
+  visible feedback line:               "Optionally, set a password so that only people with the password can view your resume through the link."
+
+=== D8 · CONTROL: the API really does enforce min(6).max(64) (dto/resume.ts:75) ===
+PUT /api/openapi/resumes/01a0225e-04e8-729f-a56b-701e119c7d6b/password {"password":"abc"}  -> 400
+   body: {"defined":false,"code":"BAD_REQUEST","status":400,"message":"Input validation failed","data":{"issues":[{"origin":"string","code":"too_small","minimum":6,"inclusive":true,"path":["password"],"message":"Too small: expected string to have >=6 characters"}]}}
+PUT ... {"password":"sixchars"}                              -> 200
+
+So the documented 6-64 rule is real and server-enforced; the dialog neither states it nor confirms it.
