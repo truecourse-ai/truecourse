@@ -123,9 +123,10 @@ describe('DocMarkdown — what the directive syntax must not touch', () => {
 
 /**
  * A synced ticket states its dates and status as YAML frontmatter, and a reader
- * opening the doc wants the ticket rather than our bookkeeping. The renderer is
- * the only place that hides it — the block stays in the source everything
- * downstream reads, so these guard the presentation contract, not the data.
+ * opening the doc wants the ticket rather than our bookkeeping. `remark-frontmatter`
+ * parses the block into a node the renderer has no handler for, so it never reaches
+ * the page. Hiding is presentation only — the block stays in the source everything
+ * downstream reads, so these guard that contract, not the data.
  */
 describe('DocMarkdown — YAML frontmatter', () => {
   const FM = [
@@ -155,6 +156,25 @@ describe('DocMarkdown — YAML frontmatter', () => {
     render(<DocMarkdown source={FM} highlight={['KAN-2: Idempotent order creation']} />);
     expect(screen.queryByText(/created:/)).toBeNull();
     expect(screen.getByText('Order creation must be idempotent.')).toBeTruthy();
+  });
+
+it('takes a block whose body would break a naive fence match', () => {
+    // A `---` inside a quoted scalar, and a key whose value is a nested block —
+    // the parser knows where the document ends; a regex over the raw text does not.
+    const tricky = [
+      '---',
+      'title: "a --- inside a value"',
+      'note: |',
+      '  a line',
+      '  --- not the end',
+      '---',
+      '',
+      '# Real heading',
+    ].join('\n');
+    render(<DocMarkdown source={tricky} />);
+    expect(screen.queryByText(/a --- inside a value/)).toBeNull();
+    expect(screen.queryByText(/not the end/)).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Real heading' })).toBeTruthy();
   });
 
   it('leaves a horizontal rule inside the prose alone', () => {
