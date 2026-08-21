@@ -85,6 +85,46 @@ export function runAgentLoop<TOutcome>(input: AgentLoopInput<TOutcome>): AgentLo
   return startSession(input, 0);
 }
 
+/**
+ * BUDGET VISIBILITY + THE WRAP-UP WINDOW (decision 2026-08-21, from the first
+ * documenso field run: 12 of 26 overlap sessions read to the wall and lost
+ * everything — silent grants give a session no way to pace itself, and a
+ * budget-exhausted failure that discards 45 turns of reading is not the "real
+ * result" §3.3 promised). Two mechanics, both shell-owned:
+ *
+ * - Every automatic resume grant is ANNOUNCED to the session as a steered user
+ *   message naming the grant, the fresh turn count, and — on the last grant —
+ *   that no more follow. Resume grants time, and now the session can see it.
+ * - When the LAST grant's budget binds, the shell does not kill the session:
+ *   it demands the outcome (a steered wrap-up message) and allows
+ *   {@link WRAP_UP_TURNS} further turns to deliver it — enough for the
+ *   outcome-precondition round trip (refusal → required tool → outcome).
+ *   Only when the window also runs out does the session fail
+ *   `budget-exhausted`. The hard limit is therefore
+ *   `(maxResumes + 1) × turns + WRAP_UP_TURNS` — still hard, never negotiable
+ *   at runtime.
+ */
+export const WRAP_UP_TURNS = 3;
+
+/** The steered announcement of an automatic in-run resume grant. */
+export function resumeGrantMessage(grant: number, of: number, turns: number): string {
+  const head = `[budget] You exhausted a ${turns}-turn budget; this is automatic resume grant ${grant} of ${of}: ${turns} fresh turns.`;
+  return grant === of
+    ? `${head} This is your LAST grant — no more turns follow it. Stop exploring in time to validate and produce your outcome within these turns, reporting honestly what you did not reach.`
+    : `${head} ${of - grant} grant(s) remain after this one — pace the remaining work accordingly.`;
+}
+
+/** The steered outcome demand that opens the wrap-up window. */
+export function wrapUpMessage(preconditionTool?: string): string {
+  return [
+    `[budget] Your turn budget is EXHAUSTED. You have ${WRAP_UP_TURNS} turns left — produce your outcome from what you already have. No more exploration.`,
+    preconditionTool
+      ? `Call \`${preconditionTool}\` on your draft, then produce the outcome.`
+      : `Produce the outcome now.`,
+    `Report honestly what you did not reach; a partial outcome delivered now beats losing everything this session found.`,
+  ].join(' ');
+}
+
 /** `depth` is the sub-session depth: 0 = top-level, 1 = child (§3.3's max). */
 function startSession<TOutcome>(
   input: AgentLoopInput<TOutcome>,
@@ -149,6 +189,9 @@ function startSession<TOutcome>(
   // which stays recorded.
   let turnsThisGrant = 0;
   let grantsUsed = 0;
+  // The wrap-up window (2026-08-21): turns left to deliver the outcome after
+  // the last grant's budget bound. `undefined` until the demand is issued.
+  let wrapUpTurnsLeft: number | undefined;
 
   // The narrowed malformed policy (§3.3): text turns are LEGAL and never
   // re-asked; a re-ask marks its TURN malformed (several re-asked calls in
@@ -162,6 +205,23 @@ function startSession<TOutcome>(
   // events; a resumed-from prior transcript is folded in below. Stays false
   // (and unread) when the def declares no precondition.
   let preconditionMet = false;
+
+  // The draft checkpoint: whether the named tool has produced a result, and
+  // whether the one-shot steer already fired. A steer that lands before the
+  // driver handle exists is parked and flushed on assignment, mirroring
+  // `pendingInterrupt` (a queue: a grant announcement and a checkpoint can
+  // fire on the same turn).
+  let checkpointMet = false;
+  let checkpointFired = false;
+  const pendingSteers: string[] = [];
+
+  // Shell-originated messages (grant announcements, the wrap-up demand, the
+  // draft checkpoint) all funnel through here so none is lost to a not-yet-
+  // assigned handle.
+  const steerSession = (message: string): void => {
+    if (handle) handle.steer(message);
+    else pendingSteers.push(message);
+  };
 
   const track = (body: SessionEventBody & { raw?: RawPayload }): void => {
     append(body);
@@ -181,14 +241,38 @@ function startSession<TOutcome>(
           requestInterrupt();
         } else if (turnsThisGrant >= def.budget.turns) {
           if (grantsUsed < def.budget.maxResumes) {
-            // Automatic resume: a fresh grant, in-run, no interruption.
+            // Automatic resume: a fresh grant, in-run, no interruption — and
+            // ANNOUNCED, so the session can pace itself (a silent grant gives
+            // time nobody knows they have).
             grantsUsed += 1;
             turnsThisGrant = 0;
             append({ type: 'resume-grant', grant: grantsUsed, of: def.budget.maxResumes });
-          } else {
+            steerSession(resumeGrantMessage(grantsUsed, def.budget.maxResumes, def.budget.turns));
+          } else if (wrapUpTurnsLeft === undefined) {
+            // The last budget bound: demand the outcome instead of killing the
+            // session — the window is what turns budget-exhausted from a total
+            // loss into §3.3's "real result".
+            wrapUpTurnsLeft = WRAP_UP_TURNS;
+            steerSession(wrapUpMessage(def.outcomePrecondition?.tool));
+          } else if (--wrapUpTurnsLeft <= 0) {
             interruptCause = 'budget';
             requestInterrupt();
           }
+        }
+        // The draft checkpoint: `afterTurn` turns in and the named tool has
+        // still produced nothing — steer the nudge, once. Suppressed once the
+        // shell has decided to stop the session or demanded the outcome (the
+        // wrap-up message supersedes a "start drafting" nudge).
+        if (
+          def.draftCheckpoint &&
+          !checkpointMet &&
+          !checkpointFired &&
+          turns >= def.draftCheckpoint.afterTurn &&
+          interruptCause === undefined &&
+          wrapUpTurnsLeft === undefined
+        ) {
+          checkpointFired = true;
+          steerSession(def.draftCheckpoint.message);
         }
         break;
       }
@@ -205,6 +289,9 @@ function startSession<TOutcome>(
       case 'tool-result': {
         if (def.outcomePrecondition && body.toolName === def.outcomePrecondition.tool) {
           preconditionMet = true;
+        }
+        if (def.draftCheckpoint && body.toolName === def.draftCheckpoint.tool) {
+          checkpointMet = true;
         }
         break;
       }
@@ -318,6 +405,7 @@ function startSession<TOutcome>(
           signal: controller.signal,
         });
         if (pendingInterrupt) void handle.interrupt();
+        for (const message of pendingSteers.splice(0)) handle.steer(message);
         return await handle.done;
       } catch (err) {
         // `done` rejecting is reserved for driver defects — converted to a
@@ -341,6 +429,12 @@ function startSession<TOutcome>(
     if (def.outcomePrecondition && !preconditionMet) {
       const required = def.outcomePrecondition.tool;
       preconditionMet = priorEvents.some((e) => e.type === 'tool-result' && e.toolName === required);
+    }
+    // Same for the draft checkpoint: a tool that ran in the resumed-from
+    // session ran, and this session carries that transcript as its history.
+    if (def.draftCheckpoint && !checkpointMet) {
+      const required = def.draftCheckpoint.tool;
+      checkpointMet = priorEvents.some((e) => e.type === 'tool-result' && e.toolName === required);
     }
     let result = await runOnce(
       input.resume ? { cursor: input.resume.cursor, events: priorEvents } : undefined,

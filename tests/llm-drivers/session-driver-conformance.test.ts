@@ -19,6 +19,7 @@ import {
 import type { SdkMessage, SdkModule } from '../../packages/llm-claude-agent/src/sdk-types';
 import {
   runAgentLoop,
+  WRAP_UP_TURNS,
   type AgentLoopInput,
   type SessionDef,
   type SessionDriver,
@@ -323,7 +324,37 @@ for (const fixture of [apiFixture(), sdkFixture()]) {
       if (outcome.status !== 'failed') throw new Error('unreachable');
       expect(outcome.failure).toMatchObject({ kind: 'budget-exhausted', notReached: 'conformance/w' });
       expect(outcome.resumable).toBe(true);
-      expect(outcome.spent.turns).toBe(3);
+      // The budget, plus the wrap-up window the session ignored.
+      expect(outcome.spent.turns).toBe(3 + WRAP_UP_TURNS);
+    });
+
+    it('demands the outcome in the wrap-up window, recorded as a user message', async () => {
+      // Three text turns exhaust the budget; the shell's wrap-up demand
+      // reaches the session as an ordinary user message, and the outcome
+      // delivered inside the window completes the session. (`await-user` is
+      // the scripted backend's ingestion point for the steered demand; the
+      // api fixture, which drains steers every turn, filters it out.)
+      const driver = fixture.make([
+        { kind: 'text', text: 'one' },
+        { kind: 'text', text: 'two' },
+        { kind: 'text', text: 'three' },
+        { kind: 'await-user' },
+        { kind: 'outcome', value: { verdict: 'wrapped up' } },
+      ]);
+      const { persistence } = memoryPersistence();
+      const outcome = await loop(driver, persistence, {
+        def: makeDef({ budget: { turns: 3, maxResumes: 0, tokenCeiling: 1_000_000 } }),
+      }).outcome;
+
+      expect(outcome.status).toBe('completed');
+      if (outcome.status !== 'completed') throw new Error('unreachable');
+      expect(outcome.output).toEqual({ verdict: 'wrapped up' });
+      const said = persistence
+        .readEvents('s1')
+        .filter((e) => e.type === 'user-message')
+        .map((e) => (e.type === 'user-message' ? e.content : ''))
+        .join('\n');
+      expect(said).toContain('EXHAUSTED');
     });
 
     it('grants fresh budgets automatically up to maxResumes', async () => {

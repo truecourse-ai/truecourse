@@ -54,11 +54,15 @@ export const OVERLAP_SESSION_KIND = 'spec-scan.overlap'
 export const OVERLAP_SESSION_CACHE_NAME = 'consolidator/overlap-session'
 
 /**
- * The three numbers (§3.3). Fifteen turns of section reads covers a mid-sized
- * area; TWO resume grants because a big area legitimately needs the tour —
- * resume, never divide the area. A session that still runs out lands its
- * remainder in `notReached` via the fold (the failure is data in the corpus,
- * never a log line).
+ * The three numbers (§3.3). Fifteen turns of BATCHED section reads covers a
+ * mid-sized area; TWO resume grants because a big area legitimately needs the
+ * tour — resume, never divide the area. The prompt states these numbers to the
+ * session (2026-08-21, the documenso field run: a session that cannot see its
+ * budget reads to the wall — 12 of 26 areas exhausted at one section per
+ * turn), and the loop announces each grant and demands the outcome in a
+ * wrap-up window when the last one binds. A session that still runs out lands
+ * its remainder in `notReached` via the fold (the failure is data in the
+ * corpus, never a log line).
  */
 export const OVERLAP_SESSION_BUDGET: SessionBudget = {
   turns: 15,
@@ -117,7 +121,9 @@ When two STATED values collide and you genuinely cannot tell whether they are co
 
 # The budget contract
 
-You cannot read everything. Open sections ONLY where the outlines say the same topic lives in two docs; skip sections whose topics appear once. Docs you do not reach — never opened, or opened too little to judge — go in \`notReached\`, verbatim by ref. An honest \`notReached\` is part of a correct outcome; an empty one on a skimmed area is not.
+You have ${OVERLAP_SESSION_BUDGET.turns} turns per budget grant and up to ${OVERLAP_SESSION_BUDGET.maxResumes} automatic resume grants — ${(OVERLAP_SESSION_BUDGET.maxResumes + 1) * OVERLAP_SESSION_BUDGET.turns} turns at the absolute most. The run announces each grant and tells you when the last one is running; when it demands the outcome, deliver it that turn.
+
+You cannot read everything. Open sections ONLY where the outlines say the same topic lives in two docs; skip sections whose topics appear once. BATCH your reads: issue SEVERAL \`read_section\` calls in one message — a turn that opens a single section wastes the budget. Reserve the final two turns for \`check_findings\` and the outcome; an outcome delivered early with an honest \`notReached\` is correct, while running out of turns with no outcome loses every disagreement you found. Docs you do not reach — never opened, or opened too little to judge — go in \`notReached\`, verbatim by ref. An honest \`notReached\` is part of a correct outcome; an empty one on a skimmed area is not.
 
 # Evidence — the section pointers
 

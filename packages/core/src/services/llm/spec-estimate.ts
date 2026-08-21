@@ -33,7 +33,7 @@ import {
 } from '@truecourse/spec-consolidator';
 import { getCacheEntry } from '@truecourse/llm';
 import type { z } from 'zod';
-import type { SessionBudget } from '@truecourse/agent-loop';
+import { WRAP_UP_TURNS, type SessionBudget } from '@truecourse/agent-loop';
 import {
   CURATE_DOC_BUDGET,
   CURATE_DOC_CACHE_NAME,
@@ -268,7 +268,8 @@ const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
 /** One session kind's work, rolled into the `StageCallEstimate` shape the
  *  CLI/dashboard already render. `calls` = expected TURNS (items × expected
  *  turns per session); `minCalls` = items (one turn each); `maxCalls` = the
- *  budget ceiling (items × (maxResumes+1) × turns). */
+ *  budget's hard limit (items × ((maxResumes+1) × turns + the shell's
+ *  wrap-up window) — §3.3, 2026-08-21). */
 function sessionKindStage(input: {
   kind: string;
   model: string;
@@ -281,7 +282,7 @@ function sessionKindStage(input: {
   bound?: string;
 }): StageCallEstimate {
   const expectedTurns = EXPECTED_TURNS[input.kind] ?? 4;
-  const ceilingTurns = (input.budget.maxResumes + 1) * input.budget.turns;
+  const ceilingTurns = (input.budget.maxResumes + 1) * input.budget.turns + WRAP_UP_TURNS;
   const stage: StageCallEstimate = {
     stage: input.kind,
     model: input.model,

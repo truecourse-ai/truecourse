@@ -22,6 +22,7 @@ import path from 'node:path'
 import { resetKvCacheStore } from '@truecourse/llm'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import {
+  OVERLAP_SESSION_BUDGET,
   OVERLAP_SESSION_CACHE_NAME,
   OVERLAP_SESSION_KIND,
   OVERLAP_SESSION_SYSTEM_PROMPT,
@@ -615,6 +616,16 @@ describe('OVERLAP_SESSION_SYSTEM_PROMPT', () => {
     expect(p).toContain('notReached')
     expect(p).toMatch(/An honest `notReached` is part of a correct outcome/i)
   })
+
+  it('states the REAL budget numbers and demands batched reads (2026-08-21: a budget-blind session reads to the wall)', () => {
+    expect(p).toContain(`${OVERLAP_SESSION_BUDGET.turns} turns per budget grant`)
+    expect(p).toContain(`${OVERLAP_SESSION_BUDGET.maxResumes} automatic resume grants`)
+    expect(p).toContain(
+      `${(OVERLAP_SESSION_BUDGET.maxResumes + 1) * OVERLAP_SESSION_BUDGET.turns} turns at the absolute most`,
+    )
+    expect(p).toMatch(/BATCH your reads/i)
+    expect(p).toMatch(/SEVERAL `read_section` calls in one message/i)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -943,6 +954,23 @@ describe('a failed overlap session', () => {
     expect(result.stats.llmFailures).toContainEqual(
       expect.objectContaining({ stage: OVERLAP_SESSION_KIND, attempts: 1, failures: 1 }),
     )
+  })
+
+  it('stamps sectionsOpened for the FAILED area too — "read 1 and ran out" is not "never read"', async () => {
+    const { result } = await runScan({
+      tagging: TAGGING,
+      overlap: async (_areaId, input) => {
+        await callTool(input, 'read_section', { doc: 'docs/auth.md', heading: 'Token lifetime' })
+        return {
+          kind: 'failure',
+          failure: { kind: 'budget-exhausted', notReached: 'outcome', retryability: 'none' },
+        }
+      },
+    })
+    const area = result.corpus.areas.find((a) => a.id === 'core/auth')!
+    expect(area.notReached?.sort()).toEqual(['docs/auth.md', 'docs/session.md'])
+    expect(area.sectionsOpened).toBe(1)
+    expect(readCorpus(repo)!.areas.find((a) => a.id === 'core/auth')!.sectionsOpened).toBe(1)
   })
 
   it('aborts the run BEFORE the corpus write when every overlap session dies of transport', async () => {

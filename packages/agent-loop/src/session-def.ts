@@ -107,6 +107,21 @@ export interface SessionDef<TOutcome = unknown> {
    * honest result. Absent ⇒ behavior identical to before the field existed.
    */
   outcomePrecondition?: { tool: string; message: string };
+  /**
+   * A structural mid-budget draft checkpoint, `outcomePrecondition`'s
+   * in-flight sibling. Exists because briefing prose did not carry it either:
+   * setup sessions died at the ceiling with 20+ pure-exploration turns and
+   * zero drafts (documenso catalog twice, strapi recipe — 2026-08-21 bench),
+   * with the one draft, when it came at all, arriving too late to act on.
+   *
+   * When set and the session's `afterTurn`-th assistant turn completes with no
+   * `tool-result` for `tool` yet (a resumed-from prior transcript counts), the
+   * shell steers `message` into the session — a user message the driver
+   * ingests at its next steering point, consuming no extra budget of its own.
+   * Fires at most once per session and never after the shell has decided to
+   * stop it. Absent ⇒ behavior identical to before the field existed.
+   */
+  draftCheckpoint?: { tool: string; afterTurn: number; message: string };
 }
 
 /**

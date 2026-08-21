@@ -14,7 +14,7 @@
  */
 
 import yaml from 'js-yaml';
-import type { SessionEvent } from '@truecourse/agent-loop';
+import { WRAP_UP_TURNS, type SessionEvent } from '@truecourse/agent-loop';
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import {
   evidenceRelPath,
@@ -326,7 +326,7 @@ export interface GuardAdjudicationPlan {
   sessions: number;
   /** Expected turns per session (provisional constant). */
   expectedTurns: number;
-  /** The hard per-session ceiling (`turns × (maxResumes + 1)`). */
+  /** The hard per-session ceiling (`turns × (maxResumes + 1)` + the shell's wrap-up window). */
   maxTurnsPerSession: number;
 }
 
@@ -347,7 +347,7 @@ export async function planGuardAdjudication(
     cached: prepared.cached.size,
     sessions: prepared.sessionItems.length,
     expectedTurns: ADJUDICATE_EXPECTED_TURNS,
-    maxTurnsPerSession: ADJUDICATE_BUDGET.turns * (ADJUDICATE_BUDGET.maxResumes + 1),
+    maxTurnsPerSession: ADJUDICATE_BUDGET.turns * (ADJUDICATE_BUDGET.maxResumes + 1) + WRAP_UP_TURNS,
   };
 }
 

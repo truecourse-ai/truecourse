@@ -914,8 +914,14 @@ export async function runSpecScanSessions(
       if (result.outcome.status === 'failed') {
         // Fail-open per area: no flags, the failure is tallied, and EVERY doc
         // of the area lands in notReached — a budget-exhausted area reads as
-        // "not covered", in the corpus, never as a log line.
+        // "not covered", in the corpus, never as a log line. The skim signal
+        // is stamped here too (a failure has a transcript even though it has
+        // no outcome), so the corpus separates "opened 45 sections and still
+        // ran out" from "never really read".
         notReachedByArea.set(item.areaId, item.docs.map((d) => d.path))
+        if (result.sessionId !== undefined) {
+          sectionsOpenedByArea.set(item.areaId, countSectionsOpened(opts.persistence, result.sessionId))
+        }
         return
       }
       const briefed = new Set([...item.docs, ...item.widened].map((d) => d.path))
