@@ -2,6 +2,7 @@ import { Link, Navigate, useParams } from 'react-router';
 import { FaLinkedin } from 'react-icons/fa6';
 import { pageMeta } from '@/lib/seo';
 import { getPost } from '@/blog';
+import { ViewCount } from '@/components/ViewCount';
 
 export function meta({ params }: { params: { slug?: string } }) {
   const post = getPost(params.slug);
@@ -55,6 +56,7 @@ export default function BlogPostPage() {
             </a>
           ) : null}
           {` · ${post.date} · ${post.readMinutes} min read`}
+          <ViewCount path={`/blog/${post.slug}`} />
         </span>
       </div>
 
