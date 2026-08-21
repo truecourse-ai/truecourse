@@ -45,6 +45,21 @@ export const SessionIndexEntrySchema = z.object({
 });
 export type SessionIndexEntry = z.infer<typeof SessionIndexEntrySchema>;
 
+/**
+ * One phase of the run-level checklist. Not every phase of an agentic command
+ * is a session (spec scan's discovery/tagging run before any session exists),
+ * and the dashboard can only see what the run record carries — so the run
+ * process mirrors its step tracker here and every rewrite streams out over
+ * the existing run.json tail.
+ */
+export const RunProgressStepSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  status: z.enum(['pending', 'active', 'done', 'error']),
+  detail: z.string().optional(),
+});
+export type RunProgressStep = z.infer<typeof RunProgressStepSchema>;
+
 export const RunRecordSchema = z.object({
   command: SessionCommandSchema,
   runId: z.string(),
@@ -52,6 +67,8 @@ export const RunRecordSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   status: RunStatusSchema,
+  /** The run-level phase checklist (see {@link RunProgressStepSchema}). */
+  progress: z.array(RunProgressStepSchema).optional(),
   /** The run process's pid — the OSS reconciliation sweep's liveness probe
    *  (§3.9: nothing stays `running` on a dead process's memory). EE's
    *  table store tracks liveness its own way and may omit it. */

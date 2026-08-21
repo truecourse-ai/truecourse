@@ -15,6 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   RunRecordSchema,
+  type RunProgressStep,
   type RunRecord,
   type RunStatus,
   type SessionCommand,
@@ -27,6 +28,30 @@ import { atomicWriteJson } from './atomic-write.js';
 
 export function sessionsDir(repoDir: string): string {
   return path.join(getRepoTruecourseDir(repoDir), 'sessions');
+}
+
+/**
+ * Payload of the `onRunStarted` hook every agentic in-process command offers:
+ * fired the moment `createSessionRun` returns, before any session runs. The
+ * CLI prints the dashboard "watch live" deep link from it.
+ */
+export interface SessionRunStartedInfo {
+  command: SessionCommand;
+  runId: string;
+  /** The run directory, `<repo>/.truecourse/sessions/<command>/<runId>`. */
+  dir: string;
+}
+
+/**
+ * A run record safe to serialize to a browser: `endpoint` (carries the session
+ * API token) and `pid` stripped. Every dashboard surface reads runs through
+ * this shape.
+ */
+export type PublicRunRecord = Omit<RunRecord, 'endpoint' | 'pid'>;
+
+export function toPublicRunRecord(record: RunRecord): PublicRunRecord {
+  const { endpoint: _endpoint, pid: _pid, ...pub } = record;
+  return pub;
 }
 
 export function sessionRunDir(repoDir: string, command: SessionCommand, runId: string): string {
@@ -50,6 +75,12 @@ export interface SessionRunStore {
    * cannot exist before the record does. Never credentials.
    */
   setLlm(llm: NonNullable<RunRecord['llm']>): void;
+  /**
+   * Mirror the run-level phase checklist into the record, so a dashboard
+   * watching the run sees progress from phases that are not sessions (spec
+   * scan discovers and tags docs long before its first session exists).
+   */
+  setProgress(steps: RunProgressStep[]): void;
   /** Terminal write: stamps `finishedAt` and drops the dead endpoint. */
   finish(status: Exclude<RunStatus, 'running'>): void;
 }
@@ -121,6 +152,10 @@ function openRun(dir: string, record: RunRecord): SessionRunStore {
     },
     setLlm(llm) {
       record.llm = llm;
+      write();
+    },
+    setProgress(steps) {
+      record.progress = steps;
       write();
     },
     finish(status) {
