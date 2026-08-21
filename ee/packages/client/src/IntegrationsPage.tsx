@@ -156,15 +156,9 @@ export default function IntegrationsPage() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const { activeJobFor, activeJobs, onJobSettled } = useJobs();
 
-  // TEMPORARY — server-advertised token reveal (TRUECOURSE_ALLOW_TOKEN_REVEAL).
-  const [revealEnabled, setRevealEnabled] = useState(false);
-
   const load = useCallback(() => {
     getJson<IntegrationsResponse>('/api/ee/integrations')
-      .then((r) => {
-        setConnectors(r.connectors);
-        setRevealEnabled(r.revealEnabled === true);
-      })
+      .then((r) => setConnectors(r.connectors))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(() => {
@@ -319,7 +313,6 @@ export default function IntegrationsPage() {
       {active && (
         <ConnectorDrawer
           connector={active}
-          revealEnabled={revealEnabled}
           onClose={() => setConfiguring(null)}
           onChanged={load}
         />
@@ -354,12 +347,10 @@ function Banner({ tone, children }: { tone: 'error' | 'ok'; children: ReactNode 
 
 function ConnectorDrawer({
   connector,
-  revealEnabled,
   onClose,
   onChanged,
 }: {
   connector: IntegrationConnectorStatus;
-  revealEnabled: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -466,9 +457,8 @@ function ConnectorDrawer({
         ))}
       </div>
 
-      {/* TEMPORARY — token recovery. Only rendered when the deployment sets
-          TRUECOURSE_ALLOW_TOKEN_REVEAL=1 and a token is actually stored. */}
-      {revealEnabled && conn?.hasToken && (
+      {/* TEMPORARY — token recovery. Remove with the route it calls. */}
+      {conn?.hasToken && (
         <div className="mt-4 rounded border border-amber-500/40 bg-amber-500/10 p-3">
           {revealed === null ? (
             <button

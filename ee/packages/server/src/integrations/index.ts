@@ -3,9 +3,9 @@
  * `GET /` lists every connector with its field metadata + current connection;
  * `POST /` saves one, `POST /test` checks credentials live, `DELETE /:kind`
  * disconnects. Adding a connector needs no route changes. Secret fields are
- * encrypted at rest and never returned to the client, with one deliberate
- * exception: `POST /:kind/reveal` returns the plaintext token, and only when
- * `TRUECOURSE_ALLOW_TOKEN_REVEAL=1` is set on the deployment.
+ * encrypted at rest and never returned to the client, with one TEMPORARY
+ * exception: `POST /:kind/reveal` returns the plaintext token for the caller's
+ * own workspace, for recovering a token that exists only as ciphertext.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -59,19 +59,6 @@ function userOf(req: Request): AuthUser | null {
   return (req as Request & { eeUser?: AuthUser }).eeUser ?? null;
 }
 
-/**
- * TEMPORARY — token recovery (`POST /:kind/reveal`).
- *
- * Off unless `TRUECOURSE_ALLOW_TOKEN_REVEAL=1` is set on the deployment, so it
- * cannot ship enabled by accident: the flag is absent from every Key Vault and
- * defaults to off in `containerapp.bicep`. Turning it back off is a revision
- * update, not a redeploy. Remove this together with the route once the
- * Confluence/Jira tokens have been re-entered.
- */
-function tokenRevealEnabled(): boolean {
-  return process.env.TRUECOURSE_ALLOW_TOKEN_REVEAL === '1';
-}
-
 export function createIntegrationsRouter(db: EeDb, masterSecret: string): Router {
   const router = Router();
   const store = new IntegrationStore(db, masterSecret);
@@ -90,18 +77,15 @@ export function createIntegrationsRouter(db: EeDb, masterSecret: string): Router
         connection: await store.getView(org, c.kind),
       })),
     );
-    // `revealEnabled` drives the drawer's Reveal button — the client must not
-    // offer an action the deployment has switched off.
-    res.json({ connectors, revealEnabled: tokenRevealEnabled() });
+    res.json({ connectors });
   });
 
   /**
    * TEMPORARY — returns the stored secret in PLAINTEXT for the calling user's
-   * own workspace. Gated by `tokenRevealEnabled()`; 404s (not 403) when off, so
-   * a disabled deployment does not advertise the route's existence.
+   * own workspace, so a token that exists only as ciphertext can be recovered
+   * and re-entered elsewhere. Remove this route once that is done.
    */
   router.post('/:kind/reveal', async (req: Request, res: Response) => {
-    if (!tokenRevealEnabled()) return res.status(404).json({ error: 'Not found' });
     const user = userOf(req);
     const org = user?.organizationId ?? null;
     if (!org) return res.status(401).json({ error: 'no workspace' });

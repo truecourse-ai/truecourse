@@ -38,9 +38,6 @@ param maxReplicas int = 1
 param targetPort int = 3001
 param tags object = {}
 
-@description('TEMPORARY — allow revealing a stored integration token in plaintext via the Integrations drawer. Defaults to off; pass true only for a deliberate token-recovery window, then redeploy without it.')
-param allowTokenReveal bool = false
-
 @description('Env vars sourced from Key Vault secrets. Each MUST exist in KV (dashed name).')
 param secretEnv array = [
   'DATABASE_URL'
@@ -72,16 +69,12 @@ var secretEnvVars = map(secretEnv, name => {
 // NODE_ENV=production, so without this they'd both report as "production".
 var sentryEnvironment = contains(toLower(name), 'prod') ? 'production' : 'development'
 
-var plainEnvVars = concat(
-  [
-    { name: 'PORT', value: string(targetPort) }
-    { name: 'TRUECOURSE_EDITION', value: edition }
-    { name: 'TRUECOURSE_LOG_DIR', value: '/data/logs' }
-    { name: 'SENTRY_ENVIRONMENT', value: sentryEnvironment }
-  ],
-  // Absent unless explicitly requested, so the reveal route stays 404 by default.
-  allowTokenReveal ? [ { name: 'TRUECOURSE_ALLOW_TOKEN_REVEAL', value: '1' } ] : []
-)
+var plainEnvVars = [
+  { name: 'PORT', value: string(targetPort) }
+  { name: 'TRUECOURSE_EDITION', value: edition }
+  { name: 'TRUECOURSE_LOG_DIR', value: '/data/logs' }
+  { name: 'SENTRY_ENVIRONMENT', value: sentryEnvironment }
+]
 
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: name

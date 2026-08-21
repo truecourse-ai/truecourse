@@ -106,43 +106,20 @@ describe('Integrations route', () => {
     expect(got.body.connectors.find((c: { kind: string }) => c.kind === 'confluence').connection).toBeNull();
   });
 
-  describe('TEMPORARY token reveal (TRUECOURSE_ALLOW_TOKEN_REVEAL)', () => {
+  describe('TEMPORARY token reveal', () => {
     const connect = (token: string) =>
       request(app).post('/api/ee/integrations').send({ kind: 'confluence', values: { ...values, apiToken: token } });
     const reveal = () => request(app).post('/api/ee/integrations/confluence/reveal');
 
-    afterEach(() => {
-      delete process.env.TRUECOURSE_ALLOW_TOKEN_REVEAL;
-    });
-
-    it('404s and stays unadvertised when the flag is unset', async () => {
-      await connect('tok-secret');
-      const res = await reveal();
-      expect(res.status).toBe(404);
-      expect(JSON.stringify(res.body)).not.toContain('tok-secret');
-      const list = await request(app).get('/api/ee/integrations');
-      expect(list.body.revealEnabled).toBe(false);
-    });
-
-    it('404s when the flag is set to anything other than "1"', async () => {
-      process.env.TRUECOURSE_ALLOW_TOKEN_REVEAL = 'true';
-      await connect('tok-secret');
-      expect((await reveal()).status).toBe(404);
-    });
-
-    it('returns the plaintext token when enabled, and advertises it', async () => {
-      process.env.TRUECOURSE_ALLOW_TOKEN_REVEAL = '1';
+    it('returns the plaintext token, no-store', async () => {
       await connect('tok-secret');
       const res = await reveal();
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ token: 'tok-secret' });
       expect(res.headers['cache-control']).toBe('no-store');
-      const list = await request(app).get('/api/ee/integrations');
-      expect(list.body.revealEnabled).toBe(true);
     });
 
     it('409s with a clear message when the row was encrypted under a different master secret', async () => {
-      process.env.TRUECOURSE_ALLOW_TOKEN_REVEAL = '1';
       await connect('tok-secret');
       // A row copied in from another environment: same ciphertext, different key.
       const foreign = express();
@@ -162,7 +139,6 @@ describe('Integrations route', () => {
     });
 
     it('404s when there is no stored token, 401s without a workspace org', async () => {
-      process.env.TRUECOURSE_ALLOW_TOKEN_REVEAL = '1';
       expect((await reveal()).status).toBe(404);
       currentOrg = null;
       expect((await reveal()).status).toBe(401);
