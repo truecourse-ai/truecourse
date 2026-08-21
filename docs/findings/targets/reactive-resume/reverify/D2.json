@@ -43,5 +43,9 @@
     "area: builder"
   ],
   "confidence": "high",
-  "notes": "Deployment: verified against SELF-HOSTED at 3221afda in headless Chromium with acceptDownloads; client-only code, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Templates, preview & export'; version 5.2.7 (commit 3221afda). Lead with the dead code (the spinner at :133 and the guards at :141/:159/:177) rather than with the doc sentence, because that is what makes the intended behaviour unambiguous. Include the polling table, since a maintainer reproducing by eye will just see the dialog close and may not notice the buttons were never disabled."
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda in headless Chromium with acceptDownloads; client-only code, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Templates, preview & export'; version 5.2.7 (commit 3221afda). Lead with the dead code (the spinner at :133 and the guards at :141/:159/:177) rather than with the doc sentence, because that is what makes the intended behaviour unambiguous. Include the polling table, since a maintainer reproducing by eye will just see the dialog close and may not notice the buttons were never disabled.",
+  "blocked": {
+    "at": "2026-08-21",
+    "reason": "live evidence gap: no sample during the export (download at 171 ms, first sample at 179 ms), and the repro contradicts its own table on whether the dialog was open when the file arrived"
+  }
 }

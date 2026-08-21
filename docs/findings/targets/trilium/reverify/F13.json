@@ -52,5 +52,11 @@
     "search"
   ],
   "confidence": "high",
-  "notes": "File as a UI bug about the 'Search now' button; cross-link #5658 and say explicitly that it covers auto-execution on open, not this. The reproduction is short and visual, so attach the before/after URL pair (same note id vs new note id) rather than a transcript; FILING-GUIDE allows screenshots where the finding is visual. The fix is small and worth naming: pass searchString and ancestorNoteId to the command, or give the widget a refresh trigger, instead of a payload-less triggerCommand=\"searchNotes\"."
+  "notes": "File as a UI bug about the 'Search now' button; cross-link #5658 and say explicitly that it covers auto-execution on open, not this. The reproduction is short and visual, so attach the before/after URL pair (same note id vs new note id) rather than a transcript; FILING-GUIDE allows screenshots where the finding is visual. The fix is small and worth naming: pass searchString and ancestorNoteId to the command, or give the widget a refresh trigger, instead of a payload-less triggerCommand=\"searchNotes\".",
+  "filed": {
+    "url": "https://github.com/TriliumNext/Trilium/issues/11130",
+    "at": "2026-08-21",
+    "account": "truecourse-agent",
+    "note": "first issue filed with inline screenshots, hosted in truecourse-agent/truecourse-evidence"
+  }
 }

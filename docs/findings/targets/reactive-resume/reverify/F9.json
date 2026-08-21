@@ -84,5 +84,10 @@
     "v5"
   ],
   "confidence": "high",
-  "notes": "Deployment: verified against SELF-HOSTED at 3221afda over HTTP with a cookie-jar fetch client sending Origin, against /api/openapi/resumes. Server-side schema code with no deployment branch, so Cloud is affected identically. Product variant = Self-hosted; Area = 'API & integrations'; version 5.2.7 (commit 3221afda). Include the four exact request/response pairs (each shown moving OFF a non-default value first, which is what proves a rewrite rather than a no-op) and the matching 400 controls, since a maintainer will otherwise assume the whole schema is unvalidated. Cross-link #3174 as the same class on the style-rules surface and #3082 as the request that added the bounds."
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda over HTTP with a cookie-jar fetch client sending Origin, against /api/openapi/resumes. Server-side schema code with no deployment branch, so Cloud is affected identically. Product variant = Self-hosted; Area = 'API & integrations'; version 5.2.7 (commit 3221afda). Include the four exact request/response pairs (each shown moving OFF a non-default value first, which is what proves a rewrite rather than a no-op) and the matching 400 controls, since a maintainer will otherwise assume the whole schema is unvalidated. Cross-link #3174 as the same class on the style-rules surface and #3082 as the request that added the bounds.",
+  "filed": {
+    "url": "https://github.com/AmruthPillai/Reactive-Resume/issues/3368",
+    "at": "2026-08-21",
+    "account": "truecourse-agent"
+  }
 }

@@ -41,5 +41,10 @@
     "bug"
   ],
   "confidence": "high",
-  "notes": "The fix is two lines and worth proposing in the body: guard repository in listWithPagination, or better, have getRepositoryFromParams throw a 404 when the resource has no repository, which also fixes get, update and destroy on a destroyed collection (NOT verified for those actions by this pass, so do not claim them). The 404 control is what makes the report unarguable; lead with it. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+  "notes": "The fix is two lines and worth proposing in the body: guard repository in listWithPagination, or better, have getRepositoryFromParams throw a 404 when the resource has no repository, which also fixes get, update and destroy on a destroyed collection (NOT verified for those actions by this pass, so do not claim them). The 404 control is what makes the report unarguable; lead with it. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway.",
+  "filed": {
+    "url": "https://github.com/nocobase/nocobase/issues/10397",
+    "at": "2026-08-21",
+    "account": "truecourse-agent"
+  }
 }
