@@ -4,7 +4,9 @@ target: TriliumNext/Trilium
 route: public issue
 title: "Search: a query whose text starts with \"#\" never loads note sizes, so the same query answers differently depending on what was searched before it in that process"
 labels: "not applied by us (outside contributor cannot self-apply); suggested in the body: State: Triage, BE, search"
-status: draft
+status: filed
+filed_url: https://github.com/TriliumNext/Trilium/issues/11131
+filed_at: 2026-08-21
 reverified: "2026-08-20 live re-run against a server built from source at main @ 86a9715b09b4fc523764eee3e2ba08b5f58ef12b, run on three separate server processes so the cold, warm and post-restart states could each be observed as first traffic; evidence in docs/findings/targets/trilium/live/F9/repro.md, live/F9/transcript.txt and live/F9/transcript-restart.txt"
 format_note: "bug_report.yml is a YAML issue form. Body uses its six `### ` section headers verbatim and in template order (Description, TriliumNext Version, What operating system are you using?, What is your setup?, Operating System Version, Error logs), with all own sub-headings demoted to `####`. Dropdown answers are real template options: `macOS` for the OS field and `Server access only` for the setup field, which is what we actually ran. No template-enforcing workflow is configured on this repo, but the form shape is matched anyway. Issue 5432 and pull request 10633 are referred to in plain words with full URLs rather than hash-number syntax."
 ---

@@ -52,5 +52,11 @@
     "search"
   ],
   "confidence": "high",
-  "notes": "PARTIAL handling: file the corrected two-part statement only. Do NOT repeat findings.md's 'orderBy / progressive search skipped' explanation (disproved: same orderBy, opposite answers, decided purely by the leading '#') and do NOT claim 'not even >= 0 works' (it does work without a leading '#'). Reproduction must specify a freshly restarted server, because a warm process hides half the bug. Cross-link #5432 and state plainly which part of it this explains. The two halves have independent fixes (honour dbLoadNeeded on the pure-expression path; initialise revisionCount so the increment guard can pass, or increment unconditionally) so consider whether the maintainers would prefer two issues."
+  "notes": "PARTIAL handling: file the corrected two-part statement only. Do NOT repeat findings.md's 'orderBy / progressive search skipped' explanation (disproved: same orderBy, opposite answers, decided purely by the leading '#') and do NOT claim 'not even >= 0 works' (it does work without a leading '#'). Reproduction must specify a freshly restarted server, because a warm process hides half the bug. Cross-link #5432 and state plainly which part of it this explains. The two halves have independent fixes (honour dbLoadNeeded on the pure-expression path; initialise revisionCount so the increment guard can pass, or increment unconditionally) so consider whether the maintainers would prefer two issues.",
+  "filed": {
+    "url": "https://github.com/TriliumNext/Trilium/issues/11131",
+    "at": "2026-08-21",
+    "account": "truecourse-agent",
+    "note": "filed with the corrected mechanism only; the original record's orderBy explanation was wrong and is filed nowhere"
+  }
 }

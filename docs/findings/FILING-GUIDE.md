@@ -128,17 +128,6 @@ Working rules that follow:
 - **A promise made in a thread is a commitment.** If a comment says a separate issue will be opened, open it.
 - **Give the account a real profile.** Since it files openly as an agent, its profile should say so: what the pipeline does, that a human reviews before filing, and how to reach a person. That is the honest version of "looks legitimate", and it is worth more than any pacing trick.
 
-## Images in a report
-
-There is no API for attaching a file to an issue, and GitHub strips `data:` URIs, so an image can only render inline if it has a fetchable URL. Two ways to get one:
-
-- **A human drags the file into any issue box.** GitHub uploads it to its own CDN and rewrites it to `https://github.com/user-attachments/assets/...`. That URL then works anywhere, including in a body created through the API. Close the form without submitting and the upload survives.
-- **Host it ourselves**, which is what we now do: `truecourse-agent/truecourse-evidence`, laid out as `<owner>/<repo>/<finding-id>/<name>.png` so the path mirrors the destination repo and the finding id quoted in the report, with a README index whose last column links the issue it was filed with.
-
-Two operational notes learned the hard way. Push as the filing account, not a personal one, or the push is refused. And `raw.githubusercontent.com` lags roughly twenty seconds behind a push on a new path, so verify the URL returns `200 image/png` before filing or the issue renders broken.
-
-Use images only where the visual is genuinely part of the argument. Our bodies are text-heavy by design, and text can be grepped, diffed and quoted back where a picture cannot. Be careful that the alt text and surrounding prose claim only what the frame actually shows: a before and after pair can prove a state change without proving the mechanism behind it, and the mechanism belongs in the transcript.
-
 ## The filing procedure
 
 ```bash

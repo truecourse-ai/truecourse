@@ -4,7 +4,9 @@ target: nocobase/nocobase
 route: public issue
 title: "Under the default role mode, X-Role: __union__ is silently rewritten to the user's first role instead of being refused like every other unheld role name"
 labels: "none (bug_report.md sets no labels; suggested in body: bug, users & permissions)"
-status: draft
+status: filed
+filed_url: https://github.com/nocobase/nocobase/issues/10399
+filed_at: 2026-08-21
 reverified: "yes (main @ 032a4f6913be912f57462d605cbd0bde97b599c6, `yarn nocobase --version` -> 2.1.45; live re-run 2026-08-20 on an instance built from that commit, with all three controls re-driven and the roleMode read out of systemSettings before and after: still reproduces)"
 format_note: "Matches .github/ISSUE_TEMPLATE/bug_report.md exactly, including the leading asterisk on the three required sections (`## * Describe the bug`, `## * Environment`, `## * How To Reproduce`) and the optional `Expected behavior` / `Screenshots` / `Logs`. Own sub-headings demoted to ####. No template-enforcing workflow was detected on this repo, but the template itself warns that issues not filled out according to it will be closed, so the shape is matched anyway. English only, per the template's note. Filed as a normal bug, NOT as a security report: the substituted role is always one the caller already holds, so effective permissions are a subset of what was asked for, never more."
 ---

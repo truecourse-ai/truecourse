@@ -4,7 +4,9 @@ target: rybbit-io/rybbit
 route: public issue
 title: "Whole-second event timestamps plus a strict > mean two funnel steps in the same second never convert (0% instead of 100%), and a two-page visit's exit page reads as its entry page"
 labels: "none. rybbit-io/rybbit applies no labels: both issue templates declare `labels: ''` and all 40 most recent issues carry an empty label array. No suggested-labels line is included, deliberately."
-status: draft
+status: filed
+filed_url: https://github.com/rybbit-io/rybbit/issues/1133
+filed_at: 2026-08-21
 reverified: "2026-08-20 live re-run against a docker compose stack built from master @ 64f8c4fb7f394bdfe9379717de8e6c21758b1ac2, both halves and both controls re-executed, ClickHouse queried directly so 'same second' is read rather than inferred; evidence in docs/findings/targets/rybbit/live/R2/repro.md and live/R2/r2.log"
 format_note: "bug_report.md is a classic Markdown template, not a YAML form, and no template-enforcing workflow exists on this repo. Body matches its bold-label section shape verbatim and in template order: **Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop (please complete the following information):**. No suggested-labels line, since this repo applies none. The neighbouring replay-precision change is referred to by commit sha and in plain words rather than hash-number syntax."
 ---

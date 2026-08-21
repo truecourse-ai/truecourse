@@ -67,5 +67,11 @@
     "area: builder"
   ],
   "confidence": "high",
-  "notes": "Deployment: verified against SELF-HOSTED at 3221afda in headless Chromium via playwright-core 1.62.1, using Playwright's own accessibility computation. Pure client-side rendering with no deployment branch, so Cloud is affected identically; answer 'Product variant' with Self-hosted and say so. File the corrected statement only: three named controls (Slug, Tags, Sidebar Width slider), plus the dangling-for= family (Picture > Size, Basics > Website) and the duplicate _r_jv_-form-item id. Do NOT repeat 'fifteen anonymous spinbuttons' or the typography.tsx / api-key call sites. Cross-link #2844 and note it is a different surface so a triager does not close this as a duplicate. Area = 'Resume builder & data'; version 5.2.7 (commit 3221afda)."
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda in headless Chromium via playwright-core 1.62.1, using Playwright's own accessibility computation. Pure client-side rendering with no deployment branch, so Cloud is affected identically; answer 'Product variant' with Self-hosted and say so. File the corrected statement only: three named controls (Slug, Tags, Sidebar Width slider), plus the dangling-for= family (Picture > Size, Basics > Website) and the duplicate _r_jv_-form-item id. Do NOT repeat 'fifteen anonymous spinbuttons' or the typography.tsx / api-key call sites. Cross-link #2844 and note it is a different surface so a triager does not close this as a duplicate. Area = 'Resume builder & data'; version 5.2.7 (commit 3221afda).",
+  "filed": {
+    "url": "https://github.com/amruthpillai/reactive-resume/issues/3369",
+    "at": "2026-08-21",
+    "account": "truecourse-agent",
+    "note": "filed with the corrected 2-of-15 count and the second defect family (dangling FormLabel ids, duplicate DOM id)"
+  }
 }

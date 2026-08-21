@@ -4,7 +4,9 @@ target: AmruthPillai/Reactive-Resume
 route: public issue
 title: "FormControl stamps the label's target id on a non-labelable wrapper, so Slug, Tags and the Sidebar Width slider have no accessible name"
 labels: "bug, status: needs triage (applied automatically by 1-bug-report.yml); suggested in body: v5, area: builder"
-status: draft
+status: filed
+filed_url: https://github.com/amruthpillai/reactive-resume/issues/3369
+filed_at: 2026-08-21
 reverified: "yes (main @ 3221afda9ddfb03d6cce87927b0ce47338b4cfa8, which is both the commit our corpus tested and today's default-branch head, so zero commits landed in between; live re-run 2026-08-20 against a self-hosted instance built from that commit, measured with Playwright's own accessibility computation plus a direct label[for] to getElementById resolution: still reproduces, including the corrected 2-of-15 spinbutton count, the two dangling for= targets and the duplicate DOM id)"
 format_note: "Matches .github/ISSUE_TEMPLATE/1-bug-report.yml exactly: every required `### ` header present and non-empty, in template order, with the required Existing-issue checkbox ticked. Dropdown sections carry only real option values, verified against the live template on 2026-08-21 (Product variant = Self-hosted; Area = Resume builder & data). The optional `Template` section is omitted deliberately: this is builder chrome, not template rendering. `blank_issues_enabled: false` on this repo, so the form shape is mandatory. Own sub-headings demoted to ####."
 ---

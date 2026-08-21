@@ -67,5 +67,11 @@
     "users & permissions"
   ],
   "confidence": "high",
-  "notes": "Do NOT file this as a security issue and do not imply escalation: userRoles[0] is always a role the caller holds, so the effective permissions are a subset of the union the caller asked for. The report's Control 2 (same request, allow-use-union mode, 4 rows with an extra column) is the load-bearing evidence, because without it a maintainer can say the answer WAS the union. Include it. Ask for 401 for consistency with the other branch, or a documented statement that __union__ degrades under default mode. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+  "notes": "Do NOT file this as a security issue and do not imply escalation: userRoles[0] is always a role the caller holds, so the effective permissions are a subset of the union the caller asked for. The report's Control 2 (same request, allow-use-union mode, 4 rows with an extra column) is the load-bearing evidence, because without it a maintainer can say the answer WAS the union. Include it. Ask for 401 for consistency with the other branch, or a documented statement that __union__ degrades under default mode. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway.",
+  "filed": {
+    "url": "https://github.com/nocobase/nocobase/issues/10399",
+    "at": "2026-08-21",
+    "account": "truecourse-agent",
+    "note": "framed as silent substitution, explicitly not escalation; all three controls included"
+  }
 }

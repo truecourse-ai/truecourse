@@ -41,5 +41,10 @@
     "bug"
   ],
   "confidence": "high",
-  "notes": "Ask for the 400 first and the default second: a maintainer may reasonably answer that type is required at the API and that the doc sentence describes the form, in which case unsupported field type null is still a 500 where a 400 belongs. Quote the doc line so the interface-default half is anchored to their own text. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway."
+  "notes": "Ask for the 400 first and the default second: a maintainer may reasonably answer that type is required at the API and that the doc sentence describes the form, in which case unsupported field type null is still a 500 where a 400 belongs. Quote the doc line so the interface-default half is anchored to their own text. Label vocabulary check: the 40 most recent nocobase/nocobase issues carry ZERO labels, so maintainers here rarely label outside triage. The labels suggested are real repo labels (verified via gh api repos/nocobase/nocobase/labels), but a Suggested labels line will probably go unused. The only issue template is bug_report.md with sections: Describe the bug, Environment, How To Reproduce, Expected behavior, Screenshots, Logs. No template-enforcing workflow was detected, but match the sections anyway.",
+  "filed": {
+    "url": "https://github.com/nocobase/nocobase/issues/10398",
+    "at": "2026-08-21",
+    "account": "truecourse-agent"
+  }
 }
