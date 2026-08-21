@@ -22,6 +22,7 @@
 import type { ComponentType, ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkDirective from 'remark-directive';
+import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -162,7 +163,7 @@ const COMPONENTS: Components = {
 function Md({ source }: { source: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkDirective, remarkAdmonitions]}
+      remarkPlugins={[remarkGfm, remarkDirective, remarkFrontmatter, remarkAdmonitions]}
       rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
       components={COMPONENTS}
     >

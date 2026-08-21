@@ -34,15 +34,38 @@ export interface JiraConfig extends ConnectorConfig {
   // so it rides the `ConnectorConfig` string index rather than a declared field.
 }
 
+/** One field change inside a changelog entry (we only read `status`). */
+interface JiraChangelogItem {
+  field?: string;
+  fromString?: string | null;
+  toString?: string | null;
+}
+/** One changelog entry — a timestamp plus the fields that changed with it. */
+interface JiraChangelogEntry {
+  created?: string;
+  items?: JiraChangelogItem[];
+}
+
 interface JiraIssue {
   id: string | number;
   key?: string;
   fields?: {
     summary?: string;
     updated?: string;
+    created?: string;
+    /** Null when the closing transition set `status` without `resolution`. */
+    resolutiondate?: string | null;
+    status?: { name?: string; statusCategory?: { key?: string } };
     /** Rich text as an ADF node tree (Jira Cloud v3). */
     description?: unknown;
   };
+  /**
+   * Present only when the request asked for `expand=changelog`. The enhanced
+   * search endpoint returns it inline, so status history costs no extra call.
+   * `total` may exceed `histories.length` on a long history — see the truncation
+   * check at the read site.
+   */
+  changelog?: { total?: number; histories?: JiraChangelogEntry[] };
 }
 interface JiraSearchResult {
   issues?: JiraIssue[];
@@ -52,6 +75,12 @@ interface JiraSearchResult {
 
 /** Issues per search page / fetchMany batch. */
 const PAGE_LIMIT = 100;
+/**
+ * The fields a body fetch needs: the document text plus the metadata the doc
+ * header carries. `resolutiondate` is nullable even on a closed issue, so the
+ * header derives its resolved date from the changelog when it is absent.
+ */
+const ISSUE_FIELDS = 'summary,description,created,updated,resolutiondate,status';
 /** Retry a rate-limited request at most this many times before surfacing it. */
 const RETRY_LIMIT = 3;
 
@@ -142,24 +171,183 @@ async function getJson<T>(cfg: JiraConfig, path: string): Promise<T> {
   }
 }
 
-/** Build one issue's document body: `# KEY: summary` H1 + the converted description. */
-function toDocContent(issue: JiraIssue): DocContent {
+/** One status transition, flattened out of the changelog. */
+interface StatusChange {
+  at: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Normalize a Jira timestamp to real ISO-8601. Jira emits a `-0700` offset,
+ * which `parseDocDate`'s value pattern tolerates but `Date` does not reliably
+ * accept — so the header always carries a `Z` form the consolidator can parse.
+ */
+function isoOrUndefined(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+/** The status transitions in a changelog, oldest first. Other field changes are ignored. */
+function statusChanges(entries: JiraChangelogEntry[]): StatusChange[] {
+  const out: StatusChange[] = [];
+  for (const entry of entries) {
+    const at = isoOrUndefined(entry.created);
+    if (!at) continue;
+    for (const item of entry.items ?? []) {
+      if (item.field !== 'status') continue;
+      out.push({ at, from: item.fromString ?? '', to: item.toString ?? '' });
+    }
+  }
+  return out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+}
+
+/**
+ * The changelog a search response embedded, and whether it was cut short. The
+ * enhanced search endpoint paginates the inline changelog, so an issue with a
+ * long history arrives partial — and its EARLIEST transitions are the ones
+ * missing, which is exactly the part the header needs.
+ */
+function inlineChangelog(issue: JiraIssue): { entries: JiraChangelogEntry[]; truncated: boolean } {
+  const changelog = issue.changelog;
+  const entries = changelog?.histories ?? [];
+  // An issue the search never carried a changelog for has nothing to be short of.
+  if (!changelog) return { entries, truncated: false };
+  // `total` is what proves the inline copy is whole. Without it we cannot tell a
+  // complete history from a clipped one, and the missing entries would be the
+  // EARLIEST — the ones the resolved-date fallback reads. Unverified means
+  // re-fetch: the call is bounded and only fires when Jira omits the count.
+  return { entries, truncated: changelog.total === undefined || changelog.total > entries.length };
+}
+
+/** One page of the per-issue changelog endpoint (`values`, not `histories`). */
+interface JiraChangelogPage {
+  values?: JiraChangelogEntry[];
+  isLast?: boolean;
+  total?: number;
+}
+
+/** Every changelog entry for one issue. Only called when the inline copy was truncated. */
+async function fetchChangelog(cfg: JiraConfig, id: string): Promise<JiraChangelogEntry[]> {
+  const entries: JiraChangelogEntry[] = [];
+  for (let startAt = 0; ; ) {
+    const page = await getJson<JiraChangelogPage>(
+      cfg,
+      `/issue/${encodeURIComponent(id)}/changelog?startAt=${startAt}&maxResults=${PAGE_LIMIT}`,
+    );
+    const values = page.values ?? [];
+    entries.push(...values);
+    if (page.isLast || values.length === 0) break;
+    startAt += values.length;
+  }
+  return entries;
+}
+
+/** An issue's status history, re-fetching the changelog only when the inline copy was short. */
+async function resolveStatusChanges(cfg: JiraConfig, issue: JiraIssue): Promise<StatusChange[]> {
+  const { entries, truncated } = inlineChangelog(issue);
+  if (!truncated) return statusChanges(entries);
+  return statusChanges(await fetchChangelog(cfg, String(issue.id)));
+}
+
+/**
+ * When the issue settled. `resolutiondate` is authoritative but nullable — a
+ * transition can set `status` without `resolution` — so an issue whose CURRENT
+ * status is in the done category falls back to when it last entered that status.
+ */
+function resolvedAt(issue: JiraIssue, changes: StatusChange[]): string | undefined {
+  const explicit = isoOrUndefined(issue.fields?.resolutiondate);
+  if (explicit) return explicit;
+  if (issue.fields?.status?.statusCategory?.key !== 'done') return undefined;
+  const current = issue.fields?.status?.name;
+  if (!current) return undefined;
+  for (let i = changes.length - 1; i >= 0; i--) {
+    if (changes[i].to === current) return changes[i].at;
+  }
+  return undefined;
+}
+
+/**
+ * Transitions kept in the header. The block sits ahead of the description, and
+ * the relevance classifier only reads the doc's first 60 lines — an uncapped
+ * history on a long-lived issue fills that window with a transition list and the
+ * issue reads as status tracking, so its requirements never reach extraction.
+ * The most recent are kept: they carry where the issue settled.
+ */
+const HISTORY_LIMIT = 10;
+
+/** YAML-quote a value that could otherwise parse as something else. */
+function yamlValue(raw: string): string {
+  return `"${raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The metadata the consolidator reads back out of the doc, as YAML frontmatter.
+ *
+ * Frontmatter rather than visible body text for two reasons: a reader opening
+ * the doc wants the ticket, not our bookkeeping, and every markdown renderer
+ * already hides it. The consolidator's readers are unaffected — they scan the
+ * first 40 lines for `name: value`, which is exactly frontmatter's shape.
+ *
+ * Key names are the ones those readers know (`created`/`updated`/`resolved`/
+ * `status`). `status_history` deliberately is not one of them, and its entries
+ * open with a timestamp: an entry beginning with a date-field NAME would be read
+ * as the doc's own date, and the first occurrence of a field wins.
+ */
+function frontmatter(issue: JiraIssue, changes: StatusChange[]): string {
+  const lines: string[] = [];
+  const created = isoOrUndefined(issue.fields?.created);
+  const updated = isoOrUndefined(issue.fields?.updated);
+  const resolved = resolvedAt(issue, changes);
+  const status = issue.fields?.status?.name;
+  // The bucket Jira files that name under. Stated beside the name, not instead
+  // of it: the reader prefers the name and falls back here, which is what keeps
+  // a workflow state we've never seen from classifying as nothing.
+  const statusCategory = issue.fields?.status?.statusCategory?.key;
+  if (created) lines.push(`created: ${created}`);
+  if (updated) lines.push(`updated: ${updated}`);
+  if (resolved) lines.push(`resolved: ${resolved}`);
+  if (status) lines.push(`status: ${yamlValue(status)}`);
+  if (statusCategory) lines.push(`status_category: ${yamlValue(statusCategory)}`);
+  if (lines.length === 0) return '';
+
+  if (changes.length > 0) {
+    lines.push('status_history:');
+    const kept = changes.slice(-HISTORY_LIMIT);
+    const dropped = changes.length - kept.length;
+    // Say what was dropped rather than truncating silently — a short list would
+    // otherwise read as the issue's whole history.
+    if (dropped > 0) lines.push(`  - ${yamlValue(`… ${dropped} earlier transitions omitted`)}`);
+    for (const c of kept) {
+      lines.push(`  - ${yamlValue(`${c.at}  ${c.from || '(none)'} -> ${c.to}`)}`);
+    }
+  }
+  return `---\n${lines.join('\n')}\n---`;
+}
+
+/** Build one issue's document: frontmatter, the `# KEY: summary` H1, the description. */
+function toDocContent(issue: JiraIssue, changes: StatusChange[] = []): DocContent {
   const key = issue.key ?? String(issue.id);
   const title = `${key}: ${issue.fields?.summary ?? ''}`;
   const body = adfToMarkdown(issue.fields?.description);
-  // Prepend the title as an H1 so a heading-less description still has a slice anchor.
-  return { title, markdown: `# ${title}\n\n${body}`.trim() };
+  // The H1 anchors the slicer, so a heading-less description still has one.
+  return {
+    title,
+    markdown: [frontmatter(issue, changes), `# ${title}`, body].filter(Boolean).join('\n\n').trim(),
+  };
 }
 
 /** `/search/jql` query string for a JQL sweep (paginates on nextPageToken). */
 function searchPath(
   jql: string,
   fields: string,
-  opts: { maxResults?: number; pageToken?: string } = {},
+  opts: { maxResults?: number; pageToken?: string; expand?: string } = {},
 ): string {
   const max = opts.maxResults ?? PAGE_LIMIT;
   const token = opts.pageToken ? `&nextPageToken=${encodeURIComponent(opts.pageToken)}` : '';
-  return `/search/jql?jql=${encodeURIComponent(jql)}&maxResults=${max}&fields=${fields}${token}`;
+  const expand = opts.expand ? `&expand=${encodeURIComponent(opts.expand)}` : '';
+  return `/search/jql?jql=${encodeURIComponent(jql)}&maxResults=${max}&fields=${fields}${token}${expand}`;
 }
 
 export const jiraConnector: KnowledgeConnector<JiraConfig> = {
@@ -187,19 +375,23 @@ export const jiraConnector: KnowledgeConnector<JiraConfig> = {
     const jql = baseJql(cfg);
     let pageToken: string | undefined;
     for (;;) {
-      const result = await getJson<JiraSearchResult>(cfg, searchPath(jql, 'summary,updated', { pageToken }));
+      const result = await getJson<JiraSearchResult>(
+        cfg,
+        searchPath(jql, 'summary,updated,created', { pageToken }),
+      );
       const issues = result.issues ?? [];
       for (const issue of issues) {
         const key = issue.key ?? String(issue.id);
         // Jira has no version counter — `updated` bumps on every edit, so it
         // serves as both the version marker and the newest-wins timestamp.
-        const updated = issue.fields?.updated ?? '1970-01-01T00:00:00.000Z';
+        const updated = issue.fields?.updated;
         refs.push({
           id: String(issue.id),
           title: `${key}: ${issue.fields?.summary ?? ''}`,
           url: `${base}/browse/${key}`,
           version: updated,
           updatedAt: updated,
+          createdAt: issue.fields?.created,
         });
       }
       // Stop when there's no next cursor (or, defensively, an empty page).
@@ -210,8 +402,11 @@ export const jiraConnector: KnowledgeConnector<JiraConfig> = {
   },
 
   async fetch(cfg, id): Promise<DocContent> {
-    const issue = await getJson<JiraIssue>(cfg, `/issue/${encodeURIComponent(id)}?fields=summary,description`);
-    return toDocContent(issue);
+    const issue = await getJson<JiraIssue>(
+      cfg,
+      `/issue/${encodeURIComponent(id)}?fields=${ISSUE_FIELDS}&expand=changelog`,
+    );
+    return toDocContent(issue, await resolveStatusChanges(cfg, issue));
   },
 
   async fetchMany(cfg, ids) {
@@ -225,10 +420,15 @@ export const jiraConnector: KnowledgeConnector<JiraConfig> = {
     const jql = `id in (${ids.join(', ')}) ORDER BY created ASC`;
     let pageToken: string | undefined;
     for (;;) {
-      const result = await getJson<JiraSearchResult>(cfg, searchPath(jql, 'summary,description', { pageToken }));
+      const result = await getJson<JiraSearchResult>(
+        cfg,
+        searchPath(jql, ISSUE_FIELDS, { pageToken, expand: 'changelog' }),
+      );
       const issues = result.issues ?? [];
       for (const issue of issues) {
-        out.set(String(issue.id), toDocContent(issue));
+        // Sequential on purpose: the await only does I/O for the rare issue whose
+        // inline changelog was truncated; every other issue resolves in memory.
+        out.set(String(issue.id), toDocContent(issue, await resolveStatusChanges(cfg, issue)));
       }
       if (!result.nextPageToken || issues.length === 0) break;
       pageToken = result.nextPageToken;

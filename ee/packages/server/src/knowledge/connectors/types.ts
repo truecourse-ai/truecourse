@@ -23,8 +23,14 @@ export interface DocRef {
   url: string;
   /** Source version (e.g. Confluence version.number); undefined ⇒ hash-only diff. */
   version?: string;
-  /** ISO timestamp; feeds newest-wins (`lastTouched`). */
-  updatedAt: string;
+  /**
+   * ISO timestamp; feeds newest-wins (`lastTouched`). Absent when the source
+   * states none — say so rather than substituting a date, which would win or
+   * lose orderings on a value nobody meant.
+   */
+  updatedAt?: string;
+  /** ISO timestamp of creation in the source tool, when it exposes one. */
+  createdAt?: string;
 }
 
 /** One document's content, as fetched from the source. */

@@ -28,6 +28,8 @@ interface ConfluencePage {
   id: string | number;
   title?: string;
   version?: { number?: number; when?: string };
+  /** Present only when the request asked for `expand=history`. */
+  history?: { createdDate?: string };
   body?: { storage?: { value?: string } };
   _links?: { webui?: string };
 }
@@ -90,6 +92,30 @@ function pageUrl(cfg: ConfluenceConfig, base: string, p: ConfluencePage): string
   return `${siteBase(cfg)}/wiki/spaces/${cfg.spaceKey}/pages/${p.id}`;
 }
 
+/** Normalize a timestamp to real ISO-8601, or drop it when it isn't one. */
+function isoOrUndefined(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+/**
+ * The metadata the consolidator reads back out of the doc, as YAML frontmatter —
+ * hidden from a reader by every markdown renderer, and still exactly the
+ * `name: value` shape its date reader scans the first 40 lines for.
+ *
+ * A page carries dates and nothing else: it has no lifecycle status, and its
+ * `version` is an edit counter rather than anything about the content.
+ */
+function frontmatter(page: ConfluencePage): string {
+  const lines: string[] = [];
+  const created = isoOrUndefined(page.history?.createdDate);
+  const updated = isoOrUndefined(page.version?.when);
+  if (created) lines.push(`created: ${created}`);
+  if (updated) lines.push(`updated: ${updated}`);
+  return lines.length > 0 ? `---\n${lines.join('\n')}\n---` : '';
+}
+
 export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
   kind: 'confluence',
   name: 'Confluence',
@@ -116,7 +142,7 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
       const space = encodeURIComponent(cfg.spaceKey);
       const list = await getJson<ConfluenceList>(
         cfg,
-        `/content?spaceKey=${space}&type=page&status=current&expand=version&limit=${PAGE_LIMIT}&start=${start}`,
+        `/content?spaceKey=${space}&type=page&status=current&expand=version,history&limit=${PAGE_LIMIT}&start=${start}`,
       );
       const results = list.results ?? [];
       const base = list._links?.base ?? siteBase(cfg);
@@ -126,7 +152,8 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
           title: p.title ?? `(untitled ${p.id})`,
           url: pageUrl(cfg, base, p),
           version: p.version?.number != null ? String(p.version.number) : undefined,
-          updatedAt: p.version?.when ?? '1970-01-01T00:00:00.000Z',
+          updatedAt: p.version?.when,
+          createdAt: p.history?.createdDate,
         });
       }
       if (!list._links?.next || results.length === 0) break;
@@ -138,11 +165,14 @@ export const confluenceConnector: KnowledgeConnector<ConfluenceConfig> = {
   async fetch(cfg, id): Promise<DocContent> {
     const page = await getJson<ConfluencePage>(
       cfg,
-      `/content/${encodeURIComponent(id)}?expand=body.storage,version`,
+      `/content/${encodeURIComponent(id)}?expand=body.storage,version,history`,
     );
     const title = page.title ?? `(untitled ${id})`;
     const body = storageXhtmlToMarkdown(page.body?.storage?.value ?? '');
-    // Prepend the title as an H1 so a heading-less page still has a slice anchor.
-    return { title, markdown: `# ${title}\n\n${body}`.trim() };
+    // The H1 anchors the slicer, so a heading-less page still has one.
+    return {
+      title,
+      markdown: [frontmatter(page), `# ${title}`, body].filter(Boolean).join('\n\n').trim(),
+    };
   },
 };

@@ -48,11 +48,40 @@ export function connectorDocPath(kind: string, externalId: string): string {
   return `knowledge/${kind}/${externalId}.md`;
 }
 
+/**
+ * A source timestamp as a `timestamptz` column will accept it, or null. `DocRef`
+ * types these as strings but nothing constrains their shape — a connector may
+ * use `updatedAt` as an opaque change marker, and a source may emit a format
+ * `Date` cannot read. Either would fail the INSERT and take the whole sync with
+ * it, so an unusable value is dropped: the doc keeps its other columns and only
+ * loses its ordering hint.
+ */
+function isoOrNull(value: string | undefined): string | null {
+  if (!value) return null;
+  const when = new Date(value);
+  return Number.isNaN(when.getTime()) ? null : when.toISOString();
+}
+
+/**
+ * The date that orders a ledger doc against the rest of the corpus: what the
+ * SOURCE last said, falling back to when we synced it.
+ *
+ * One function because both materialization paths need the same answer and had
+ * drifted — the workspace scan fell back, the repo inheritance path did not, so
+ * a row predating the source-date columns was stamped with the write instant
+ * there and read as newer than every doc it should have lost to.
+ */
+export function lastTouchedOf(row: { externalUpdatedAt: string | null; lastSyncedAt: string }): string {
+  return row.externalUpdatedAt ?? row.lastSyncedAt;
+}
+
 export interface SyncDoc {
   externalId: string;
   title: string;
   url: string | null;
   version: string | null;
+  externalCreatedAt: string | null;
+  externalUpdatedAt: string | null;
   contentHash: string;
   doc: WorkspaceDocInput;
 }
@@ -66,6 +95,9 @@ function toSyncDoc(kind: string, ref: DocRef, content: DocContent): SyncDoc {
     title: content.title || ref.title,
     url: ref.url,
     version: ref.version ?? null,
+    // The dates in their own columns, not smuggled through `version`.
+    externalCreatedAt: isoOrNull(ref.createdAt),
+    externalUpdatedAt: isoOrNull(ref.updatedAt),
     contentHash: sha256(Buffer.from(content.markdown, 'utf-8')),
     doc: {
       docPath: connectorDocPath(kind, ref.id),
@@ -164,6 +196,8 @@ async function reconcileLedgerSlice(
       title: d.title,
       url: d.url,
       version: d.version,
+      externalCreatedAt: d.externalCreatedAt,
+      externalUpdatedAt: d.externalUpdatedAt,
       contentHash: d.contentHash,
     });
   }
@@ -229,7 +263,7 @@ export async function processWorkspaceKnowledge(
     loaded += 1;
     await progress?.(loaded, total, SYNC_MSG_FETCH);
     if (markdown == null) continue;
-    docs.push({ docPath: row.docPath, markdown, lastTouched: row.lastSyncedAt });
+    docs.push({ docPath: row.docPath, markdown, lastTouched: lastTouchedOf(row) });
     consolidated.push({ docPath: row.docPath, processedHash: row.contentHash });
     bySource[row.sourceKind] = (bySource[row.sourceKind] ?? 0) + 1;
   }

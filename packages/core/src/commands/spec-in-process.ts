@@ -579,13 +579,34 @@ export async function curateInProcess(
 // job); this path is corpus-only.
 // ---------------------------------------------------------------------------
 
+/**
+ * Set a materialized doc's mtime to when the SOURCE says it last changed, so
+ * discovery can order it. Best-effort: an unparseable or absent timestamp leaves
+ * the file's own mtime, which is the pre-existing behavior.
+ */
+function stampMtime(dest: string, lastTouched: string | undefined): void {
+  if (!lastTouched) return;
+  const when = new Date(lastTouched);
+  if (Number.isNaN(when.getTime())) return;
+  try {
+    fs.utimesSync(dest, when, when);
+  } catch {
+    /* a filesystem that refuses the stamp must not fail the sync */
+  }
+}
+
 /** One source document handed to the workspace corpus sync. The body is transient. */
 export interface WorkspaceDocInput {
   /** Stable, namespaced relative path, e.g. `knowledge/confluence/<externalId>.md`. */
   docPath: string;
   /** The transient markdown body. Never persisted. */
   markdown: string;
-  /** ISO timestamp (the source tool's `updatedAt`); informational. */
+  /**
+   * ISO timestamp (the source tool's `updatedAt`). Stamped onto the written
+   * file's mtime, because discovery derives a doc's date from the filesystem
+   * when it has nothing better — and every doc here is written in one loop, so
+   * without this they all share the write instant and nothing can be ordered.
+   */
   lastTouched?: string;
 }
 
@@ -626,6 +647,7 @@ export async function syncWorkspaceCorpusInProcess(options: {
       const dest = path.join(tmp, doc.docPath);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, doc.markdown, 'utf-8');
+      stampMtime(dest, doc.lastTouched);
     }
     // Materialize the decisions BEFORE curate so it reads them from the tree, the
     // same channel a repo uses (curate reads `.truecourse/specs/decisions.json`).
@@ -695,6 +717,7 @@ export async function materializeWorkspaceInheritance(
     const dest = path.join(repoRoot, doc.docPath);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, doc.markdown, 'utf-8');
+    stampMtime(dest, doc.lastTouched);
   }
   return { decisions: mergeInheritedDecisions(layer.decisions, repoDecisions), inherited: true };
 }

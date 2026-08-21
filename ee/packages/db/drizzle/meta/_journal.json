@@ -71,6 +71,13 @@
       "when": 1784239769917,
       "tag": "0009_stale_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787186776458,
+      "tag": "0010_tricky_firedrake",
+      "breakpoints": true
     }
   ]
 }

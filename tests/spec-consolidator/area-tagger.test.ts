@@ -140,3 +140,38 @@ describe('parseDocStatus', () => {
     expect(parseDocStatus('Status: ![badge](https://x/y.svg)\nStatus: shipped\n')).toBe('shipped');
   });
 });
+
+describe('parseDocStatus — the workflow name, then its category', () => {
+  it('reads the terminal states every tracker ships with', () => {
+    expect(parseDocStatus('Status: Closed')).toBe('shipped');
+    expect(parseDocStatus('Status: Resolved')).toBe('shipped');
+  });
+
+  it('sees through the quotes a YAML writer adds', () => {
+    expect(parseDocStatus('status: "Done"')).toBe('shipped');
+    expect(parseDocStatus("status: 'In Progress'")).toBe('planned');
+  });
+
+  it('falls back to the category when the workflow name means nothing to us', () => {
+    // A custom state no vocabulary could enumerate. Without the category this
+    // ticket carries no status at all.
+    const doc = ['status: "Awaiting Carrier Handoff"', 'status_category: done'].join('\n');
+    expect(parseDocStatus(doc)).toBe('shipped');
+  });
+
+  it('lets a name we DO understand overrule its own category', () => {
+    // Jira files "Won't Do" under `done`. Reading the category first would
+    // report a dropped ticket as delivered.
+    const doc = ['status: "Won\'t Do"', 'status_category: done'].join('\n');
+    expect(parseDocStatus(doc)).toBe('out-of-scope');
+  });
+
+  it('stays undefined when neither the name nor the category is known', () => {
+    expect(parseDocStatus(['status: "???"', 'status_category: mystery'].join('\n'))).toBeUndefined();
+  });
+
+  it('does not read a category line as a status line, or vice versa', () => {
+    expect(parseDocStatus('status_category: done')).toBe('shipped');
+    expect(parseDocStatus('status_history:\n  - "x -> y"')).toBeUndefined();
+  });
+});

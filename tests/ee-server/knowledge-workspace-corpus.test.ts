@@ -61,6 +61,10 @@ async function seedStored(
       title: d.title,
       url: null,
       version: null,
+      // No source dates: these fixtures stand in for docs whose connector
+      // reported none, which is the case the ordering fallback covers.
+      externalCreatedAt: null,
+      externalUpdatedAt: null,
       contentHash,
     });
   }

@@ -23,6 +23,9 @@ export interface KnowledgeDocRow {
   title: string;
   url: string | null;
   version: string | null;
+  /** Creation / last-modification time in the source tool; null when it exposes none. */
+  externalCreatedAt: string | null;
+  externalUpdatedAt: string | null;
   contentHash: string;
   /** sha256 of the body the last process consolidated; null until first processed. */
   processedHash: string | null;
@@ -84,6 +87,8 @@ export class PgKnowledgeStore {
         title: row.title,
         url: row.url,
         version: row.version,
+        externalCreatedAt: row.externalCreatedAt,
+        externalUpdatedAt: row.externalUpdatedAt,
         contentHash: row.contentHash,
         lastSyncedAt: now,
         createdAt: now,
@@ -99,6 +104,8 @@ export class PgKnowledgeStore {
           title: row.title,
           url: row.url,
           version: row.version,
+          externalCreatedAt: row.externalCreatedAt,
+          externalUpdatedAt: row.externalUpdatedAt,
           contentHash: row.contentHash,
           lastSyncedAt: now,
         },
@@ -146,6 +153,8 @@ export class PgKnowledgeStore {
         title: r.title,
         url: r.url,
         version: r.version,
+        externalCreatedAt: r.externalCreatedAt,
+        externalUpdatedAt: r.externalUpdatedAt,
         contentHash: r.contentHash,
         processedHash: r.processedHash,
         lastSyncedAt: r.lastSyncedAt,
@@ -195,6 +204,8 @@ export class PgKnowledgeStore {
         title: r.title,
         url: r.url,
         version: r.version,
+        externalCreatedAt: r.externalCreatedAt,
+        externalUpdatedAt: r.externalUpdatedAt,
         contentHash: r.contentHash,
         processedHash: r.processedHash,
         lastSyncedAt: r.lastSyncedAt,
@@ -225,6 +236,8 @@ export class PgKnowledgeStore {
       title: r.title,
       url: r.url,
       version: r.version,
+      externalCreatedAt: r.externalCreatedAt,
+      externalUpdatedAt: r.externalUpdatedAt,
       contentHash: r.contentHash,
       processedHash: r.processedHash,
       lastSyncedAt: r.lastSyncedAt,

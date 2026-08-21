@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   classifyDoc,
   discoverDocs,
@@ -401,5 +402,64 @@ describe('discoverDocs — include-scope', () => {
 
     const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
     expect(paths).toEqual(['SPEC.md', 'docs/a.md']);
+  });
+});
+
+/**
+ * A doc's identity is what it SAYS, not what it says ABOUT itself.
+ *
+ * The content hash keys the per-doc LLM caches, and a synced ticket restates its
+ * `updated` on any comment or label change — hashing that buys a paid re-tag of
+ * text nobody touched. The preview is the window the relevance classifier judges
+ * through, so metadata spent there is content it never sees.
+ */
+describe('discoverDocs — frontmatter is metadata, not content', () => {
+  const DOC = ['# Order cancellation', '', 'Users can cancel while Pending.'].join('\n');
+  const withMeta = (updated: string) =>
+    ['---', 'created: 2026-01-01T00:00:00.000Z', `updated: ${updated}`, 'status: "Done"', '---', '', DOC].join('\n');
+
+  /** The candidate for `rel`, discovered fresh from disk. */
+  const discover = (rel: string) => {
+    const docs = discoverDocs(root, { skipGit: true });
+    return docs.find((d) => d.path === rel)!;
+  };
+
+  it('hashes the document alike however its metadata moves', () => {
+    place('a.md', withMeta('2026-01-02T00:00:00.000Z'));
+    const before = discover('a.md').contentHash;
+    place('a.md', withMeta('2026-08-20T00:00:00.000Z'));
+    const after = discover('a.md').contentHash;
+    // A comment on the ticket moved `updated` and nothing else. Were this to
+    // differ, every cache keyed on it would miss and re-pay for identical text.
+    expect(after).toBe(before);
+  });
+
+  it('still hashes a real edit differently', () => {
+    place('b.md', withMeta('2026-01-02T00:00:00.000Z'));
+    const before = discover('b.md').contentHash;
+    place('b.md', withMeta('2026-01-02T00:00:00.000Z').replace('while Pending', 'until it ships'));
+    expect(discover('b.md').contentHash).not.toBe(before);
+  });
+
+  it('gives the preview window to the document, not to the metadata', () => {
+    place('c.md', withMeta('2026-01-02T00:00:00.000Z'));
+    const preview = discover('c.md').preview;
+    expect(preview.startsWith('# Order cancellation')).toBe(true);
+    expect(preview).not.toContain('updated:');
+  });
+
+  it('leaves a doc without frontmatter exactly as it was', () => {
+    // No mass cache invalidation: a doc that never had a block hashes unchanged.
+    place('d.md', DOC);
+    expect(discover('d.md').contentHash).toBe(
+      createHash('sha256').update(DOC).digest('hex'),
+    );
+  });
+
+  it('does not take a horizontal rule for a metadata block', () => {
+    const ruled = ['---', '', '# Not frontmatter', '', 'body'].join('\n');
+    place('e.md', ruled);
+    // No closing fence, so there is no block — the doc is its whole self.
+    expect(discover('e.md').preview).toContain('---');
   });
 });
