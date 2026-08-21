@@ -301,10 +301,15 @@ function frontmatter(issue: JiraIssue, changes: StatusChange[]): string {
   const updated = isoOrUndefined(issue.fields?.updated);
   const resolved = resolvedAt(issue, changes);
   const status = issue.fields?.status?.name;
+  // The bucket Jira files that name under. Stated beside the name, not instead
+  // of it: the reader prefers the name and falls back here, which is what keeps
+  // a workflow state we've never seen from classifying as nothing.
+  const statusCategory = issue.fields?.status?.statusCategory?.key;
   if (created) lines.push(`created: ${created}`);
   if (updated) lines.push(`updated: ${updated}`);
   if (resolved) lines.push(`resolved: ${resolved}`);
   if (status) lines.push(`status: ${yamlValue(status)}`);
+  if (statusCategory) lines.push(`status_category: ${yamlValue(statusCategory)}`);
   if (lines.length === 0) return '';
 
   if (changes.length > 0) {

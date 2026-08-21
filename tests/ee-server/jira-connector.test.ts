@@ -543,6 +543,9 @@ function headerStatusLine(body: string): string | undefined {
   return undefined;
 }
 
+/** What `relevance-filter` reads of a doc before deciding whether it is a spec. */
+const RELEVANCE_PREVIEW_LINES = 60;
+
 describe('jiraConnector — metadata header contract', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -672,8 +675,12 @@ it('caps the history and says how many it dropped, rather than truncating silent
     // The most recent survive — they carry where the issue settled.
     expect(md).toContain('S24 -> S25');
     expect(md).not.toContain('S0 -> S1');
-    // …and the block still leaves room in the 60-line relevance window.
-    expect(md.split('\n').findIndex((l) => l.startsWith('# ENG-1'))).toBeLessThan(20);
+    // …and the doc still reads as a requirement inside the window the relevance
+    // classifier sees. Uncapped, the transition list fills it and the issue
+    // classifies as status tracking.
+    const window = md.split('\n').slice(0, RELEVANCE_PREVIEW_LINES).join('\n');
+    expect(window).toContain('# ENG-1');
+    expect(window).toContain('POST /orders');
   });
 
 it('leaves updatedAt absent when the issue states none, rather than inventing one', async () => {
@@ -698,6 +705,20 @@ it('leaves updatedAt absent when the issue states none, rather than inventing on
     expect(md).not.toContain('status_history:');
     const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
     expect(calls.some((c) => String(c[0]).includes('/changelog?'))).toBe(false);
+  });
+
+it('states the status category beside the name, for a workflow we cannot enumerate', async () => {
+    const md = await bodyOf(
+      issue({ fields: { status: { name: 'Awaiting Carrier Handoff', statusCategory: { key: 'done' } } } }),
+    );
+    expect(md).toContain('status: "Awaiting Carrier Handoff"');
+    expect(md).toContain('status_category: "done"');
+  });
+
+  it('omits the category when Jira sent none', async () => {
+    const md = await bodyOf(issue({ fields: { status: { name: 'Done' } } }));
+    expect(md).toContain('status: "Done"');
+    expect(md).not.toContain('status_category:');
   });
 
   it('omits the block entirely when an issue carries no metadata', async () => {

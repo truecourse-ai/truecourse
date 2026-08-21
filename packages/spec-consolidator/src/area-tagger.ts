@@ -157,22 +157,41 @@ function docBody(doc: DocCandidate): string {
 
 const STATUS_VALUES = new Set(StatusSchema.options);
 
+/** `Status: shipped`. Disjoint from {@link STATUS_CATEGORY_LINE}: `status` must be
+ *  followed by the separator, so `status_category` and `status_history` miss it. */
+const STATUS_LINE = /^\s*[-*]?\s*\*{0,2}status\*{0,2}\s*[:=]\s*(.+?)\s*$/i;
+/** `Status category: done` — a tracker's coarse bucket beside its workflow name. */
+const STATUS_CATEGORY_LINE = /^\s*[-*]?\s*\*{0,2}status[ _-]?category\*{0,2}\s*[:=]\s*(.+?)\s*$/i;
+
 /**
  * Parse a lifecycle status from a doc's header. PRDs/ADRs commonly carry a
  * `Status: shipped` line (in YAML frontmatter or a header block) in the first
  * lines. Best-effort: returns undefined when nothing recognizable is found.
+ *
+ * The NAME decides whenever we understand it, and a coarse `Status category`
+ * only answers when nothing did. That order matters: a tracker files "Won't Do"
+ * under its done category, so the category alone would read a dropped ticket as
+ * shipped. Read second, it does the one thing the name cannot — keep a workflow
+ * whose vocabulary we've never seen from classifying as nothing at all.
  */
 export function parseDocStatus(body: string): Status | undefined {
   const head = body.split(/\r?\n/).slice(0, 40);
+  let category: Status | undefined;
   for (const line of head) {
-    const m = /^\s*[-*]?\s*\*{0,2}status\*{0,2}\s*[:=]\s*(.+?)\s*$/i.exec(line);
-    if (!m) continue;
-    const status = classifyStatusValue(m[1]);
-    if (status) return status;
-    // Unrecognized value on this status line (e.g. a badge image) — keep scanning
-    // for a clearer one rather than bailing on the first match.
+    const named = STATUS_LINE.exec(line);
+    if (named) {
+      const status = classifyStatusValue(named[1]);
+      if (status) return status;
+      // Unrecognized value on this status line (e.g. a badge image) — keep scanning
+      // for a clearer one rather than bailing on the first match.
+      continue;
+    }
+    if (category === undefined) {
+      const bucket = STATUS_CATEGORY_LINE.exec(line);
+      if (bucket) category = classifyStatusCategory(bucket[1]);
+    }
   }
-  return undefined;
+  return category;
 }
 
 /**
@@ -182,16 +201,42 @@ export function parseDocStatus(body: string): Status | undefined {
  * incidental keyword. Ambiguous short tokens (`ga`/`live`) only count when they
  * are the whole value.
  */
+/**
+ * Map a tracker's coarse status CATEGORY — the bucket it files a workflow state
+ * under, independent of what that state is called.
+ *
+ * A fallback only. A category cannot separate "Done" from "Won't Do" (both are
+ * done), so it answers only where the name meant nothing: an unrecognized custom
+ * state degrades to roughly right instead of to no status at all. The vocabulary
+ * is small on purpose — these are the buckets trackers actually expose, and a
+ * category we don't know stays unknown rather than being guessed at.
+ */
+function classifyStatusCategory(rawValue: string): Status | undefined {
+  const raw = rawValue.toLowerCase().replace(/[`*_"']/g, '').trim();
+  if (raw === 'done' || raw === 'complete') return 'shipped';
+  if (raw === 'new' || raw === 'to do' || raw === 'todo' || raw === 'indeterminate' || raw === 'in progress') {
+    return 'planned';
+  }
+  return undefined;
+}
+
 function classifyStatusValue(rawValue: string): Status | undefined {
-  const raw = rawValue.toLowerCase().replace(/[`*_]/g, '').trim();
+  const raw = rawValue.toLowerCase().replace(/[`*_"']/g, '').trim();
   if (!raw) return undefined;
   if (STATUS_VALUES.has(raw as Status)) return raw as Status;
-  if (/\b(out[- ]?of[- ]?scope|wont[- ]?fix|rejected|cancelled|canceled)\b/.test(raw)) return 'out-of-scope';
+  // `wont do` alongside `wont fix`: a tracker files both under its DONE category,
+  // so a name we failed to place here would fall through and read as delivered.
+  if (/\b(out[- ]?of[- ]?scope|wont[- ]?(?:fix|do)|rejected|cancelled|canceled|duplicate)\b/.test(raw)) {
+    return 'out-of-scope';
+  }
   if (/\b(deprecated|superseded|obsolete|retired)\b/.test(raw)) return 'deprecated';
   if (/\b(deferred|on[- ]?hold|paused|backlog)\b/.test(raw)) return 'deferred';
   if (/\b(in[- ]?progress|planned|draft|proposed|todo|wip|upcoming|not[- ]?started)\b/.test(raw)) return 'planned';
   // "accepted"/"approved"/"adopted" — an ADR whose decision is in force.
-  if (/\b(shipped|done|complete|completed|released|accepted|approved|adopted|active|generally[- ]?available)\b/.test(raw)) return 'shipped';
+  // `closed`/`resolved` are the default terminal states of every issue tracker,
+  // and land AFTER the negative patterns so "Closed — won't fix" still reads as
+  // out-of-scope rather than as delivered.
+  if (/\b(shipped|done|complete|completed|released|closed|resolved|accepted|approved|adopted|active|generally[- ]?available)\b/.test(raw)) return 'shipped';
   if (raw === 'ga' || raw === 'live' || raw === 'go live') return 'shipped';
   return undefined;
 }
