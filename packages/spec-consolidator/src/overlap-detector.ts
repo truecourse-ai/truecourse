@@ -1,82 +1,27 @@
 /**
- * OVERLAP candidate widening — the deterministic net of the old per-pair
- * overlap detector, which the `spec-scan.overlap` SESSION (plan 02 step 5, in
- * `@truecourse/core`'s `services/spec-scan/overlap.ts`) now judges against.
+ * The RETIRED overlap detector's prompt constants. Two generations of this
+ * module's machinery are gone:
  *
- * The LLM pair-matrix runner retired with the sessions: one session per AREA
- * reads the area's docs (plus the widened candidates below) itself, section by
- * section, and both flags AND adjudicates in one pass — replacing this stage's
- * flagOverlaps and the verifier's verifyFlaggedOverlaps.
+ * - the LLM pair-matrix runner (`flagOverlaps` + the window matrix) retired
+ *   when the `spec-scan.overlap` SESSION (plan 02 step 5, in `@truecourse/core`'s
+ *   `services/spec-scan/overlap.ts`) took over flag-and-adjudicate in one pass;
+ * - the heading-widened doc net (`hasConcernHeading` / `widenedOverlapDocs`)
+ *   retired with SPEC_GUARD_PLAN item 119 — the deterministic collision
+ *   pairing (`collision-pairing.ts`) applies the same canonical-heading fold at
+ *   SECTION level across the whole kept corpus, which subsumes doc-level
+ *   widening entirely.
  *
- * What stays is what was never a call:
- * - {@link widenedOverlapDocs} — the heading-widened candidate net. The tagger
- *   labels each doc independently, so the same subject can land under
- *   different concerns across docs (a broad PRD's `## Pagination` tagged
- *   `core/api-conventions`, a focused note tagged `core/pagination`), and the
- *   pair would never share an area to be compared. Any OUTSIDE doc whose
- *   markdown heading slug-matches an area's concern joins that area's overlap
- *   briefing. Pure string work, feeds the session briefing.
- * - {@link OVERLAP_DETECTOR_SYSTEM_PROMPT} / {@link OVERLAP_WINDOW_CHARS} —
- *   kept exported for the pre-flight estimate (until step 7's rework); the
- *   session prompt derives its disagreement rules from this text. The
- *   `consolidator/overlap` cache keeps its files but is no longer read.
+ * What remains is documentary: {@link OVERLAP_DETECTOR_SYSTEM_PROMPT} /
+ * {@link OVERLAP_WINDOW_CHARS}, the text the session prompt's disagreement
+ * rules were derived from. The `consolidator/overlap` cache keeps its files but
+ * is no longer read.
  */
 
 import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm';
-import { docBody, type DocCandidate } from './discovery.js';
-import { canonicalizeConcern, isProcessArea } from './corpus-types.js';
-import type { VocabMap } from './corpus-types.js';
 
 /** Max chars of one doc shown per judge call in the retired one-shot; the
  *  estimate still models the old window matrix with it (step 7 retires it). */
 export const OVERLAP_WINDOW_CHARS = 24_000;
-
-/**
- * ATX markdown heading texts (`#`…`######` lines) from a doc body. The leading
- * (and optional trailing) hashes are dropped and inline emphasis / code markers
- * stripped, so `## \`Pagination\` ##` and `### **Auth**` yield `Pagination` /
- * `Auth`. Setext (underline) headings and fenced-code `#` lines are ignored.
- */
-function extractHeadings(body: string): string[] {
-  const out: string[] = [];
-  for (const line of body.split(/\r?\n/)) {
-    const m = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!m) continue;
-    const text = m[1].replace(/[`*_~]/g, '').trim();
-    if (text) out.push(text);
-  }
-  return out;
-}
-
-/**
- * Whether any of the doc's headings canonicalizes to `concern` — the same
- * slug/alias/vocab fold the grouper applies to an area's concern axis, so a
- * heading `Authentication` matches the `auth` concern and `Pagination` matches
- * `pagination`.
- */
-export function hasConcernHeading(doc: DocCandidate, concern: string, vocab?: VocabMap): boolean {
-  for (const heading of extractHeadings(docBody(doc))) {
-    if (canonicalizeConcern(heading, vocab) === concern) return true;
-  }
-  return false;
-}
-
-/**
- * The OUTSIDE docs an area's overlap session must also read: every doc NOT in
- * the area whose markdown heading slug-matches the area's concern. Empty for
- * process areas, whose concerns (overview/goals/…) name generic structural
- * sections, not behavior. Order follows `docs` (discovery order), so briefings
- * are deterministic.
- */
-export function widenedOverlapDocs(
-  area: { id: string; concern: string; docRefs: readonly string[] },
-  docs: readonly DocCandidate[],
-  vocab?: VocabMap,
-): DocCandidate[] {
-  if (isProcessArea(area.id)) return [];
-  const inArea = new Set(area.docRefs);
-  return docs.filter((d) => !inArea.has(d.path) && hasConcernHeading(d, area.concern, vocab));
-}
 
 // ---------------------------------------------------------------------------
 // The retired one-shot's prompt — see the module note for why it stays.

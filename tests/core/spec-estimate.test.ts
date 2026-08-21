@@ -448,7 +448,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
 
     const cold = await estimateScanTokens(repo);
     expect(stage(cold, OVERLAP_SESSION_KIND)!.bound).toMatch(
-      /^~\d+ of ~\d+ areas? changed \(changed docs may reshape areas\)$/,
+      /^~\d+ of ~\d+ comparisons? changed \(changed docs may reshape clusters\)$/,
     );
 
     // One changed doc is enough to re-open the question: its verdict can move a
@@ -458,7 +458,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect(stage(await estimateScanTokens(repo), OVERLAP_SESSION_KIND)!.bound).toContain('~');
   });
 
-  it('states an EXACT `N of M areas changed` once every doc verdict is settled', async () => {
+  it('states an EXACT `N of M comparisons changed` once every doc verdict is settled', async () => {
     writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
     writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
     // The workspace-sync shape: curate + settle warmed, overlap never run. Every
@@ -467,7 +467,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
 
     const est = await estimateScanTokens(repo);
     const overlap = stage(est, OVERLAP_SESSION_KIND)!;
-    expect(overlap.bound).toMatch(/^\d+ of \d+ areas? changed$/);
+    expect(overlap.bound).toMatch(/^\d+ of \d+ comparisons? changed$/);
     expect(overlap.bound).not.toContain('~');
     // Exact means the LOW bound is the real cache-miss count, not a heuristic.
     expect(overlap.callsRange!.low).toBe(1);

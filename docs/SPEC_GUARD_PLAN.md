@@ -6539,9 +6539,10 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     under-merging within the topic axis. A lever would let the settle session
     assign docs wholesale to named areas (schema + validation + fold + briefing
     + estimate) — deliberately deferred 2026-08-20 to keep the scan fixes
-    shippable. Related: overlap recall is ~50–60% per scan (cal.diy 3/6,
-    documenso 10/17 of reference pairs) — tracked, contained by item 111 (a
-    missed pair no longer destroys its stored verdict).
+    shippable. Related: overlap recall was ~50–60% per scan (cal.diy 3/6,
+    documenso 10/17 of reference pairs) — contained by item 111 (a missed pair
+    no longer destroys its stored verdict) and structurally addressed by item
+    119 (deterministic collision pairing replaces the session's own retrieval).
 
 114. **manualAreas pins are immune to settle merges (2026-08-20).** STATUS:
     BUILT. Caught by the same day's fresh full-pipeline validation run:
@@ -6775,3 +6776,82 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     route/screen reader (07's 0/79 ceiling), catalog briefing naming
     what is NOT a dependency (passport/strapi-project), ownHosts-filter
     investigation above.
+
+119. **Overlap retrieval is deterministic: collision pairing + cluster
+    sessions (2026-08-21).** STATUS: BUILT. The documenso full-corpus field
+    run (item 117's subject) exposed the structural problem behind the
+    ~50–60% overlap recall item 113 tracks: the session was doing
+    RETRIEVAL — deciding from 62 heading outlines where claims collide —
+    and retrieval cost scales with area size, so `notReached` covered
+    ~70% of the big areas' docs (46/62 api-integration, 44/63
+    document-signing) and the reference corpus's single most consequential
+    find (the `/envelope/distribute` body-form vs path-param contradiction,
+    code-verified to 404, present in FOUR docs) was never flagged. Budget
+    was the wrong lever in both directions. Three changes, one derivation:
+
+    - **Deterministic candidate pairing**
+      (`packages/spec-consolidator/src/collision-pairing.ts`). A
+      disagreement definitionally requires both docs to NAME the same
+      concrete thing, and those names are surface-extractable: claim
+      tokens (route path segments, UPPER_SNAKE members, camel/snake
+      identifiers, hyphenated header names — markdown link targets and
+      URLs stripped first, they name places not claims) plus canonical
+      HEADING keys (the `canonicalizeConcern` fold, which subsumes the
+      retired doc-level `widenedOverlapDocs` net at section level; both
+      deleted). Keys are idf-weighted `log2((S+1)/df)` (the `+1` keeps
+      two-doc corpora pairable), pairs generate only from keys in ≤ 24
+      sections, and a score floor drops corpus-generic residue. Within a
+      doc pair, GREEDY MAX-COVERAGE selection (marginal uncovered-key
+      weight ≥ the floor, ceiling 6) keeps a modest pair carrying a
+      unique signal alive beneath 50-point shared-code-example walls —
+      the distribute route's exact shape. Sections split fence-aware via
+      the shared `parseHeadings`, so every pair side is a heading
+      `read_section` can open.
+    - **One session per collision-cluster CHUNK, never per area.** Pairs
+      are assigned to exactly ONE area (lexicographically-first shared
+      area, union-first when the docs share none — the widened-net case),
+      clustered by connected components over doc refs, and chunked at
+      `MAX_BRIEFED_PAIRS` (30) in rank order. Every derived pair is
+      briefed to exactly one session; docs with no candidate collision
+      cost no session. The briefing leads with the ranked checklist
+      (shared signals named) above the chunk docs' outlines, and the
+      prompt now says this session is the ONLY one that will see these
+      pairs (the per-area SCOPE deferral rule is gone) while still
+      inviting flags the checklist didn't nominate.
+    - **Single-area assignment kills the multi-tag multiplier**: a doc
+      tagged into 6 areas no longer appears in 6 briefings. The flagged
+      record still lists its SPAN (`overlap.areas` = the docs' shared
+      areas) so resolutions scope as before.
+    - **Coverage is corpus data, stamped off the transcript.**
+      `Area.uncheckedPairs` (additive, optional) holds the briefed pairs
+      whose two sections the transcript never shows both opened — parsed
+      from `read_section` result headers, never self-reported, cached with
+      the outcome like `sectionsOpened` (which now SUMS across a run's
+      chunks); a failed chunk lands all its pairs there. A recall gap is
+      now the exact list of pairs nobody compared.
+
+    Cache: new name `consolidator/overlap-cluster`, keyed on the chunk
+    docs' content hashes + the PAIR-IDENTITY fingerprint (docs+headings,
+    never scores/keys — a weight shift from an edit elsewhere re-runs
+    nothing). Estimate mirrors via the shared `deriveOverlapWorkItems`;
+    bound wording is now "N of M comparisons changed". Field numbers
+    (documenso, 126 kept docs): 1 718 pairs kept in ~35 ms, 70 sessions,
+    ~1.05 MB total briefing chars — vs the old run's 26 sessions whose
+    12 largest all budget-died with zero rows; the distribute conflict is
+    co-briefed in both its doc pairs. Tracked residuals: enum-ABSENCE
+    disputes pair weakly (the shared token is the missing member —
+    ASSISTANT vs `validRoles`), prose-only disputes with zero shared
+    identifiers/headings ride only on co-briefed outlines, and coverage
+    does not yet accrete across runs (uncheckedPairs is recorded but the
+    next scan does not prioritize it). As built:
+    `packages/spec-consolidator/src/{collision-pairing,corpus-types,
+    overlap-detector,index}.ts`,
+    `packages/core/src/services/spec-scan/{overlap,run}.ts`,
+    `packages/core/src/services/llm/spec-estimate.ts`,
+    `tools/cli/src/commands/spec.ts`. Tests:
+    `tests/spec-consolidator/collision-pairing.test.ts` (extraction,
+    rarity, greedy max-coverage, clustering, fingerprint),
+    `tests/core/spec-scan-overlap.test.ts` (checklist briefing,
+    uncheckedPairs stamping, failed-chunk fold),
+    `tests/spec-consolidator/{curate,request-schema,overlap-detector}.test.ts`
+    and `tests/core/spec-estimate.test.ts` updated to the new derivation.

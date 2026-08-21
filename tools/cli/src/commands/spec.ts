@@ -323,7 +323,7 @@ const SCAN_STAGE_EFFECT: Record<string, string> = {
   "spec-scan.orchestrate": "stored scope verdicts kept — no new subtree decisions",
   "spec-scan.curate-doc": "affected docs kept by default, untagged (they join no area)",
   "spec-scan.settle-areas": "area labels kept as-is (no merges/subdivisions)",
-  "spec-scan.overlap": "affected areas left unflagged (their docs land in notReached)",
+  "spec-scan.overlap": "affected clusters left unflagged (docs land in notReached, their pairs in uncheckedPairs)",
 };
 
 

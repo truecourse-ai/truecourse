@@ -376,6 +376,22 @@ function resolutionMatchesConflict(
 }
 
 /**
+ * The stored resolution that identifies THIS conflict, if any — the exported
+ * face of {@link resolutionMatchesConflict} for surfaces that hold a dispute
+ * from somewhere other than the corpus (the Activity chat renders findings
+ * straight off a session transcript). Never rebuild the identity matching in
+ * a consumer.
+ */
+export function resolutionForConflict(
+  resolutions: readonly ConflictResolutionLike[] | undefined,
+  a: string,
+  b: string,
+  sections: readonly OverlapSectionLike[] | undefined,
+): ConflictResolutionLike | undefined {
+  return (resolutions ?? []).find((r) => resolutionMatchesConflict(r, a, b, sections));
+}
+
+/**
  * A stored resolution for THIS doc pair that does NOT match the conflict's
  * precise dispute identity — the pair was re-flagged with drifted quotes (the
  * overlap session excerpts the same disagreement differently on every scan),

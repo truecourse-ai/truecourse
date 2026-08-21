@@ -321,6 +321,29 @@ export const OverlapSchema = z.object({
 });
 export type Overlap = z.infer<typeof OverlapSchema>;
 
+/** One side of a deterministic candidate pair — a section, addressed the way
+ *  the overlap session's `read_section` addresses it (`null` = the doc's lead). */
+export const CandidateSectionRefSchema = z.object({
+  doc: DocRefSchema,
+  heading: z.string().nullable(),
+});
+export type CandidateSectionRef = z.infer<typeof CandidateSectionRefSchema>;
+
+/**
+ * A candidate collision the deterministic pairing nominated (item 119): two
+ * sections in different docs sharing rare claim tokens or the same canonical
+ * heading. Lands in the corpus only when NOT examined (`Area.uncheckedPairs`),
+ * so a coverage gap is data — the exact pairs nobody compared — never an
+ * inference from doc lists.
+ */
+export const CandidatePairSchema = z.object({
+  a: CandidateSectionRefSchema,
+  b: CandidateSectionRefSchema,
+  /** The shared signals that nominated the pair (display form), sorted. */
+  keys: z.array(z.string()).default([]),
+});
+export type CandidatePair = z.infer<typeof CandidatePairSchema>;
+
 /** A group of docs sharing one normalized area. */
 export const AreaSchema = z.object({
   /** Canonical area id, `product/concern`. */
@@ -346,6 +369,14 @@ export const AreaSchema = z.object({
    * Absent on cache-hit areas (no transcript) and on pre-session corpora.
    */
   sectionsOpened: z.number().int().nonnegative().optional(),
+  /**
+   * Candidate pairs assigned to this area that no session examined — briefed
+   * pairs whose two sections the transcript never shows both opened, pairs
+   * beyond a session's briefing cap, and every pair of a failed session.
+   * Stamped by the run off the transcript (never self-reported). Additive +
+   * optional; absent on pre-pairing corpora.
+   */
+  uncheckedPairs: z.array(CandidatePairSchema).optional(),
 });
 export type Area = z.infer<typeof AreaSchema>;
 

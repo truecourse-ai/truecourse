@@ -26,7 +26,6 @@ import {
   readSourcesFile,
   resolveRepoIdentity,
   groupByArea,
-  widenedOverlapDocs,
   type AreaTag,
   type DocAreaTags,
   type DocCandidate,
@@ -64,6 +63,7 @@ import {
   OVERLAP_SESSION_KIND,
   OVERLAP_SESSION_SYSTEM_PROMPT,
   OverlapOutcomeSchema,
+  deriveOverlapWorkItems,
   overlapBriefing,
   overlapSessionCacheKey,
   type OverlapWorkItem,
@@ -438,11 +438,12 @@ export async function estimateScanTokens(
     settleMax = 1;
   }
 
-  // ---- overlap: group from cached tags, probe per-area keys -----------------
+  // ---- overlap: group from cached tags, probe per-cluster keys --------------
   // Exactly the run's derivation whenever everything upstream is cached (the
-  // settlement applied, the same grouper, the same widened net, the same key
-  // builder); with upstream misses the probed part still holds and the changed
-  // docs' share is added as a range.
+  // settlement applied, the same grouper, the same collision pairing and
+  // clustering via deriveOverlapWorkItems, the same key builder); with
+  // upstream misses the probed part still holds and the changed docs' share is
+  // added as a range.
   const applied = settlement ? applySettlement(settlement, vocab) : null;
   const vocabMap = applied?.vocab ?? { products: {}, concerns: {} };
   if (applied) {
@@ -460,14 +461,7 @@ export async function estimateScanTokens(
     keptDocs.map((d) => [d.path, { tags: canonicalByPath.get(d.path) ?? [] }]),
   );
   const grouped = groupByArea(keptDocs, groupTags, decisions.manualAreas ?? [], vocabMap);
-  const byPath = new Map(keptDocs.map((d) => [d.path, d]));
-  const overlapItems: OverlapWorkItem[] = [];
-  for (const area of grouped.areas) {
-    const areaDocs = area.docRefs.map((ref) => byPath.get(ref)).filter((d): d is DocCandidate => d !== undefined);
-    const widened = widenedOverlapDocs(area, keptDocs, vocabMap);
-    if (areaDocs.length + widened.length < 2 || areaDocs.length === 0) continue;
-    overlapItems.push({ areaId: area.id, concern: area.concern, docs: areaDocs, widened });
-  }
+  const overlapItems: OverlapWorkItem[] = deriveOverlapWorkItems(grouped.areas, keptDocs, vocabMap);
   const overlapMissItems: OverlapWorkItem[] = [];
   for (const item of overlapItems) {
     const cached = await probeSessionCache(
@@ -482,17 +476,17 @@ export async function estimateScanTokens(
   // the settlement either cached or not needed. A pending settlement can
   // reshape the areas, so its presence downgrades the overlap count to a range.
   const overlapExact = missCount === 0 && (settlement !== null || !gate);
-  // Areas the CHANGED docs will land in — unknowable before their sessions run;
-  // sized by the mean-area heuristic and carried as a range.
-  const changedAreas = missCount > 0 ? Math.ceil(Math.round(missCount * KEEP_RATE) / AVG_AREA_SIZE) : 0;
-  const overlapExpectedItems = overlapMissItems.length + changedAreas;
+  // Comparison clusters the CHANGED docs will land in — unknowable before
+  // their sessions run; sized by the mean-area heuristic and carried as a range.
+  const changedClusters = missCount > 0 ? Math.ceil(Math.round(missCount * KEEP_RATE) / AVG_AREA_SIZE) : 0;
+  const overlapExpectedItems = overlapMissItems.length + changedClusters;
   // A fully settled upstream with zero misses is a KNOWN no-op — the ceiling
   // drops to zero so the stage vanishes and a warmed cache yields an EMPTY
   // estimate (confirm skipped). An unsettled upstream keeps the honest
-  // ceiling: a fresh settlement can re-key every area.
+  // ceiling: a fresh settlement can re-key every cluster.
   const overlapIdle = overlapExpectedItems === 0 && overlapExact;
-  const overlapMaxItems = overlapIdle ? 0 : overlapItems.length + changedAreas;
-  const areasTotal = overlapItems.length + changedAreas;
+  const overlapMaxItems = overlapIdle ? 0 : overlapItems.length + changedClusters;
+  const clustersTotal = overlapItems.length + changedClusters;
 
   // ---- roll-up ---------------------------------------------------------------
   const stages: StageCallEstimate[] = [
@@ -538,8 +532,8 @@ export async function estimateScanTokens(
         mean(overlapMissItems.map((i) => overlapBriefing(i, instructions).length)) ||
         (overlapExpectedItems > 0 ? OVERLAP_BRIEFING_FALLBACK_CHARS : 0),
       bound: overlapExact
-        ? `${overlapMissItems.length} of ${Math.max(areasTotal, overlapMissItems.length)} area${areasTotal === 1 ? '' : 's'} changed`
-        : `~${overlapExpectedItems} of ~${areasTotal} area${areasTotal === 1 ? '' : 's'} changed (changed docs may reshape areas)`,
+        ? `${overlapMissItems.length} of ${Math.max(clustersTotal, overlapMissItems.length)} comparison${clustersTotal === 1 ? '' : 's'} changed`
+        : `~${overlapExpectedItems} of ~${clustersTotal} comparison${clustersTotal === 1 ? '' : 's'} changed (changed docs may reshape clusters)`,
     }),
   ];
 

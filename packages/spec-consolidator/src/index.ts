@@ -34,6 +34,8 @@ export {
   OverlapSchema,
   OverlapSectionSchema,
   OverlapReviewSchema,
+  CandidateSectionRefSchema,
+  CandidatePairSchema,
   AreaSchema,
   CuratedCorpusSchema,
   normalizeArea,
@@ -52,10 +54,21 @@ export type {
   Overlap,
   OverlapSection,
   OverlapReview,
+  CandidateSectionRef,
+  CandidatePair,
   Area,
   CuratedCorpus,
   VocabMap,
 } from './corpus-types.js';
+
+export {
+  deriveCollisionPairs,
+  assignPairArea,
+  clusterPairs,
+  pairsFingerprint,
+  extractClaimTokens,
+} from './collision-pairing.js';
+export type { CollisionPair, CollisionSectionRef } from './collision-pairing.js';
 
 export {
   corpusFilePath,
@@ -79,8 +92,6 @@ export { VOCAB_NORMALIZER_SYSTEM_PROMPT } from './vocab-normalizer.js';
 export {
   OVERLAP_DETECTOR_SYSTEM_PROMPT,
   OVERLAP_WINDOW_CHARS,
-  widenedOverlapDocs,
-  hasConcernHeading,
 } from './overlap-detector.js';
 
 export { verifyOverlapSections, splitDocSections, locateQuote } from './pointer-verifier.js';
