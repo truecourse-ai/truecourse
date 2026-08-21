@@ -1,8 +1,8 @@
 /**
  * Vercel serverless function: GET /api/blog-views?path=/blog/<slug>
  *
- * Returns the number of unique viewers PostHog has recorded for a blog post
- * (distinct `distinct_id`s with a `$pageview` there), as `{ views: number }`. Responses carry an edge-cache header (60s +
+ * Returns the total `$pageview` count PostHog has recorded for a blog post,
+ * as `{ views: number }`. Responses carry an edge-cache header (60s +
  * stale-while-revalidate) so PostHog's query API is hit at most ~once a
  * minute per post regardless of traffic.
  *
@@ -61,7 +61,7 @@ export default async function handler(req: any, res: any): Promise<void> {
             // {path} is a HogQL placeholder bound via `values` — the path is
             // never spliced into the query string.
             query:
-              "SELECT count(DISTINCT distinct_id) FROM events WHERE event = '$pageview' " +
+              "SELECT count() FROM events WHERE event = '$pageview' " +
               "AND (properties.$pathname = {path} OR properties.$pathname = concat({path}, '/'))",
             values: { path },
           },
