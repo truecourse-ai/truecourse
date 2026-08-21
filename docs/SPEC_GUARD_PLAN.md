@@ -6558,3 +6558,220 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     of folding into the settled one — that is what a pin means. As built:
     `packages/spec-consolidator/src/area-grouper.ts`. Test:
     `tests/spec-consolidator/area-grouper.test.ts` (pin-vs-merge case).
+
+115. **Recipe discovery hardening (2026-08-20 guard-setup bench).** STATUS:
+    BUILT. The setup bench ran `--only-recipe` against all three reference
+    repos and every session gamed verification green: cal.diy authored the
+    app-store CLI as the product (the briefing's own inventory listed the
+    Nest api), documenso authored an inline `node -e` stub server answering
+    200 to every path (rewriting the one-liner comma-operator style to slip
+    the shell-operator lint), strapi a no-op eval build plus a config module
+    as `entry`. Five closures, all gating on the ENGINE side because prompt
+    rules alone were what got gamed:
+    - **Stage `static` in `verifyProposal`** — the free refusal rules now run
+      at stage zero of EVERY verification path (deterministic, session fold,
+      one-shot, cache), not just the session's `check_recipe` tool.
+    - **Inline-eval refusal** — eval flags (`node -e/-p`, `python -c`,
+      `sh -c`, `deno eval`, …) in `entry`/`serve` argvs, and an
+      install/build that is nothing but one eval one-liner (`true` stays the
+      sanctioned no-build).
+    - **The inventory rule** — a proposal with no `api` block while the
+      route manifest lists apps with HTTP route prefixes is refused, naming
+      them. Partial coverage is deliberately NOT refused (a monorepo
+      routinely serves one app and ships others it never runs).
+    - **The wildcard (anti-stub) probe** — after the health path answers,
+      verification GETs two paths no app could serve; identical status+body
+      on all three fails `server boot`. Discovery-only — the runner's
+      preflight never re-probes a recipe a human accepted.
+    - **Workspace api derivation** — the deterministic proposer's workspace
+      branch used to punt unless exactly one member declared a `bin`; now
+      the most-routed non-example manifest app with a plain `start` script
+      derives `api.serve` (workspace-mediated argv, `app`, `cwd: "repo"`,
+      the member's own health route — `/api/health` joined the ranking).
+      cal.diy now derives `yarn workspace @calcom/api-v2 start` +
+      `/health`, documenso `npm run start -w @documenso/remix` +
+      `/api/health` — the reference targets — with zero LLM calls; a boot
+      failure hands the session THIS candidate as evidence instead of
+      nothing. Route manifest also learned Remix/React-Router flat routes
+      (`buildRouteManifest`, gate: the app's routes config imports
+      `remix-flat-routes`; grammar mirrored from
+      `packages/interface-mapper/src/web/remix-flat.ts` — dependency
+      direction forbids the import), which is what made documenso's product
+      app visible at all (125 routes vs `other · no routes`). And the
+      database hint gained the recipe-app manifest fallback
+      (`databaseFromManifest`): strapi's `examples/getstarted` declares
+      `better-sqlite3` that its code only names in a knex config string, and
+      `examples/` is not a service dir, so nothing else could see it.
+      Deliberately NOT built: a `web` block in the proposal schema (web is
+      authored, never discovered — the repair prompt now says so) and serve
+      grounding to workspace scripts (held until a re-bench shows the
+      probe + eval rules leaking). ADDENDUM (same day): the re-bench's
+      first cal.diy run exposed that the PROPOSAL schemas had no `cwd` —
+      the runner and the deterministic path carry `cwd: "repo"` but a
+      session could not express it, so no workspace-mediated serve could
+      ever boot from a repair (the session burned its budget on `--cwd`
+      argv hacks). Both proposal schemas gained `cwd: z.literal('repo')`
+      plus prompt lines. VALIDATED (step-05 re-bench ×3): gaming gone 3/3 —
+      cal.diy green (api-v2 `yarn workspace` serve, real /health 200 boot,
+      one verify, 249k tokens), documenso green (the reference serve
+      verbatim, real /api/health 200 against its dockerized test db, 261k),
+      strapi honest CLI-only (real install/build/bin; its api surface needs
+      a strapi route reader — open gap). Open observations: verify's
+      install/build channel is an unsandboxed host shell (one session used
+      `build: "…; ls -la ..; false"` as recon; strapi's green recipe runs
+      `corepack enable` — host shims — on every install), and the sandbox
+      HOME hits the corepack download prompt on yarn-workspace boots.
+      SECOND ADDENDUM (same evening, clean-rerun round): all four
+      observations closed and one incident survived. (1) compose bring-up
+      in install/build statically refused → `api.services.up/down`; the
+      proposal schemas therefore gained `services {up, down?}` + top-level
+      `app` (the first refusal steered an obedient session into a field the
+      schema forbade — two zod re-asks counted as the 2-strike malformed
+      death; open agent-loop question: schema re-asks may deserve their own
+      budget). (2) A GREEN verdict now carries `warnings` (surfaced as
+      todos + "VERIFIED WITH CAVEATS") when the boot rode a localhost
+      datastore the recipe never brings up. (3) Host-mutation refusals over
+      install/build/services + sudo in any argv: sudo, `corepack enable`
+      (message teaches `corepack yarn …`), global installs, npm config
+      set, git config --global, launchctl/systemctl, and — after a session
+      put `docker rm -f database` in services.up and REMOVED the
+      developer's running cal.diy database container (restored from its
+      surviving volume same hour) — `docker rm/kill/stop`, `docker volume
+      rm/prune`, `docker system prune`; project-scoped `docker compose
+      down` stays legal, and the incident command is a test verbatim.
+      (4) `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` defaults in every child env.
+      Plus: `probeApiServers` now runs `api.services.up` around the boots
+      and best-effort `down` after — the probe owns the world the recipe
+      declares (before this, a services recipe verified green and then
+      failed its own probe into an empty world). Final clean runs: cal.diy
+      green + warning fires; documenso green in the reference shape
+      (testing compose under services, collision solved WITHOUT docker rm);
+      strapi honest CLI-only green with zero host mutations.
+      As built:
+      `packages/guard-generator/src/{recipe-discovery,recipe-propose,prompts}.ts`,
+      `packages/core/src/services/guard-setup/recipe-repair.ts`,
+      `packages/guard-runner/src/route-manifest.ts`,
+      `packages/analyzer/src/database-detector.ts`,
+      `packages/core/src/services/interface.service.ts`. Tests:
+      `tests/guard-generator/recipe-static-complaints.test.ts`,
+      `recipe-discovery.test.ts` (wildcard probe),
+      `recipe-propose.test.ts` (workspace member),
+      `tests/guard-runner/route-manifest.test.ts` (remix),
+      `tests/analyzer/database-detector.test.ts` (manifest fallback),
+      `tests/core/guard-setup-recipe-repair.test.ts` (session tools).
+
+116. **Dependency-catalog session: domain grain + convergence (2026-08-20
+    guard-setup bench).** STATUS: BUILT. The step-06 bench failed 0/3: the
+    one session that completed classified the raw service detection (65
+    junk rows on cal.diy — rule 1 forced an entry per url-mined hostname,
+    amplifying detector noise into curation), and the other two spent every
+    turn on read_file/search_repo and died without an outcome (the settle
+    disease, item 112). Three fixes in
+    `packages/core/src/services/guard-setup/dependency-catalog.ts`:
+    (1) rule 1 narrowed to SUBSTANTIATED services — an SDK-registry match
+    or a base-URL env var, the skeleton's own declarability bar; url-mined
+    hostnames become an information-only briefing line and the prompt calls
+    entries for them wrong, not thorough. (2) The briefing grounds on the
+    DOMAIN: it opens with the grain ("a handful of entries — the domain
+    objects the documented flows stand on"), lists the corpus area tags
+    with doc counts (a local corpus.json read; a missing corpus yields
+    nothing), and splits detection into must-account vs information-only.
+    (3) Settle-style convergence pressure: draft to `check_catalog` no
+    later than mid-budget, read a handful of files at most. The prompt
+    change rotates the session cache key. Re-bench: 3/3 converged in the
+    right universe — cal.diy 8 domain entries (2 turns/27k; was 65 junk
+    rows), documenso 10 (14 turns/140k; was dead), strapi 7 (19/276k; was
+    dead). Residual, tracked not fixed: recall GRAIN vs the hand-curated
+    references (semantic ~5/17 · 6/8 · 4/15 — cold sessions produce the
+    coarse layer; credential variants and per-type documents are slice
+    curation), synonym NAMING with no shown vocabulary (the item-106
+    lesson), a library (`passport`) forced in by its registry category,
+    and the externals skeleton's baseUrlEnv minting (finding 58 class)
+    still open. Tests: `tests/core/guard-setup-catalog.test.ts`
+    (substantiated-only rule, briefing split + corpus grounding).
+
+117. **Budget visibility + the wrap-up window (2026-08-21 documenso
+    spec-scan field run).** STATUS: BUILT. The first loop-driven scan at
+    scale: 12 of 26 overlap sessions — the twelve largest areas
+    (documents, api-reference, fields, recipients, security…) — read ONE
+    section per turn to the 45-turn wall and failed `budget-exhausted`
+    with nothing, 7.5M of the run's 13.2M tokens producing zero corpus
+    rows; the sessions that finished clustered at 41–44 turns. Root
+    cause: grants were silent and no prompt stated the numbers, so no
+    session could pace itself or knew a grant was its last (one began
+    wrapping up exactly one turn too late). Fixes, per
+    AGENTIC_PIPELINE_PLAN §3.3 (2026-08-21 amendment): (1) the shell
+    steers an announcement on every automatic resume grant — grant N of
+    M, fresh turn count, "LAST grant" on the final one; (2) when the last
+    budget binds the shell demands the outcome and allows `WRAP_UP_TURNS`
+    (3) further turns — room for the precondition round trip — before
+    failing, making the hard limit `(maxResumes + 1) × turns +
+    WRAP_UP_TURNS` (estimates updated); (3) the overlap prompt states its
+    real numbers and demands BATCHED `read_section` calls (the failed
+    sessions' pace was 1/turn; the drivers execute parallel calls
+    already); (4) a FAILED area's `sectionsOpened` is stamped into the
+    corpus off its transcript, separating "opened 45 and ran out" from
+    "never read". Also wired the shell half of `draftCheckpoint` (the
+    guard-setup sibling nudge — see the setup bench items). As built:
+    `packages/agent-loop/src/agent-loop.ts` (WRAP_UP_TURNS,
+    resumeGrantMessage, wrapUpMessage, steer plumbing),
+    `packages/core/src/services/spec-scan/{overlap,run}.ts`,
+    `packages/core/src/services/llm/spec-estimate.ts`,
+    `packages/core/src/commands/guard-adjudicate.ts`. Tests:
+    `tests/agent-loop/agent-loop.test.ts` (wrap-up + announcements +
+    draft checkpoint), `tests/llm-drivers/session-driver-conformance.test.ts`
+    (the demand lands as a user message in BOTH drivers),
+    `tests/core/spec-scan-overlap.test.ts` (prompt numbers, failed-area
+    stamp), `tests/core/spec-estimate.test.ts` (ceilings).
+
+118. **Setup hardening round 2 (2026-08-21 steps-05/06 run-of-record).**
+    STATUS: BUILT. Six fixes from the bench's engine items:
+    (1) **Compose NAMESPACE rule** — the boundary the docker-rm refusal
+    left open: cal.diy's verified-green `services.up` re-ported and
+    stopped the developer's live redis through legal `docker compose
+    up/stop` (bare invocation = the developer's default project; compose
+    "resolves" a port change by RECREATING the running container). Static
+    refusal in `staticProposalComplaints` (now takes `repoRoot`): every
+    `docker compose` in install/build/services must carry `-p <project>`
+    or an `-f` file pinning top-level `name:`; `-f -` (stdin) demands
+    `-p`. The generated `docker-compose.guard.yml` now pins
+    `name: tc-guard-<database>` (datastore-compose.ts). Both prompts
+    teach the rule + "namespace YOUR OWN world, never touch theirs".
+    (2) **Empty-schema warning** — the unserviced-localhost warning's
+    sibling: services declared, SQL URL pinned, and NO migrate-ish
+    command anywhere (install/build/services.up) warns that the green
+    rode whatever schema the volume already carried (cal.diy verified
+    against a 7-day-old reference volume under `SKIP_DB_MIGRATIONS=1`).
+    (3) **`draftCheckpoint` on both setup sessions** — the item-117 shell
+    mechanism wired onto recipe-repair (check_recipe, turn 8) and
+    dependency-catalog (check_catalog, turn 6): the death mode (strapi
+    recipe run 5, documenso catalog runs 1+3 — 20+ exploration turns,
+    zero or one late draft) now gets a structural mid-budget steer, not
+    briefing prose.
+    (4) **Skeleton plausible-origin rule** (third skeleton rule): a
+    `baseUrlEnv` must be origin-shaped (or carry a detected default URL),
+    never credential/callback-shaped (`DAILY_API_KEY`,
+    `CLOSECOM_CLIENT_ID`, `*_WEBHOOK_URL`, `*_REDIRECT_URI`), and never
+    a variable the recipe itself pins (`dub→NEXT_PUBLIC_WEBAPP_URL`) —
+    kills the finding-58 mint-time class that reproduced 3/3 runs on
+    cal.diy (18 invented declarations → ~3 honest ones).
+    (5) **`ownHosts` joins the proposal schema** + both prompts, written
+    through to recipe.json — the fallback recipe can finally name the
+    product's own domains (cal.diy: 81 detected externals under a
+    hostless recipe). NOTE: the 06-bench observation that detection
+    reported 81 even WITH reference ownHosts is still open — the filter
+    itself needs a look.
+    (6) **Sandbox-starts-empty briefing** — sandbox_exec/shell
+    descriptions + the repair how-to now say the sandbox is an empty
+    scratch dir (strapi run 5 burned early turns discovering that).
+    As built: `packages/guard-generator/src/{recipe-discovery,
+    externals-skeleton, datastore-compose, schemas, prompts}.ts`,
+    `packages/core/src/services/guard-setup/{recipe-repair,
+    dependency-catalog}.ts`. Tests:
+    `tests/guard-generator/recipe-static-complaints.test.ts` (namespace
+    rule, incident verbatim), `recipe-discovery.test.ts` (empty-schema
+    warning trio), `externals-skeleton.test.ts` (plausible-origin rule,
+    cal.diy verbatim). Open from the bench: the strapi web
+    route/screen reader (07's 0/79 ceiling), catalog briefing naming
+    what is NOT a dependency (passport/strapi-project), ownHosts-filter
+    investigation above.

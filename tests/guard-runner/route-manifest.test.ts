@@ -139,6 +139,46 @@ describe('buildRouteManifest — NestJS', () => {
   })
 })
 
+describe('buildRouteManifest — Remix / React Router flat routes', () => {
+  const REMIX_PKG = JSON.stringify({
+    name: 'fixture-remix',
+    dependencies: { 'react-router': '7.0.0', 'remix-flat-routes': '0.6.0' },
+  })
+  const FLAT_CONFIG = "import { flatRoutes } from 'remix-flat-routes'\nexport default flatRoutes()\n"
+
+  it('reads the flat-routes grammar: dots, $params, + directories, pathless and splat tokens', () => {
+    const r = repoWith({
+      'services/rr/package.json': REMIX_PKG,
+      'services/rr/app/routes.ts': FLAT_CONFIG,
+      'services/rr/app/routes/_index.tsx': 'export default () => null',
+      'services/rr/app/routes/api.health.ts': 'export const loader = () => new Response("ok")',
+      'services/rr/app/routes/documents.$id.edit.tsx': 'export default () => null',
+      'services/rr/app/routes/_authenticated+/t.$teamUrl+/settings.tsx': 'export default () => null',
+      'services/rr/app/routes/$.tsx': 'export default () => null', // splat — not a route
+      'services/rr/app/routes/components/button.tsx': 'export default () => null', // colocation
+    })
+    const rr = app(buildRouteManifest(r), 'services/rr')
+    expect(rr.framework).toBe('remix')
+    expect(rr.opaque).toBe(false)
+    expect(rr.routes).toEqual(['/', '/api/health', '/documents/{id}/edit', '/t/{teamUrl}/settings'])
+    expect(rr.prefixes).toContain('/api')
+  })
+
+  // The documenso failure mode: before this reader existed the product app showed
+  // `other · (no routes detected)` and the recipe briefing pointed at the docs site.
+  it('marks a Remix app WITHOUT a readable flat-routes config as opaque, never "serves nothing"', () => {
+    const r = repoWith({
+      'services/rr/package.json': REMIX_PKG,
+      'services/rr/app/routes.ts': "export default [{ path: '/', file: 'home.tsx' }]\n", // config-table routing
+      'services/rr/app/routes/anything.tsx': 'export default () => null',
+    })
+    const rr = app(buildRouteManifest(r), 'services/rr')
+    expect(rr.framework).toBe('remix')
+    expect(rr.routes).toEqual([])
+    expect(rr.opaque).toBe(true)
+  })
+})
+
 describe('buildRouteManifest — extraRoutes', () => {
   it('attributes analyzer-supplied routes to the app whose dir contains the file', () => {
     const manifest = buildRouteManifest(MONOREPO, {

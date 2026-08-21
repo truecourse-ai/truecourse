@@ -312,6 +312,7 @@ export {
   type SeedBlockedClaim,
   type SeedRetryContext,
   type SeedSchemaTable,
+  type RecipeAppInventoryEntry,
 } from './prompts.js'
 
 // Example mining (D3) — the doc's own examples run verbatim.

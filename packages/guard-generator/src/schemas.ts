@@ -42,10 +42,11 @@ export const CLAIM_DRIVERS = guardDriverIds
 /**
  * The api half of a recipe proposal — how to START the HTTP server under test.
  * A deliberate SUBSET of the runner's `RecipeApiSchema`: the model proposes only
- * what it can read off the repo (the serve argv and a health path). Credentials,
- * seed, and services are never model-proposed — they carry secrets and repo
- * orchestration, and the deterministic proposer writes them into `recipe.json`
- * directly.
+ * what it can read off the repo — the serve argv, a health path, and the
+ * datastore bring-up the repo itself ships (`services`: the compose-in-build
+ * refusal points here, so the field must be proposable — documenso 2026-08-20,
+ * where the schema gap killed an obedient session as "malformed"). Credentials
+ * and seed are never model-proposed — they carry secrets.
  */
 export const RecipeApiServerProposalSchema = z
   .object({
@@ -57,6 +58,14 @@ export const RecipeApiServerProposalSchema = z
     env: z.record(z.string(), z.string()).optional(),
     /** Repo-relative dir of the workspace package this service serves (`apps/api/v2`). */
     app: z.string().min(1).optional(),
+    /**
+     * Boot in the repo root instead of the throwaway sandbox — REQUIRED for any
+     * workspace-mediated serve (`yarn workspace …`, `npm run -w …`), which dies
+     * outside the workspace root. Mirrors the runner's `cwd`; without it the
+     * 2026-08-20 cal.diy session could not express a bootable serve at all and
+     * burned its budget on `--cwd` argv hacks.
+     */
+    cwd: z.literal('repo').optional(),
   })
   .strict()
 export type RecipeApiServerProposal = z.infer<typeof RecipeApiServerProposalSchema>
@@ -69,6 +78,19 @@ export const RecipeApiProposalSchema = z
     healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
     /** Extra env for the server process; values may carry `${PORT}`. */
     env: z.record(z.string(), z.string()).optional(),
+    /** Boot in the repo root — required for a workspace-mediated serve. */
+    cwd: z.literal('repo').optional(),
+    /** Repo-relative dir of the workspace package the single serve drives. */
+    app: z.string().min(1).optional(),
+    /**
+     * The datastore bring-up the repo ships (`docker compose … up`) and its
+     * teardown — world SETUP, owned by the runner's lifecycle, which is exactly
+     * why it may not hide inside `build`. Shared across every declared server.
+     */
+    services: z
+      .object({ up: z.string().min(1), down: z.string().min(1).optional() })
+      .strict()
+      .optional(),
     /**
      * The multi-service shape: one named entry per HTTP service the
      * workspace ships. A monorepo with a web app AND an api service must declare
@@ -127,6 +149,17 @@ export const RecipeProposalSchema = z
       .optional(),
     env: z.record(z.string(), z.string()).optional(),
     api: RecipeApiProposalSchema.optional(),
+    /**
+     * The product's OWN hostnames (`cal.com`, `api.cal.com`) — what keeps
+     * detection from minting the app itself as a third-party external service.
+     * Never a proposal-schema afterthought: without it every recipe the
+     * fallback lands leaves detection reporting the app's own domains as
+     * externals (cal.diy 2026-08-21: 81 detected services under a recipe with
+     * no ownHosts). Hostnames only, no scheme, no path.
+     */
+    ownHosts: z
+      .array(z.string().min(1).regex(/^[\w.-]+$/, 'a bare hostname — no scheme, no path'))
+      .optional(),
   })
   .strict()
   .refine((r) => r.entry !== undefined || r.api !== undefined, {

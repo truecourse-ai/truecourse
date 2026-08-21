@@ -41,7 +41,7 @@ export interface RouteManifestApp {
   dir: string
   /** package.json name, when there is one (`@calcom/api-v2`). */
   pkg?: string
-  framework: 'next' | 'nest' | 'other'
+  framework: 'next' | 'nest' | 'remix' | 'other'
   /** Canonical path templates (`/v2/bookings/{id}`), sorted, deduped. */
   routes: string[]
   /** Static 1- and 2-segment prefixes covering the routes (`/v2`, `/api/v2`). Reporting only. */
@@ -298,8 +298,17 @@ function readApp(repoRoot: string, dir: string): RouteManifestApp | null {
   if (!pkg) return null
   const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }
   const nextConfig = findFile(abs, (f) => f.startsWith('next.config.'))
+  const remixDeps = Object.keys(deps).some(
+    (d) => d.startsWith('@remix-run/') || d === 'react-router' || d.startsWith('@react-router/'),
+  )
   const framework: RouteManifestApp['framework'] =
-    'next' in deps || nextConfig !== null ? 'next' : '@nestjs/core' in deps ? 'nest' : 'other'
+    'next' in deps || nextConfig !== null
+      ? 'next'
+      : '@nestjs/core' in deps
+        ? 'nest'
+        : remixDeps
+          ? 'remix'
+          : 'other'
 
   const app: RouteManifestApp = {
     dir,
@@ -332,6 +341,15 @@ function readApp(repoRoot: string, dir: string): RouteManifestApp | null {
     // read (a generated surface, an unusual layout) — never "it serves nothing".
     if (controllers.length === 0) app.opaque = true
     app.routes.push(...nestRoutes(abs, controllers, budget))
+  } else if (framework === 'remix') {
+    // Only the flat-routes convention is readable from filenames alone; a
+    // config-file route table is opaque — never "it serves nothing". Before this
+    // branch existed, a Remix product app read as `other · (no routes detected)`
+    // and the recipe briefing pointed the model at the DOCS site instead
+    // (documenso, 2026-08-20 bench).
+    const routes = remixRoutes(abs, budget)
+    if (routes === null) app.opaque = true
+    else app.routes.push(...routes)
   }
   if (budget.files > MAX_FILES_PER_APP) app.opaque = true
   return app
@@ -385,6 +403,95 @@ function nextSegment(segment: string): string {
   const dynamic = /^\[(.+)\]$/.exec(segment)
   if (dynamic) return `{${dynamic[1]}}`
   return segment
+}
+
+// --- Remix / React Router (flat routes) ---------------------------------------
+//
+// The whole address lives in the file's NAME under `app/routes/`, `.`-separated
+// (`t.$teamUrl+/documents.$id.edit.tsx` → /t/{teamUrl}/documents/{id}/edit). The
+// grammar here mirrors `packages/interface-mapper/src/web/remix-flat.ts` (the
+// web-place reader), which documents it token by token — duplicated because
+// interface-mapper depends on THIS package, so the import cannot go the other
+// way. THE GATE is the same as there: `routes/` is far too common a directory
+// name to read on sight, so the tree only counts when the app's own routes
+// config imports `remix-flat-routes`. Ungated or config-table routing returns
+// null — opaque, never "serves nothing".
+
+const REMIX_ROUTES_CONFIG = /^routes\.(?:tsx|jsx|ts|js|mjs)$/
+const REMIX_ROUTE_FILE = /\.(?:tsx|jsx|ts|js|mjs)$/
+
+/** Route templates of a flat-routes app, or null when the tree is unreadable. */
+function remixRoutes(appAbs: string, budget: { files: number }): string[] | null {
+  for (const base of ['app', 'src/app']) {
+    const appDir = path.join(appAbs, base)
+    const config = isDir(appDir)
+      ? fs.readdirSync(appDir).find((f) => REMIX_ROUTES_CONFIG.test(f))
+      : undefined
+    if (!config) continue
+    budget.files += 1
+    if (!readText(path.join(appDir, config)).includes('remix-flat-routes')) continue
+    const routesDir = path.join(appDir, 'routes')
+    if (!isDir(routesDir)) continue
+    const routes: string[] = []
+    for (const rel of walkFiles(routesDir, budget)) {
+      const segments = remixRouteSegments(rel.split('/'))
+      if (segments === null) continue
+      const template = canonicalizePath(`/${segments.join('/')}`)
+      if (template) routes.push(template)
+    }
+    return routes
+  }
+  return null
+}
+
+/** The address segments of one route module, or null when the file is not a
+ *  route: a layout, a splat, or a file colocated in a non-`+` directory. */
+function remixRouteSegments(relative: string[]): string[] | null {
+  const fileName = relative[relative.length - 1]
+  if (!fileName || !REMIX_ROUTE_FILE.test(fileName)) return null
+
+  const tokens: string[] = []
+  for (const directory of relative.slice(0, -1)) {
+    if (!directory.endsWith('+')) return null // colocation, not routing
+    tokens.push(...remixSplit(directory.slice(0, -1)))
+  }
+  tokens.push(...remixSplit(fileName.replace(REMIX_ROUTE_FILE, '')))
+
+  const segments: string[] = []
+  for (const [index, token] of tokens.entries()) {
+    const last = index === tokens.length - 1
+    if (token === 'layout' || token === '_layout') return null // the layout module itself
+    if (token === '$') return null // a splat catches what no place matched
+    if (last && (token === 'route' || token === 'index' || token === 'page')) continue
+    if (token.startsWith('_')) continue // pathless: a layout wrap, or the index route
+    const escaped = /^\[(.*)\]$/.exec(token)
+    if (escaped) {
+      segments.push(escaped[1]!)
+      continue
+    }
+    const trimmed = token.endsWith('_') ? token.slice(0, -1) : token
+    segments.push(trimmed.startsWith('$') ? `{${trimmed.slice(1)}}` : trimmed)
+  }
+  return segments
+}
+
+/** Split one name on the separator dots, leaving the `[…]`-escaped ones alone. */
+function remixSplit(name: string): string[] {
+  const tokens: string[] = []
+  let current = ''
+  let escaped = false
+  for (const char of name) {
+    if (char === '[') escaped = true
+    else if (char === ']') escaped = false
+    if (char === '.' && !escaped) {
+      if (current) tokens.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  if (current) tokens.push(current)
+  return tokens
 }
 
 // --- NestJS -----------------------------------------------------------------

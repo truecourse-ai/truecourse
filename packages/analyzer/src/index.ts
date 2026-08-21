@@ -88,7 +88,7 @@ export { createPyrightConfig } from './lsp-servers/pyright.js'
 export { getLspServerConfig, hasLspServer } from './lsp-servers/registry.js'
 
 // Database detection
-export { detectDatabases, parseDockerCompose } from './database-detector.js'
+export { detectDatabases, databaseFromManifest, parseDockerCompose } from './database-detector.js'
 export { parsePrismaSchema } from './schema-parsers/prisma.js'
 export { parseDrizzleSchema } from './schema-parsers/drizzle.js'
 export { parseSqlAlchemySchema } from './schema-parsers/sqlalchemy.js'

@@ -28,6 +28,7 @@ import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths.js';
 import { readGuardExternalsView } from '../../packages/core/src/commands/guard-externals.js';
 import {
   buildCatalogSession,
+  dependencyCatalogBriefing,
   dependencyCatalogSessionDef,
   DEPENDENCY_CATALOG_BUDGET,
   DEPENDENCY_CATALOG_CACHE_NAME,
@@ -180,6 +181,22 @@ describe('validateCatalogDraft', () => {
     expect(byCatalog).toEqual([]);
   });
 
+  // The 2026-08-20 cal.diy failure: 81 url-mined hostnames (www, gstatic,
+  // npmjs…) each forced an entry, drowning the domain catalog in 65 junk rows.
+  // Only SUBSTANTIATED services (SDK match or base-URL var) force accounting.
+  it('never forces an entry for a url-mined service with no SDK match and no base-URL var', () => {
+    const junk = { service: 'gstatic', evidence: [], source: 'http' as const };
+    const complaints = validateCatalogDraft(
+      draft([{ name: 'app-database', class: 'seedable', evidence: 'schema.prisma' }]),
+      input('/tmp/x', { detected: [junk, STRIPE] }),
+      empty,
+    );
+
+    // stripe (substantiated) still complains; gstatic never does.
+    expect(complaints).toHaveLength(1);
+    expect(complaints[0]).toContain('"stripe"');
+  });
+
   it('refuses a non-kebab name, a duplicate, and an unparseable condition', () => {
     const complaints = validateCatalogDraft(
       draft([
@@ -200,6 +217,39 @@ describe('validateCatalogDraft', () => {
 // ---------------------------------------------------------------------------
 // The fold — the only writes of this step's session half
 // ---------------------------------------------------------------------------
+
+describe('dependencyCatalogBriefing', () => {
+  it('splits detection into MUST-account vs information-only, and grounds on the corpus areas', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-catalog-brief-'));
+    try {
+      fs.mkdirSync(path.join(r, '.truecourse', 'specs'), { recursive: true });
+      fs.writeFileSync(
+        path.join(r, '.truecourse', 'specs', 'corpus.json'),
+        JSON.stringify({
+          docs: [
+            { ref: 'docs/booking.md', areaTags: ['core/bookings'] },
+            { ref: 'docs/slots.md', areaTags: ['core/bookings'] },
+            { ref: 'docs/auth.md', areaTags: ['core/authentication'] },
+          ],
+        }),
+      );
+      const junk = { service: 'gstatic', evidence: [], source: 'http' as const };
+      const briefing = dependencyCatalogBriefing(
+        input(r, { detected: [STRIPE, junk] }),
+        { dependencies: [] },
+      );
+
+      expect(briefing).toContain('core/bookings (2 docs)');
+      expect(briefing).toMatch(/MUST be accounted for[\s\S]*stripe/);
+      expect(briefing).toMatch(/INFORMATION ONLY[\s\S]*gstatic/);
+      // The junk hostname never appears in the must-account section.
+      const mustSection = briefing.split('INFORMATION ONLY')[0];
+      expect(mustSection).not.toContain('gstatic');
+    } finally {
+      fs.rmSync(r, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('foldCatalogDraft', () => {
   it('writes a new entry, and the machine-side registration of a supplied service', () => {

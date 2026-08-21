@@ -34,6 +34,8 @@ import {
   resolveApiServers,
   preflightApiServer,
   buildRouteManifest,
+  runBuild,
+  DEFAULT_BUILD_TIMEOUT_MS,
   type Recipe,
   type ResolvedApiServer,
   type RouteManifest,
@@ -86,6 +88,27 @@ export async function probeApiServers(opts: ProbeApiServersOptions): Promise<Gua
   // "probing live routes 0/0" as the running step's phase line and leave it there.
   if (total > 0) opts.onServer?.(done, total)
 
+  // The world the recipe declares comes up FIRST, exactly as verification and the
+  // runner bring it up — a probe that boots a database-backed server into a world
+  // with no database reports "not reachable" about its own omission, not the
+  // recipe (documenso 2026-08-20: verify green, probe dead, run failed). Up once
+  // around every server (services are the shared world), best-effort down after.
+  const services = recipe.api.services
+  let servicesUp = false
+  if (services) {
+    const up = await runBuild(repoRoot, services.up, recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
+    if (!up.ok) {
+      const tail = up.output.trimEnd().split('\n').slice(-3).join(' / ')
+      return [...resolved.servers.values()].map((server) => ({
+        server: server.name,
+        path: server.healthPath,
+        ok: false,
+        error: `api.services \`${services.up}\` failed${up.timedOut ? ' (timed out)' : ''}: ${tail}`,
+      }))
+    }
+    servicesUp = true
+  }
+  try {
   for (const server of resolved.servers.values()) {
     const routes = appRoutes(manifest, appDirOfServer(index, server.name))
     const paths = probePaths(server.healthPath, routes)
@@ -101,6 +124,19 @@ export async function probeApiServers(opts: ProbeApiServersOptions): Promise<Gua
     opts.onServer?.(++done, total)
   }
   return probes
+  } finally {
+    // Teardown is best-effort and never a verdict — the same rule verification
+    // applies. A world that will not stop is a warning, not a failed probe.
+    if (servicesUp && services?.down) {
+      const down = await runBuild(repoRoot, services.down, recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
+      if (!down.ok) {
+        // eslint-disable-next-line no-console -- the probe's one advisory line.
+        console.warn(
+          `[guard setup] \`${services.down}\` failed after the endpoint probe — the services it brought up may still be running.`,
+        )
+      }
+    }
+  }
 }
 
 /** The route templates of the app a server serves; empty when the join is unknown. */

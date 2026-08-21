@@ -26,6 +26,8 @@
  */
 
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 import { defineSessionTool, type SessionDef, type SessionEvent, type SessionTool } from '@truecourse/agent-loop';
 import type {
@@ -185,13 +187,19 @@ export function validateCatalogDraft(
       if (!parsed.ok) complaints.push(`entry "${entry.name}": ${parsed.error}`);
     }
   }
-  // EVERY detected service accounted for: by a draft entry (its name, since an
-  // external-service entry is named for its service), by an existing catalog
-  // entry that names it, or by the recipe's own `api.externals` declaration
-  // (the skeleton just wrote those).
+  // Every SUBSTANTIATED detected service accounted for: by a draft entry (its
+  // name, since an external-service entry is named for its service), by an
+  // existing catalog entry that names it, or by the recipe's own
+  // `api.externals` declaration (the skeleton just wrote those). Substantiated
+  // = an SDK-registry match (`category`) or a base-URL env var — the skeleton's
+  // own declarability bar. URL-mined services with neither are dumb evidence (a
+  // hardcoded literal somewhere), and forcing an entry per hostname is how
+  // cal.diy's 81-service detection drowned the 2026-08-20 catalog in 65 junk
+  // rows: noise amplified into curation.
   const declaredByRecipe = new Set([...input.skeleton.declared, ...input.skeleton.alreadyDeclared]);
   const namedByCatalog = new Set(existing.dependencies.flatMap((d) => d.services ?? []));
   for (const service of input.detected) {
+    if (!substantiatedService(service)) continue;
     const name = service.service;
     if (seen.has(name) || declaredByRecipe.has(name) || namedByCatalog.has(name)) continue;
     complaints.push(
@@ -199,6 +207,12 @@ export function validateCatalogDraft(
     );
   }
   return complaints;
+}
+
+/** A detected service worth FORCING into the catalog: an SDK-registry match or
+ *  a base-URL env var. The rest stays visible in the briefing as information. */
+function substantiatedService(service: GuardSetupCatalogSessionInput['detected'][number]): boolean {
+  return service.category !== undefined || service.baseUrlEnv !== undefined || (service.baseUrlEnvs?.length ?? 0) > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +359,16 @@ export function dependencyCatalogSessionDef(
       message:
         'Outcome refused: you never ran `check_catalog` in this session. Call it on your complete draft now — it runs the exact validation the fold will run (names, conditions, every detected service accounted for), so a problem it finds costs one turn here instead of the whole draft at the outcome. Fix anything it reports, then call `outcome` again.',
     },
+    // The in-flight sibling (2026-08-21 bench: two of three documenso catalog
+    // runs spent all 24 turns on read_file/search_repo, drafted at most once,
+    // and died at the ceiling — briefing prose alone does not make a session
+    // draft in time).
+    draftCheckpoint: {
+      tool: 'check_catalog',
+      afterTurn: 6,
+      message:
+        '[checkpoint] You have spent more than half your first turn grant without drafting. Call `check_catalog` on your best current draft NOW — the briefing already carries the detection, the corpus areas and the grain guidance, and the checker\'s complaints steer better than more reading. Iterate from the draft; do not return to open-ended exploration.',
+    },
   };
 }
 
@@ -358,10 +382,19 @@ export function dependencyCatalogBriefing(
   const lines: string[] = [
     'Classify the DEPENDENCY CATALOG of this repository: the classes of starting state the program under test needs, each obtained one of exactly three ways (step-creatable / seedable / supplied).',
     '',
-    '## Detected external services',
+    'A catalog is a HANDFUL of entries — the DOMAIN OBJECTS the documented flows stand on (an account, the central resource, the thing scenarios create and mutate) plus the real-world inputs nothing may fabricate. It is NOT one row per hostname: only the substantiated services listed below need accounting for.',
   ];
-  if (input.detected.length === 0) lines.push('(none detected)');
-  for (const service of input.detected) {
+  const areas = corpusAreaSummary(input.repoRoot);
+  if (areas.length > 0) {
+    lines.push('', '## The documented areas (the spec corpus — what scenarios will exercise)');
+    lines.push(...areas.map((a) => `- ${a.area} (${a.docs} doc${a.docs === 1 ? '' : 's'})`));
+    lines.push('The starting state those flows need is the catalog. The database tables below name the same domain.');
+  }
+  const substantiated = input.detected.filter((s) => substantiatedService(s));
+  const informational = input.detected.filter((s) => !substantiatedService(s));
+  lines.push('', '## Detected external services that MUST be accounted for (SDK match or base-URL var)');
+  if (substantiated.length === 0) lines.push('(none)');
+  for (const service of substantiated) {
     const vars = (service.baseUrlEnvs ?? []).map((v) => v.envVar).join(', ') || service.baseUrlEnv || '(no base-URL var)';
     const evidence = service.evidence
       .slice(0, 3)
@@ -369,6 +402,13 @@ export function dependencyCatalogBriefing(
       .join(', ');
     lines.push(
       `- ${service.service}${service.category ? ` (${service.category})` : ''} · via ${service.source ?? 'sdk'} · base-URL vars: ${vars} · seen in: ${evidence}`,
+    );
+  }
+  if (informational.length > 0) {
+    lines.push(
+      '',
+      '## Hostnames also seen in the source (INFORMATION ONLY — do NOT write entries for these)',
+      informational.map((s) => s.service).join(', '),
     );
   }
   lines.push('', '## Database');
@@ -408,9 +448,29 @@ export function dependencyCatalogBriefing(
           .map((d) => `- ${d.name} · ${d.class}${d.services?.length ? ` · services: ${d.services.join(', ')}` : ''} · ${d.summary}`)
           .join('\n'),
     '',
-    'Entries already in the catalog are settled — the fold never edits them. Your entries ADD: classify what is missing (every unaccounted detected service must get an entry), condition what only applies sometimes, and name the real-world inputs the engine must never fabricate. Use `run_program` to observe how the program fails without a dependency — the error names it. Run `check_catalog` on your draft before the outcome.',
+    'Entries already in the catalog are settled — the fold never edits them. Your entries ADD: the domain classes of starting state the documented flows need (think: the account that acts, the central resource, what a flow books/signs/publishes), every unaccounted MUST-account service above, conditions for what only applies sometimes, and the real-world inputs the engine must never fabricate. The briefing already carries the established facts — read a handful of files at most, and use `run_program` only where observation settles what reading cannot. Call `check_catalog` on a draft NO LATER than the midpoint of your turn budget; an early imperfect draft it can correct beats a perfect draft you never produce.',
   );
   return lines.join('\n');
+}
+
+/** The corpus's area tags with their doc counts — the domain map the catalog
+ *  grounds on. A missing/unreadable corpus yields nothing, never a failure. */
+function corpusAreaSummary(repoRoot: string): { area: string; docs: number }[] {
+  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json');
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
+      docs?: { areaTags?: string[] }[];
+    };
+    const counts = new Map<string, number>();
+    for (const doc of parsed.docs ?? []) {
+      for (const tag of doc.areaTags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([area, docs]) => ({ area, docs }));
+  } catch {
+    return [];
+  }
 }
 
 function runProgramTool(): SessionTool {
@@ -613,6 +673,8 @@ The boundary between the first two and the third is TRANSACTIONAL vs DURABLE: wh
 
 \`entries\`: one per class of starting state — \`name\` (lower-kebab-case; an external service's entry is named FOR the service, e.g. \`stripe\`), \`class\`, \`evidence\` (one line: what you read that establishes this need — a file, an import, an error), and optionally \`condition\` when the dependency only applies sometimes.
 
+The catalog's grain is the DOMAIN, not the network graph: the account that acts, the central resource the flows create and mutate (a booking, a document, a content entry), the workspace/team it lives in, the credential that authenticates — a HANDFUL of entries. The briefed database tables and documented areas name these objects. An external service earns an entry only when it appears in the must-account list of your briefing; hostnames outside that list get NO entry.
+
 A \`condition\` is a machine-evaluable predicate expression, closed grammar:
   \`<predicate>[ && <predicate>] :: <sentence>\`
   predicates: \`config-value:<key>=<value>\` · \`language-present:<language>\` · \`command-path:<interfaceId>\`
@@ -622,10 +684,10 @@ The sentence after \`::\` is what humans read. A dependency that always applies 
 
 # The rules that are checked
 
-1. Every DETECTED external service in your briefing must be accounted for — by one of your entries, an existing catalog entry, or the recipe's own externals declaration. \`check_catalog\` refuses a draft that leaves one invisible.
+1. Every service in the briefing's MUST-account list (SDK match or base-URL var) must be accounted for — by one of your entries, an existing catalog entry, or the recipe's own externals declaration. \`check_catalog\` refuses a draft that leaves one invisible. The information-only hostnames are exempt — and adding entries for them is wrong, not thorough.
 2. Existing catalog entries are settled: never restate one — the fold ignores duplicates rather than editing curated work.
 3. Nothing is guessed. Evidence names what you read. Use \`run_program\` to observe how the program actually fails without a dependency — the error message is the honest evidence.
 
 # How to work
 
-Read the briefing first — the detection, the schema, the recipe are already established facts. Read the repository where classification needs the source (does the CLI have an init command, or must the project pre-exist?). Probe with \`run_program\` when observation settles what reading cannot. Run \`check_catalog\` on the complete draft, fix what it reports, then produce the outcome.`;
+Read the briefing first — the detection, the schema, the documented areas, the recipe are already established facts; most of the catalog is derivable from them alone. Read the repository ONLY where classification needs the source (does the CLI have an init command, or must the project pre-exist?) — a handful of files, not a survey. Draft EARLY: call \`check_catalog\` on a draft no later than the midpoint of your turn budget, fix what it reports, then produce the outcome. A session that spends every turn reading and never drafts settles nothing.`;

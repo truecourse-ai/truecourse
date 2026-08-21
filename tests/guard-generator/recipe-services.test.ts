@@ -54,7 +54,9 @@ function dbRepo(): { root: string; dbFile: string; downMarker: string } {
       '  console.error(`Database error: Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle" (${store})`)',
       '  process.exit(1)',
       '}',
-      "http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{\"ok\":true}') })",
+      // 404 on unknown paths: verification's wildcard probe refuses a server that
+      // answers every path identically (the anti-stub rule), and a real server 404s.
+      "http.createServer((req, res) => { if (req.url !== '/') { res.writeHead(404); res.end('not found'); return } res.writeHead(200, { 'content-type': 'application/json' }); res.end('{\"ok\":true}') })",
       '  .listen(Number(process.env.PORT))',
     ].join('\n'),
   )
