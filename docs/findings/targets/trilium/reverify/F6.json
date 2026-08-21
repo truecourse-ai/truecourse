@@ -42,5 +42,10 @@
     "search"
   ],
   "confidence": "high",
-  "notes": "Lead with the geo-map instruction, because it makes the report self-evidently a bug rather than a preference: the manual tells the user to write #geolocation=\"lat,lon\" and that exact value is unsearchable. Do not repeat findings.md's *= probe as evidence; *= is ends-with (build_comparator.ts:46) and its empty answer is correct. Use *=* if a contrast operator is needed. Mention the backslash escape as an undocumented workaround, not as the fix."
+  "notes": "Lead with the geo-map instruction, because it makes the report self-evidently a bug rather than a preference: the manual tells the user to write #geolocation=\"lat,lon\" and that exact value is unsearchable. Do not repeat findings.md's *= probe as evidence; *= is ends-with (build_comparator.ts:46) and its empty answer is correct. Use *=* if a contrast operator is needed. Mention the backslash escape as an undocumented workaround, not as the fix.",
+  "filed": {
+    "url": "https://github.com/TriliumNext/Trilium/issues/11132",
+    "at": "2026-08-21",
+    "account": "truecourse-agent"
+  }
 }

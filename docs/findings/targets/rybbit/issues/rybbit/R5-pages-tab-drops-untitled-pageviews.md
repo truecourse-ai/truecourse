@@ -4,7 +4,9 @@ target: rybbit-io/rybbit
 route: public issue
 title: "The Pages tab silently drops every pageview whose page_title is empty, so a two-page site renders as \"Showing 1 to 1 of 1 pages\""
 labels: "none. rybbit-io/rybbit applies no labels: both issue templates declare `labels: ''` and all 40 most recent issues carry an empty label array. No suggested-labels line is included, deliberately."
-status: draft
+status: filed
+filed_url: https://github.com/rybbit-io/rybbit/issues/1135
+filed_at: 2026-08-21
 reverified: "2026-08-20 live re-run against a docker compose stack built from master @ 64f8c4fb7f394bdfe9379717de8e6c21758b1ac2, proved on the API and again on the rendered tab in Chromium, with the stored ClickHouse rows read directly; evidence in docs/findings/targets/rybbit/live/R5/repro.md, live/R5/r5.log, live/R5/r5-pages-tab.png and live/R5/r5-pages-tab.txt"
 format_note: "bug_report.md is a classic Markdown template, not a YAML form, and no template-enforcing workflow exists on this repo. Body matches its bold-label section shape verbatim and in template order: **Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop (please complete the following information):**. No suggested-labels line, since this repo applies none. A screenshot of the rendered tab exists and should be attached at filing time."
 ---
@@ -146,6 +148,10 @@ Both pageviews appear on the Pages tab, and its footer reads "Showing 1 to 2 of 
 At minimum, a page the overview counts and the paths listing lists should not vanish without trace from the tab documented as covering every URL on the site.
 
 **Screenshots**
+
+The Pages tab for the two-pageview site in the reproduction above. One row is listed, and the tab's own footer reads "Showing 1 to 1 of 1 pages". The untitled pageview, which the paths listing does return, is absent here.
+
+![The Pages tab showing a single row and a footer reading "Showing 1 to 1 of 1 pages"](https://raw.githubusercontent.com/truecourse-agent/truecourse-evidence/main/rybbit-io/rybbit/R5/pages-tab.png)
 
 A screenshot of the rendered tab is attached, showing the single `Pricing` row and the "Showing 1 to 1 of 1 pages" footer for the two-pageview site described above. The extracted page text in the transcript above is from that same render.
 

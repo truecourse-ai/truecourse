@@ -4,7 +4,9 @@ target: TriliumNext/Trilium
 route: public issue
 title: "Search: the lexer strips commas even inside quotes, so the documented #geolocation=\"48.8583,2.2945\" can never be matched"
 labels: "not applied by us (outside contributor cannot self-apply); suggested in the body: State: Triage, BE, search"
-status: draft
+status: filed
+filed_url: https://github.com/TriliumNext/Trilium/issues/11132
+filed_at: 2026-08-21
 reverified: "2026-08-20 live re-run against a server built from source at main @ 86a9715b09b4fc523764eee3e2ba08b5f58ef12b, all three quoting forms, all three controls and the escape hatch re-executed, with the stored attribute value read back first; evidence in docs/findings/targets/trilium/live/F6/repro.md and live/F6/transcript.txt"
 format_note: "bug_report.yml is a YAML issue form. Body uses its six `### ` section headers verbatim and in template order (Description, TriliumNext Version, What operating system are you using?, What is your setup?, Operating System Version, Error logs), with all own sub-headings demoted to `####`. Dropdown answers are real template options: `macOS` for the OS field and `Server access only` for the setup field, which is what we actually ran. No template-enforcing workflow is configured on this repo, but the form shape is matched anyway. Pull request 10633 is referred to in plain words with a full URL rather than hash-number syntax."
 ---

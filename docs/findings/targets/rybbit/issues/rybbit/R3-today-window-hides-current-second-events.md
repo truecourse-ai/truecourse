@@ -4,7 +4,9 @@ target: rybbit-io/rybbit
 route: public issue
 title: "A date-range window's upper bound is a strict < against whole-second now(), so a just-flushed event is visible to realtime and invisible to every date-range surface until the next second ticks"
 labels: "none. rybbit-io/rybbit applies no labels: both issue templates declare `labels: ''` and all 40 most recent issues carry an empty label array. No suggested-labels line is included, deliberately."
-status: draft
+status: filed
+filed_url: https://github.com/rybbit-io/rybbit/issues/1134
+filed_at: 2026-08-21
 reverified: "2026-08-20 live re-run against a docker compose stack built from master @ 64f8c4fb7f394bdfe9379717de8e6c21758b1ac2, 10 rounds, all 10 divergent, both windows polled in parallel every 40 ms from the moment of the track ack; evidence in docs/findings/targets/rybbit/live/R3/repro.md and live/R3/r3.log"
 format_note: "bug_report.md is a classic Markdown template, not a YAML form, and no template-enforcing workflow exists on this repo. Body matches its bold-label section shape verbatim and in template order: **Describe the bug**, **To Reproduce**, **Expected behavior**, **Screenshots**, **Desktop (please complete the following information):**. No suggested-labels line, since this repo applies none. The recently merged past-minutes navigation change is referred to by commit sha and in plain words rather than hash-number syntax, and is explicitly ruled out as a fix."
 ---

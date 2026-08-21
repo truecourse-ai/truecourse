@@ -207,3 +207,18 @@ One issue per repo, top finding each, every body matched to that repo's own temp
 Two corrections made while drafting, both against the handover: rybbit's cache key is at `auth-utils.ts:168`, not `:169`; and the Trilium collapse chain is now fully traced rather than described by symptom (parse records the error and returns undefined, the note and not branches discard the already-parsed filter with it, AndExp filters falsy entries and returns TrueExp when nothing survives, and TrueExp returns its input set unchanged, which is why a failed query matches everything).
 
 Route policy change recorded in the guide: prefer a new issue over a comment on a long-closed one, since a comment on a closed issue cannot be triaged and may never be read. Commenting remains right on an open thread such as an active pull request.
+
+## 2026-08-21: twelve reports across the four new targets
+
+Twelve filed, three per target, each spaced at least five minutes apart and watched for three minutes afterwards. All twelve opened clean: no template flags, no automated closes, no complaints.
+
+- nocobase 10397, 10398, 10399
+- reactive-resume 3368, 3369, 3370
+- trilium 11130, 11131, 11132
+- rybbit 1133, 1134, 1135
+
+The receiving triage bot confirmed all three trilium reports at the exact line and proposed a patch for each, including the one whose mechanism the original record had wrong. Two reports carry inline screenshots, hosted in a small public repository owned by the filing account and laid out by destination repository and finding id.
+
+One planned report was pulled rather than filed. Its live evidence contradicted itself and, more importantly, contained no observation during the window it made claims about, because the export finished faster than the polling interval on this machine. It is marked blocked with the two ways to unblock it. A different finding took its slot so the day still ran to twelve.
+
+Two guards earned their keep. The five-minute filing gate refused a filing that would otherwise have gone out three minutes early, after two reports went out a minute apart earlier in the campaign. And checking the extracted body rather than trusting a filename match caught a report that would have promised a screenshot it did not contain.

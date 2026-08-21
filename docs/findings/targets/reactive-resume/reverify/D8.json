@@ -55,5 +55,11 @@
     "area: account"
   ],
   "confidence": "high",
-  "notes": "Deployment: verified against SELF-HOSTED at 3221afda; both the dialog and the DTO are shared code, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Accounts & sharing'; version 5.2.7 (commit 3221afda). File the server-enforced range as the anchor: it turns 'the docs say confirm and there is no confirm' into 'the dialog omits validation the API already requires'. The anonymous password field belongs to F7 and should be mentioned in one line here at most, not made the headline."
+  "notes": "Deployment: verified against SELF-HOSTED at 3221afda; both the dialog and the DTO are shared code, so Cloud is affected identically. Product variant = Self-hosted; Area = 'Accounts & sharing'; version 5.2.7 (commit 3221afda). File the server-enforced range as the anchor: it turns 'the docs say confirm and there is no confirm' into 'the dialog omits validation the API already requires'. The anonymous password field belongs to F7 and should be mentioned in one line here at most, not made the headline.",
+  "filed": {
+    "url": "https://github.com/amruthpillai/reactive-resume/issues/3370",
+    "at": "2026-08-21",
+    "account": "truecourse-agent",
+    "note": "substituted into the day-12 slot after D2 was pulled for an evidence gap"
+  }
 }
