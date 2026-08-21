@@ -1,0 +1,19 @@
+{
+  "r5": {
+    "site": "33",
+    "mentionsPricingPath": true,
+    "mentionsPricingTitle": true,
+    "mentionsUntitledPath": false,
+    "pageTitlesRequests": [
+      "200 /api/sites/33/page-titles?start_date=2026-08-19&end_date=2026-08-19&time_zone=America%2FLos_Angeles&limit=1000&page=1",
+      "200 /api/sites/33/page-titles?start_date=2026-08-20&end_date=2026-08-20&time_zone=America%2FLos_Angeles&limit=25&page=1"
+    ]
+  },
+  "r7": {
+    "site": "35",
+    "bodyMatchesBounce": false,
+    "mentionsOnlyPage": true,
+    "mentionsFirst": true,
+    "mentionsSecond": true
+  }
+}

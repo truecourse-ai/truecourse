@@ -1,0 +1,63 @@
+tcref-r7-42dd02b2
+Web Analytics
+Main
+Globe
+Goals
+API Playground
+Query
+Dashboards
+Product Analytics
+Replay
+Funnels
+Journeys
+Retention
+Behavior
+Sessions
+Users
+Events
+Errors
+Settings
+Site Settings
+Filter
+Today
+Identified only
+Min pageviews
+Min events
+Min duration (s)
+Page 1
+Fuchsia Turkey
+1
+0
+Direct
+/only-page
+/only-page
+Aug 20, 7:39 PM
+•
+0s
+Purple Zebra
+2
+0
+Direct
+/first
+/second
+Aug 20, 7:39 PM
+•
+1s
+Liking Rybbit? Consider sponsoring the project!
+Sponsor us
+Resources
+Documentation
+Features
+GitHub
+Discord
+API Reference
+50% Affiliate Program
+Company
+Privacy Policy
+Terms and Conditions
+Security
+DPA
+© 2026 Rybbit. All rights reserved.
+v2.8.0
+English
+Made with ❤️ by frogs 🐸🍅

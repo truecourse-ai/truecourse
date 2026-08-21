@@ -1,0 +1,60 @@
+# F9 live re-run - COLD server (process just started), note ZWB3896n0unt (#tcprop9, 92 bytes of content, 1 revision)
+
+=== COLD becca - every query below begins with "#" ===
+PROBE     GET /api/search/#tcprop9 note.contentSize > 0
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.contentSize >= 0
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.contentSize < 1000000
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.contentAndAttachmentsSize > 0
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.contentAndAttachmentsAndRevisionsSize >= 0
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.revisionCount >= 0
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.revisionCount >= 1
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.revisionCount = 1
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.revisionCount = 0
+          -> 200 []
+
+=== CONTROL 1 - becca-backed properties, same note, same query shape, still "#"-leading ===
+CONTROL   GET /api/search/#tcprop9 note.parentCount = 1
+          -> 200 ["ZWB3896n0unt"]
+CONTROL   GET /api/search/#tcprop9 note.labelCount >= 1
+          -> 200 ["ZWB3896n0unt"]
+CONTROL   GET /api/search/#tcprop9 note.type = text
+          -> 200 ["ZWB3896n0unt"]
+
+=== orderBy is innocent: same orderBy, "#"-leading, still cold ===
+PROBE     GET /api/search/#tcprop9 note.contentSize > 0 orderBy note.title
+          -> 200 []
+
+=== CONTROL 2 - the SAME comparison in a query that does NOT begin with "#" ===
+CONTROL   GET /api/search/note.contentSize > 0 AND #tcprop9
+          -> 200 ["ZWB3896n0unt"]
+
+=== the "#" form again, SAME process, now warm ===
+AFTER     GET /api/search/#tcprop9 note.contentSize > 0
+          -> 200 ["ZWB3896n0unt"]
+AFTER     GET /api/search/#tcprop9 note.contentSize >= 0
+          -> 200 ["ZWB3896n0unt"]
+AFTER     GET /api/search/#tcprop9 note.contentSize > 0 orderBy note.title
+          -> 200 ["ZWB3896n0unt"]
+AFTER     GET /api/search/note.contentSize > 0 AND #tcprop9 orderBy note.title
+          -> 200 ["ZWB3896n0unt"]
+
+=== revisionCount on BOTH paths, warm process, note really has 1 revision ===
+PROBE     GET /api/search/note.revisionCount >= 1 AND #tcprop9
+          -> 200 []
+CONTROL   GET /api/search/note.revisionCount = 0 AND #tcprop9
+          -> 200 ["ZWB3896n0unt"]
+AFTER     GET /api/search/#tcprop9 note.revisionCount >= 1
+          -> 200 []
+AFTER     GET /api/search/#tcprop9 note.revisionCount = 0
+          -> 200 ["ZWB3896n0unt"]
+
+GET /api/notes/ZWB3896n0unt/revisions -> 200 1 revision(s): ["nPb5KrSPqx8L"]
+GET /api/notes/ZWB3896n0unt/blob -> 200 contentLength=92

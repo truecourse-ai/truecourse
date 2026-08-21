@@ -1,0 +1,53 @@
+import path from 'node:path';
+import { startServer, stopServer, login, loadIds, recorder, SCRATCH } from './lib.mjs';
+
+const ids = loadIds();
+const N = ids.tcSizeNote;
+const server = await startServer();
+const R = recorder();
+try {
+  const s = await login();
+  R.log(`# F9 live re-run - COLD server (process just started), note ${N} (#tcprop9, 92 bytes of content, 1 revision)`);
+  R.log('');
+  R.log('=== COLD becca - every query below begins with "#" ===');
+  await R.probe(s, 'PROBE', `#tcprop9 note.contentSize > 0`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.contentSize >= 0`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.contentSize < 1000000`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.contentAndAttachmentsSize > 0`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.contentAndAttachmentsAndRevisionsSize >= 0`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.revisionCount >= 0`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.revisionCount >= 1`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.revisionCount = 1`);
+  await R.probe(s, 'PROBE', `#tcprop9 note.revisionCount = 0`);
+  R.log('');
+  R.log('=== CONTROL 1 - becca-backed properties, same note, same query shape, still "#"-leading ===');
+  await R.probe(s, 'CONTROL', `#tcprop9 note.parentCount = 1`);
+  await R.probe(s, 'CONTROL', `#tcprop9 note.labelCount >= 1`);
+  await R.probe(s, 'CONTROL', `#tcprop9 note.type = text`);
+  R.log('');
+  R.log('=== orderBy is innocent: same orderBy, "#"-leading, still cold ===');
+  await R.probe(s, 'PROBE', `#tcprop9 note.contentSize > 0 orderBy note.title`);
+  R.log('');
+  R.log('=== CONTROL 2 - the SAME comparison in a query that does NOT begin with "#" ===');
+  await R.probe(s, 'CONTROL', `note.contentSize > 0 AND #tcprop9`);
+  R.log('');
+  R.log('=== the "#" form again, SAME process, now warm ===');
+  await R.probe(s, 'AFTER', `#tcprop9 note.contentSize > 0`);
+  await R.probe(s, 'AFTER', `#tcprop9 note.contentSize >= 0`);
+  await R.probe(s, 'AFTER', `#tcprop9 note.contentSize > 0 orderBy note.title`);
+  await R.probe(s, 'AFTER', `note.contentSize > 0 AND #tcprop9 orderBy note.title`);
+  R.log('');
+  R.log('=== revisionCount on BOTH paths, warm process, note really has 1 revision ===');
+  await R.probe(s, 'PROBE', `note.revisionCount >= 1 AND #tcprop9`);
+  await R.probe(s, 'CONTROL', `note.revisionCount = 0 AND #tcprop9`);
+  await R.probe(s, 'AFTER', `#tcprop9 note.revisionCount >= 1`);
+  await R.probe(s, 'AFTER', `#tcprop9 note.revisionCount = 0`);
+  const revs = await s.api('GET', `/api/notes/${N}/revisions`);
+  R.log('');
+  R.log(`GET /api/notes/${N}/revisions -> ${revs.status} ${Array.isArray(revs.json) ? revs.json.length : '?'} revision(s): ${JSON.stringify((revs.json ?? []).map(r => r.revisionId))}`);
+  const blob = await s.api('GET', `/api/notes/${N}/blob`);
+  R.log(`GET /api/notes/${N}/blob -> ${blob.status} contentLength=${blob.json?.content?.length}`);
+} finally {
+  await stopServer(server);
+  R.dump(path.join(SCRATCH, 'probe', 'F9-transcript.txt'));
+}

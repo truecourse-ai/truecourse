@@ -1,0 +1,91 @@
+# F13 DOM half - fresh saved search fNpO06ehjjK3
+  type=search title="Search: "
+  attributes (3): ["searchString=#tcfindme","keepCurrentHoisting=","ancestor=root"]
+  stored children: 0
+
+browser: chromium 141.0.7390.37 via playwright-core 1.62.1, FULL chromium build rev 1194
+(chrome-headless-shell for playwright 1.62's pinned rev 1234 is NOT installed on this machine, so the full chromium build was launched instead)
+
+GET http://127.0.0.1:8099/#root/fNpO06ehjjK3
+.search-result-widget in the DOM: 5, of them visible: 1
+--- innerText of the VISIBLE search-result widget ---
+Search has not been executed yet.
+Search now
+--- end ---
+body.innerText length: 1066
+body contains "Search has not been executed yet." -> true
+body contains "tcHitAlpha"                        -> false
+body contains "tcHitBeta"                         -> false
+buttons inside the visible .search-result-widget: ["Search now"]
+
+--- CONTROL: press the only control the widget offers, "Search now"
+url before click: http://127.0.0.1:8099/#root/_hidden/_search/NpJd5jXZN9QK/fNpO06ehjjK3?ntxId=fIN8fe
+url after  click: http://127.0.0.1:8099/#root/_hidden/_search/NpJd5jXZN9QK/XKt9xVS3FQB9?ntxId=fiiXc3
+note id before: fNpO06ehjjK3   note id after: XKt9xVS3FQB9   same note? false
+--- innerText of the VISIBLE search-result widget AFTER the click ---
+ List
+<b>bold</b> <script>x</script> plain
+root
+<b>bold</b> <script>x</script> plain
+root
+New note
+root
+tcCloneSource
+root
+tcCloneTarget
+root
+tcFuzzyGood
+root
+#tcfuzzy=trilium
+tcFuzzyOther
+root
+#tcfuzzy=zebra
+tcGeoMarker
+root
+tcNoComma
+root
+#tcnocomma=48.8583
+tcSSBoxA
+root
+tcSSBoxB
+root
+tcSizeNote
+root
+#tcprop9
+tcTmplParent
+root
+#titleTemplate="<b>bold</b> <script>x</script> plain"
+tcbox
+root
+tcprobebook-control
+root
+tcHitAlpha
+tcSSBoxA
+#tcfindme
+tcHitBeta
+tcSSBoxB
+#tcfindme
+<b>bold</b> x plain
+tcTmplParent
+tcPropNote
+tcbox
+#tcprop8
+--- end ---
+
+the note the button navigated to: XKt9xVS3FQB9  title="Search: " type=search
+   its 3 attributes: ["searchString=","keepCurrentHoisting=","ancestor=root"]
+   GET /api/search-note/XKt9xVS3FQB9 -> 200 20 results  (the EMPTY query = the whole instance)
+   GET /api/search-note/fNpO06ehjjK3 (the saved search you were looking at) -> 200 ["A2nb3vnWnyi8","kn7Lw7kh0enb"]
+
+################ F17 - how the unsanitised title renders in the tree ################
+{
+  "literalTextNodesFound": 4,
+  "sampleOuterHTML": [
+    "<span class=\"fancytree-title\" tabindex=\"0\">&lt;b&gt;bold&lt;/b&gt; &lt;script&gt;x&lt;/script&gt; plain</span>",
+    "<span class=\"fancytree-title\" tabindex=\"0\">&lt;b&gt;bold&lt;/b&gt; &lt;script&gt;x&lt;/script&gt; plain</span>",
+    "<a href=\"#root/Nn7rzq5UdXSR\" class=\"no-tooltip-preview tn-link note-book-title\">&lt;b&gt;bold&lt;/b&gt; &lt;script&gt;x&lt;/script&gt; plain</a>"
+  ],
+  "scriptTagsWhoseTextIsX": 0,
+  "boldElementsSayingBold": 0,
+  "bodyContainsLiteralPayload": true
+}

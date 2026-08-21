@@ -1,0 +1,131 @@
+{
+  "rounds": 12,
+  "sortedMs": [
+    101,
+    256,
+    289,
+    347,
+    359,
+    434,
+    473,
+    571,
+    632,
+    723,
+    762,
+    926
+  ],
+  "minMs": 101,
+  "medianMs": 454,
+  "maxMs": 926,
+  "emptyImmediate": 12,
+  "board": [
+    {
+      "round": 1,
+      "siteId": 21,
+      "ackStatus": 200,
+      "immediateAtMs": 25,
+      "immediatePageviews": 0,
+      "visibleAtMs": 571,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 2,
+      "siteId": 22,
+      "ackStatus": 200,
+      "immediateAtMs": 23,
+      "immediatePageviews": 0,
+      "visibleAtMs": 289,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 3,
+      "siteId": 23,
+      "ackStatus": 200,
+      "immediateAtMs": 32,
+      "immediatePageviews": 0,
+      "visibleAtMs": 632,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 4,
+      "siteId": 24,
+      "ackStatus": 200,
+      "immediateAtMs": 27,
+      "immediatePageviews": 0,
+      "visibleAtMs": 359,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 5,
+      "siteId": 25,
+      "ackStatus": 200,
+      "immediateAtMs": 35,
+      "immediatePageviews": 0,
+      "visibleAtMs": 723,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 6,
+      "siteId": 26,
+      "ackStatus": 200,
+      "immediateAtMs": 12,
+      "immediatePageviews": 0,
+      "visibleAtMs": 434,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 7,
+      "siteId": 27,
+      "ackStatus": 200,
+      "immediateAtMs": 29,
+      "immediatePageviews": 0,
+      "visibleAtMs": 347,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 8,
+      "siteId": 28,
+      "ackStatus": 200,
+      "immediateAtMs": 28,
+      "immediatePageviews": 0,
+      "visibleAtMs": 762,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 9,
+      "siteId": 29,
+      "ackStatus": 200,
+      "immediateAtMs": 24,
+      "immediatePageviews": 0,
+      "visibleAtMs": 101,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 10,
+      "siteId": 30,
+      "ackStatus": 200,
+      "immediateAtMs": 20,
+      "immediatePageviews": 0,
+      "visibleAtMs": 926,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 11,
+      "siteId": 31,
+      "ackStatus": 200,
+      "immediateAtMs": 26,
+      "immediatePageviews": 0,
+      "visibleAtMs": 256,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    },
+    {
+      "round": 12,
+      "siteId": 32,
+      "ackStatus": 200,
+      "immediateAtMs": 28,
+      "immediatePageviews": 0,
+      "visibleAtMs": 473,
+      "immediateBody": "{\"data\":{\"sessions\":0,\"pages_per_session\":null,\"bounce_rate\":null,\"session_duration\":null,\"pageviews\":0,\"users\":0}}"
+    }
+  ]
+}

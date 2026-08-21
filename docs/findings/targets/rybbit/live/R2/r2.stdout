@@ -1,0 +1,122 @@
+# R2 live probe — same-second funnel steps, and the entry/exit tie
+
+--- PROBE funnel, no gap (gap between the two paths: 0 ms) ---
+  site 7  (tcref-r2fp-e40808b7)
+  track acks: {"success":true} | {"success":true} | {"success":true} | {"success":true}
+  clickhouse rows (pathname / timestamp / session):
+      /cart   2026-08-21 02:37:42   80ssgI7dc-jbuJ
+      /cart   2026-08-21 02:37:42   2EcKAJO8zH3Aph
+      /checkout   2026-08-21 02:37:42   80ssgI7dc-jbuJ
+      /checkout   2026-08-21 02:37:42   2EcKAJO8zH3Aph
+  distinct whole seconds across the 4 rows: 1 (2026-08-21 02:37:42)
+  POST /api/sites/7/funnels/analyze
+    -> 200 {"data":[{"step_number":1,"step_name":"Cart","sessions":2,"conversion_rate":100,"dropoff_rate":0,"visitors":2},{"step_number":2,"step_name":"Checkout","sessions":0,"conversion_rate":0,"dropoff_rate":100,"visitors":0}]}
+
+--- CONTROL funnel, 1500 ms apart (gap between the two paths: 1500 ms) ---
+  site 8  (tcref-r2fc-e40808b7)
+  track acks: {"success":true} | {"success":true} | {"success":true} | {"success":true}
+  clickhouse rows (pathname / timestamp / session):
+      /cart   2026-08-21 02:37:43   dyH17TnMS6K1bI
+      /cart   2026-08-21 02:37:43   _yfxv_BQymEMxY
+      /checkout   2026-08-21 02:37:44   dyH17TnMS6K1bI
+      /checkout   2026-08-21 02:37:44   _yfxv_BQymEMxY
+  distinct whole seconds across the 4 rows: 2 (2026-08-21 02:37:43, 2026-08-21 02:37:44)
+  POST /api/sites/8/funnels/analyze
+    -> 200 {"data":[{"step_number":1,"step_name":"Cart","sessions":2,"conversion_rate":100,"dropoff_rate":0,"visitors":2},{"step_number":2,"step_name":"Checkout","sessions":2,"conversion_rate":100,"dropoff_rate":0,"visitors":2}]}
+
+--- PROBE entry/exit, no gap (gap: 0 ms) ---
+  site 9  (tcref-r2ep-e40808b7)
+  clickhouse rows (pathname / timestamp / session):
+      /blog/article   2026-08-21 02:37:46   zLG0Ff6Pgmgat8
+      /checkout   2026-08-21 02:37:46   zLG0Ff6Pgmgat8
+  distinct whole seconds across the 2 rows: 1 (2026-08-21 02:37:46)
+  GET /api/sites/9/metric?parameter=entry_page -> 200 {"data":{"data":[{"value":"/blog/article","hostname":"tcref.test","count":1,"percentage":100,"pageviews":1,"pageviews_percentage":100,"time_on_page_seconds":0,"bounce_rate":0}],"totalCount":1}}
+  GET /api/sites/9/metric?parameter=exit_page  -> 200 {"data":{"data":[{"value":"/blog/article","hostname":"tcref.test","count":1,"percentage":100,"pageviews":1,"pageviews_percentage":100,"time_on_page_seconds":0,"bounce_rate":0}],"totalCount":1}}
+
+--- CONTROL entry/exit, 2000 ms apart (gap: 2000 ms) ---
+  site 10  (tcref-r2ec-e40808b7)
+  clickhouse rows (pathname / timestamp / session):
+      /blog/article   2026-08-21 02:37:47   Cpqy7LilFFYj2M
+      /checkout   2026-08-21 02:37:49   Cpqy7LilFFYj2M
+  distinct whole seconds across the 2 rows: 2 (2026-08-21 02:37:47, 2026-08-21 02:37:49)
+  GET /api/sites/10/metric?parameter=entry_page -> 200 {"data":{"data":[{"value":"/blog/article","hostname":"tcref.test","count":1,"percentage":100,"pageviews":1,"pageviews_percentage":100,"time_on_page_seconds":2,"bounce_rate":0}],"totalCount":1}}
+  GET /api/sites/10/metric?parameter=exit_page  -> 200 {"data":{"data":[{"value":"/checkout","hostname":"tcref.test","count":1,"percentage":100,"pageviews":1,"pageviews_percentage":100,"time_on_page_seconds":0,"bounce_rate":0}],"totalCount":1}}
+
+=== R2 RESULT ===
+{
+  "funnelProbe": {
+    "siteId": 7,
+    "gapMs": 0,
+    "distinctSeconds": 1,
+    "seconds": [
+      "2026-08-21 02:37:42"
+    ],
+    "step1": {
+      "step_number": 1,
+      "step_name": "Cart",
+      "sessions": 2,
+      "conversion_rate": 100,
+      "dropoff_rate": 0,
+      "visitors": 2
+    },
+    "step2": {
+      "step_number": 2,
+      "step_name": "Checkout",
+      "sessions": 0,
+      "conversion_rate": 0,
+      "dropoff_rate": 100,
+      "visitors": 0
+    },
+    "acks": [
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}"
+    ]
+  },
+  "funnelControl": {
+    "siteId": 8,
+    "gapMs": 1500,
+    "distinctSeconds": 2,
+    "seconds": [
+      "2026-08-21 02:37:43",
+      "2026-08-21 02:37:44"
+    ],
+    "step1": {
+      "step_number": 1,
+      "step_name": "Cart",
+      "sessions": 2,
+      "conversion_rate": 100,
+      "dropoff_rate": 0,
+      "visitors": 2
+    },
+    "step2": {
+      "step_number": 2,
+      "step_name": "Checkout",
+      "sessions": 2,
+      "conversion_rate": 100,
+      "dropoff_rate": 0,
+      "visitors": 2
+    },
+    "acks": [
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}"
+    ]
+  },
+  "exitProbe": {
+    "siteId": 9,
+    "gapMs": 0,
+    "distinctSeconds": 1,
+    "entryPage": "/blog/article",
+    "exitPage": "/blog/article"
+  },
+  "exitControl": {
+    "siteId": 10,
+    "gapMs": 2000,
+    "distinctSeconds": 2,
+    "entryPage": "/blog/article",
+    "exitPage": "/checkout"
+  }
+}

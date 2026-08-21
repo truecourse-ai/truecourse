@@ -1,0 +1,13 @@
+################ F13 - a saved search does not execute itself (API half) ################
+POST /api/special-notes/search-note -> 200  noteId=tNKub6PWBEHG type=undefined title=undefined
+born with: ["searchString=","keepCurrentHoisting=","ancestor=root"]
+PUT /api/notes/tNKub6PWBEHG/attributes (searchString -> "#tcfindme") -> 204
+now:       ["searchString=#tcfindme","keepCurrentHoisting=","ancestor=root"]
+POST /api/tree/load -> children of the saved search: 0
+--- CONTROL A: the query is valid and the server runs it on demand
+GET /api/search-note/tNKub6PWBEHG -> 200 {"searchResultNoteIds":["A2nb3vnWnyi8","kn7Lw7kh0enb"],"highlightedTokens":["tcfindme"],"error":null}
+CONTROL   GET /api/search/#tcfindme
+          -> 200 [2] ["A2nb3vnWnyi8","kn7Lw7kh0enb"]
+POST /api/tree/load again -> children: 0   (results are in-memory only)
+
+(the saved search note id for the browser half is tNKub6PWBEHG; hits are tcHitAlpha=A2nb3vnWnyi8 tcHitBeta=kn7Lw7kh0enb)

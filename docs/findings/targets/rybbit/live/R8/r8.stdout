@@ -1,0 +1,34 @@
+# R8 live probe — a query-param exclusion, a kind the doc's list does not name
+site 36
+declare a QUERY PARAM exclusion
+    PUT /api/sites/36/config    -> 200 {"success":true,"message":"Site configuration updated successfully","config":{"id":"39db12445c66","siteId":36,"type":"web","public":true,"embedEnabled":false,"saltUserIds":false,"domain":"tcref-r8-5342a71b.tcref.test","blockBots":false,"firstPartyProxy":false,…
+    (waited 11 ms for the R1 sitesAccessCache window before the read-back)
+read it back
+    GET /api/sites/36/excluded-query-params -> 200 {"success":true,"excludedQueryParams":["preview"]}
+
+PROBE   POST /api/track  (querystring "?preview=1")
+    -> 200 {"success":true,"message":"Event not tracked - query param excluded"}
+
+CONTROL POST /api/track  (querystring "?utm_source=x")
+    -> 200 {"success":true}
+
+=== R8 RESULT ===
+{
+  "siteId": 36,
+  "putStatus": 200,
+  "readBack": {
+    "success": true,
+    "excludedQueryParams": [
+      "preview"
+    ]
+  },
+  "probe": {
+    "status": 200,
+    "body": "{\"success\":true,\"message\":\"Event not tracked - query param excluded\"}"
+  },
+  "control": {
+    "status": 200,
+    "body": "{\"success\":true}"
+  },
+  "accessWaitMs": 11
+}

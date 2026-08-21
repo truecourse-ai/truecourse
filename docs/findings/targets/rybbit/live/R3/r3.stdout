@@ -1,0 +1,76 @@
+# R3 live probe — 10 rounds, write parked just after a second boundary
+round 1 site 11: ack=200 {"success":true} (6 ms, stamped +31 ms into its second) | past_minutes visible at 386 ms | date_range visible at 987 ms | gap 601 ms
+  DIVERGENT at +386 ms:
+    GET /api/sites/11/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"s5AnnRUCdC4fD4","user_id":"2c7259e51a82","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/11/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 2 site 12: ack=200 {"success":true} (27 ms, stamped +31 ms into its second) | past_minutes visible at 438 ms | date_range visible at 994 ms | gap 556 ms
+  DIVERGENT at +438 ms:
+    GET /api/sites/12/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"vh0-FkmO1ZRjKT","user_id":"d1b50d067820","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/12/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 3 site 13: ack=200 {"success":true} (6 ms, stamped +32 ms into its second) | past_minutes visible at 452 ms | date_range visible at 1040 ms | gap 588 ms
+  DIVERGENT at +452 ms:
+    GET /api/sites/13/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"51YVn5pp6zEm-q","user_id":"9fb6f4c8605e","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/13/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 4 site 14: ack=200 {"success":true} (22 ms, stamped +32 ms into its second) | past_minutes visible at 439 ms | date_range visible at 1014 ms | gap 575 ms
+  DIVERGENT at +439 ms:
+    GET /api/sites/14/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"NGHieKOhlwhjph","user_id":"1e0b504ee9cb","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/14/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 5 site 15: ack=200 {"success":true} (23 ms, stamped +32 ms into its second) | past_minutes visible at 410 ms | date_range visible at 987 ms | gap 577 ms
+  DIVERGENT at +410 ms:
+    GET /api/sites/15/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"v69n10cTlNYJ8j","user_id":"6da263028711","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/15/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 6 site 16: ack=200 {"success":true} (10 ms, stamped +32 ms into its second) | past_minutes visible at 420 ms | date_range visible at 1006 ms | gap 586 ms
+  DIVERGENT at +420 ms:
+    GET /api/sites/16/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"ux4Z-Rb_YAXRpN","user_id":"99c0fc57bd7a","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/16/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 7 site 17: ack=200 {"success":true} (11 ms, stamped +31 ms into its second) | past_minutes visible at 448 ms | date_range visible at 981 ms | gap 533 ms
+  DIVERGENT at +448 ms:
+    GET /api/sites/17/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"PF4wKJj4-2HeDF","user_id":"af470bcc3ca2","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/17/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 8 site 18: ack=200 {"success":true} (21 ms, stamped +30 ms into its second) | past_minutes visible at 446 ms | date_range visible at 1017 ms | gap 571 ms
+  DIVERGENT at +446 ms:
+    GET /api/sites/18/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"HoWkVqJpnCiS4-","user_id":"13fe064bc92f","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/18/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 9 site 19: ack=200 {"success":true} (24 ms, stamped +30 ms into its second) | past_minutes visible at 428 ms | date_range visible at 1004 ms | gap 576 ms
+  DIVERGENT at +428 ms:
+    GET /api/sites/19/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"0CS6DfuByX2Rmy","user_id":"30654877bc36","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/19/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+round 10 site 20: ack=200 {"success":true} (26 ms, stamped +32 ms into its second) | past_minutes visible at 388 ms | date_range visible at 970 ms | gap 582 ms
+  DIVERGENT at +388 ms:
+    GET /api/sites/20/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0
+      -> 200 {"data":[{"session_id":"Oh35URAvHF3HmZ","user_id":"f7b46cbc1081","identified_user_id":"","country":"\u0000\u0000","region":"","city":"","language":"","device_type":"Mobile","browser":"","browser_version":"","operating_system":"","operating_system_version":"","…
+    GET /api/sites/20/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC
+      -> 200 {"data":[]}
+
+| round | stamped at +ms into its second | past_minutes visible | date_range visible | gap |
+|---:|---:|---:|---:|---:|
+| 1 | 31 | 386 ms | 987 ms | 601 ms (divergent) |
+| 2 | 31 | 438 ms | 994 ms | 556 ms (divergent) |
+| 3 | 32 | 452 ms | 1040 ms | 588 ms (divergent) |
+| 4 | 32 | 439 ms | 1014 ms | 575 ms (divergent) |
+| 5 | 32 | 410 ms | 987 ms | 577 ms (divergent) |
+| 6 | 32 | 420 ms | 1006 ms | 586 ms (divergent) |
+| 7 | 31 | 448 ms | 981 ms | 533 ms (divergent) |
+| 8 | 30 | 446 ms | 1017 ms | 571 ms (divergent) |
+| 9 | 30 | 428 ms | 1004 ms | 576 ms (divergent) |
+| 10 | 32 | 388 ms | 970 ms | 582 ms (divergent) |
+
+=== R3 SUMMARY: 10 of 10 rounds divergent; gaps 533-601 ms ===

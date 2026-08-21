@@ -1,0 +1,110 @@
+# R1 live probe  BASE=http://127.0.0.1:14701  owner=guard-owner@rybbit.test  org=lKLmCtV3I7G1PFIQP3iUQxLkNE2CRzbv
+# whoami (better-auth session role):
+    GET /api/auth/get-session -> 200 role="admin" id=qVi0orIAbDjPSreDwfr0s77yImf6VZvj
+
+=== PHASE A — the `${userId}:false` key: POST /goals and POST /funnels ===
+--- idle 16 s so both cache halves expire ---
+[  16099ms] create site A
+    POST /api/organizations/lKLmCtV3I7G1PFIQP3iUQxLkNE2CRzbv/sites
+    -> 201 {"id":"54dced450562","siteId":1,"name":"tcref-r1a-a11c5412","type":null,"domain":"tcref-r1a-a11c5412.tcref.test","createdAt":"2026-08-21 02:35:40.682402","updatedAt":"2026-08-21 02:35:40.682402","createdBy":"qVi0orIAbDjPSreDwfr0s77yImf6VZvj","organizationId":"…
+[  16121ms] goal on A (warms userId:false)
+    POST /api/sites/1/goals
+    -> 201 {"success":true,"goalId":1}
+[  16137ms] PUT config on A (warms userId:true)
+    PUT /api/sites/1/config
+    -> 200 {"success":true,"message":"Site configuration updated successfully","config":{"id":"54dced450562","siteId":1,"type":"web","public":true,"embedEnabled":false,"saltUserIds":false,"domain":"tcref-r1a-a11c5412.tcref.test","blockBots":false,"firstPartyProxy":false,…
+[  16145ms] create site B
+    POST /api/organizations/lKLmCtV3I7G1PFIQP3iUQxLkNE2CRzbv/sites
+    -> 201 {"id":"4b8411bd26f2","siteId":2,"name":"tcref-r1b-a11c5412","type":null,"domain":"tcref-r1b-a11c5412.tcref.test","createdAt":"2026-08-21 02:35:40.731243","updatedAt":"2026-08-21 02:35:40.731243","createdBy":"qVi0orIAbDjPSreDwfr0s77yImf6VZvj","organizationId":"…
+[  16150ms] PROBE goal on B (immediate)
+    POST /api/sites/2/goals
+    -> 403 {"error":"Forbidden"}
+[  16154ms] PROBE funnel on B (immediate)
+    POST /api/sites/2/funnels
+    -> 403 {"error":"Forbidden"}
+    (403 window measured on GET /api/sites/2/excluded-paths: first non-403 at +15451 ms after the probe)
+--- CONTROL A: idle 16 s (stdTTL 15) then repeat, nothing else changed ---
+[  47659ms] CONTROL goal on B (after 16 s)
+    POST /api/sites/2/goals
+    -> 201 {"success":true,"goalId":2}
+[  47676ms] CONTROL funnel on B (after 16 s)
+    POST /api/sites/2/funnels
+    -> 201 {"success":true,"funnelId":1}
+
+=== PHASE B — the `${userId}:false` key on the READ side: GET /excluded-paths ===
+--- idle 16 s ---
+[  63696ms] create site A2
+    POST /api/organizations/lKLmCtV3I7G1PFIQP3iUQxLkNE2CRzbv/sites
+    -> 201 {"id":"1ba2ee15eec1","siteId":3,"name":"tcref-r1c-a11c5412","type":null,"domain":"tcref-r1c-a11c5412.tcref.test","createdAt":"2026-08-21 02:36:28.282119","updatedAt":"2026-08-21 02:36:28.282119","createdBy":"qVi0orIAbDjPSreDwfr0s77yImf6VZvj","organizationId":"…
+[  63708ms] GET excluded-paths on A2 (warms userId:false)
+    GET /api/sites/3/excluded-paths
+    -> 200 {"success":true,"excludedPaths":[]}
+[  63716ms] create site B2
+    POST /api/organizations/lKLmCtV3I7G1PFIQP3iUQxLkNE2CRzbv/sites
+    -> 201 {"id":"169d1352be28","siteId":4,"name":"tcref-r1d-a11c5412","type":null,"domain":"tcref-r1d-a11c5412.tcref.test","createdAt":"2026-08-21 02:36:28.302611","updatedAt":"2026-08-21 02:36:28.302611","createdBy":"qVi0orIAbDjPSreDwfr0s77yImf6VZvj","organizationId":"…
+[  63727ms] PUT config on B2 (admin path, immediate)
+    PUT /api/sites/4/config
+    -> 200 {"success":true,"message":"Site configuration updated successfully","config":{"id":"169d1352be28","siteId":4,"type":"web","public":true,"embedEnabled":false,"saltUserIds":false,"domain":"tcref-r1d-a11c5412.tcref.test","blockBots":false,"firstPartyProxy":false,…
+[  63731ms] PROBE GET excluded-paths on B2 (immediate)
+    GET /api/sites/4/excluded-paths
+    -> 403 {"error":"Forbidden"}
+    (the write at +1787279788305 and the read of that same write 10 ms later)
+--- CONTROL: idle 16 s, same GET ---
+[  79822ms] CONTROL GET excluded-paths on B2 (after 16 s)
+    GET /api/sites/4/excluded-paths
+    -> 200 {"success":true,"excludedPaths":["/admin/*"]}
+
+=== PHASE C — the `${userId}:true` key, with a SECOND non-system-admin account ===
+[  79937ms] sign up a second user
+    POST /api/auth/sign-up/email
+    -> 200 {"token":"toHsm6HUdqNnehCntlQqUGq7CzOI4WYr","user":{"name":"Second User","email":"tcverify-second-a11c5412@rybbit.test","emailVerified":false,"image":null,"createdAt":"2026-08-21T02:36:44.512Z","updatedAt":"2026-08-21T02:36:44.512Z","role":"user","banned":fals…
+    user2 session role="user" id=fdwi2LwbkdfauaNRknK3VVQ1Z33Xeihz
+[  79977ms] user2 creates its own organization
+    POST /api/auth/organization/create
+    -> 200 {"name":"Second Org a11c5412","slug":"tcverify-second-a11c5412","logo":null,"createdAt":"2026-08-21T02:36:44.547Z","stripeCustomerId":null,"monthlyEventCount":0,"overMonthlyLimit":false,"planOverride":null,"id":"rJy4NV4MS7q0ExBdkdQ7aAP1WyQ4IPFH","members":[{"o…
+--- idle 16 s ---
+[  96048ms] user2 creates site C
+    POST /api/organizations/rJy4NV4MS7q0ExBdkdQ7aAP1WyQ4IPFH/sites
+    -> 201 {"id":"976d96e21164","siteId":5,"name":"tcref-r1e-a11c5412","type":null,"domain":"tcref-r1e-a11c5412.tcref.test","createdAt":"2026-08-21 02:37:00.628478","updatedAt":"2026-08-21 02:37:00.628478","createdBy":"fdwi2LwbkdfauaNRknK3VVQ1Z33Xeihz","organizationId":"…
+[  96078ms] user2 PUT config on C (warms userId:true)
+    PUT /api/sites/5/config
+    -> 200 {"success":true,"message":"Site configuration updated successfully","config":{"id":"976d96e21164","siteId":5,"type":"web","public":true,"embedEnabled":false,"saltUserIds":false,"domain":"tcref-r1e-a11c5412.tcref.test","blockBots":false,"firstPartyProxy":false,…
+[  96087ms] user2 creates site D
+    POST /api/organizations/rJy4NV4MS7q0ExBdkdQ7aAP1WyQ4IPFH/sites
+    -> 201 {"id":"b1a5a3a91768","siteId":6,"name":"tcref-r1f-a11c5412","type":null,"domain":"tcref-r1f-a11c5412.tcref.test","createdAt":"2026-08-21 02:37:00.672366","updatedAt":"2026-08-21 02:37:00.672366","createdBy":"fdwi2LwbkdfauaNRknK3VVQ1Z33Xeihz","organizationId":"…
+[  96094ms] PROBE user2 PUT config on D (immediate)
+    PUT /api/sites/6/config
+    -> 403 {"error":"Forbidden"}
+--- CONTROL: idle 16 s, same PUT ---
+[ 112133ms] CONTROL user2 PUT config on D (after 16 s)
+    PUT /api/sites/6/config
+    -> 200 {"success":true,"message":"Site configuration updated successfully","config":{"id":"b1a5a3a91768","siteId":6,"type":"web","public":true,"embedEnabled":false,"saltUserIds":false,"domain":"tcref-r1f-a11c5412.tcref.test","blockBots":false,"firstPartyProxy":false,…
+
+=== R1 RESULT ===
+{
+  "phaseA": {
+    "siteA": 1,
+    "siteB": 2,
+    "probeGoal": 403,
+    "probeFunnel": 403,
+    "controlGoal": 201,
+    "controlFunnel": 201,
+    "window403Ms": 15451
+  },
+  "phaseB": {
+    "siteA2": 3,
+    "siteB2": 4,
+    "putStatus": 200,
+    "probeGet": 403,
+    "controlGet": 200,
+    "writeToReadMs": 10
+  },
+  "phaseC": {
+    "email2": "tcverify-second-a11c5412@rybbit.test",
+    "role2": "user",
+    "siteC": 5,
+    "siteD": 6,
+    "probePut": 403,
+    "controlPut": 200
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "funnelProbe": {
+    "siteId": 7,
+    "gapMs": 0,
+    "distinctSeconds": 1,
+    "seconds": [
+      "2026-08-21 02:37:42"
+    ],
+    "step1": {
+      "step_number": 1,
+      "step_name": "Cart",
+      "sessions": 2,
+      "conversion_rate": 100,
+      "dropoff_rate": 0,
+      "visitors": 2
+    },
+    "step2": {
+      "step_number": 2,
+      "step_name": "Checkout",
+      "sessions": 0,
+      "conversion_rate": 0,
+      "dropoff_rate": 100,
+      "visitors": 0
+    },
+    "acks": [
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}"
+    ]
+  },
+  "funnelControl": {
+    "siteId": 8,
+    "gapMs": 1500,
+    "distinctSeconds": 2,
+    "seconds": [
+      "2026-08-21 02:37:43",
+      "2026-08-21 02:37:44"
+    ],
+    "step1": {
+      "step_number": 1,
+      "step_name": "Cart",
+      "sessions": 2,
+      "conversion_rate": 100,
+      "dropoff_rate": 0,
+      "visitors": 2
+    },
+    "step2": {
+      "step_number": 2,
+      "step_name": "Checkout",
+      "sessions": 2,
+      "conversion_rate": 100,
+      "dropoff_rate": 0,
+      "visitors": 2
+    },
+    "acks": [
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}",
+      "{\"success\":true}"
+    ]
+  },
+  "exitProbe": {
+    "siteId": 9,
+    "gapMs": 0,
+    "distinctSeconds": 1,
+    "entryPage": "/blog/article",
+    "exitPage": "/blog/article"
+  },
+  "exitControl": {
+    "siteId": 10,
+    "gapMs": 2000,
+    "distinctSeconds": 2,
+    "entryPage": "/blog/article",
+    "exitPage": "/checkout"
+  }
+}

@@ -1,0 +1,87 @@
+# R7 live probe — one genuine bounce and one two-page visit on the same site
+site 35
+
+GET /api/sites/35/sessions -> 200
+  2 session rows. Keys of row 0:
+    ["session_id","user_id","identified_user_id","country","region","city","language","device_type","browser","browser_version","operating_system","operating_system_version","screen_width","screen_height","referrer","channel","hostname","utm_source","utm_medium","utm_campaign","utm_term","utm_content","session_end","session_start","session_duration","entry_page","exit_page","pageviews","events","errors","outbound","button_clicks","copies","form_submits","input_changes","ip","lat","lon","tag","timezone","has_replay","traits"]
+  any key matching /bounc/i: []
+  whole response contains the substring "bounc": false
+  row: entry=/only-page exit=/only-page pageviews=1 events=0
+  row: entry=/first exit=/second pageviews=2 events=0
+
+CONTROL GET /api/sites/35/overview
+  -> 200 {"data":{"sessions":2,"pages_per_session":1.5,"bounce_rate":50,"session_duration":0.5,"pageviews":3,"users":2}}
+
+=== R7 RESULT ===
+{
+  "siteId": 35,
+  "sessionRows": 2,
+  "keys": [
+    "session_id",
+    "user_id",
+    "identified_user_id",
+    "country",
+    "region",
+    "city",
+    "language",
+    "device_type",
+    "browser",
+    "browser_version",
+    "operating_system",
+    "operating_system_version",
+    "screen_width",
+    "screen_height",
+    "referrer",
+    "channel",
+    "hostname",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "session_end",
+    "session_start",
+    "session_duration",
+    "entry_page",
+    "exit_page",
+    "pageviews",
+    "events",
+    "errors",
+    "outbound",
+    "button_clicks",
+    "copies",
+    "form_submits",
+    "input_changes",
+    "ip",
+    "lat",
+    "lon",
+    "tag",
+    "timezone",
+    "has_replay",
+    "traits"
+  ],
+  "bounceKeys": [],
+  "responseContainsBounce": false,
+  "rows": [
+    {
+      "entry_page": "/only-page",
+      "exit_page": "/only-page",
+      "pageviews": 1,
+      "events": 0
+    },
+    {
+      "entry_page": "/first",
+      "exit_page": "/second",
+      "pageviews": 2,
+      "events": 0
+    }
+  ],
+  "overview": {
+    "sessions": 2,
+    "pages_per_session": 1.5,
+    "bounce_rate": 50,
+    "session_duration": 0.5,
+    "pageviews": 3,
+    "users": 2
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "siteId": 33,
+  "pageTitlesRows": 1,
+  "pageTitlesPaths": [
+    "/pricing"
+  ],
+  "pathnameRows": 2,
+  "pathnamePaths": [
+    "/docs/getting-started",
+    "/pricing"
+  ],
+  "overviewPageviews": 2,
+  "clickhouse": [
+    "/docs/getting-started\t\t2026-08-21 02:39:05",
+    "/pricing\tPricing\t2026-08-21 02:39:05"
+  ]
+}

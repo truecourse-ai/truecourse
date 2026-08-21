@@ -1,0 +1,49 @@
+{
+  "siteId": 34,
+  "storedChannels": [
+    "Organic Search",
+    "Organic Social"
+  ],
+  "filters": {
+    "Search": {
+      "status": 200,
+      "sessions": 0,
+      "pageviews": 0,
+      "users": 0
+    },
+    "Social": {
+      "status": 200,
+      "sessions": 0,
+      "pageviews": 0,
+      "users": 0
+    },
+    "Organic Search": {
+      "status": 200,
+      "sessions": 1,
+      "pageviews": 1,
+      "users": 1
+    },
+    "Organic Social": {
+      "status": 200,
+      "sessions": 1,
+      "pageviews": 1,
+      "users": 1
+    },
+    "Referral": {
+      "status": 200,
+      "sessions": 0,
+      "pageviews": 0,
+      "users": 0
+    },
+    "Direct": {
+      "status": 200,
+      "sessions": 0,
+      "pageviews": 0,
+      "users": 0
+    }
+  },
+  "clickhouse": [
+    "Organic Search\thttps://www.google.com/search?q=rybbit",
+    "Organic Social\thttps://twitter.com/someone/status/1"
+  ]
+}

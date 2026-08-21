@@ -1,0 +1,24 @@
+################ F7 - the fuzzy operators ~= / ~* never lex ################
+fixtures: tcFuzzyGood=obb2wKi47mqT (#tcfuzzy=trilium), tcFuzzyOther=4weUGTNJRtdH (#tcfuzzy=zebra)
+--- PROBE
+PROBE     GET /api/search/#tcfuzzy ~= trilim
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+PROBE     GET /api/search/#tcfuzzy ~= qqqqqqq
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+PROBE     GET /api/search/#tcfuzzy ~* trilim
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+PROBE     GET /api/search/#tcfuzzy ~* qqqqqqq
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+--- CONTROL
+CONTROL   GET /api/search/#tcfuzzy = trilium
+          -> 200 [1] ["obb2wKi47mqT"]
+CONTROL   GET /api/search/#tcfuzzy = zebra
+          -> 200 [1] ["4weUGTNJRtdH"]
+CONTROL   GET /api/search/#tcfuzzy
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+--- the property-path forms (the report noted these fail silently on this build)
+PROBE     GET /api/search/note.title ~= Books
+          -> 200 [0] []
+PROBE     GET /api/search/note.content ~* zzzzznotpresent
+          -> 200 [16] ["root","uI5TTDlvedxt","nLQUhHGGu1BH","obb2wKi47mqT","4weUGTNJRtdH","l65BjI6IhuYL"]…
+          contains "root"? true

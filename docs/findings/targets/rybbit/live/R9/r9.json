@@ -1,0 +1,29 @@
+{
+  "siteId": 37,
+  "eventNames": [
+    {
+      "eventName": "signup_clicked",
+      "count": 1
+    }
+  ],
+  "journeys": {
+    "journeys": [
+      {
+        "path": [
+          "/start",
+          "/middle",
+          "/end"
+        ],
+        "count": 1,
+        "percentage": 100
+      }
+    ]
+  },
+  "journeyContainsEvent": false,
+  "clickhouse": [
+    "pageview\t/start\t\t2026-08-21 02:39:09",
+    "custom_event\t/start\tsignup_clicked\t2026-08-21 02:39:11",
+    "pageview\t/middle\t\t2026-08-21 02:39:12",
+    "pageview\t/end\t\t2026-08-21 02:39:13"
+  ]
+}

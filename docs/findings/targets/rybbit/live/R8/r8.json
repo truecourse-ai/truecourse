@@ -1,0 +1,19 @@
+{
+  "siteId": 36,
+  "putStatus": 200,
+  "readBack": {
+    "success": true,
+    "excludedQueryParams": [
+      "preview"
+    ]
+  },
+  "probe": {
+    "status": 200,
+    "body": "{\"success\":true,\"message\":\"Event not tracked - query param excluded\"}"
+  },
+  "control": {
+    "status": 200,
+    "body": "{\"success\":true}"
+  },
+  "accessWaitMs": 11
+}

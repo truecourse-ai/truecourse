@@ -1,0 +1,201 @@
+{
+  "rounds": 10,
+  "divergentRounds": 10,
+  "ratio": "10 of 10",
+  "gapMinMs": 533,
+  "gapMaxMs": 601,
+  "allGaps": [
+    601,
+    556,
+    588,
+    575,
+    577,
+    586,
+    533,
+    571,
+    576,
+    582
+  ],
+  "board": [
+    {
+      "round": 1,
+      "siteId": 11,
+      "stampedInto": 31,
+      "pmAt": 386,
+      "drAt": 987,
+      "gap": 601,
+      "divergent": {
+        "at": 386
+      },
+      "divergentDetail": {
+        "at": 386,
+        "pm": "{\"data\":[{\"session_id\":\"s5AnnRUCdC4fD4\",\"user_id\":\"2c7259e51a82\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/11/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/11/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 2,
+      "siteId": 12,
+      "stampedInto": 31,
+      "pmAt": 438,
+      "drAt": 994,
+      "gap": 556,
+      "divergent": {
+        "at": 438
+      },
+      "divergentDetail": {
+        "at": 438,
+        "pm": "{\"data\":[{\"session_id\":\"vh0-FkmO1ZRjKT\",\"user_id\":\"d1b50d067820\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/12/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/12/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 3,
+      "siteId": 13,
+      "stampedInto": 32,
+      "pmAt": 452,
+      "drAt": 1040,
+      "gap": 588,
+      "divergent": {
+        "at": 452
+      },
+      "divergentDetail": {
+        "at": 452,
+        "pm": "{\"data\":[{\"session_id\":\"51YVn5pp6zEm-q\",\"user_id\":\"9fb6f4c8605e\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/13/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/13/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 4,
+      "siteId": 14,
+      "stampedInto": 32,
+      "pmAt": 439,
+      "drAt": 1014,
+      "gap": 575,
+      "divergent": {
+        "at": 439
+      },
+      "divergentDetail": {
+        "at": 439,
+        "pm": "{\"data\":[{\"session_id\":\"NGHieKOhlwhjph\",\"user_id\":\"1e0b504ee9cb\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/14/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/14/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 5,
+      "siteId": 15,
+      "stampedInto": 32,
+      "pmAt": 410,
+      "drAt": 987,
+      "gap": 577,
+      "divergent": {
+        "at": 410
+      },
+      "divergentDetail": {
+        "at": 410,
+        "pm": "{\"data\":[{\"session_id\":\"v69n10cTlNYJ8j\",\"user_id\":\"6da263028711\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/15/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/15/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 6,
+      "siteId": 16,
+      "stampedInto": 32,
+      "pmAt": 420,
+      "drAt": 1006,
+      "gap": 586,
+      "divergent": {
+        "at": 420
+      },
+      "divergentDetail": {
+        "at": 420,
+        "pm": "{\"data\":[{\"session_id\":\"ux4Z-Rb_YAXRpN\",\"user_id\":\"99c0fc57bd7a\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/16/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/16/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 7,
+      "siteId": 17,
+      "stampedInto": 31,
+      "pmAt": 448,
+      "drAt": 981,
+      "gap": 533,
+      "divergent": {
+        "at": 448
+      },
+      "divergentDetail": {
+        "at": 448,
+        "pm": "{\"data\":[{\"session_id\":\"PF4wKJj4-2HeDF\",\"user_id\":\"af470bcc3ca2\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/17/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/17/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 8,
+      "siteId": 18,
+      "stampedInto": 30,
+      "pmAt": 446,
+      "drAt": 1017,
+      "gap": 571,
+      "divergent": {
+        "at": 446
+      },
+      "divergentDetail": {
+        "at": 446,
+        "pm": "{\"data\":[{\"session_id\":\"HoWkVqJpnCiS4-\",\"user_id\":\"13fe064bc92f\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/18/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/18/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 9,
+      "siteId": 19,
+      "stampedInto": 30,
+      "pmAt": 428,
+      "drAt": 1004,
+      "gap": 576,
+      "divergent": {
+        "at": 428
+      },
+      "divergentDetail": {
+        "at": 428,
+        "pm": "{\"data\":[{\"session_id\":\"0CS6DfuByX2Rmy\",\"user_id\":\"30654877bc36\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/19/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/19/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    },
+    {
+      "round": 10,
+      "siteId": 20,
+      "stampedInto": 32,
+      "pmAt": 388,
+      "drAt": 970,
+      "gap": 582,
+      "divergent": {
+        "at": 388
+      },
+      "divergentDetail": {
+        "at": 388,
+        "pm": "{\"data\":[{\"session_id\":\"Oh35URAvHF3HmZ\",\"user_id\":\"f7b46cbc1081\",\"identified_user_id\":\"\",\"country\":\"\\u0000\\u0000\",\"region\":\"\",\"city\":\"\",\"language\":\"\",\"device_type\":\"Mobile\",\"browser\":\"\",\"browser_version\":\"\",\"operating_system\":\"\",\"operating_system_version\":\"\",\"…",
+        "dr": "{\"data\":[]}",
+        "pmPath": "/api/sites/20/sessions?time_zone=UTC&past_minutes_start=5&past_minutes_end=0",
+        "drPath": "/api/sites/20/sessions?start_date=2026-08-21&end_date=2026-08-21&time_zone=UTC"
+      }
+    }
+  ]
+}

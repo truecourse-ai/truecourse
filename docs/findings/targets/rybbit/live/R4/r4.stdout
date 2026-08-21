@@ -1,0 +1,42 @@
+# R4 live probe — 12 rounds, random phase
+round 1 site 21: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+25 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+571 ms
+round 2 site 22: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+23 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+289 ms
+round 3 site 23: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+32 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+632 ms
+round 4 site 24: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+27 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+359 ms
+round 5 site 25: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+35 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+723 ms
+round 6 site 26: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+12 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+434 ms
+round 7 site 27: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+29 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+347 ms
+round 8 site 28: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+28 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+762 ms
+round 9 site 29: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+24 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+101 ms
+round 10 site 30: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+20 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+926 ms
+round 11 site 31: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+26 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+256 ms
+round 12 site 32: POST /api/track -> 200 {"success":true} @T+0
+   GET overview @T+28 ms -> 200 {"data":{"sessions":0,"pages_per_session":null,"bounce_rate":null,"session_duration":null,"pageviews":0,"users":0}}
+   first non-zero read @T+473 ms
+
+=== R4 SUMMARY over 12 rounds ===
+ack -> queryable, sorted: 101, 256, 289, 347, 359, 434, 473, 571, 632, 723, 762, 926 ms
+min 101 ms · median 454 ms · max 926 ms
+12 of 12 immediate read-backs answered pageviews: 0

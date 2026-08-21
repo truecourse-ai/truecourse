@@ -1,0 +1,47 @@
+# R10 live probe — uppercase vs lowercase vs mixed-case country codes
+site 38
+CONTROL uppercase US
+    PUT /api/sites/38/config              -> 200 {"success":true,"message":"Site configuration updated successfully","config":{"id":"f5ebc442d31a","siteId":38,"type":"web","public":true,"embedEnabled":false,"saltUserIds":false,"domain":"tcref-r10-93…
+    (waited 10427 ms for the R1 sitesAccessCache window before the read-back)
+CONTROL read back
+    GET /api/sites/38/excluded-countries  -> 200 {"success":true,"excludedCountries":["US"]}
+
+PROBE lowercase us
+    PUT /api/sites/38/config
+      -> 400 {"success":false,"error":"Invalid request data","details":{"formErrors":[],"fieldErrors":{"excludedCountries":["Country code must be a 2-letter ISO code (e.g., US, GB, CN)"]}}}
+
+PROBE mixed-case Us
+    PUT /api/sites/38/config
+      -> 400 {"success":false,"error":"Invalid request data","details":{"formErrors":[],"fieldErrors":{"excludedCountries":["Country code must be a 2-letter ISO code (e.g., US, GB, CN)"]}}}
+
+read back after the refusals
+    GET /api/sites/38/excluded-countries  -> 200 {"success":true,"excludedCountries":["US"]}
+
+=== R10 RESULT ===
+{
+  "siteId": 38,
+  "upper": {
+    "status": 200
+  },
+  "readBack": {
+    "success": true,
+    "excludedCountries": [
+      "US"
+    ]
+  },
+  "lower": {
+    "status": 400,
+    "body": "{\"success\":false,\"error\":\"Invalid request data\",\"details\":{\"formErrors\":[],\"fieldErrors\":{\"excludedCountries\":[\"Country code must be a 2-letter ISO code (e.g., US, GB, CN)\"]}}}"
+  },
+  "mixed": {
+    "status": 400,
+    "body": "{\"success\":false,\"error\":\"Invalid request data\",\"details\":{\"formErrors\":[],\"fieldErrors\":{\"excludedCountries\":[\"Country code must be a 2-letter ISO code (e.g., US, GB, CN)\"]}}}"
+  },
+  "afterRefusals": {
+    "success": true,
+    "excludedCountries": [
+      "US"
+    ]
+  },
+  "accessWaitMs": 10427
+}

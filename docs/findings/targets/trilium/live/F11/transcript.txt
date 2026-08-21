@@ -1,0 +1,5 @@
+################ F11 - clone-to-branch 500s on an empty body ################
+PROBE     PUT /api/notes/uI5TTDlvedxt/clone-to-branch/root_nLQUhHGGu1BH   (no body at all)
+          -> 500 {"message":"Cannot destructure property 'prefix' of 'e.body' as it is undefined."}
+CONTROL   PUT /api/notes/uI5TTDlvedxt/clone-to-branch/root_nLQUhHGGu1BH   {"prefix": null}
+          -> 200 {"success":true,"branchId":"nLQUhHGGu1BH_uI5TTDlvedxt","notePath":"root/nLQUhHGGu1BH/uI5TTDlvedxt"}

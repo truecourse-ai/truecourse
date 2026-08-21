@@ -1,0 +1,12 @@
+################ F12 - creating a typed note without `content` 500s ################
+PROBE     POST /api/notes/root/children?target=into   {"title":"tcprobebook","type":"book"}
+          -> 500 {"message":"Note content must be set"}
+CONTROL   POST /api/notes/root/children?target=into   {"title":"tcprobebook-control","type":"book","content":""}
+          -> 200 {"note":{"noteId":"CU1UNxmnBSUQ","title":"tcprobebook-control","isProtected":false,"type":"book","mime":"","blobId":"z4PhNX7vuL3xVChQ1m2A","isDeleted":false,"dateCreated":"2026-08-20 19:32:59.992-0700","dateModified":"2026-08-20 19:32:59.994-0700","utcDateCreated":"2026-08-21 02:32:59.992Z","utcDate
+PROBE     POST /api/notes/root/children?target=into   {"title":"tcprobetext","type":"text"}
+          -> 500 {"message":"Note content must be set"}
+PROBE     POST /api/notes/root/children?target=into   {"title":"tcprobecode","type":"code"}
+          -> 500 {"message":"Note content must be set"}
+CONTROL   POST /api/notes/root/children?target=into   {"type":"text","content":""}
+          -> 200 {"note":{"noteId":"ywp18NnpHDng","title":"New note","isProtected":false,"type":"text","mime":"text/html","blobId":"z4PhNX7vuL3xVChQ1m2A","isDeleted":false,"dateCreated":"2026-08-20 19:32:59.999-0700","dateModified":"2026-08-20 19:33:00.000-0700","utcDateCreated":"2026-08-21 02:32:59.999Z","utcDateMo
+          (the missing-title control defaulted the title to "New note")

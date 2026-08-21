@@ -1,0 +1,51 @@
+{
+  "target": "trilium",
+  "build": {
+    "sha": "86a9715b09b4fc523764eee3e2ba08b5f58ef12b",
+    "date": "2026-08-21T02:39:06Z",
+    "branch": "main"
+  },
+  "checkedAt": "2026-08-20",
+  "findings": {
+    "F6": {
+      "verdict": "still reproduces",
+      "evidence": "live/F6/repro.md, live/F6/transcript.txt",
+      "note": "All three quoting forms of #geolocation=\"48.8583,2.2945\" answer 200 []. Controls pass: the bare label matches, the comma-free #tcnocomma=\"48.8583\" matches, *=* reaches the note, and the backslash-escaped comma matches. The stored value was read back with the comma intact before probing."
+    },
+    "F7": {
+      "verdict": "still reproduces",
+      "evidence": "live/F7/repro.md, live/F7/transcript.txt",
+      "note": "#tcfuzzy ~= qqqqqqq and ~* qqqqqqq both return BOTH notes, so the operand is never consulted; = trilium and = zebra split them correctly. Property-path forms still fail silently on this build: note.title ~= Books -> [], note.content ~* zzzzznotpresent -> the whole instance including root. Routed as a PR comment (issue #9426 open, PRs #9508 / #10633 target it)."
+    },
+    "F8": {
+      "verdict": "still reproduces",
+      "evidence": "live/F8/repro.md, live/F8/transcript.txt",
+      "note": "Cold server. #tcprop8 AND not(note.ancestor.title = tcbox) returns all 16 notes including root and _hidden, as do note.noteSize and note.ownedAttributeCount. The plural note.ancestors.title spelling behaves perfectly in both directions. New this run: the same query through /api/quick-search returns error 'Unrecognized note property \"ancestor\"', so the parser detects it and /api/search discards it."
+    },
+    "F9": {
+      "verdict": "still reproduces",
+      "evidence": "live/F9/repro.md, live/F9/transcript.txt, live/F9/transcript-restart.txt",
+      "note": "Corrected mechanism confirmed in full. Cold process, fixtures created in a prior process: every #-leading size query answers [] including >= 0 and < 1000000, while note.parentCount/labelCount/type answer the note. note.contentSize > 0 AND #tcprop9 answers the note, and the identical #-leading query then answers it too for the rest of the process. orderBy is innocent. A restart against the same DB makes it dead again, proving the memoisation is in-memory. revisionCount is dead on both paths: note.revisionCount >= 1 AND #tcprop9 -> [] with one real revision on the note. One refinement: cold #tcprop9 note.revisionCount = 0 answers [] here (the report recorded a match, which appears to have been taken warm); the substantive claim is unaffected."
+    },
+    "F11": {
+      "verdict": "still reproduces",
+      "evidence": "live/F11/repro.md, live/F11/transcript.txt",
+      "note": "PUT /api/notes/<id>/clone-to-branch/<branchId> with no body -> 500 {\"message\":\"Cannot destructure property 'prefix' of 'e.body' as it is undefined.\"}, leaking the minified variable name. The same call with {\"prefix\": null} -> 200 and the clone succeeds."
+    },
+    "F12": {
+      "verdict": "still reproduces",
+      "evidence": "live/F12/repro.md, live/F12/transcript.txt",
+      "note": "type book, text and code all 500 with 'Note content must be set' when content is omitted; content:\"\" is accepted. A missing title is defaulted to 'New note', which is the asymmetry the finding describes. Note for any filed repro: the route requires ?target=into or it rejects 400 'Invalid target type.' before the content check."
+    },
+    "F13": {
+      "verdict": "still reproduces",
+      "evidence": "live/F13/repro.md, live/F13/transcript.txt, live/F13/web-transcript.txt, live/F13/F13-before-click.png, live/F13/F13-after-click.png",
+      "note": "API half: the saved search stores 0 children while GET /api/search-note/<id> returns exactly the two #tcfindme hits. DOM half in real Chromium: the visible widget reads 'Search has not been executed yet.' with a single 'Search now' button and neither hit on the page. Clicking it navigates from fNpO06ehjjK3 to a brand-new note XKt9xVS3FQB9 whose searchString is EMPTY and whose result list is all 20 notes in the instance, while the saved search you were looking at still returns just the two hits."
+    },
+    "F17": {
+      "verdict": "still reproduces",
+      "evidence": "live/F17/repro.md, live/F17/transcript.txt, live/F17/F17-tree-render.png",
+      "note": "Both write paths store '<b>bold</b> <script>x</script> plain' byte for byte: creation with a title, and PUT /api/notes/<id>/title, each read back from GET /api/notes/<id> and POST /api/tree/load. The control is the sharp part and still holds: a child created with no title key under a parent carrying that same string as #titleTemplate comes back as '<b>bold</b> x plain', so sanitizeHtml is wired up and working on the one path a typed title never takes. The tree escapes on render (no script tag, no b element), so this is not a live XSS there."
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "siteId": 38,
+  "upper": {
+    "status": 200
+  },
+  "readBack": {
+    "success": true,
+    "excludedCountries": [
+      "US"
+    ]
+  },
+  "lower": {
+    "status": 400,
+    "body": "{\"success\":false,\"error\":\"Invalid request data\",\"details\":{\"formErrors\":[],\"fieldErrors\":{\"excludedCountries\":[\"Country code must be a 2-letter ISO code (e.g., US, GB, CN)\"]}}}"
+  },
+  "mixed": {
+    "status": 400,
+    "body": "{\"success\":false,\"error\":\"Invalid request data\",\"details\":{\"formErrors\":[],\"fieldErrors\":{\"excludedCountries\":[\"Country code must be a 2-letter ISO code (e.g., US, GB, CN)\"]}}}"
+  },
+  "afterRefusals": {
+    "success": true,
+    "excludedCountries": [
+      "US"
+    ]
+  },
+  "accessWaitMs": 10427
+}

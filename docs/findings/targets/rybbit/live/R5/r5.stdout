@@ -1,0 +1,37 @@
+# R5 live probe — one titled pageview, one untitled, same site
+site 33
+track acks: 200 {"success":true} | 200 {"success":true}
+
+PROBE   GET /api/sites/33/page-titles
+  -> 200 {"data":[{"value":"Pricing","pathname":"/pricing","count":1,"percentage":100,"pageviews":1,"bounce_rate":100,"time_on_page_seconds":0}]}
+  (1 row(s): /pricing)
+
+CONTROL GET /api/sites/33/metric?parameter=pathname
+  -> 200 {"data":{"data":[{"value":"/docs/getting-started","hostname":"tcref.test","count":1,"percentage":50,"pageviews":1,"pageviews_percentage":50,"time_on_page_seconds":0,"bounce_rate":100},{"value":"/pricing","hostname":"tcref.test","count":1,"percentage":50,"pageviews":1,"pageviews_percentage":50,"time_on_page_seconds":0,"bounce_rate":100}],"totalCount":2}}
+  (2 row(s): /docs/getting-started, /pricing)
+
+CONTROL GET /api/sites/33/overview
+  -> 200 {"data":{"sessions":2,"pages_per_session":1,"bounce_rate":100,"session_duration":0,"pageviews":2,"users":2}}
+
+clickhouse rows (pathname / page_title / timestamp):
+  /docs/getting-started		2026-08-21 02:39:05
+  /pricing	Pricing	2026-08-21 02:39:05
+
+=== R5 RESULT ===
+{
+  "siteId": 33,
+  "pageTitlesRows": 1,
+  "pageTitlesPaths": [
+    "/pricing"
+  ],
+  "pathnameRows": 2,
+  "pathnamePaths": [
+    "/docs/getting-started",
+    "/pricing"
+  ],
+  "overviewPageviews": 2,
+  "clickhouse": [
+    "/docs/getting-started\t\t2026-08-21 02:39:05",
+    "/pricing\tPricing\t2026-08-21 02:39:05"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "F13": {
+    "savedSearchId": "fNpO06ehjjK3",
+    "storedChildren": 0,
+    "attrs": [
+      "searchString=#tcfindme",
+      "keepCurrentHoisting=",
+      "ancestor=root"
+    ],
+    "urlBefore": "http://127.0.0.1:8099/#root/_hidden/_search/NpJd5jXZN9QK/fNpO06ehjjK3?ntxId=fIN8fe",
+    "urlAfter": "http://127.0.0.1:8099/#root/_hidden/_search/NpJd5jXZN9QK/XKt9xVS3FQB9?ntxId=fiiXc3",
+    "sameNote": false,
+    "notExecuted": true,
+    "hitAlphaShown": false,
+    "hitBetaShown": false,
+    "buttons": [
+      "Search now"
+    ]
+  },
+  "afterClick": {
+    "noteId": "XKt9xVS3FQB9",
+    "title": "Search: ",
+    "attrCount": 3,
+    "attrs": [
+      "searchString=",
+      "keepCurrentHoisting=",
+      "ancestor=root"
+    ],
+    "newNoteResultCount": 20,
+    "originalSavedSearchResults": [
+      "A2nb3vnWnyi8",
+      "kn7Lw7kh0enb"
+    ]
+  },
+  "F17ui": {
+    "literalTextNodesFound": 4,
+    "sampleOuterHTML": [
+      "<span class=\"fancytree-title\" tabindex=\"0\">&lt;b&gt;bold&lt;/b&gt; &lt;script&gt;x&lt;/script&gt; plain</span>",
+      "<span class=\"fancytree-title\" tabindex=\"0\">&lt;b&gt;bold&lt;/b&gt; &lt;script&gt;x&lt;/script&gt; plain</span>",
+      "<a href=\"#root/Nn7rzq5UdXSR\" class=\"no-tooltip-preview tn-link note-book-title\">&lt;b&gt;bold&lt;/b&gt; &lt;script&gt;x&lt;/script&gt; plain</a>"
+    ],
+    "scriptTagsWhoseTextIsX": 0,
+    "boldElementsSayingBold": 0,
+    "bodyContainsLiteralPayload": true
+  }
+}

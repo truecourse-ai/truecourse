@@ -1,0 +1,81 @@
+root
+tcFuzzyGood
+tcFuzzyOther
+tcbox
+tcSizeNote
+tcGeoMarker
+tcNoComma
+tcSSBoxA
+tcSSBoxB
+tcCloneSource
+tcCloneTarget
+tcCloneSource
+tcTmplParent
+tcprobebook-control
+New note
+<b>bold</b> <script>x</script> plain
+<b>bold</b> <script>x</script> plain
+root
+Search:
+Search:
+Search:
+Search:
++
+ Search Parameters
+Add search option:	
+search script
+fast search
+include archived
+order by
+limit
+debug
+action
+
+Search string:	
+	 
+Ancestor	
+depth:
+doesn't matter
+is exactly 1 (direct children)
+is exactly 2
+is exactly 3
+is exactly 4
+is exactly 5
+is exactly 6
+is exactly 7
+is exactly 8
+is exactly 9
+is greater than 0
+is greater than 1
+is greater than 2
+is greater than 3
+is greater than 4
+is greater than 5
+is greater than 6
+is greater than 7
+is greater than 8
+is greater than 9
+is less than 2
+is less than 3
+is less than 4
+is less than 5
+is less than 6
+is less than 7
+is less than 8
+is less than 9
+	
+
+Search
+↩
+Search & Execute actions
+Save to note
+Search has not been executed yet.
+Search now
+Nothing to show for this note
+Hidden Notes
+Search History
+2026-08
+Search:
+ 
+3 attributes
+ 

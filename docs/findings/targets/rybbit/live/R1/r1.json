@@ -1,0 +1,27 @@
+{
+  "phaseA": {
+    "siteA": 1,
+    "siteB": 2,
+    "probeGoal": 403,
+    "probeFunnel": 403,
+    "controlGoal": 201,
+    "controlFunnel": 201,
+    "window403Ms": 15451
+  },
+  "phaseB": {
+    "siteA2": 3,
+    "siteB2": 4,
+    "putStatus": 200,
+    "probeGet": 403,
+    "controlGet": 200,
+    "writeToReadMs": 10
+  },
+  "phaseC": {
+    "email2": "tcverify-second-a11c5412@rybbit.test",
+    "role2": "user",
+    "siteC": 5,
+    "siteD": 6,
+    "probePut": 403,
+    "controlPut": 200
+  }
+}

@@ -1,0 +1,87 @@
+################ F7 - the fuzzy operators ~= / ~* never lex ################
+fixtures: tcFuzzyGood=obb2wKi47mqT (#tcfuzzy=trilium), tcFuzzyOther=4weUGTNJRtdH (#tcfuzzy=zebra)
+--- PROBE
+PROBE     GET /api/search/#tcfuzzy ~= trilim
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+PROBE     GET /api/search/#tcfuzzy ~= qqqqqqq
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+PROBE     GET /api/search/#tcfuzzy ~* trilim
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+PROBE     GET /api/search/#tcfuzzy ~* qqqqqqq
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+--- CONTROL
+CONTROL   GET /api/search/#tcfuzzy = trilium
+          -> 200 [1] ["obb2wKi47mqT"]
+CONTROL   GET /api/search/#tcfuzzy = zebra
+          -> 200 [1] ["4weUGTNJRtdH"]
+CONTROL   GET /api/search/#tcfuzzy
+          -> 200 [2] ["obb2wKi47mqT","4weUGTNJRtdH"]
+--- the property-path forms (the report noted these fail silently on this build)
+PROBE     GET /api/search/note.title ~= Books
+          -> 200 [0] []
+PROBE     GET /api/search/note.content ~* zzzzznotpresent
+          -> 200 [16] ["root","uI5TTDlvedxt","nLQUhHGGu1BH","obb2wKi47mqT","4weUGTNJRtdH","l65BjI6IhuYL"]…
+          contains "root"? true
+
+################ F6 - the lexer strips commas even inside quotes ################
+GET /api/notes/l65BjI6IhuYL/attributes -> 200  stored geolocation value(s): ["48.8583,2.2945"]
+--- PROBE
+PROBE     GET /api/search/#geolocation="48.8583,2.2945"
+          -> 200 [0] []
+PROBE     GET /api/search/#geolocation=48.8583,2.2945
+          -> 200 [0] []
+PROBE     GET /api/search/#geolocation='48.8583,2.2945'
+          -> 200 [0] []
+--- CONTROL
+CONTROL   GET /api/search/#geolocation
+          -> 200 [1] ["l65BjI6IhuYL"]
+CONTROL   GET /api/search/#tcnocomma="48.8583"
+          -> 200 [1] ["gP4nDim7wyWo"]
+CONTROL   GET /api/search/#geolocation *=* 48.8583
+          -> 200 [1] ["l65BjI6IhuYL"]
+--- the undocumented escape hatch
+PROBE     GET /api/search/#geolocation="48.8583\,2.2945"
+          -> 200 [1] ["l65BjI6IhuYL"]
+
+################ F11 - clone-to-branch 500s on an empty body ################
+PROBE     PUT /api/notes/uI5TTDlvedxt/clone-to-branch/root_nLQUhHGGu1BH   (no body at all)
+          -> 500 {"message":"Cannot destructure property 'prefix' of 'e.body' as it is undefined."}
+CONTROL   PUT /api/notes/uI5TTDlvedxt/clone-to-branch/root_nLQUhHGGu1BH   {"prefix": null}
+          -> 200 {"success":true,"branchId":"nLQUhHGGu1BH_uI5TTDlvedxt","notePath":"root/nLQUhHGGu1BH/uI5TTDlvedxt"}
+
+################ F12 - creating a typed note without `content` 500s ################
+PROBE     POST /api/notes/root/children?target=into   {"title":"tcprobebook","type":"book"}
+          -> 500 {"message":"Note content must be set"}
+CONTROL   POST /api/notes/root/children?target=into   {"title":"tcprobebook-control","type":"book","content":""}
+          -> 200 {"note":{"noteId":"CU1UNxmnBSUQ","title":"tcprobebook-control","isProtected":false,"type":"book","mime":"","blobId":"z4PhNX7vuL3xVChQ1m2A","isDeleted":false,"dateCreated":"2026-08-20 19:32:59.992-0700","dateModified":"2026-08-20 19:32:59.994-0700","utcDateCreated":"2026-08-21 02:32:59.992Z","utcDate
+PROBE     POST /api/notes/root/children?target=into   {"title":"tcprobetext","type":"text"}
+          -> 500 {"message":"Note content must be set"}
+PROBE     POST /api/notes/root/children?target=into   {"title":"tcprobecode","type":"code"}
+          -> 500 {"message":"Note content must be set"}
+CONTROL   POST /api/notes/root/children?target=into   {"type":"text","content":""}
+          -> 200 {"note":{"noteId":"ywp18NnpHDng","title":"New note","isProtected":false,"type":"text","mime":"text/html","blobId":"z4PhNX7vuL3xVChQ1m2A","isDeleted":false,"dateCreated":"2026-08-20 19:32:59.999-0700","dateModified":"2026-08-20 19:33:00.000-0700","utcDateCreated":"2026-08-21 02:32:59.999Z","utcDateMo
+          (the missing-title control defaulted the title to "New note")
+
+################ F17 - note titles are never HTML-sanitised ################
+PROBE1    POST /api/notes/root/children?target=into  {"title":"<b>bold</b> <script>x</script> plain","type":"text","content":"body"}
+          -> 200   response title: "<b>bold</b> <script>x</script> plain"
+          GET /api/notes/Nn7rzq5UdXSR stored title: "<b>bold</b> <script>x</script> plain"
+PROBE2    PUT /api/notes/Vy4UPnvc78nD/title  {"title":"<b>bold</b> <script>x</script> plain"}  -> 200
+          GET /api/notes/Vy4UPnvc78nD stored title: "<b>bold</b> <script>x</script> plain"
+          POST /api/tree/load titles: ["<b>bold</b> <script>x</script> plain","<b>bold</b> <script>x</script> plain"]
+CONTROL   POST /api/notes/lrJ6QQydNiyq/children?target=into  {"type":"text","content":""}   (parent carries #titleTemplate="<b>bold</b> <script>x</script> plain", no title key sent)
+          -> 200   derived title: "<b>bold</b> x plain"
+
+################ F13 - a saved search does not execute itself (API half) ################
+POST /api/special-notes/search-note -> 200  noteId=tNKub6PWBEHG type=undefined title=undefined
+born with: ["searchString=","keepCurrentHoisting=","ancestor=root"]
+PUT /api/notes/tNKub6PWBEHG/attributes (searchString -> "#tcfindme") -> 204
+now:       ["searchString=#tcfindme","keepCurrentHoisting=","ancestor=root"]
+POST /api/tree/load -> children of the saved search: 0
+--- CONTROL A: the query is valid and the server runs it on demand
+GET /api/search-note/tNKub6PWBEHG -> 200 {"searchResultNoteIds":["A2nb3vnWnyi8","kn7Lw7kh0enb"],"highlightedTokens":["tcfindme"],"error":null}
+CONTROL   GET /api/search/#tcfindme
+          -> 200 [2] ["A2nb3vnWnyi8","kn7Lw7kh0enb"]
+POST /api/tree/load again -> children: 0   (results are in-memory only)
+
+(the saved search note id for the browser half is tNKub6PWBEHG; hits are tcHitAlpha=A2nb3vnWnyi8 tcHitBeta=kn7Lw7kh0enb)

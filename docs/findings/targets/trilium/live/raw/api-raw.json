@@ -1,0 +1,60 @@
+{
+  "F11": {
+    "noBody": {
+      "status": 500,
+      "body": "{\"message\":\"Cannot destructure property 'prefix' of 'e.body' as it is undefined.\"}"
+    },
+    "withBody": {
+      "status": 200,
+      "body": "{\"success\":true,\"branchId\":\"nLQUhHGGu1BH_uI5TTDlvedxt\",\"notePath\":\"root/nLQUhHGGu1BH/uI5TTDlvedxt\"}"
+    }
+  },
+  "F12": {
+    "bookNo": {
+      "status": 500,
+      "body": "{\"message\":\"Note content must be set\"}"
+    },
+    "bookYes": {
+      "status": 200
+    },
+    "textNo": {
+      "status": 500,
+      "body": "{\"message\":\"Note content must be set\"}"
+    },
+    "codeNo": {
+      "status": 500,
+      "body": "{\"message\":\"Note content must be set\"}"
+    },
+    "defaultedTitle": "New note"
+  },
+  "F17": {
+    "createdTitle": "<b>bold</b> <script>x</script> plain",
+    "storedTitle": "<b>bold</b> <script>x</script> plain",
+    "renamedStored": "<b>bold</b> <script>x</script> plain",
+    "treeTitles": [
+      "<b>bold</b> <script>x</script> plain",
+      "<b>bold</b> <script>x</script> plain"
+    ],
+    "derivedTitle": "<b>bold</b> x plain"
+  },
+  "F13": {
+    "savedSearchId": "tNKub6PWBEHG",
+    "bornAttrs": [
+      "searchString=",
+      "keepCurrentHoisting=",
+      "ancestor=root"
+    ],
+    "childrenBefore": 0,
+    "childrenAfter": 0,
+    "searchFromNote": {
+      "searchResultNoteIds": [
+        "A2nb3vnWnyi8",
+        "kn7Lw7kh0enb"
+      ],
+      "highlightedTokens": [
+        "tcfindme"
+      ],
+      "error": null
+    }
+  }
+}

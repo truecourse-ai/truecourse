@@ -1,0 +1,9 @@
+################ F17 - note titles are never HTML-sanitised ################
+PROBE1    POST /api/notes/root/children?target=into  {"title":"<b>bold</b> <script>x</script> plain","type":"text","content":"body"}
+          -> 200   response title: "<b>bold</b> <script>x</script> plain"
+          GET /api/notes/Nn7rzq5UdXSR stored title: "<b>bold</b> <script>x</script> plain"
+PROBE2    PUT /api/notes/Vy4UPnvc78nD/title  {"title":"<b>bold</b> <script>x</script> plain"}  -> 200
+          GET /api/notes/Vy4UPnvc78nD stored title: "<b>bold</b> <script>x</script> plain"
+          POST /api/tree/load titles: ["<b>bold</b> <script>x</script> plain","<b>bold</b> <script>x</script> plain"]
+CONTROL   POST /api/notes/lrJ6QQydNiyq/children?target=into  {"type":"text","content":""}   (parent carries #titleTemplate="<b>bold</b> <script>x</script> plain", no title key sent)
+          -> 200   derived title: "<b>bold</b> x plain"

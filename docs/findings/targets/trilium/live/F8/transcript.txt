@@ -1,0 +1,42 @@
+# F8 live re-run - COLD server. tcPropNote=w898k2aBwuDl (#tcprop8) sits under tcbox=h5QNPC6UWkAG.
+
+=== PROBE - unrecognised note properties ===
+PROBE     GET /api/search/#tcprop8 AND not(note.ancestor.title = tcbox)
+          -> 200 [16] ["root","uI5TTDlvedxt","nLQUhHGGu1BH","obb2wKi47mqT","4weUGTNJRtdH","l65BjI6IhuYL","gP4nDim7wyWo","Tls839FIYtrV","gmKHJ8TiN1St","ZWB3896n0unt","lrJ6QQydNiyq","h5QNPC6UWkAG","A2nb3vnWnyi8","kn7Lw7kh0enb","w898k2aBwuDl","_hidden"]
+             contains "root"? true   contains "_hidden"? true
+PROBE     GET /api/search/#tcprop8 note.noteSize > 50
+          -> 200 [16] ["root","uI5TTDlvedxt","nLQUhHGGu1BH","obb2wKi47mqT","4weUGTNJRtdH","l65BjI6IhuYL","gP4nDim7wyWo","Tls839FIYtrV","gmKHJ8TiN1St","ZWB3896n0unt","lrJ6QQydNiyq","h5QNPC6UWkAG","A2nb3vnWnyi8","kn7Lw7kh0enb","w898k2aBwuDl","_hidden"]
+             contains "root"? true   contains "_hidden"? true
+PROBE     GET /api/search/#tcprop8 note.ownedAttributeCount >= 1
+          -> 200 [16] ["root","uI5TTDlvedxt","nLQUhHGGu1BH","obb2wKi47mqT","4weUGTNJRtdH","l65BjI6IhuYL","gP4nDim7wyWo","Tls839FIYtrV","gmKHJ8TiN1St","ZWB3896n0unt","lrJ6QQydNiyq","h5QNPC6UWkAG","A2nb3vnWnyi8","kn7Lw7kh0enb","w898k2aBwuDl","_hidden"]
+             contains "root"? true   contains "_hidden"? true
+
+=== CONTROL - the recognised plural spelling, and the rest of the machinery ===
+CONTROL   GET /api/search/#tcprop8
+          -> 200 [1] ["w898k2aBwuDl"]
+             contains "root"? false   contains "_hidden"? false
+CONTROL   GET /api/search/#tcprop8 AND not(note.ancestors.title = tcbox)
+          -> 200 [0] []
+             contains "root"? false   contains "_hidden"? false
+CONTROL   GET /api/search/#tcprop8 AND note.ancestors.title = tcbox
+          -> 200 [1] ["w898k2aBwuDl"]
+             contains "root"? false   contains "_hidden"? false
+CONTROL   GET /api/search/#tcprop8 AND note.ancestors.title = nosuchbox
+          -> 200 [0] []
+             contains "root"? false   contains "_hidden"? false
+CONTROL   GET /api/search/#tcprop8 note.labelCount >= 1
+          -> 200 [1] ["w898k2aBwuDl"]
+             contains "root"? false   contains "_hidden"? false
+CONTROL   GET /api/search/#tcprop8 AND not(note.type = code)
+          -> 200 [1] ["w898k2aBwuDl"]
+             contains "root"? false   contains "_hidden"? false
+
+=== quick-search DOES surface the error the plain /api/search route drops ===
+GET /api/quick-search/#tcprop8 AND not(note.ancestor.title = tcbox) -> 200
+   error field: "Unrecognized note property \"ancestor\" in \"...cprop8 AND not(note.ancestor.title = tcbox)\""
+   result count: 200
+
+=== F9 addendum - the SAME cold process, bare non-"#" size queries (no "#" anywhere) ===
+GET /api/search/note.contentSize >= 0 -> 200 [16]
+GET /api/search/note.contentSize > 0  -> 200 [14]
+(these two ran BEFORE any other non-"#" query in this process, i.e. cold, and both answered correctly)

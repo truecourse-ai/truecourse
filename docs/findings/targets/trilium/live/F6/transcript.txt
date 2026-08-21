@@ -1,0 +1,19 @@
+################ F6 - the lexer strips commas even inside quotes ################
+GET /api/notes/l65BjI6IhuYL/attributes -> 200  stored geolocation value(s): ["48.8583,2.2945"]
+--- PROBE
+PROBE     GET /api/search/#geolocation="48.8583,2.2945"
+          -> 200 [0] []
+PROBE     GET /api/search/#geolocation=48.8583,2.2945
+          -> 200 [0] []
+PROBE     GET /api/search/#geolocation='48.8583,2.2945'
+          -> 200 [0] []
+--- CONTROL
+CONTROL   GET /api/search/#geolocation
+          -> 200 [1] ["l65BjI6IhuYL"]
+CONTROL   GET /api/search/#tcnocomma="48.8583"
+          -> 200 [1] ["gP4nDim7wyWo"]
+CONTROL   GET /api/search/#geolocation *=* 48.8583
+          -> 200 [1] ["l65BjI6IhuYL"]
+--- the undocumented escape hatch
+PROBE     GET /api/search/#geolocation="48.8583\,2.2945"
+          -> 200 [1] ["l65BjI6IhuYL"]

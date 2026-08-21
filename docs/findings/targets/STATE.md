@@ -168,3 +168,13 @@ dosubot's comment on 27433 independently reached the same timing conclusion we d
 - Documenso "ASSISTANT recipient accepted on a parallel-signing envelope" (D3) -> https://github.com/documenso/documenso/issues/3291
 
 Filed with a five-minute gap, D5 first, after confirming it sat clean. Day total 2026-08-20: 6 public issues (4 documenso, 2 strapi), 1 private advisory, 2 PR verification comments. That is above the 2-3/day guideline; justified case by case (a public commitment, a PR-timing window, and an explicit request), but worth resetting to the guideline tomorrow.
+
+## Second wave: four new targets (2026-08-20)
+
+Ingested trilium, rybbit, nocobase and reactive-resume from the handover in `repos/issues`: guard stores, reference corpora and seed scripts extracted into freshly cloned repos, filing rules generated per destination repo, and all 47 findings re-verified for source drift and tracker movement. All 47 unchanged at head. Routing: 41 reports, 2 comments on existing threads, 4 skips.
+
+Six findings diverge from the handover's own record, and only two are verdict disagreements: an install race real in source but never observed across 15 installs, and a directive whose docs never promise the failure mode the finding assumes. The other four are routing changes rather than corrections. Each divergence was double-checked independently at source or tracker level, not taken on the agents' word.
+
+**Live re-run, trilium: all 8 findings still reproduce** on `main` @ `86a9715b`. Evidence in `trilium/live/`. It went beyond the report in three places: a restart re-kills the healed size query, so the memoisation is in-memory only; quick-search DOES produce `Unrecognized note property`, and the search API discards it, which reframes that fix; and the missing-content 500 covers book, text and code alike with the title defaulting to "New note".
+
+Provenance note worth keeping honest: strapi and documenso findings carry OUR live evidence. The four new targets arrived with someone else's hand-verification, which did run clean instances with a probe and a control per finding. Trilium now has ours too; the other three are being re-run.

@@ -1,0 +1,47 @@
+# R9 live probe — /start -> custom event -> /middle -> /end, 1.2 s apart
+site 37
+track acks: {"success":true} | {"success":true} | {"success":true} | {"success":true}
+
+CONTROL the custom event IS stored
+    GET /api/sites/37/events/names -> 200 {"data":[{"eventName":"signup_clicked","count":1}]}
+
+PROBE the journeys surface
+    GET /api/sites/37/journeys?steps=4
+      -> 200 {"journeys":[{"path":["/start","/middle","/end"],"count":1,"percentage":100}]}
+
+clickhouse rows (type / pathname / event_name / timestamp):
+  pageview	/start		2026-08-21 02:39:09
+  custom_event	/start	signup_clicked	2026-08-21 02:39:11
+  pageview	/middle		2026-08-21 02:39:12
+  pageview	/end		2026-08-21 02:39:13
+
+=== R9 RESULT ===
+{
+  "siteId": 37,
+  "eventNames": [
+    {
+      "eventName": "signup_clicked",
+      "count": 1
+    }
+  ],
+  "journeys": {
+    "journeys": [
+      {
+        "path": [
+          "/start",
+          "/middle",
+          "/end"
+        ],
+        "count": 1,
+        "percentage": 100
+      }
+    ]
+  },
+  "journeyContainsEvent": false,
+  "clickhouse": [
+    "pageview\t/start\t\t2026-08-21 02:39:09",
+    "custom_event\t/start\tsignup_clicked\t2026-08-21 02:39:11",
+    "pageview\t/middle\t\t2026-08-21 02:39:12",
+    "pageview\t/end\t\t2026-08-21 02:39:13"
+  ]
+}

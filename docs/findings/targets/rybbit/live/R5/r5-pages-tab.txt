@@ -1,0 +1,60 @@
+tcref-r5-cd78b486
+Web Analytics
+Main
+Globe
+Goals
+API Playground
+Query
+Dashboards
+Product Analytics
+Replay
+Funnels
+Journeys
+Retention
+Behavior
+Sessions
+Users
+Events
+Errors
+Settings
+Site Settings
+Filter
+Today
+Page	Trend	Views	Sessions	Bounce	Duration
+
+Pricing
+
+/pricing
+
+	
+	
+1
+	
+1
++999%
+	
+100%
+	
+0s
+Showing 1 to 1 of 1 pages
+Page size:
+25
+1 / 1
+Liking Rybbit? Consider sponsoring the project!
+Sponsor us
+Resources
+Documentation
+Features
+GitHub
+Discord
+API Reference
+50% Affiliate Program
+Company
+Privacy Policy
+Terms and Conditions
+Security
+DPA
+© 2026 Rybbit. All rights reserved.
+v2.8.0
+English
+Made with ❤️ by frogs 🐸🍅

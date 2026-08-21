@@ -1,0 +1,12 @@
+# F9 addendum - the process was restarted after the warm run above. Same DB, same note ZWB3896n0unt.
+# If the fix had been persisted, these would still answer. They do not: the memoisation died with the process.
+PROBE     GET /api/search/#tcprop9 note.contentSize >= 0
+          -> 200 []
+PROBE     GET /api/search/#tcprop9 note.contentSize > 0
+          -> 200 []
+
+# and the non-"#" form still works on this cold process, then heals the "#" form again:
+CONTROL   GET /api/search/note.contentSize > 0 AND #tcprop9
+          -> 200 ["ZWB3896n0unt"]
+AFTER     GET /api/search/#tcprop9 note.contentSize >= 0
+          -> 200 ["ZWB3896n0unt"]
