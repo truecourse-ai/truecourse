@@ -195,6 +195,56 @@ sessions, resolving conflicts and dismissing claims). WorkOS organization
 membership roles are the source; the product reads them and enforces them
 on write routes. The operator flag (TrueCourse staff) is unchanged.
 
+### 3.5 The dashboard: enterprise structure, the open-source idiom (decision 2026-08-21)
+
+The one dashboard takes its STRUCTURE from the hosted enterprise dashboard
+and its IDIOM from the recent open-source work on the agentic branch. Both
+exist today; neither is rebuilt from nothing.
+
+**Structure (from the enterprise shell).** Sign-in and workspace switch;
+the workspace home (overview of connected repos, gate activity, and the
+jobs in flight); Repositories (connect, policy, unlink); Pull requests (the
+cross-repo gate feed); Notifications (the durable feed and the bell);
+Settings as a hub (members and SSO, providers, models, integrations,
+plan); Admin for operators. Below that, the repo console: the repo page
+with Spec Guard as its one section and the curated tab order the
+enterprise lens already uses (Coverage, Tests, Interfaces, Runs, Activity,
+plus Sources and Dependencies, which return for everyone; they were hidden
+in hosted mode only because they read the working tree, and they are
+row-backed now). Jobs and sessions stream live into every page through
+the one event connection the shell already holds.
+
+**Idiom (from the agentic branch, carried over whole).** These are the
+product's visual language and the enterprise pages are restyled onto
+them, never the reverse:
+
+- The panel idiom: every left panel collapses and resizes the same way
+  (a fixed-height header carrying the panel's name and a collapse chevron,
+  a thin button strip when collapsed, a drag-to-resize edge), with the
+  page-level collapsible aside for Sources, Dependencies, Activity and the
+  Runs columns. Session state only, nothing persisted.
+- The quiet status idiom: a status is a colored dot plus a full-contrast
+  word, capsules only for neutral bounded labels, the muted ground a step
+  darker in light and a step lighter in dark, hover help in popovers.
+- Spec Guard as the primary lens: a bare repo address lands on Coverage;
+  the coverage Overview is read-only composition bars on the validated
+  palette with freshness stamps.
+- The one-column test workspace: verdict band, evidence filmstrip and
+  replay, collapsible step records with the failing step open, long-form
+  records behind drawers, the ruling beside the evidence it was made on.
+- The Sources page as shared-list-left, detail-right, add-in-a-dialog,
+  progress inline; the Interfaces tab reading each surface in its own
+  words; driver chips on every test row and filter.
+- The Activity surface: runs, sessions, transcript and chat, with
+  multi-select status filter chips and a neutral-surface transcript.
+- The brand: the twin-sail mark, the wordmark face, the horizontal and
+  stacked logo set.
+
+The shared components those pages rest on (the one list component for
+every list, the empty-state component, previewable rows, the hover
+popover) are the platform's; the enterprise pages that still carry their
+own tables, capsules and accordions move onto them in Phase B.
+
 ## 4. Connecting repositories through a provider
 
 ### 4.1 The provider seam
