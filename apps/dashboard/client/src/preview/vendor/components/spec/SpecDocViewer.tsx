@@ -1,0 +1,171 @@
+// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// Copied from the agentic branch's apps/dashboard/client/src/components/spec/SpecDocViewer.tsx; delete with the preview.
+/**
+ * SpecDocViewer, right-pane viewer for one corpus source doc, rendered as
+ * markdown. Opened from the Spec tab's left nav (preview on click, pinned on
+ * double-click) the same way spec/contract files open, URL-synced as
+ * `?spec=<docRef>`; the Sources page renders it in place for a fetched page,
+ * passing its own header `actions`.
+ */
+
+import { headingMatchKey } from '@/lib/heading-match';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Loader2, AlertCircle, EyeOff, ExternalLink } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { HoverPopover } from '@/preview/ui/hover-popover';
+import { webDocLabel } from '@/preview/vendor/lib/spec-web-source';
+import { DocMarkdown } from '@/components/spec/DocMarkdown';
+import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
+import { WebSourceBadge } from '@/preview/vendor/components/spec/WebSourceBadge';
+
+export function SpecDocViewer({
+  repoId,
+  docRef,
+  title,
+  sourceTitle,
+  url,
+  commit,
+  badge,
+  scrollTo,
+  highlight,
+  highlightPreamble,
+  tags,
+  notIncludedReason,
+  actions,
+}: {
+  repoId: string;
+  docRef: string;
+  /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
+  title?: string;
+  /** Web sources: the site this page was fetched from, heads the display label. */
+  sourceTitle?: string;
+  /** Deep link to the original doc: the ledger's (workspace) or the fetched page's (web). */
+  url?: string | null;
+  /** EE PR view: read the doc's markdown at this commit (the PR head). */
+  commit?: string;
+  /** Optional role label shown before the doc name (e.g. "Older" / "Newer"). */
+  badge?: string;
+  /** Scroll the rendered doc to the heading whose text matches this, re-applied
+   *  when `nonce` changes so re-clicking the same heading scrolls again. */
+  scrollTo?: { heading: string; nonce: number };
+  /** Headings to mark in-place as conflicting (amber band + "conflict" tag). */
+  highlight?: string[];
+  /** Band the doc's lead (content before the first heading, else the opening
+   *  heading's own section), for null-heading preamble conflicts. */
+  highlightPreamble?: boolean;
+  /** The doc's area tags, shown in full in the header (the list caps them). */
+  tags?: string[];
+  /** When set, this doc was dropped by the relevance filter, show why, above the content. */
+  notIncludedReason?: string;
+  /** Header controls at the trailing edge (close, jump-outs), the in-place preview's. */
+  actions?: ReactNode;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // A web-source page reads as `<site> / <page>`, never its raw snapshot ref.
+  const webLabel = webDocLabel(docRef, sourceTitle);
+
+  // A provided (workspace) source wins; otherwise the repo default reading at the
+  // given commit (EE PR view). Workspace docs re-fetch transiently from their source.
+  const ctxSource = useSpecSource();
+  const repoSource = useMemo(
+    () => createRepoSpecSource(repoId, commit ? { ref: commit } : undefined),
+    [repoId, commit],
+  );
+  const source = ctxSource ?? repoSource;
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    source
+      .getDoc(docRef)
+      .then((r) => !cancelled && setContent(r.content))
+      .catch((e) => !cancelled && setError((e as Error).message))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [source, docRef]);
+
+  // Scroll to a conflicting section: match a rendered heading by text.
+  useEffect(() => {
+    const wanted = scrollTo?.heading == null ? undefined : headingMatchKey(scrollTo.heading);
+    if (!wanted || loading || error) return;
+    const root = scrollRef.current;
+    if (!root) return;
+    const headings = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6')];
+    const exact = headings.find((el) => headingMatchKey(el.textContent ?? '') === wanted);
+    const fuzzy = headings.find((el) => headingMatchKey(el.textContent ?? '').includes(wanted));
+    (exact ?? fuzzy)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [scrollTo, content, loading, error]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-border px-4 py-2" title={docRef}>
+        <div className="flex items-center gap-2">
+          {badge && (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {badge}
+            </span>
+          )}
+          <span className="truncate text-xs font-medium text-foreground">
+            {webLabel ?? title ?? docRef}
+          </span>
+          {webLabel && <WebSourceBadge />}
+          {url && (
+            // The header sits at the top-right of the pane, inside an
+            // `overflow-hidden` column, anchor the tooltip below-and-left so it
+            // isn't clipped by the pane top or the viewport right edge.
+            <HoverPopover content="Open source" side="bottom" align="end">
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open source"
+                className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </HoverPopover>
+          )}
+          {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
+        </div>
+        {tags && tags.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {tags.map((t) => (
+              <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {notIncludedReason && (
+        <div className="flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-[12px] text-amber-800 dark:text-amber-200">
+          <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <span className="font-medium">Not included in the corpus.</span> {notIncludedReason}, use{' '}
+            <span className="font-medium">include</span> in the list to pull it in.
+          </span>
+        </div>
+      )}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-5 py-4">
+        {loading ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : error ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : (
+          <DocMarkdown source={content ?? ''} highlight={highlight} highlightPreamble={highlightPreamble} />
+        )}
+      </div>
+    </div>
+  );
+}

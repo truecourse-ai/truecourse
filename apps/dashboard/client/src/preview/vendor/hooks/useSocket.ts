@@ -1,0 +1,218 @@
+// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// Copied from the agentic branch's apps/dashboard/client/src/hooks/useSocket.ts; delete with the preview.
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { connectSocket, disconnectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
+
+export type StepStatus = 'pending' | 'active' | 'done' | 'error';
+
+export interface AnalysisStep {
+  key: string;
+  label: string;
+  status: StepStatus;
+  detail?: string;
+}
+
+export type AnalysisProgress = {
+  step: string;
+  percent: number;
+  detail?: string;
+  steps?: AnalysisStep[];
+  /** Job family, when one is stamped ('sources' renders inline, not as the popup). */
+  kind?: string;
+};
+
+/**
+ * The pre-flight LLM cost estimate the confirm modal renders. Shared by the socket
+ * gate (analyze / spec scan push it over `analysis:llm-estimate`) and the guard
+ * GET estimate route, one shape, one modal component.
+ */
+export type LlmEstimateData = {
+  totalEstimatedTokens: number;
+  tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }>;
+  /** Per-stage breakdown for spec scan / contracts generate / guard generate. */
+  stages?: Array<{
+    stage: string;
+    label?: string;
+    model: string;
+    calls: number;
+    estimatedTokens: number;
+    callsRange?: { low: number; high: number };
+    /** Realistic (point) call count when the ceiling overstates likely spend. */
+    expectedCalls?: number;
+    /** Ceiling USD cost for this stage (present only when prices were available). */
+    estimatedCostUsd?: number;
+    /** Expected USD cost for this stage (present only when `expectedCalls` is). */
+    expectedCostUsd?: number;
+  }>;
+  /** Short subject for the confirm copy, e.g. "12 docs" / "9 areas". */
+  subjectLabel?: string;
+  /** Ceiling USD cost for the whole run (prices the high end, ignores caching). */
+  estimatedCostUsd?: number;
+  /** Expected (likely) USD cost for the whole run, priced at realistic counts. */
+  expectedCostUsd?: number;
+  /** Provenance of the prices behind the cost. */
+  costSource?: 'live' | 'cache' | 'bundled';
+  /** True when some stage's model couldn't be priced. */
+  costPartial?: boolean;
+};
+
+export type LlmEstimate = {
+  repoId: string;
+  estimate: LlmEstimateData;
+};
+
+export type StashConfirmRequest = {
+  repoId: string;
+  modifiedCount: number;
+  untrackedCount: number;
+};
+
+export type StashConfirmChoice = 'stash' | 'no-stash' | 'cancel';
+
+type EventHandler = (data: unknown) => void;
+
+export function useSocket(repoId?: string) {
+  const [isConnected, setIsConnected] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
+  const [specProgress, setSpecProgress] = useState<AnalysisProgress | null>(null);
+  const [llmEstimate, setLlmEstimate] = useState<LlmEstimate | null>(null);
+  const [stashConfirm, setStashConfirm] = useState<StashConfirmRequest | null>(null);
+  const handlersRef = useRef<Map<string, EventHandler[]>>(new Map());
+
+  useEffect(() => {
+    const socket = connectSocket();
+
+    function onConnect() {
+      setIsConnected(true);
+      if (repoId) {
+        joinRepoRoom(repoId);
+      }
+    }
+
+    function onDisconnect() {
+      setIsConnected(false);
+    }
+
+    function onAnalysisProgress(data: AnalysisProgress) {
+      if (data.step === 'error') {
+        setAnalysisProgress({ ...data, step: 'error' });
+        return;
+      }
+      if (data.percent >= 100) {
+        setAnalysisProgress(null);
+      } else {
+        setAnalysisProgress(data);
+      }
+    }
+
+    function onAnalysisComplete(data: unknown) {
+      setAnalysisProgress(null);
+      handlersRef.current.get('analysis:complete')?.forEach((h) => h(data));
+    }
+
+    function onSpecProgress(data: AnalysisProgress) {
+      if (data.step === 'error') {
+        setSpecProgress({ ...data, step: 'error' });
+        return;
+      }
+      if (data.percent >= 100) {
+        setSpecProgress(null);
+      } else {
+        setSpecProgress(data);
+      }
+    }
+
+    function onSpecComplete(data: unknown) {
+      setSpecProgress(null);
+      handlersRef.current.get('spec:complete')?.forEach((h) => h(data));
+    }
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('analysis:progress', onAnalysisProgress);
+    socket.on('analysis:complete', onAnalysisComplete);
+    socket.on('spec:progress', onSpecProgress);
+    socket.on('spec:complete', onSpecComplete);
+    socket.on('files:changed', (data: unknown) => {
+      handlersRef.current.get('files:changed')?.forEach((h) => h(data));
+    });
+    socket.on('violations:ready', (data: unknown) => {
+      setAnalysisProgress(null);
+      handlersRef.current.get('violations:ready')?.forEach((h) => h(data));
+    });
+    socket.on('analysis:canceled', (data: unknown) => {
+      setAnalysisProgress(null);
+      setLlmEstimate(null);
+      setStashConfirm(null);
+      handlersRef.current.get('analysis:canceled')?.forEach((h) => h(data));
+    });
+    socket.on('analysis:llm-estimate', (data: LlmEstimate) => {
+      setLlmEstimate(data);
+    });
+    socket.on('analysis:llm-resolved', () => {
+      setLlmEstimate(null);
+    });
+    socket.on('analysis:stash-confirm-request', (data: StashConfirmRequest) => {
+      setStashConfirm(data);
+    });
+    if (socket.connected && repoId) {
+      joinRepoRoom(repoId);
+    }
+
+    return () => {
+      if (repoId) {
+        leaveRepoRoom(repoId);
+      }
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('analysis:progress', onAnalysisProgress);
+      socket.off('analysis:complete', onAnalysisComplete);
+      socket.off('spec:progress', onSpecProgress);
+      socket.off('spec:complete', onSpecComplete);
+      disconnectSocket();
+    };
+  }, [repoId]);
+
+  const onEvent = useCallback((event: string, handler: EventHandler) => {
+    const handlers = handlersRef.current.get(event) || [];
+    handlers.push(handler);
+    handlersRef.current.set(event, handlers);
+
+    return () => {
+      const current = handlersRef.current.get(event) || [];
+      handlersRef.current.set(
+        event,
+        current.filter((h) => h !== handler),
+      );
+    };
+  }, []);
+
+  const clearProgress = useCallback(() => setAnalysisProgress(null), []);
+  const clearSpecProgress = useCallback(() => setSpecProgress(null), []);
+
+  const respondToLlmEstimate = useCallback((repoIdArg: string, proceed: boolean) => {
+    const socket = connectSocket();
+    socket.emit('analysis:llm-proceed', { repoId: repoIdArg, proceed });
+    setLlmEstimate(null);
+  }, []);
+
+  const respondToStashConfirm = useCallback((repoIdArg: string, choice: StashConfirmChoice) => {
+    const socket = connectSocket();
+    socket.emit('analysis:stash-confirm-response', { repoId: repoIdArg, choice });
+    setStashConfirm(null);
+  }, []);
+
+  return {
+    isConnected,
+    analysisProgress,
+    specProgress,
+    clearProgress,
+    clearSpecProgress,
+    onEvent,
+    llmEstimate,
+    respondToLlmEstimate,
+    stashConfirm,
+    respondToStashConfirm,
+  };
+}

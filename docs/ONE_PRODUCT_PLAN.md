@@ -202,17 +202,50 @@ and its IDIOM from the recent open-source work on the agentic branch. Both
 exist today; neither is rebuilt from nothing.
 
 **Structure (from the enterprise shell).** Sign-in and workspace switch;
-the workspace home (overview of connected repos, gate activity, and the
-jobs in flight); Repositories (connect, policy, unlink); Notifications
-(the durable feed and the bell); Settings as a hub (members and SSO,
-providers, models, integrations, plan); Admin for operators. Below that,
-the repo console: selecting a repository opens its page, whose menu is
-Pull requests (that repository's gate feed: each pull request, its check,
-its runs hosted and local, its spec-change offer) followed by the guard
-tabs in the curated order the enterprise lens already uses (Coverage,
-Tests, Interfaces, Runs, Activity, plus Sources and Dependencies, which
-return for everyone; they were hidden in hosted mode only because they
-read the working tree, and they are row-backed now). Two things from
+Home (the landing page, for the product owner: the workspace's
+requirements and how much of them is proven, the repository Coverage
+overview summed over every connected repository, then one row per
+repository with its own covered / partly / not-covered split and its last
+check, opening the repository's Coverage; Connect repository is the page
+action, and there is NO separate Repositories page, decision 2026-08-22);
+Knowledge (the workspace-level spec corpus as the enterprise page has
+it, Spec and Sources: Spec is the same two levels as a repository's
+Corpus, the table of workspace documents and conflicts and a document or
+conflict as its own page; Sources is the provenance ledger fed by the
+connectors; an enterprise entitlement, shown locked on other plans); Notifications (the durable feed
+and the bell); Settings as a hub (members and SSO, providers, models,
+integrations, plan); Admin for operators. Home carries no activity feed
+and no jobs: gate activity lives on a repository's Pull requests, jobs in
+Activity. Below that,
+the repo console: selecting a repository opens its page, whose menu is,
+in two groups (decision 2026-08-22, superseding the Pull requests tab of
+the day before): the working set, Coverage (the landing tab: the overview,
+how much of the spec is proven), Corpus (the documents and conflicts, by
+version), Tests, Runs; and a SETUP group, Sources, Interfaces,
+Dependencies, Activity, and the repository's own Settings (gate policy,
+notify addresses, unlink). Every tab is TWO levels
+(decision 2026-08-22): a flat table of its things (search, chip filters
+that become a type-to-narrow box past a dozen options), and a thing opened
+from it is its own page with a breadcrumb back, never a third nested
+column. The table is the index; the page is the thing. There
+is NO pull request page: a pull request is seen through two things it
+produces. Its RUNS appear in Runs, where a Pull request filter narrows the
+history to one PR and every run row names its PR and the coverage version
+it ran against. Its SPEC CHANGES appear in Corpus as a VERSION: when a
+PR edits spec documents, the scan writes a coverage version parented on
+the baseline (the agentic plan's delta version), Corpus's version picker
+lists the baseline and every live PR version, a picked version shows the
+corpus as it was with diff markers against its parent (document added,
+edited, removed; conflict opened, resolved; an edited document opens on
+its changed sections), and the regenerate-and-re-gate action lives on
+that version. A run therefore always says which version it ran on, and
+opens Corpus there.
+Sources and Dependencies return for everyone; they were hidden in hosted
+mode only because they read the working tree, and they are row-backed
+now. Activity is ONE level: every agent session of the repository in one
+list, each row named by the command that ran it (spec scan, guard setup,
+guard generate), narrowed by Kind and Status chips, the transcript beside
+it; a run is a fact on the row, never a level to click through. Two things from
 today's navigation go: Pull requests is NOT a top-level entry (the
 cross-repo feed collapses into the workspace home's activity; the page
 itself lives under the repository), and the section switcher between Code
@@ -268,7 +301,11 @@ connection, never by a global token):
   the user is sent to), complete it (the callback that binds the provider's
   installation, group or organization to a workspace), list the
   repositories a connection can see, revoke it. A connection belongs to
-  exactly one workspace; a repository belongs to exactly one connection.
+  exactly one workspace; a repository belongs to exactly one connection; a
+  workspace holds as many connections as it needs, several per provider
+  (decision 2026-08-21: an organization and a personal account on GitHub
+  are two connections, listed side by side, each with its own
+  repositories).
 - **Repository facts.** Stable provider id, full name, default branch,
   visibility (public/private; the plan's private-repo allowance reads it),
   the web URL, and the clone URL.
@@ -308,9 +345,12 @@ next to provider links.
 1. Sign in. Create or pick a workspace.
 2. Add a provider connection (GitHub today). The user is sent to the
    provider, authorizes the app for an organization or an account, and
-   returns.
-3. Pick repositories to connect. Each connection lists what it can see;
-   connecting a private repository is checked against the plan's allowance.
+   returns. The workspace's connections are listed together (provider and
+   account on each), and adding another is always one step away, from the
+   connect flow and from Settings.
+3. Pick a connection, then the repositories to connect from what it can
+   see; connecting a private repository is checked against the plan's
+   allowance.
 4. Onboarding runs (§4.3). The dashboard shows the jobs and their sessions
    live; the user can steer.
 5. From then on every pull request on that repository is gated (§5).
