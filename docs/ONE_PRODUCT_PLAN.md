@@ -203,16 +203,22 @@ exist today; neither is rebuilt from nothing.
 
 **Structure (from the enterprise shell).** Sign-in and workspace switch;
 the workspace home (overview of connected repos, gate activity, and the
-jobs in flight); Repositories (connect, policy, unlink); Pull requests (the
-cross-repo gate feed); Notifications (the durable feed and the bell);
-Settings as a hub (members and SSO, providers, models, integrations,
-plan); Admin for operators. Below that, the repo console: the repo page
-with Spec Guard as its one section and the curated tab order the
-enterprise lens already uses (Coverage, Tests, Interfaces, Runs, Activity,
-plus Sources and Dependencies, which return for everyone; they were hidden
-in hosted mode only because they read the working tree, and they are
-row-backed now). Jobs and sessions stream live into every page through
-the one event connection the shell already holds.
+jobs in flight); Repositories (connect, policy, unlink); Notifications
+(the durable feed and the bell); Settings as a hub (members and SSO,
+providers, models, integrations, plan); Admin for operators. Below that,
+the repo console: selecting a repository opens its page, whose menu is
+Pull requests (that repository's gate feed: each pull request, its check,
+its runs hosted and local, its spec-change offer) followed by the guard
+tabs in the curated order the enterprise lens already uses (Coverage,
+Tests, Interfaces, Runs, Activity, plus Sources and Dependencies, which
+return for everyone; they were hidden in hosted mode only because they
+read the working tree, and they are row-backed now). Two things from
+today's navigation go: Pull requests is NOT a top-level entry (the
+cross-repo feed collapses into the workspace home's activity; the page
+itself lives under the repository), and the section switcher between Code
+Analysis and Spec Guard is deleted with Code Analysis, so the repo page has
+one menu and no toggle. Jobs and sessions stream live into every page
+through the one event connection the shell already holds.
 
 **Idiom (from the agentic branch, carried over whole).** These are the
 product's visual language and the enterprise pages are restyled onto
@@ -699,7 +705,7 @@ out of the deleted context router into the estimator.
   notifications feed and bell, the workspace settings, the LLM provider
   configuration and the hosted LLM transport, the admin console, error
   tracking, the log transport, the auth routes and session verifier, the
-  workspace home, the repositories and pull requests pages, the settings
+  workspace home, the repositories page, the pull requests page (re-homed under the repository, §3.5), the settings
   hub, the Models page, the jobs context and progress popup.
 - The GitHub App package: MOVE and SPLIT. The provider-neutral half
   (connection and repository tables, the gate decision and runner, the
