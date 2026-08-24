@@ -559,17 +559,25 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // summary above and this line instead of a next-flag pointer.)
   if (opts.only && sessionsRunDir) p.log.step(`sessions    ${sessionsRunDir}`);
 
-  // The runner DECLINED the run — a broken recipe, a half-configured external
-  // account. Nothing was built, booted or validated, so this is the only news the
-  // run has: it prints last, loudly, and exits non-zero. Re-running it changes
-  // nothing until the configuration does, so it never suggests a retry.
+  // The runner DECLINED the run at some validation round, and the latch refused
+  // everything after it. What settled BEFORE the latch is real — each written
+  // scenario passed its own confirmation run — so the line must never claim
+  // "nothing was validated" over a partial corpus (the documenso 13-worker
+  // bench shipped 5 files under exactly that banner). It prints last, loudly,
+  // and exits non-zero; the refusal itself never heals by re-running, but a
+  // re-run DOES resume the refused flows from the authoring cache.
   if (guard.refusal) {
-    p.log.error(`Guard refused the run (${guard.refusal.status}) — nothing was built, started, or validated.`);
+    const written = guard.written.length;
+    p.log.error(
+      written > 0
+        ? `Guard refused the run (${guard.refusal.status}) after ${written} test${written === 1 ? "" : "s"} had already settled and been written — everything after the refusal was declined, not validated.`
+        : `Guard refused the run (${guard.refusal.status}) — nothing was built, started, or validated.`,
+    );
     for (const line of guard.refusal.message.trimEnd().split("\n")) console.log(`  ${line}`);
     if (guard.refusal.flowIds.length > 0) {
       p.log.step(`${guard.refusal.flowIds.length} flow${guard.refusal.flowIds.length === 1 ? "" : "s"} had tests authored but never validated — fix the above and re-run \`truecourse guard generate\` (authoring is cached).`);
     }
-    p.outro(guardGenerateOutro({ written: 0, problems: 0, refused: true }));
+    p.outro(guardGenerateOutro({ written, problems: 0, refused: true }));
     process.exit(1);
   }
 
@@ -602,10 +610,14 @@ export function guardGenerateOutro(o: {
   written: number;
   /** Findings + errors — anything the summary above already listed. */
   problems: number;
-  /** The runner declined the run; nothing was validated and re-running won't help. */
+  /** The runner declined the run at some round; `written` counts the tests that
+   *  settled before the latch (0 = nothing was validated at all). */
   refused?: boolean;
 }): string {
-  if (o.refused) return "Aborted — the run was refused; no tests were written.";
+  if (o.refused)
+    return o.written > 0
+      ? `Aborted — the run was refused; the ${o.written} test${o.written === 1 ? " written before the refusal stands" : "s written before the refusal stand"}.`
+      : "Aborted — the run was refused; no tests were written.";
   if (o.written === 0) return o.problems > 0 ? "No tests written — see the errors above." : "No tests written.";
   return "Review + commit the tests, then `truecourse guard run`.";
 }
@@ -1022,6 +1034,12 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       p.log.step(`last gen    ${g.generatedAt} · nothing changed`);
     } else if (g.status !== "ok") {
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
+      printStatusLlmFailures(g.llmFailures);
+      printStatusUnadjudicated(g.unadjudicated);
+    } else if (g.refused) {
+      // A refused generate reads `status: ok` (the pre-latch scenarios are real)
+      // — without this branch the status line reports it as a clean run.
+      p.log.warn(`last gen    ${g.generatedAt} · ${testsLine(g)} · REFUSED (${g.refused}) — flows after the latch were never validated; re-run \`truecourse guard generate\` (authoring is cached)`);
       printStatusLlmFailures(g.llmFailures);
       printStatusUnadjudicated(g.unadjudicated);
     } else {

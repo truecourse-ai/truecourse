@@ -537,10 +537,11 @@ export const GuardGenerateErrorSchema = z
      *    plan). Self-healing: the next generate re-authors and may well succeed.
      *  - `birth` — a scenario WAS authored and its execution errored. Scenario-level,
      *    so it carries {@link flowId}.
-     *  - `refusal` — the RUN was declined before anything was validated (a broken
-     *    recipe, a half-configured external account, a dead entry). Nothing was
-     *    authored, nothing executed, and re-running changes NOTHING until the
-     *    config does — so a surface must never offer "will retry next generate".
+     *  - `refusal` — the RUN latched a decline (a broken recipe, a half-configured
+     *    external account, a dead world): every round from the latch on was refused
+     *    unvalidated. Work settled BEFORE the latch stands; the refusal itself
+     *    never heals by re-running until the config/world does — but a re-run DOES
+     *    resume the refused flows from the authoring cache.
      * Optional: reports written before the discriminator existed carry no kind, and
      * are read as `authoring` (the retry wording those surfaces already used).
      */
@@ -634,11 +635,12 @@ export const GuardEntryPreflightSchema = z
 export type GuardEntryPreflight = z.infer<typeof GuardEntryPreflightSchema>
 
 /**
- * The runner DECLINED the run — before building, booting, or executing anything.
- * A broken `recipe.json`, a credential env var that is not set, an external account
- * described only half-way: all are read off one JSON file in milliseconds, and all
- * of them mean the same thing — no scenario was validated, and none will be until
- * the configuration changes.
+ * The runner DECLINED a run — a broken `recipe.json`, a credential env var that
+ * is not set, a seed whose world died under it. From the round that hit it, the
+ * latch refuses every later round: none of THOSE flows was validated, and none
+ * will be until the configuration (or world) changes. In a generate whose
+ * validation runs per-candidate, rounds that settled BEFORE the latch stand —
+ * the refusal marks where validation STOPPED, not that none ever happened.
  *
  * Recorded ONCE, at the RUN level, in the runner's own grammar. It must never be
  * fanned out per candidate: a refusal that arrives as N per-scenario "validation

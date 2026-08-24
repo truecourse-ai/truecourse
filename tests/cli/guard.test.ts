@@ -903,6 +903,20 @@ describe('composeGuardStatus', () => {
     expect(s).toEqual({ coverage: null, sections: null, lastRun: null, lastGenerate: null })
   })
 
+  it('surfaces a latched refusal — a refused generate reads status:ok and must not summarize as clean', () => {
+    const clean = composeGuardStatus(null, null, report()).lastGenerate!
+    expect(clean.refused).toBeNull()
+    const refused = composeGuardStatus(
+      null,
+      null,
+      report({
+        refusal: { status: 'seed-failed', message: 'seed command exited 1', flowIds: ['f1', 'f2'] },
+      }),
+    ).lastGenerate!
+    expect(refused.status).toBe('ok')
+    expect(refused.refused).toBe('seed-failed')
+  })
+
   it('summarizes coverage: bound sections + the ones owning scenarios', () => {
     const manifest: GuardManifest = {
       flows: [
@@ -1479,6 +1493,15 @@ describe('guardGenerateOutro', () => {
   it('says a refused run was aborted, whatever else the report carries', () => {
     expect(guardGenerateOutro({ written: 0, problems: 0, refused: true })).toBe(
       'Aborted — the run was refused; no tests were written.',
+    )
+    // A refusal latched mid-validation: what settled before it is REAL and the
+    // outro must say so, never "no tests were written" over a partial corpus
+    // (the documenso 13-worker bench shipped 5 files under that banner).
+    expect(guardGenerateOutro({ written: 5, problems: 0, refused: true })).toBe(
+      'Aborted — the run was refused; the 5 tests written before the refusal stand.',
+    )
+    expect(guardGenerateOutro({ written: 1, problems: 0, refused: true })).toBe(
+      'Aborted — the run was refused; the 1 test written before the refusal stands.',
     )
   })
 })

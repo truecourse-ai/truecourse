@@ -7011,3 +7011,19 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     trusting a world claim without re-proving it. Tests updated
     incident-verbatim in `tests/core/guard-generate-worker-seam.test.ts`.
 
+127. **A latched refusal is reported honestly — partial corpora stop
+    reading as "nothing was validated" (same bench).** STATUS: BUILT. A
+    refusal that latches mid-validation leaves the scenarios settled BEFORE
+    it fully validated and written, yet the CLI said "nothing was built,
+    started, or validated" over 5 written files while `result.json` read
+    `status: ok` with no refusal surfaced in `guard status`. Now: the
+    refusal line and the outro are written-aware ("after N tests had
+    already settled…", "…the N tests written before the refusal stand"),
+    `GuardLastGenerateSummary` carries `refused` (the refusal status id)
+    and `guard status` renders a refused last-gen as a warn line instead of
+    a clean one, and the stale "birth validated nothing" comments on
+    `GuardGenerateResult.refusal` / `GuardRunRefusalSchema` / the report
+    error-kind now state the latch semantics. `status` itself stays `ok` —
+    the pre-latch corpus is real; `refusal` is the discriminator readers
+    must surface. Tests: `tests/cli/guard.test.ts` (outro, projection).
+

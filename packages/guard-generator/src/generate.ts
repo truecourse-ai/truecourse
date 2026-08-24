@@ -405,9 +405,13 @@ export interface GuardGenerateResult {
    */
   entryPreflight?: GuardEntryPreflight
   /**
-   * Present ONLY when the runner REFUSED the run (a broken recipe, a
-   * half-configured external account). Birth validated nothing, so every candidate
-   * flow stayed unsettled — with ONE run-level error, never one per candidate.
+   * Present ONLY when the runner REFUSED a validation round (a broken recipe, a
+   * half-configured external account, a dead world) — the latch then declined
+   * every LATER round, with ONE run-level error, never one per candidate.
+   * Scenarios that settled BEFORE the latch are real: each passed its own
+   * confirmation run and was written (`written` counts them), so `status` stays
+   * `'ok'` and readers must surface THIS field to tell a refused run from a
+   * clean one. The refused flows' authoring is cached — a re-run resumes them.
    */
   refusal?: GuardRunRefusal
   /**

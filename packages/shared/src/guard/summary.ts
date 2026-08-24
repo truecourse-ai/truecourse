@@ -108,6 +108,13 @@ export interface GuardLastRunSummary {
 export interface GuardLastGenerateSummary {
   generatedAt: string
   status: GuardGenerateReport['status']
+  /**
+   * The runner-refusal status id (`seed-failed`, `missing-external-env`, …) when
+   * the run latched a REFUSAL mid-validation — `status` alone reads `ok` on such
+   * a run (the scenarios settled before the latch are real), so a status surface
+   * that omits this line reports a refused generate as a clean one.
+   */
+  refused: string | null
   noChanges: boolean
   written: number
   /**
@@ -430,6 +437,7 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
   return {
     generatedAt: r.generatedAt,
     status: r.status,
+    refused: r.refusal?.status ?? null,
     noChanges: r.noChanges,
     written: r.written.length,
     testsFailing: r.written.filter((w) => w.status === 'failing').length,
