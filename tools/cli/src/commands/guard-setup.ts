@@ -319,6 +319,22 @@ export function printSetupReport(report: GuardSetupReport, reportPath: string): 
     }
   }
 
+  // The auth verdict lives only on the steps spine (no legacy top-level field),
+  // and `blocked` is BY DESIGN loud and actionable — a registration the user
+  // must perform. Swallowing it defeated the step (2026-08-24 bench, twice).
+  const auth = report.steps?.find((step) => step.key === "auth");
+  if (auth) {
+    if (auth.status === "blocked") {
+      p.log.warn(`auth        blocked: ${auth.reason}`);
+    } else if (auth.status === "failed") {
+      p.log.warn(`auth        failed: ${auth.reason}`);
+    } else if (auth.status === "skipped") {
+      p.log.info(`auth        skipped: ${auth.reason}`);
+    } else {
+      p.log.step(`auth        every provided dependency proved`);
+    }
+  }
+
   for (const error of report.credentialSchemes?.errors ?? []) {
     p.log.error(`${error} \`truecourse guard generate\` will refuse to run until this is fixed.`);
   }

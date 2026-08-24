@@ -411,6 +411,29 @@ describe('printSetupReport', () => {
     expect(text()).toMatch(/report: \.truecourse\/guard\/setup\.json/);
   });
 
+  // `blocked` is the auth step's LOUD verdict by design — the 2026-08-24 bench
+  // caught the CLI swallowing it twice (the verdict lived only in setup.json).
+  it('renders the auth verdict from the steps spine, blocked loudest', () => {
+    printSetupReport(
+      {
+        ranAt: '2026-08-19T00:00:00.000Z',
+        status: 'ok',
+        steps: [
+          {
+            key: 'auth',
+            status: 'blocked',
+            inputFingerprint: 'b',
+            reason: 'aws: not registered — packages/providers/upload-aws-s3 imports it',
+          },
+        ],
+        recipe: { status: 'ok', outcome: 'exists' },
+      },
+      '.truecourse/guard/setup.json',
+    );
+
+    expect(text()).toMatch(/auth\s+blocked: aws: not registered/);
+  });
+
   // The usage line is still the ONE-SHOT line: `usage.sessions` (and the step
   // rows, and the diagnostics) are not rendered yet — the report surface is
   // section 06's. Pinned so that change is a visible one.
