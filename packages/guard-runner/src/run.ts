@@ -54,6 +54,7 @@ import {
   type ResolvedExternal,
 } from './externals.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
+import type { GuardSharedWorld } from './shared-world.js'
 import {
   DependencyCatalogError,
   dependencyBlockFor,
@@ -144,6 +145,15 @@ export interface RunGuardOptions {
   concurrency?: number
   /** Suppress the build (tests that pre-build). Off by default. */
   skipBuild?: boolean
+  /**
+   * The run-level SHARED world (services + seed), threaded by generate across
+   * every sandbox/birth execution so their lifecycles cannot race on the
+   * recipe's singleton compose project (see shared-world.ts). When present,
+   * this run consumes the shared boot instead of running `services.up`/`seed`
+   * itself, and NEVER runs `services.down` — the handle's owner does, once.
+   * In-process only; absent on a plain `guard run` and on hosted executors.
+   */
+  sharedWorld?: GuardSharedWorld
   /**
    * The wall-clock below which an exit-0 empty-output cli step is classified a
    * no-op for anomaly detection (C4). Defaults to `NO_OP_STEP_THRESHOLD_MS`; a
@@ -833,46 +843,76 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       } else {
         apiCredentials = new Map()
       }
-      if (api.services) {
-        const up = await runBuild(
-          repoRoot,
-          api.services.up,
-          loaded.recipe.env,
-          opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
-          cancel.signal,
-        )
-        const stop = cancelled('build')
-        if (stop) return stop
-        if (!up.ok) return { status: 'build-failed', build: up, loadErrors }
-        servicesUp = true
-      }
-      // Seed AFTER services.up (its datastore/migrations are ready) and BEFORE the
-      // server boots — once per run. Seeded credentials merge into the resolved map
-      // (and are redacted like any secret); seeded fixtures feed `{{fixture:…}}`.
-      if (api.seed) {
-        try {
-          const seeded = await runSeed({
+      // The prepared world (services + seed) — either THIS run's own, or the
+      // run-level SHARED one (`opts.sharedWorld`): generate threads a single
+      // world across every sandbox/birth execution so their up/down lifecycles
+      // cannot race each other on the recipe's singleton compose project (see
+      // shared-world.ts — the documenso 13-worker P1017 incident). A plain
+      // `guard run` passes no handle and prepares + tears down its own, as
+      // before. The boot/teardown THUNKS live here so the shared path runs
+      // byte-identical logic to the owned path.
+      type WorldBoot =
+        | { ok: true; credentials: [string, string][]; fixtures: Map<string, Record<string, unknown>> | undefined }
+        | { ok: false; stop: RunGuardResult }
+      const bootWorld = async (): Promise<WorldBoot> => {
+        if (api.services) {
+          const up = await runBuild(
             repoRoot,
-            seed: api.seed,
-            // The seed prepares state for the SERVER, so it runs with the server's env
-            // (recipe.env merged with api.env) — a datastore URL in `api.env` must reach it.
-            env: sharedEnv,
-            // Fold the already-resolved Phase-1 credential values into the failure
-            // redactor so a secret the seed echoes before failing is masked in seed-failed.
-            knownCredentials: apiCredentials,
-            externalSecrets,
-            timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
-            signal: cancel.signal,
-          })
-          for (const [name, cred] of seeded.credentials) apiCredentials.set(name, cred.value)
-          apiFixtures = seeded.fixtures
-        } catch (e) {
+            api.services.up,
+            loaded.recipe.env,
+            opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+            cancel.signal,
+          )
           const stop = cancelled('build')
-          if (stop) return stop
-          if (e instanceof SeedError) return { status: 'seed-failed', message: e.message }
-          throw e
+          if (stop) return { ok: false, stop }
+          if (!up.ok) return { ok: false, stop: { status: 'build-failed', build: up, loadErrors } }
+        }
+        // Seed AFTER services.up (its datastore/migrations are ready) and BEFORE
+        // the server boots — once per prepared world. Seeded credentials merge
+        // into the resolved map (and are redacted like any secret); seeded
+        // fixtures feed `{{fixture:…}}`.
+        const credentials: [string, string][] = []
+        let fixtures: Map<string, Record<string, unknown>> | undefined
+        if (api.seed) {
+          try {
+            const seeded = await runSeed({
+              repoRoot,
+              seed: api.seed,
+              // The seed prepares state for the SERVER, so it runs with the server's env
+              // (recipe.env merged with api.env) — a datastore URL in `api.env` must reach it.
+              env: sharedEnv,
+              // Fold the already-resolved Phase-1 credential values into the failure
+              // redactor so a secret the seed echoes before failing is masked in seed-failed.
+              knownCredentials: apiCredentials,
+              externalSecrets,
+              timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+              signal: cancel.signal,
+            })
+            for (const [name, cred] of seeded.credentials) credentials.push([name, cred.value])
+            fixtures = seeded.fixtures
+          } catch (e) {
+            const stop = cancelled('build')
+            if (stop) return { ok: false, stop }
+            if (e instanceof SeedError) return { ok: false, stop: { status: 'seed-failed', message: e.message } }
+            throw e
+          }
+        }
+        return { ok: true, credentials, fixtures }
+      }
+      const downWorld = async (): Promise<void> => {
+        if (api.services?.down) {
+          await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
         }
       }
+      const world = opts.sharedWorld
+        ? await opts.sharedWorld.ensure(bootWorld, downWorld, (v) => !v.ok)
+        : await bootWorld()
+      if (!world.ok) return world.stop
+      // Own-world runs tear down in the finally below; a shared world is torn
+      // down exactly once by its owner's `shutdown()`, never per execution.
+      if (!opts.sharedWorld && api.services) servicesUp = true
+      for (const [name, value] of world.credentials) apiCredentials.set(name, value)
+      if (world.fixtures !== undefined) apiFixtures = world.fixtures
       // `fromRequest` credentials mint their value against a LIVE app, so the login
       // rides the preflight boot itself (`onReady`) rather than paying for a second
       // one — and lands after the seed, so a seeded account can be the one it logs

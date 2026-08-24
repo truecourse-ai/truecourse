@@ -88,6 +88,7 @@ import {
   type Recipe,
   type BuildResult,
   type EntryPreflightResult,
+  createGuardSharedWorld,
 } from '@truecourse/guard-runner'
 import {
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
@@ -789,6 +790,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // default); the recipe is the discovered/loaded one below, passed IN so the
   // executor never re-reads recipe.json.
   const executor = options.executor ?? defaultGuardExecutor
+  // ONE prepared world for the whole run (see guard-runner's shared-world.ts):
+  // every sandbox and birth round consumes the same booted services + seed, so
+  // their lifecycles cannot race on the recipe's singleton compose project.
+  // Inert until the first execution needs it; shut down before every exit of
+  // the worker phase (the item-94 teardown channel backstops crashes).
+  const sharedWorld = createGuardSharedWorld()
   // ONE counting seam for the transport half of the run: the two remaining
   // one-shot runners (recipe, match) are spawned on the WRAPPED transport, so
   // attempts and failures are accounted centrally instead of at each fail-soft
@@ -1963,6 +1970,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
         const round = await birthValidate(repoRoot, [candidate], {
           executor,
+          sharedWorld,
           recipe,
           skipBuild: true,
           noOpThresholdMs: options.noOpThresholdMs,
@@ -2332,6 +2340,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
       // The C4 abort — before persist, so nothing corpus-side moved.
       if (anomalyLatch) {
+        await sharedWorld.shutdown()
         return emptyResult('recipe-failed', {
           llmFailures: [...audit.failures(), ...sessionTallies],
           reason: noOpAnomalyReason(anomalyLatch, recipe),
@@ -2344,6 +2353,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // one-shot authoring wipeout, through the same channel.
       const anyCompleted = [...byTask.values()].some((r) => r.kind === 'outcome')
       if (!anyCompleted && isSystemicSessionLoss(summary)) {
+        await sharedWorld.shutdown()
         return llmFailedResult(
           audit,
           'guard.generate',
@@ -2586,6 +2596,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   if (workerFidelityLoss) {
     unadjudicated.push({ stage: 'guard.fidelity', affected: fidelityUnreviewed })
   }
+
+  // The last execution is behind us — tear the shared world down BEFORE persist,
+  // so the write phase can never race a live compose project (and a refused or
+  // clean run alike leaves the host swept; crashes fall to the item-94 channel).
+  await sharedWorld.shutdown()
 
   // 8. Persist — INDEPENDENTLY, per scenario, whatever its confirmation run said.
   // A test that passed is written; a test that FAILED is written too, with its

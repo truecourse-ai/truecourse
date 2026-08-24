@@ -13,6 +13,7 @@
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { Recipe } from './recipe.js'
 import { runGuard, type RunGuardResult } from './run.js'
+import type { GuardSharedWorld } from './shared-world.js'
 import type { GuardVisualJudge } from './visual-judge.js'
 
 export interface GuardExecInput {
@@ -63,6 +64,13 @@ export interface GuardExecInput {
    * executor simply ignores it and its runs stay unannotated — never a failure.
    */
   visualJudge?: GuardVisualJudge
+  /**
+   * OPTIONAL run-level shared world (see shared-world.ts): generate threads one
+   * across every execution so sandbox world lifecycles cannot race. Same
+   * in-process class as `visualJudge` — a hosted executor ignores it and keeps
+   * booting its own worlds (remote runs never shared a host to race on).
+   */
+  sharedWorld?: GuardSharedWorld
 }
 
 /** The run report — reuses the existing discriminated union verbatim. */
@@ -96,4 +104,5 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     onPhase: input.onPhase,
     onScenarioSettled: input.onScenarioSettled,
     ...(input.visualJudge ? { visualJudge: input.visualJudge } : {}),
+    ...(input.sharedWorld ? { sharedWorld: input.sharedWorld } : {}),
   })

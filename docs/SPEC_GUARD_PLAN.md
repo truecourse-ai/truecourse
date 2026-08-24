@@ -6977,3 +6977,26 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     binary. `packages/core/src/services/guard-setup/seed-session.ts`; tests
     in `tests/core/guard-setup-seed-session.test.ts` (build-before-up
     ordering, failing-build refusal with zero sessions).
+
+125. **One shared world per generate — sandbox lifecycles stop racing the
+    recipe's singleton compose project (2026-08-24 documenso 13-worker
+    bench).** STATUS: BUILT. Every sandboxed `run_scenario` and birth round
+    used to boot AND tear down `api.services` + `api.seed` itself; the
+    compose file pins one project name and one datastore volume, so at any
+    concurrency one execution's `down` landed under a sibling's seed —
+    Prisma P1017 / "can't reach database" — and a single hit latched a
+    run-wide seed-failed refusal (three aborted bench runs). The per-sandbox
+    up/down bought no isolation (every sandbox shared the same datastore):
+    now `generateGuards` creates ONE `GuardSharedWorld` (guard-runner
+    `shared-world.ts`, a single-flight memo whose boot/teardown thunks stay
+    in `run.ts` so the shared and owned paths cannot drift) and threads it
+    through `birthValidate` → the executor seam → `runGuard`; the first
+    execution boots services + seed, every later one reuses the memo, and
+    teardown happens exactly once — before persist, and on the worker
+    phase's early aborts (crashes fall to the item-94 channel). A failed
+    boot is never memoized (each round re-attempts, as before); a plain
+    `guard run` and hosted/EE executors pass no handle and keep owning
+    their worlds. Tests: `tests/guard-runner/shared-world.test.ts` (memo
+    contract; sequential/CONCURRENT runs boot once, seed once, down only at
+    shutdown; failed-up retry).
+

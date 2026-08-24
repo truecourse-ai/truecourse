@@ -49,6 +49,8 @@ export type {
 
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
+export { createGuardSharedWorld } from './shared-world.js'
+export type { GuardSharedWorld } from './shared-world.js'
 
 export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'

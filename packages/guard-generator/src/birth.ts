@@ -14,7 +14,7 @@
  * RUN level and produces no scenario verdicts at all (see {@link BirthRound}).
  */
 
-import { runFailureMessage, type GuardExecutor, type GuardRunStepStats, type Recipe } from '@truecourse/guard-runner'
+import { runFailureMessage, type GuardExecutor, type GuardRunStepStats, type GuardSharedWorld, type Recipe } from '@truecourse/guard-runner'
 import type {
   GuardDriverId,
   GuardFlow,
@@ -118,6 +118,12 @@ export interface BirthOptions {
    */
   executor: GuardExecutor
   /**
+   * The run-level shared world, threaded verbatim into every executor input so
+   * all rounds of one generate consume ONE booted world (see guard-runner's
+   * shared-world.ts). Absent on callers that own their world.
+   */
+  sharedWorld?: GuardSharedWorld
+  /**
    * The recipe to build + run against (REQUIRED). The generate flow already has the
    * discovered/loaded recipe, so it's passed IN rather than re-read from disk.
    */
@@ -151,6 +157,7 @@ export async function birthValidate(
 
   const res = await opts.executor({
     checkoutDir: repoRoot,
+    ...(opts.sharedWorld ? { sharedWorld: opts.sharedWorld } : {}),
     recipe: opts.recipe,
     scenarios: candidates.map((c) => c.scenario),
     persist: false,
