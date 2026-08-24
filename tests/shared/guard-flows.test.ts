@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   GuardFlowSchema,
+  GuardFlowWorkerOutcomeSchema,
   GuardFlowsFileSchema,
   GuardFlowMilestoneSchema,
   GuardManifestSchema,
@@ -319,5 +320,49 @@ describe('guard decisions — dismissedFlows', () => {
     expect(() =>
       GuardDecisionsSchema.parse({ version: 1, dismissedFlows: [{ flowId: 'f', dismissedAt: 'now' }] }),
     ).toThrow()
+  })
+})
+
+describe('GuardFlowWorkerOutcomeSchema payload pairing', () => {
+  it('blocked MAY carry lastEvidence — the run evidence behind the block (documenso 13-worker incident)', () => {
+    // Incident-verbatim (run 5, session 99f01d47…): the worker ended blocked
+    // after real runs and attached what it had proven. Refusing the evidence
+    // cost a whole re-ask turn for information worth keeping.
+    const withEvidence = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'blocked',
+      perMilestone: [
+        { order: 1, capability: 'missing-data: a legacy document id usable through POST /api/v2/template/use' },
+      ],
+      lastEvidence: 'GET /api/v2/document/1 → 404 with both credentials; the seeded world has no legacy document',
+    })
+    expect(withEvidence.success).toBe(true)
+  })
+
+  it('blocked still refuses attempts — retirement bookkeeping with no consumer on a block', () => {
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'blocked',
+      perMilestone: [{ order: 1, capability: 'a stripe sandbox account' }],
+      attempts: 3,
+    })
+    expect(res.success).toBe(false)
+    if (!res.success) expect(res.error.issues.map((i) => i.path[0])).toEqual(['attempts'])
+  })
+
+  it('settled must not carry lastEvidence — the allowance is blocked-only', () => {
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'settled',
+      scenarioYamlSha: 'a'.repeat(64),
+      expectedReds: [],
+      lastEvidence: 'stray',
+    })
+    expect(res.success).toBe(false)
+  })
+
+  it('retired keeps requiring both attempts and lastEvidence', () => {
+    expect(GuardFlowWorkerOutcomeSchema.safeParse({ kind: 'retired', attempts: 2 }).success).toBe(false)
+    expect(
+      GuardFlowWorkerOutcomeSchema.safeParse({ kind: 'retired', attempts: 2, lastEvidence: 'no faithful scenario' })
+        .success,
+    ).toBe(true)
   })
 })

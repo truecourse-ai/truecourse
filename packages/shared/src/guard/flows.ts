@@ -213,6 +213,18 @@ const FLOW_WORKER_PAYLOAD_FIELDS = {
   retired: ['attempts', 'lastEvidence'],
 } as const satisfies Record<string, readonly string[]>
 
+/** Fields a kind MAY carry beyond its required payload. A worker that ends
+ *  `blocked` after real runs naturally attaches the evidence that proved the
+ *  block — refusing it cost a whole re-ask turn for information worth keeping
+ *  (the documenso 13-worker bench, 2026-08-24). `attempts` stays refused on
+ *  blocked: it is retirement bookkeeping with no consumer on a block. */
+const FLOW_WORKER_OPTIONAL_FIELDS = {
+  settled: [],
+  blocked: ['lastEvidence'],
+  'journey-defect': [],
+  retired: [],
+} as const satisfies Record<keyof typeof FLOW_WORKER_PAYLOAD_FIELDS, readonly string[]>
+
 /**
  * The `guard-generate.flow-worker` session's outcome (plan 04 step 17) —
  * exhaustive: a worker cannot end without one of these four kinds.
@@ -252,12 +264,14 @@ export const GuardFlowWorkerOutcomeSchema = z
     report: z.object({ interfaceId: z.string().min(1), detail: z.string().min(1) }).strict().optional(),
     /** retired: how many authoring attempts the worker spent before giving up. */
     attempts: z.number().int().nonnegative().optional(),
-    /** retired: the last run's evidence — why no faithful scenario could be produced. */
+    /** retired: the last run's evidence — why no faithful scenario could be produced.
+     *  blocked MAY carry it too: the run evidence behind the block. */
     lastEvidence: z.string().min(1).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
     const wanted: readonly string[] = FLOW_WORKER_PAYLOAD_FIELDS[value.kind]
+    const allowed: readonly string[] = FLOW_WORKER_OPTIONAL_FIELDS[value.kind]
     const allFields = Object.values(FLOW_WORKER_PAYLOAD_FIELDS).flat()
     for (const field of allFields) {
       const present = value[field as keyof typeof value] !== undefined
@@ -267,7 +281,7 @@ export const GuardFlowWorkerOutcomeSchema = z
           path: [field],
           message: `kind "${value.kind}" requires \`${field}\``,
         })
-      } else if (!wanted.includes(field) && present) {
+      } else if (!wanted.includes(field) && !allowed.includes(field) && present) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [field],

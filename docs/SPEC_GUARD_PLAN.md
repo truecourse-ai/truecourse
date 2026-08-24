@@ -7027,3 +7027,12 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     the pre-latch corpus is real; `refusal` is the discriminator readers
     must surface. Tests: `tests/cli/guard.test.ts` (outro, projection).
 
+128. **`blocked` may carry `lastEvidence` (same bench).** STATUS: BUILT. A
+    worker that ends blocked after real runs naturally attaches the
+    evidence that proved the block; the outcome schema's strict pairing
+    refused it (`kind "blocked" must not carry lastEvidence`), costing a
+    re-ask turn to DELETE information worth keeping — two sessions died
+    malformed on exactly this. `FLOW_WORKER_OPTIONAL_FIELDS` now allows
+    `lastEvidence` on `blocked` (`attempts` stays refused: retirement
+    bookkeeping with no consumer on a block). Incident-verbatim tests in
+    `tests/shared/guard-flows.test.ts`.
