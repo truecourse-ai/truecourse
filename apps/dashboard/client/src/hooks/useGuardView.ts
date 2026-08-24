@@ -41,7 +41,12 @@ export interface GuardViewState {
    * Coverage section's flow row and an interface's "grounds" link both take.
    */
   openGuardFlow: (flowId: string) => void;
-  /** Jump to the Interfaces tab with one interface's detail open (`?ginterface=`). */
+  /**
+   * Jump to the Interfaces tab with one interface open (`?ginterface=`). The tab's
+   * subject is the PLACE that owns the member, which only the catalog can say —
+   * so this writes the interface id and the pane resolves it, selecting the place
+   * and expanding (and scrolling to) that member.
+   */
   openGuardInterface: (interfaceId: string) => void;
   /**
    * Jump to the Dependencies tab — the CTA of a `needs-setup` section, flow or
@@ -55,7 +60,7 @@ export interface GuardViewState {
 
 /** Drop every guard tab selection — each jump owns the pane it lands on. */
 function clearGuardSelections(q: URLSearchParams): void {
-  for (const key of ['gdrift', 'gflow', 'gfind', 'ginterface', 'gjourney', 'gclaim', 'gext', 'gsrc']) {
+  for (const key of ['gdrift', 'gflow', 'gfind', 'ginterface', 'gjourney', 'gplace', 'gclaim', 'gext', 'gsrc']) {
     q.delete(key);
   }
 }

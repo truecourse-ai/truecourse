@@ -1624,6 +1624,10 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
     // The contract passes through verbatim — the view renders the catalog's own
     // words, and a catalog without one simply carries none.
     ...(j.contract ? { contract: j.contract } : {}),
+    // What this entry's steps CALL, by id — verbatim, absence included: the
+    // client joins the ids against the api rows beside them, and `[]` (reaches
+    // no server) must stay distinguishable from "nobody established it".
+    ...(j.apiEffects ? { apiEffects: j.apiEffects } : {}),
   }))
 
   const countByType = new Map<string, number>()
@@ -1638,6 +1642,9 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
     // The resource registry, verbatim — defined once in the catalog, joined by
     // the client (panel labels, the open row's place card).
     ...(catalog.resources ? { resources: catalog.resources } : {}),
+    // The state registry travels the same way and for the same reason: the ids
+    // are on the rows, the one line that says what each world IS is here.
+    ...(catalog.states ? { states: catalog.states } : {}),
     surfaces,
     totals: {
       interfaces: interfaces.length,

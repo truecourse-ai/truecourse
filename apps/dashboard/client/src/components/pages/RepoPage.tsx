@@ -72,7 +72,7 @@ import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { guardTestBinds } from '@/lib/guard-tests';
 import type { GuardFlowFilter } from '@/lib/guard-flow-status';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
-import { useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
+import { useGuardInterfaceMember, useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
 import { useGuardClaims } from '@/hooks/useGuardClaims';
 import { guardUntestableEntries } from '@/lib/guard-claims';
 import { useGraph } from '@/hooks/useGraph';
@@ -411,11 +411,16 @@ function RepoPageInner() {
   // A refused statement has no store id — it is addressed by where it sits, and
   // the panel, the tab strip and the detail must all agree on that address.
   const guardUntestable = useMemo(() => guardUntestableEntries(guardClaims.view), [guardClaims.view]);
-  // Guard's OWN flow (`?gflow=`) and interface (`?ginterface=`) tab sets — the
+  // Guard's OWN flow (`?gflow=`) and interface-PLACE (`?gplace=`) tab sets — the
   // Spec-doc transient/pinned tab model (single-click preview, double-click pin),
   // guard-scoped so nothing bleeds into BL Drift's tab sets.
   const guardFlowTabs = useGuardFlowTabs(repoId);
   const guardInterfaceTabs = useGuardInterfaceTabs(repoId);
+  // WHICH MEMBER of the open row is expanded. It lives here because the panel's
+  // entry rows open one and the pane's rows toggle one — one selection, two
+  // surfaces. `?ginterface=` seeds it, which is how a cross-navigation jump from
+  // a flow lands on the right method.
+  const [guardInterfaceMember, setGuardInterfaceMember] = useGuardInterfaceMember();
   // The interface detail's second nav: which COMMAND of the tree is being read.
   // The list narrowings live HERE, above the panels that own them, so they survive
   // a main-pane navigation (open a flow, come back, the list is still where it
@@ -1223,9 +1228,10 @@ function RepoPageInner() {
             </GuardPrScopeGate>
           )}
           {leftTab === 'interfaces' && (
-            // The code-derived catalog, grouped by surface, each row carrying the
-            // reverse index onto the flows that ground on it — and each surface
-            // group leading with the preparation THAT surface runs on.
+            // The code-derived catalog as SCREENS, OPERATIONS AND COMMANDS — one
+            // flat row per screen (web), per method+path (api) or per command
+            // (cli), nothing nested and nothing expandable. Each surface group
+            // leads with its loose entries and the preparation THAT surface runs on.
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardInterfacesPanel
                 interfaces={guardInterfaces.view?.interfaces ?? []}
@@ -1240,9 +1246,10 @@ function RepoPageInner() {
                 onToggleRecipe={(surface) =>
                   setGuardRecipeSurface((open) => (open === surface ? null : surface))
                 }
-                onOpen={(id, pinned) => {
+                onOpen={(place, pinned, member) => {
                   setGuardRecipeSurface(null);
-                  guardInterfaceTabs.open(id, pinned);
+                  setGuardInterfaceMember(member ?? null);
+                  guardInterfaceTabs.open(place, pinned);
                 }}
               />
             </GuardPrScopeGate>
@@ -1415,9 +1422,10 @@ function RepoPageInner() {
               />
             </GuardPrScopeGate>
           ) : leftTab === 'interfaces' ? (
-            // Guard Interfaces: the catalog detail — the sequence diagram and the
-            // flows that ground on it — or the preparation recipe of whichever
-            // surface the panel opened.
+            // Guard Interfaces: the selected row in full — a screen aggregated
+            // over its panels and dialogs (its actions table and what the page
+            // shows), one operation, or one command — or the preparation recipe
+            // of whichever surface the panel opened.
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardInterfacesPane
                 repoId={repoId}
@@ -1425,6 +1433,8 @@ function RepoPageInner() {
                 loading={guardInterfaces.loading}
                 error={guardInterfaces.error}
                 tabs={guardInterfaceTabs}
+                member={guardInterfaceMember}
+                onMember={setGuardInterfaceMember}
                 recipe={guardFlows.view?.recipe ?? null}
                 recipeSurface={guardRecipeSurface}
                 onCloseRecipe={() => setGuardRecipeSurface(null)}

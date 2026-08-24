@@ -1,19 +1,39 @@
 /**
- * Guard INTERFACES-tab tests — the code half's read surface and its one FREE action.
- * Covers the unmapped empty state and the Map swap (the POST answers with the
- * fresh catalog, so the tab re-renders from the response — no refetch, no socket),
- * the per-surface catalog with the reverse index onto the flows, the SURFACE
- * FILTER over it, the per-surface FAMILIES the catalog groups its entries into,
- * the per-surface RECIPE rows the panel opens with (the preparation THAT surface
- * runs on, in its two readings, in one field grammar for every surface), the
- * sequence diagram, and the "Used by flows" click-through into the Flows tab.
+ * Guard INTERFACES-tab tests — the code half's read surface, as SCREENS,
+ * OPERATIONS AND COMMANDS (2026-08-24).
  *
- * There is no detected-surface banner: the surface groups of the catalog beside
- * the pane ARE that information, and saying it twice is two things to keep in
- * agreement.
+ * The panel is a flat SKIM with nothing expandable: one row per web SCREEN (a
+ * top-level place, tallying its own interfaces and every part's), per api
+ * OPERATION (a coloured method and a path, its endpoint's rows adjacent) or per
+ * cli COMMAND. A screen with nothing to do — and an api ENDPOINT no operation
+ * serves — is counted out under the rows, never listed. The pane is that row in
+ * full. What is covered here:
+ *
+ *  - the rows of each surface, their tallies, the loose ENTRIES a screens surface
+ *    has no place for, and the hidden-empty rule;
+ *  - the SCREEN page: the classic header (surface, kind, place id, route +
+ *    mapping, description) over ONE Contract section — the ACTIONS table across
+ *    every part, each row opening in place, and THE PAGE SHOWS table over every
+ *    readable;
+ *  - the OPERATION page, opened DIRECTLY with no endpoint list in between, its
+ *    endpoint and siblings as one line of chips; and the COMMAND page (one
+ *    interface, its contract straight away);
+ *  - an expanded action's own facts — the sequence, `apiEffects` as a calls
+ *    block, and the world it leaves with the registry's own line. Both were gaps:
+ *    a web task used to dead-end at "No contract derived" and `apiEffects` was
+ *    rendered nowhere at all;
+ *  - CROSS-NAVIGATION: `?ginterface=<id>` still names an interface, and the pane
+ *    resolves it to the ROW that owns it — a task on a panel opens the SCREEN
+ *    that panel is part of, an operation opens itself — then expands and scrolls;
+ *  - the SURFACE FILTER, the per-surface RECIPE rows, and the cli/api contracts,
+ *    which the redesign did not touch.
+ *
+ * The join and the minting rules are pinned in `interface-pom.test.ts`; this file
+ * is what the components DO with them.
  *
  * Fixture: the plan's taskbird cli catalog — three grounded interfaces plus one no
- * flow mentions (the candidate spec gap).
+ * flow mentions (the candidate spec gap) — plus a small web catalog with a real
+ * registry.
  */
 
 import { useState } from 'react';
@@ -25,7 +45,7 @@ import type { GuardDriverId, GuardInterfacesView, GuardRecipeCard } from '@truec
 import { GuardInterfacesPanel } from '@/components/guard/GuardInterfacesPanel';
 import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
-import { useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
+import { useGuardInterfaceMember, useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -104,10 +124,10 @@ let recipeRawRequests: string[] = [];
 
 /** The wire always carries a row per registry driver — the catalog groups the ones with code. */
 const SURFACES: GuardInterfacesView['surfaces'] = [
-  { surface: 'cli', label: 'CLI', runnable: true, interfaces: 5, detected: true, source: 'tree' },
-  { surface: 'api', label: 'API', runnable: true, interfaces: 0, detected: false },
-  { surface: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, detected: false },
-  { surface: 'desktop', label: 'Desktop', runnable: false, waitingLabel: 'Needs desktop driver', interfaces: 0, detected: false },
+  { surface: 'cli', label: 'CLI', runnable: true, interfaces: 5, resources: 2, detected: true, source: 'tree' },
+  { surface: 'api', label: 'API', runnable: true, interfaces: 0, resources: 0, detected: false },
+  { surface: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, resources: 0, detected: false },
+  { surface: 'desktop', label: 'Desktop', runnable: false, waitingLabel: 'Needs desktop driver', interfaces: 0, resources: 0, detected: false },
 ];
 
 const FLOW_TITLE = 'A user creates a task, sees it listed, and completes it';
@@ -116,17 +136,28 @@ const BLOCKED_FLOW_ID = 'manage-telemetry-settings';
 /** A realized usage — a committed scenario grounds on the interface. */
 const usedBy = (flowId: string, title: string) => ({ flowId, title, realized: true });
 
+/**
+ * The cli registry: the `tasks` command group, with `tasks telemetry` hanging off
+ * it — the nesting a page-object reading of a command tree needs.
+ */
+const CLI_PLACES: NonNullable<GuardInterfacesView['resources']>['cli'] = [
+  { id: 'tasks', kind: 'command-group', title: 'tasks' },
+  { id: 'tasks-telemetry', kind: 'command-group', title: 'tasks telemetry', of: 'tasks' },
+];
+
 const iface = (
   slug: string,
   title: string,
   flags: string[],
   flows: GuardInterfacesView['interfaces'][number]['flows'],
+  place = 'tasks',
 ) => ({
   id: `cli/${slug}`,
   type: 'cli' as const,
   title,
   entry: { command: title.split(' ') },
   steps: [{ kind: 'invoke' as const, command: title.split(' '), flags }],
+  resource: place,
   fingerprint: `sha256:${slug}`,
   flows,
   scenarioIds: flows.some((f) => f.realized) ? [SCENARIO_ID] : [],
@@ -142,20 +173,28 @@ const MAPPED: GuardInterfacesView = {
     iface('tasks-list', 'tasks list', ['--done'], [usedBy(FLOW_ID, FLOW_TITLE)]),
     iface('tasks-done', 'tasks done', [], [usedBy(FLOW_ID, FLOW_TITLE)]),
     iface('tasks-purge', 'tasks purge', ['--force'], []),
-    // Matched by a flow whose authoring was refused — used, never exercised.
-    iface('telemetry', 'tasks telemetry', [], [
-      {
-        flowId: BLOCKED_FLOW_ID,
-        title: 'A user turns telemetry off and it stays off',
-        realized: false,
-        gap: {
-          kind: 'blocked-on',
-          reason: 'blocked on credentials: A user turns telemetry off',
-          label: 'blocked on',
+    // Matched by a flow whose authoring was refused — used, never exercised. It
+    // lives one level down, on its own command group.
+    iface(
+      'telemetry',
+      'tasks telemetry off',
+      [],
+      [
+        {
+          flowId: BLOCKED_FLOW_ID,
+          title: 'A user turns telemetry off and it stays off',
+          realized: false,
+          gap: {
+            kind: 'blocked-on',
+            reason: 'blocked on credentials: A user turns telemetry off',
+            label: 'blocked on',
+          },
         },
-      },
-    ]),
+      ],
+      'tasks-telemetry',
+    ),
   ],
+  resources: { cli: CLI_PLACES },
   surfaces: SURFACES,
   totals: { interfaces: 5, detectedSurfaces: 1, grounded: 4, ungrounded: 1 },
 };
@@ -166,50 +205,23 @@ const CLI_AND_WEB: GuardInterfacesView = {
   interfaces: [
     ...MAPPED.interfaces,
     {
-      id: 'web/tasks-board',
+      id: 'web/open-tasks-board',
       type: 'web',
-      title: 'Task board',
-      entry: { command: ['web'] },
+      title: 'Open the task board',
+      entry: { method: 'GET', path: '/tasks' },
       steps: [{ kind: 'navigate', route: '/tasks' }],
+      to: 'tasks-board',
       fingerprint: 'sha256:web-tasks-board',
       flows: [],
       scenarioIds: [],
       source: 'probes',
     },
   ],
+  resources: { cli: CLI_PLACES, web: [{ id: 'tasks-board', kind: 'screen', title: 'the task board' }] },
   surfaces: SURFACES.map((s) =>
-    s.surface === 'web' ? { ...s, interfaces: 1, detected: true, source: 'probes' as const } : s,
+    s.surface === 'web' ? { ...s, interfaces: 1, resources: 1, detected: true, source: 'probes' as const } : s,
   ),
   totals: { interfaces: 6, detectedSurfaces: 2, grounded: 4, ungrounded: 2 },
-};
-
-/**
- * A catalog whose entries carry the FAMILY the derivation put them in: two cli
- * trees, one entry in no family at all (`version`), and — on the web surface — a
- * family that happens to share the `rules` name and means its own thing.
- */
-const FAMILIES: GuardInterfacesView = {
-  ...MAPPED,
-  interfaces: [
-    iface('version', 'version', [], []),
-    { ...iface('rules-list', 'rules list', [], []), group: 'rules' },
-    { ...iface('analyses-list', 'analyses list', [], []), group: 'analyses' },
-    { ...iface('rules-disable', 'rules disable', [], []), group: 'rules' },
-    {
-      id: 'web/rules-page',
-      type: 'web',
-      title: 'Rules page',
-      group: 'rules',
-      entry: { command: ['web'] },
-      steps: [{ kind: 'navigate', route: '/rules' }],
-      fingerprint: 'sha256:web-rules-page',
-      flows: [],
-      scenarioIds: [],
-      source: 'probes',
-    },
-  ],
-  surfaces: CLI_AND_WEB.surfaces,
-  totals: { interfaces: 5, detectedSurfaces: 2, grounded: 0, ungrounded: 5 },
 };
 
 /**
@@ -239,6 +251,7 @@ const API_MAPPED: GuardInterfacesView = {
       title: 'GET /todos/{id}',
       entry: { method: 'GET', path: '/todos/{id}' },
       steps: [{ kind: 'request' as const, method: 'GET', path: '/todos/{id}', label: 'getTodo' }],
+      resource: 'todos',
       fingerprint: 'sha256:get-todos-id',
       flows: [usedBy(FLOW_ID, FLOW_TITLE)],
       scenarioIds: [SCENARIO_ID],
@@ -250,6 +263,7 @@ const API_MAPPED: GuardInterfacesView = {
       title: 'PATCH /todos/{id}',
       entry: { method: 'PATCH', path: '/todos/{id}' },
       steps: [{ kind: 'request' as const, method: 'PATCH', path: '/todos/{id}' }],
+      resource: 'todos',
       fingerprint: 'sha256:patch-todos-id',
       flows: [],
       scenarioIds: [],
@@ -257,18 +271,25 @@ const API_MAPPED: GuardInterfacesView = {
       specOnly: true as const,
     },
   ],
+  resources: {
+    api: [
+      { id: 'todos', kind: 'rest-noun', title: '/todos' },
+      // A noun the derivation named and nothing serves — counted out, not listed.
+      { id: 'lists', kind: 'rest-noun', title: '/lists' },
+    ],
+  },
   surfaces: SURFACES.map((s) =>
     s.surface === 'api'
-      ? { ...s, interfaces: 2, detected: true, source: 'tree' as const }
+      ? { ...s, interfaces: 2, resources: 1, detected: true, source: 'tree' as const }
       : s.surface === 'cli'
-        ? { ...s, interfaces: 0, detected: false }
+        ? { ...s, interfaces: 0, resources: 0, detected: false }
         : s,
   ),
   totals: { interfaces: 2, detectedSurfaces: 1, grounded: 1, ungrounded: 1 },
 };
 
 /**
- * A catalog with ALL THREE runnable surfaces in it — one group each, and so one
+ * A catalog with ALL THREE runnable surfaces in it — one place each, and so one
  * recipe row each. The case that proves no surface is quietly left without one.
  */
 const ALL_SURFACES: GuardInterfacesView = {
@@ -278,9 +299,14 @@ const ALL_SURFACES: GuardInterfacesView = {
     API_MAPPED.interfaces[0],
     CLI_AND_WEB.interfaces[CLI_AND_WEB.interfaces.length - 1],
   ],
+  resources: {
+    cli: CLI_PLACES,
+    api: API_MAPPED.resources!.api!,
+    web: CLI_AND_WEB.resources!.web!,
+  },
   surfaces: SURFACES.map((s) =>
     s.surface === 'cli' || s.surface === 'api' || s.surface === 'web'
-      ? { ...s, interfaces: 1, detected: true, source: 'tree' as const }
+      ? { ...s, interfaces: 1, resources: 1, detected: true, source: 'tree' as const }
       : s,
   ),
   totals: { interfaces: 3, detectedSurfaces: 3, grounded: 2, ungrounded: 1 },
@@ -463,16 +489,140 @@ const UNMAPPED: GuardInterfacesView = {
   generatedAt: null,
   recipeFingerprint: null,
   interfaces: [],
-  surfaces: SURFACES.map((s) => ({ ...s, interfaces: 0, detected: false })),
+  surfaces: SURFACES.map((s) => ({ ...s, interfaces: 0, resources: 0, detected: false })),
   totals: { interfaces: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 },
+};
+
+// ---------------------------------------------------------------------------
+// The WEB fixture: a registry with real nesting, named states with descriptions,
+// readables on the place, and `apiEffects` pointing at the api entries beside it.
+// ---------------------------------------------------------------------------
+
+const WEB_VIEW: GuardInterfacesView = {
+  ...MAPPED,
+  interfaces: [
+    {
+      id: 'web/open-dashboard-home',
+      type: 'web',
+      title: 'Open the dashboard home',
+      entry: { method: 'GET', path: '/' },
+      steps: [{ kind: 'navigate', route: '/' }],
+      to: 'repo-report',
+      fingerprint: 'sha256:home',
+      flows: [],
+      scenarioIds: [],
+    },
+    {
+      id: 'web/silence-rule-from-violation-card',
+      type: 'web',
+      title: 'Silence a noisy rule from a violation card',
+      entry: { method: 'GET', path: '/repos/{repoId}' },
+      steps: [
+        { kind: 'activate', target: 'button "More actions"' },
+        { kind: 'activate', target: 'menuitem "Disable rule for this repo"' },
+      ],
+      at: 'violations-list',
+      startingState: 'repo-report-open',
+      endState: 'rule-silenced',
+      apiEffects: ['api/patch-rules', 'api/gone'],
+      fingerprint: 'sha256:silence',
+      flows: [usedBy(FLOW_ID, FLOW_TITLE)],
+      scenarioIds: [],
+    },
+    {
+      id: 'web/open-rules-panel',
+      type: 'web',
+      title: 'Open the repository’s Rules panel',
+      entry: { method: 'GET', path: '/repos/{repoId}' },
+      steps: [{ kind: 'activate', target: 'button "Browse Rules"' }],
+      at: 'violations-list',
+      to: 'rules-dialog',
+      apiEffects: [],
+      fingerprint: 'sha256:open-rules',
+      flows: [],
+      scenarioIds: [],
+    },
+    {
+      id: 'web/filter-violations-by-category',
+      type: 'web',
+      title: 'Narrow the violation list to one category',
+      entry: { method: 'GET', path: '/repos/{repoId}' },
+      steps: [{ kind: 'activate', target: 'button "{category}"' }],
+      at: 'violations-list',
+      endState: 'violations-filtered-by-category',
+      fingerprint: 'sha256:filter',
+      flows: [],
+      scenarioIds: [],
+    },
+    {
+      id: 'api/patch-rules',
+      type: 'api',
+      title: 'PATCH /api/repos/{id}/rules/{ruleKey}',
+      entry: { method: 'PATCH', path: '/api/repos/{id}/rules/{ruleKey}' },
+      steps: [{ kind: 'request', method: 'PATCH', path: '/api/repos/{id}/rules/{ruleKey}' }],
+      fingerprint: 'sha256:patch-rules',
+      flows: [],
+      scenarioIds: [],
+    },
+  ],
+  resources: {
+    web: [
+      {
+        id: 'repo-report',
+        kind: 'screen',
+        title: 'the repository report',
+        address: '/repos/{repoId}',
+        description: 'The repository page’s Home tab: the latest analysis report.',
+      },
+      {
+        id: 'violations-list',
+        kind: 'panel',
+        title: 'the violation list',
+        of: 'repo-report',
+        description: 'The report’s right half: the filters and the violation cards.',
+        readables: {
+          markers: [{ marker: 'Filtered by:', when: 'any filter is active' }],
+          controls: [{ control: { role: 'button', name: 'More actions' }, states: ['expanded'] }],
+          rows: [
+            {
+              item: 'listitem',
+              within: { role: 'list', name: 'Violations' },
+              template: '<ruleName> · <severity>',
+              slots: [
+                { name: 'ruleName', kind: 'text' },
+                { name: 'severity', kind: 'enum', values: ['critical', 'high'] },
+              ],
+            },
+          ],
+        },
+      },
+      { id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog', of: 'repo-report' },
+      // A screen no task acts on — counted out under the rows, never listed.
+      { id: 'guard-section', kind: 'screen', title: 'the Spec Guard section' },
+    ],
+  },
+  states: {
+    web: [
+      { id: 'repo-report-open', description: 'The repository report is open on its Home tab.' },
+      {
+        id: 'rule-silenced',
+        description: 'A rule is disabled for the repository and its cards have left the list.',
+      },
+    ],
+  },
+  surfaces: SURFACES.map((s) =>
+    s.surface === 'web' ? { ...s, interfaces: 4, resources: 3, detected: true, source: 'tree' as const } : s,
+  ),
+  totals: { interfaces: 5, detectedSurfaces: 2, grounded: 1, ungrounded: 4 },
 };
 
 afterEach(() => vi.unstubAllGlobals());
 
 /**
- * The tab exactly as RepoPage wires it: one hook feeding panel + pane, the surface
- * narrowing and the per-surface RECIPE toggle owned above both (the opener is in
- * the panel, the body is in the pane).
+ * The tab exactly as RepoPage wires it: one hook feeding panel + pane, the place
+ * tab set and the expanded MEMBER shared by both, the surface narrowing and the
+ * per-surface RECIPE toggle owned above both (the opener is in the panel, the
+ * body is in the pane).
  */
 function InterfacesHarness({
   onOpenFlow = () => {},
@@ -484,6 +634,7 @@ function InterfacesHarness({
 }) {
   const interfaces = useGuardInterfaces('r', true);
   const tabs = useGuardInterfaceTabs('r');
+  const [member, setMember] = useGuardInterfaceMember();
   const loc = useLocation();
   const [surfaces, setSurfaces] = useState<string[]>([]);
   const [recipeSurface, setRecipeSurface] = useState<GuardDriverId | null>(null);
@@ -493,17 +644,20 @@ function InterfacesHarness({
       <div data-testid="panel">
         <GuardInterfacesPanel
           interfaces={interfaces.view?.interfaces ?? []}
+          {...(interfaces.view?.resources ? { resources: interfaces.view.resources } : {})}
           loading={interfaces.loading}
           error={interfaces.error}
           activeId={recipeSurface ? null : tabs.activeId}
+          activeMemberId={member}
           surfaces={surfaces}
           onSurfaces={setSurfaces}
           hasRecipe={recipe != null}
           recipeSurface={recipeSurface}
           onToggleRecipe={(surface) => setRecipeSurface((open) => (open === surface ? null : surface))}
-          onOpen={(id, pinned) => {
+          onOpen={(place, pinned, opened) => {
             setRecipeSurface(null);
-            tabs.open(id, pinned);
+            setMember(opened ?? null);
+            tabs.open(place, pinned);
           }}
         />
       </div>
@@ -512,6 +666,8 @@ function InterfacesHarness({
         loading={interfaces.loading}
         error={interfaces.error}
         tabs={tabs}
+        member={member}
+        onMember={setMember}
         recipe={recipe}
         recipeSurface={recipeSurface}
         onCloseRecipe={() => setRecipeSurface(null)}
@@ -535,6 +691,7 @@ const renderTab = (
 /** The pane alone on a fixed view — for states the fetch fixtures don't carry. */
 function PaneHarness({ view }: { view: GuardInterfacesView }) {
   const tabs = useGuardInterfaceTabs('r');
+  const [member, setMember] = useGuardInterfaceMember();
   const loc = useLocation();
   return (
     <>
@@ -544,6 +701,8 @@ function PaneHarness({ view }: { view: GuardInterfacesView }) {
         loading={false}
         error={null}
         tabs={tabs}
+        member={member}
+        onMember={setMember}
         onOpenFlow={() => {}}
       />
     </>
@@ -559,19 +718,28 @@ const renderPane = (view: GuardInterfacesView, url = '/repos/r?tab=interfaces') 
 
 const search = () => screen.getByTestId('search').textContent ?? '';
 
+/** A row's own words: its title/signature, without the tally beside it. */
+const rowLabel = (el: HTMLElement) =>
+  el.querySelector<HTMLElement>('.truncate')?.textContent ?? el.textContent ?? '';
+
 /**
  * The catalog panel in render order: every group header as `# label`, interleaved
- * with the row ids between them — the one reading that shows WHAT nests under WHAT.
+ * with the row labels between them — the one reading that shows WHAT nests under WHAT.
  */
 const catalogOutline = () =>
   Array.from(
     screen
       .getByRole('list', { name: 'Interface catalog' })
       .querySelectorAll<HTMLElement>('.sticky, [role="listitem"]'),
-  ).map((el) => {
-    const text = el.querySelector('span')?.textContent ?? '';
-    return el.getAttribute('role') === 'listitem' ? text : `# ${text}`;
-  });
+  ).map((el) =>
+    el.getAttribute('role') === 'listitem'
+      ? rowLabel(el)
+      : `# ${el.querySelector('span')?.textContent ?? ''}`,
+  );
+
+/** A place row of the panel, by the title it reads under. */
+const placeRow = (title: string) =>
+  within(screen.getByTestId('panel')).getByText(title).closest('[role="listitem"]') as HTMLElement;
 
 describe('Interfaces tab — the surfaces are the catalog’s, not a banner’s', () => {
   it('carries no detected-surface banner at all — the surface groups are that reading', () => {
@@ -581,19 +749,495 @@ describe('Interfaces tab — the surfaces are the catalog’s, not a banner’s'
     expect(screen.queryByText(/Web · Needs web driver ⚠/)).not.toBeInTheDocument();
   });
 
-  it('names the surfaces and nothing else — how a catalog was derived is store data', () => {
-    renderPane(CLI_AND_WEB, '/repos/r?tab=interfaces&ginterface=web%2Ftasks-board');
-    // `tree` / `probes` is a degradation marker the store keeps; no reading of the
-    // page — the open interface's byline included — says it.
-    expect(screen.queryByText(/\btree\b|\bprobes\b/)).not.toBeInTheDocument();
-  });
-
   it('says what an empty catalog means — and offers no action for it', () => {
     renderPane(UNMAPPED);
     expect(screen.getByText('No interfaces mapped yet')).toBeInTheDocument();
     // The Map trigger is gone: interface derivation is the engine's, not a button.
     expect(screen.queryByText(/free, no LLM/)).toBeNull();
     expect(screen.queryByRole('button', { name: /^Map/ })).toBeNull();
+  });
+
+  it('asks for a ROW of the catalog, not an interface, when nothing is open', () => {
+    renderPane(MAPPED);
+    expect(screen.getByText('Select a place')).toBeInTheDocument();
+  });
+});
+
+/**
+ * THE PANEL'S ROWS — one flat row per thing a reader can open, in the shape the
+ * surface reads as: a screen, an operation, a command. Nothing nests, nothing
+ * expands, and the tasks a screens surface has no place for read as SIGNATURES
+ * under a quiet header of their own.
+ */
+describe('Interfaces tab — the catalog rows', () => {
+  const stub = (view: GuardInterfacesView) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(view) : json({}))),
+    );
+
+  it('lists one row per COMMAND on cli — no group rows, nothing nested', async () => {
+    stub(MAPPED);
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+    // The registry's two command GROUPS are a prefix the rows already spell.
+    expect(catalogOutline()).toEqual([
+      'CLI recipe',
+      '# CLI',
+      'tasks add',
+      'tasks list',
+      'tasks done',
+      'tasks purge',
+      'tasks telemetry off',
+    ]);
+    expect(screen.getByText('5 commands')).toBeInTheDocument();
+  });
+
+  it('lists one row per SCREEN on web, tallying its parts with it', async () => {
+    stub(WEB_VIEW);
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+    // `open-dashboard-home` acts at no place — it is what OPENS the surface, and
+    // every such member stands behind ONE Entries row, not a group of its own.
+    // The violation list and the Rules dialog are PARTS of the report, not rows.
+    // The api entry is its own operation row, endpoint or no endpoint.
+    expect(catalogOutline()).toEqual([
+      'API recipe',
+      'Web recipe',
+      '# API',
+      '/api/repos/{id}/rules/{ruleKey}',
+      '# Web',
+      'Ways in',
+      'the repository report',
+    ]);
+    // Nothing is at the screen itself; all three tasks are on its violation list.
+    expect(placeRow('the repository report')).toHaveTextContent(/3$/);
+  });
+
+  it('hides a screen with nothing to do, and counts it out under the rows', async () => {
+    stub(WEB_VIEW);
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+    expect(screen.queryByText('the Spec Guard section')).toBeNull();
+    expect(screen.getByText('1 screen with nothing to do hidden')).toBeInTheDocument();
+  });
+
+  it('lists one row per OPERATION on api, the method leading the path in its own colour', async () => {
+    stub(API_MAPPED);
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+    // Two operations of ONE endpoint, adjacent, the read before the write.
+    expect(catalogOutline()).toEqual(['API recipe', '# API', '/todos/{id}', '/todos/{id}']);
+    const rows = within(screen.getByTestId('panel'))
+      .getAllByText('/todos/{id}')
+      .map((el) => el.closest('[role="listitem"]') as HTMLElement);
+    expect(rows.map((row) => within(row).getByText(/^(GET|PATCH)$/).textContent)).toEqual([
+      'GET',
+      'PATCH',
+    ]);
+    // Colour is how a verb survives a skim of forty rows — a token, not a chip.
+    expect(within(rows[0]!).getByText('GET').className).toContain('oklch');
+
+    // The NOUN is not a row at all; an endpoint no operation serves is counted
+    // out, because it never had a row to drop.
+    expect(screen.queryByText('/todos')).toBeNull();
+    expect(screen.queryByText('/lists')).toBeNull();
+    expect(screen.getByText('1 endpoint with no operations hidden')).toBeInTheDocument();
+    expect(screen.getByText('2 operations across 1 endpoint')).toBeInTheDocument();
+  });
+
+  it('finds a screen by what is ON it, not only by its own words', async () => {
+    const user = userEvent.setup();
+    stub(WEB_VIEW);
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+
+    await user.type(screen.getByLabelText('Search interfaces'), 'silence-rule');
+    // The task is on a panel of the report, so the report is the answer.
+    expect(catalogOutline()).toEqual(['Web recipe', '# Web', 'the repository report']);
+  });
+
+  it('finds the ENTRIES row by a member it stands for — its own label names none of them', async () => {
+    const user = userEvent.setup();
+    stub(WEB_VIEW);
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+
+    // One row now stands for every placeless member, so it has to answer for all
+    // of them: searching a task by name must not lose the row that opens onto it.
+    await user.type(screen.getByLabelText('Search interfaces'), 'dashboard home');
+    expect(catalogOutline()).toEqual(['Web recipe', '# Web', 'Ways in']);
+  });
+
+  it('opens a row into the URL, and pins it on double click', async () => {
+    const user = userEvent.setup();
+    stub(MAPPED);
+    renderTab();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+
+    await user.click(within(screen.getByTestId('panel')).getByText('tasks list'));
+    // Ids are AREA-scoped, so the address carries the surface with it.
+    expect(search()).toContain('gplace=cli%3Atasks-list');
+
+    await user.dblClick(within(screen.getByTestId('panel')).getByText('tasks add'));
+    expect(search()).toContain('gplace=cli%3Atasks-add');
+    // The tab is addressed by the selection id and LABELLED by the row's title.
+    expect(screen.getByLabelText('Close cli:tasks-add')).toBeInTheDocument();
+  });
+});
+
+/**
+ * THE SCREEN PAGE — one top-level place, AGGREGATED over its panels and dialogs,
+ * as the classic pane header over ONE section: the CONTRACT, which is two tables.
+ */
+describe('Interfaces tab — a screen and its contract', () => {
+  const openReport = () => renderPane(WEB_VIEW, '/repos/r?tab=interfaces&gplace=web%3Arepo-report');
+
+  /** The header's own column set, in order — the table's contract with a reader. */
+  const headers = (table: HTMLElement) =>
+    within(table)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent);
+
+  it('heads the pane in the classic idiom: surface, kind, place id, then route and mapping', () => {
+    openReport();
+    expect(screen.getByText('Web')).toBeInTheDocument();
+    expect(screen.getByText('screen')).toBeInTheDocument();
+    expect(screen.getByText('repo-report')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'the repository report' })).toBeInTheDocument();
+    // WHERE it is and WHEN it was read off the tree — one muted line.
+    expect(screen.getByText(/^route \/repos\/\{repoId\} · mapped /)).toBeInTheDocument();
+    expect(screen.getByText(/the latest analysis report/)).toBeInTheDocument();
+  });
+
+  it('drops the "on this screen" chip row — the Where column carries the parts now', () => {
+    openReport();
+    expect(screen.queryByText('On this screen')).toBeNull();
+  });
+
+  it('lists every action across the screen in ONE table, the part as a column', () => {
+    openReport();
+    expect(screen.getByText('Contract')).toBeInTheDocument();
+    expect(screen.getByText('Actions · 3')).toBeInTheDocument();
+    expect(headers(screen.getAllByRole('table')[0]!)).toEqual([
+      'Action',
+      'Where',
+      'Needs',
+      'Leaves',
+      'Flows',
+    ]);
+
+    const row = screen.getByText('Silence a noisy rule from a violation card').closest('tr')!;
+    // The elements a task touches read in its SEQUENCE, one click down — never as
+    // a second line under every title.
+    expect(row.textContent).not.toContain('button "More actions"');
+    expect(within(row).getByText('violation list')).toBeInTheDocument();
+    expect(within(row).getByText('repo-report-open')).toBeInTheDocument();
+    expect(within(row).getByText('rule-silenced')).toBeInTheDocument();
+    // One count: the flows that use it. What the click CALLS is implementation
+    // traffic, and is not on this page at all.
+    expect(within(row).getByText('1')).toBeInTheDocument();
+    // A part with no tasks contributes no heading and no row.
+    expect(screen.queryByText('Rules dialog')).toBeNull();
+  });
+
+  it('renders an unestablished world as an em dash, and a `to` as its destination', () => {
+    openReport();
+    const filter = screen.getByText('Narrow the violation list to one category').closest('tr')!;
+    // Nothing established is an em dash — never an invented "none".
+    expect(within(filter).getAllByText('—').length).toBeGreaterThan(0);
+    expect(within(filter).getByText('violations-filtered-by-category')).toBeInTheDocument();
+
+    const opens = screen.getByText('Open the repository’s Rules panel').closest('tr')!;
+    // A task that hands you a place ON THIS SCREEN goes nowhere a click could
+    // follow — the destination is plain text, because a non-link must not dress
+    // as one. Only a destination on ANOTHER screen is a link.
+    expect(within(opens).getByText('→ the Rules dialog')).toBeInTheDocument();
+    expect(within(opens).queryByRole('button', { name: '→ the Rules dialog' })).toBeNull();
+  });
+
+  it('opens an action IN PLACE — its identity, sequence, calls and the world it leaves', async () => {
+    const user = userEvent.setup();
+    openReport();
+    // Neither is on the collapsed row: an id and a fingerprint are what you read
+    // ABOUT an action, not how you pick one out of a table. And it is the ID —
+    // the runner has no task verb, so no minted `camelCase()` pretends otherwise.
+    expect(screen.queryByText('web/silence-rule-from-violation-card')).toBeNull();
+
+    await user.click(screen.getByText('Silence a noisy rule from a violation card'));
+    expect(screen.getByText('web/silence-rule-from-violation-card')).toBeInTheDocument();
+    expect(screen.getByText('silence')).toBeInTheDocument();
+    expect(screen.getByText('Sequence')).toBeInTheDocument();
+    // The elements it touches are HERE, in the sequence — the one place they read.
+    expect(screen.getByText('button "More actions"')).toBeInTheDocument();
+    expect(screen.getByText('Used by flows')).toBeInTheDocument();
+  });
+
+  it('opens only one action at a time', async () => {
+    const user = userEvent.setup();
+    openReport();
+    await user.click(screen.getByText('Silence a noisy rule from a violation card'));
+    expect(screen.getByText('Sequence')).toBeInTheDocument();
+
+    await user.click(screen.getByText('Narrow the violation list to one category'));
+    expect(screen.getByText('web/filter-violations-by-category')).toBeInTheDocument();
+    // The first action's own sequence is gone with it — one body, one action.
+    expect(screen.queryByText('button "More actions"')).not.toBeInTheDocument();
+  });
+
+  it('lists everything THE PAGE SHOWS, each row located the way a step locates it', () => {
+    openReport();
+    expect(screen.getByText('The page shows · 3')).toBeInTheDocument();
+    expect(headers(screen.getAllByRole('table')[1]!)).toEqual([
+      'Kind',
+      'What',
+      'Locator',
+      'When',
+      'Where',
+    ]);
+
+    // The KIND reads as what the thing IS — text, rows, element, control — not as
+    // the catalog's own verbs, which read as noise down a column.
+    const marker = screen.getByText('“Filtered by:”').closest('tr')!;
+    expect(within(marker).getByText('text')).toBeInTheDocument();
+    expect(within(marker).getByText('any filter is active')).toBeInTheDocument();
+    // No `within` — the marker is read off the whole place, and the column says so.
+    expect(within(marker).getByText('—')).toBeInTheDocument();
+
+    const rows = screen.getByText('<ruleName> · <severity>').closest('tr')!;
+    expect(within(rows).getByText('rows')).toBeInTheDocument();
+    expect(within(rows).getByText('listitem · in list “Violations”')).toBeInTheDocument();
+
+    const control = screen.getByText('exposes expanded').closest('tr')!;
+    expect(within(control).getByText('control')).toBeInTheDocument();
+    expect(within(control).getByText('button “More actions”')).toBeInTheDocument();
+    // The Rules dialog establishes no readables, so it contributes no row — and
+    // no "none" is invented on its behalf.
+    expect(screen.getAllByText('violation list')).toHaveLength(6);
+  });
+
+  it('says nothing about what the page shows where the catalog established nothing', () => {
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&gplace=web%3Aguard-section');
+    expect(screen.queryByText(/^The page shows/)).toBeNull();
+    // Zero actions IS established — it is what hides the row from the panel.
+    expect(screen.getByText('Actions · 0')).toBeInTheDocument();
+    expect(screen.getByText('Nothing in the catalog acts on this screen.')).toBeInTheDocument();
+  });
+
+  it('gives a surface’s loose ENTRIES a page of their own, leading where they lead', async () => {
+    const user = userEvent.setup();
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&gplace=web%3A');
+    expect(screen.getByRole('heading', { name: 'Web ways in' })).toBeInTheDocument();
+    expect(screen.getByText('Open the dashboard home')).toBeInTheDocument();
+    // An entry has no place, so there is nothing to assert on beside it.
+    expect(screen.queryByText(/^Get · /)).toBeNull();
+
+    const row = screen.getByText('Open the dashboard home').closest('[role="button"]')!;
+    await user.click(within(row).getByRole('button', { name: 'the repository report' }));
+    await waitFor(() => expect(search()).toContain('gplace=web%3Arepo-report'));
+  });
+});
+
+/**
+ * THE OPERATION PAGE — one api interface, opened DIRECTLY. The endpoint is not a
+ * page to pass through: it is one line naming the noun and the operations that
+ * share it, each a chip that jumps.
+ */
+describe('Interfaces tab — an operation, opened directly', () => {
+  const openGet = (view = API_MAPPED) =>
+    renderPane(view, '/repos/r?tab=interfaces&gplace=api%3Aget-todos-id');
+
+  it('heads the pane with the surface, the coloured method and the path — no list in between', () => {
+    openGet();
+    expect(screen.getByText('API')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '/todos/{id}' })).toBeInTheDocument();
+    expect(screen.getByText('GET').className).toContain('oklch');
+    // There is no operations list to pick from any more: the row WAS the pick.
+    expect(screen.queryByText(/^Operations · /)).toBeNull();
+  });
+
+  it('names the endpoint and its siblings as chips that jump', async () => {
+    const user = userEvent.setup();
+    openGet();
+    // The noun is mono inside the sentence, so the line is one span of three nodes.
+    expect(
+      screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === 'endpoint /todos · also:'),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'PATCH /todos/{id}' }));
+    await waitFor(() => expect(search()).toContain('gplace=api%3Apatch-todos-id'));
+    // …and the sibling's page names the one we came from, the same way.
+    expect(await screen.findByRole('button', { name: 'GET /todos/{id}' })).toBeInTheDocument();
+  });
+
+  it('offers no endpoint line for an operation the registry names no noun for', () => {
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&gplace=api%3Apatch-rules');
+    expect(
+      screen.getByRole('heading', { name: '/api/repos/{id}/rules/{ruleKey}' }),
+    ).toBeInTheDocument();
+    // Two paths are not one endpoint just because nobody grouped them.
+    expect(screen.queryByText(/^endpoint /)).toBeNull();
+  });
+
+  it('opens straight into the summary and the HTTP contract', () => {
+    openGet(WITH_OPERATION);
+    // The contract's one-line SUMMARY heads the page; its longer `description`
+    // is the contract body's, below.
+    expect(screen.getByText('Create a todo.')).toBeInTheDocument();
+    expect(screen.getByText('Appends the todo and answers the created row.')).toBeInTheDocument();
+    expect(screen.getByText('Request')).toBeInTheDocument();
+    expect(screen.getByText('Response statuses')).toBeInTheDocument();
+    expect(screen.getByText('Used by flows')).toBeInTheDocument();
+  });
+});
+
+/** THE COMMAND PAGE — one cli interface, whole. A row IS the command. */
+describe('Interfaces tab — a command', () => {
+  it('is the command’s own page: no member list, the contract straight away', async () => {
+    renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&gplace=cli%3Atasks-add');
+    const header = within(screen.getByRole('heading', { name: 'tasks add' }).parentElement!);
+    expect(header.getByText('CLI')).toBeInTheDocument();
+    expect(header.getByText('command')).toBeInTheDocument();
+    expect(await screen.findByText('Grammar')).toBeInTheDocument();
+    // Nothing to expand: the page is the one interface.
+    expect(screen.queryByText('add([--json])')).toBeNull();
+    expect(screen.getByText('Used by flows')).toBeInTheDocument();
+  });
+
+  it('says so when the catalog has no row for the selection any more', () => {
+    renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&gplace=cli%3Agone');
+    expect(screen.getByText('Not in the catalog')).toBeInTheDocument();
+  });
+});
+
+/**
+ * AN EXPANDED ACTION'S OWN FACTS — the gap this redesign closed. A web task's
+ * contract is not a separate artifact: it is the entry's own steps, the world it
+ * leaves, and the api calls its clicks make. Before this the pane dead-ended at
+ * "No contract derived" and `apiEffects` was rendered nowhere.
+ *
+ * The world it NEEDS is not repeated here: it is the Needs column of the row
+ * that opened, two lines up, and the page reads once.
+ */
+describe('Interfaces tab — an expanded action’s own facts', () => {
+  const openTask = (id = 'web%2Fsilence-rule-from-violation-card') =>
+    renderPane(WEB_VIEW, `/repos/r?tab=interfaces&ginterface=${id}`);
+
+  it('never reaches the "no contract derived" card', async () => {
+    openTask();
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    expect(screen.queryByText('No contract derived')).not.toBeInTheDocument();
+  });
+
+  it('renders the steps in the order they run, each in its own step kind', async () => {
+    openTask();
+    const sequence = within((await screen.findByText('Sequence')).parentElement as HTMLElement);
+    expect(sequence.getAllByText(/^(activate|input|navigate)$/).map((el) => el.textContent)).toEqual([
+      'activate',
+      'activate',
+    ]);
+    expect(sequence.getByText('button "More actions"')).toBeInTheDocument();
+    expect(sequence.getByText('menuitem "Disable rule for this repo"')).toBeInTheDocument();
+  });
+
+  it('names the world it LEAVES with the registry’s own line — and repeats no Needs', async () => {
+    openTask();
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    expect(
+      screen.getByText('A rule is disabled for the repository and its cards have left the list.'),
+    ).toBeInTheDocument();
+    // The starting world is the row's Needs column; its gloss belongs to the
+    // screen it is assumed on, not to this block.
+    expect(screen.queryByText('The repository report is open on its Home tab.')).toBeNull();
+    // The id is the fact — mono, matched by equality; the description is the gloss.
+    expect(screen.getByText('repo-report-open').className).toMatch(/font-mono/);
+  });
+
+  it('says nothing about what the click CALLS — implementation traffic is not this page', async () => {
+    openTask();
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    // `apiEffects` stays in the catalog and the raw view; the tab renders what a
+    // reader DRIVES, so neither the minted call name nor its endpoint appears.
+    expect(screen.queryByText('Calls')).toBeNull();
+    expect(screen.queryByText('rules.update()')).toBeNull();
+    expect(screen.queryByText('PATCH /api/repos/{id}/rules/{ruleKey}')).toBeNull();
+    expect(screen.queryByText('api/gone')).toBeNull();
+  });
+
+  it('leaves what the screen SHOWS to the screen — the page reads once', async () => {
+    openTask();
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    // The readables belong to the screen, in their own table, and the open
+    // action's facts add no second copy of them.
+    expect(screen.getAllByText('The page shows · 3')).toHaveLength(1);
+    expect(screen.getAllByText('exposes expanded')).toHaveLength(1);
+  });
+});
+
+/**
+ * CROSS-NAVIGATION. Other surfaces address an INTERFACE (`?ginterface=`), and the
+ * pane's subject is a ROW — so the pane resolves the one to the other: a task on
+ * a panel opens the SCREEN that panel is part of, with that member expanded.
+ */
+describe('Interfaces tab — cross-navigation lands on the member', () => {
+  it('resolves an interface id to the SCREEN that owns it, and expands the member', async () => {
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&ginterface=web%2Fsilence-rule-from-violation-card');
+    // The screen is the subject — the violation list is a part of it, not a row…
+    expect(await screen.findByRole('heading', { name: 'the repository report' })).toBeInTheDocument();
+    // …and the member the jump named is the one that is open.
+    expect(screen.getByText('Sequence')).toBeInTheDocument();
+    await waitFor(() => expect(search()).toContain('gplace=web%3Arepo-report'));
+    // The inbound address is CONSUMED by the selection it produced.
+    expect(search()).not.toContain('ginterface');
+  });
+
+  it('lands a placeless task on its surface’s entries', async () => {
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&ginterface=web%2Fopen-dashboard-home');
+    expect(await screen.findByRole('heading', { name: 'Web ways in' })).toBeInTheDocument();
+    await waitFor(() => expect(search()).toContain('gplace=web%3A'));
+  });
+
+  it('still reads the retired ?gjourney alias', async () => {
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&gjourney=web%2Fopen-rules-panel');
+    expect(await screen.findByRole('heading', { name: 'the repository report' })).toBeInTheDocument();
+    expect(screen.getByText('web/open-rules-panel')).toBeInTheDocument();
+  });
+
+  it('resolves an OPERATION to itself — it is already its own row', async () => {
+    renderPane(API_MAPPED, '/repos/r?tab=interfaces&ginterface=api%2Fpatch-todos-id');
+    expect(await screen.findByRole('heading', { name: '/todos/{id}' })).toBeInTheDocument();
+    await waitFor(() => expect(search()).toContain('gplace=api%3Apatch-todos-id'));
+    expect(search()).not.toContain('ginterface');
+  });
+
+  it('closes for good — a still-expanded member is not a second arrival', async () => {
+    const user = userEvent.setup();
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&ginterface=web%2Fsilence-rule-from-violation-card');
+    await screen.findByRole('heading', { name: 'the repository report' });
+
+    await user.click(screen.getByLabelText('Close web:repo-report'));
+    expect(screen.getByText('Select a place')).toBeInTheDocument();
+    // …and it stays closed: the place must not re-resolve itself off the member
+    // that was open in it.
+    await waitFor(() => expect(search()).not.toContain('gplace'));
+    expect(screen.getByText('Select a place')).toBeInTheDocument();
+  });
+
+  it('scrolls the deep-linked MEMBER into view — the cross-navigation rule', async () => {
+    const scrolled: Element[] = [];
+    const spy = vi
+      .spyOn(Element.prototype, 'scrollIntoView')
+      .mockImplementation(function (this: Element) {
+        scrolled.push(this);
+      });
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&ginterface=web%2Ffilter-violations-by-category');
+    await screen.findByRole('heading', { name: 'the repository report' });
+    await waitFor(() =>
+      expect(
+        scrolled.some((el) => el.textContent?.includes('Narrow the violation list to one category')),
+      ).toBe(true),
+    );
+    spy.mockRestore();
   });
 });
 
@@ -605,32 +1249,22 @@ describe('Interfaces tab — the mapped catalog', () => {
     );
   });
 
-  it('groups the catalog by surface and carries the reverse index onto the flows', async () => {
-    renderTab();
-    const list = await screen.findByRole('list', { name: 'Interface catalog' });
-    expect(within(list).getByText('CLI')).toBeInTheDocument();
-    // Four interfaces are used by one flow each — the three realized ones AND the
-    // one whose flow matched but was blocked before a scenario could be written.
-    expect(within(list).getAllByText('1 flow')).toHaveLength(4);
-    // Nothing references `tasks purge` — the candidate spec gap.
-    expect(within(list).getByText('0 flows')).toBeInTheDocument();
+  it('carries the reverse index onto the flows, on every action row', async () => {
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&gplace=web%3Arepo-report');
+    // One of the three tasks on this screen is used by a flow; nothing
+    // references the other two — the candidate spec gaps.
+    const flows = Array.from(
+      screen.getAllByRole('table')[0]!.querySelectorAll<HTMLElement>('tbody tr td:last-child'),
+    ).map((td) => td.textContent);
+    expect(flows).toEqual(['1', '0', '0']);
   });
 
-  it('previews an interface as a sequence diagram and links the flows that use it', async () => {
+  it('links the flows that use an open member', async () => {
     const user = userEvent.setup();
     const onOpenFlow = vi.fn();
-    renderTab('/repos/r?tab=interfaces', onOpenFlow);
-    await user.click(await within(screen.getByTestId('panel')).findByText('cli/tasks-add'));
-    expect(search()).toContain('ginterface=cli%2Ftasks-add');
+    renderTab('/repos/r?tab=interfaces&gplace=cli%3Atasks-add', onOpenFlow);
 
-    const diagram = await screen.findByRole('group', { name: 'Interface cli/tasks-add' });
-    // Participants read in product words: the person, then the surface's registry label.
-    expect(within(diagram).getByText('User')).toBeInTheDocument();
-    expect(within(diagram).getByText('CLI')).toBeInTheDocument();
-    expect(within(diagram).queryByText('You')).not.toBeInTheDocument();
-    expect(within(diagram).getByText('tasks add --json')).toBeInTheDocument();
-
-    expect(screen.getByText('Used by flows')).toBeInTheDocument();
+    expect(await screen.findByText('Used by flows')).toBeInTheDocument();
     // The flow reads by TITLE, not by its engine id — and wears the SAME status
     // chip the Flows list wears (one vocabulary, one chip component).
     await user.click(screen.getByRole('button', { name: new RegExp(FLOW_TITLE) }));
@@ -638,8 +1272,8 @@ describe('Interfaces tab — the mapped catalog', () => {
   });
 
   it('an interface used only by a BLOCKED flow reads as used, and says what it needs', async () => {
-    const user = userEvent.setup();
     const onOpenFlow = vi.fn();
+    const user = userEvent.setup();
     renderTab('/repos/r?tab=interfaces&ginterface=cli%2Ftelemetry', onOpenFlow);
 
     expect(await screen.findByText('Used by flows')).toBeInTheDocument();
@@ -656,8 +1290,8 @@ describe('Interfaces tab — the mapped catalog', () => {
     expect(onOpenFlow).toHaveBeenCalledWith(BLOCKED_FLOW_ID);
   });
 
-  // An interface's truth is its entry in guard/interfaces.json, so the detail offers
-  // the SAME two readings every artifact-backed entity does — and no third.
+  // An interface's truth is its entry in guard/interfaces.json, so an OPEN MEMBER
+  // offers the SAME two readings every artifact-backed entity does — and no third.
   it('switches between the page and the stored interface entry, defaulting to the page', async () => {
     const user = userEvent.setup();
     const RAW = JSON.stringify({ id: 'cli/tasks-add', type: 'cli', fingerprint: 'sha256:j1' }, null, 2);
@@ -669,10 +1303,17 @@ describe('Interfaces tab — the mapped catalog', () => {
         return u.includes('/guard/interfaces') ? json(MAPPED) : json({});
       }),
     );
-    renderTab('/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add');
-    await screen.findByRole('group', { name: 'Interface cli/tasks-add' });
+    // A SCREEN is many entries, so with no action open there is no single
+    // artifact to read, and no switch is offered.
+    renderPane(WEB_VIEW, '/repos/r?tab=interfaces&gplace=web%3Arepo-report');
+    expect(screen.getByText('Actions · 3')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'View mode' })).toBeNull();
 
-    const modes = screen.getByRole('group', { name: 'View mode' });
+    cleanup();
+    // A COMMAND, by contrast, IS one entry — its page carries the switch with
+    // nothing expanded at all.
+    renderTab('/repos/r?tab=interfaces&gplace=cli%3Atasks-add');
+    const modes = await screen.findByRole('group', { name: 'View mode' });
     expect(within(modes).getAllByRole('button').map((b) => b.textContent)).toEqual(['View', 'JSON']);
     expect(within(modes).getByRole('button', { name: 'View' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByLabelText('interface source')).not.toBeInTheDocument();
@@ -680,17 +1321,16 @@ describe('Interfaces tab — the mapped catalog', () => {
     await user.click(within(modes).getByRole('button', { name: 'JSON' }));
     await waitFor(() => expect(screen.getByLabelText('interface source')).toHaveTextContent('sha256:j1'));
     // The stored file REPLACES the page — never two readings at once.
-    expect(screen.queryByRole('group', { name: 'Interface cli/tasks-add' })).not.toBeInTheDocument();
     expect(screen.queryByText('Used by flows')).not.toBeInTheDocument();
 
     await user.click(within(modes).getByRole('button', { name: 'View' }));
-    expect(await screen.findByRole('group', { name: 'Interface cli/tasks-add' })).toBeInTheDocument();
+    expect(await screen.findByText('Used by flows')).toBeInTheDocument();
   });
 
-  it('labels an api interface by its operation and says when the operation is documented but unrouted', async () => {
+  it('says when an operation is documented but unrouted', async () => {
     renderPane(API_MAPPED, '/repos/r?tab=interfaces&ginterface=api%2Fpatch-todos-id');
 
-    expect(await screen.findByText(/entry PATCH \/todos\/\{id\}/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '/todos/{id}' })).toBeInTheDocument();
     // The specOnly cross-check reads as a plain sentence, and the zero-references
     // line must NOT claim the spec never mentions it — the spec is where it's from.
     expect(screen.getByText(/no code route serves it/)).toBeInTheDocument();
@@ -700,8 +1340,7 @@ describe('Interfaces tab — the mapped catalog', () => {
 
   it('an api interface that code serves carries no unrouted caution', async () => {
     renderPane(API_MAPPED, '/repos/r?tab=interfaces&ginterface=api%2Fget-todos-id');
-
-    expect(await screen.findByText(/entry GET \/todos\/\{id\}/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '/todos/{id}' })).toBeInTheDocument();
     expect(screen.queryByText(/no code route serves it/)).not.toBeInTheDocument();
   });
 
@@ -727,20 +1366,20 @@ describe('Interfaces tab — the mapped catalog', () => {
     expect(screen.queryByText(SCENARIO_ID)).not.toBeInTheDocument();
   });
 
-  it('scrolls a deep-linked interface row into view — the cross-navigation rule', async () => {
+  it('scrolls a deep-linked PLACE row into view — the cross-navigation rule', async () => {
     const scrolled: Element[] = [];
     const spy = vi
       .spyOn(Element.prototype, 'scrollIntoView')
       .mockImplementation(function (this: Element) {
         scrolled.push(this);
       });
-    renderTab('/repos/r?tab=interfaces&ginterface=cli%2Ftasks-done');
+    renderTab('/repos/r?tab=interfaces&gplace=cli%3Atelemetry');
     await screen.findByRole('list', { name: 'Interface catalog' });
     // The scroll is a passive effect on the commit that renders the rows, so the
     // list being queryable does NOT mean it has run yet — poll for the effect
     // rather than the DOM it fires alongside.
     await waitFor(() =>
-      expect(scrolled.some((el) => el.textContent?.includes('cli/tasks-done'))).toBe(true),
+      expect(scrolled.some((el) => el.textContent?.includes('tasks telemetry off'))).toBe(true),
     );
     spy.mockRestore();
   });
@@ -764,69 +1403,35 @@ describe('Interfaces tab — the mapped catalog', () => {
     }
   });
 
-  it('a ?ginterface deep link opens the interface, and one NO flow references says so', async () => {
-    renderTab('/repos/r?tab=interfaces&ginterface=cli%2Ftasks-purge');
-    expect(await screen.findByRole('group', { name: 'Interface cli/tasks-purge' })).toBeInTheDocument();
-    // Reserved for zero references of any kind — realized or merely planned.
-    expect(screen.getAllByText(/No flow uses this interface/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/the spec never mentions this code path/)).toBeInTheDocument();
-  });
-
-  it('a retired ?gjourney deep link still opens the interface, and a click converges the URL', async () => {
-    // The param was `?gjourney=` before the INTERFACE rename (2026-08-10). It is
-    // READ as an alias so bookmarks survive, and the first write drops it — the
-    // URL never carries both spellings.
-    const user = userEvent.setup();
-    renderTab('/repos/r?tab=interfaces&gjourney=cli%2Ftasks-purge');
-    expect(await screen.findByRole('group', { name: 'Interface cli/tasks-purge' })).toBeInTheDocument();
-    await user.click(await within(screen.getByTestId('panel')).findByText('cli/tasks-list'));
-    expect(search()).toContain('ginterface=cli%2Ftasks-list');
-    expect(search()).not.toContain('gjourney');
-  });
-
-  it('pins an interface on double click', async () => {
+  // Nothing selected IS this pane — "pick a place" — so the strip never offers an
+  // Overview chip to go "back" to it.
+  it('carries NO Overview entry in its tab strip, and names its tabs by PLACE', async () => {
     const user = userEvent.setup();
     renderTab();
-    const row = await within(screen.getByTestId('panel')).findByText('cli/tasks-list');
-    await user.dblClick(row);
-    expect(search()).toContain('ginterface=cli%2Ftasks-list');
-    expect(screen.getByLabelText('Close cli/tasks-list')).toBeInTheDocument();
-  });
-
-  // The contract is rendered by the pane, not fetched separately — see the
-  // dedicated describe below for the grammar table and the io panel.
-
-  // Nothing selected IS this pane — "pick an interface" — so the strip never
-  // offers an Overview chip to go "back" to it.
-  it('carries NO Overview entry in its tab strip', async () => {
-    const user = userEvent.setup();
-    renderTab();
-    // Nothing selected: the pick-an-interface state, no strip.
-    expect(await screen.findByText('Select an interface')).toBeInTheDocument();
+    expect(await screen.findByText('Select a place')).toBeInTheDocument();
     expect(screen.queryByText('Overview')).toBeNull();
 
-    // With an interface open the strip is up — and it holds the interface alone.
-    await user.click(await within(screen.getByTestId('panel')).findByText('cli/tasks-add'));
-    expect(screen.getByLabelText('Close cli/tasks-add')).toBeInTheDocument();
+    await user.click(within(screen.getByTestId('panel')).getByText('tasks add'));
+    // The tab wears the row's own title; only its ADDRESS is the selection id.
+    expect(screen.getByLabelText('Close cli:tasks-add')).toBeInTheDocument();
     expect(screen.queryByText('Overview')).toBeNull();
 
-    // Closing it returns to the same natural state.
-    await user.click(screen.getByLabelText('Close cli/tasks-add'));
-    expect(await screen.findByText('Select an interface')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Close cli:tasks-add'));
+    expect(await screen.findByText('Select a place')).toBeInTheDocument();
   });
 });
 
 /**
- * The SURFACE FILTER — the one filter idiom over the catalog: a count chip per
- * surface the catalog has, counted by the very predicate that narrows it. The
- * surface GROUPS survive the narrowing; filtering to one surface just leaves that
- * surface's groups standing.
+ * THE SURFACE FILTER — the one filter idiom over the catalog: a count chip per
+ * surface the catalog has, counted by INTERFACES (how much code is on it, which
+ * is what a reader is choosing between). The surface GROUPS survive the
+ * narrowing; filtering to one surface just leaves that surface's rows standing.
  */
 describe('Interfaces tab — the surface filter', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(FAMILIES) : json({}))),
+      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(CLI_AND_WEB) : json({}))),
     );
   });
 
@@ -834,9 +1439,8 @@ describe('Interfaces tab — the surface filter', () => {
 
   it('offers a chip per surface the catalog HAS, counted by what it keeps', async () => {
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('cli/version');
-    // FAMILIES: four cli entries, one web entry.
-    expect(within(bar()).getByRole('button', { name: 'CLI 4' })).toBeInTheDocument();
+    await screen.findByRole('list', { name: 'Interface catalog' });
+    expect(within(bar()).getByRole('button', { name: 'CLI 5' })).toBeInTheDocument();
     expect(within(bar()).getByRole('button', { name: 'Web 1' })).toBeInTheDocument();
     // Drivers with no code behind them are engine knowledge, not user information.
     expect(within(bar()).queryByRole('button', { name: /^API/ })).toBeNull();
@@ -846,24 +1450,23 @@ describe('Interfaces tab — the surface filter', () => {
   it('narrows to the drivers clicked — multi-select, a union like the Tests filter', async () => {
     const user = userEvent.setup();
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('cli/version');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(within(bar()).getByRole('button', { name: 'Web 1' }));
-    // Just the web surface — its recipe row, then its own family header under it.
-    expect(catalogOutline()).toEqual(['Web recipe', '# Web', '# rules', 'web/rules-page']);
+    // The board is a screen nothing acts ON — the entry that OPENS it is the
+    // surface's one row, and the board is counted out under it.
+    expect(catalogOutline()).toEqual(['Web recipe', '# Web', 'Ways in']);
     expect(within(bar()).getByRole('button', { name: 'Web 1' })).toHaveAttribute('aria-pressed', 'true');
 
     // A second chip WIDENS the selection — never a swap: both stay pressed and
     // the list is the union of the two.
-    await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
+    await user.click(within(bar()).getByRole('button', { name: 'CLI 5' }));
     expect(within(bar()).getByRole('button', { name: 'Web 1' })).toHaveAttribute('aria-pressed', 'true');
-    expect(within(bar()).getByRole('button', { name: 'CLI 4' })).toHaveAttribute('aria-pressed', 'true');
-    expect(
-      catalogOutline().filter((line) => !line.startsWith('#') && !line.endsWith(' recipe')),
-    ).toHaveLength(5);
+    expect(catalogOutline()).toContain('# CLI');
+    expect(catalogOutline()).toContain('# Web');
 
     // Toggling both off restores the whole catalog.
-    await user.click(within(bar()).getByRole('button', { name: 'CLI 4' }));
+    await user.click(within(bar()).getByRole('button', { name: 'CLI 5' }));
     await user.click(within(bar()).getByRole('button', { name: 'Web 1' }));
     expect(catalogOutline()).toContain('# Web');
     expect(catalogOutline()).toContain('# CLI');
@@ -902,7 +1505,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
   it('opens each surface’s preparation from its own row', async () => {
     const user = userEvent.setup();
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(opener('CLI'));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });
@@ -920,7 +1523,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
   it('scopes the WEB row to the web surface, and a second click closes it', async () => {
     const user = userEvent.setup();
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('web/tasks-board');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(opener('Web'));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });
@@ -941,7 +1544,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
   it('reads every scope in the SAME label-over-value rows', async () => {
     const user = userEvent.setup();
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('web/tasks-board');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(opener('CLI'));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });
@@ -980,7 +1583,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
       ),
     );
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('api/get-todos-id');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(opener('API'));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });
@@ -1001,7 +1604,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
       ),
     );
     renderTab('/repos/r?tab=interfaces', undefined, { recipe: API_RECIPE });
-    await within(screen.getByTestId('panel')).findByText('api/get-todos-id');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(opener('API'));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });
@@ -1021,7 +1624,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
       ),
     );
     renderTab('/repos/r?tab=interfaces', undefined, { recipe: CLI_ONLY_RECIPE });
-    await within(screen.getByTestId('panel')).findByText('api/get-todos-id');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(opener('API'));
     const recipe = await screen.findByRole('region', { name: 'Recipe' });
@@ -1031,23 +1634,25 @@ describe('Interfaces tab — the per-surface recipe', () => {
     expect(within(recipe).queryByText(/same server as the web surface/)).toBeNull();
   });
 
-  it('picking an interface navigates AWAY from the recipe — one body, one subject', async () => {
+  it('picking a place navigates AWAY from the recipe — one body, one subject', async () => {
     const user = userEvent.setup();
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    await screen.findByRole('list', { name: 'Interface catalog' });
     await user.click(opener('CLI'));
     await screen.findByRole('region', { name: 'Recipe' });
 
-    await user.click(within(screen.getByTestId('panel')).getByText('cli/tasks-add'));
+    await user.click(within(screen.getByTestId('panel')).getByText('tasks telemetry off'));
     expect(screen.queryByRole('region', { name: 'Recipe' })).toBeNull();
     expect(opener('CLI')).toHaveAttribute('aria-pressed', 'false');
-    expect(await screen.findByRole('group', { name: 'Interface cli/tasks-add' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'tasks telemetry off' }),
+    ).toBeInTheDocument();
   });
 
   it('reads the stored file verbatim in raw mode — the WHOLE file, lazily', async () => {
     const user = userEvent.setup();
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('web/tasks-board');
+    await screen.findByRole('list', { name: 'Interface catalog' });
     await user.click(opener('Web'));
     // Nothing fetched for a reading nobody asked for.
     expect(recipeRawRequests).toHaveLength(0);
@@ -1068,7 +1673,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
   it('shows the file as the server masked it — the raw mode is no secret door', async () => {
     const user = userEvent.setup();
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    await screen.findByRole('list', { name: 'Interface catalog' });
     await user.click(opener('CLI'));
     await user.click(
       within(within(await screen.findByRole('region', { name: 'Recipe' })).getByRole('group', { name: 'View mode' }))
@@ -1083,7 +1688,7 @@ describe('Interfaces tab — the per-surface recipe', () => {
 
   it('offers nothing at all when the repo has no recipe yet', async () => {
     renderTab('/repos/r?tab=interfaces', undefined, { recipe: null });
-    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    await screen.findByRole('list', { name: 'Interface catalog' });
     expect(within(screen.getByTestId('panel')).queryByRole('button', { name: /recipe/i })).toBeNull();
   });
 });
@@ -1092,8 +1697,8 @@ describe('Interfaces tab — the per-surface recipe', () => {
  * WHERE THE RECIPE ROWS SIT, and what they are made of. All of them together at
  * the TOP of the panel — one per surface the catalog shows, in the catalog's own
  * surface order — and each one a ROW of the list: the same wrapper, the same
- * selected paint, the same hover as the interface rows under it. Not a pill, not
- * a toolbar button, not a lead floating inside a group.
+ * selected paint, the same hover as the place rows under it. Not a pill, not a
+ * toolbar button, not a lead floating inside a group.
  */
 describe('Interfaces tab — the recipe rows are the panel’s first rows', () => {
   const list = () => screen.getByRole('list', { name: 'Interface catalog' });
@@ -1105,41 +1710,39 @@ describe('Interfaces tab — the recipe rows are the panel’s first rows', () =
       vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(view) : json({}))),
     );
 
-  it('leads the panel with a row per surface, before any interface group', async () => {
+  it('leads the panel with a row per surface, before any place group', async () => {
     stub(ALL_SURFACES);
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
-    // Every surface the catalog has, in the order the catalog groups them, and
-    // all of them ahead of the first group header.
+    await screen.findByRole('list', { name: 'Interface catalog' });
     expect(catalogOutline()).toEqual([
       'CLI recipe',
       'API recipe',
       'Web recipe',
       '# CLI',
-      'cli/tasks-add',
+      'tasks add',
       '# API',
-      'api/get-todos-id',
+      '/todos/{id}',
       '# Web',
-      'web/tasks-board',
+      'Ways in',
     ]);
   });
 
-  it('wears the list’s row idiom — the same class as an interface row, no pill', async () => {
+  it('wears the list’s row idiom — the same class as a place row, no pill', async () => {
     const user = userEvent.setup();
     stub(ALL_SURFACES);
     renderTab();
-    const iface = (await within(screen.getByTestId('panel')).findByText('cli/tasks-add')).closest(
+    const row = (await within(screen.getByTestId('panel')).findByText('tasks add')).closest(
       '[role="listitem"]',
     ) as HTMLElement;
 
     // The row is the row: same wrapper, same paint, same hover. Not a bordered
     // pill sitting on top of the list.
-    expect(recipeRow('CLI').className).toBe(iface.className);
+    expect(recipeRow('CLI').className).toBe(row.className);
     expect(recipeRow('CLI').className).not.toMatch(/rounded/);
     expect(recipeRow('CLI').closest('[role="listitem"]')).not.toBeNull();
 
-    // Selected, it takes the selected paint an interface row takes — and says so
-    // as a toggle, which an interface row is not.
+    // Selected, it takes the selected paint a catalog row takes — and says so as
+    // a toggle, which a catalog row is not.
     await user.click(recipeRow('CLI'));
     expect(recipeRow('CLI')).toHaveAttribute('aria-pressed', 'true');
     expect(recipeRow('CLI').className).toMatch(/bg-primary\/10/);
@@ -1150,112 +1753,23 @@ describe('Interfaces tab — the recipe rows are the panel’s first rows', () =
     const user = userEvent.setup();
     stub(ALL_SURFACES);
     renderTab();
-    await within(screen.getByTestId('panel')).findByText('cli/tasks-add');
+    await screen.findByRole('list', { name: 'Interface catalog' });
 
     await user.click(
       within(screen.getByRole('group', { name: 'Filter by driver' })).getByRole('button', { name: 'API 1' }),
     );
-    expect(catalogOutline()).toEqual(['API recipe', '# API', 'api/get-todos-id']);
+    expect(catalogOutline()).toEqual(['API recipe', '# API', '/todos/{id}']);
   });
 });
 
 /**
- * One entry is one invocable thing, so the tree a reader knows — `rules`,
- * `analyses` — only survives in the catalog's per-entry FAMILY. The panel shows it
- * as the inner level of the one grouping mechanism: surface outside, family inside.
- */
-describe('Interfaces tab — the families inside a surface', () => {
-  beforeEach(() => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(FAMILIES) : json({}))),
-    );
-  });
-
-  it('nests each family under its surface, in first-seen order and scoped to it', async () => {
-    renderTab();
-    await screen.findByRole('list', { name: 'Interface catalog' });
-    // Families read in the order the catalog first names them, never alphabetically,
-    // and the two `rules` headers are two families — one per surface.
-    expect(catalogOutline()).toEqual([
-      'CLI recipe',
-      'Web recipe',
-      '# CLI',
-      'cli/version',
-      '# rules',
-      'cli/rules-list',
-      'cli/rules-disable',
-      '# analyses',
-      'cli/analyses-list',
-      '# Web',
-      '# rules',
-      'web/rules-page',
-    ]);
-  });
-
-  it('keeps the surface as the outer level and the interface rows as they were', async () => {
-    const user = userEvent.setup();
-    renderTab();
-    const list = await screen.findByRole('list', { name: 'Interface catalog' });
-    // The surface header still carries its own tally over every row beneath it.
-    expect(within(list).getByText('CLI').closest('div')).toHaveTextContent('4');
-    // A family header is the group NAME and nothing else — no tally line of its own
-    // beside it, no count of flows, no prose.
-    expect(within(list).getByText('analyses').closest('div')?.textContent).toBe('analyses1');
-    // Rows are unchanged: a click still previews the interface into the URL.
-    await user.click(within(list).getByText('cli/rules-disable'));
-    expect(search()).toContain('ginterface=cli%2Frules-disable');
-  });
-
-  it('heads the family as the INNER level — a quieter header, its rows indented under it', async () => {
-    renderTab();
-    const list = await screen.findByRole('list', { name: 'Interface catalog' });
-    const header = (label: string) => within(list).getByText(label).closest('.sticky') as HTMLElement;
-
-    // The surface keeps the chrome every outer group wears.
-    expect(header('CLI').className).toMatch(/font-semibold/);
-    expect(header('CLI').className).not.toMatch(/pl-6/);
-
-    // The family is the same header one step down — lighter and indented, never a
-    // second full-weight header the eye reads as another surface.
-    expect(header('analyses').className).toMatch(/font-medium/);
-    expect(header('analyses').className).not.toMatch(/font-semibold/);
-    expect(header('analyses').className).not.toMatch(/pl-6/);
-
-    // …and its rows line up under its label, while an entry in no family stays at
-    // the surface's own edge — so which rows a family owns is readable off the gutter.
-    const row = (id: string) => within(list).getByText(id).closest('[role="listitem"]') as HTMLElement;
-    expect(row('cli/analyses-list').className).not.toMatch(/pl-6/);
-    expect(row('cli/version').className).not.toMatch(/pl-6/);
-  });
-
-  it('leaves a catalog with no families flat — no invented "other" group', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => (String(url).includes('/guard/interfaces') ? json(MAPPED) : json({}))),
-    );
-    renderTab();
-    await screen.findByRole('list', { name: 'Interface catalog' });
-    expect(catalogOutline()).toEqual([
-      'CLI recipe',
-      '# CLI',
-      'cli/tasks-add',
-      'cli/tasks-list',
-      'cli/tasks-done',
-      'cli/tasks-purge',
-      'cli/telemetry',
-    ]);
-  });
-});
-
-/**
- * The CONTRACT block: the CALLING INTERFACE and nothing else — the grammar of
- * every command in the tree and each command's input/output, the io rendered as
- * FLAT ROWS (one fact, one line, its condition after a `·`) because a fact list is
- * not tabular data and the artifact carries no prose. The page reads once:
- * nothing here repeats the interface name, its entry or its steps. The two honesty
- * rules are asserted directly — `unknown` reads as unknown, and a list the
- * derivation never established renders nothing rather than a confident "none".
+ * The CONTRACT block: the CALLING INTERFACE and nothing else — the grammar of the
+ * command and its input/output, the io rendered as FLAT ROWS (one fact, one line,
+ * its condition after a `·`) because a fact list is not tabular data and the
+ * artifact carries no prose. The page reads once: nothing here repeats the
+ * member's signature or its place. The two honesty rules are asserted directly —
+ * `unknown` reads as unknown, and a list the derivation never established renders
+ * nothing rather than a confident "none".
  */
 describe('Interfaces tab — the contract', () => {
   const openAdd = () => renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add');
@@ -1468,10 +1982,8 @@ describe('Interfaces tab — the contract', () => {
     openAdd();
     expect(await screen.findByText('Grammar')).toBeInTheDocument();
 
-    // The sequence diagram carries the steps; a typed list of the same steps is
-    // the same reading twice, so the pane no longer has one.
+    // The contract does not restate what the signature row already said.
     expect(screen.queryByText('Steps')).not.toBeInTheDocument();
-    // The contract does not restate what the pane header already said.
     expect(screen.queryByText('Contract')).not.toBeInTheDocument();
     expect(screen.queryByText('`tasks add` and its `--json` mode.')).not.toBeInTheDocument();
 
@@ -1491,16 +2003,17 @@ describe('Interfaces tab — the contract', () => {
   });
 
   it('never prints the command path, and offers no command nav — one entry, one command', async () => {
-    // The cli member is singular now: the path IS the interface title the reader
-    // just passed, so the contract adds no occurrence of it anywhere on the page,
-    // and there is nothing left for a nav to choose between.
+    // The cli member is singular now, and its page is headed by the command —
+    // so the CONTRACT adds no occurrence of the path at all, and there is
+    // nothing left for a nav to choose between.
     openAdd();
     expect(await screen.findByText('Grammar')).toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Commands' })).toBeNull();
-    const withContract = screen.getAllByText(/^tasks add$/).length;
+    // Exactly two: the page's own heading, and the tab that addresses it.
+    expect(screen.getAllByText('tasks add')).toHaveLength(2);
 
-    // The SAME entry with no contract at all: the count does not move, so every
-    // occurrence on the page comes from the pane header, none from the contract.
+    // The SAME entry with no contract at all: the empty state is the cli/api
+    // reading, and it says what is missing rather than filling anything in.
     cleanup();
     const noContract: GuardInterfacesView = {
       ...WITH_CONTRACT,
@@ -1511,10 +2024,9 @@ describe('Interfaces tab — the contract', () => {
     };
     renderPane(noContract, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add');
     expect(await screen.findByText('No contract derived')).toBeInTheDocument();
-    expect(screen.getAllByText(/^tasks add$/)).toHaveLength(withContract);
   });
 
-  it('opens the sibling command as its own interface — the tree is siblings, not a nav', async () => {
+  it('opens the sibling command as its own member — the tree is siblings, not a nav', async () => {
     renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-purge');
     expect(await screen.findByText('Delete every completed task.')).toBeInTheDocument();
     // `tasks purge` declares no positionals at all — established as none.
@@ -1667,160 +2179,5 @@ describe('Interfaces tab — the question sequence', () => {
     expect(await screen.findByText('Input and output')).toBeInTheDocument();
     expect(screen.queryByText('Question sequence')).not.toBeInTheDocument();
     expect(screen.queryByText('sequence unknown')).not.toBeInTheDocument();
-  });
-});
-
-/**
- * THE STATE CONTRACT of a web task, after the named-states rework (2026-08-11).
- * Both fields are now IDS into the area's registry, and the per-step prose is
- * gone — so the pane names two states and the diagram is one message per step,
- * with no interaction-change sentences threaded between them.
- */
-describe('a web task’s state contract', () => {
-  const WEB: GuardInterfacesView['interfaces'][number] = {
-    id: 'web/silence-rule-from-violation-card',
-    type: 'web',
-    title: 'Silence a noisy rule from a violation card',
-    group: 'repos',
-    entry: { method: 'GET', path: '/repos/{repoId}' },
-    steps: [
-      { kind: 'activate', target: 'button "More actions"' },
-      { kind: 'activate', target: 'menuitem "Disable rule for this repo"' },
-    ],
-    startingState: 'repo-report-open',
-    endState: 'rule-silenced',
-    fingerprint: 'sha256:web',
-    flows: [],
-    scenarioIds: [],
-  };
-
-  const openWebTask = () =>
-    renderPane(
-      { ...MAPPED, interfaces: [WEB] },
-      '/repos/r?tab=interfaces&ginterface=web%2Fsilence-rule-from-violation-card',
-    );
-
-  it('names the two states it assumes and leaves, as ids', async () => {
-    openWebTask();
-    expect(await screen.findByText('Starting state')).toBeInTheDocument();
-    const start = screen.getByText('repo-report-open');
-    const end = screen.getByText('rule-silenced');
-    expect(screen.getByText('End state')).toBeInTheDocument();
-    // Mono, because they are ids: two tasks chain when these match exactly.
-    expect(start.className).toMatch(/font-mono/);
-    expect(end.className).toMatch(/font-mono/);
-  });
-
-  it('draws one message per step — no state prose between them', async () => {
-    openWebTask();
-    const diagram = await screen.findByRole('group', {
-      name: 'Interface web/silence-rule-from-violation-card',
-    });
-    expect(within(diagram).getAllByTitle(/^activate /).map((el) => el.textContent)).toEqual([
-      'activate button "More actions"',
-      'activate menuitem "Disable rule for this repo"',
-    ]);
-    // Two steps, two messages: nothing is drawn flowing back from the surface.
-    expect(diagram.querySelectorAll('[title]')).toHaveLength(2);
-  });
-});
-
-/**
- * THE PLACE ENVELOPE (2026-08-12): a web task carries a LOCATION contract —
- * `at` the resource it acts on, `to` the one it leads to — and the view carries
- * the registry those ids resolve in. The pane renders the place with its
- * READABLES (what the place visibly shows); the panel families web rows under
- * the place's own title instead of a group slug.
- */
-describe('a web task’s place', () => {
-  const PLACED: GuardInterfacesView['interfaces'][number] = {
-    id: 'web/open-rules-dialog',
-    type: 'web',
-    title: 'Open the Rules dialog from the repo report',
-    group: 'repos',
-    entry: { method: 'GET', path: '/repos/{repoId}' },
-    steps: [{ kind: 'activate', target: 'button "Rules"' }],
-    at: 'repo-report',
-    to: 'rules-dialog',
-    fingerprint: 'sha256:placed',
-    flows: [],
-    scenarioIds: [],
-  };
-
-  const RESOURCES: NonNullable<GuardInterfacesView['resources']> = {
-    web: [
-      {
-        id: 'repo-report',
-        kind: 'screen',
-        title: 'the repository report',
-        description: 'The repository page’s Home tab: the latest analysis report.',
-        readables: {
-          markers: [{ marker: 'Violations' }],
-          controls: [{ control: { role: 'button', name: 'Rules' }, states: ['pressed'] }],
-          rows: [
-            {
-              item: 'listitem',
-              within: { role: 'list', name: 'Violations' },
-              template: '<ruleName> · <severity>',
-              slots: [
-                { name: 'ruleName', kind: 'text' },
-                { name: 'severity', kind: 'enum', values: ['critical', 'high'] },
-              ],
-            },
-          ],
-        },
-      },
-      { id: 'rules-dialog', kind: 'dialog', title: 'the Rules dialog' },
-    ],
-  };
-
-  const openPlaced = () =>
-    renderPane(
-      { ...MAPPED, interfaces: [PLACED], resources: RESOURCES },
-      '/repos/r?tab=interfaces&ginterface=web%2Fopen-rules-dialog',
-    );
-
-  it('renders the place card: the kind, the title, and where the task leads', async () => {
-    openPlaced();
-    expect(await screen.findByText('Where')).toBeInTheDocument();
-    expect(screen.getByText('screen')).toBeInTheDocument();
-    expect(screen.getByText('the repository report')).toBeInTheDocument();
-    // `to` joins to the DESTINATION’s title — the id stays in the store.
-    expect(screen.getByText(/leaves the user at the Rules dialog/)).toBeInTheDocument();
-  });
-
-  it('reads the place’s readables in the driver’s own words', async () => {
-    openPlaced();
-    await screen.findByText('Where');
-    // A marker, a control with its exposed states, and the row grammar.
-    expect(screen.getByText('shows').closest('li')?.textContent).toContain('“Violations”');
-    expect(screen.getByText(/button “Rules” — exposes pressed/)).toBeInTheDocument();
-    expect(screen.getByText('<ruleName> · <severity>')).toBeInTheDocument();
-    expect(screen.getByText(/severity: critical \| high/)).toBeInTheDocument();
-  });
-
-  it('renders no Where block for a task that names no place', async () => {
-    renderPane(
-      { ...MAPPED, interfaces: [{ ...PLACED, at: undefined, to: undefined }], resources: RESOURCES },
-      '/repos/r?tab=interfaces&ginterface=web%2Fopen-rules-dialog',
-    );
-    expect(await screen.findByText('Sequence')).toBeInTheDocument();
-    expect(screen.queryByText('Where')).not.toBeInTheDocument();
-  });
-
-  it('the panel families a placed row under the place’s title, not its group slug', () => {
-    render(
-      <GuardInterfacesPanel
-        interfaces={[PLACED]}
-        resources={RESOURCES}
-        loading={false}
-        error={null}
-        activeId={null}
-        surfaces={[]}
-        onSurfaces={() => {}}
-        onOpen={() => {}}
-      />,
-    );
-    expect(catalogOutline()).toEqual(['# Web', '# the repository report', 'web/open-rules-dialog']);
   });
 });

@@ -155,6 +155,13 @@ export interface EntityListProps<T> {
   filter?: EntityListFilter<T> | EntityListFilter<T>[];
   /** The row-count line: "12 of 30 flows". Omit for no count line. */
   noun?: { one: string; many: string };
+  /**
+   * The count line in the surface's OWN words, in the same slot — for a list
+   * whose rows and its rows' contents are two different tallies ("5 screens · 55
+   * interfaces"), which "N of M" cannot say. Wins over {@link noun} when both are
+   * given; it is the same one line either way.
+   */
+  countLine?: ReactNode;
   /** A line above the controls — the PR baseline-fallback note. */
   banner?: ReactNode;
   /**
@@ -392,6 +399,7 @@ export function EntityList<T>(props: EntityListProps<T>) {
     filter,
     sort,
     noun,
+    countLine,
     banner,
     toolbar,
     loading = false,
@@ -474,7 +482,13 @@ export function EntityList<T>(props: EntityListProps<T>) {
     );
   }
 
-  const controls = (search || bars.length > 0 || noun || toolbar) && (
+  // ONE count line, whoever wrote it: the surface's own words when it has them,
+  // the "N of M nouns" default otherwise.
+  const count =
+    countLine ??
+    (noun ? `${visible.length} of ${all.length} ${all.length === 1 ? noun.one : noun.many}` : null);
+
+  const controls = (search || bars.length > 0 || count || toolbar) && (
     <div className="shrink-0">
       {search && (
         <div className="border-b border-border p-2">
@@ -499,12 +513,10 @@ export function EntityList<T>(props: EntityListProps<T>) {
           {...(bar.multi ? { multi: true } : {})}
         />
       ))}
-      {noun && (
+      {count && (
         <div className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
           <HoverPopover portal width="narrow" content={onOpen ? PREVIEW_PIN_HINT : null}>
-            <span>
-              {visible.length} of {all.length} {all.length === 1 ? noun.one : noun.many}
-            </span>
+            <span>{count}</span>
           </HoverPopover>
         </div>
       )}

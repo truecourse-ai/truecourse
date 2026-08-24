@@ -9,19 +9,30 @@
  * is not tabular data, it is a list of sentences with the prose already removed,
  * so it reads top to bottom at a glance. A fact with no condition simply ends.
  *
- * It renders the CONTRACT UNION, dispatching on the surface the contract itself
- * declares. A cli entry gets the command grammar, its positionals and (where it is
- * interactive) its question sequence. An api entry gets HTTP: its request split by
- * where the caller puts it, its response statuses, its response-body markers. That
- * dispatch is the point of the union — before it, an operation was rendered as a
- * command whose argv was `["GET", "/x"]`, its query parameters sat under a column
- * headed "Flag" and its 404 under a heading reading "Exit codes", and every one of
- * those was a decoding step the reader had to perform.
+ * It dispatches on the SURFACE. A cli entry gets the command grammar, its
+ * positionals and (where it is interactive) its question sequence. An api entry
+ * gets HTTP: its request split by where the caller puts it, its response
+ * statuses, its response-body markers. That dispatch is the point of the contract
+ * union — before it, an operation was rendered as a command whose argv was
+ * `["GET", "/x"]`, its query parameters sat under a column headed "Flag" and its
+ * 404 under a heading reading "Exit codes", and every one of those was a decoding
+ * step the reader had to perform.
  *
- * The page reads ONCE, top to bottom: the pane's name and entry, the step
- * diagram, then here the grammar and the input/output facts. Nothing repeats what
- * the reader has already passed — an entry's own identity is the title above, so
- * it is never echoed here.
+ * A WEB TASK is the third branch and the one the union has no member for: its
+ * contract is not a separate artifact but the entry's own fields — the steps and
+ * the two named states it moves between. Rendering them here is what killed the
+ * "No contract derived" card every web task used to dead-end at. `apiEffects` is
+ * deliberately NOT rendered (2026-08-24) — implementation traffic, kept to the
+ * catalog and the raw view; {@link GuardWebCalls} remains exported for a surface
+ * that wants it. The rendered pieces are EXPORTED ({@link GuardWebSequence},
+ * {@link GuardWebState}) because the screen page lays the same facts out inside
+ * an expanded Actions row — never a second copy that could drift.
+ *
+ * The page reads ONCE, top to bottom: the place, its readables, the member's
+ * title row, then here the grammar and the input/output facts. Nothing repeats
+ * what the reader has already passed — a member's own identity is the row above,
+ * and a web task's assertion surface is the place's readables, which the pane
+ * renders once for every member at it.
  *
  * Two rules the whole block obeys:
  *
@@ -65,10 +76,13 @@ import {
   type InterfaceSequence,
   type InterfaceSequenceBranch,
   type InterfaceSequenceNode,
+  type InterfaceState,
+  type InterfaceStep,
   type InterfaceWriteFact,
 } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import { stepTargetText, type PomCall } from '@/lib/interface-pom';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 const SUBLABEL = 'text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -87,7 +101,7 @@ function Established({ list, children }: { list: unknown[] | undefined; children
  * heading. The heading is always right there, so the word alone is the whole
  * sentence; what it must never do is look like the heading was simply omitted.
  */
-function NoneLine() {
+export function GuardNoneLine() {
   return <p className="py-1 text-[11px] italic text-muted-foreground">none</p>;
 }
 
@@ -100,8 +114,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-/** A table that scrolls sideways INSIDE its own box — the pane never does. */
-function Scroller({ children }: { children: React.ReactNode }) {
+/**
+ * A table that scrolls sideways INSIDE its own box — the pane never does.
+ * Exported because the screen page renders its two tables in the same box.
+ */
+export function GuardTableBox({ children }: { children: React.ReactNode }) {
   return <div className="max-w-full overflow-x-auto rounded border border-border">{children}</div>;
 }
 
@@ -114,7 +131,7 @@ function optionValue(option: InterfaceOption): string {
 
 function GrammarTable({ options }: { options: InterfaceOption[] }) {
   return (
-    <Scroller>
+    <GuardTableBox>
       <table className="w-full border-collapse">
         <thead className="border-b border-border bg-muted/30">
           <tr>
@@ -167,15 +184,15 @@ function GrammarTable({ options }: { options: InterfaceOption[] }) {
           ))}
         </tbody>
       </table>
-    </Scroller>
+    </GuardTableBox>
   );
 }
 
 function PositionalsTable({ command }: { command: InterfaceCommandContract }) {
   if (command.positionals === undefined) return null;
-  if (command.positionals.length === 0) return <NoneLine />;
+  if (command.positionals.length === 0) return <GuardNoneLine />;
   return (
-    <Scroller>
+    <GuardTableBox>
       <table className="w-full border-collapse">
         <thead className="border-b border-border bg-muted/30">
           <tr>
@@ -199,7 +216,7 @@ function PositionalsTable({ command }: { command: InterfaceCommandContract }) {
           ))}
         </tbody>
       </table>
-    </Scroller>
+    </GuardTableBox>
   );
 }
 
@@ -494,7 +511,7 @@ function Block<T>({
   return (
     <div className="mt-2 first:mt-0">
       <div className={`${SUBLABEL} mb-1`}>{title}</div>
-      {list.length === 0 ? <NoneLine /> : children(list)}
+      {list.length === 0 ? <GuardNoneLine /> : children(list)}
     </div>
   );
 }
@@ -555,7 +572,7 @@ function CommandContract({ command, showPath }: { command: InterfaceCommandContr
 
       <Established list={command.options}>
         <Section title="Grammar">
-          {command.options?.length ? <GrammarTable options={command.options} /> : <NoneLine />}
+          {command.options?.length ? <GrammarTable options={command.options} /> : <GuardNoneLine />}
         </Section>
       </Established>
 
@@ -596,7 +613,7 @@ function CommandContract({ command, showPath }: { command: InterfaceCommandContr
 /** One request region — path, query or body — as a fact list, not a flag table. */
 function RequestFields({ fields }: { fields: InterfaceRequestField[] }) {
   return (
-    <Scroller>
+    <GuardTableBox>
       <table className="w-full border-collapse">
         <thead className="border-b border-border bg-muted/30">
           <tr>
@@ -648,7 +665,7 @@ function RequestFields({ fields }: { fields: InterfaceRequestField[] }) {
           ))}
         </tbody>
       </table>
-    </Scroller>
+    </GuardTableBox>
   );
 }
 
@@ -773,13 +790,130 @@ function OperationContract({ operation }: { operation: InterfaceOperationContrac
   );
 }
 
+// ---------------------------------------------------------------------------
+// The WEB TASK — the third member, and the one the union has no entry for. A web
+// task's contract is not a separate artifact: the SCHEMA already says it is the
+// steps it runs, the two worlds it moves between, and the server calls it makes,
+// and until now this component simply never honored that — every web task fell
+// into the "No contract derived" empty state and `apiEffects`, the UI-to-API
+// relation, was rendered nowhere at all.
+//
+// What is deliberately NOT here: the place's READABLES. They are what a scenario
+// asserts on, and they belong to the PLACE, not to any one task at it — the pane
+// renders them once, above the member list, and the page reads once.
+// ---------------------------------------------------------------------------
+
+/**
+ * The world an id names, when its area's registry names it. Ids stay ids: two
+ * members chain when these match exactly, and the description is the gloss.
+ * Exported because the screen page's expanded Actions row shows the world a task
+ * LEAVES in the same one line.
+ */
+export function GuardWebState({
+  id,
+  states,
+}: {
+  id: string;
+  states?: readonly InterfaceState[];
+}) {
+  const described = states?.find((state) => state.id === id)?.description;
+  return (
+    <FactList>
+      <li className={ROW}>
+        <span className="rounded bg-muted px-1 py-px font-mono text-[10px] text-foreground">{id}</span>
+        {described ? <span className="text-muted-foreground">{described}</span> : null}
+      </li>
+    </FactList>
+  );
+}
+
+/** The steps in the order they run — the one thing every web task carries. */
+export function GuardWebSequence({ steps }: { steps: readonly InterfaceStep[] }) {
+  return (
+    <ol className="divide-y divide-border/60">
+      {steps.map((step, i) => (
+        <li key={i} className={ROW}>
+          <span className="text-[10px] text-muted-foreground">{i + 1}</span>
+          <span className={CHIP}>{step.kind}</span>
+          <span className={FACT}>{stepTargetText(step)}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * WHAT THE CLICK CALLS. Each id is joined against the catalog's own api entries
+ * and minted into `noun.method()` beside the operation it is; an id that resolves
+ * to NOTHING keeps its raw id, because a relation shown short reads as a screen
+ * that reaches fewer endpoints than it does.
+ */
+export function GuardWebCalls({ calls }: { calls: readonly PomCall[] }) {
+  return (
+    <FactList>
+      {calls.map((call) => (
+        <li key={call.id} className={ROW}>
+          <span className="font-mono">{call.name ? `${call.name}()` : call.id}</span>
+          {call.operation ? (
+            <span className="font-mono text-[10px] text-muted-foreground">{call.operation}</span>
+          ) : null}
+        </li>
+      ))}
+    </FactList>
+  );
+}
+
+function WebContract({
+  iface,
+  states,
+}: {
+  iface: GuardInterfaceRow;
+  states: readonly InterfaceState[] | undefined;
+}) {
+  return (
+    <div>
+      <Section title="Sequence">
+        <GuardWebSequence steps={iface.steps} />
+      </Section>
+
+      {iface.startingState ? (
+        <Section title="Assumes">
+          <GuardWebState id={iface.startingState} {...(states ? { states } : {})} />
+        </Section>
+      ) : null}
+      {iface.endState ? (
+        <Section title="Leaves">
+          <GuardWebState id={iface.endState} {...(states ? { states } : {})} />
+        </Section>
+      ) : null}
+
+      {/* `apiEffects` is deliberately NOT rendered (2026-08-24): the calls a click
+          fires are implementation traffic, not part of what a reader drives — the
+          relation stays in the catalog and the raw view. */}
+    </div>
+  );
+}
+
 /**
  * The contract, dispatched on the surface it declares. There is no command NAV
  * any more: one entry is one invocable thing (2026-08-10), so a cli contract
  * carries exactly one command and a list of one was a nav onto itself.
  */
-export function GuardInterfaceContract({ iface }: { iface: GuardInterfaceRow }) {
+export function GuardInterfaceContract({
+  iface,
+  states,
+}: {
+  iface: GuardInterfaceRow;
+  /** The state registry of this entry's AREA — the one line each state id names. */
+  states?: readonly InterfaceState[];
+}) {
   const contract = iface.contract;
+
+  // A web task's contract IS what the entry carries — there is no second artifact
+  // to be missing, so it never reaches the empty state below.
+  if (iface.type === 'web') {
+    return <WebContract iface={iface} states={states} />;
+  }
 
   if (!contract) {
     return (

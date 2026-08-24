@@ -5421,10 +5421,40 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     - **Consumers**: authoring renders a PLACES block (`buildResourceHints` in
       `guard-generator/src/grounding.ts` — the plan's `at`/`to` places plus `of`
       ancestors; `prompts.ts` `resourceLines`), riding the `InterfaceProvider`
-      seam and the snapshot fallback. The dashboard Interfaces tab groups web
-      rows by place (panel) and renders the open task's place card with its
-      readables (pane); `at`/`to` pass through `GuardInterfaceRow`, the registry
-      travels once on `GuardInterfacesView.resources`.
+      seam and the snapshot fallback. The dashboard Interfaces tab IS the
+      registry (redesigned 2026-08-24, "screens and operations"): the panel is a
+      FLAT skim with nothing expandable, one row per SCREEN (web top-level place,
+      tallying its own interfaces plus every `of` descendant's), per OPERATION
+      (one api interface — a colour-coded method and its path, an endpoint's rows
+      kept adjacent and sorted GET · HEAD · POST · PUT · PATCH · DELETE) or per
+      COMMAND (one cli interface). A screen with nothing to do — and an api REST
+      NOUN no operation serves, which never had a row — is counted out under the
+      rows, not listed. The pane is that row in full:
+      - a SCREEN as the classic header (surface + kind chips, the place id, one
+        muted `route <address> · mapped <time>` line, the description) over ONE
+        **Contract** section, which is two tables: **Actions** (one row per task
+        on the screen or any part of it — title + LOCATOR CHAIN, the part as a
+        Where column, Needs/Leaves as state ids with a `to` rendering as a
+        clickable destination, and the Calls/Flows counts — each row opening IN
+        PLACE into that task's signature, fingerprint, sequence, calls and the
+        world it leaves) and **The page shows** (one row per readable across the
+        parts: kind, the fact, the element it is read off in `describeWebLocator`
+        words, the condition, the part);
+      - an OPERATION opened DIRECTLY, with no endpoint page in between — the
+        method and path as the header, the contract summary, one "also on this
+        endpoint" line whose siblings are chips that jump, then the HTTP contract;
+      - a COMMAND as its own contract.
+      `at`/`to`/`resource` and `apiEffects` pass through `GuardInterfaceRow`; the
+      resource and state registries travel once, on
+      `GuardInterfacesView.resources` / `.states`. All of it is a render-time
+      JOIN (`apps/dashboard/client/src/lib/interface-pom.ts`) — no field exists
+      for it, and the only invented data is the SIGNATURE and the LOCATOR CHAIN
+      (display, never identity, never fingerprinted). Selection is
+      `?gplace=<surface>:<id>`, where the id is a PLACE on a screens surface and
+      the INTERFACE SLUG on api/cli (`api:patch-api-repos-id-rules-rulekey`);
+      `?ginterface=` stays the inbound address and resolves to the row that owns
+      the member (a task's panel → the screen it is part of; an operation and a
+      command → themselves).
     - **Reference migration**: 20 places, 32 world/view states (was 48), all 55
       task entries and ALL fingerprints byte-identical (asserted by the pinned
       reference tests). No merges: the envelope solves the many-small-entries

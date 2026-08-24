@@ -36,6 +36,7 @@ import {
   InterfaceEntrySchema,
   InterfaceOriginSchema,
   InterfaceResourceSchema,
+  InterfaceStateSchema,
   InterfaceStepSchema,
 } from '../interfaces.js'
 
@@ -1133,6 +1134,17 @@ export const GuardInterfaceRowSchema = z
      * renders as "no contract derived yet".
      */
     contract: InterfaceContractSchema.optional(),
+    /**
+     * The api interfaces this entry's steps CALL, by id — the UI-to-API relation,
+     * passed through from the catalog verbatim. Ids, not shapes: a reader joins
+     * them against the catalog's own api rows (the pane mints `noun.method()`
+     * from the joined entry, and shows the raw id when nothing resolves).
+     *
+     * The absence rule of the catalog holds here too and both halves are real
+     * answers: OMITTED = the derivation established nothing, `[]` = it
+     * established NONE (an interaction that reaches no server at all).
+     */
+    apiEffects: z.array(z.string()).optional(),
   })
   .strict()
 export type GuardInterfaceRow = z.infer<typeof GuardInterfaceRowSchema>
@@ -1189,6 +1201,15 @@ export const GuardInterfacesViewSchema = z
      * Absent where the catalog names none (cli/api-only catalogs).
      */
     resources: z.record(z.string(), z.array(InterfaceResourceSchema)).optional(),
+    /**
+     * The STATE REGISTRY, per area — the catalog's own, verbatim: the worlds the
+     * rows' `startingState`/`endState` name, each with the one line that says
+     * what it is. On the view for the same reason `resources` is: a state is
+     * defined ONCE and many rows reference it. Absent where the catalog names
+     * none, and a row whose state id the registry does not carry still renders
+     * its id — the id is the fact, the description is the gloss.
+     */
+    states: z.record(z.string(), z.array(InterfaceStateSchema)).optional(),
     /** One row per driver-registry surface (the banner), registry order. */
     surfaces: z.array(GuardInterfaceSurfaceSchema),
     totals: z
