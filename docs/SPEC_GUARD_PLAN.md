@@ -7027,12 +7027,19 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     the pre-latch corpus is real; `refusal` is the discriminator readers
     must surface. Tests: `tests/cli/guard.test.ts` (outro, projection).
 
-128. **`blocked` may carry `lastEvidence` (same bench).** STATUS: BUILT. A
-    worker that ends blocked after real runs naturally attaches the
-    evidence that proved the block; the outcome schema's strict pairing
-    refused it (`kind "blocked" must not carry lastEvidence`), costing a
-    re-ask turn to DELETE information worth keeping — two sessions died
-    malformed on exactly this. `FLOW_WORKER_OPTIONAL_FIELDS` now allows
-    `lastEvidence` on `blocked` (`attempts` stays refused: retirement
-    bookkeeping with no consumer on a block). Incident-verbatim tests in
-    `tests/shared/guard-flows.test.ts`.
+128. **`blocked` may carry `lastEvidence` and `attempts` (same bench).**
+    STATUS: BUILT. A worker that ends blocked after real runs naturally
+    attaches the evidence that proved the block; the outcome schema's strict
+    pairing refused it (`kind "blocked" must not carry lastEvidence`),
+    costing a re-ask turn to DELETE information worth keeping — two sessions
+    died malformed on exactly this. `FLOW_WORKER_OPTIONAL_FIELDS` now allows
+    `lastEvidence` on `blocked`. AMENDED 2026-08-24 after the conc-4
+    verification run: `attempts` had stayed refused ("retirement bookkeeping
+    with no consumer on a block") and three sessions on the SAME bench then
+    died malformed volunteering it beside their evidence — honest blocked
+    verdicts turned into unsettled errors. `attempts` is now admitted on
+    `blocked` too (journey-defect/settled still refuse it). The worker
+    prompt is deliberately untouched — the blocked example still shows only
+    `perMilestone`, so the prompt fingerprint (and every worker cache) is
+    unmoved; models volunteer the field unprompted. Incident-verbatim tests
+    in `tests/shared/guard-flows.test.ts`.

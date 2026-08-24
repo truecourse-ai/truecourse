@@ -338,11 +338,26 @@ describe('GuardFlowWorkerOutcomeSchema payload pairing', () => {
     expect(withEvidence.success).toBe(true)
   })
 
-  it('blocked still refuses attempts — retirement bookkeeping with no consumer on a block', () => {
+  it('blocked MAY carry attempts — workers volunteer their probe count on an honest block (documenso 13-worker run 6)', () => {
+    // Incident-verbatim (run 6, session 0d3c76a5…): the worker made 16 real
+    // API attempts, diagnosed missing-data, attached lastEvidence as designed —
+    // and died malformed on `attempts`. Three honest blocked verdicts became
+    // hard session failures the same way; the field is honest metadata.
     const res = GuardFlowWorkerOutcomeSchema.safeParse({
       kind: 'blocked',
-      perMilestone: [{ order: 1, capability: 'a stripe sandbox account' }],
-      attempts: 3,
+      perMilestone: [{ order: 1, capability: 'missing-data: a pending envelope/document owned by the owner API token' }],
+      attempts: 16,
+      lastEvidence:
+        'cancelling sourceTemplate.id returned 404 Document not found; a fresh draft cancel returned 400 "Only pending documents can be cancelled"',
+    })
+    expect(res.success).toBe(true)
+  })
+
+  it('journey-defect still refuses attempts — the allowance is blocked-only', () => {
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'journey-defect',
+      report: { interfaceId: 'api/get-api-v2-envelope', detail: 'the derived route does not exist' },
+      attempts: 2,
     })
     expect(res.success).toBe(false)
     if (!res.success) expect(res.error.issues.map((i) => i.path[0])).toEqual(['attempts'])

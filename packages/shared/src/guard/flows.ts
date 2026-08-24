@@ -216,11 +216,13 @@ const FLOW_WORKER_PAYLOAD_FIELDS = {
 /** Fields a kind MAY carry beyond its required payload. A worker that ends
  *  `blocked` after real runs naturally attaches the evidence that proved the
  *  block — refusing it cost a whole re-ask turn for information worth keeping
- *  (the documenso 13-worker bench, 2026-08-24). `attempts` stays refused on
- *  blocked: it is retirement bookkeeping with no consumer on a block. */
+ *  (the documenso 13-worker bench, 2026-08-24). `attempts` is admitted on
+ *  blocked for the same reason: workers volunteer their probe count alongside
+ *  the evidence, and refusing it turned three honest blocked verdicts into
+ *  malformed-session failures (run 6, same bench). */
 const FLOW_WORKER_OPTIONAL_FIELDS = {
   settled: [],
-  blocked: ['lastEvidence'],
+  blocked: ['lastEvidence', 'attempts'],
   'journey-defect': [],
   retired: [],
 } as const satisfies Record<keyof typeof FLOW_WORKER_PAYLOAD_FIELDS, readonly string[]>
@@ -262,7 +264,8 @@ export const GuardFlowWorkerOutcomeSchema = z
       .optional(),
     /** journey-defect: the derived interface the worker found wrong against the real app. */
     report: z.object({ interfaceId: z.string().min(1), detail: z.string().min(1) }).strict().optional(),
-    /** retired: how many authoring attempts the worker spent before giving up. */
+    /** retired: how many authoring attempts the worker spent before giving up.
+     *  blocked MAY carry it too: the probe count behind the block. */
     attempts: z.number().int().nonnegative().optional(),
     /** retired: the last run's evidence — why no faithful scenario could be produced.
      *  blocked MAY carry it too: the run evidence behind the block. */
