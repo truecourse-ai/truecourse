@@ -275,9 +275,12 @@ describe('flowWorkerCacheKey', () => {
 })
 
 describe('cacheableWorkerOutcome', () => {
-  it('stores settled and blocked; never a retirement or a journey defect', () => {
+  it('stores ONLY settled — a block is a per-run world claim, like a retirement or a journey defect', () => {
     expect(cacheableWorkerOutcome({ kind: 'settled', scenarioYamlSha: 'a', expectedReds: [] })).toBe(true)
-    expect(cacheableWorkerOutcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'stripe' }] })).toBe(true)
+    // The documenso 13-worker incident (2026-08-24): cached "database
+    // unreachable" blocks replayed on every retry with no re-verification
+    // path, permanently skipping flows whose world was healthy again.
+    expect(cacheableWorkerOutcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'stripe' }] })).toBe(false)
     expect(cacheableWorkerOutcome({ kind: 'retired', attempts: 1, lastEvidence: 'e' })).toBe(false)
     expect(cacheableWorkerOutcome({ kind: 'journey-defect', report: { interfaceId: 'i', detail: 'd' } })).toBe(false)
   })
@@ -341,18 +344,49 @@ describe('the flow-worker pool’s cache', () => {
     })
   })
 
-  it('a cached BLOCKED entry serves without any confirmation run', async () => {
+  it('a legacy cached BLOCKED entry is a MISS — the session re-attempts the flow (the P1017 replay incident)', async () => {
     const r = docRepo()
-    const { task, calls } = fakeTask()
-    const blocked = { outcome: { kind: 'blocked' as const, perMilestone: [{ order: 1, capability: 'stripe' }] } }
+    const { task } = fakeTask()
+    // Incident-verbatim entry shape (documenso 13-worker run 1): an
+    // infra-class block cached by the pre-fix engine. It parses, but a block
+    // has no re-verification path (unlike settled's confirmCached), so it
+    // must never serve as a hit.
+    const blocked = {
+      outcome: {
+        kind: 'blocked' as const,
+        perMilestone: [
+          { order: 1, capability: 'working guard seed/database connection (guard-seed failed with Prisma P1017)' },
+        ],
+      },
+    }
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), blocked)
+    sessionScript = settleScript
 
     const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
 
-    expect(summary).toMatchObject({ ran: 0, fromCache: 1 })
-    expect(byTask.get(task.workItem)).toMatchObject({ kind: 'outcome', fromCache: true })
-    expect(calls.confirm).toEqual([])
-    expect(constructions).toBe(0)
+    expect(summary).toMatchObject({ ran: 1, fromCache: 0 })
+    const res = byTask.get(task.workItem)
+    expect(res).toMatchObject({ kind: 'outcome' })
+    if (res?.kind === 'outcome') expect(res.outcome.kind).toBe('settled')
+    // The fresh settled outcome overwrote the stale blocked entry.
+    const entry = (await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))) as {
+      outcome: { kind: string }
+    }
+    expect(entry.outcome.kind).toBe('settled')
+  })
+
+  it('a fresh BLOCKED outcome folds but is never written to the cache', async () => {
+    const r = docRepo()
+    const { task } = fakeTask()
+    sessionScript = async (call) => {
+      await callTool(call, 'run_scenario', { yaml: YAML })
+      return outcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'stripe sandbox account' }] })
+    }
+
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    expect(summary).toMatchObject({ ran: 1, failed: 0 })
+    expect(byTask.get(task.workItem)).toMatchObject({ kind: 'outcome' })
+    expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toBeNull()
   })
 
   it('a TAINTED task skips the cache read entirely — the entry still holds the rejected scenario', async () => {

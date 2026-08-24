@@ -7000,3 +7000,14 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     contract; sequential/CONCURRENT runs boot once, seed once, down only at
     shutdown; failed-up retry).
 
+126. **`blocked` worker outcomes are per-run — never cached (same bench).**
+    STATUS: BUILT. A cached `blocked` replayed as a fromCache hit with no
+    re-verification path (only `settled` has `confirmCached`), so six
+    P1017-era infra-blocks kept permanently skipping flows whose world was
+    healthy again, run after run. `cacheableWorkerOutcome` now admits ONLY
+    `settled`; a legacy `blocked` entry still parses but reads as a MISS
+    and is overwritten by the session's fresh outcome. Cost: a short
+    re-session per run for genuinely blocked flows — the price of never
+    trusting a world claim without re-proving it. Tests updated
+    incident-verbatim in `tests/core/guard-generate-worker-seam.test.ts`.
+

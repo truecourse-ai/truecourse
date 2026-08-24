@@ -141,8 +141,9 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
 /**
  * One cached worker result: the completed outcome plus, for `settled`, the
  * engine-stashed yaml (the outcome's sha references run state that does not
- * survive the run, so the yaml must ride the entry). Only `settled` and
- * `blocked` are written — see {@link cacheableWorkerOutcome}.
+ * survive the run, so the yaml must ride the entry). Only `settled` is
+ * written — see {@link cacheableWorkerOutcome}; the shape still parses legacy
+ * `blocked` entries so an old store never throws (they read as misses).
  */
 export const CachedWorkerEntrySchema = z
   .object({
@@ -153,16 +154,17 @@ export const CachedWorkerEntrySchema = z
 export type CachedWorkerEntry = z.infer<typeof CachedWorkerEntrySchema>
 
 /**
- * Which completed outcomes enter the cache. `settled` and `blocked` are
- * statements about a world the key fully names — the one-shot author cache
- * stored exactly these two shapes (scenario / blockedOn). `journey-defect` and
- * `retired` are NOT cached: a retirement is a per-run event whose record is the
- * ledger (a cached one would silently skip the flow without ever bumping or
- * escalating), and a journey defect should re-attempt once someone touches the
- * catalog even when the key has not moved.
+ * Which completed outcomes enter the cache: ONLY `settled` — the one shape
+ * whose cache hit is re-proven against the live world (`confirmCached`) before
+ * it stands. `blocked` is NOT cached (since the documenso 13-worker bench,
+ * 2026-08-24): a block is a claim about the WORLD at run time — six cached
+ * "Prisma P1017 / database unreachable" verdicts replayed as fromCache hits on
+ * every retry with no re-verification path, permanently skipping flows whose
+ * world was fine again. Like `retired` and `journey-defect`, a block is a
+ * per-run event: the next run re-attempts it (blocked sessions are short).
  */
 export function cacheableWorkerOutcome(outcome: GuardFlowWorkerOutcome): boolean {
-  return outcome.kind === 'settled' || outcome.kind === 'blocked'
+  return outcome.kind === 'settled'
 }
 
 const runScenarioTool = (task: FlowWorkerTask): SessionTool =>

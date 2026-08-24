@@ -606,12 +606,11 @@ export function createGuardGenerateSessionSeams(
           const parsed = CachedWorkerEntrySchema.safeParse(hit)
           if (parsed.success) {
             const { outcome, scenarioYaml } = parsed.data
-            if (outcome.kind === 'blocked') {
-              summary.fromCache++
-              byTask.set(task.workItem, { kind: 'outcome', outcome, fromCache: true })
-              tick('blocked')
-              continue
-            }
+            // A legacy `blocked` entry parses but is a MISS: a block is a
+            // world claim with no re-verification path (unlike settled's
+            // confirmCached), and replayed infra-blocks permanently skipped
+            // live flows (the documenso 13-worker bench). The session re-runs
+            // and, since blocked is no longer cacheable, overwrites nothing.
             if (
               outcome.kind === 'settled' &&
               scenarioYaml !== undefined &&
@@ -714,9 +713,10 @@ export function createGuardGenerateSessionSeams(
             tick('failed')
           } else {
             byTask.set(task.workItem, { kind: 'outcome', outcome: settled.output })
-            // Only settled + blocked enter the cache; a settled entry carries
-            // the STASHED yaml (the sha references run state that dies with
-            // the run). Failures are never cached.
+            // Only settled enters the cache, carrying the STASHED yaml (the
+            // sha references run state that dies with the run). Blocked,
+            // retired, journey-defect and failures are per-run events — never
+            // cached (see cacheableWorkerOutcome).
             if (cacheableWorkerOutcome(settled.output)) {
               const scenarioYaml =
                 settled.output.kind === 'settled' ? task.stashedYaml(settled.output.scenarioYamlSha!) : undefined
