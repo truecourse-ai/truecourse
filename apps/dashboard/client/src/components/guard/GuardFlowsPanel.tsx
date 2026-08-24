@@ -122,7 +122,7 @@ function FlowRow({
           </HoverPopover>
         )}
         {flow.manual && (
-          <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
+          <HoverPopover portal width="narrow" content="Hand-written scenario — it belongs to no synthesized flow.">
             <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               <PenLine className="h-3 w-3" />
               manual

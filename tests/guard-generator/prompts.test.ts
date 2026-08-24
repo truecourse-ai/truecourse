@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import {
   EXTRACT_SYSTEM_PROMPT,
-  GENERATE_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
-  GENERATE_PROMPT_FINGERPRINT,
-  GENERATE_API_PROMPT_FINGERPRINT,
+  WORKER_CLI_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
+  WORKER_CLI_PROMPT_FINGERPRINT,
+  WORKER_API_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
@@ -24,12 +24,15 @@ import {
   buildFlowsEpicUserPrompt,
   type AuthorMilestone,
   type AuthorUserContext,
+  type CommandGrammarEntry,
   type FidelityUserContext,
   type MatchUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
 } from '@truecourse/guard-generator'
 import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
+import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
+import { deriveCliJourneysFromTree } from '../../packages/journey-mapper/src/cli-tree'
 
 /** The same content fingerprint the engine folds into the cache keys. */
 const fingerprint = (text: string): string =>
@@ -105,6 +108,8 @@ function fidelityCtx(overrides: Partial<FidelityUserContext> = {}): FidelityUser
       },
     ],
     scenarioYaml: 'title: done marks complete\nsteps:\n  - run: [done, t1]\n',
+    scenarioId: 'done.cli.1',
+    surface: 'cli',
     ...overrides,
   }
 }
@@ -130,41 +135,34 @@ function matchCtx(overrides: Partial<MatchUserContext> = {}): MatchUserContext {
   }
 }
 
-/** A retry authoring prompt carrying birth-failure evidence. */
-function retryPrompt(): string {
-  return buildAuthorUserPrompt(
-    authorCtx({
-      retry: {
-        scenarioTitle: 'done marks the task complete',
-        step: 1,
-        expected: 'stdout contains "Completed t1 ✓"',
-        actual: 'Marked t1 as done',
-      },
-    }),
-  )
-}
-
 describe('guard-generator prompts', () => {
-  it('GENERATE_SYSTEM_PROMPT carries the world-state capabilities block', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# World-state capabilities')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('setup.git')
+  it('WORKER_CLI_SYSTEM_PROMPT carries the world-state capabilities block', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# World-state capabilities')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('setup.git')
     // The sandbox realities, one line each.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('no network')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('allowlisted')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('no shell')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('no network egress')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('no credentials')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('no shell')
   })
 
-  it('GENERATE_SYSTEM_PROMPT documents the blockedOn output shape', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('blockedOn')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('service|db|network|credentials')
+  it('WORKER_CLI_SYSTEM_PROMPT names the blocked-on nouns the settle carries', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('blockedOn')
+    // The closed noun vocabulary: a secret, the third party itself, missing data.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('`"credentials"` when a SECRET is missing')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('the SERVICE ITSELF when a third party is missing')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('`"missing-data"`')
+    // A blocked milestone never holds its testable siblings hostage.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('blockedMilestones')
   })
 
-  it('GENERATE_SYSTEM_PROMPT closes the action space (no tools / no repo access)', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# No tools, no repository access')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('You have NO tools and NO repository access')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('<tool_use>')
-    // Points the model at the injected transcripts instead of inspecting code.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('REAL BEHAVIOR')
+  it('WORKER_CLI_SYSTEM_PROMPT gives the session ONE tool and a converging loop', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# Your loop')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('You have ONE tool: `run_scenario`')
+    // The sandbox capture is what a revision reads — draft → run → observe → revise.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('draft → run →\nobserve → revise')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('Your turns are budgeted')
+    // The settle is on an EXECUTED scenario, never on an unexecuted draft.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('The LAST run is your answer')
   })
 
   it('EXTRACT and RECIPE carry the shared output-only guardrail', () => {
@@ -172,10 +170,18 @@ describe('guard-generator prompts', () => {
     expect(RECIPE_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
-  it('GENERATE keeps its own richer no-tools block, not the shared constant', () => {
-    // GENERATE was hardened by an earlier pass with a fuller block; leave it as is.
-    expect(GENERATE_SYSTEM_PROMPT).not.toContain(OUTPUT_ONLY_GUARDRAIL)
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# No tools, no repository access')
+  it('both worker prompts are agentic — the loop, the one tool, the last-run answer', () => {
+    for (const prompt of [WORKER_CLI_SYSTEM_PROMPT, WORKER_API_SYSTEM_PROMPT]) {
+      expect(prompt).not.toContain(OUTPUT_ONLY_GUARDRAIL)
+      expect(prompt).not.toContain('You have NO tools')
+      expect(prompt).toContain('# Your loop')
+      expect(prompt).toContain('You have ONE tool: `run_scenario`')
+      expect(prompt).toMatch(/draft → run →\s*observe → revise/)
+      expect(prompt).toContain('Your turns are budgeted')
+      expect(prompt).toContain('The LAST run is your answer')
+    }
+    // There is no retry stage: the capture is read in-loop, never a "retry supplies".
+    expect(WORKER_API_SYSTEM_PROMPT).not.toContain('retry supplies')
   })
 
   it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
@@ -219,148 +225,270 @@ describe('guard-generator prompts', () => {
     expect(EXTRACT_SYSTEM_PROMPT).toContain('web/tui/library claims')
   })
 
-  // Assertions come from the claim/doc, never the transcript (AUTHORING).
-  it('GENERATE_SYSTEM_PROMPT rules assertions come from the claim, not the transcript', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# Assertions come from the claim, never the transcript')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('you MUST STILL assert the CLAIM')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('fails birth')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('surfaces as a finding')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('effect-only check')
-    // The old "ground every assertion in the transcript" instruction is gone.
-    expect(GENERATE_SYSTEM_PROMPT).not.toContain('Ground every assertion about output in those transcripts')
+  // Assertions come from the claim/doc, never what the sandbox happened to print.
+  it('WORKER_CLI_SYSTEM_PROMPT rules assertions come from the claim, not the observed run', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain(
+      '# Assertions come from the claim, never from observed behavior',
+    )
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('you MUST STILL')
+    // The disagreement is the point: keep the assertion, watch it fail, settle failing.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('settle FAILING with a\ndiagnosis')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('this scenario exists to surface')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('effect-only')
+    // Softening an assertion to make the sandbox go green is the worst outcome.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('a green test that proves less than the claim is')
   })
 
-  it('GENERATE_SYSTEM_PROMPT carries the compact worked example (claim X vs transcript Y)', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Worked example')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Completed t1 ✓')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Marked t1 as done')
+  it('WORKER_CLI_SYSTEM_PROMPT carries the compact worked example (claim X vs observed Y)', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('Worked example')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('Completed t1 ✓')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('Marked t1 as done')
   })
 
-  it('GENERATE_SYSTEM_PROMPT keeps faithfulness the prime directive', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# Faithfulness — the prime directive')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# Faithfulness — the prime directive')
+  it('both authoring prompts keep faithfulness the prime directive', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# Faithfulness — the prime directive')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('# Faithfulness — the prime directive')
     // A green test that proves less than the claim is the worst outcome.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('must never claim more than the prose does')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('must never claim more than the prose does')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('must never claim more than the prose does')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('must never claim more than the prose does')
   })
 
   // The milestone contract — every milestone realized, plumbing steps unannotated.
-  it('GENERATE_SYSTEM_PROMPT requires every milestone to carry a step, plumbing steps none', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# The path is the point: one scenario, every milestone')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Every milestone MUST be realized by at least one step')
-    expect(GENERATE_SYSTEM_PROMPT).toContain("milestone: <that milestone's number>")
+  it('WORKER_CLI_SYSTEM_PROMPT requires every milestone to carry a step, plumbing steps none', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# The path is the point: one scenario, every milestone')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('Every milestone MUST be realized by at least one step')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain("milestone: <that milestone's number>")
     // A seeding / unasserted step paints neutral.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('only prepares the world')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('carries NO `milestone`')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('only prepares\n  the world')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('carries NO `milestone`')
     // The numbers are given, not the model's to reshape.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Never renumber, merge, split, skip, or invent a milestone')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('Never renumber, merge, split, skip, or invent a milestone')
     // Missing world-state is declared in `setup`, never an excuse to drop a milestone.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('never drop the milestone')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('never drop the milestone')
   })
 
-  it('GENERATE_API_SYSTEM_PROMPT states the same milestone contract for the api surface', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# The path is the point: one scenario, every milestone')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Every milestone MUST be realized by at least one step')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('carries NO `milestone`')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Never renumber, merge, split, skip, or invent a milestone')
-    // One server, one path — chained with capture rather than guessed ids.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('one freshly booted server')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`capture`')
-  })
-
-  it('both authoring prompts ask for ONE scenario object, or a blockedOn instead', () => {
-    for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
-      expect(prompt).toContain('# Output — ONE object, carrying one scenario')
-      expect(prompt).toContain('Return EXACTLY ONE JSON object')
-      expect(prompt).toContain('"scenario": { … the scenario, its steps carrying `milestone` … }')
-      expect(prompt).toContain('"blockedOn"')
-      expect(prompt).toContain('Exactly one of the two')
+  // Two-sided promises get two-sided tests — the same rule, in each driver's words.
+  it('both authoring prompts demand both halves of a two-sided promise', () => {
+    for (const prompt of [WORKER_CLI_SYSTEM_PROMPT, WORKER_API_SYSTEM_PROMPT]) {
+      expect(prompt).toContain('# Two-sided promises get two-sided tests')
+      expect(prompt).toContain("BOTH halves are that milestone's contract")
+      expect(prompt).toContain('steps for BOTH halves')
     }
-    // The api refusal shape asks for the SERVICE NAME, not a generic noun.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('the SERVICE NAME when it is a third party')
   })
 
-  // The same claim-not-transcript rule, mirrored in the RETRY prompt
-  // (buildAuthorUserPrompt with retry evidence).
-  it('the RETRY authoring prompt keeps the claim assertion on a doc-vs-code disagreement', () => {
-    const p = retryPrompt()
-    expect(p).toContain('RETRY —')
-    expect(p).toContain('fix COMMANDS')
-    expect(p).toContain('DOC-vs-CODE disagreement on an asserted VALUE')
-    expect(p).toContain("KEEP the claim's assertion")
-    expect(p).toContain('correctly becomes a finding')
-    expect(p).toContain('Never weaken an')
-    // Reordering the path is allowed; dropping a milestone to go green is not.
-    expect(p).toContain('MAY REORDER the milestones')
-    expect(p).toContain('never drop a milestone')
+  // The doc's own worked examples run byte-for-byte, on both surfaces.
+  it('both authoring prompts run a DOC EXAMPLE verbatim, never reformatted', () => {
+    for (const prompt of [WORKER_CLI_SYSTEM_PROMPT, WORKER_API_SYSTEM_PROMPT]) {
+      expect(prompt).toContain("# The doc's own examples run VERBATIM")
+      expect(prompt).toContain('DOC EXAMPLE markers')
+      expect(prompt).toContain('BYTE-FOR-BYTE')
+      // A block nothing runs/sends constrains nothing.
+      expect(prompt).toContain('constrains nothing')
+    }
+    // The cli half seeds the bytes as scenario INPUT; a broken example stays broken.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain("seed the DOC EXAMPLE's bytes")
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('deliberately-broken example must stay broken')
   })
 
-  it('the RETRY prompt is one per-flow block naming the failing step and its milestone', () => {
+  // A long-running command is drivable from a cli scenario — the managed-service verbs.
+  it('WORKER_CLI_SYSTEM_PROMPT teaches the managed-service step vocabulary and its limit', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# A long-running SERVICE is drivable')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('"boot"')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('"signal"')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('"logs"')
+    // An ordinary `run` step waits for exit, so it can never test such a command…
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('An ordinary `run` step waits for EXIT')
+    // …and a command that EXITS stays an ordinary `run` step.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('never a `boot`')
+  })
+
+  it('WORKER_API_SYSTEM_PROMPT states the same milestone contract for the api surface', () => {
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('# The path is the point: one scenario, every milestone')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('Every milestone MUST be realized by at least one step')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('carries NO `milestone`')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('Never renumber, merge, split, skip, or invent a milestone')
+    // One server, one path — chained with capture rather than guessed ids.
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('one freshly booted server')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('`capture`')
+  })
+
+  it('the api worker closes the outcome space a session may end on', () => {
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('# Outcomes — how a session ends')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('Every session ends with exactly one outcome')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('- `settled` —')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('- `blocked` —')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('- `journey-defect` —')
+    // A blocked api flow still names the SERVICE, never a generic noun.
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('write the SERVICE (`"stripe"`')
+  })
+
+  // The cli surface settles an OUTCOME instead of returning one object: the same
+  // three answers (a scenario, a refusal, a defect report), reached over turns.
+  it('WORKER_CLI_SYSTEM_PROMPT closes the outcome space a session may end on', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# Outcomes — how a session ends')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('Every session ends with exactly one outcome')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('- `settled` —')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('- `blocked` —')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('- `journey-defect` —')
+  })
+
+  // Where the deleted evidence-retry's job went: a run that fails because code and
+  // doc disagree is SETTLED failing, with the diagnosis the triage stage used to
+  // produce — verdict, confidence, brief, recommendation.
+  it('WORKER_CLI_SYSTEM_PROMPT settles a genuine disagreement FAILING, with a diagnosis', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain(
+      'Settle FAILING when the run fails because code and doc genuinely disagree',
+    )
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('`code-drift`')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('`doc-drift`')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('`confidence` (high | medium | low)')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('`recommendation`')
+    // A scenario broken by its OWN defect is fixed or run out honestly — never
+    // settled failing, which is what would turn a bad test into a false finding.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain(
+      'A scenario that fails because of ITS OWN defect is never\n  settled failing',
+    )
+  })
+
+  // The COMMAND GRAMMAR block — the cli analog of the api operations block:
+  // the bound commands' flags are parsed facts, never prose-reconstructed guesses.
+  const grammar = (): CommandGrammarEntry[] => [
+    {
+      command: ['config', 'llm', 'setup'],
+      label: 'Choose the LLM transport',
+      options: [
+        { flag: '--transport', required: true, choices: ['claude-code', 'api'] },
+        { flag: '--provider', takesValue: true, valueHint: 'name', description: 'API provider' },
+        { flag: '--model', takesValue: true, valueHint: 'id', description: 'Model id every stage runs on' },
+        { flag: '--no-test' },
+      ],
+    },
+  ]
+
+  it('renders one usage line per bound command — required bare, optional bracketed, choices enumerated', () => {
+    const p = buildAuthorUserPrompt(authorCtx({ commandGrammar: grammar() }))
+    expect(p).toContain('COMMAND GRAMMAR')
+    expect(p).toContain(
+      '- config llm setup --transport <claude-code|api> [--provider <name>] [--model <id>] [--no-test]   (Choose the LLM transport)',
+    )
+    // Per-option detail lines carry the declared descriptions.
+    expect(p).toContain('    --provider <name>: API provider')
+    expect(p).toContain('    --model <id>: Model id every stage runs on')
+  })
+
+  it('renders program-scope options on their own line, never in the usage line', () => {
     const p = buildAuthorUserPrompt(
       authorCtx({
-        milestones: [milestone({ order: 1 }), milestone({ order: 2, claim: '`list` prints open tasks' })],
-        retry: {
-          scenarioTitle: 'done marks the task complete',
-          step: 3,
-          expected: 'stdout contains "Completed t1 ✓"',
-          actual: 'Marked t1 as done',
-          milestone: 2,
-        },
+        commandGrammar: [
+          {
+            command: ['analyze'],
+            options: [
+              { flag: '--diff' },
+              { flag: '--verbose', scope: 'program', description: 'Print every step' },
+              {
+                flag: '--config',
+                scope: 'program',
+                required: true,
+                takesValue: true,
+                valueHint: 'path',
+              },
+            ],
+          },
+        ],
       }),
     )
-    expect(p).toContain('scenario: done marks the task complete')
-    expect(p).toContain('failing step: 3 (milestone 2)')
-    // Exactly one retry block for the whole flow.
-    expect(p.split('RETRY —').length - 1).toBe(1)
+    expect(p).toContain('- analyze [--diff]')
+    expect(p).not.toContain('analyze [--diff] [--verbose]')
+    expect(p).toContain(
+      '    program-level flags (pass before the subcommand): [--verbose] --config <path>',
+    )
+    // Program-scope descriptions still render in the per-option detail lines.
+    expect(p).toContain('    --verbose: Print every step')
   })
 
-  it('the RETRY prompt renders program stdout/stderr blocks after expected/actual', () => {
+  it('renders no grammar block without data, and never on api', () => {
+    const bare = buildAuthorUserPrompt(authorCtx())
+    expect(bare).not.toContain('COMMAND GRAMMAR')
+    expect(buildAuthorUserPrompt(authorCtx({ commandGrammar: [] }))).toBe(bare)
+    expect(buildAuthorUserPrompt(apiAuthorCtx({ commandGrammar: grammar() }))).not.toContain(
+      'COMMAND GRAMMAR',
+    )
+  })
+
+  it('a re-authoring prompt carries the same grammar block', () => {
+    // A prompt built with PRIOR-REJECTION evidence is still the same flow's prompt:
+    // the given facts it composes argv from must survive the re-ask.
     const p = buildAuthorUserPrompt(
       authorCtx({
-        milestones: [milestone({ claim: '`add` records an expense' })],
-        retry: {
-          scenarioTitle: 'add records an expense',
-          step: 1,
-          expected: 'exit 3',
-          actual: 'exit 2',
-          stdout: 'usage: expense add --amount <n> --note <s>',
-          stderr: 'error: missing required flag --amount',
-        },
+        commandGrammar: grammar(),
+        priorFlag: { title: 'setup stores the key', mismatch: 'asserted only the exit code' },
       }),
     )
-    // The excerpts follow the expected/actual lines.
-    expect(p).toContain('expected: exit 3')
-    expect(p).toContain('actual:   exit 2')
-    expect(p).toContain('program stdout:')
-    expect(p).toContain('usage: expense add --amount <n>')
-    expect(p).toContain('program stderr:')
-    expect(p).toContain('error: missing required flag --amount')
-    expect(p.indexOf('actual:')).toBeLessThan(p.indexOf('program stdout:'))
-    // The doc-first rules are untouched.
-    expect(p).toContain("KEEP the claim's assertion")
-    expect(p).toContain('fix COMMANDS')
+    expect(p).toContain('PRIOR FLAG —')
+    expect(p).toContain('- config llm setup --transport <claude-code|api>')
   })
 
-  it('the RETRY prompt omits an absent program-output stream', () => {
-    // The default retryPrompt() carries no excerpts → neither block renders.
-    const p = retryPrompt()
-    expect(p).not.toContain('program stdout:')
-    expect(p).not.toContain('program stderr:')
+  it('the cli system prompt states the grammar rule; the api prompt says nothing of it', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('# Command grammar is given')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('never pass a flag')
+    // A sandbox that contradicts the given grammar is reported, never worked around.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('a sandbox contradiction is a JOURNEY DEFECT')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('do NOT work around it')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('the fix heals every flow')
+    // The doc-example precedence stays intact: a worked example still runs verbatim.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('still runs byte-for-byte')
+    expect(WORKER_API_SYSTEM_PROMPT).not.toContain('COMMAND GRAMMAR')
   })
 
-  it('a non-retry authoring prompt carries no RETRY block', () => {
-    expect(buildAuthorUserPrompt(authorCtx())).not.toContain('RETRY —')
+  // The field case, end to end: a commander registration with a required
+  // `--transport <mode>` option reaches the authoring context as a usage block
+  // naming it — through the real analyzer and the journey mapper.
+  it('a commander registration reaches the authoring context as its usage block', () => {
+    const journeys = deriveCliJourneysFromTree([
+      analyzeFileContent(
+        'src/cli.ts',
+        `
+        import { Command } from 'commander'
+        const program = new Command()
+        const config = program.command('config').description('Configuration')
+        const llm = config.command('llm').description('LLM transport')
+        llm.command('setup')
+          .description('Choose the LLM transport')
+          .requiredOption('--transport <mode>', 'Transport to save')
+          .option('--model <id>', 'Model id every stage runs on')
+          .action(runSetup)
+        `,
+        'typescript',
+      ),
+    ])
+    const setup = journeys.find((j) => j.id === 'cli/config-llm-setup')
+    const invoke = setup?.steps[0]
+    if (!invoke || invoke.kind !== 'invoke') throw new Error('expected an invoke step')
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        commandGrammar: [
+          {
+            command: invoke.command,
+            ...(invoke.label ? { label: invoke.label } : {}),
+            options: invoke.options ?? [],
+          },
+        ],
+      }),
+    )
+    expect(p).toContain('COMMAND GRAMMAR')
+    expect(p).toContain('- config llm setup --transport <mode> [--model <id>]   (Choose the LLM transport)')
+    expect(p).toContain('    --transport <mode>: Transport to save')
   })
 
   // The seeding constraint, LOUD, in the capabilities block.
-  it('GENERATE_SYSTEM_PROMPT makes the git-seeding constraint impossible to miss', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('SEEDING RULE')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('setup.git.commits[].files')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('setup.git.staged')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('MUST also be seeded')
-    // The one-line wrong/right example.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Wrong:')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Right:')
+  it('WORKER_CLI_SYSTEM_PROMPT makes the git-seeding constraint impossible to miss', () => {
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('SEEDING RULE (do not skip)')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('setup.git.commits[].files')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('setup.git.staged')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('MUST also be seeded')
+    // …and what it costs to skip it: the whole test never builds.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('is never materialized')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('the WHOLE test fails to build')
   })
 
   // --- authoring USER prompt: the flow and its milestones -------------------
@@ -445,34 +573,10 @@ describe('guard-generator prompts', () => {
     expect(p).not.toContain('realized through:')
   })
 
-  it('buildAuthorUserPrompt quotes back the uncovered and unknown milestone numbers', () => {
-    const p = buildAuthorUserPrompt(
-      authorCtx({
-        milestones: [milestone({ order: 1 }), milestone({ order: 2 }), milestone({ order: 3 })],
-        issues: { uncoveredMilestones: [2, 3], unknownMilestones: [7] },
-      }),
-    )
-    expect(p).toContain('CORRECTION — no step realized these milestones.')
-    expect(p).toContain('one step carrying its number in `milestone`')
-    expect(p).toContain('  2, 3')
-    expect(p).toContain('CORRECTION — these `milestone` values match no milestone of this flow.')
-    // The closed number set is stated, and plumbing steps stay unannotated.
-    expect(p).toContain('the numbers listed above (1..3), or omit `milestone` for a plumbing step:')
-    expect(p).toContain('  7')
-    expect(p).toContain('Return the COMPLETE scenario again, as one JSON object matching the schema.')
-  })
-
-  it('buildAuthorUserPrompt renders no issues block when the engine found none', () => {
+  it('buildAuthorUserPrompt renders no correction block — malformed turns re-ask in-loop', () => {
+    // The one-shot corrective re-ask is gone: an invalid draft is answered by the
+    // run_scenario validation result, and a malformed reply by the loop's re-ask.
     expect(buildAuthorUserPrompt(authorCtx())).not.toContain('CORRECTION —')
-  })
-
-  it('buildAuthorUserPrompt appends a CORRECTION block restating the one-object output shape', () => {
-    const p = buildAuthorUserPrompt(authorCtx({ correction: { invalidOutput: 'not json' } }))
-    expect(p).toContain('CORRECTION — your previous response was NOT valid.')
-    expect(p).toContain('not json')
-    expect(p).toContain('Return exactly ONE JSON object: { "scenario": { … } }')
-    expect(p).toContain('driver "cli"')
-    expect(p).toContain('{ "blockedOn": ["<capability>"] }')
   })
 
   // Fidelity review: does a green scenario actually verify its flow?
@@ -573,7 +677,7 @@ describe('guard-generator prompts', () => {
     // The exact placeholder syntax the runner substitutes.
     expect(p).toContain('{{cred:api-key}}')
     // Values are never advertised; undeclared credentials still block.
-    expect(p).toContain('"blockedOn": ["credentials"]')
+    expect(p).toContain('name `"credentials"` in `blockedOn`')
   })
 
   it('the api authoring prompt renders identically whether credentials are absent or empty', () => {
@@ -628,68 +732,55 @@ describe('guard-generator prompts', () => {
     expect(buildAuthorUserPrompt(ctx)).not.toContain('OPERATION SECURITY')
   })
 
-  it('GENERATE_PROMPT_FINGERPRINT is pinned — moves only with an intended re-author', () => {
-    // A moved fingerprint re-authors every cli scenario (it is folded into the
-    // authoring cache key), so it must move only when the AUTHORED vocabulary or the
-    // flow-authoring rules genuinely change — never for USER-prompt features
-    // (grounding transcripts, the realization plan, retry evidence), which belong in
-    // buildAuthorUserPrompt.
-    // Rolled once: `setup.http` joined the AUTHORED scenario
-    // schema (GuardSetupSchema is shared by both drivers), so the cli vocabulary moved
-    // — a cli program that reads a third party's base URL from env is stubable too.
-    // Rolled again: the `missing-data` capability noun joined the
-    // blocked-on VOCABULARY (which noun to name for which class of missing world), so
-    // every cli section re-authors once and flows that settled on a vague free-text
-    // blocker get a countable noun.
-    // Rolled again for the always-on externals proxy: `setup.externals`
-    // joined GuardSetupSchema, which BOTH drivers embed, so the cli scenario schema
-    // moved with it. The capability itself is api-only (external accounts configure
-    // the api server), and the cli system prompt says nothing new about it.
-    // Rolled again for the scenario story: the TITLE rule — a title
-    // states the doc's promise, never the literal expected output. What the model
-    // writes into an authored field is its own vocabulary, so it belongs here and
-    // rolls the fingerprint; the story surfaces read that title beside the flow's
-    // promise, and a title that quoted an exit code read as an implementation note.
-    // Rolled again 2026-08-01 (the doc's own examples run
-    // VERBATIM): a static AUTHORING rule — a DOC EXAMPLE the scenario runs is
-    // seeded byte-for-byte, never paraphrased or reformatted. The per-section
-    // BYTES stay in the user prompt (engine-mined, clearly bounded); only the
-    // rule that reads them is static, so every cli flow re-authors once.
-    // Rolled with it (same wave, 2026-08-01) — two-sided
-    // promises get two-sided tests: a milestone whose claim states a positive
-    // AND a negative half is realized with steps for BOTH, the exclusion
-    // asserted observably — the pre-squash defect family (one-sided flag tests
-    // that stayed green when exclusion logic broke), re-expressed in flow terms.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('833bbf6dd06af484')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('833bbf6dd06af484')
+  it('WORKER_CLI_PROMPT_FINGERPRINT is pinned — moves only with an intended re-author', () => {
+    // A moved fingerprint re-authors every cli flow (it is folded into the worker
+    // authoring cache key AND into `flowGenerationInputsHash`), so it must move only
+    // when the AUTHORED vocabulary, the session protocol, or the flow-authoring rules
+    // genuinely change — never for USER-prompt features (the realization plan, the
+    // command grammar, prior-rejection evidence), which belong in buildAuthorUserPrompt.
+    // Rolled for the probe-ban + settle-immediately loop rules (field run 2).
+    expect(fingerprint(WORKER_CLI_SYSTEM_PROMPT)).toBe('a3d8cfa0733fe6ba')
+    expect(WORKER_CLI_PROMPT_FINGERPRINT).toBe('a3d8cfa0733fe6ba')
+  })
+
+  it('the worker author wakes flows retired under the one-shot cli author', () => {
+    // The retirement reset compares the ledger's recorded `promptFingerprint` against
+    // the CURRENT surface fingerprint (`retirementResets`, generate.ts). A flow retired
+    // under the one-shot cli author recorded 2528d52c09f0e75a; the worker prompt is a
+    // different prompt, so that record no longer matches and the flow re-enters work.
+    expect(WORKER_CLI_PROMPT_FINGERPRINT).not.toBe('2528d52c09f0e75a')
+    expect(WORKER_CLI_PROMPT_FINGERPRINT).not.toBe('51c1ea533c42a935')
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which
   // noun names which class of missing world), so it lives in both system prompts.
   it('both authoring prompts enumerate the missing-data capability noun', () => {
-    for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
+    for (const prompt of [WORKER_CLI_SYSTEM_PROMPT, WORKER_API_SYSTEM_PROMPT]) {
       expect(prompt).toContain('"missing-data"')
       // Distinguished from the credential and third-party classes, and paired with the
       // entity that names what a seed would have to create.
-      expect(prompt).toContain('an already-cancelled booking')
       expect(prompt).toContain('credentials')
     }
+    // Each names the entity a seed would have to create, in its own driver's words.
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('add a SECOND entry naming the entity')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('an already-cancelled booking')
   })
 
   // The story surfaces render the title beside the flow's promise, so
   // a title that quotes the literal expected output says nothing a reviewer needs.
   it('both authoring prompts forbid a title that restates the expected output', () => {
-    for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
+    for (const prompt of [WORKER_CLI_SYSTEM_PROMPT, WORKER_API_SYSTEM_PROMPT]) {
       expect(prompt).toContain('# The title states the PROMISE, never the expected output')
-      expect(prompt).toContain('in the words a reader of the doc would use')
+      // (the api prompt wraps the line one word later)
+      expect(prompt).toContain('in the words a reader of the doc would')
     }
-    expect(GENERATE_SYSTEM_PROMPT).toContain('not "stdout contains')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('not "response status is 201"')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('not "stdout contains')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('not "response status is 201"')
   })
 
   it('the cli prompt roll re-plans every flow — the fingerprint is folded into generationInputsHash', () => {
     // The incremental gate compares a flow's RECORDED manifest hash with the current
-    // one; the current one folds GENERATE_PROMPT_FINGERPRINT, so rolling the prompt
+    // one; the current one folds WORKER_CLI_PROMPT_FINGERPRINT, so rolling the prompt
     // makes every committed cli flow mismatch and re-plan — which is exactly how a
     // new authoring capability converts the flows that settled `blocked-on` for want
     // of it, with no migration and no manual invalidation.
@@ -711,65 +802,65 @@ describe('guard-generator prompts', () => {
   it('the cli authoring prompt offers per-step env (the same command under several environments)', () => {
     // The field itself arrives via the Zod-derived schema; the prompt adds only what
     // the schema cannot say — WHEN to reach for it.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('A step may also carry `env`')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('THAT step alone')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('A step may also carry `env`')
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain('THAT step alone')
     // The api driver has no such thing (a booted server's env is fixed at boot).
-    expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('A step may also carry `env`')
+    expect(WORKER_API_SYSTEM_PROMPT).not.toContain('A step may also carry `env`')
   })
 
   // The capability is Zod-advertised, but the SEMANTICS ("only when
   // the base URL comes from an env var", "an unmatched call fails") are prose.
   it('the api system prompt teaches setup.http — the env-var precondition and its rules', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`setup.http` FAKES a third-party HTTP')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('${HTTP_STUB:<name>}')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('A request no route matches FAILS the scenario')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('`setup.http` FAKES a third-party HTTP')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('${HTTP_STUB:<name>}')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('A request no route matches FAILS the scenario')
     // A third party WITHOUT a base-URL override is still an honest blocked flow.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('a\nthird-party with NO base-URL env override')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('a\nthird-party with NO base-URL env override')
     // The capability itself rides the Zod-derived schema, not hand-written prose.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"http"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"http"')
   })
 
   // A PROVIDED service's faults are scriptable — an AUTHORING rule, hence
   // the system prompt, and the reason a flow about upstream failure stops being
   // blocked.
   it('the api system prompt teaches setup.externals — the fault vocabulary and what it unblocks', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('FAULTS on a provided service ARE scriptable')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`setup.externals`')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`refuse: true`')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"once": true')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('must NOT be left `blockedOn`')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('FAULTS on a provided service ARE scriptable')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('`setup.externals`')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('`refuse: true`')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"once": true')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('must NOT be left `blockedOn`')
     // The block itself rides the Zod-derived schema, not hand-written prose.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"externals"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"externals"')
   })
 
   it('the verbatim-path rule spans BOTH operations blocks, with ONE carve-out', () => {
     // The setup half: a flow whose milestones never mention signing up still has to
     // sign up, and the operation for it lives in the second block.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('TWO blocks list them');
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('OTHER\n  operations available for setup steps');
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('take that operation from the second block rather than inventing one');
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('TWO blocks list them');
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('OTHER\n  operations available for setup steps');
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('take that operation from the second block rather than inventing one');
     // The carve-out: a claim ABOUT unknown paths must request one.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('ONE carve-out, and only this one');
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('an unknown path, an unsupported method on a listed');
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('keeps the verbatim rule');
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('ONE carve-out, and only this one');
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('an unknown path, an unsupported method on a listed');
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('keeps the verbatim rule');
   });
 
   it('the api system prompt teaches the process-lifecycle steps and their limits', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# The server PROCESS is drivable')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"boot"')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"signal"')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"logs"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('# The server PROCESS is drivable')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"boot"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"signal"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"logs"')
     // boot.env vs setup.env, stated as a choice.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Choose `boot.env` over `setup.env` when the claim is about that environment')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('Choose `boot.env` over `setup.env` when the claim is about that environment')
     // The restart-persistence shape, spelled out.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`boot` → write it → `signal` → `boot` → read it')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('`boot` → write it → `signal` → `boot` → read it')
     // Back-compat is stated, so an ordinary flow does not sprout lifecycle steps.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('A scenario that declares NO `boot` gets the usual implicit one')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('A scenario that declares NO `boot` gets the usual implicit one')
     // A package script is honestly out of scope — the cli driver is not bent for it.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('A claim about a\npackage script')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('stays honestly `blockedOn`')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('A claim about a\npackage script')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('stays honestly `blockedOn`')
     // The stale "scenarios never manage processes" line is gone.
-    expect(GENERATE_API_SYSTEM_PROMPT).not.toContain('scenarios never manage processes')
+    expect(WORKER_API_SYSTEM_PROMPT).not.toContain('scenarios never manage processes')
   })
 
   it('MATCH_SYSTEM_PROMPT makes a process milestone realizable on api', () => {
@@ -779,7 +870,7 @@ describe('guard-generator prompts', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('a package script, a build')
   })
 
-  it('GENERATE_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
+  it('WORKER_API_PROMPT_FINGERPRINT is pinned — credential/fixture/response-guidance live in the USER prompt', () => {
     // A moved fingerprint re-authors every api scenario (it is folded into the
     // authoring cache key). The static api system prompt carries the AUTHORED scenario
     // JSON schema (from RawGeneratedApiScenarioSchema) and the flow-authoring rules, so
@@ -857,16 +948,22 @@ describe('guard-generator prompts', () => {
     // rule now states the boundary the runner enforces — the window OPENS where the
     // previous step BEGAN, so a line the service flushes after that step's response
     // still counts. Every api flow re-authors once.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('58e07b12d07e4324')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('58e07b12d07e4324')
+    // Rolled 2026-08-05 for the WORKER pivot: the api surface authors through the
+    // flow worker session (the one-shot framing became the loop conduct, the Output
+    // section became the worker Outcomes, blocked mechanics became the blocked
+    // outcome + blockedMilestones, and the operation-contract contradiction became
+    // the journey-defect outcome). Every api flow re-authors once — intended.
+    // Rolled for the probe-ban + settle-immediately loop rules (field run 2).
+    expect(fingerprint(WORKER_API_SYSTEM_PROMPT)).toBe('8c27b6e160d71b65')
+    expect(WORKER_API_PROMPT_FINGERPRINT).toBe('8c27b6e160d71b65')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('COOKIE JAR')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('never capture or\nre-send the cookie yourself')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('`captureHeaders`')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('COOKIE JAR')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('never capture or\nre-send the cookie yourself')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('`captureHeaders`')
     // The field itself rides the Zod-derived schema, not hand-written prose.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"captureHeaders"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"captureHeaders"')
   })
 
   // Phase 2 — the seed fixture catalog advertised in the AUTHORING USER prompt.
@@ -887,7 +984,7 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('{{fixture:<name>.<field>}}')
     // The "data not listed above" sentence names the canonical noun, so a
     // fixture gap is countable instead of free text.
-    expect(p).toContain('"blockedOn": ["missing-data", "<the entity>"]')
+    expect(p).toContain('name `"missing-data"` plus the entity in `blockedOn`')
   })
 
   it('the api authoring prompt advertises seed-provided credentials alongside declared ones', () => {
@@ -1009,14 +1106,14 @@ describe('guard-generator prompts', () => {
     expect(RECIPE_SYSTEM_PROMPT).toMatch(/FAIL outright when their lockfile is\s+absent/)
   })
 
-  it('GENERATE_API_SYSTEM_PROMPT forbids re-routing a documented path to another service', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# One service, one server — never re-route a documented path')
+  it('WORKER_API_SYSTEM_PROMPT forbids re-routing a documented path to another service', () => {
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('# One service, one server — never re-route a documented path')
     // The three improvisations the cal.com bench measured, each named and forbidden.
-    expect(GENERATE_API_SYSTEM_PROMPT).toMatch(/NOT\s+rewrite\s+its\s+prefix/)
-    expect(GENERATE_API_SYSTEM_PROMPT).toMatch(/NOT\s+substitute\s+a\s+different\s+endpoint/)
-    expect(GENERATE_API_SYSTEM_PROMPT).toMatch(/hoping\s+it\s+is\s+proxied/)
+    expect(WORKER_API_SYSTEM_PROMPT).toMatch(/NOT\s+rewrite\s+its\s+prefix/)
+    expect(WORKER_API_SYSTEM_PROMPT).toMatch(/NOT\s+substitute\s+a\s+different\s+endpoint/)
+    expect(WORKER_API_SYSTEM_PROMPT).toMatch(/hoping\s+it\s+is\s+proxied/)
     // …with the refusal it must return instead — the noun the generate gate uses.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"blockedOn": ["missing-server"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"blockedOn": ["missing-server"')
   })
 
   it('buildAuthorUserPrompt names the BOUND server, and stays byte-identical without one', () => {

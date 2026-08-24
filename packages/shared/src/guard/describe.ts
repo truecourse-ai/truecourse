@@ -1,9 +1,9 @@
 /**
  * A committed scenario, told as a STORY — the plain sentences a reviewer reads
  * instead of the declarative YAML the engine runs. Every `expect` matcher becomes
- * one sentence, `setup` becomes the world the test is placed in, each step becomes
+ * one sentence, `setup` becomes the world the scenario is placed in, each step becomes
  * what it DOES plus what it remembers, and the flow's promise leads. ONE source,
- * rendered by both the dashboard (the test detail's Story mode) and the CLI
+ * rendered by both the dashboard (the scenario detail's Story mode) and the CLI
  * (`guard flows --show <id> --story`), so what a reviewer reads can never drift
  * from what runs.
  *
@@ -29,8 +29,12 @@ import {
   isApiLogsStep,
   isApiRequestStep,
   isApiSignalStep,
+  isCliBootStep,
+  isCliRunStep,
+  isCliSignalStep,
   type GuardApiExpect,
   type GuardApiStep,
+  type GuardCliStep,
   type GuardExpect,
   type GuardExternals,
   type GuardFileMatcher,
@@ -40,7 +44,6 @@ import {
   type GuardLogMatch,
   type GuardScenario,
   type GuardSetup,
-  type GuardStep,
   type GuardStreamMatcher,
 } from './scenario.js'
 import type { GuardDriverId } from './drivers.js'
@@ -85,7 +88,7 @@ export interface GuardScenarioStory {
   steps: GuardStoryStep[]
   /** The normalizations applied to every compared value, in plain words. */
   normalizers: string[]
-  /** The spec sections the test is bound to. */
+  /** The spec sections the scenario is bound to. */
   binds: { doc: string; section: string }[]
 }
 
@@ -186,7 +189,7 @@ function httpStubSentences(stubs: GuardHttpStubs): string[] {
     const unmatched =
       stub.unmatched === '404'
         ? 'a call to anything else answers 404'
-        : 'a call to anything else fails the test'
+        : 'a call to anything else fails the scenario'
     const asserted = stub.routes.filter((r) => r.expect).length
     const counted = stub.routes.filter((r) => r.calls !== undefined)
     const extra: string[] = []
@@ -228,7 +231,7 @@ function externalsSentences(externals: GuardExternals): string[] {
   })
 }
 
-/** The `setup` block as the world the test is placed in, one sentence per capability. */
+/** The `setup` block as the world the scenario is placed in, one sentence per capability. */
 export function describeWorld(setup: GuardSetup | undefined): string[] {
   if (!setup) return []
   const lines: string[] = []
@@ -281,19 +284,61 @@ export function describeArgv(run: readonly string[]): string {
   return `run the program with \`${run.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\``
 }
 
-function cliStoryStep(step: GuardStep, n: number): GuardStoryStep {
+function cliStoryStep(step: GuardCliStep, n: number): GuardStoryStep {
+  const base = {
+    n,
+    ...(step.milestone != null ? { milestone: step.milestone } : {}),
+  }
+  if (isCliBootStep(step)) {
+    const env = Object.entries(step.boot.env ?? {}).map(([k, v]) => `${k}=${v}`)
+    const { stream, match } = step.boot.ready
+    return {
+      ...base,
+      does:
+        step.boot.run.length === 0
+          ? 'start the program as a service'
+          : `start the service with \`${step.boot.run.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}\``,
+      ...(env.length > 0 ? { env } : {}),
+      expectations: [`its ${stream} prints a line matching ${logMatchSentence(match)} — then it keeps running`],
+    }
+  }
+  if (isCliSignalStep(step)) {
+    const expectations: string[] = []
+    if (step.signal.expect?.exitCode !== undefined) {
+      expectations.push(`the process exits with code ${step.signal.expect.exitCode}`)
+    }
+    if (step.signal.expect?.withinMs !== undefined) {
+      expectations.push(`it goes down within ${step.signal.expect.withinMs}ms`)
+    }
+    return { ...base, does: `send ${step.signal.name} to the running service`, expectations }
+  }
+  if (!isCliRunStep(step)) {
+    const { stream, match, count, sinceLastStep } = step.logs
+    const subject =
+      count === undefined
+        ? `at least one ${stream} line matches`
+        : count === 0
+          ? `no ${stream} line matches`
+          : count === 1
+            ? `exactly 1 ${stream} line matches`
+            : `exactly ${count} ${stream} lines match`
+    const expectations = [`${subject} ${logMatchSentence(match)}`]
+    if (sinceLastStep) {
+      expectations.push('only output written since the previous step began counts')
+    }
+    return { ...base, does: `read what the service wrote to ${stream}`, expectations }
+  }
   const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
   const uses = new Set<string>()
   collectVars(step.run, uses)
   collectVars(step.stdin, uses)
   return {
-    n,
+    ...base,
     does: describeArgv(step.run),
     ...(env.length > 0 ? { env } : {}),
     ...(step.stdin !== undefined ? { stdin: short(step.stdin) } : {}),
     ...(uses.size > 0 ? { uses: [...uses] } : {}),
     expectations: describeCliExpectations(step.expect),
-    ...(step.milestone != null ? { milestone: step.milestone } : {}),
     ...(step.repeat != null && step.repeat > 1 ? { repeat: step.repeat } : {}),
   }
 }
@@ -319,7 +364,7 @@ function apiStoryStep(step: GuardApiStep, n: number): GuardStoryStep {
     for (const s of e?.stderrContains ?? []) expectations.push(`its stderr contains ${quoted(s)}`)
     return {
       ...base,
-      does: env.length > 0 ? '(re)start the server under test' : 'start the server under test',
+      does: env.length > 0 ? '(re)start the app server' : 'start the app server',
       ...(env.length > 0 ? { env } : {}),
       expectations,
     }

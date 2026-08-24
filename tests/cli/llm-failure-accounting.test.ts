@@ -16,13 +16,13 @@ vi.mock('../../tools/cli/src/lib/claude-preflight.js', async (importOriginal) =>
   return { ...actual, preflightLlmOrExit: vi.fn(async () => {}) };
 });
 
-import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import { setDefaultTransport, type LlmTransport, type LlmTransportWithTurn } from '@truecourse/shared/llm';
 import { readGuardResult, manifestPath, writeGuardResult } from '@truecourse/guard-runner';
 import { GuardGenerateReportSchema, type GuardGenerateReport } from '@truecourse/shared';
 import { corpusFilePath } from '../../packages/spec-consolidator/src/index.js';
 import { runSpecScan } from '../../tools/cli/src/commands/spec.js';
 import { runGuardGenerate, runGuardStatus, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard.js';
-import { makeTempRepo, rmrf, writeDoc, writeRecipe, writeCorpus } from '../guard-generator/helpers.js';
+import { makeTempRepo, rmrf, writeDoc, writeRecipe, writeCorpus, workerTurnBy } from '../guard-generator/helpers.js';
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -207,7 +207,7 @@ describe('guard generate — every fidelity review was lost', () => {
   it('exits clean, writes the manifest, and records the stage unadjudicated in result.json', async () => {
     const r = seedGuardRepo();
 
-    setDefaultTransport(async (req) => {
+    const transport: LlmTransportWithTurn = async (req) => {
       if (req.stage === 'guard.fidelity') throw new Error('claude API error (api 429): usage limit reached');
       if (req.stage === 'guard.extract') {
         return JSON.stringify({
@@ -231,17 +231,11 @@ describe('guard generate — every fidelity review was lost', () => {
         const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
         return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
       }
-      if (req.stage === 'guard.generate') {
-        return JSON.stringify({
-          scenario: {
-            title: 'prints the version',
-            driver: 'cli',
-            steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
-          },
-        });
-      }
       return '{}';
-    });
+    };
+    // The cli flow authors through a WORKER SESSION on the transport's turn seam.
+    transport.turn = workerTurnBy({});
+    setDefaultTransport(transport);
     const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
 
     expect(exitCode).toBeNull();
@@ -262,10 +256,10 @@ describe('guard generate — every authoring reply was unusable', () => {
   it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
     const r = seedGuardRepo();
 
-    // Extraction, synthesis and matching answer; authoring answers with a JSON
-    // object that is not the reply contract — every call LANDS, so nothing is a
-    // transport failure and only the engine's own counters catch the loss.
-    setDefaultTransport(async (req) => {
+    // Extraction, synthesis and matching answer; the authoring WORKER SESSION
+    // answers with replies that carry no action — every turn LANDS, so nothing is
+    // a transport failure and only the engine's own counters catch the loss.
+    const transport: LlmTransportWithTurn = async (req) => {
       if (req.stage === 'guard.extract') {
         return JSON.stringify({
           claims: [{ claim: 'version works', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' }],
@@ -290,9 +284,10 @@ describe('guard generate — every authoring reply was unusable', () => {
         const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
         return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
       }
-      if (req.stage === 'guard.generate') return '{"scenarios":[]}';
       return '{}';
-    });
+    };
+    transport.turn = workerTurnBy({ version: { malformed: true } });
+    setDefaultTransport(transport);
     const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
 
     expect(exitCode).toBe(1);
@@ -418,10 +413,7 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
   it('the generate summary names the stage, what shipped without it, and the retry', () => {
     printGuardGenerateSummary(
       guardReport({
-        unadjudicated: [
-          { stage: 'guard.fidelity', affected: 41 },
-          { stage: 'guard.triage', affected: 7 },
-        ],
+        unadjudicated: [{ stage: 'guard.fidelity', affected: 41 }],
         llmFailures: [{ stage: 'guard.fidelity', attempts: 41, failures: 41, firstError: 'claude API error (429)' }],
       }),
       '.truecourse/guard/result.json',
@@ -430,12 +422,10 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
     expect(text).toContain('unadjudicated');
     expect(text).toContain('fidelity review');
     expect(text).toContain('41');
-    expect(text).toContain('failure triage');
-    expect(text).toContain('7');
     // ONE story per stage: the per-call effect sentence ("their flows unsettled")
     // describes a PARTIAL loss, so a stage already reported unadjudicated never
     // prints it — it points at the block that states the total loss in full.
-    expect(text).not.toContain('affected tests were left unreviewed');
+    expect(text).not.toContain('affected scenarios were left unreviewed');
     expect(text).toContain('claude API error (429)');
   });
 
@@ -447,7 +437,7 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
       '.truecourse/guard/result.json',
     );
     const text = stripAnsi(out);
-    expect(text).toContain('affected tests were left unreviewed');
+    expect(text).toContain('affected scenarios were left unreviewed');
     expect(text).not.toContain('unadjudicated');
   });
 
@@ -463,5 +453,69 @@ describe('the unadjudicated stage on the CLI surfaces', () => {
     const text = stripAnsi(out);
     expect(text).toContain('unadjudicated');
     expect(text).toContain('fidelity review 41');
+  });
+});
+
+/**
+ * The tests a lost adjudication call left with no verdict, BY NAME. A count is not
+ * enough: an unreviewed green is the class fidelity exists to catch, and "2 of 22
+ * reviews failed" without the names is a log-forensics errand.
+ */
+describe('lost adjudication calls name their tests on the CLI surfaces', () => {
+  const LOST = [
+    {
+      doc: 'docs/cli.md',
+      anchor: 'version',
+      kind: 'fidelity' as const,
+      flowId: 'version',
+      surface: 'cli' as const,
+      scenarioId: 'version.cli.1',
+      message: 'fidelity review (cli) call failed: claude timed out after 600000ms',
+    },
+    {
+      doc: 'docs/cli.md',
+      anchor: 'help',
+      kind: 'triage' as const,
+      flowId: 'help',
+      surface: 'cli' as const,
+      scenarioId: 'help.cli.1',
+      message: 'triage (cli) call failed: claude timed out after 600000ms',
+    },
+  ];
+
+  let out: string;
+  let spy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    out = '';
+    spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out += String(chunk);
+      return true;
+    });
+  });
+  afterEach(() => spy.mockRestore());
+
+  it('the generate summary lists the unreviewed and untriaged tests', () => {
+    printGuardGenerateSummary(guardReport({ errors: LOST }), '.truecourse/guard/result.json');
+    const text = stripAnsi(out);
+    expect(text).toContain('1 scenario passed unreviewed: version.cli.1');
+    expect(text).toContain('1 failing scenario committed untriaged: help.cli.1');
+    // Never worded as lost WORK: nothing was withheld and nothing needs re-authoring.
+    expect(text).not.toContain('nothing was written for');
+  });
+
+  it('`guard status` reads the same names back off the stored report', async () => {
+    const r = repo();
+    writeGuardResult(r, guardReport({ errors: LOST }));
+    await runGuardStatus({ cwd: r });
+    const text = stripAnsi(out);
+    expect(text).toContain('1 scenario passed unreviewed: version.cli.1');
+    expect(text).toContain('1 failing scenario committed untriaged: help.cli.1');
+    // The adjudication rows are not counted as the run's errors.
+    expect(text).not.toContain('2 errors');
+  });
+
+  it('says nothing when every verdict landed', () => {
+    printGuardGenerateSummary(guardReport(), '.truecourse/guard/result.json');
+    expect(stripAnsi(out)).not.toContain('passed unreviewed');
   });
 });

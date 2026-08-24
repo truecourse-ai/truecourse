@@ -47,16 +47,19 @@ import {
   sectionInputsKey,
   flowGenerationInputsHash,
   flowAreaIdForDoc,
+  flowHttpSignal,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
-  GENERATE_SYSTEM_PROMPT,
+  WORKER_CLI_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
+  DEFAULT_WORKER_MAX_TURNS,
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
-  TRIAGE_SYSTEM_PROMPT as GUARD_TRIAGE_SYSTEM_PROMPT,
   FLOWS_SYSTEM_PROMPT as GUARD_FLOWS_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
   type FlowAreaDocInput,
   type GuardWorkPlan,
+  type SectionInput,
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
 import {
@@ -102,9 +105,7 @@ const STAGE_LABELS: Record<string, string> = {
   guardFlows: 'Synthesizing flows',
   guardMatch: 'Matching flows',
   guardAuthor: 'Authoring scenarios',
-  guardRetry: 'Re-authoring on evidence',
   guardFidelity: 'Reviewing fidelity',
-  guardTriage: 'Triaging failures',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
@@ -276,16 +277,12 @@ const GUARD_VIEW_CHARS_CAP = 48_000; // per-view sizing cap for the extraction e
 const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
 const GUARD_AUTHOR_OUTPUT_TOKENS = 700; // ~one flow scenario's YAML (several steps)
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
-const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
 const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the review input)
 // Seed drafting: the prompt carries the parsed schema + the blocked
 // claims, and the reply is a whole script file — the largest single output of any
 // guard stage.
 const GUARD_SEED_BODY_CHARS = 6000;
 const GUARD_SEED_OUTPUT_TOKENS = 3000;
-// Grounded authoring injects real empty-sandbox probe transcripts into each
-// authoring prompt (zero extra LLM CALLS — it just enlarges the input).
-const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
 // Flow synthesis reads one area's claims + outlines (no document text at all), so
 // its input is small; the cold-cache fallback assumes a mid-sized area.
 const GUARD_FLOWS_AREA_CHARS = 6000;
@@ -445,6 +442,8 @@ async function planGuardRealizationStages(
     const sectionKeyOf = new Map(
       plan.sections.map((s) => [`${s.doc} ${s.anchor}`, sectionInputsKey(s)]),
     );
+    const sectionOf = new Map(plan.sections.map((s) => [`${s.doc} ${s.anchor}`, s]));
+    const apiJourneys = catalogs.get('api')?.journeys ?? [];
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
     let matchCalls = 0;
     let authorCalls = 0;
@@ -455,7 +454,20 @@ async function planGuardRealizationStages(
       const journeyFingerprints: string[] = [];
       let plannedPairs = 0;
       let unknown = false;
-      for (const catalog of matchable) {
+      // The run's own HTTP transport gate: a flow whose spec names no HTTP transport
+      // never reaches the api catalog, so the estimate must not price that pair either.
+      const candidates =
+        flowHttpSignal({
+          flow,
+          sections: [...flow.milestones, ...flow.bindings]
+            .map((ref) => sectionOf.get(`${ref.doc} ${ref.anchor}`))
+            .filter((s): s is SectionInput => s !== undefined),
+          basePaths: plan.basePaths,
+          apiJourneys,
+        }) !== null
+          ? matchable
+          : matchable.filter((c) => c.surface !== 'api');
+      for (const catalog of candidates) {
         const cached = await readCachedMatch(repoRoot, flow, catalog);
         if (!cached) {
           matchCalls++;
@@ -477,7 +489,7 @@ async function planGuardRealizationStages(
       // surface unaccounted for is WORK, whatever its hash says.
       const changed =
         unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior);
-      if (changed) authorCalls += unknown ? Math.max(matchable.length, 1) : plannedPairs;
+      if (changed) authorCalls += unknown ? Math.max(candidates.length, 1) : plannedPairs;
     }
     const pairs = Math.max(matchable.length, 1);
     // Nothing to match and nothing to author is a KNOWN no-op — the ceiling drops to
@@ -651,8 +663,8 @@ export async function estimateGuardTokens(
   const flowStage = await planGuardFlowStage(repoRoot, plan);
   const realization = await planGuardRealizationStages(repoRoot, plan, flowStage);
   // An authoring prompt carries every milestone's section text once, plus the
-  // realization plan and (cli) the grounding transcripts.
-  const authorBodyChars = GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_GROUND_TRANSCRIPT_CHARS;
+  // realization plan and the command grammar.
+  const authorBodyChars = GUARD_MILESTONES_PER_FLOW * avgSectionChars;
 
   const stages: StageCallEstimate[] = [
     {
@@ -703,30 +715,25 @@ export async function estimateGuardTokens(
         : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`,
     },
     {
-      // Authoring: ONE call per (flow, surface with a realization plan) — the flow
-      // is the unit, so a composite flow costs one call, not one per claim.
+      // Authoring: one WORKER SESSION per (flow, surface with a realization plan)
+      // — cli and api alike; the flow is the unit, and the session TURNS are the
+      // calls: an honest session takes at least ~2 turns (draft + run, then
+      // settle) and at most the worker's turn budget, all at the generate model.
+      // The per-turn input is priced at the LARGER of the two surfaces' worker
+      // system prompts, keeping the ceiling honest for a mixed-surface run.
       stage: 'guardAuthor',
       model: resolveModel('guard.generate', undefined, repoRoot, opts.mode),
-      calls: realization.authorCalls,
+      calls: realization.authorCalls * 2,
       minCalls: 0,
-      maxCalls: realization.maxPairs,
-      avgInputTokens: tokensFromChars(GENERATE_SYSTEM_PROMPT.length, authorBodyChars),
+      maxCalls: realization.maxPairs * DEFAULT_WORKER_MAX_TURNS,
+      avgInputTokens: tokensFromChars(
+        Math.max(WORKER_CLI_SYSTEM_PROMPT.length, WORKER_API_SYSTEM_PROMPT.length),
+        authorBodyChars,
+      ),
       avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS,
       bound: realization.exact
-        ? `≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
-        : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`,
-    },
-    {
-      // The evidence retry: at most ONE re-author per authored scenario, and only
-      // for the ones that fail birth — so it ranges 0..authoring.
-      stage: 'guardRetry',
-      model: resolveModel('guard.retry', undefined, repoRoot, opts.mode),
-      calls: 0,
-      minCalls: 0,
-      maxCalls: realization.maxPairs,
-      avgInputTokens: tokensFromChars(GENERATE_SYSTEM_PROMPT.length, authorBodyChars + GUARD_SCENARIO_YAML_CHARS),
-      avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS,
-      bound: 'one re-author per scenario that fails birth',
+        ? `2 to ${DEFAULT_WORKER_MAX_TURNS} worker turns per flow scenario, ≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
+        : `2 to ${DEFAULT_WORKER_MAX_TURNS} worker turns per flow scenario, flows ≤ runnable claims`,
     },
     {
       stage: 'guardFidelity',
@@ -742,25 +749,6 @@ export async function estimateGuardTokens(
         GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_SCENARIO_YAML_CHARS,
       ),
       avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
-    },
-    {
-      // Failing-test triage: one Opus judgment per test that fails birth,
-      // after every round settles. The failure count is unknowable pre-run — like
-      // the retry stage it ranges 0..authored pairs, and the ceiling drives the
-      // quoted cost.
-      stage: 'guardTriage',
-      model: resolveModel('guard.triage', undefined, repoRoot, opts.mode),
-      calls: 0,
-      minCalls: 0,
-      maxCalls: realization.maxPairs,
-      // A triage carries the system prompt + the failing milestone's section text +
-      // one scenario YAML + the request-surface grounding transcript.
-      avgInputTokens: tokensFromChars(
-        GUARD_TRIAGE_SYSTEM_PROMPT.length,
-        avgSectionChars + GUARD_SCENARIO_YAML_CHARS + GUARD_GROUND_TRANSCRIPT_CHARS,
-      ),
-      avgOutputTokens: GUARD_TRIAGE_OUTPUT_TOKENS,
-      bound: 'one triage per test that fails birth',
     },
   ];
 

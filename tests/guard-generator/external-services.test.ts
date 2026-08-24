@@ -15,7 +15,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   buildAuthorUserPrompt,
   enrichBlockedOn,
-  GENERATE_API_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   type AuthorUserContext,
 } from '@truecourse/guard-generator'
 import {
@@ -31,7 +31,8 @@ import {
   writeDoc,
   writeCorpus,
   extractBy,
-  authorBy,
+  apiWorkerTurnBy,
+  workerTurnBy,
   runGenerate,
   withExternalServices,
   writeApiRecipe,
@@ -95,6 +96,23 @@ describe('enrichBlockedOn', () => {
   it('dedupes across nouns and keeps first-seen order', () => {
     expect(enrichBlockedOn(['stripe', 'external-service', 'db'], detected)).toEqual(['stripe', 'sendgrid', 'db'])
   })
+
+  /**
+   * The second lock on self-reference. Detection drops the repo's own product at
+   * the source; if a service named after the product reaches here anyway (an older
+   * report, another caller), canonicalizing onto it would launder "our own app"
+   * into a third party the user is asked to configure.
+   */
+  it('refuses to canonicalize onto the repo’s own product', () => {
+    const withSelf = [svc('truecourse'), svc('stripe')]
+    const own = { ownProductNames: ['TrueCourse'] }
+
+    expect(enrichBlockedOn(['truecourse cli'], withSelf, own)).toEqual(['truecourse cli'])
+    // …and it is not offered as one of the repo's third parties either.
+    expect(enrichBlockedOn(['external-service'], withSelf, own)).toEqual(['stripe'])
+    // Without the name it behaves exactly as before — this only ever subtracts self.
+    expect(enrichBlockedOn(['truecourse cli'], withSelf)).toEqual(['truecourse'])
+  })
 })
 
 describe('generateGuards — blocked-on gaps carry the detected services', () => {
@@ -109,7 +127,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
         { service: 'sendgrid', category: 'messaging' },
       ),
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: { blockedOn: ['external-service'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['external-service'] } }),
     })
 
     const gap = res.coverageGaps.find((g) => g.kind === 'blocked-on')!
@@ -127,7 +145,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: { blockedOn: ['external-service'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['external-service'] } }),
     })
 
     expect(res.coverageGaps.find((g) => g.kind === 'blocked-on')!.reason).toBe('blocked on external-service: version')
@@ -142,7 +160,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
       journeys: withExternalServices(DEFAULT_JOURNEYS(r), { service: 'stripe', category: 'payment' }),
       extractRunner: extractBy({}),
       // Nothing is blocked — the dependency is still a fact about the repo.
-      generateRunner: authorBy({}),
+      turnFn: workerTurnBy({}),
     })
 
     expect(res.externalServices.map((s) => s.service)).toEqual(['stripe'])
@@ -159,7 +177,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const openings: string[] = []
 
     await runGenerate({
       repoRoot: r,
@@ -170,21 +188,28 @@ describe('generateGuards — the api authoring prompt advertises the detected se
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text)
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([{ name: 'stripe' }])
-    // The prompt renders them as the blockers worth naming — never as a capability.
-    const prompt = buildAuthorUserPrompt(api)
+    // The session's user prompt renders them as the blockers worth naming —
+    // never as a capability.
+    const prompt = openings[0]
     expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON — detected in its source: stripe.')
     expect(prompt).toContain('"blockedOn": ["stripe"]')
 
     // A repo with no detection renders the prompt exactly as before.
-    const bare = buildAuthorUserPrompt({ ...api, externalServices: undefined })
-    expect(bare).not.toContain('THIRD PARTIES')
+    const bare: AuthorUserContext = {
+      flow: { id: 'list', title: 'list the todos', goal: 'todos list' },
+      milestones: [],
+      journeyPath: [],
+      areaTags: [],
+      driver: 'api',
+      recipeServe: ['node', 'server.mjs'],
+      recipeBuild: 'true',
+    }
+    expect(buildAuthorUserPrompt(bare)).not.toContain('THIRD PARTIES')
   })
 
   // A detected base-URL env var is the `setup.http` precondition,
@@ -195,7 +220,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const openings: string[] = []
 
     await runGenerate({
       repoRoot: r,
@@ -206,14 +231,12 @@ describe('generateGuards — the api authoring prompt advertises the detected se
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text)
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([{ name: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
-    const prompt = buildAuthorUserPrompt(api)
+    const prompt = openings[0]
     expect(prompt).toContain('stripe (base URL env: STRIPE_API_BASE — stubable via setup.http, or provide it)')
     expect(prompt).toContain('${HTTP_STUB:<name>}')
   })
@@ -227,7 +250,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const openings: string[] = []
 
     await runGenerate({
       repoRoot: r,
@@ -251,20 +274,12 @@ describe('generateGuards — the api authoring prompt advertises the detected se
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (req) => {
+        if (req.messages.length === 1) openings.push(req.messages[0].text)
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([
-      {
-        name: 'open-meteo',
-        baseUrlEnv: 'GEOCODING_BASE_URL',
-        baseUrlEnvs: ['GEOCODING_BASE_URL', 'FORECAST_BASE_URL'],
-      },
-    ])
-    const prompt = buildAuthorUserPrompt(api)
+    const prompt = openings[0]
     expect(prompt).toContain(
       'open-meteo (base URL envs: GEOCODING_BASE_URL, FORECAST_BASE_URL — stubable via setup.http, or provide it)',
     )
@@ -274,7 +289,7 @@ describe('generateGuards — the api authoring prompt advertises the detected se
 
 describe('the api SYSTEM prompt asks for the service by name', () => {
   it('says a named blocker beats a generic noun', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('NAME the blocker as precisely as you')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('"stripe"')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('NAME the blocker as precisely as you')
+    expect(WORKER_API_SYSTEM_PROMPT).toContain('"stripe"')
   })
 })

@@ -34,15 +34,12 @@ function renderRail({
 }
 
 describe('Guard section — rail tabs', () => {
-  it('renders the guard tabs on the rail (Coverage · Flows · Journeys · Runs; no Spec, Scenarios or Generate tab)', () => {
+  it('renders the guard tabs on the rail (Coverage · Flows · Scenarios · Journeys · Runs; no Spec or Generate tab)', () => {
     renderRail();
-    for (const label of ['Coverage', 'Flows', 'Journeys', 'Runs']) {
+    for (const label of ['Coverage', 'Flows', 'Scenarios', 'Journeys', 'Runs']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: 'Spec' })).toBeNull();
-    // Flows replaced the flat Scenarios inventory — a scenario is reached through
-    // its flow, never as a top-level list.
-    expect(screen.queryByRole('button', { name: 'Scenarios' })).toBeNull();
     // The Generate/Report tab folded into Flows — no rail tab of its own.
     expect(screen.queryByRole('button', { name: 'Generate' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();

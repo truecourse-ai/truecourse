@@ -42,8 +42,8 @@
  * moves on regenerate.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Ban, Layers, PenLine, Route } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, Ban, ChevronDown, ChevronRight, Layers, PenLine, Route } from 'lucide-react';
 import { guardFindingClass } from '@truecourse/shared';
 import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow, GuardGenerateError } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -65,6 +65,7 @@ import {
 import { guardTestLabel } from '@/lib/guard-tests';
 import { GuardMilestoneGraph } from './GuardMilestoneGraph';
 import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
+import { GuardSessionTranscript } from './GuardSessionTranscript';
 import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip, GuardToolDefectChip } from './GuardStatusBadge';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -149,7 +150,7 @@ function SurfaceRow({
       type="button"
       role="listitem"
       onClick={() => onOpenTest(row.scenarioId!)}
-      title={`${row.scenarioId} — open the test`}
+      title={`${row.scenarioId} — open the scenario`}
       className="flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40"
     >
       <div className="flex w-full flex-wrap items-center gap-1">
@@ -157,7 +158,7 @@ function SurfaceRow({
         <span className="text-[11px] text-muted-foreground">·</span>
         <GuardFlowStatusChip status={view.plain} word={view.word} />
         {row.journeyDrifted && (
-          <HoverPopover portal width="narrow" content="The code surface this test was grounded on has moved since it was written. Never a pass/fail input.">
+          <HoverPopover portal width="narrow" content="The code surface this scenario was grounded on has moved since it was written. Never a pass/fail input.">
             <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           </HoverPopover>
         )}
@@ -194,6 +195,54 @@ function AuthoringAttempts({
         </li>
       ))}
     </ul>
+  );
+}
+
+type OnEvent = (event: string, handler: (data: unknown) => void) => () => void;
+
+/**
+ * The worker-session expander a surface row carries when the last generate
+ * recorded its authoring run: closed, it is one slim line; open, it renders the
+ * session transcript for (flow, surface) — live while the run writes it, a
+ * replay after. Sits under its row (a test row is itself a button, so the
+ * expander cannot nest inside it) and only mounts the transcript when opened.
+ */
+function SessionExpander({
+  repoId,
+  runId,
+  flowId,
+  surface,
+  onSocketEvent,
+}: {
+  repoId: string;
+  runId: string;
+  flowId: string;
+  surface: string;
+  onSocketEvent?: OnEvent;
+}) {
+  const [open, setOpen] = useState(false);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <div role="listitem" aria-label={`Session: ${surface}`} className="border-b border-border/60 bg-muted/10">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+      >
+        <Chevron className="h-3 w-3 shrink-0" />
+        Session
+      </button>
+      {open && (
+        <GuardSessionTranscript
+          repoId={repoId}
+          runId={runId}
+          flowId={flowId}
+          surface={surface}
+          {...(onSocketEvent ? { onEvent: onSocketEvent } : {})}
+        />
+      )}
+    </div>
   );
 }
 
@@ -273,6 +322,9 @@ function DismissFlowAction({
 export function GuardFlowDetail({
   detail,
   decisions,
+  repoId,
+  authoringRunId,
+  onSocketEvent,
   onOpenSpec,
   onOpenTest,
   onOpenJourney,
@@ -281,6 +333,16 @@ export function GuardFlowDetail({
   detail: GuardFlowDetailData;
   /** The dismissals state; omitted (guard reads off / PR scope unresolved) = no ruling. */
   decisions?: GuardDecisionsState;
+  /** Needed (with `authoringRunId`) for the per-surface Session expander. */
+  repoId?: string;
+  /**
+   * The last generate's authoring run id — the key of the worker-session
+   * transcripts. Absent (an older report, or no generate yet) hides the
+   * Session expanders entirely.
+   */
+  authoringRunId?: string;
+  /** The socket fan-out (`useSocket().onEvent`) — live transcript appends. */
+  onSocketEvent?: OnEvent;
   onOpenSpec: (doc: string, section: string) => void;
   /** Open a test on the Tests tab — a test has exactly one home. */
   onOpenTest: (testId: string) => void;
@@ -337,7 +399,7 @@ export function GuardFlowDetail({
             </HoverPopover>
           )}
           {detail.manual && (
-            <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
+            <HoverPopover portal width="narrow" content="Hand-written scenario — it belongs to no synthesized flow.">
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <PenLine className="h-3 w-3" />
                 manual
@@ -368,18 +430,28 @@ export function GuardFlowDetail({
         )}
 
         <div>
-          <div className={LABEL}>Tests</div>
-          <div className="rounded border border-border" role="list" aria-label="Tests">
+          <div className={LABEL}>Scenarios</div>
+          <div className="rounded border border-border" role="list" aria-label="Scenarios">
             {rows.map((row, i) => (
-              <SurfaceRow
-                key={`${row.surface ?? 'none'}-${row.scenarioId ?? i}`}
-                row={row}
-                attempted={attempted}
-                errors={detail.errors}
-                {...(blocked ? { blocked } : {})}
-                onOpenTest={onOpenTest}
-                {...(onOpenExternals ? { onOpenExternals } : {})}
-              />
+              <Fragment key={`${row.surface ?? 'none'}-${row.scenarioId ?? i}`}>
+                <SurfaceRow
+                  row={row}
+                  attempted={attempted}
+                  errors={detail.errors}
+                  {...(blocked ? { blocked } : {})}
+                  onOpenTest={onOpenTest}
+                  {...(onOpenExternals ? { onOpenExternals } : {})}
+                />
+                {repoId && authoringRunId && row.surface && (
+                  <SessionExpander
+                    repoId={repoId}
+                    runId={authoringRunId}
+                    flowId={detail.flowId}
+                    surface={row.surface}
+                    {...(onSocketEvent ? { onSocketEvent } : {})}
+                  />
+                )}
+              </Fragment>
             ))}
           </div>
         </div>

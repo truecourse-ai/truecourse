@@ -374,6 +374,98 @@ export function isApiLogsStep(step: GuardApiStep): step is GuardApiLogsStep {
   return 'logs' in step
 }
 
+// --- Steps (cli driver) — the MANAGED SERVICE lifecycle ---------------
+
+/**
+ * The readiness condition of a cli service boot: a line the service writes when
+ * it is up. A cli service has no health endpoint to poll, so the line IS the
+ * readiness signal — the same per-line matching a `logs` step uses (`match` is a
+ * substring or `{ pattern }`), scoped to the output of THIS boot. `withinMs`
+ * bounds the wait; the run's step timeout applies when omitted.
+ */
+export const GuardCliReadySchema = z
+  .object({
+    stream: z.enum(['stdout', 'stderr']),
+    match: GuardLogMatchSchema,
+    /** Budget for the readiness line; the step timeout is applied when omitted. */
+    withinMs: z.number().int().positive().max(600_000).optional(),
+  })
+  .strict()
+
+/**
+ * Start a MANAGED SERVICE: `run` is argv appended to the recipe entrypoint
+ * exactly like an ordinary step's, but the process is expected to KEEP RUNNING —
+ * readiness is asserted on {@link GuardCliReadySchema}, never on exit. Ordinary
+ * `run` steps that follow execute while the service stays up; `signal` and `logs`
+ * steps drive and observe it. At most one service runs per scenario: a second
+ * `boot` replaces (kills) the first, its output folded into the scenario's log
+ * accumulator, and the service is killed at scenario end no matter how the
+ * scenario exits. A command whose claim is about EXITING (a failing startup, a
+ * usage error) is an ordinary `run` step, never a `boot`.
+ */
+export const GuardCliBootSchema = z
+  .object({
+    /** Argv appended to the recipe entrypoint — the service's own command. */
+    run: z.array(z.string()),
+    /**
+     * Env overlay for the SERVICE process only, applied on top of the
+     * scenario-global `setup.env` (last layer wins) — the same layering an
+     * ordinary step's `env` gets.
+     */
+    env: z.record(z.string(), z.string()).optional(),
+    /** The line that means the service is up. Required — there is no health path. */
+    ready: GuardCliReadySchema,
+  })
+  .strict()
+
+export const GuardCliBootStepSchema = z
+  .object({ boot: GuardCliBootSchema, milestone })
+  .strict()
+
+/** Signal the running service — the SAME shape as the api driver's `signal` step. */
+export const GuardCliSignalStepSchema = z
+  .object({ signal: GuardSignalSchema, milestone })
+  .strict()
+
+/** Assert on the service's captured output — the SAME shape as the api `logs` step. */
+export const GuardCliLogsStepSchema = z
+  .object({ logs: GuardLogsSchema, milestone })
+  .strict()
+
+/**
+ * ONE cli step — one action. A `run` invokes the program to completion (the
+ * original step kind); `boot`, `signal` and `logs` start, drive and observe a
+ * long-running SERVICE, which is what makes daemon/watcher/server claims testable
+ * on this surface. All three are additive and optional: no `GUARD_FORMAT_VERSION`
+ * bump, and a scenario made only of `run` steps parses and runs exactly as before.
+ */
+export const GuardCliStepSchema = z.union([
+  GuardStepSchema,
+  GuardCliBootStepSchema,
+  GuardCliSignalStepSchema,
+  GuardCliLogsStepSchema,
+])
+
+/** True when the step runs a command to completion (the original step kind). */
+export function isCliRunStep(step: GuardCliStep): step is GuardStep {
+  return 'run' in step
+}
+
+/** True when the step starts (or restarts) the managed service. */
+export function isCliBootStep(step: GuardCliStep): step is GuardCliBootStep {
+  return 'boot' in step
+}
+
+/** True when the step signals the running service. */
+export function isCliSignalStep(step: GuardCliStep): step is GuardCliSignalStep {
+  return 'signal' in step
+}
+
+/** True when the step asserts on the service's captured output. */
+export function isCliLogsStep(step: GuardCliStep): step is GuardCliLogsStep {
+  return 'logs' in step
+}
+
 // --- The closed normalizer set --------------------------------------
 
 export const GuardNormalizerSchema = z.enum([
@@ -725,7 +817,7 @@ export const GuardCliScenarioSchema = z
   .object({
     ...envelope,
     driver: z.literal('cli'),
-    steps: z.array(GuardStepSchema).min(1),
+    steps: z.array(GuardCliStepSchema).min(1),
   })
   .strict()
 
@@ -770,6 +862,12 @@ export type GuardApiBootStep = z.infer<typeof GuardApiBootStepSchema>
 export type GuardApiSignalStep = z.infer<typeof GuardApiSignalStepSchema>
 export type GuardApiLogsStep = z.infer<typeof GuardApiLogsStepSchema>
 export type GuardApiStep = z.infer<typeof GuardApiStepSchema>
+export type GuardCliReady = z.infer<typeof GuardCliReadySchema>
+export type GuardCliBoot = z.infer<typeof GuardCliBootSchema>
+export type GuardCliBootStep = z.infer<typeof GuardCliBootStepSchema>
+export type GuardCliSignalStep = z.infer<typeof GuardCliSignalStepSchema>
+export type GuardCliLogsStep = z.infer<typeof GuardCliLogsStepSchema>
+export type GuardCliStep = z.infer<typeof GuardCliStepSchema>
 export type GuardNormalizer = z.infer<typeof GuardNormalizerSchema>
 export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
 export type GuardGit = z.infer<typeof GuardGitSchema>
@@ -810,7 +908,7 @@ export interface InvalidMatchPattern {
 }
 
 /** Every regex source one step carries, with the path that names it. */
-function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pattern: string }> {
+function stepPatterns(step: GuardCliStep | GuardApiStep): Array<{ where: string; pattern: string }> {
   const out: Array<{ where: string; pattern: string }> = []
   const add = (where: string, pattern: string | undefined): void => {
     if (pattern !== undefined) out.push({ where, pattern })
@@ -820,13 +918,18 @@ function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pa
     add('expect.stderr', step.expect.stderr?.matches)
     return out
   }
-  if (isApiRequestStep(step)) {
+  if ('boot' in step && 'ready' in step.boot) {
+    const { match } = step.boot.ready
+    if (typeof match !== 'string') add('boot.ready.match', match.pattern)
+    return out
+  }
+  if ('request' in step) {
     add('expect.body', step.expect.body?.matches)
     for (const [name, m] of Object.entries(step.expect.headers ?? {})) add(`expect.headers.${name}`, m.matches)
     for (const [path, m] of Object.entries(step.expect.json ?? {})) add(`expect.json.${path || '(root)'}`, m.matches)
     return out
   }
-  if (isApiLogsStep(step) && typeof step.logs.match !== 'string') add('logs.match', step.logs.match.pattern)
+  if ('logs' in step && typeof step.logs.match !== 'string') add('logs.match', step.logs.match.pattern)
   return out
 }
 
@@ -839,7 +942,7 @@ function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pa
  * (authoring) and at load (committed scenarios) rather than after a wasted run.
  */
 export function firstInvalidMatchPattern(
-  steps: readonly (GuardStep | GuardApiStep)[],
+  steps: readonly (GuardCliStep | GuardApiStep)[],
 ): InvalidMatchPattern | null {
   for (let i = 0; i < steps.length; i++) {
     for (const { where, pattern } of stepPatterns(steps[i])) {
@@ -963,6 +1066,39 @@ export function describeApiLifecycleStep(
 }
 
 /**
+ * One cli service-lifecycle step, same contract as {@link describeApiLifecycleStep}:
+ * the SINGLE rendering the dashboard step list and the evidence transcript share.
+ * A cli `boot` names the argv it starts and the readiness line it waits for;
+ * `signal`/`logs` are the api shapes with the service as their subject.
+ */
+export function describeCliLifecycleStep(
+  step: GuardCliBootStep | GuardCliSignalStep | GuardCliLogsStep,
+): { command: string; expectation: string; env?: string[] } {
+  if (isCliBootStep(step)) {
+    const env = Object.entries(step.boot.env ?? {}).map(([k, v]) => `${k}=${v}`)
+    const { stream, match } = step.boot.ready
+    return {
+      command: `start the service: ${step.boot.run.join(' ')}`,
+      expectation: `${stream} prints a line matching ${describeLogMatch(match)}`,
+      ...(env.length > 0 ? { env } : {}),
+    }
+  }
+  if (isCliSignalStep(step)) {
+    const parts: string[] = []
+    if (step.signal.expect?.exitCode !== undefined) parts.push(`exits ${step.signal.expect.exitCode}`)
+    if (step.signal.expect?.withinMs !== undefined) parts.push(`within ${step.signal.expect.withinMs}ms`)
+    return { command: `signal ${step.signal.name}`, expectation: parts.join(' · ') }
+  }
+  const { stream, match, count, sinceLastStep } = step.logs
+  const window = sinceLastStep ? ' since the previous step' : ''
+  const n = count === undefined ? 'a line' : `exactly ${count} line${count === 1 ? '' : 's'}`
+  return {
+    command: `read service ${stream}`,
+    expectation: `${n} matching ${describeLogMatch(match)}${window}`,
+  }
+}
+
+/**
  * A parsed scenario as its step list. Anything that doesn't parse as a known
  * driver yields an empty list — the caller falls back to the raw source, never to
  * a half-rendered guess.
@@ -984,13 +1120,14 @@ export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStep
     })
   }
   return s.steps.map((step, i) => {
+    const base = { n: i + 1, ...(step.milestone != null ? { milestone: step.milestone } : {}) }
+    if (!isCliRunStep(step)) return { ...base, ...describeCliLifecycleStep(step) }
     const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
     return {
-      n: i + 1,
+      ...base,
       command: step.run.join(' '),
       ...(env.length > 0 ? { env } : {}),
       expectation: describeCliExpect(step.expect),
-      ...(step.milestone != null ? { milestone: step.milestone } : {}),
       ...(step.repeat != null ? { repeat: step.repeat } : {}),
     }
   })

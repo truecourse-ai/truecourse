@@ -163,7 +163,7 @@ export const SECTIONS: SectionDescriptor[] = [
       // themselves live, and the ONE standalone test-detail destination (a flow's
       // test row and a run's instance both link here, `?gtest=`). It follows Flows
       // because it is the same story one level down: spec -> flow -> its tests.
-      { id: 'tests', label: 'Tests', icon: FlaskConical },
+      { id: 'tests', label: 'Scenarios', icon: FlaskConical },
       // Code-side journey catalog — the free Map action's read surface: detected
       // surfaces banner, per-surface catalog with the reverse index onto flows, and
       // the sequence diagram per journey. It sits AFTER Tests: it is the code half,

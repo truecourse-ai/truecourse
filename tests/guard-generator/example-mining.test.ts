@@ -6,14 +6,14 @@ import {
   mineExampleBlocks,
   exampleFidelityDefect,
   buildAuthorUserPrompt,
-  GENERATE_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
+  WORKER_CLI_SYSTEM_PROMPT,
+  WORKER_API_SYSTEM_PROMPT,
   MAX_EXAMPLE_BLOCKS_PER_SECTION,
   MAX_EXAMPLE_BLOCK_BYTES,
   type AuthorUserContext,
   type DocExampleBlock,
-  type GenerateRunner,
 } from '@truecourse/guard-generator'
+import type { LlmTurnFn } from '@truecourse/shared/llm'
 import {
   makeTempRepo,
   rmrf,
@@ -22,6 +22,7 @@ import {
   writeCorpus,
   extractBy,
   runGenerate,
+  turnReply,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -129,11 +130,11 @@ describe('exampleFidelityDefect — byte-compare where feasible', () => {
 
 describe('the authoring prompts carry the verbatim-example contract', () => {
   it('both system prompts state the rule', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
+    expect(WORKER_CLI_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
+    expect(WORKER_API_SYSTEM_PROMPT).toContain("The doc's own examples run VERBATIM")
   })
 
-  it('the user prompt renders each mined block clearly bounded, and the correction names the defect', () => {
+  it('the user prompt renders each mined block clearly bounded', () => {
     const ctx: AuthorUserContext = {
       flow: { id: 'f', title: 'Check the rule', goal: 'the rule fires' },
       milestones: [
@@ -156,13 +157,9 @@ describe('the authoring prompts carry the verbatim-example contract', () => {
     const prompt = buildAuthorUserPrompt(ctx)
     expect(prompt).toContain('DOC EXAMPLE 1.1 (sql)')
     expect(prompt).toContain('<<<DOC-EXAMPLE\nselect 1\nDOC-EXAMPLE>>>')
-
-    const corrected = buildAuthorUserPrompt({
-      ...ctx,
-      issues: { uncoveredMilestones: [], unknownMilestones: [], exampleFidelity: 'setup.files["q.sql"] embeds a REFORMATTED copy…' },
-    })
-    expect(corrected).toContain('reformats a DOC EXAMPLE')
-    expect(corrected).toContain('setup.files["q.sql"]')
+    // A reformatted copy is caught by the run_scenario validation (draftDefect),
+    // whose wording reaches the session through the tool result — not through a
+    // one-shot correction block, which no longer exists.
   })
 })
 
@@ -178,44 +175,60 @@ describe('generateGuards — the doc example is embedded byte-for-byte end to en
     '```',
   ].join('\n')
 
-  it('re-asks on a reformatted embedding and commits the exact bytes', async () => {
+  it('rejects a reformatted embedding inside the session and commits the exact bytes', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const ctxs: AuthorUserContext[] = []
-    const gen: GenerateRunner = async (ctx) => {
-      ctxs.push(ctx)
-      // First attempt reformats the doc's example (the historical defect);
-      // the corrective re-ask then copies it byte-for-byte.
-      const content = ctx.issues?.exampleFidelity ? BLOCK : 'line one\nindented line'
-      return {
-        scenario: {
-          title: 'the version prints for the documented input',
-          driver: 'cli',
-          setup: { files: { 'input.txt': content } },
-          steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
-        },
+    // The worker's `run_scenario` tool validates BEFORE it spends a sandbox run:
+    // a draft that reformats the doc's example comes back `invalid` with the
+    // defect named, and the session's next draft copies the bytes exactly.
+    const toolResults: string[] = []
+    let drafts = 0
+    let openingPrompt = ''
+    const turnFn: LlmTurnFn = async (req) => {
+      openingPrompt ||= req.messages[0]?.text ?? ''
+      const last = req.messages[req.messages.length - 1]
+      if (last?.role === 'user' && last.text.startsWith('run_scenario result:')) {
+        toolResults.push(last.text)
+        if (last.text.includes('"verdict": "pass"')) return turnReply({ outcome: { result: 'settled' } })
       }
+      // First draft reformats the doc's example (the historical defect); the
+      // second copies it byte-for-byte.
+      const content = drafts++ === 0 ? 'line one\nindented line' : BLOCK
+      return turnReply({
+        tool: 'run_scenario',
+        args: {
+          scenario: {
+            title: 'the version prints for the documented input',
+            driver: 'cli',
+            setup: { files: { 'input.txt': content } },
+            steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
+          },
+        },
+      })
     }
 
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({ check: [{ claim: 'the version prints for the documented input' }] }),
-      generateRunner: gen,
+      turnFn,
     })
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])
     expect(res.written).toHaveLength(1)
 
-    // The engine re-asked ONCE, naming exactly the reformatted carrier…
-    expect(ctxs).toHaveLength(2)
-    expect(ctxs[1].issues?.exampleFidelity).toContain('setup.files["input.txt"]')
-    expect(ctxs[1].issues?.exampleFidelity).toContain(`${DOC}#check`)
-    // …and the round-1 prompt already carried the mined block, byte-exact.
-    expect(ctxs[0].milestones[0].examples).toEqual([{ lang: 'txt', content: BLOCK }])
+    // The session drafted twice: the first came back invalid — no sandbox run —
+    // naming exactly the reformatted carrier…
+    expect(drafts).toBe(2)
+    expect(toolResults[0]).toContain('"verdict": "invalid"')
+    expect(toolResults[0]).toContain('setup.files[\\"input.txt\\"]')
+    expect(toolResults[0]).toContain(`${DOC}#check`)
+    // …and the opening prompt already carried the mined block, byte-exact.
+    expect(openingPrompt).toContain('DOC EXAMPLE 1.1 (txt)')
+    expect(openingPrompt).toContain(`<<<DOC-EXAMPLE\n${BLOCK}\nDOC-EXAMPLE>>>`)
 
     // The committed scenario embeds the doc's exact bytes.
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {

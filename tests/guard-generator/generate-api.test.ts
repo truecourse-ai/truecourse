@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
-import { spawnGenerateRunner, type AuthorUserContext, type GenerateRunner } from '@truecourse/guard-generator'
 import { readManifest } from '@truecourse/guard-runner'
 import { guardManifestSections } from '@truecourse/shared'
 import {
@@ -12,14 +11,15 @@ import {
   writeDoc,
   writeCorpus,
   extractBy,
-  authorBy,
+  apiWorkerTurnBy,
+  workerTurnBy,
+  workerTurnsBy,
   runGenerate,
   journeysOf,
   cliJourney,
   apiJourney,
   raw,
   rawApi,
-  stampMilestones,
   PASSING_STEPS,
   PASSING_API_STEPS,
   FAILING_API_STEPS,
@@ -62,7 +62,7 @@ describe('generateGuards — api surface authoring + birth', () => {
       repoRoot: r,
       journeys: journeysOf(r, apiJourney('GET', '/todos')),
       extractRunner: listExtract,
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200 with the empty list', PASSING_API_STEPS) }),
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /todos answers 200 with the empty list', PASSING_API_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -119,7 +119,7 @@ describe('generateGuards — api surface authoring + birth', () => {
       repoRoot: r,
       journeys: journeysOf(r, apiJourney('GET', '/todos')),
       extractRunner: listExtract,
-      generateRunner: authorBy({
+      turnFn: apiWorkerTurnBy({
         list: rawApi('the todos server comes up', PASSING_API_STEPS, {
           setup: { env: { TC_FAIL_BOOT: '1', TC_LEAK: SECRET } },
         }),
@@ -149,9 +149,10 @@ describe('generateGuards — api surface authoring + birth', () => {
         list: [{ driver: 'api', claim: 'GET /boom answers 200', reason: 'HTTP status' }],
         version: { untestable: 'covered elsewhere' },
       }),
-      // Round 1 AND the retry both author the claim's (correct) assertion; the
-      // fixture answers 500 → the disagreement is committed as a FAILING test.
-      generateRunner: authorBy({ list: rawApi('GET /boom answers 200', FAILING_API_STEPS) }),
+      // The worker asserts the claim's (correct) version, watches the run fail,
+      // and settles FAILING with its diagnosis. The isolated confirmation run
+      // re-fails, and the disagreement is committed as a FAILING test.
+      turnFn: apiWorkerTurnBy({ list: rawApi('GET /boom answers 200', FAILING_API_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -178,45 +179,49 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   }, 60_000)
 
-  it('authors a flow’s cli and api surfaces in separate single-driver calls', async () => {
-    // One scenario per (flow, surface): a surface never rides another's authoring
-    // call, so each call carries exactly one driver's framing and system prompt.
+  it('authors a flow’s cli and api surfaces on their own paths, each with its own framing', async () => {
+    // One scenario per (flow, surface), and the two surfaces never share a prompt:
+    // each runs its OWN worker session under its own system prompt.
     const r = repo()
     writeApiRecipe(r) // prepares both cli (entry) and api (serve)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    const calls: { flowId: string; driver: string; hasEntry: boolean; hasServe: boolean }[] = []
-    const perSurface: GenerateRunner = async (ctx) => {
-      calls.push({
-        flowId: ctx.flow.id,
-        driver: ctx.driver,
-        hasEntry: ctx.recipeEntry !== undefined,
-        hasServe: ctx.recipeServe !== undefined,
-      })
-      const scenario =
-        ctx.driver === 'api'
-          ? rawApi('GET /todos answers 200', PASSING_API_STEPS)
-          : raw('relkit --version exits 0', PASSING_STEPS)
-      return { scenario: stampMilestones(scenario, ctx.milestones.length) }
-    }
+    const sessions: { subject: string; system: string; opening: string }[] = []
 
     const res = await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, cliJourney(['relkit']), apiJourney('GET', '/todos')),
       extractRunner: listExtract,
-      generateRunner: perSurface,
+      turnFn: workerTurnsBy(
+        {
+          cli: { list: raw('relkit --version exits 0', PASSING_STEPS) },
+          api: { list: rawApi('GET /todos answers 200', PASSING_API_STEPS) },
+        },
+        (req) =>
+          sessions.push({
+            subject: req.subject ?? '',
+            system: req.system,
+            opening: req.messages[0]?.text ?? '',
+          }),
+      ),
     })
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])
-    // Two calls for the ONE flow — one per surface, never mixed.
-    expect(calls).toHaveLength(2)
-    expect(calls.every((c) => c.flowId === 'list')).toBe(true)
-    expect(calls.map((c) => c.driver).sort()).toEqual(['api', 'cli'])
-    // Each call is handed only its own surface's preparation.
-    expect(calls.find((c) => c.driver === 'api')).toMatchObject({ hasEntry: false, hasServe: true })
-    expect(calls.find((c) => c.driver === 'cli')).toMatchObject({ hasEntry: true, hasServe: false })
+    // Both surfaces ran their own worker session for the one flow, each under its
+    // own framing — neither prompt leaks into the other.
+    expect(sessions.every((s) => s.subject === 'list')).toBe(true)
+    const cliSessions = sessions.filter((s) => s.system.includes('command-line program'))
+    const apiSessions = sessions.filter((s) => s.system.includes('HTTP service'))
+    expect(cliSessions.length).toBeGreaterThan(0)
+    expect(apiSessions.length).toBeGreaterThan(0)
+    expect(cliSessions.length + apiSessions.length).toBe(sessions.length)
+    // Each session's USER prompt carries only its own surface's preparation.
+    expect(cliSessions[0].opening).toContain('Program entrypoint:')
+    expect(cliSessions[0].opening).not.toContain('Service serve command:')
+    expect(apiSessions[0].opening).toContain('Service serve command:')
+    expect(apiSessions[0].opening).not.toContain('Program entrypoint:')
 
     // Both surfaces persist as their own scenario under the one flow.
     expect(res.written.map((w) => w.surface).sort()).toEqual(['api', 'cli'])
@@ -225,6 +230,48 @@ describe('generateGuards — api surface authoring + birth', () => {
       { id: 'list.api.1', surface: 'api', status: 'passing' },
       { id: 'list.cli.1', surface: 'cli', status: 'passing' },
     ])
+  }, 60_000)
+
+  it('an api worker session CONVERGES against the real fixture server: wrong path fails, the revision passes', async () => {
+    // The canonical worker script on the api surface: the first draft asks a path
+    // the todos server does not serve, the session reads the capture, revises to
+    // the real path, and settles PASSING — every run against the REAL server.
+    const r = repo()
+    writeApiRecipe(r, { entry: null })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    let runs = 0
+    const res = await runGenerate({
+      repoRoot: r,
+      journeys: journeysOf(r, apiJourney('GET', '/todos')),
+      extractRunner: listExtract,
+      turnFn: apiWorkerTurnBy(
+        {
+          list: {
+            first: rawApi('GET /todos answers 200', [
+              { request: { method: 'GET', path: '/todoz' }, expect: { status: 200 } },
+            ]),
+            retry: rawApi('GET /todos answers 200', PASSING_API_STEPS),
+          },
+        },
+        (req) => {
+          const last = req.messages[req.messages.length - 1]
+          if (last?.role === 'user' && last.text.startsWith('run_scenario result:')) runs++
+        },
+      ),
+    })
+
+    expect(res.status).toBe('ok')
+    expect(res.errors).toEqual([])
+    expect(res.birthFindings).toEqual([])
+    // The session executed twice (the failing draft, then the fix) before settling.
+    expect(runs).toBe(2)
+    expect(res.written).toMatchObject([{ id: 'list.api.1', surface: 'api', status: 'passing' }])
+    const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
+      steps: { request: { path: string } }[]
+    }
+    expect(committed.steps[0].request.path).toBe('/todos')
   }, 60_000)
 
   it('a runnable surface with an EMPTY journey catalog settles as a no-journey gap', async () => {
@@ -239,7 +286,7 @@ describe('generateGuards — api surface authoring + birth', () => {
       repoRoot: r,
       journeys: journeysOf(r, cliJourney(['relkit'])), // cli only
       extractRunner: listExtract,
-      generateRunner: authorBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }),
     })
 
     expect(res.written.map((w) => w.surface)).toEqual(['cli'])
@@ -251,27 +298,3 @@ describe('generateGuards — api surface authoring + birth', () => {
   }, 60_000)
 })
 
-describe('spawnGenerateRunner — per-driver system prompt', () => {
-  it('sends the api authoring prompt for an api scenario and the cli one otherwise', async () => {
-    const systems: string[] = []
-    const transport = async (input: { system: string }): Promise<string> => {
-      systems.push(input.system)
-      return '{"blockedOn":["nothing"]}'
-    }
-    const runner = spawnGenerateRunner({ transport: transport as never })
-    const base: Omit<AuthorUserContext, 'driver'> = {
-      flow: { id: 'list', title: 'list the todos', goal: 'a user sees their todos' },
-      milestones: [
-        { order: 1, claim: 'GET /todos returns 200', doc: 'docs/api.md', sectionHeading: 'list', sectionText: '', realization: [] },
-      ],
-      journeyPath: ['api/get-todos'],
-      areaTags: [],
-      recipeBuild: 'true',
-    }
-    await runner({ ...base, driver: 'api', recipeServe: ['node', 'server.js'], recipeHealthPath: '/health' })
-    await runner({ ...base, driver: 'cli', recipeEntry: ['node', 'cli.js'] })
-    expect(systems[0]).toContain('HTTP service')
-    expect(systems[0]).toContain('"api"')
-    expect(systems[1]).toContain('command-line program')
-  })
-})

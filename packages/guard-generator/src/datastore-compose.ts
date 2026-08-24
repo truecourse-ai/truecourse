@@ -416,7 +416,7 @@ function renderCompose(services: readonly DerivedService[], endpoints: readonly 
     '# only while no recipe references it, so your edits are safe.',
     '#',
     '# It is NOT a deployment artifact — it publishes a throwaway datastore on',
-    '# localhost for tests to run against.',
+    '# localhost for scenarios to run against.',
     '',
   ].join('\n')
   return `${header}\n${body}`

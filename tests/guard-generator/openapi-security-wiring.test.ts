@@ -13,8 +13,6 @@ import {
   flowGenerationInputsHash,
   planGuardWork,
   type SectionInput,
-  type AuthorUserContext,
-  type GenerateRunner,
 } from '@truecourse/guard-generator'
 import { writeManifest } from '@truecourse/guard-runner'
 import { GUARD_FORMAT_VERSION } from '@truecourse/shared'
@@ -26,9 +24,11 @@ import {
   writeDoc,
   extractBy,
   runGenerate,
+  turnReply,
   journeysOf,
   apiJourney,
 } from './helpers.js'
+import type { LlmTurnFn } from '@truecourse/shared/llm'
 
 const repos: string[] = []
 afterEach(() => {
@@ -155,19 +155,19 @@ describe('authorCacheKey — security fold', () => {
 })
 
 describe('generateGuards — the api author prompt carries the operation-auth mapping', () => {
-  /** Collect every (flow, surface) authoring context's operationAuth, authoring nothing. */
-  function collectAuth(): { ctxs: AuthorUserContext[]; runner: GenerateRunner } {
-    const ctxs: AuthorUserContext[] = []
-    const runner: GenerateRunner = async (c) => {
-      ctxs.push(c)
-      return { blockedOn: ['a spy runner authors nothing'] }
+  /** Collect every api worker session's OPENING prompt, authoring nothing. */
+  function collectAuth(): { prompts: Map<string, string>; turnFn: LlmTurnFn } {
+    const prompts = new Map<string, string>()
+    const turnFn: LlmTurnFn = async (req) => {
+      if (req.messages.length === 1) prompts.set(req.subject ?? '', req.messages[0].text)
+      return turnReply({ outcome: { result: 'blocked', blockedOn: ['a spy session authors nothing'] } })
     }
-    return { ctxs, runner }
+    return { prompts, turnFn }
   }
 
   it('advertises the satisfying credential for a matched scheme and blocks on an unsatisfied one', async () => {
     const r = setupRepo(openapi(), API_KEY)
-    const { ctxs, runner } = collectAuth()
+    const { prompts, turnFn } = collectAuth()
     await runGenerate({
       repoRoot: r,
       journeys: meJourneys(r),
@@ -176,25 +176,26 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
         'paths/get-getadmin': [{ claim: 'GET /admin returns admin data', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getpublic': [{ claim: 'GET /public returns data', driver: 'api', reason: 'HTTP 200' }],
       }),
-      generateRunner: runner,
+      turnFn,
     })
-    // Every bound operation is authored for, so the mapping must reach some call.
-    expect(ctxs.map((c) => c.flow.id).sort()).toEqual([
+    // Every bound operation is authored for, so the mapping must reach some session.
+    expect([...prompts.keys()].sort()).toEqual([
       'paths-get-getadmin',
       'paths-get-getme',
       'paths-get-getpublic',
     ])
-    const satisfied = ctxs.flatMap((c) => c.operationAuth?.satisfiedBy ?? [])
-    const unsatisfied = ctxs.flatMap((c) => c.operationAuth?.unsatisfied ?? [])
+    const all = [...prompts.values()].join('\n')
     // apiKeyAuth (GET /me) is satisfied by the api-key credential via the header heuristic.
-    expect(satisfied).toContainEqual({ scheme: 'apiKeyAuth', credential: 'api-key', header: 'X-API-Key' })
+    expect(all).toContain(
+      'scheme `apiKeyAuth` is satisfied by credential `api-key` — put `{{cred:api-key}}` in request header `X-API-Key`.',
+    )
     // oauth2Auth (GET /admin) has no declared credential → named in unsatisfied.
-    expect(unsatisfied).toContain('oauth2Auth')
+    expect(all).toContain('scheme `oauth2Auth` has NO declared credential')
   }, 60_000)
 
   it('names the required scheme as unsatisfied when the recipe declares no credential for it', async () => {
     const r = setupRepo(openapi(), undefined)
-    const { ctxs, runner } = collectAuth()
+    const { prompts, turnFn } = collectAuth()
     await runGenerate({
       repoRoot: r,
       journeys: meJourneys(r),
@@ -203,19 +204,19 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
         'paths/get-getadmin': { untestable: 'needs oauth' },
         'paths/get-getpublic': { untestable: 'trivial' },
       }),
-      generateRunner: runner,
+      turnFn,
     })
     // No credentials → apiKeyAuth is unsatisfiable, so the secured GET /me surfaces as
-    // blocked (still auth-relevant) with nothing in satisfiedBy.
-    const auth = ctxs.map((c) => c.operationAuth).find((a) => a && a.unsatisfied.length > 0)
-    expect(auth?.satisfiedBy).toEqual([])
-    expect(auth?.unsatisfied).toContain('apiKeyAuth')
+    // blocked (still auth-relevant) with nothing satisfied.
+    const all = [...prompts.values()].join('\n')
+    expect(all).toContain('scheme `apiKeyAuth` has NO declared credential')
+    expect(all).not.toContain('is satisfied by credential')
   }, 60_000)
 })
 
 describe('generateGuards — `satisfies` validation', () => {
-  /** A generate runner that must never be reached: validation stops the run first. */
-  const neverAuthors: GenerateRunner = async () => {
+  /** A worker turn seam that must never be reached: validation stops the run first. */
+  const neverAuthors: LlmTurnFn = async () => {
     throw new Error('authoring must not run — the recipe was rejected')
   }
 
@@ -229,7 +230,7 @@ describe('generateGuards — `satisfies` validation', () => {
       extractRunner: async () => {
         throw new Error('extraction must not run — the recipe was rejected')
       },
-      generateRunner: neverAuthors,
+      turnFn: neverAuthors,
     })
     expect(res.status).toBe('recipe-failed')
     expect(res.reason).toContain('"api-key"')
@@ -250,7 +251,7 @@ describe('generateGuards — `satisfies` validation', () => {
         'paths/get-getadmin': { untestable: 'nothing to author here' },
         'paths/get-getpublic': { untestable: 'nothing to author here' },
       }),
-      generateRunner: neverAuthors,
+      turnFn: neverAuthors,
     })
     expect(res.status).toBe('ok')
     expect(res.recipe?.warnings).toBeUndefined()
@@ -269,7 +270,7 @@ describe('generateGuards — `satisfies` validation', () => {
       repoRoot: r,
       journeys: journeysOf(r),
       extractRunner: extractBy({ login: { untestable: 'prose only' } }),
-      generateRunner: neverAuthors,
+      turnFn: neverAuthors,
     })
     expect(res.status).toBe('ok')
     expect(res.recipe?.warnings).toHaveLength(1)

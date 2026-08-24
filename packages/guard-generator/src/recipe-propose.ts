@@ -567,7 +567,7 @@ function findAppAssignment(
 function detectDotnet(repoRoot: string): RecipeSignals | { ok: false; reason: string } {
   const projects = findCsprojFiles(repoRoot)
   if (projects.length !== 1) {
-    return { ok: false, reason: `${projects.length} .csproj files under the repo root — the project under test is not deterministic` }
+    return { ok: false, reason: `${projects.length} .csproj files under the repo root — which project to run is not deterministic` }
   }
   const rel = projects[0]
   const content = readText(path.join(repoRoot, rel)) ?? ''

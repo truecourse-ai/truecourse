@@ -29,8 +29,8 @@ function usageHint(journey: GuardJourneyRow): string {
   if (n === 0) return 'No flow uses this journey — code the spec never mentions.';
   const blocked = journey.flows.filter((f) => !f.realized).length;
   if (blocked === 0) return `Used by ${n} flow(s).`;
-  if (blocked === n) return `Used by ${n} flow(s) — all blocked before a test could be written.`;
-  return `Used by ${n} flow(s); ${blocked} blocked before a test could be written.`;
+  if (blocked === n) return `Used by ${n} flow(s) — all blocked before a scenario could be written.`;
+  return `Used by ${n} flow(s); ${blocked} blocked before a scenario could be written.`;
 }
 
 export function GuardJourneysPanel({

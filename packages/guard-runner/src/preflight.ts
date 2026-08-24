@@ -215,12 +215,12 @@ function deadEntryOutput(opts: PreflightEntryOptions, bare: StepCapture, timeout
 /**
  * The diagnostic for a SILENT entry: it started but produced nothing on every probe.
  * Lists each probed argv and its exit-0/empty result so the "does not look like the
- * program under test" verdict is one glance, and names the probed vectors.
+ * program the scenarios drive" verdict is one glance, and names the probed vectors.
  */
 function silentEntryOutput(opts: PreflightEntryOptions, probes: readonly EntryProbe[]): string {
   const entry = opts.displayEntry.join(' ')
   const lines = [
-    'Every probe produced no output and exited 0 — the entry does not look like the program under test:',
+    'Every probe produced no output and exited 0 — the entry does not look like the program the scenarios drive:',
   ]
   for (const p of probes) {
     const cmd = [entry, ...p.argv].join(' ').trim()
@@ -320,11 +320,11 @@ export function entryPreflightHeadline(entry: string, buildCommand: string): str
 
 /**
  * The one-line headline + rebuild/hand-recipe hint for a SILENT entry — it started
- * but produced no output on any probe, so it does not look like the program under
- * test. Every scenario would run against a do-nothing no-op.
+ * but produced no output on any probe, so it does not look like the program the
+ * scenarios drive. Every scenario would run against a do-nothing no-op.
  */
 export function entrySilentHeadline(entry: string, buildCommand: string): string {
-  return `The recipe entry \`${entry}\` produced no output for any probe (no arguments, \`--help\`, or \`--version\`) yet exited 0 — it does not look like the program under test, so every scenario would run against a silent no-op. Rebuild it with \`${buildCommand}\` (its build output is likely stale or incomplete) or supply a hand-written recipe, then retry.`
+  return `The recipe entry \`${entry}\` produced no output for any probe (no arguments, \`--help\`, or \`--version\`) yet exited 0 — it does not look like the program the scenarios drive, so every scenario would run against a silent no-op. Rebuild it with \`${buildCommand}\` (its build output is likely stale or incomplete) or supply a hand-written recipe, then retry.`
 }
 
 /**

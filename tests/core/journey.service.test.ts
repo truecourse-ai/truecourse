@@ -88,11 +88,17 @@ describe('mapJourneys', () => {
     expect(result.catalog.version).toBe(1);
     expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree' });
     expect(result.catalog.journeys.map((j) => j.id)).toEqual([
+      'cli/root',
       'cli/config',
       'cli/config-get',
       'cli/deploy',
       'cli/status',
     ]);
+    // The root journey is rooted at the bin name, carrying the program level.
+    expect(result.catalog.journeys[0]).toMatchObject({
+      entry: { command: ['shipit'] },
+      steps: [{ kind: 'invoke', command: ['shipit'], flags: ['--version', '--help'] }],
+    });
     expect(result.catalog.recipeFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(new Date(result.catalog.generatedAt).toString()).not.toBe('Invalid Date');
 
@@ -170,6 +176,59 @@ describe('mapJourneys', () => {
     expect(probed[1]).toEqual(['--help']);
   });
 
+  it('unions tree and probes when both are available, snapshotting the disagreements', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'shipit', bin: { shipit: 'dist/cli.js' } }),
+      'src/cli.ts': COMMANDER_CLI,
+      'dist/cli.js': '// built artifact',
+      '.truecourse/scenarios/recipe.json': JSON.stringify({
+        build: 'npm run build',
+        entry: ['node', 'dist/cli.js'],
+      }),
+    });
+
+    const result = await mapJourneys(repo, {
+      probeExec: async (argv) => {
+        const args = [...argv].slice(2).join(' ');
+        const rootHelp =
+          'Usage: shipit [options] [command]\n\nCommands:\n  deploy   Deploy a service\n  status   Show status\n  rollback   Roll back the last deploy\n';
+        if (args === '' || args === '--help') return { stdout: rootHelp, stderr: '', exitCode: 0 };
+        if (args === 'deploy --help') {
+          return {
+            stdout:
+              'Usage: shipit deploy [options]\n\nOptions:\n  -e, --env <name>  Target environment\n  --force           Skip the confirmation\n  -h, --help        display help for command\n',
+            stderr: '',
+            exitCode: 0,
+          };
+        }
+        return { stdout: '', stderr: '', exitCode: 1 };
+      },
+    });
+
+    expect(result.catalog.source).toEqual({ cli: 'union', api: 'tree' });
+    // The probe-only command joins the catalog; every tree command survives.
+    expect(result.catalog.journeys.map((j) => j.id)).toEqual([
+      'cli/root',
+      'cli/config',
+      'cli/config-get',
+      'cli/deploy',
+      'cli/rollback',
+      'cli/status',
+    ]);
+    // The probe-discovered flag lands in the grammar, never in the
+    // fingerprinted flag set.
+    const deploy = result.catalog.journeys.find((j) => j.id === 'cli/deploy');
+    expect(deploy?.steps[0]).toMatchObject({ flags: ['--env'] });
+    expect(deploy?.steps[0].options?.map((o) => o.flag)).toEqual(['--env', '--force', '--help']);
+    // Every disagreement is written down, and the snapshot carries them.
+    expect(result.catalog.diagnostics).toEqual([
+      expect.objectContaining({ kind: 'tree-missing-flag', path: ['deploy'], flag: '--force' }),
+      expect.objectContaining({ kind: 'tree-missing-command', path: ['rollback'] }),
+      expect.objectContaining({ kind: 'probe-missing-command', path: ['config'] }),
+    ]);
+    expect(readSnapshot().diagnostics).toEqual(result.catalog.diagnostics);
+  });
+
   it('writes an empty catalog — never an error — for a repo with no cli surface', async () => {
     writeRepo({
       'package.json': JSON.stringify({ name: 'reporting' }),
@@ -226,6 +285,7 @@ describe('mapJourneys', () => {
     const result = await mapJourneys(repo, { probeExec: null });
     expect(result.catalog.source).toEqual({ cli: 'tree', api: 'tree' });
     expect(result.catalog.journeys.map((j) => j.id)).toEqual([
+      'cli/root',
       'cli/config',
       'cli/config-get',
       'cli/deploy',

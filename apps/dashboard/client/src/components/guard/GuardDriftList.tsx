@@ -90,14 +90,14 @@ export function GuardDriftList({
                 <span>{g.rows.length}</span>
               </div>
               {/* Stale/orphaned name their mechanism, not their meaning — one muted
-                  line says why these tests have no result (they never ran). */}
+                  line says why these scenarios have no result (they never ran). */}
               {meta.hint && (
                 <div className="border-b border-border/60 bg-muted/30 px-3 py-1 text-[10px] leading-snug text-muted-foreground">
                   {meta.hint}
                 </div>
               )}
             </div>
-            <div role="list" aria-label={`${meta.label} tests`}>
+            <div role="list" aria-label={`${meta.label} scenarios`}>
               {g.rows.map((d) => (
                 <GuardTestListRow
                   key={d.id}
@@ -120,7 +120,7 @@ export function GuardDriftList({
               type="button"
               onClick={() => setPassExpanded((v) => !v)}
               aria-expanded={passExpanded}
-              aria-label={passExpanded ? 'Collapse passed tests' : 'Expand passed tests'}
+              aria-label={passExpanded ? 'Collapse passed scenarios' : 'Expand passed scenarios'}
               className={`flex w-full items-center justify-between border-b border-border px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider ${passMeta.badge}`}
             >
               <span className="flex items-center gap-1">
@@ -131,7 +131,7 @@ export function GuardDriftList({
             </button>
           </div>
           {passExpanded && (
-            <div role="list" aria-label="Passed tests">
+            <div role="list" aria-label="Passed scenarios">
               {passed.map((p) => (
                 <GuardTestListRow
                   key={p.id}

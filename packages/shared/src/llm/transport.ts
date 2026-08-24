@@ -31,6 +31,7 @@ import {
   isSystemicTally,
   LlmStageFailureError,
   MAX_TALLY_ERROR_CHARS,
+  MAX_TALLY_SUBJECTS,
   type StageTransportTally,
 } from './tally.js';
 
@@ -44,6 +45,20 @@ export {
   isSystemicTally,
   type StageTransportTally,
 } from './tally.js';
+// The agent loop drives turn-level sessions over this seam; re-exported here
+// so consumers keep the single `@truecourse/shared/llm` entry.
+export {
+  DEFAULT_OUTCOME_NAME,
+  renderActionProtocol,
+  runAgentLoop,
+  type AgentLoopBudget,
+  type AgentLoopEvent,
+  type AgentLoopOptions,
+  type AgentLoopResult,
+  type AgentLoopUsage,
+  type AgentOutcomeDef,
+  type AgentToolDef,
+} from './agent-loop.js';
 
 export interface LlmRequest {
   /** Stable id (the runner's natural id, e.g. `contract.extract:<sliceId>`).
@@ -51,6 +66,13 @@ export interface LlmRequest {
   id?: string;
   /** Pipeline stage, e.g. `spec.relevance` / `contract.extract` — informational. */
   stage?: string;
+  /**
+   * WHAT this call is about, in the words the run's surfaces use for it (a
+   * scenario id, a flow, a document). Purely accounting: {@link auditTransport}
+   * keeps it on the stage tally when the call FAILS, so a report can name the
+   * work a lost call was judging instead of only counting it.
+   */
+  subject?: string;
   /** Primary model (cli passes `--model`; agent treats it as a hint). */
   model?: string;
   /** Fallback model (cli passes `--fallback-model`). */
@@ -84,6 +106,109 @@ export interface LlmRequest {
 
 /** Returns the model's raw assistant text. The caller strips fences + parses. */
 export type LlmTransport = (req: LlmRequest) => Promise<string>;
+
+// ---------------------------------------------------------------------------
+// turn-level seam — one conversational turn of an agentic session
+// ---------------------------------------------------------------------------
+
+/** A tool call the model made on a turn (native backends carry a provider id). */
+export interface LlmToolCall {
+  /** Provider call id (api backend); absent when parsed out of plain text. */
+  id?: string;
+  name: string;
+  /** The arguments value as the provider delivered it (already parsed). */
+  arguments: unknown;
+}
+
+/** One tool the model may call during an agentic session. */
+export interface LlmToolDef {
+  name: string;
+  description: string;
+  /** JSON-schema STRING for the arguments object (see {@link jsonSchemaHint}). */
+  schema: string;
+}
+
+/** One message of a turn-level conversation, oldest first. */
+export interface LlmTurnMessage {
+  role: 'user' | 'assistant' | 'tool';
+  /**
+   * The rendered text of the message. For `tool` this is the serialized tool
+   * result the model reads; text-protocol backends send it verbatim as the
+   * next user-side message, native backends wrap it in a tool-result part.
+   */
+  text: string;
+  /** assistant only: the native tool call the model made, when it made one. */
+  toolCall?: LlmToolCall;
+  /** tool only: which native call this result answers. */
+  toolCallId?: string;
+  /** tool only: the tool that produced this result. */
+  toolName?: string;
+}
+
+/** One turn's token/cost usage, in the same buckets `StageUsage` tracks. */
+export interface LlmTurnUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  costUsd: number;
+}
+
+export interface LlmTurnRequest {
+  id?: string;
+  /** Pipeline stage the turns account under (same table as one-shot calls). */
+  stage?: string;
+  /** What the session is about (a flow id) — kept on failure tallies. */
+  subject?: string;
+  model?: string;
+  fallbackModel?: string;
+  /** Re-sent on EVERY turn: backends must not depend on session-side storage. */
+  system: string;
+  /**
+   * Full history, oldest first, ending with the user-side message to answer
+   * (the opening prompt, a tool result, or a correction). The claude-code
+   * backend sends only that trailing message — the session carries the rest
+   * server-side; the api backend replays the whole history.
+   */
+  messages: LlmTurnMessage[];
+  tools: LlmToolDef[];
+  /** Opaque session handle from the previous reply (claude-code `--resume`). */
+  sessionId?: string;
+  /** Per-turn wall-clock ceiling in ms. */
+  timeoutMs?: number;
+}
+
+export interface LlmTurnReply {
+  /** Assistant text; `''` when the reply was a pure native tool call. */
+  text: string;
+  /** Native tool call, when the backend declares tools to the provider. */
+  toolCall?: LlmToolCall;
+  /** Session handle to pass back on the next turn. */
+  sessionId?: string;
+  usage?: LlmTurnUsage;
+}
+
+/**
+ * One conversational turn: history + tools in, the model's next reply out.
+ * The turn is the whole provider seam — the loop that drives it (budgets,
+ * dispatch, re-asks, transcripts) lives in `agent-loop.ts` and is written once.
+ */
+export interface LlmTurnFn {
+  (req: LlmTurnRequest): Promise<LlmTurnReply>;
+  /**
+   * True when the backend declares tools natively to the provider (api mode),
+   * so replies carry `toolCall` and the loop skips its text action protocol.
+   */
+  nativeTools?: boolean;
+}
+
+/** A transport that can also run turn-level agentic calls. */
+export type LlmTransportWithTurn = LlmTransport & { turn?: LlmTurnFn };
+
+/** The transport's turn seam, when the installed backend provides one. */
+export function turnFnOf(transport: LlmTransport | undefined): LlmTurnFn | undefined {
+  return (transport as LlmTransportWithTurn | undefined)?.turn;
+}
 
 // ---------------------------------------------------------------------------
 // per-stage usage accounting
@@ -205,14 +330,26 @@ export function auditTransport(inner: LlmTransport): TransportAudit {
       tally.failures++;
       const message = e instanceof Error ? e.message : String(e);
       if (!tally.firstError) tally.firstError = message.slice(0, MAX_TALLY_ERROR_CHARS);
+      if (req.subject) {
+        const subjects = (tally.subjects ??= []);
+        if (subjects.length < MAX_TALLY_SUBJECTS && !subjects.includes(req.subject)) {
+          subjects.push(req.subject);
+        }
+      }
       throw e;
     }
   };
+  // Snapshot: the subjects array keeps growing as the run goes on, so a reader
+  // that kept a tally would watch its own copy change under it.
+  const copy = (t: StageTransportTally): StageTransportTally => ({
+    ...t,
+    ...(t.subjects ? { subjects: [...t.subjects] } : {}),
+  });
   const audit: TransportAudit = {
     transport,
-    tally: (stage) => ({ ...(byStage.get(stage) ?? { stage, attempts: 0, failures: 0 }) }),
-    tallies: () => [...byStage.values()].map((t) => ({ ...t })),
-    failures: () => [...byStage.values()].filter((t) => t.failures > 0).map((t) => ({ ...t })),
+    tally: (stage) => copy(byStage.get(stage) ?? { stage, attempts: 0, failures: 0 }),
+    tallies: () => [...byStage.values()].map(copy),
+    failures: () => [...byStage.values()].filter((t) => t.failures > 0).map(copy),
     isSystemicFailure: (stage) => isSystemicTally(byStage.get(stage)),
     assertStageHealthy: (stage) => {
       if (isSystemicTally(byStage.get(stage))) throw new LlmStageFailureError(audit.tally(stage));
@@ -247,7 +384,10 @@ export interface EnvelopeUsage {
  * shape as the buffered `claude -p --output-format json` envelope). The `agent`
  * transport has no such envelope, so usage there is simply absent (returns null).
  */
-function parseEnvelopeUsage(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
+function parseEnvelopeUsage(
+  req: { model?: string },
+  envelope: unknown,
+): EnvelopeUsage | null {
   if (!envelope || typeof envelope !== 'object') return null;
   const env = envelope as Record<string, unknown>;
   const usage = (env.usage ?? {}) as Record<string, unknown>;
@@ -287,7 +427,10 @@ function parseEnvelopeUsage(req: LlmRequest, envelope: unknown): EnvelopeUsage |
 }
 
 /** Parse + record one call's usage under its stage. Returns the parsed usage. */
-function recordUsageFromEnvelope(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
+function recordUsageFromEnvelope(
+  req: { stage?: string; model?: string },
+  envelope: unknown,
+): EnvelopeUsage | null {
   const u = parseEnvelopeUsage(req, envelope);
   if (u) recordStageUsage(req.stage, u);
   return u;
@@ -573,16 +716,37 @@ function isFirstTokenDelta(ev: unknown): boolean {
   return d === 'text_delta' || d === 'thinking_delta';
 }
 
-export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
-  const bin = opts.bin ?? resolveClaudeBinary();
-  return (req) =>
-    new Promise<string>((resolve, reject) => {
+/** One `claude -p` spawn — a one-shot call or one session turn. The prompt
+ *  always travels over stdin; the argv decides everything else. */
+interface ClaudePrintCall {
+  bin: string;
+  args: string[];
+  stdinBody: string;
+  /** Accounting identity for the usage table and the per-call log. */
+  stage?: string;
+  id?: string;
+  model?: string;
+  itemCount?: number;
+  /** The system prompt in force (already in `args`); kept on the call record. */
+  system: string;
+  timeoutMs?: number;
+}
+
+interface ClaudePrintResult {
+  text: string;
+  /** The terminal `result` event (carries session_id, usage, timings). */
+  envelope: Record<string, unknown>;
+  usage: EnvelopeUsage | null;
+}
+
+function runClaudePrint(call: ClaudePrintCall): Promise<ClaudePrintResult> {
+  return new Promise<ClaudePrintResult>((resolve, reject) => {
       const t0 = Date.now();
       const ts = new Date().toISOString();
-      const inputChars = req.system.length + req.user.length;
-      const itemCount = req.itemCount ?? 1;
-      const id = req.id ?? '';
-      const stage = req.stage ?? 'unknown';
+      const inputChars = call.system.length + call.stdinBody.length;
+      const itemCount = call.itemCount ?? 1;
+      const id = call.id ?? '';
+      const stage = call.stage ?? 'unknown';
       let reported = false;
       let ceilingTimer: ReturnType<typeof setTimeout> | null = null;
       let stallTimer: ReturnType<typeof setTimeout> | null = null;
@@ -608,7 +772,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       // Effective (scaled) limits in force for THIS call. Resolved up-front (both
       // are pure env reads) so every emitted record carries the ceiling and stall
       // window it was judged against, not just the clock that fired.
-      const timeoutMs = req.timeoutMs ? req.timeoutMs * resolveTimeoutScale() : undefined;
+      const timeoutMs = call.timeoutMs ? call.timeoutMs * resolveTimeoutScale() : undefined;
       const stallMs = resolveStallTimeoutMs();
 
       const clearTimers = (): void => {
@@ -630,14 +794,14 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         reported = true;
         clearTimers();
         emitCall({
-          ts, stage, model: req.model ?? '', id, itemCount,
+          ts, stage, model: call.model ?? '', id, itemCount,
           ok: false, outcome, error, exitCode, wallMs: Date.now() - t0,
           timeoutMs, stallTimeoutMs: stallMs,
           eventCount, msSinceLastEvent: obsSilenceMs(),
           ttftMs: obsTtftMs(), timeToRequestMs: obsTimeToRequestMs(),
           inputChars, outputChars: 0,
           inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0,
-          system: req.system, user: req.user, responseText: '',
+          system: call.system, user: call.stdinBody, responseText: '',
         });
       };
       const succeed = (usage: EnvelopeUsage | null, text: string): void => {
@@ -645,7 +809,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         reported = true;
         clearTimers();
         emitCall({
-          ts, stage, model: usage?.model || req.model || '', id, itemCount,
+          ts, stage, model: usage?.model || call.model || '', id, itemCount,
           ok: true, outcome: 'ok', exitCode: 0, wallMs: Date.now() - t0,
           timeoutMs, stallTimeoutMs: stallMs,
           eventCount, msSinceLastEvent: obsSilenceMs(),
@@ -656,54 +820,13 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
           claudeDurationMs: usage?.claudeDurationMs, apiDurationMs: usage?.apiDurationMs,
           // ttft/timeToRequest are OUR observations of the stream, not the envelope.
           ttftMs: obsTtftMs(), timeToRequestMs: obsTimeToRequestMs(),
-          system: req.system, user: req.user, responseText: text,
+          system: call.system, user: call.stdinBody, responseText: text,
         });
       };
 
-      const modelArgs: string[] = [];
-      if (req.model) modelArgs.push('--model', req.model);
-      if (req.fallbackModel) modelArgs.push('--fallback-model', req.fallbackModel);
-      const args = [
-        // `-p` alone: the user prompt travels over STDIN, never as a positional
-        // argv. A prompt that begins with `-` (the identity block's `--- IDENTITY`
-        // rule line did) would otherwise be parsed as a CLI flag — `claude` exits
-        // 1 with "unknown option" and the stage sees a transport failure. Stdin
-        // has no option grammar, so prompt CONTENT can never change the command.
-        '-p',
-        ...modelArgs,
-        // stream-json emits one NDJSON event per line: system:init, stream_event
-        // deltas, then a terminal `result` object identical to the buffered
-        // `--output-format json` envelope. `--verbose` is REQUIRED by the CLI
-        // for `-p` + stream-json; `--include-partial-messages` surfaces the
-        // token-level deltas that drive ttft + stall telemetry.
-        '--output-format',
-        'stream-json',
-        '--include-partial-messages',
-        '--verbose',
-        // Full REPLACE (not `--append-system-prompt`): the claude harness's
-        // built-in system prompt teaches tool/agent behavior and costs ~3.1K
-        // input tokens per call — pure contamination for these output-only
-        // stages. `--system-prompt` swaps it out entirely; `req.system` already
-        // carries everything the stage needs.
-        '--system-prompt',
-        req.system,
-        // `user` (not `project`): these stages are pure text-in/JSON-out and
-        // never need the *scanned* repo's CLAUDE.md or tools. Loading `project`
-        // hauled that file into every call — ~5k cache-creation tokens (1.25x)
-        // per block of pure overhead. `user` keeps only the operator's own config.
-        '--setting-sources',
-        'user',
-        // Every pipeline stage is output-only by design: the prompt carries all
-        // needed context and the model must never explore or modify the repo.
-        // Without this an eager model turns a one-shot completion into a
-        // multi-turn agentic session (observed: 47-60 turns fabricating repo
-        // files — ~10x the cost and latency, plus timeouts).
-        '--tools',
-        '',
-      ];
-      const proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(call.bin, call.args, { stdio: ['pipe', 'pipe', 'pipe'] });
       proc.stdin.on('error', () => {}); // EPIPE if claude dies first — close() reports it
-      proc.stdin.write(req.user);
+      proc.stdin.write(call.stdinBody);
       proc.stdin.end();
       const err: Buffer[] = [];
 
@@ -839,7 +962,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
           // Best-effort token/cost accounting — never let it break extraction.
           let usage: EnvelopeUsage | null = null;
           try {
-            usage = recordUsageFromEnvelope(req, envelope);
+            usage = recordUsageFromEnvelope({ stage: call.stage, model: call.model }, envelope);
           } catch {
             /* usage is observational only */
           }
@@ -850,13 +973,133 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
             return;
           }
           succeed(usage, text);
-          resolve(text);
+          resolve({ text, envelope, usage });
         } catch (e) {
           fail(e instanceof Error ? e.message : String(e), 0);
           reject(e instanceof Error ? e : new Error(String(e)));
         }
       });
+  });
+}
+
+/** The one-shot argv shared by both cli entry points; session flags append. */
+function claudePrintArgs(req: {
+  model?: string;
+  fallbackModel?: string;
+  system: string;
+}): string[] {
+  const modelArgs: string[] = [];
+  if (req.model) modelArgs.push('--model', req.model);
+  if (req.fallbackModel) modelArgs.push('--fallback-model', req.fallbackModel);
+  return [
+    // `-p` alone: the user prompt travels over STDIN, never as a positional
+    // argv. A prompt that begins with `-` (the identity block's `--- IDENTITY`
+    // rule line did) would otherwise be parsed as a CLI flag — `claude` exits
+    // 1 with "unknown option" and the stage sees a transport failure. Stdin
+    // has no option grammar, so prompt CONTENT can never change the command.
+    '-p',
+    ...modelArgs,
+    // stream-json emits one NDJSON event per line: system:init, stream_event
+    // deltas, then a terminal `result` object identical to the buffered
+    // `--output-format json` envelope. `--verbose` is REQUIRED by the CLI
+    // for `-p` + stream-json; `--include-partial-messages` surfaces the
+    // token-level deltas that drive ttft + stall telemetry.
+    '--output-format',
+    'stream-json',
+    '--include-partial-messages',
+    '--verbose',
+    // Full REPLACE (not `--append-system-prompt`): the claude harness's
+    // built-in system prompt teaches tool/agent behavior and costs ~3.1K
+    // input tokens per call — pure contamination for these output-only
+    // stages. `--system-prompt` swaps it out entirely; `req.system` already
+    // carries everything the stage needs.
+    '--system-prompt',
+    req.system,
+    // `user` (not `project`): these stages are pure text-in/JSON-out and
+    // never need the *scanned* repo's CLAUDE.md or tools. Loading `project`
+    // hauled that file into every call — ~5k cache-creation tokens (1.25x)
+    // per block of pure overhead. `user` keeps only the operator's own config.
+    '--setting-sources',
+    'user',
+    // Every stage — and every worker turn — is output-only by design: the
+    // prompt carries all needed context and the model must never explore or
+    // modify the repo. Without this an eager model turns a one-shot completion
+    // into a multi-turn agentic session (observed: 47-60 turns fabricating
+    // repo files — ~10x the cost and latency, plus timeouts). Worker sessions
+    // act through OUR loop's text action protocol, not claude's own tools.
+    '--tools',
+    '',
+  ];
+}
+
+export function cliTransport(opts: CliTransportOptions = {}): LlmTransportWithTurn {
+  const bin = opts.bin ?? resolveClaudeBinary();
+  const transport: LlmTransportWithTurn = async (req) => {
+    const { text } = await runClaudePrint({
+      bin,
+      args: claudePrintArgs(req),
+      stdinBody: req.user,
+      stage: req.stage,
+      id: req.id,
+      model: req.model,
+      itemCount: req.itemCount,
+      system: req.system,
+      timeoutMs: req.timeoutMs,
     });
+    return text;
+  };
+  transport.turn = cliTurn(bin);
+  return transport;
+}
+
+/**
+ * The claude-code turn backend: one `claude -p` spawn per turn, with the
+ * conversation carried server-side by the session — `--session-id <uuid>` on
+ * the first turn, `--resume <id>` after. Only the TRAILING user-side message
+ * travels (over stdin); the session already holds everything before it. The
+ * system prompt is re-passed on every turn so nothing depends on resume
+ * re-applying stored state. Tools stay disabled (`--tools ''`): a worker acts
+ * through the loop's text action protocol, and the loop is the only dispatcher.
+ */
+function cliTurn(bin: string): LlmTurnFn {
+  const turn: LlmTurnFn = async (req) => {
+    const last = req.messages[req.messages.length - 1];
+    if (!last || last.role === 'assistant') {
+      throw new Error('turn call needs a trailing user or tool message to send');
+    }
+    const sessionId = req.sessionId ?? randomUUID();
+    const args = [
+      ...claudePrintArgs(req),
+      ...(req.sessionId ? ['--resume', req.sessionId] : ['--session-id', sessionId]),
+    ];
+    const { envelope, text, usage } = await runClaudePrint({
+      bin,
+      args,
+      stdinBody: last.text,
+      stage: req.stage,
+      id: req.id,
+      model: req.model,
+      system: req.system,
+      timeoutMs: req.timeoutMs,
+    });
+    const echoed = envelope.session_id;
+    return {
+      text,
+      sessionId: typeof echoed === 'string' && echoed ? echoed : sessionId,
+      ...(usage
+        ? {
+            usage: {
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              cacheReadTokens: usage.cacheReadTokens,
+              cacheCreateTokens: usage.cacheCreateTokens,
+              costUsd: usage.costUsd,
+            },
+          }
+        : {}),
+    };
+  };
+  return turn;
 }
 
 // ---------------------------------------------------------------------------
@@ -878,7 +1121,7 @@ export interface AgentTransportOptions {
  * a partial file. Each concurrent transport call owns one id; the runner's own
  * concurrency drives how many requests are in flight.
  */
-export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}): LlmTransport {
+export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}): LlmTransportWithTurn {
   const reqDir = path.join(ioDir, 'requests');
   const resDir = path.join(ioDir, 'responses');
   fs.mkdirSync(reqDir, { recursive: true });
@@ -886,34 +1129,22 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
   const pollMs = opts.pollMs ?? 200;
   const defaultTimeout = opts.defaultTimeoutMs ?? 600_000;
 
-  return async (req) => {
-    const id = sanitizeId(req.id ?? deriveId(req));
+  /** Write the request (unless already answered) and poll for `{text}`. */
+  const exchange = async (
+    id: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number | undefined,
+  ): Promise<string> => {
     const reqPath = path.join(reqDir, `${id}.json`);
     const resPath = path.join(resDir, `${id}.json`);
 
     // Resume-friendly: if an answer is already present (e.g. a re-run after a
     // crash), consume it without re-writing the request.
     if (!fs.existsSync(resPath)) {
-      atomicWrite(
-        reqPath,
-        JSON.stringify(
-          {
-            id,
-            stage: req.stage,
-            model: req.model,
-            fallbackModel: req.fallbackModel,
-            responseFormat: req.responseFormat ?? 'json',
-            schema: req.schema,
-            system: req.system,
-            user: req.user,
-          },
-          null,
-          2,
-        ),
-      );
+      atomicWrite(reqPath, JSON.stringify(payload, null, 2));
     }
 
-    const deadline = Date.now() + (req.timeoutMs ?? defaultTimeout) * resolveTimeoutScale();
+    const deadline = Date.now() + (timeoutMs ?? defaultTimeout) * resolveTimeoutScale();
     for (;;) {
       if (fs.existsSync(resPath)) {
         let parsed: { text?: string; error?: string };
@@ -934,6 +1165,59 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
       await sleep(pollMs);
     }
   };
+
+  const transport: LlmTransportWithTurn = async (req) => {
+    const id = sanitizeId(req.id ?? deriveId(req));
+    return exchange(
+      id,
+      {
+        id,
+        stage: req.stage,
+        model: req.model,
+        fallbackModel: req.fallbackModel,
+        responseFormat: req.responseFormat ?? 'json',
+        schema: req.schema,
+        system: req.system,
+        user: req.user,
+      },
+      req.timeoutMs,
+    );
+  };
+
+  // The mailbox turn backend: one `kind: "turn"` request file per turn, the
+  // FULL history each time (the answering agent is stateless between files).
+  // The answer is raw assistant text — the loop's text action protocol rides
+  // it, exactly as in claude-code mode, so `nativeTools` stays unset.
+  transport.turn = async (req) => {
+    const id = sanitizeId(req.id ?? deriveTurnId(req));
+    const text = await exchange(
+      id,
+      {
+        id,
+        kind: 'turn',
+        stage: req.stage,
+        model: req.model,
+        fallbackModel: req.fallbackModel,
+        system: req.system,
+        messages: req.messages,
+        tools: req.tools,
+        sessionId: req.sessionId,
+      },
+      req.timeoutMs,
+    );
+    return { text, sessionId: req.sessionId ?? id };
+  };
+
+  return transport;
+}
+
+/** Stable turn id when the caller supplies none: content hash + turn ordinal. */
+function deriveTurnId(req: LlmTurnRequest): string {
+  const hash = createHash('sha256')
+    .update(`${req.stage ?? ''}\0${req.system}\0${req.messages.map((m) => m.text).join('\0')}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `${hash}-t${req.messages.length}`;
 }
 
 function deriveId(req: LlmRequest): string {

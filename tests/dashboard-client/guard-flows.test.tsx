@@ -9,7 +9,7 @@
  * the FLOW DETAIL (the milestone graph in generate paint, and ONE row per surface
  * — the test, clickable through to the Tests tab, or the why-no-test sentence,
  * with NO gaps block, NO findings block and NO authoring-errors block), and the
- * RUNS tab's flow instance (execution paint + the "open this test" link).
+ * RUNS tab's flow instance (execution paint + the "open this scenario" link).
  *
  * The fixture is the plan's worked example, "taskbird", plus the shapes the
  * 2026-07-26 live review caught rendering wrong: a flow whose only news was a
@@ -651,7 +651,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     const list = screen.getByRole('list', { name: 'Flow inventory' });
     const row = within(list).getByText(UNDERIVED_ID).closest('[role="listitem"]')! as HTMLElement;
     expect(
-      within(row).getByText('No longer derived from your specs — kept because its test still runs.'),
+      within(row).getByText('No longer derived from your specs — kept because its scenario still runs.'),
     ).toBeInTheDocument();
     // Every other row keeps its own goal — the sentence only fills an EMPTY slot.
     const derived = within(list).getByText(FLOW_TITLE).closest('[role="listitem"]')! as HTMLElement;
@@ -678,7 +678,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     expect(wordsIn(row)).toEqual(['Passing']);
     // …and the sentence it explains is still there, untouched.
     expect(
-      within(row).getByText('No longer derived from your specs — kept because its test still runs.'),
+      within(row).getByText('No longer derived from your specs — kept because its scenario still runs.'),
     ).toBeInTheDocument();
   });
 
@@ -870,12 +870,12 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
 
   it('renders ONE row per surface: the test with its status, or why there is none', () => {
     renderDetail();
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
     const rows = within(tests).getAllByRole('listitem');
     expect(rows).toHaveLength(DETAIL.surfaces.length);
 
     // The cli surface HAS a test: surface, status word, and the test's title.
-    expect(within(rows[0]).getByText('CLI test')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('CLI scenario')).toBeInTheDocument();
     expect(within(rows[0]).getByText('Failing')).toBeInTheDocument();
     expect(within(rows[0]).getByText(DETAIL.surfaces[0].title!)).toBeInTheDocument();
 
@@ -921,14 +921,14 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     const user = userEvent.setup();
     const onOpenTest = vi.fn();
     renderDetail({ detail: CONFLICTS_DETAIL, onOpenTest });
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
     const rows = within(tests).getAllByRole('listitem');
     expect(rows).toHaveLength(1);
     const row = rows[0];
 
     // The surface's own name — never "CLI test", which is what a TEST row says.
     expect(within(row).getByText('CLI')).toBeInTheDocument();
-    expect(within(row).queryByText('CLI test')).not.toBeInTheDocument();
+    expect(within(row).queryByText('CLI scenario')).not.toBeInTheDocument();
     // The status word, then the WHY as its own sentence — needs joined with "and".
     expect(within(row).getByText('Blocked')).toBeInTheDocument();
     expect(within(row).getByText('Needs credentials and network access.')).toBeInTheDocument();
@@ -952,7 +952,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
           onOpenJourney={() => {}}
         />,
       );
-      const tests = screen.getByRole('list', { name: 'Tests' });
+      const tests = screen.getByRole('list', { name: 'Scenarios' });
       for (const row of within(tests).getAllByRole('listitem')) {
         const surface = detail.surfaces.find((s) => within(row).queryByText(s.title ?? '\u0000'));
         if (!surface?.scenarioId) continue;
@@ -988,8 +988,8 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
 
   it('says a flow whose authoring never finished will retry — never "Failing"', () => {
     renderDetail({ detail: ERROR_ONLY_DETAIL });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText(/Couldn’t create the test — will retry next generate/)).toBeInTheDocument();
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
+    expect(within(tests).getByText(/Couldn’t create the scenario — will retry next generate/)).toBeInTheDocument();
     expect(within(tests).queryByText('Failing')).not.toBeInTheDocument();
   });
 
@@ -1011,7 +1011,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
         ],
       },
     });
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
 
     // The two timeouts fold into ONE reason, counted twice; the invalid output is
     // its own reason, counted once.
@@ -1024,7 +1024,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
 
   it('shows no reasons on a row that is not an authoring error', () => {
     renderDetail({ detail: NOT_ATTEMPTED_DETAIL });
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
     expect(within(tests).queryByText(/\d+ attempt/)).not.toBeInTheDocument();
   });
 
@@ -1042,8 +1042,8 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
         errors: [{ doc: '(guard run)', anchor: '(refused)', kind: 'refusal', message }],
       },
     });
-    const tests = screen.getByRole('list', { name: 'Tests' });
-    expect(within(tests).getByText(/Nothing could be tested/)).toBeInTheDocument();
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
+    expect(within(tests).getByText(/No scenario could run/)).toBeInTheDocument();
     expect(within(tests).getByText(/hit-pay is only partly configured/)).toBeInTheDocument();
     expect(within(tests).queryByText(/will retry next generate/)).not.toBeInTheDocument();
   });
@@ -1056,10 +1056,10 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
    */
   it('says a flow nothing was attempted for is not generated — never a bare line', () => {
     renderDetail({ detail: NOT_ATTEMPTED_DETAIL });
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
     expect(within(tests).getByText('Not generated')).toBeInTheDocument();
     expect(
-      within(tests).getByText(/No test yet — will be attempted on the next generate/),
+      within(tests).getByText(/No scenario yet — will be attempted on the next generate/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Nothing tests this flow yet/)).not.toBeInTheDocument();
     // The retry sentence belongs to an authoring that RAN — nothing ran here.
@@ -1070,7 +1070,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     const user = userEvent.setup();
     const onOpenTest = vi.fn();
     renderDetail({ detail: BIRTH_FAILED_DETAIL, onOpenTest });
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
     expect(within(tests).getByText('Failing (birth)')).toBeInTheDocument();
     await user.click(within(tests).getByText(BIRTH_FAILED_DETAIL.surfaces[0].title!));
     expect(onOpenTest).toHaveBeenCalledWith(BIRTH_FAILED_ID);
@@ -1087,11 +1087,11 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     renderDetail({ detail: UNDERIVED_DETAIL, onOpenTest });
 
     expect(
-      screen.getByText('No longer derived from your specs — kept because its test still runs.'),
+      screen.getByText('No longer derived from your specs — kept because its scenario still runs.'),
     ).toBeInTheDocument();
     // It replaces the goal, so it sits in the header, above the Tests block.
     expect(screen.queryByText('Milestones')).not.toBeInTheDocument();
-    const tests = screen.getByRole('list', { name: 'Tests' });
+    const tests = screen.getByRole('list', { name: 'Scenarios' });
     expect(within(tests).getByText('Passing')).toBeInTheDocument();
     await user.click(within(tests).getByText('Purged tasks leave the list'));
     expect(onOpenTest).toHaveBeenCalledWith(UNDERIVED_TEST_ID);
@@ -1106,7 +1106,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     expect(within(chip.parentElement!).getByText('Passing')).toBeInTheDocument();
     expect(chip.className).not.toMatch(/emerald|red|amber|sky|zinc/);
     expect(
-      screen.getByText('No longer derived from your specs — kept because its test still runs.'),
+      screen.getByText('No longer derived from your specs — kept because its scenario still runs.'),
     ).toBeInTheDocument();
   });
 
@@ -1231,7 +1231,7 @@ describe('GuardFlowsPane — tabs and deep links', () => {
     const user = userEvent.setup();
     const onOpenTest = vi.fn();
     renderPane(`/repos/r?tab=guardflows&gflow=${FLOW_ID}`, onOpenTest);
-    await screen.findByRole('list', { name: 'Tests' });
+    await screen.findByRole('list', { name: 'Scenarios' });
     await user.click(screen.getByText(DETAIL.surfaces[0].title!));
     expect(onOpenTest).toHaveBeenCalledWith(SCENARIO_ID);
     // No second home: the Flows tab never grows a test tab of its own.
@@ -1342,11 +1342,11 @@ describe('flow dismissal — the one manual unit', () => {
     // Nothing is dismissed yet: no marker on the row, and the ruling is offered.
     const panel = screen.getByTestId('panel');
     expect(within(panel).queryByText('Dismissed')).not.toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: /Don’t test this flow/ }));
+    await user.click(await screen.findByRole('button', { name: /Rule this flow out/ }));
 
     // The detail now explains the consequence and offers the undo…
     expect(await screen.findByRole('button', { name: 'Un-dismiss' })).toBeInTheDocument();
-    expect(screen.getByText(/drops this flow and deletes its tests/)).toBeInTheDocument();
+    expect(screen.getByText(/drops this flow and deletes its scenarios/)).toBeInTheDocument();
     // …and the LIST row wears the marker immediately — the ruling is a decision,
     // not a run, so nothing waits on the engine.
     expect(within(panel).getByText('Dismissed')).toBeInTheDocument();
@@ -1367,7 +1367,7 @@ describe('flow dismissal — the one manual unit', () => {
     expect(await screen.findByText('not a user path')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Un-dismiss' }));
 
-    expect(await screen.findByRole('button', { name: /Don’t test this flow/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Rule this flow out/ })).toBeInTheDocument();
     expect(within(screen.getByTestId('panel')).queryByText('Dismissed')).not.toBeInTheDocument();
     expect(calls[0].body).toEqual({ flowId: FLOW_ID });
   });
@@ -1376,7 +1376,7 @@ describe('flow dismissal — the one manual unit', () => {
   // on whether it passes — so the status chip beside the marker is untouched.
   it('never replaces the flow status — the marker sits beside it', async () => {
     renderHarness();
-    await screen.findByRole('button', { name: /Don’t test this flow/ });
+    await screen.findByRole('button', { name: /Rule this flow out/ });
     const row = within(screen.getByTestId('panel')).getAllByRole('listitem')[0];
     expect(row.textContent).toContain(GUARD_FLOW_STATUS_WORD.failing);
   });
@@ -1389,8 +1389,8 @@ describe('flow dismissal — the one manual unit', () => {
         <FlowsHarness />
       </MemoryRouter>,
     );
-    await screen.findByRole('list', { name: 'Tests' });
-    expect(screen.queryByRole('button', { name: /Don’t test this flow/ })).not.toBeInTheDocument();
+    await screen.findByRole('list', { name: 'Scenarios' });
+    expect(screen.queryByRole('button', { name: /Rule this flow out/ })).not.toBeInTheDocument();
   });
 });
 
@@ -1563,8 +1563,8 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     const onOpenTest = vi.fn();
     renderRun(FAILED_RESULT, RUN_FLOW, onOpenTest);
     // The run's own record is what renders — the transcript and steps stay here.
-    expect(screen.getByLabelText('test steps')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /open this test/ }));
+    expect(screen.getByLabelText('scenario steps')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /open this scenario/ }));
     expect(onOpenTest).toHaveBeenCalledWith(SCENARIO_ID);
   });
 
@@ -1574,7 +1574,7 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     expect(screen.getByText(`As of run ${RUN_ID}`)).toBeInTheDocument();
     expect(screen.queryByText('Latest state')).not.toBeInTheDocument();
     expect(screen.getByText('Verdict')).toBeInTheDocument();
-    expect(await screen.findByLabelText('test steps')).toBeInTheDocument();
+    expect(await screen.findByLabelText('scenario steps')).toBeInTheDocument();
     // The run-scoped chrome it adds: the flow instance in execution paint.
     expect(screen.getByRole('list', { name: 'Milestones' })).toBeInTheDocument();
   });

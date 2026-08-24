@@ -11,8 +11,8 @@ import {
   writeCorpus,
   raw,
   extractBy,
-  authorBy,
   runGenerate,
+  workerTurnBy,
   PASSING_STEPS,
 } from './helpers.js'
 
@@ -50,7 +50,7 @@ describe('generateGuards — entry pre-flight', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -94,7 +94,7 @@ describe('generateGuards — entry pre-flight', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -121,7 +121,7 @@ describe('generateGuards — entry pre-flight', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -149,7 +149,7 @@ describe('recipe discovery — post-build entry existence check', () => {
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', 'dist/cli.js'] }),
       extractRunner: extractBy({}),
-      generateRunner: authorBy({}),
+      turnFn: workerTurnBy({}),
     })
 
     expect(res.status).toBe('recipe-failed')

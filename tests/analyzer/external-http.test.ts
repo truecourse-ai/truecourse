@@ -147,6 +147,38 @@ describe('deriveOwnHosts', () => {
     expect(deriveOwnHosts(bare, { controlledEnvVars: ['NEXT_PUBLIC_WEBAPP_URL'] })).toEqual([]);
   });
 
+  /**
+   * The sharper invariant, and independent of `ownHosts`: a marketing/SEO module
+   * writes the product's own domain as an ordinary literal in an ordinary file, with
+   * no env var and no recipe declaration to derive ownership from. Detection turned
+   * `https://truecourse.dev` into a service named after the product, which the
+   * blocked-on canonicalizer then attached every refusal mentioning the product to —
+   * the app rendered as a SaaS the user had forgotten to configure.
+   */
+  it('never turns the repo’s OWN product into a third party', () => {
+    const files = [
+      analyzed(
+        '/repo/apps/landing/src/lib/seo.ts',
+        `
+          export const SITE_URL = 'https://truecourse.dev';
+          export const seo = {
+            canonical: SITE_URL,
+            ogImage: 'https://truecourse.dev/og.png',
+            twitter: 'https://x.com/truecourseai',
+          };
+        `,
+      ),
+    ];
+
+    expect(detectExternalServices(files).map((s) => s.service)).toEqual(['truecourse', 'x']);
+    // The identity as the resolver states it, and as a domain — both are the product.
+    expect(detectExternalServices(files, { ownProductNames: ['truecourse'] }).map((s) => s.service)).toEqual(['x']);
+    expect(detectExternalServices(files, { ownProductNames: ['truecourse.dev'] }).map((s) => s.service)).toEqual(['x']);
+    // Every subdomain of the product's domain goes with it.
+    const docs = [analyzed('/repo/src/help.ts', `const help = 'https://docs.truecourse.dev/guard';`)];
+    expect(detectExternalServices(docs, { ownProductNames: ['TrueCourse'] })).toEqual([]);
+  });
+
   it('feeds detection: the self-service disappears, the real third party stays', () => {
     const files = [
       analyzed(

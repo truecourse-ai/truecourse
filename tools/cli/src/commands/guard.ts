@@ -24,6 +24,7 @@ import type {
   GuardBirthFinding,
   GuardFlow,
   GuardLastGenerateSummary,
+  GuardManifest,
   GuardScenarioResult,
   GuardGenerateReport,
   GuardUnadjudicatedStage,
@@ -42,13 +43,19 @@ import {
 import {
   composeGuardStatus,
   orderGuardDrifts,
+  guardAdjudicationLossLine,
   guardDriverIds,
   guardGapDisplayLabel,
+  guardSettleLine,
   guardUnadjudicatedEffect,
+  isGuardAdjudicationError,
+  summarizeFlowSettle,
   GUARD_UNADJUDICATED_REMEDY,
   isCompositionFinding,
 } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
+import { getServerUrl } from "./helpers.js";
+import { createFlowBoard } from "../lib/flow-board.js";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { clip, flowInstanceLine } from "../lib/guard-flow-format.js";
 import { requireGitRepo } from "./git-guard.js";
@@ -255,7 +262,10 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro("Guard generate");
   await requireGitRepo(repoRoot);
-  await registerProject(repoRoot);
+  const registered = await registerProject(repoRoot);
+  // The dashboard is an independent process: open before, during, or after the
+  // run — the authoring transcripts stream live when it is up, replay when not.
+  p.log.info(`Watch live: ${getServerUrl()}/repos/${registered.slug}?tab=guardflows`);
 
   if (opts.llmTransport === "agent" && !opts.io) {
     p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
@@ -272,6 +282,11 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // checklist below only starts once the run does, so it paints exactly once.
   const renderer = createStdoutStepRenderer();
   const tracker = new StepTracker(renderer.onProgress, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
+  // The per-flow authoring board: the partition counter + active worker rows,
+  // painted live under the checklist. Flows settle continuously, so progress
+  // is real, not settles-last.
+  const board = createFlowBoard();
+  renderer.setFooter(board.render);
   // The ceiling the gate quoted, kept so the summary can print spend against it.
   let estimatedCostUsd: number | undefined;
   let guard;
@@ -289,6 +304,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       // fails, above the checklist. A flow that is timing out never ticks the
       // settle counter, so it is otherwise indistinguishable from a slow one.
       onAuthorFailure: (f) => renderer.log(authorFailureLine(f)),
+      onFlowState: board.onFlowState,
     }));
   } catch (e: unknown) {
     renderer.dispose();
@@ -392,9 +408,13 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
 
   // The generate persisted its report at the end (usage + generatedAt); read it
   // back so the summary reuses the exact `guard status` composition. Fall back to
-  // the in-memory result if the file is somehow absent.
+  // the in-memory result if the file is somehow absent. The manifest it just
+  // rewrote drives the flows line's settle breakdown.
   const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
-  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { estimatedCostUsd });
+  printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), {
+    estimatedCostUsd,
+    manifest: await readManifest(repoRoot),
+  });
 
   // The runner DECLINED the run — a broken recipe, a half-configured external
   // account. Nothing was built, booted or validated, so this is the only news the
@@ -404,7 +424,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     p.log.error(`Guard refused the run (${guard.refusal.status}) — nothing was built, started, or validated.`);
     for (const line of guard.refusal.message.trimEnd().split("\n")) console.log(`  ${line}`);
     if (guard.refusal.flowIds.length > 0) {
-      p.log.step(`${guard.refusal.flowIds.length} flow${guard.refusal.flowIds.length === 1 ? "" : "s"} had tests authored but never validated — fix the above and re-run \`truecourse guard generate\` (authoring is cached).`);
+      p.log.step(`${guard.refusal.flowIds.length} flow${guard.refusal.flowIds.length === 1 ? "" : "s"} had scenarios authored but never validated — fix the above and re-run \`truecourse guard generate\` (authoring is cached).`);
     }
     p.outro(guardGenerateOutro({ written: 0, problems: 0, refused: true }));
     process.exit(1);
@@ -421,7 +441,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     problems: guard.birthFindings.length + guard.errors.length,
   });
   if (guard.written.length > 0) {
-    p.log.success(`Wrote ${guard.written.length} test file${guard.written.length === 1 ? "" : "s"} to .truecourse/scenarios/.`);
+    p.log.success(`Wrote ${guard.written.length} scenario file${guard.written.length === 1 ? "" : "s"} to .truecourse/scenarios/.`);
   }
   p.outro(closing);
 }
@@ -441,11 +461,11 @@ export function authorFailureLine(f: AuthorFailure): string {
 /**
  * The closing line of `guard generate`, from what the run actually left behind.
  *
- * Its one rule: a run that wrote NO test file never says there are tests to review
- * and commit. That line used to be reached whenever anything at all went wrong —
- * the "No tests written." early return was gated on there being no findings AND no
- * errors — so a generate that recorded 50 errors and wrote zero files signed off
- * with "Review + commit the tests, then `truecourse guard run`."
+ * Its one rule: a run that wrote NO scenario file never says there are scenarios to
+ * review and commit. That line used to be reached whenever anything at all went
+ * wrong — the "No scenarios written." early return was gated on there being no
+ * findings AND no errors — so a generate that recorded 50 errors and wrote zero
+ * files signed off with "Review + commit the scenarios, then `truecourse guard run`."
  */
 export function guardGenerateOutro(o: {
   written: number;
@@ -454,9 +474,9 @@ export function guardGenerateOutro(o: {
   /** The runner declined the run; nothing was validated and re-running won't help. */
   refused?: boolean;
 }): string {
-  if (o.refused) return "Aborted — the run was refused; no tests were written.";
-  if (o.written === 0) return o.problems > 0 ? "No tests written — see the errors above." : "No tests written.";
-  return "Review + commit the tests, then `truecourse guard run`.";
+  if (o.refused) return "Aborted — the run was refused; no scenarios were written.";
+  if (o.written === 0) return o.problems > 0 ? "No scenarios written — see the errors above." : "No scenarios written.";
+  return "Review + commit the scenarios, then `truecourse guard run`.";
 }
 
 /**
@@ -478,6 +498,13 @@ export interface GuardGenerateSummaryOptions {
    * a ceiling the bill can exceed") is visible in the terminal, not just in docs.
    */
   estimatedCostUsd?: number;
+  /**
+   * The manifest the generate just wrote. With it the flows line is the
+   * flow×surface settle breakdown (`37/60 settled · 23 unsettled: …`) — a run
+   * whose flows couldn't settle into scenarios must SAY so, per reason. Absent, the
+   * line falls back to the report's own run bookkeeping.
+   */
+  manifest?: GuardManifest | null;
 }
 
 /**
@@ -495,7 +522,20 @@ export function printGuardGenerateSummary(
 ): void {
   const g = composeGuardStatus(null, null, report).lastGenerate!;
 
-  if (report.flows) {
+  if (opts.manifest) {
+    // The one honest closing line: flow×surface units settled into scenarios vs
+    // the ones without one, per reason — "nothing pending" and "23 flows have no
+    // scenario" must never read the same. Run bookkeeping rides the head when
+    // nonzero.
+    const f = report.flows;
+    const extras: string[] = [];
+    if (f) {
+      if (f.skipped > 0) extras.push(`${f.skipped} unchanged`);
+      if (f.dismissed > 0) extras.push(`${f.dismissed} dismissed`);
+      if (f.orphaned > 0) extras.push(`${f.orphaned} orphaned`);
+    }
+    p.log.step(`flows       ${guardSettleLine(summarizeFlowSettle(opts.manifest), extras)}`);
+  } else if (report.flows) {
     const f = report.flows;
     const parts = [`${f.settled} settled`, `${f.unsettled} unsettled`];
     if (f.skipped > 0) parts.push(`${f.skipped} unchanged`);
@@ -514,9 +554,10 @@ export function printGuardGenerateSummary(
     );
   }
 
-  // Guard commits every authored test, so the headline is the test inventory: how
-  // many landed, and how many of them are already red because the code disagrees.
-  p.log.step(`tests       ${testsLine(g)}`);
+  // Guard commits every authored scenario, so the headline is the scenario
+  // inventory: how many landed, and how many are already red because the code
+  // disagrees.
+  p.log.step(`scenarios   ${testsLine(g)}`);
   // Ready-but-held: birth-passed scenarios an unsettled sibling withheld. Flow-keyed
   // generation persists independently and never holds, so this only renders for the
   // older reports that recorded it.
@@ -534,8 +575,18 @@ export function printGuardGenerateSummary(
   if (report.extractionFailures.length > 0) {
     p.log.step(`extraction  ${report.extractionFailures.length} document${report.extractionFailures.length === 1 ? "" : "s"} failed — re-run to retry`);
   }
+  const journeyDefects = report.journeyDefects ?? [];
+  if (journeyDefects.length > 0) {
+    const healed = journeyDefects.filter((d) => d.healed).length;
+    const healedNote = healed > 0 ? ` (${healed} healed in-run)` : "";
+    p.log.step(`journeys    ${journeyDefects.length} journey defect${journeyDefects.length === 1 ? "" : "s"}${healedNote} — the command grammar disagrees with the sandbox`);
+    for (const d of journeyDefects.slice(0, 3)) {
+      p.log.message(`  ▲ ${d.flowId} · ${d.surface}${d.argv ? ` · \`${d.argv.join(" ")}\`` : ""}: ${clip(d.observed, 70)}`);
+    }
+  }
   printGuardLlmFailures(g.llmFailures, report.extractionFailures, g.unadjudicated);
   printUnadjudicated(g.unadjudicated);
+  printAdjudicationLosses(g);
   // Orphan honesty: a dismissal whose claim text no longer matches any
   // live claim in a re-read doc — surfaced so it is never silently honored forever.
   const orphanedDismissals = (report.orphanedDismissals?.length ?? 0) + (report.orphanedFlowDismissals?.length ?? 0);
@@ -543,7 +594,7 @@ export function printGuardGenerateSummary(
     p.log.step(`dismissals  ${orphanedDismissals} orphaned — the dismissed claim/flow no longer exists; re-dismiss it or drop it from decisions.json`);
   }
 
-  // The failing tests, ONE line each (top 3): a composition failure — the chain
+  // The failing scenarios, ONE line each (top 3): a composition failure — the chain
   // broke mid-path, earlier milestones passed — is marked so "milestones don't
   // chain" never reads as ordinary doc-vs-code drift. They are COMMITTED, so this
   // block explains the `failing` count above; it never means work was withheld.
@@ -554,7 +605,7 @@ export function printGuardGenerateSummary(
     const more = failing.length - 3;
     if (more > 0) p.log.message(`  … and ${more} more — see \`truecourse guard drifts\``);
   }
-  // Fidelity rejections are the one verdict that still withholds a test: the
+  // Fidelity rejections are the one verdict that still withholds a scenario: the
   // scenario itself was judged wrong, so it is re-authored next generate.
   if (g.fidelityRejections > 0) {
     p.log.step(`rejected    ${g.fidelityRejections} by fidelity review — re-authored next generate`);
@@ -565,9 +616,11 @@ export function printGuardGenerateSummary(
 
   // EVERY failed unit, deduped and collapsed — one line each, no top-3 cap. A run
   // that could not author 9 flows must say which 9: they are exactly the work a
-  // re-run retries, and a truncated list hides half of it.
-  if (report.errors.length > 0) {
-    const units = collapseAuthoringErrors(report.errors);
+  // re-run retries, and a truncated list hides half of it. Adjudication losses are
+  // NOT here: nothing was withheld for them, and the block above named them.
+  const workErrors = report.errors.filter((e) => !isGuardAdjudicationError(e));
+  if (workErrors.length > 0) {
+    const units = collapseAuthoringErrors(workErrors);
     p.log.step(`errors      ${g.errors} authoring error${g.errors === 1 ? "" : "s"} — nothing was written for ${units.length === 1 ? "this unit" : `these ${units.length} units`}, re-run generate to retry`);
     for (const u of units) p.log.message(`  ✗ ${u.subject} — ${u.reason}`);
   }
@@ -593,9 +646,10 @@ export function printGuardGenerateSummary(
 }
 
 /**
- * `12 written · 10 passing · 2 failing (birth)` — the committed test inventory.
- * A failing test is committed like any other; "(birth)" says the stage that judged
- * it, never that it was withheld. The failing half is dropped when there is none.
+ * `12 written · 10 passing · 2 failing (birth)` — the committed scenario inventory.
+ * A failing scenario is committed like any other; "(birth)" says the stage that
+ * judged it, never that it was withheld. The failing half is dropped when there is
+ * none.
  */
 function testsLine(g: GuardLastGenerateSummary): string {
   const parts = [`${g.written} written`, `${g.testsPassing} passing`];
@@ -619,7 +673,7 @@ function gapBreakdown(g: { coverageGapsByKind: Record<string, number>; blockedOn
  * One finding, one line. A COMPOSITION finding (the milestone chain broke
  * mid-path) leads with `▲` and names the milestone that broke plus what the run
  * saw; every other finding names the flow surface and the claim it asserted —
- * with the triage verdict as the kind word when the test carries one.
+ * with the triage verdict as the kind word when the scenario carries one.
  */
 function findingLine(f: GuardBirthFinding): string {
   const subject = f.flowId ? `${f.flowId}${f.surface ? ` · ${f.surface}` : ""}` : sectionLeaf(f.anchor);
@@ -643,7 +697,7 @@ function printGuardLlmFailures(
 ): void {
   if (failures.length === 0) return;
   // A stage that lost EVERY call is stated in full by the unadjudicated block that
-  // follows. Its per-call effect sentence describes a PARTIAL loss (some tests
+  // follows. Its per-call effect sentence describes a PARTIAL loss (some scenarios
   // unreviewed), so printing both would tell two stories about one stage.
   const blind = new Set(unadjudicated.map((u) => u.stage as string));
   p.log.warn("LLM calls failed — this generate is incomplete:");
@@ -665,7 +719,7 @@ function printGuardLlmFailures(
  * run was NOT aborted (plan item 88 — fidelity and triage judge content birth
  * already validated, so losing them costs annotation, not correctness), which is
  * only honest if the terminal says the corpus is unadjudicated. Never summarized
- * away: a test nobody reviewed must not read like a reviewed one.
+ * away: a scenario nobody reviewed must not read like a reviewed one.
  */
 function printUnadjudicated(stages: readonly GuardUnadjudicatedStage[]): void {
   if (stages.length === 0) return;
@@ -674,6 +728,33 @@ function printUnadjudicated(stages: readonly GuardUnadjudicatedStage[]): void {
     p.log.message(`  • ${GUARD_STAGE_LABEL[s.stage] ?? s.stage}: ${guardUnadjudicatedEffect(s)}`);
   }
   p.log.message(`    ${GUARD_UNADJUDICATED_REMEDY}`);
+}
+
+/**
+ * The scenarios an adjudication call was lost for, BY NAME. Per-call fail-soft is
+ * invisible without this: a review that times out leaves a green persisted with
+ * nobody's judgment on it, which is exactly the class fidelity exists to catch, and
+ * a count alone sends the reader to the logs to find out which scenario it meant.
+ */
+function printAdjudicationLosses(g: GuardLastGenerateSummary): void {
+  if (g.unreviewedTests.length === 0 && g.untriagedTests.length === 0) return;
+  p.log.warn("These scenarios carry no verdict — their adjudication call was lost:");
+  if (g.unreviewedTests.length > 0) {
+    p.log.message(`  • ${guardAdjudicationLossLine("fidelity", g.unreviewedTests)}`);
+  }
+  if (g.untriagedTests.length > 0) {
+    p.log.message(`  • ${guardAdjudicationLossLine("triage", g.untriagedTests)}`);
+  }
+}
+
+/** The compact adjudication-loss detail `guard status` reads back from the report. */
+function printStatusAdjudication(g: GuardLastGenerateSummary): void {
+  if (g.unreviewedTests.length > 0) {
+    p.log.message(`    ${guardAdjudicationLossLine("fidelity", g.unreviewedTests)}`);
+  }
+  if (g.untriagedTests.length > 0) {
+    p.log.message(`    ${guardAdjudicationLossLine("triage", g.untriagedTests)}`);
+  }
 }
 
 /** The compact per-stage unadjudicated detail `guard status` reads back from the report. */
@@ -698,9 +779,7 @@ const GUARD_STAGE_LABEL: Record<string, string> = {
   "guard.flows": "flow synthesis",
   "guard.match": "realization matching",
   "guard.generate": "authoring",
-  "guard.retry": "evidence retry",
   "guard.fidelity": "fidelity review",
-  "guard.triage": "failure triage",
 };
 
 /** What each stage's per-item fail-soft default did to the calls it lost. */
@@ -710,10 +789,8 @@ const GUARD_STAGE_EFFECT: Record<string, string> = {
   "guard.extract": "affected documents yielded no claims; their sections stay unguarded",
   "guard.flows": "affected areas composed no flow; their claims stay unguarded",
   "guard.match": "affected flows got no realization plan and authored nothing",
-  "guard.generate": "affected flows wrote no test",
-  "guard.retry": "affected tests stayed birth findings",
-  "guard.fidelity": "affected tests were left unreviewed and their flows unsettled",
-  "guard.triage": "affected failing tests committed untriaged",
+  "guard.generate": "affected flows wrote no scenario",
+  "guard.fidelity": "affected scenarios were left unreviewed and their flows unsettled",
 };
 
 /** The trailing heading of a section anchor (`cli/version` → `version`). */
@@ -799,14 +876,10 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     if (cl.unclassified > 0) parts.push(`unclassified ${cl.unclassified}`);
     p.log.message(`    ${parts.join(" · ")}`);
 
-    // The flows line — guarded / partly guarded / nothing realized, with the gap
-    // labels behind the incomplete ones so "why" needs no second command.
-    const f = c.flows;
-    const flowParts = [`${f.total} total`, `${f.guarded} guarded`];
-    if (f.partial > 0) flowParts.push(`${f.partial} partial`);
-    if (f.blocked > 0) flowParts.push(`${f.blocked} blocked`);
-    const why = f.gapLabels.length > 0 ? ` (${f.gapLabels.join(" · ")})` : "";
-    p.log.step(`flows       ${flowParts.join(" · ")}${why}`);
+    // The flows line — the flow×surface settle breakdown, per reason, so a
+    // corpus whose flows couldn't settle into scenarios says why without a second
+    // command (and an all-settled one stays terse).
+    p.log.step(`flows       ${guardSettleLine(c.settle)}`);
   }
 
   // Last run — guard/LATEST.json.
@@ -836,6 +909,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
       printStatusLlmFailures(g.llmFailures);
       printStatusUnadjudicated(g.unadjudicated);
+      printStatusAdjudication(g);
     } else {
       p.log.step(`last gen    ${g.generatedAt} · ${testsLine(g)}`);
       const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
@@ -858,6 +932,7 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       if (g.usage) p.log.message(`    ${g.usage.calls} call${g.usage.calls === 1 ? "" : "s"} · $${g.usage.costUsd.toFixed(2)}`);
       printStatusLlmFailures(g.llmFailures);
       printStatusUnadjudicated(g.unadjudicated);
+      printStatusAdjudication(g);
     }
   }
 

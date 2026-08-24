@@ -227,3 +227,37 @@ describe('guard store — generate report', () => {
     expect(readGuardResult(r)).toBeNull()
   })
 })
+
+describe('guard store — authoring transcripts', () => {
+  it('appends events as JSONL and reads them back in order', async () => {
+    const { appendAuthoringEvent, readAuthoringTranscript, authoringTranscriptPath } = await import(
+      '@truecourse/guard-runner'
+    )
+    const r = repo()
+    appendAuthoringEvent(r, 'run-1', 'flow-a', 'cli', { kind: 'init', turn: 0 })
+    appendAuthoringEvent(r, 'run-1', 'flow-a', 'cli', { kind: 'reply', turn: 1 })
+    expect(readAuthoringTranscript(r, 'run-1', 'flow-a', 'cli')).toEqual([
+      { kind: 'init', turn: 0 },
+      { kind: 'reply', turn: 1 },
+    ])
+    // The file lives under guard/authoring/<runId>/<flowId>.<surface>.jsonl.
+    const file = authoringTranscriptPath(r, 'run-1', 'flow-a', 'cli')
+    expect(file).toContain('guard/authoring/run-1/flow-a.cli.jsonl')
+    expect(fs.readFileSync(file, 'utf-8').trim().split('\n')).toHaveLength(2)
+  })
+
+  it('skips a torn trailing line and unsafe ids are sanitized', async () => {
+    const { appendAuthoringEvent, readAuthoringTranscript, authoringTranscriptPath } = await import(
+      '@truecourse/guard-runner'
+    )
+    const r = repo()
+    appendAuthoringEvent(r, 'run-1', 'flow/../x', 'cli', { ok: true })
+    const file = authoringTranscriptPath(r, 'run-1', 'flow/../x', 'cli')
+    // Separators are flattened into one segment — no traversal out of the run dir.
+    expect(file).toContain('guard/authoring/run-1/flow_.._x.cli.jsonl')
+    fs.appendFileSync(file, '{"kind":"reply","tex')
+    expect(readAuthoringTranscript(r, 'run-1', 'flow/../x', 'cli')).toEqual([{ ok: true }])
+    // A missing transcript reads as empty, never a throw.
+    expect(readAuthoringTranscript(r, 'run-9', 'nope', 'cli')).toEqual([])
+  })
+})

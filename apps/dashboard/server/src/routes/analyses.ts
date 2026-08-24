@@ -130,7 +130,8 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
       }
     } finally {
       unregisterAnalysis(id);
-      popLogger();
+      // The run's log closes with the run — nothing left writing to the repo.
+      await popLogger();
     }
   } catch (error) {
     next(error);

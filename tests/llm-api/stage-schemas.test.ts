@@ -68,14 +68,11 @@ import {
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
   spawnMatchRunner,
-  spawnGenerateRunner,
   spawnFidelityRunner,
-  spawnTriageRunner,
   spawnSeedRunner,
   spawnRecipeRunner,
 } from '../../packages/guard-generator/src/runners.js';
 import type {
-  AuthorUserContext,
   FidelityUserContext,
   FlowsUserContext,
   FlowsEpicUserContext,
@@ -83,7 +80,6 @@ import type {
   RecipeDiscoveryInput,
   SeedDraftInput,
 } from '../../packages/guard-generator/src/prompts.js';
-import type { TriageUserContext } from '../../packages/guard-generator/src/triage.js';
 
 // --- analyze (core cli-provider transport branch) ----------------------------
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
@@ -346,29 +342,9 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     await spawnMatchRunner(t)(matchCtx);
     push('guard.match', c.reqs.splice(0));
 
-    const authorCtx: AuthorUserContext = {
-      flow,
-      milestones: [
-        {
-          order: 1,
-          claim: 'prints the version',
-          doc: 'docs/cli.md',
-          sectionHeading: 'version',
-          sectionText: '`relkit --version` prints the version.',
-          realization: ['run --version'],
-        },
-      ],
-      journeyPath: ['j1'],
-      areaTags: ['core/checkout'],
-      driver: 'cli',
-      recipeEntry: ['node', 'dist/cli.js'],
-      recipeBuild: 'pnpm build',
-    };
-    const author = spawnGenerateRunner(t);
-    await author(authorCtx);
-    push('guard.generate', c.reqs.splice(0));
-    await author({ ...authorCtx, driver: 'api', recipeServe: ['node', 'dist/server.js'] });
-    push('guard.generate.api', c.reqs.splice(0));
+    // Scenario authoring has NO one-shot runner: both surfaces author through the
+    // flow worker's turn seam, whose tool/outcome schemas ride the loop, not a
+    // request schema — so there is nothing to probe here.
 
     const fidelityCtx: FidelityUserContext = {
       flow,
@@ -382,24 +358,11 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
         },
       ],
       scenarioYaml: 'id: checkout.cli.1\ntitle: prints the version\n',
+      scenarioId: 'checkout.cli.1',
+      surface: 'cli',
     };
     await spawnFidelityRunner(t)(fidelityCtx);
     push('guard.fidelity', c.reqs.splice(0));
-
-    const triageCtx: TriageUserContext = {
-      flow,
-      surface: 'cli',
-      doc: 'docs/cli.md',
-      sectionHeading: 'version',
-      sectionText: '`relkit --version` prints the version.',
-      milestones: [{ order: 1, claim: 'prints the version', failed: true }],
-      scenarioYaml: 'id: checkout.cli.1\n',
-      step: 1,
-      expected: 'exit 0',
-      actual: 'exit 1',
-    };
-    await spawnTriageRunner(t)(triageCtx);
-    push('guard.triage', c.reqs.splice(0));
 
     const seedCtx: SeedDraftInput = {
       driver: 'pg',
@@ -477,8 +440,6 @@ function formatCapturingModel() {
 const EXPECTED_OPT_OUTS = [
   'contract.gapJudge', // `verdicts` record
   'contract.reconcile', // `merges` record
-  'guard.generate', // a scenario's `setup.files` / `setup.env` records
-  'guard.generate.api', // the same schema, api driver
   'guard.recipe', // `env` / `servers` records
   'guard.seed', // `provides.credentials` / `provides.fixtures` records
   'spec.vocab', // `products` / `concerns` records
@@ -502,7 +463,7 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    expect(collected.length).toBeGreaterThanOrEqual(27);
+    expect(collected.length).toBeGreaterThanOrEqual(25);
     // Each collected call site contributed exactly one request.
     expect(new Set(collected.map((c) => c.name)).size).toBe(collected.length);
   });
@@ -555,12 +516,9 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
       'guard.fidelity',
       'guard.flows',
       'guard.flows.epic',
-      'guard.generate',
-      'guard.generate.api',
       'guard.match',
       'guard.recipe',
       'guard.seed',
-      'guard.triage',
     ]);
   });
 

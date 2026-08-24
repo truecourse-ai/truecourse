@@ -13,12 +13,18 @@
 export { deriveCliJourneys } from './derive.js'
 export type { DeriveCliJourneysOptions, CliJourneyCatalog } from './derive.js'
 
-export { deriveCliJourneysFromTree } from './cli-tree.js'
+export { deriveCliJourneysFromTree, cliTreeSurface, buildJourneysFromSurface } from './cli-tree.js'
+export type { CliTreeSurface, CliTreeRoot, DeriveCliJourneysFromTreeOptions } from './cli-tree.js'
+
+export { unionCliSurfaces } from './cli-union.js'
+export type { CliUnionResult } from './cli-union.js'
 
 export {
   deriveCliJourneysFromProbes,
+  probeCliSurface,
   createSandboxProbeExec,
   parseCliHelp,
+  programNameOf,
   MAX_CLI_PROBES,
   CLI_PROBE_TIMEOUT_MS,
 } from './cli-probes.js'
@@ -27,6 +33,7 @@ export type {
   CliProbeExec,
   CliProbeCapture,
   ParsedCliHelp,
+  ProbedCliSurface,
 } from './cli-probes.js'
 
 export { buildCliJourneys, buildRootCliJourney } from './cli-journeys.js'

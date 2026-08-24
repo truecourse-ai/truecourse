@@ -1423,6 +1423,7 @@ function RepoPageInner() {
                 // blocked panel over these live conflicts instead.
                 conflicts={guardOpenConflicts}
                 decisions={guardDecisions}
+                onSocketEvent={onEvent}
                 onOpenConflict={openSpecConflict}
                 onOpenSpec={openSpecSection}
                 onOpenTest={openGuardTest}

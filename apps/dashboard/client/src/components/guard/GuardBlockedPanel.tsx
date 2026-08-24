@@ -85,14 +85,14 @@ export function GuardBlockedPanel({
     return (
       <div
         role="region"
-        aria-label="Test generation blocked"
+        aria-label="Scenario generation blocked"
         className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
       >
         <CheckCircle2 className="h-8 w-8 text-emerald-500" />
         <div>
           <h3 className="text-sm font-semibold text-foreground">Spec conflicts resolved</h3>
           <p className="mt-1 max-w-md text-xs text-muted-foreground">
-            All open spec conflicts have been resolved. Spec Guard will write the missing tests on
+            All open spec conflicts have been resolved. Spec Guard will write the missing scenarios on
             the next generate.
           </p>
         </div>
@@ -102,15 +102,15 @@ export function GuardBlockedPanel({
 
   const n = conflicts.length;
   return (
-    <div role="region" aria-label="Test generation blocked" className="h-full overflow-y-auto">
+    <div role="region" aria-label="Scenario generation blocked" className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-5 px-5 py-6">
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">Test generation is blocked</h3>
+            <h3 className="text-sm font-semibold text-foreground">Scenario generation is blocked</h3>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {n} open spec conflict{n === 1 ? '' : 's'} must be resolved before Spec Guard can write its
-              tests. Open each conflict to pick a side or dismiss it — generation re-runs automatically
+              scenarios. Open each conflict to pick a side or dismiss it — generation re-runs automatically
               once they are all resolved.
             </p>
           </div>

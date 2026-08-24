@@ -10,7 +10,6 @@
 export {
   generateGuards,
   authorCacheKey,
-  retryCacheKey,
   GENERATE_CACHE_NAME,
   FIDELITY_CACHE_NAME,
   type GenerateGuardsOptions,
@@ -21,6 +20,7 @@ export {
   type GuardGenerateError,
   type GuardExtractionFailure,
   type AuthorFailure,
+  type FlowAuthoringState,
   type JourneyProvider,
 } from './generate.js'
 
@@ -168,6 +168,8 @@ export {
   captureProbes,
   groundProbes,
   defaultProbeExecutor,
+  programNamesOf,
+  repoPackageProgramNames,
   GROUND_CACHE_NAME,
   MAX_PROBES_PER_BATCH,
   PROBE_OUTPUT_LIMIT,
@@ -212,6 +214,19 @@ export {
 
 export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-skeleton.js'
 
+// Journey self-heal — the live re-verification of a worker's journey-defect
+// ending, one adapter per surface over the shared verdict seam.
+export {
+  cliJourneyHealProbe,
+  apiJourneyHealProbe,
+  type JourneyHealProbe,
+  type JourneyHealDefect,
+  type JourneyHealVerdict,
+  type JourneyHealCorrection,
+  type CliJourneyHealOptions,
+  type ApiJourneyHealOptions,
+} from './journey-heal.js'
+
 export {
   birthValidate,
   birthRunTimeoutMs,
@@ -222,24 +237,8 @@ export {
   type BirthRound,
 } from './birth.js'
 
-// Failing-test triage — the post-birth judgment stage.
-export {
-  runTriage,
-  triageCacheKey,
-  buildTriageUserPrompt,
-  TRIAGE_CACHE_NAME,
-  TRIAGE_SYSTEM_PROMPT,
-  TRIAGE_PROMPT_FINGERPRINT,
-  type TriageUserContext,
-  type TriageFlowContext,
-  type TriageMilestone,
-} from './triage.js'
-
 export {
   EXTRACT_SYSTEM_PROMPT,
-  GENERATE_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
-  GENERATE_API_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
   SEED_PROMPT_FINGERPRINT,
@@ -252,18 +251,23 @@ export {
   FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
-  GENERATE_PROMPT_FINGERPRINT,
+  WORKER_CLI_SYSTEM_PROMPT,
+  WORKER_CLI_PROMPT_FINGERPRINT,
+  WORKER_API_SYSTEM_PROMPT,
+  WORKER_API_PROMPT_FINGERPRINT,
   buildMatchUserPrompt,
   buildAuthorUserPrompt,
+  renderCommandGrammarEntry,
   buildFidelityUserPrompt,
   buildRecipeUserPrompt,
   buildFlowsUserPrompt,
   buildFlowsEpicUserPrompt,
   type AuthorUserContext,
+  type CommandGrammarEntry,
+  type CommandGrammarOption,
   type JourneyContractHint,
   type OutboundRequestHint,
   type AuthorMilestone,
-  type BirthRetryContext,
   type FidelityUserContext,
   type FidelityMilestone,
   type MatchUserContext,
@@ -294,20 +298,17 @@ export {
 
 export {
   spawnExtractRunner,
-  spawnGenerateRunner,
   spawnRecipeRunner,
   spawnSeedRunner,
   spawnFidelityRunner,
-  spawnTriageRunner,
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
   spawnMatchRunner,
+  ADJUDICATION_TIMEOUT_MS,
   type ExtractRunner,
-  type GenerateRunner,
   type RecipeRunner,
   type SeedRunner,
   type FidelityRunner,
-  type TriageRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
   type MatchRunner,
@@ -324,7 +325,8 @@ export {
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
-  AuthoredFlowScenarioSchema,
+  RawGeneratedCliScenarioSchema,
+  RawGeneratedApiScenarioSchema,
   RealizationMatchSchema,
   FidelityReviewSchema,
   FlowSynthesisSchema,
@@ -343,7 +345,8 @@ export {
   type UntestableNote,
   type DocExtraction,
   type RawGeneratedScenario,
-  type AuthoredFlowScenario,
+  type RawGeneratedCliScenario,
+  type RawGeneratedApiScenario,
   type RealizationMatch,
   type RealizationStep,
   type FidelityReview,
@@ -360,6 +363,7 @@ export {
   buildServerRouteIndex,
   bindFlowServer,
   documentedApiPaths,
+  documentedPathsInText,
   missingServerBlockedOn,
   multiServerBlockedOn,
   servedByOtherApp,
@@ -370,6 +374,14 @@ export {
   type ServerBinding,
 } from './server-binding.js'
 
+// The HTTP transport gate — whether the api surface is a candidate for a flow at all.
+export {
+  flowHttpSignal,
+  NO_HTTP_SIGNAL_REASON,
+  type HttpSignal,
+  type HttpSignalInput,
+} from './http-signal.js'
+
 // The validate-then-correct helpers — the corrective re-ask's two renderings, and
 // the per-driver COMPOSITION rules the scenario schema cannot express.
 export {
@@ -379,3 +391,17 @@ export {
   cliCompositionDefect,
   apiCompositionDefect,
 } from './validate.js'
+
+// The flow worker — the agentic authoring session (cli + api surfaces).
+export {
+  DEFAULT_WORKER_MAX_TURNS,
+  DEFAULT_WORKER_MAX_TOTAL_TOKENS,
+  runFlowWorker,
+  type WorkerBlockedMilestone,
+  type WorkerFlowInput,
+  type WorkerFlowResult,
+  type WorkerLastRun,
+  type WorkerSessionState,
+} from './worker.js'
+export { uncoveredMilestones, unknownMilestones } from './validate.js'
+export { buildFlowScenario, assignScenarioId, areaOrDocSlug } from './serialize.js'

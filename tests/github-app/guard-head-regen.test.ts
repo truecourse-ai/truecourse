@@ -232,6 +232,7 @@ describe('guard head-regen pipeline', () => {
       version: 1,
       dismissedClaims: [...repoRow.dismissedClaims, ...overlay.dismissedClaims],
       dismissedFlows: [],
+      reenabledFlows: [],
     });
   });
 

@@ -68,6 +68,13 @@ export interface StdoutStepRenderer {
    * (e.g. a failing scenario) without corrupting the in-place redraw.
    */
   log: (line: string) => void;
+  /**
+   * Extra live lines painted UNDER the checklist, inside the same in-place
+   * region — the per-flow authoring board (partition counter + active worker
+   * rows). A thunk, evaluated at every paint, so time-derived content
+   * (elapsed seconds) stays current on each spinner frame. `null` clears it.
+   */
+  setFooter: (footer: (() => string[]) | null) => void;
   /** Stop the spinner timer. Call when the command exits. */
   dispose: () => void;
 }
@@ -87,6 +94,7 @@ export function createStdoutStepRenderer(): StdoutStepRenderer {
   // The most recent full checklist, kept (unlike `latestSteps`, which clears
   // when nothing is active) so `log()` can repaint after clearing the region.
   let lastPainted: AnalysisStep[] | null = null;
+  let footer: (() => string[]) | null = null;
 
   /** Physical rows the last frame occupies at `width` (1 row/line when null). */
   function lastFrameRows(width: number | null): number {
@@ -145,6 +153,14 @@ export function createStdoutStepRenderer(): StdoutStepRenderer {
       lastFrameLengths.push(visibleLength(line));
     }
 
+    if (footer) {
+      for (const raw of footer()) {
+        const line = width === null ? raw : clampToWidth(raw, width);
+        process.stderr.write(`\x1b[2K\x1b[2m${line}\x1b[0m\n`);
+        lastFrameLengths.push(visibleLength(line));
+      }
+    }
+
     const hasActive = steps.some((s) => s.status === 'active');
     if (hasActive && !spinnerInterval) {
       latestSteps = steps;
@@ -176,6 +192,11 @@ export function createStdoutStepRenderer(): StdoutStepRenderer {
       clearRegion(terminalWidth());
       process.stderr.write(`${line}\n`);
       if (lastPainted) paint(lastPainted);
+    },
+    setFooter(next) {
+      footer = next;
+      // Non-TTY paints append-only frames; skip footer churn entirely there.
+      if (process.stderr.isTTY && lastPainted) paint(lastPainted);
     },
     dispose() {
       if (spinnerInterval) {

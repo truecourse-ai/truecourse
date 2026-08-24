@@ -71,10 +71,12 @@ export interface StaticProbes {
   /**
    * Phase-1 help surfaces, in priority order: the bare no-args invocation (when a
    * claim named no command), the bare `--help` (ALWAYS — the seed the expansion
-   * phase scans for subcommands), then salvaged subcommand `--help`s — for a
-   * fragment rejected because it carries value tokens, its leading subcommand
-   * prefix + `--help` (`` `add 12.50 lunch` `` → `add --help`). Capped at
-   * {@link MAX_PROBES_PER_BATCH}; never evicted by lower-priority classes.
+   * phase scans for subcommands), the BOUND commands' `--help`s (the commands the
+   * realization plan says the scenario will run — their usage text is the flag
+   * grammar authoring composes argv from), then salvaged subcommand `--help`s —
+   * for a fragment rejected because it carries value tokens, its leading
+   * subcommand prefix + `--help` (`` `add 12.50 lunch` `` → `add --help`). Capped
+   * at {@link MAX_PROBES_PER_BATCH}; never evicted by lower-priority classes.
    */
   helps: string[][]
   /**
@@ -88,16 +90,18 @@ export interface StaticProbes {
 }
 
 /**
- * Phase-1/phase-2 (static) probes for a batch, derived from its claim TEXTS alone
- * — see {@link StaticProbes} for the classes and their priority. An empty batch
- * derives nothing (no claims, no probes).
+ * Phase-1/phase-2 (static) probes for a batch, derived from its claim TEXTS plus
+ * the BOUND command paths the realization plan walks — see {@link StaticProbes}
+ * for the classes and their priority. An empty batch (no claims, no bound
+ * commands) derives nothing.
  */
 export function deriveStaticProbes(
   claimTexts: string[],
   entry: readonly string[],
   extraProgramNames: readonly string[] = [],
+  boundCommands: readonly (readonly string[])[] = [],
 ): StaticProbes {
-  if (claimTexts.length === 0) return { helps: [], fragments: [] }
+  if (claimTexts.length === 0 && boundCommands.length === 0) return { helps: [], fragments: [] }
   const programNames = programNamesOf(entry, extraProgramNames)
   // The bare `--help` is unconditional — reserve its dedupe key up front so a
   // salvaged/exact probe can never duplicate it.
@@ -111,6 +115,20 @@ export function deriveStaticProbes(
     if (seen.has(k)) return
     seen.add(k)
     list.push(argv)
+  }
+
+  // Bound commands rank right after the bare `--help` and register first, so a
+  // salvaged prefix can never duplicate (or evict) the command the plan walks. A
+  // leading program-name token is stripped; the ROOT journey (the program itself)
+  // strips to nothing — the unconditional `--help` already covers it.
+  const bound: string[][] = []
+  for (const command of boundCommands) {
+    const tokens = [...command]
+    if (tokens.length > 0 && (programNames.has(tokens[0]) || programNames.has(path.basename(tokens[0])))) {
+      tokens.shift()
+    }
+    if (tokens.length === 0) continue
+    add(bound, [...tokens, '--help'])
   }
 
   for (const text of claimTexts) {
@@ -129,6 +147,7 @@ export function deriveStaticProbes(
   const helps: string[][] = []
   if (needBare) helps.push([])
   helps.push(['--help'])
+  helps.push(...bound)
   helps.push(...salvaged)
   return { helps: helps.slice(0, MAX_PROBES_PER_BATCH), fragments: exact }
 }
@@ -397,6 +416,9 @@ export interface GroundProbesOptions {
   repoRoot: string
   /** The batch's claim texts — the probe-derivation input. */
   claimTexts: string[]
+  /** The bound cli commands the realization plan walks (argv paths) — each gets a
+   *  deterministic `<command> --help` probe so its usage text grounds authoring. */
+  boundCommands?: readonly (readonly string[])[]
   /** The recipe entry resolved to absolute paths (what the child actually runs). */
   resolvedEntry: string[]
   /** The recipe entry as written (repo-relative) — display command + derivation. */
@@ -428,7 +450,12 @@ export async function groundProbes(opts: GroundProbesOptions): Promise<ProbeTran
   // Learn the package's real command names once (name w/o scope + bin keys), so
   // spec fragments that write the tool's own name (`` `xpn add …` ``) strip it.
   const extraProgramNames = repoPackageProgramNames(opts.repoRoot)
-  const { helps, fragments } = deriveStaticProbes(opts.claimTexts, opts.displayEntry, extraProgramNames)
+  const { helps, fragments } = deriveStaticProbes(
+    opts.claimTexts,
+    opts.displayEntry,
+    extraProgramNames,
+    opts.boundCommands ?? [],
+  )
   if (helps.length === 0) return []
 
   const capture = (probes: string[][]): Promise<ProbeTranscript[]> =>
@@ -498,8 +525,10 @@ function isUnknownCommandTranscript(t: ProbeTranscript): boolean {
  * The real command names the repo's package.json contributes: the package `name`
  * with any `@scope/` stripped, plus every `bin` key. A missing or unparseable
  * manifest (a non-node repo) contributes none — behavior is unchanged there.
+ * Exported for the journey self-heal, whose `--help` re-probe strips the same
+ * leading program-name tokens this module does.
  */
-function repoPackageProgramNames(repoRoot: string): string[] {
+export function repoPackageProgramNames(repoRoot: string): string[] {
   let raw: string
   try {
     raw = fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')

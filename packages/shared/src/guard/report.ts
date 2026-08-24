@@ -17,6 +17,7 @@ import {
   type GuardDriverId,
 } from './drivers.js'
 import { DetectedExternalServiceSchema } from '../external-services.js'
+import { JourneyDiagnosticSchema } from '../journeys.js'
 import { GuardAutoResolutionSourceSchema } from './auto-resolutions.js'
 import { OutputExcerptsSchema } from './excerpts.js'
 // The per-stage transport tally lives with the LLM seam; imported from the
@@ -46,6 +47,12 @@ export const GuardWrittenScenarioSchema = z
      * tests parse; absent reads as `passing`.
      */
     status: GuardTestStatusSchema.optional(),
+    /**
+     * The flow milestone orders this scenario covers, present ONLY when it covers a
+     * SUBSET (the flow's other milestones settled as a milestone-scoped `blocked-on`
+     * gap). Absent means the scenario walks every milestone of its flow.
+     */
+    milestones: z.array(z.number().int().positive()).optional(),
   })
   .strict()
 export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
@@ -58,8 +65,11 @@ export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
  * (needs world-state no `setup` block can express — a running service, database,
  * network, credentials), `dismissed` (the user judged the claim/flow
  * noise/won't-fix in `scenarios/decisions.json`, so generate settles it explicitly
- * instead of silently disappearing it), or the two REALIZATION kinds a flow's
- * surface can end in:
+ * instead of silently disappearing it), `retired` (the auto-resolve ledger
+ * exhausted its budget on this flow's surface — every attempt was judged our own
+ * defect, so authoring gave up: a quiet settled gap, never a human task, durable
+ * until one of the three retirement resets fires), or the two REALIZATION kinds a
+ * flow's surface can end in:
  *  - `no-journey` — the surface's journey catalog is EMPTY: nothing was mapped
  *    that could serve the flow. Usually "the mapper can't see your code" (an
  *    extraction gap), and must never read as "your product lacks the feature".
@@ -80,10 +90,29 @@ export const GuardCoverageGapKindSchema = z.enum([
   'no-claim',
   'blocked-on',
   'dismissed',
+  'retired',
   'no-journey',
   'unrealizable',
 ])
 export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
+
+/**
+ * One flow milestone a `blocked-on` gap holds back, with the capability nouns
+ * blocking IT — the milestone-scoped half of a PARTIAL flow: the flow's other
+ * milestones are covered by a committed scenario (whose `milestones` field lists
+ * them), and these are the ones that still need world-state the sandbox lacks.
+ */
+export const GuardBlockedMilestoneSchema = z
+  .object({
+    /** The flow milestone's 1-based `order`. */
+    milestone: z.number().int().positive(),
+    /** The milestone's extracted-claim text — readable without a flows.json join. */
+    claim: z.string().optional(),
+    /** The capability nouns blocking this milestone (enriched, per-service). */
+    blockedOn: z.array(z.string()),
+  })
+  .strict()
+export type GuardBlockedMilestone = z.infer<typeof GuardBlockedMilestoneSchema>
 
 /**
  * Migrate an OLD-shape gap row (`kind:'api'|'web'|'tui'`) to the un-conflated
@@ -110,10 +139,19 @@ export const GuardCoverageGapSchema = z
     flowId: z.string().optional(),
     /** The surface a flow-level gap happened on — the driver a scenario would run on. */
     surface: GuardDriverIdSchema.optional(),
+    /**
+     * On a MILESTONE-SCOPED `blocked-on` gap: exactly which milestones are blocked
+     * and on what. The flow's other milestones are covered by a committed scenario,
+     * so this gap means partial coverage, never silence. Absent on a whole-flow gap.
+     */
+    blockedMilestones: z.array(GuardBlockedMilestoneSchema).optional(),
   })
   .strict()
   .refine((g) => (g.kind === 'awaiting-driver') === (g.driver !== undefined), {
     message: 'awaiting-driver gaps carry a driver; other kinds carry none',
+  })
+  .refine((g) => g.blockedMilestones === undefined || g.kind === 'blocked-on', {
+    message: 'blockedMilestones only rides a blocked-on gap',
   })
 
 export type GuardCoverageGap = z.infer<typeof GuardCoverageGapSchema>
@@ -175,6 +213,12 @@ export function parseBlockedOnCapabilities(reason: string): string[] {
 export function parseBlockedOnClaim(reason: string): string {
   const m = /^blocked on .+?: (.+)$/s.exec(reason)
   return m ? m[1].trim() : ''
+}
+
+/** The `retired` gap's reason — one format, produced at retirement and re-derived
+ *  from the ledger record on every later generate, so the two can never drift. */
+export function retiredGapReason(attempts: number): string {
+  return `no scenario — authoring retired after ${attempts} defective attempt${attempts === 1 ? '' : 's'}`
 }
 
 /**
@@ -372,13 +416,10 @@ export const GuardBirthFindingSchema = z
      */
     triage: GuardTriageSchema.optional(),
     /**
-     * Set when the auto-resolve loop KEPT rejecting this flow's test: the
-     * verdict said auto-resolve (a HIGH-confidence generation-defect, a
-     * HIGH-confidence fidelity flag), but the flow has already auto-resolved
-     * `count` times across generates without converging — so it is surfaced as a
-     * human task with a "re-generation is not fixing this" note instead of being
-     * auto-resolved again. The escalation guard against an infinite silent loop.
-     * Optional — a flow that never recurred (or an older report) simply omits it.
+     * HISTORICAL — no longer produced. A past-threshold auto-resolve verdict now
+     * RETIRES the flow (a `retired` coverage gap + a `retire` autoResolved row)
+     * instead of surfacing a human-task finding. Kept so reports written by the
+     * escalation-era generates keep parsing and rendering.
      */
     autoResolveEscalation: z
       .object({ count: z.number().int().positive(), source: GuardAutoResolutionSourceSchema })
@@ -403,6 +444,10 @@ export type GuardBirthFinding = z.infer<typeof GuardBirthFindingSchema>
  *    confidence: our scenario was bad, the flow's claims are fine, so the failure
  *    is retired to the ledger (never committed, never a task) and the flow
  *    re-attempts next generate with its author cache bypassed (the taint).
+ *  - `retire` — the ledger budget exhausted on yet another high-confidence
+ *    defect verdict, so the flow's surface RETIRED: it settles as a `retired`
+ *    coverage gap and no later generate spends on it until a reset fires. This
+ *    row is the run's visible record of the transition.
  */
 export const GuardFidelityDiscardSchema = z
   .object({
@@ -446,9 +491,30 @@ export const GuardTriageResolveSchema = z
   .strict()
 export type GuardTriageResolve = z.infer<typeof GuardTriageResolveSchema>
 
+export const GuardFlowRetireSchema = z
+  .object({
+    kind: z.literal('retire'),
+    flowId: z.string(),
+    surface: GuardDriverIdSchema,
+    /** The flow's primary binding — where coverage surfaces attribute the gap. */
+    doc: z.string(),
+    anchor: z.string(),
+    /** The final rejected scenario's title. */
+    title: z.string(),
+    /** What drove the final defective attempt. */
+    source: GuardAutoResolutionSourceSchema,
+    /** The final verdict text — the fidelity mismatch or the triage brief. */
+    detail: z.string(),
+    /** Total defective attempts, the retiring one included. */
+    attempts: z.number().int().positive(),
+  })
+  .strict()
+export type GuardFlowRetire = z.infer<typeof GuardFlowRetireSchema>
+
 export const GuardAutoResolvedSchema = z.discriminatedUnion('kind', [
   GuardFidelityDiscardSchema,
   GuardTriageResolveSchema,
+  GuardFlowRetireSchema,
 ])
 export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
 
@@ -464,9 +530,10 @@ export type GuardAutoResolved = z.infer<typeof GuardAutoResolvedSchema>
  *  - `defect` — OUR fault: a `generation-defect` verdict or a fidelity rejection.
  *    Nothing was committed and nothing is broken in the repo; the flow re-authors
  *    on the next generate. Never rendered as drift, never counted as drift.
- *  - `escalation` — a `defect` the auto-resolve loop kept failing to fix
- *    ({@link GuardBirthFinding.autoResolveEscalation}). Re-generation is not
- *    working, so it IS a human task — and deliberately never auto-dismissed.
+ *  - `escalation` — HISTORICAL: a `defect` the escalation-era generates surfaced
+ *    as a human task ({@link GuardBirthFinding.autoResolveEscalation}). New
+ *    generates RETIRE the flow instead (a `retired` gap, no finding); the class
+ *    remains so old reports keep rendering.
  */
 export type GuardFindingClass = 'drift' | 'defect' | 'escalation'
 
@@ -521,11 +588,21 @@ export const GuardGenerateErrorSchema = z
      *    recipe, a half-configured external account, a dead entry). Nothing was
      *    authored, nothing executed, and re-running changes NOTHING until the
      *    config does — so a surface must never offer "will retry next generate".
+     *  - `fidelity` / `triage` — an ADJUDICATION call was lost (see
+     *    {@link GUARD_ADJUDICATION_ERROR_KINDS}). No WORK failed: the test exists and
+     *    birth already ran it; what is missing is the verdict ABOUT it, so these rows
+     *    are never counted or worded as authoring failures.
      * Optional: reports written before the discriminator existed carry no kind, and
      * are read as `authoring` (the retry wording those surfaces already used). NO
      * format-version bump.
      */
-    kind: z.enum(['authoring', 'birth', 'refusal']).optional(),
+    kind: z.enum(['authoring', 'birth', 'refusal', 'fidelity', 'triage']).optional(),
+    /**
+     * The SCENARIO the errored work was about, when the error is scenario-level (an
+     * adjudication loss names the exact test it could not judge). Optional: authoring
+     * fails before any scenario exists, and older reports carry none.
+     */
+    scenarioId: z.string().optional(),
     /**
      * The flow the errored work belonged to, when the error HAS one. Errors are
      * otherwise attributed by section, which is lossy (many flows bind one section).
@@ -553,6 +630,51 @@ export const GuardGenerateErrorSchema = z
   })
   .strict()
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
+
+/**
+ * The error kinds an ADJUDICATION stage produces — one row per fidelity review or
+ * triage verdict the run could not obtain. They are their own class because their
+ * consequence is the opposite of an authoring error's: nothing was lost from the
+ * corpus, a test simply carries no verdict, so a surface that lumps them in with
+ * "nothing was written for these units" tells the user the wrong thing twice.
+ */
+export const GUARD_ADJUDICATION_ERROR_KINDS = ['fidelity', 'triage'] as const
+export type GuardAdjudicationErrorKind = (typeof GUARD_ADJUDICATION_ERROR_KINDS)[number]
+
+/** Whether one generate error is an adjudication loss (a lost verdict, not lost work). */
+export function isGuardAdjudicationError(e: Pick<GuardGenerateError, 'kind'>): boolean {
+  return e.kind === 'fidelity' || e.kind === 'triage'
+}
+
+/**
+ * How a generate error NAMES the unit it was about: the scenario when it has one
+ * (every adjudication loss does), else the flow and surface, else its section.
+ */
+export function guardErrorSubject(
+  e: Pick<GuardGenerateError, 'scenarioId' | 'flowId' | 'surface' | 'anchor'>,
+): string {
+  if (e.scenarioId) return e.scenarioId
+  if (e.flowId) return e.surface ? `${e.flowId} · ${e.surface}` : e.flowId
+  return e.anchor
+}
+
+/**
+ * The scenarios an adjudication stage could not judge, NAMED — ONE copy, rendered by
+ * the CLI generate summary, `guard status` and the dashboard. A count alone sends
+ * the reader to the logs to find out which scenarios it meant, which is exactly the
+ * forensics this line exists to remove.
+ */
+export function guardAdjudicationLossLine(
+  kind: GuardAdjudicationErrorKind,
+  subjects: readonly string[],
+): string {
+  const n = subjects.length
+  const head =
+    kind === 'fidelity'
+      ? `${n} scenario${n === 1 ? '' : 's'} passed unreviewed`
+      : `${n} failing scenario${n === 1 ? '' : 's'} committed untriaged`
+  return `${head}: ${subjects.join(', ')}`
+}
 
 /**
  * One birth-passed-but-withheld candidate under a held section — validated work
@@ -750,6 +872,10 @@ export const GuardJourneysReportSchema = z
     total: z.number().int().nonnegative(),
     /** Journey type (a driver id) → how many journeys were mapped for it. */
     bySurface: z.record(z.string(), z.number().int().nonnegative()),
+    /** The union derivation's static-vs-runtime disagreements: the mapper's own
+     *  defect queue, carried so `guard status` can surface them. Absent when the
+     *  mapping had one source (or predates the cross-check). */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type GuardJourneysReport = z.infer<typeof GuardJourneysReportSchema>
@@ -840,6 +966,38 @@ export const GuardUnadjudicatedStageSchema = z
   .strict()
 export type GuardUnadjudicatedStage = z.infer<typeof GuardUnadjudicatedStageSchema>
 
+/**
+ * One JOURNEY DEFECT an authoring worker reported: the sandbox contradicted the
+ * derived command grammar — a promised flag was rejected, or the program demanded
+ * one the grammar lacks. A first-class run output (never an error row): each one
+ * is a journey-mapper bug with a reproduction attached. A `healed` entry was
+ * verified against the live program in-run and its session resumed to completion;
+ * an unhealed one leaves the flow unsettled until the grammar layer is fixed.
+ */
+export const GuardJourneyDefectSchema = z
+  .object({
+    flowId: z.string().min(1),
+    surface: GuardDriverIdSchema,
+    /** The argv whose grammar the sandbox contradicted, when the worker named it. */
+    argv: z.array(z.string()).optional(),
+    /** What the derived grammar promised. */
+    promised: z.string(),
+    /** What the sandbox actually did. */
+    observed: z.string(),
+    /**
+     * True when the run HEALED the defect in place: the disputed grammar was
+     * re-verified against the live program and the worker session resumed with
+     * the verdict, so the flow completed in-run. The entry stays recorded either
+     * way (it is the journey-mapper's feedback loop). Absent = not healed.
+     */
+    healed: z.boolean().optional(),
+    /** One-line summary of the correction the re-probe produced (healed runs
+     *  whose probe contradicted the grammar; absent otherwise). */
+    corrected: z.string().optional(),
+  })
+  .strict()
+export type GuardJourneyDefect = z.infer<typeof GuardJourneyDefectSchema>
+
 /** LLM call/token/cost totals for the generate run — omitted when unmeasured. */
 export const GuardGenerateUsageSchema = z
   .object({
@@ -916,6 +1074,18 @@ export const GuardGenerateReportSchema = z
      * reads as "everything was adjudicated".
      */
     unadjudicated: z.array(GuardUnadjudicatedStageSchema).optional(),
+    /**
+     * The journey defects authoring workers reported this run — the sandbox
+     * contradicting the derived command grammar. Optional so older reports parse;
+     * absent reads as "none".
+     */
+    journeyDefects: z.array(GuardJourneyDefectSchema).optional(),
+    /**
+     * The authoring-transcript run id (`guard/authoring/<id>/`) this generate's
+     * worker sessions appended under, so a reader can find the transcripts.
+     * Optional: absent on older reports and on runs with no worker session.
+     */
+    authoringRunId: z.string().optional(),
     orphaned: z.array(GuardOrphanedSectionSchema),
     /**
      * Birth passes that SURVIVED to a reported bucket, counted once per surviving

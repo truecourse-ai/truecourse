@@ -5,6 +5,7 @@ import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { loadEnterprise } from './ee-loader.js';
 import { stopAllWatchers } from './services/watcher.service.js';
+import { stopAllAuthoringTails } from './services/authoring-tail.service.js';
 import { installLlmTransportAtBoot } from './services/llm-transport.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
@@ -84,6 +85,7 @@ async function main() {
   async function shutdown() {
     log.info('[Server] Shutting down...');
     stopAllWatchers();
+    stopAllAuthoringTails();
     httpServer.closeAllConnections();
     httpServer.close();
     log.info('[Server] Closed');

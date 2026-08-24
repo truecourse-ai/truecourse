@@ -47,7 +47,7 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis | null
   try {
     const content = await readFile(filePath, 'utf-8')
     return withParsedTree(filePath, content, language, (tree) =>
-      buildFileAnalysis(tree, filePath, language),
+      buildFileAnalysis(tree, filePath, language, content),
     )
   } catch (error) {
     throw new Error(
@@ -67,7 +67,7 @@ export function analyzeFileContent(
   language: SupportedLanguage,
 ): FileAnalysis {
   return withParsedTree(filePath, content, language, (tree) =>
-    buildFileAnalysis(tree, filePath, language),
+    buildFileAnalysis(tree, filePath, language, content),
   )
 }
 
@@ -80,6 +80,7 @@ function buildFileAnalysis(
   tree: Tree,
   filePath: string,
   language: SupportedLanguage,
+  sourceCode: string,
 ): FileAnalysis {
   // Extract all elements using language-specific extractors
   let functions, classes, imports, exports: ExportStatement[]
@@ -116,7 +117,7 @@ function buildFileAnalysis(
 
   // Build function context and extract calls
   const functionContext = buildFunctionContext(functions, classes)
-  const calls = extractCalls(tree, filePath, language, functionContext)
+  const calls = extractCalls(tree, filePath, language, functionContext, sourceCode)
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
   const { routes: rawRoutes, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)

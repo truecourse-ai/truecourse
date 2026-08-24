@@ -1156,6 +1156,21 @@ export function saveGuardExternals(
   });
 }
 
+/**
+ * One authoring worker session's transcript backfill. Always 200 — `{ events: [] }`
+ * until the worker's first line lands; live appends ride the `guard:transcript`
+ * socket event and merge over this by index.
+ */
+export function getGuardTranscript(
+  repoId: string,
+  runId: string,
+  flowId: string,
+  surface: string,
+): Promise<{ events: unknown[] }> {
+  const q = new URLSearchParams({ runId, flowId, surface });
+  return fetchApi<{ events: unknown[] }>(`/api/repos/${repoId}/guard/transcript?${q.toString()}`);
+}
+
 /** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */
 export async function getGuardReport(repoId: string, ref?: string): Promise<GuardGenerateReport | null> {
   try {

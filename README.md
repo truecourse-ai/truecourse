@@ -20,7 +20,7 @@
 TrueCourse catches two classes of defect, through two independent tools — use either on its own or both together:
 
 - **Code defects** (`truecourse analyze`) — from the categories linters cover (unused code, style, missing types) through to ones they don't reach: circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, performance footguns. Tree-sitter analysis combined with LLM review.
-- **Business-logic drift** (`truecourse guard`) — when the implementation no longer matches what the docs say it should do. TrueCourse curates your PRDs/ADRs/READMEs into a spec corpus, an LLM authors **scenario tests bound to each spec section** once, and `guard run` executes them deterministically — a failing scenario means that section and the code disagree.
+- **Business-logic drift** (`truecourse guard`) — when the implementation no longer matches what the docs say it should do. TrueCourse curates your PRDs/ADRs/READMEs into a spec corpus, an LLM authors **scenarios bound to each spec section** once, and `guard run` executes them deterministically — a failing scenario means that section and the code disagree.
 
 Both store their results under `.truecourse/` and surface them in a shared [dashboard](#dashboard-web-ui) for human review, with plain-text CLI output an agent can read directly.
 
@@ -191,7 +191,7 @@ pre-commit:
 
 # 2. Spec → Guard — business-logic drift
 
-TrueCourse builds a curated spec corpus from your docs, then **guards** it: an LLM authors declarative scenario tests bound to each spec section once, and running them is fully deterministic — no model in the verification loop. A failing scenario means "this section and the code disagree" (a drift or a bug — the developer's call). This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
+TrueCourse builds a curated spec corpus from your docs, then **guards** it: an LLM authors declarative scenarios bound to each spec section once, and running them is fully deterministic — no model in the verification loop. A failing scenario means "this section and the code disagree" (a drift or a bug — the developer's call). This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
 
 > **Prerequisite:** the spec scan, guard setup and the guard generator need an LLM. By default they shell out to the Claude Code CLI (`claude -p`) — install Claude Code and sign in once before running `spec scan`, `guard setup` or `guard generate` — or point them at a provider API instead with [`truecourse config llm setup`](#llm-transport-claude-code-or-api). `guard run` needs neither — it's deterministic.
 
@@ -202,7 +202,7 @@ cd <your-repo>
 truecourse spec scan                    # Curate docs → corpus (areas + overlap flags)
 truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
 truecourse guard setup                  # Prepare the repo: recipe + external APIs + the data/auth seed (cheap)
-truecourse guard generate               # Author scenario tests from spec sections (classify → generate → birth-validate)
+truecourse guard generate               # Author scenarios from spec sections (classify → generate → birth-validate)
 truecourse guard run                    # Run the committed scenarios; exits non-zero on any drift (CI gate)
 ```
 
@@ -224,15 +224,15 @@ Why it is a separate stage rather than something `guard generate` figures out: a
 
 It is idempotent: a bare re-run over a prepared repo reports and no-ops. `--refresh` re-derives, and replacing an existing seed script always asks first (in a non-TTY it refuses rather than clobber a hand-edited file). Output: `guard/setup.json` (the record + detection snapshot, gitignored), plus whatever it wrote to `recipe.json` and the seed script — both committable, both yours to review.
 
-**3. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (two drivers today — `cli` invokes your project's binary, `api` drives your HTTP service; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — the outcome becomes the test's status. Every authored test is committed, so a test that fails at birth (the spec and the code already disagree) lands as a **failing test** you can open, re-run, and resolve, not as a separate species of report entry. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
+**3. Guard generation** (`truecourse guard generate`) — Splits each kept doc into sections and, per section: **classifies** whether the section makes a claim a driver can assert (two drivers today — `cli` invokes your project's binary, `api` drives your HTTP service; a non-testable verdict carries a one-sentence reason and surfaces as a visible coverage gap), **authors** one or more declarative YAML scenarios from the section's claim plus the code, and **birth-validates** each one by running it immediately — the outcome becomes the scenario's status. Every authored scenario is committed, so one that fails at birth (the spec and the code already disagree) lands as a **failing scenario** you can open, re-run, and resolve, not as a separate species of report entry. Output, all committable: `.truecourse/scenarios/<area>/*.yaml` (the scenarios), `scenarios/recipe.json` (how to build/prepare the repo for a run), and `scenarios/manifest.json` (section ↔ scenario bindings + section fingerprints, so re-generates only touch changed sections).
 
-Two authoring guarantees ride generation: a section's own **worked example** (a fenced block) is seeded into its test **byte-for-byte** — never paraphrased, the engine byte-checks the committed scenario against the doc's bytes — and a **two-sided promise** ("valid X is accepted, invalid X is rejected") gets steps for **both halves**, so exclusion logic that silently breaks can't stay green. And a last line of defense guards the whole run: when a large sample of birth steps is overwhelmingly inert — a cli entry answering everything instantly with nothing, or an api server answering every route with the same empty status — generate **aborts as a recipe failure** (nothing is written) instead of committing a green corpus that proves nothing.
+Two authoring guarantees ride generation: a section's own **worked example** (a fenced block) is seeded into its scenario **byte-for-byte** — never paraphrased, the engine byte-checks the committed scenario against the doc's bytes — and a **two-sided promise** ("valid X is accepted, invalid X is rejected") gets steps for **both halves**, so exclusion logic that silently breaks can't stay green. And a last line of defense guards the whole run: when a large sample of birth steps is overwhelmingly inert — a cli entry answering everything instantly with nothing, or an api server answering every route with the same empty status — generate **aborts as a recipe failure** (nothing is written) instead of committing a green corpus that proves nothing.
 
-**Generation also adjudicates what it wrote**, and that adjudication now actually runs on the default OSS transport (it did not in 0.8.0 — see below). Two stages judge the corpus after birth: a **fidelity review** (up to one call per green scenario — does this test actually verify the claim it binds to?) and a **failure triage** (up to one call per failing test — is the repo wrong, the doc wrong, or our test wrong?). Both were quietly disabled for OSS runs through 0.8.0 — they were gated on a transport the OSS CLI never installs, so they cost nothing and returned nothing. They now always run, which is a **real increase in what a generate bills** versus 0.8.0 for the same repo. The pre-flight estimate always priced both stages, so the ceiling you confirm is unchanged and still an upper bound — but the invoice is not where you should discover this. If either stage loses *every* call (a rate limit, an outage, an expired login), the run **still writes its scenarios** — those verdicts are annotation about tests birth has already executed, and throwing away a whole generate's spend over them costs strictly more — and reports the stage as **unadjudicated** in the summary, in `guard status`, and in the dashboard. The affected flows are deliberately left **unsettled**, so re-running generate once the model is reachable adjudicates exactly them; authoring is cached on unchanged specs, so that re-run pays for the verdicts, not for writing the tests again.
+**Generation also adjudicates what it wrote**, and that adjudication now actually runs on the default OSS transport (it did not in 0.8.0 — see below). Two stages judge the corpus after birth: a **fidelity review** (up to one call per green scenario — does it actually verify the claim it binds to?) and a **failure triage** (up to one call per failing scenario — is the repo wrong, the doc wrong, or our scenario wrong?). Both were quietly disabled for OSS runs through 0.8.0 — they were gated on a transport the OSS CLI never installs, so they cost nothing and returned nothing. They now always run, which is a **real increase in what a generate bills** versus 0.8.0 for the same repo. The pre-flight estimate always priced both stages, so the ceiling you confirm is unchanged and still an upper bound — but the invoice is not where you should discover this. If either stage loses *every* call (a rate limit, an outage, an expired login), the run **still writes its scenarios** — those verdicts are annotation about scenarios birth has already executed, and throwing away a whole generate's spend over them costs strictly more — and reports the stage as **unadjudicated** in the summary, in `guard status`, and in the dashboard. The affected flows are deliberately left **unsettled**, so re-running generate once the model is reachable adjudicates exactly them; authoring is cached on unchanged specs, so that re-run pays for the verdicts, not for writing the scenarios again.
 
-**4. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A test that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
+**4. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A scenario that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
 
-**Not every red test is drift.** A scenario walks a flow: some steps assert a spec claim (they carry a milestone), others only prepare the world — the seeding request at the head of a flow, a login. When the step that fails is one of the *preparation* steps, the run annotates the result **blocked precondition**: the scenario still fails, but the documented behavior was never actually exercised, so the fix is the setup (seed the row, declare the fixture, supply the credential), not the code. The CLI prints it on its own line under the failure and the dashboard marks the test "setup failed", distinctly from a real expectation mismatch. It is an annotation only — it never changes an outcome and never softens a CI gate.
+**Not every red scenario is drift.** A scenario walks a flow: some steps assert a spec claim (they carry a milestone), others only prepare the world — the seeding request at the head of a flow, a login. When the step that fails is one of the *preparation* steps, the run annotates the result **blocked precondition**: the scenario still fails, but the documented behavior was never actually exercised, so the fix is the setup (seed the row, declare the fixture, supply the credential), not the code. The CLI prints it on its own line under the failure and the dashboard marks the scenario "setup failed", distinctly from a real expectation mismatch. It is an annotation only — it never changes an outcome and never softens a CI gate.
 
 The section ↔ scenario binding is **bidirectional**: code changed → its scenarios fail (code-side drift); a spec section edited → its scenarios go stale (spec-side drift). The spec document itself becomes the coverage UI — every section visibly carries its proof and its status.
 
@@ -255,7 +255,7 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 │   ├── recipe.json           ← how to build/prepare the repo for a run
 │   ├── manifest.json         ← section ↔ scenario bindings + section fingerprints
 │   ├── externals.local.json  ← external-account base URLs + API keys (GITIGNORED)
-│   └── <area>/*.yaml         ← the scenario tests
+│   └── <area>/*.yaml         ← the scenarios
 ├── guard/                   ← guard run store (mirrors analyze; `truecourse guard run`)
 │   ├── runs/                 ← per-run snapshots (gitignored)
 │   ├── LATEST.json           ← current run state (committable)
@@ -953,7 +953,7 @@ truecourse spec source list                       # Registered sources with page
 truecourse spec source refresh [id]               # Refetch a source (all of them when id is omitted) and report the diff
 truecourse spec source remove <id>                # Delete a source's snapshot and its registry entry
 
-# Guard — spec-section-bound scenario tests (author once, run deterministically)
+# Guard — spec-section-bound scenarios (author once, run deterministically)
 truecourse guard setup                            # PREREQUISITE for generate: derive + prove the recipe, declare external APIs, draft the data/auth seed
 truecourse guard setup --refresh                  # Re-derive the recipe and re-draft the seed (asks before replacing an existing seed script)
 truecourse guard setup -y                         # Skip the cost confirm (and, with --refresh, consent to replacing the seed)
@@ -965,9 +965,9 @@ truecourse guard recipe                           # Read-only: the preparation r
 truecourse guard seed                             # Read-only: the database seed (api.seed), the script it names, and the flows blocked on missing data
 truecourse guard externals                        # Read-only: each service with its state, base URL/mode, unmet requirements, blocked flows
 truecourse guard flows                            # List the synthesized flows with per-surface coverage (--show <id> for one flow's detail)
-truecourse guard flows --show <id> --story        # Read that flow's committed tests in plain words (the promise, the world, every assertion)
-truecourse guard flows dismiss <flow-id>          # Rule a flow out of testing (--note <text>); the next generate drops it and deletes its tests
-truecourse guard flows undismiss <flow-id>        # Put a dismissed flow back — the next generate authors tests for it again
+truecourse guard flows --show <id> --story        # Read that flow's committed scenarios in plain words (the promise, the world, every assertion)
+truecourse guard flows dismiss <flow-id>          # Rule a flow out (--note <text>); the next generate drops it and deletes its scenarios
+truecourse guard flows undismiss <flow-id>        # Put a dismissed flow back — the next generate authors scenarios for it again
 truecourse guard findings                         # The last generate's findings by flow: drift (the repo's) vs tool defect (ours), + the auto-resolved ledger
 truecourse guard findings --kind drift --json     # Filter by class (drift | defect | escalation) or --flow <id>; --json is the agent-facing envelope
 truecourse guard status                           # Compact summary: setup state, section coverage, last run, last generate (LLM-free, no re-run)
@@ -975,19 +975,19 @@ truecourse guard drifts                           # List the latest run's non-pa
 ```
 
 **Findings are split by whose fault they are.** A generate produces two very different
-results and only one of them is work for you: `drift` is a test that COMMITTED red — the
+results and only one of them is work for you: `drift` is a scenario that COMMITTED red — the
 code and the doc disagree, `guard run` reproduces it, CI breaks on it; `tool defect` is a
 scenario guard itself judged faulty, so nothing was committed and nothing in your repo is
 broken (the flow re-authors on the next generate). A defect that re-generation keeps
 failing to fix `escalates` to a real task. The dashboard draws the same line: a tool
-defect is a muted marker beside the flow's status, never a red one, and each failing test
-carries its triage verdict — *code drift*, *doc drift*, *our defect* — with the concrete
+defect is a muted marker beside the flow's status, never a red one, and each failing
+scenario carries its triage verdict — *code drift*, *doc drift*, *our defect* — with the concrete
 unblock beside it.
 
-**Every committed test can be read in plain words.** A test's YAML carries the flow's
+**Every committed scenario can be read in plain words.** Its YAML carries the flow's
 promise, and one shared renderer turns the whole file into sentences — the world it is
 placed in (seeded files, a git history, scripted third-party stubs), what each step does,
-what it remembers for later steps, and what must be true. The dashboard's test detail
+what it remembers for later steps, and what must be true. The dashboard's scenario detail
 offers it as `View · Story · YAML`; the terminal prints the same words with
 `truecourse guard flows --show <id> --story`.
 

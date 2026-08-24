@@ -39,9 +39,8 @@ import {
   generateGuards,
   type GuardGenerateResult,
   type ExtractRunner,
-  type GenerateRunner,
 } from '@truecourse/guard-generator';
-import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
+import { flowStageRunners, stubAdjudicationRunners, workerTurnBy } from '../guard-generator/helpers.js';
 import type { GithubAuth } from '../../ee/packages/github-app/src/github';
 import {
   materializeStoredCorpus,
@@ -478,6 +477,7 @@ describe('guard onboarding pipeline', () => {
         version: 1,
         dismissedClaims: [...GUARD_DECISIONS.dismissedClaims, ...PR_OVERLAY.dismissedClaims],
         dismissedFlows: [],
+        reenabledFlows: [],
       });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
@@ -502,7 +502,7 @@ describe('guard onboarding pipeline', () => {
         pr: 25,
       });
 
-      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims, dismissedFlows: [] });
+      expect(decisionsSeenByGenerate).toEqual({ version: 1, dismissedClaims: PR_OVERLAY.dismissedClaims, dismissedFlows: [], reenabledFlows: [] });
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
     }
@@ -586,12 +586,6 @@ describe('guard onboarding pipeline', () => {
     ],
     untestable: [],
   });
-  const authorVersion: GenerateRunner = async (ctx) => ({
-    scenario: stampMilestones(
-      { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-      ctx.milestones.length,
-    ),
-  });
 
   /** The real generate wired with a fixed recipe proposal — no LLM, everything else real. */
   function realGenerateProposing(proposal: { install?: string; build: string; entry: string[] }) {
@@ -602,7 +596,7 @@ describe('guard onboarding pipeline', () => {
         ...stubAdjudicationRunners(),
         recipeRunner: async () => proposal,
         extractRunner: extractVersion,
-        generateRunner: authorVersion,
+        turnFn: workerTurnBy({}),
       }),
     });
   }
@@ -690,7 +684,7 @@ describe('guard onboarding pipeline', () => {
       guardGenerateInProcess(dir, {
         recipeRunner: sentinel as never,
         extractRunner: sentinel as never,
-        generateRunner: sentinel as never,
+        turnFn: sentinel as never,
         fidelityRunner: sentinel as never,
       });
   }

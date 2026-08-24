@@ -53,8 +53,8 @@ export interface GuardExternalServiceView {
   state: GuardExternalState;
   /** The detector's category (`payment`, `ai`, …) when it was detected. */
   category?: string;
-  /** How detection identified it — an SDK import, or a plain HTTP call. */
-  detectedVia?: 'sdk' | 'http';
+  /** How detection identified it — an SDK import, a plain HTTP call, or a spawned program. */
+  detectedVia?: 'sdk' | 'http' | 'binary';
   baseUrlEnv: string | null;
   /** Whether `baseUrlEnv` is the recipe's declaration or the detector's guess. */
   baseUrlEnvSource: 'recipe' | 'detected' | null;

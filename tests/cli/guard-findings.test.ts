@@ -45,7 +45,7 @@ function report(over: Partial<GuardGenerateReport> = {}): GuardGenerateReport {
   }
 }
 
-/** A committed red test — triage blamed the repo, so `guard run` reproduces it. */
+/** A committed red scenario — triage blamed the repo, so `guard run` reproduces it. */
 const DRIFT = {
   doc: DOC,
   anchor: 'tasks/completing-tasks',
@@ -70,7 +70,7 @@ const DRIFT = {
   },
 }
 
-/** A withheld generation defect — ours, and never a red test. */
+/** A withheld generation defect — ours, and never a red scenario. */
 const DEFECT = {
   doc: DOC,
   anchor: 'tasks/creating-tasks',
@@ -175,11 +175,11 @@ describe('runGuardFindings — the terminal read', () => {
     expect(out).toContain('[drift] cli · Completing a task reports it done')
     expect(out).toContain('code-drift (high)')
     expect(out).toContain('do: Fix the message')
-    expect(out).toContain('test: .truecourse/scenarios/tasks/task-lifecycle.cli.1.yaml')
+    expect(out).toContain('scenario: .truecourse/scenarios/tasks/task-lifecycle.cli.1.yaml')
     expect(out).toContain('evidence: .truecourse/guard/evidence/r1/task-lifecycle.cli.1')
     // Defect: OURS — it says nothing was committed and the flow re-authors.
     expect(out).toContain('[tool defect] api · Creating a task returns it')
-    expect(out).toContain('withheld — no test was committed')
+    expect(out).toContain('withheld — no scenario was committed')
     // Escalation: the loop is not converging, so a human owns it.
     expect(out).toContain('[escalated] api · Login rate-limits after 5 failed attempts')
     expect(out).toContain('re-generation is not fixing this — 3 triage auto-resolutions')

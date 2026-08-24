@@ -294,6 +294,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../../../packages/guard-runner
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
@@ -805,6 +808,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
+      '@truecourse/journey-mapper':
+        specifier: workspace:*
+        version: link:../journey-mapper
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm

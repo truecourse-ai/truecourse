@@ -22,12 +22,12 @@ function repo(): string {
 
 describe('guard decisions store', () => {
   it('reads an empty decisions file when none exists', () => {
-    expect(readGuardDecisions(repo())).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
+    expect(readGuardDecisions(repo())).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [], reenabledFlows: [] });
   });
 
   it('writes to .truecourse/scenarios/decisions.json (next to recipe/manifest)', () => {
     const r = repo();
-    writeGuardDecisions(r, { version: 1, dismissedClaims: [], dismissedFlows: [] });
+    writeGuardDecisions(r, { version: 1, dismissedClaims: [], dismissedFlows: [], reenabledFlows: [] });
     expect(guardDecisionsPath(r)).toBe(path.join(r, '.truecourse', 'scenarios', 'decisions.json'));
     expect(fs.existsSync(guardDecisionsPath(r))).toBe(true);
   });
@@ -40,7 +40,7 @@ describe('guard decisions store', () => {
     expect(readGuardDecisions(r).dismissedClaims).toEqual([claim]);
 
     fs.writeFileSync(guardDecisionsPath(r), '{ not json');
-    expect(readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [] });
+    expect(readGuardDecisions(r)).toEqual({ version: 1, dismissedClaims: [], dismissedFlows: [], reenabledFlows: [] });
   });
 
   it('re-dismissing the same identity refreshes in place (no duplicate)', () => {

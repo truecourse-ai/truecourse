@@ -18,7 +18,6 @@ import type {
   GuardApiBootStep,
   GuardApiLogsStep,
   GuardApiSignalStep,
-  GuardLogMatch,
   GuardScenarioResult,
   OutputExcerpts,
 } from '@truecourse/shared'
@@ -42,6 +41,14 @@ import type { ExternalProxyTarget } from '../externals.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
 import { applyUniqueEnv, applyUniqueSetup } from '../unique.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
+import {
+  SIGNAL_EXIT_TIMEOUT_MS,
+  LOGS_WAIT_MS,
+  LOGS_POLL_INTERVAL_MS,
+  logMatchLabel,
+  matchingLogLines,
+  exitLabel,
+} from '../service-process.js'
 import type { ApiStepObservation } from '../step-stats.js'
 import {
   spawnApiProcess,
@@ -257,13 +264,6 @@ interface LogMark {
   stderr: number
 }
 
-/** Default budget for a signalled process to exit (`signal.expect.withinMs`). */
-const SIGNAL_EXIT_TIMEOUT_MS = 10_000
-/** Default window a `logs` step waits for its expected lines to appear. */
-const LOGS_WAIT_MS = 2_000
-/** Poll interval while a `logs` step waits. */
-const LOGS_POLL_INTERVAL_MS = 25
-
 /** The failing-step excerpts: response body as `stdout`, server stderr as `stderr`. */
 function apiExcerpts(
   capture: ApiStepCapture | null,
@@ -274,25 +274,6 @@ function apiExcerpts(
   if (capture?.bodyText) out.stdout = redact(capture.bodyText.slice(0, FAILURE_OUTPUT_LIMIT))
   if (serverLogs.stderr) out.stderr = redact(serverLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT))
   return out
-}
-
-/** `“x”` / `/x/` — how a log matcher reads in a failure message. */
-function logMatchLabel(m: GuardLogMatch): string {
-  return typeof m === 'string' ? `“${m}”` : `/${m.pattern}/`
-}
-
-/** The lines of a log window that match — substring or regex, per LINE. */
-function matchingLogLines(window: string, match: GuardLogMatch): string[] {
-  const lines = window.split('\n').filter((l) => l.length > 0)
-  if (typeof match === 'string') return lines.filter((l) => l.includes(match))
-  const re = new RegExp(match.pattern)
-  return lines.filter((l) => re.test(l))
-}
-
-/** How a closed process went down, in the words a failure message needs. */
-function exitLabel(exit: { code: number | null; signal: NodeJS.Signals | null }): string {
-  if (exit.code !== null) return `exited with code ${exit.code}`
-  return exit.signal ? `was killed by ${exit.signal}` : 'exited without a code'
 }
 
 export async function runApiScenario(

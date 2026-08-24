@@ -133,6 +133,9 @@ export function useSocket(repoId?: string) {
     socket.on('files:changed', (data: unknown) => {
       handlersRef.current.get('files:changed')?.forEach((h) => h(data));
     });
+    socket.on('guard:transcript', (data: unknown) => {
+      handlersRef.current.get('guard:transcript')?.forEach((h) => h(data));
+    });
     socket.on('violations:ready', (data: unknown) => {
       setAnalysisProgress(null);
       handlersRef.current.get('violations:ready')?.forEach((h) => h(data));

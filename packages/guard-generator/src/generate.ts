@@ -13,15 +13,24 @@
  *   5. flows    per-area synthesis + the epic pass → `scenarios/flows.json`.
  *   6. match    per (flow, surface with a catalog): the realization plan, or an
  *               explicit `unrealizable` — the join of the two halves.
- *   7. author   one Opus call per (flow, surface with a plan) → one scenario whose
- *               steps carry the milestone each realizes.
- *   8. birth    run every candidate once; re-author a failing FLOW once with its
- *               evidence; a still-failing candidate is triaged and ROUTED:
- *               repo-blamed or untriaged → COMMITTED as a failing test with its
- *               diagnosis; generation-defect → withheld.
- *   9. persist  INDEPENDENTLY: every scenario is written the moment its birth
- *               execution settles — passing or failing. Only a "test is wrong"
- *               verdict (a fidelity rejection, a generation-defect triage)
+ *   7. author   one WORKER SESSION per (flow, surface with a plan) — an
+ *               agentic loop that drafts, executes in the sandbox, revises, and
+ *               settles a structured outcome (the scenario, a blocked verdict, a
+ *               journey defect, or an honest exhaustion the ledger escalates);
+ *               a settled-failing scenario carries the worker's own diagnosis.
+ *               The fidelity review runs IN-LOOP: a high-confidence flag resumes
+ *               the still-open session once. Epic flows (non-empty `composedOf`)
+ *               schedule as a second wave, their prompts carrying the settled
+ *               members' scenarios read-only.
+ *   8. confirm  the gate of record: every worker-settled candidate executes once
+ *               in a sandbox the session never touched; a flip re-opens the
+ *               session once with the evidence. cli candidates batch into one
+ *               run (each already gets its own fresh sandbox); api candidates
+ *               confirm ALONE in a fresh runner invocation each (they would
+ *               share datastore state in a batch), bounded by the isolation cap.
+ *   9. persist  INDEPENDENTLY: every scenario is written the moment its
+ *               confirmation settles — passing or failing. Only a "test is wrong"
+ *               verdict (a fidelity rejection, a twice-unconfirmed green settle)
  *               withholds one; there is no held state.
  *  10. manifest rewrite the flow-keyed binding record with the settled outcomes,
  *               each scenario carrying the status it was committed with.
@@ -38,7 +47,8 @@
  * violating it is treated as work (its hash disregarded) so the hole re-runs.
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import fs from 'node:fs'
 import pLimit from 'p-limit'
 import os from 'node:os'
 import { z } from 'zod'
@@ -47,13 +57,16 @@ import {
   auditTransport,
   cliTransport,
   formatStageFailure,
+  turnFnOf,
   type LlmTransport,
+  type LlmTurnFn,
   type StageTransportTally,
   type TransportAudit,
 } from '@truecourse/shared/llm'
 import {
   writeManifest,
   readManifest,
+  appendAuthoringEvent,
   readGuardDecisions,
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
@@ -94,11 +107,16 @@ import {
   runnableDriverIds,
   unaccountedSurfaces,
   violatesSettleInvariant,
+  retiredGapReason,
   runRefusalError,
+  GuardTriageSchema,
   type GuardAutoResolutionEntry,
   type GuardAutoResolutionSource,
   type GuardAutoResolved,
+  type GuardAutoResolvedAttempt,
+  type GuardFlowRetirement,
   type GuardBirthFinding,
+  type GuardBlockedMilestone,
   type GuardFlowTaint,
   type OutputExcerpts,
   type ApiRequestContract,
@@ -112,6 +130,7 @@ import {
   type GuardFlow,
   type GuardFlowsReport,
   type GuardGenerateError,
+  type GuardJourneyDefect,
   type GuardJourneysReport,
   type GuardManifestFlow,
   type GuardManifestGap,
@@ -121,9 +140,12 @@ import {
   type GuardRunRefusal,
   type GuardScenario,
   type GuardScenarioDiagnosis,
+  type GuardScenarioResult,
   type GuardTestStatus,
+  type GuardTriage,
   type GuardUnadjudicatedStage,
   type Journey,
+  type JourneyDiagnostic,
 } from '@truecourse/shared'
 import {
   planGuardWork,
@@ -142,42 +164,43 @@ import {
 } from './openapi-security.js'
 import { parseOpenApiSpec } from '@truecourse/shared/openapi'
 import {
-  GENERATE_PROMPT_FINGERPRINT,
-  GENERATE_API_PROMPT_FINGERPRINT,
+  WORKER_CLI_PROMPT_FINGERPRINT,
+  WORKER_API_PROMPT_FINGERPRINT,
   FIDELITY_PROMPT_FINGERPRINT,
+  buildAuthorUserPrompt,
   type AuthorMilestone,
   type AuthorUserContext,
+  type CommandGrammarEntry,
   type JourneyContractHint,
   type OutboundRequestHint,
-  type BirthRetryContext,
   type ExternalServiceHint,
   type FidelityUserContext,
 } from './prompts.js'
 import {
-  AuthoredFlowScenarioSchema,
   RawGeneratedScenarioSchema,
   FidelityReviewSchema,
   type RawGeneratedScenario,
 } from './schemas.js'
 import {
   spawnExtractRunner,
-  spawnGenerateRunner,
   spawnRecipeRunner,
   spawnFidelityRunner,
-  spawnTriageRunner,
   spawnFlowsRunner,
   spawnFlowsEpicRunner,
   spawnMatchRunner,
   type ExtractRunner,
-  type GenerateRunner,
   type RecipeRunner,
   type FidelityRunner,
-  type TriageRunner,
   type FlowsRunner,
   type FlowsEpicRunner,
   type MatchRunner,
 } from './runners.js'
-import { runTriage, type TriageMilestone } from './triage.js'
+import {
+  runFlowWorker,
+  type WorkerBlockedMilestone,
+  type WorkerFlowResult,
+  type WorkerSessionState,
+} from './worker.js'
 import { extractDocClaims, countExtractViews, type DocClaims } from './extract.js'
 import {
   synthesizeFlows,
@@ -194,8 +217,15 @@ import {
   type RealizationPlan,
   type SurfaceCatalog,
 } from './match.js'
-import { groundProbes, type ProbeTranscript } from './ground.js'
-import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from './validate.js'
+import type { ProbeTranscript } from './ground.js'
+import {
+  callWithRetry,
+  flattenZodError,
+  quoteInvalidOutput,
+  scenarioCompositionDefect,
+  uncoveredMilestones,
+  unknownMilestones,
+} from './validate.js'
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
@@ -207,7 +237,13 @@ import {
   buildOutboundRequestHints,
   outboundOverflow,
 } from './grounding.js'
-import { birthValidate, type BirthCandidate, type BirthOutcome, type BirthRound } from './birth.js'
+import { birthValidate, birthRunTimeoutMs, type BirthCandidate, type BirthOutcome, type BirthRound } from './birth.js'
+import {
+  apiJourneyHealProbe,
+  cliJourneyHealProbe,
+  type JourneyHealProbe,
+  type JourneyHealVerdict,
+} from './journey-heal.js'
 import {
   buildServerRouteIndex,
   bindFlowServer,
@@ -219,12 +255,14 @@ import {
   MISSING_SERVER_NOUN,
   type ServerRouteIndex,
 } from './server-binding.js'
+import { flowHttpSignal, NO_HTTP_SIGNAL_REASON } from './http-signal.js'
 import {
   assignScenarioId,
   buildFlowScenario,
   areaOrDocSlug,
   writeScenarioFile,
   serializeScenarioYaml,
+  scenarioFileIndex,
   deleteScenarioFiles,
   existingScenarioIds,
 } from './serialize.js'
@@ -262,6 +300,9 @@ export interface GeneratedScenarioInfo {
   surface: GuardDriverId
   /** The status the test was committed with — `failing` when it failed at birth. */
   status: GuardTestStatus
+  /** The flow milestone orders covered, present ONLY for a PARTIAL scenario (the
+   *  flow's other milestones settled as a milestone-scoped blocked-on gap). */
+  milestones?: number[]
 }
 
 /**
@@ -360,11 +401,27 @@ export interface GuardGenerateResult {
   /** Every test committed this run, passing and failing alike. */
   written: GeneratedScenarioInfo[]
   coverageGaps: GuardCoverageGap[]
-  /** The birth-stage failure results: the committed failing tests
-   *  (repo-blamed or untriaged), plus the withheld classes — generation-defect
-   *  verdicts and fidelity rejections. For a fresh run, `written('failing').length
-   *  === birthFindings committed rows` — the routing's arithmetic identity. */
+  /** The confirmation-stage failure results: the committed failing tests (each
+   *  carrying the worker's diagnosis, or none when it committed untriaged), plus
+   *  the withheld classes — twice-unconfirmed green settles and fidelity
+   *  rejections. For a fresh run, `written('failing').length === birthFindings
+   *  committed rows` — the routing's arithmetic identity. */
   birthFindings: GuardBirthFinding[]
+  /**
+   * The journey defects authoring workers reported: the sandbox contradicted the
+   * derived command grammar (a promised flag rejected, or a demanded flag the
+   * grammar lacks). First-class run outputs — each is a journey-mapper bug with a
+   * reproduction attached. A `healed` row was verified against the live program
+   * in-run and its session resumed to completion; an unhealed row's flow stays
+   * unsettled.
+   */
+  journeyDefects: GuardJourneyDefect[]
+  /**
+   * The authoring-transcript run id: worker sessions append their transcript
+   * events under `guard/authoring/<id>/<flowId>.<surface>.jsonl`. Present only
+   * when at least one worker session ran this generate.
+   */
+  authoringRunId?: string
   errors: GuardGenerateError[]
   extractionFailures: GuardExtractionFailure[]
   /**
@@ -375,12 +432,10 @@ export interface GuardGenerateResult {
    */
   llmFailures: StageTransportTally[]
   /**
-   * The ADJUDICATION stages (`guard.fidelity` / `guard.triage`) that lost EVERY
-   * call, so part of this corpus shipped with no verdict about it — green tests
-   * persisted unreviewed, red tests committed untriaged. Carved out of the
-   * `llm-failed` abort on purpose (see the adjudication carve-out in
-   * {@link generateGuards}); this row is what keeps that carve-out LOUD. Empty when
-   * every verdict landed.
+   * The ADJUDICATION stage (`guard.fidelity`) when it lost EVERY call, so green
+   * tests persisted unreviewed. Carved out of the `llm-failed` abort on purpose
+   * (see the adjudication carve-out in {@link generateGuards}); this row is what
+   * keeps that carve-out LOUD. Empty when every verdict landed.
    */
   unadjudicated: GuardUnadjudicatedStage[]
   orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
@@ -445,12 +500,8 @@ export interface GuardGenerateModels {
   /** Realization matching (stage `guard.match`). */
   match?: string
   generate?: string
-  /** Evidence-retry re-authoring (stage `guard.retry`); defaults to `generate`. */
-  retry?: string
   /** Fidelity review (stage `guard.fidelity`) — a cheap-tier adversarial pass. */
   fidelity?: string
-  /** Failing-test triage (stage `guard.triage`) — the top-tier post-birth judgment. */
-  triage?: string
   recipe?: string
   fallback?: string
 }
@@ -472,6 +523,12 @@ export type JourneyProvider = () => Promise<{
    * "not detected": every blocked-on reason keeps its generic noun.
    */
   externalServices?: DetectedExternalService[]
+  /**
+   * The repo's OWN product names, resolved by the same pass. Detection already
+   * dropped them; they ride along so a blocked-on reason cannot canonicalize a
+   * refusal onto the product itself. Omitted ⇒ no second lock, only the first.
+   */
+  ownProductNames?: string[]
   /**
    * The repo's datastore + its PARSED schema, off the same analysis pass
    * for the same reason. Omitted (an older provider, the snapshot fallback) reads as
@@ -499,11 +556,31 @@ export type JourneyProvider = () => Promise<{
    * it fakes for. Omitted ⇒ no outbound block, as before this grounding existed.
    */
   outboundRequests?: OutboundRequest[]
+  /**
+   * The mapping's static-vs-runtime disagreements (the cli tree∪probe cross-
+   * check). Pure provenance for the journeys report; omitted reads as none.
+   */
+  diagnostics?: JourneyDiagnostic[]
 }>
+
+/** The authoring lifecycle states {@link GenerateGuardsOptions.onFlowState}
+ *  reports per (flow, surface) task. 'queued'/'active' are progress; the other
+ *  four are terminals, exactly one of which ends every task. */
+export type FlowAuthoringState = 'queued' | 'active' | 'settled' | 'blocked' | 'retired' | 'error'
 
 export interface GenerateGuardsOptions {
   repoRoot: string
   transport?: LlmTransport
+  /**
+   * The turn seam WORKER SESSIONS run on. Defaults to the transport's own
+   * `.turn` (the claude-code session backend, or the api transport's native
+   * tool-calling turn). A transport without one cannot run workers: each
+   * authoring task then records an authoring error instead of a session.
+   * Injected directly by tests (a scripted turn function).
+   */
+  turnFn?: LlmTurnFn
+  /** Per-session worker budget; defaults to the worker's own defaults. */
+  workerBudget?: { maxTurns?: number; maxTotalTokens?: number }
   models?: GuardGenerateModels
   /**
    * The execution seam birth validation runs through. Core passes
@@ -535,6 +612,13 @@ export interface GenerateGuardsOptions {
   /** Journey mapping seam — see {@link JourneyProvider}. */
   journeys?: JourneyProvider
   /**
+   * INTERNAL test seam: the journey self-heal's live re-verification, replacing
+   * BOTH per-surface adapters (`cliJourneyHealProbe` / `apiJourneyHealProbe`).
+   * Production builds the real adapter per task from the recipe and the task's
+   * bound journeys.
+   */
+  journeyHealProbe?: JourneyHealProbe
+  /**
    * The hard gate: refuse to run without a committed `recipe.json` instead of
    * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
    * derivation now); FALSE on the hosted/EE ephemeral-checkout paths, which have no
@@ -550,10 +634,8 @@ export interface GenerateGuardsOptions {
   stopAfterFlows?: boolean
   // --- test seams (production injects none) ---
   extractRunner?: ExtractRunner
-  generateRunner?: GenerateRunner
   recipeRunner?: RecipeRunner
   fidelityRunner?: FidelityRunner
-  triageRunner?: TriageRunner
   flowsRunner?: FlowsRunner
   flowsEpicRunner?: FlowsEpicRunner
   matchRunner?: MatchRunner
@@ -572,23 +654,18 @@ export interface GenerateGuardsOptions {
   onMatchProgress?: (done: number, total: number) => void
   /** Authoring progress over the (flow, surface) pairs with a realization plan. */
   onAuthorProgress?: (done: number, total: number) => void
-  /** Grounding probe progress — captured vs planned probes across all authoring
-   *  calls; the planned total grows as later flows enter grounding. */
-  onGroundProgress?: (captured: number, planned: number) => void
   /** Birth build/run phase transitions (forwarded from the runner) — for a "building…"
    *  detail. `confirm` is the generator's own isolated re-confirmation phase (layer d),
    *  carrying the number of would-be findings being re-checked in clean rooms. */
   onBirthPhase?: (phase: 'build' | 'run' | 'confirm', total?: number) => void
   /** Birth progress, ticking per settled scenario across both rounds. */
   onBirthProgress?: (done: number, total: number) => void
-  /** Retry-authoring progress: `total` = failed flow scenarios being re-authored. */
+  /** Worker session RESUMES (a confirmation flip re-opening its session, an
+   *  in-loop fidelity heal): `total` grows as resumes are queued. */
   onRetryProgress?: (done: number, total: number) => void
   /** Fidelity-review progress: `reviewed` = green scenarios reviewed so far, `planned`
    *  = green scenarios queued for review. */
   onFidelityProgress?: (reviewed: number, planned: number) => void
-  /** Failing-test triage progress: `total` = the run's birth failures (known once
-   *  every birth round settles — the triage stage runs after them all). */
-  onTriageProgress?: (done: number, total: number) => void
   /** Per-FLOW settle progress: `total` = the flows this run had work for. */
   onFlowSettled?: (settled: number, total: number) => void
   /** Fired the moment an authoring attempt fails — a thrown call, invalid output, or
@@ -596,6 +673,19 @@ export interface GenerateGuardsOptions {
    *  counts the flows that gave up. Optional, so callers that surface nothing (the
    *  dashboard popup) pass nothing and behave exactly as before. */
   onAuthorFailure?: (failure: AuthorFailure) => void
+  /**
+   * Per-flow authoring state, for a live display. The unit is the (flow, surface)
+   * authoring task: every task emits 'queued' up front (unchanged flows included,
+   * their terminal following immediately), 'active' when its worker session starts
+   * (or its cache adjudication begins), then EXACTLY ONE terminal —
+   * 'settled' (scenario committed; detail 'passing' or 'failing: <verdict>'),
+   * 'blocked' (gap recorded; detail names the capability nouns),
+   * 'retired' (the ledger retired the flow this run), or
+   * 'error' (authoring error, journey defect, or an exhaustion that did not
+   * retire; detail states the reason). The states always sum: queued tasks all
+   * reach a terminal, so a counter over the events never drifts.
+   */
+  onFlowState?: (flowId: string, surface: GuardDriverId, state: FlowAuthoringState, detail?: string) => void
 }
 
 function defaultConcurrency(): number {
@@ -608,9 +698,9 @@ function defaultConcurrency(): number {
 }
 
 /** The authoring system-prompt fingerprint for a surface — each driver has its own
- *  prompt, so a scenario's cache entry moves only when ITS prompt changes. */
+ *  worker prompt, so a scenario's cache entry moves only when ITS prompt changes. */
 function authorPromptFingerprint(surface: GuardDriverId): string {
-  return surface === 'api' ? GENERATE_API_PROMPT_FINGERPRINT : GENERATE_PROMPT_FINGERPRINT
+  return surface === 'api' ? WORKER_API_PROMPT_FINGERPRINT : WORKER_CLI_PROMPT_FINGERPRINT
 }
 
 /**
@@ -639,39 +729,6 @@ export function authorCacheKey(
   return createHash('sha256').update(parts.join('::')).digest('hex')
 }
 
-/** Per-retry cache key: the round-1 key plus the birth evidence that drove the
- *  re-ask, so a stopped/re-run generate never re-pays the retry round. */
-export function retryCacheKey(
-  flow: Pick<GuardFlow, 'fingerprint'>,
-  surface: GuardDriverId,
-  sectionKeys: readonly string[],
-  journeyFingerprints: readonly string[],
-  recipeFingerprint: string,
-  evidence: GuardBirthFinding,
-): string {
-  const evidenceHash = createHash('sha256')
-    .update(
-      [
-        evidence.title,
-        String(evidence.step),
-        String(evidence.failedMilestone ?? ''),
-        evidence.expected,
-        evidence.actual,
-        evidence.stdout ?? '',
-        evidence.stderr ?? '',
-      ].join('|'),
-    )
-    .digest('hex')
-  return createHash('sha256')
-    .update(
-      [
-        authorCacheKey(flow, surface, sectionKeys, journeyFingerprints, recipeFingerprint),
-        evidenceHash,
-      ].join('::'),
-    )
-    .digest('hex')
-}
-
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
@@ -682,15 +739,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // default); the recipe is the discovered/loaded one below, passed IN so the
   // executor never re-reads recipe.json.
   const executor = options.executor ?? defaultGuardExecutor
-  // ONE counting seam for the whole run: every stage's runner is spawned on the
-  // WRAPPED transport, so attempts and failures are accounted centrally instead of
-  // at each fail-soft site. The default is materialized HERE (rather than inside
-  // each runner) so no stage can bypass the accounting — it is the same
-  // `cliTransport()` each spawn would otherwise have built. A test that injects a
-  // runner bypasses the transport entirely: that stage records no attempts, which
-  // is correct — the tally answers "did this stage reach the model", nothing else.
-  const audit = auditTransport(options.transport ?? cliTransport())
+  // ONE counting seam for the whole run: every one-shot stage's runner is spawned
+  // on the WRAPPED transport, so attempts and failures are accounted centrally
+  // instead of at each fail-soft site. The default is materialized HERE (rather
+  // than inside each runner) so no stage can bypass the accounting — it is the
+  // same `cliTransport()` each spawn would otherwise have built. A test that
+  // injects a runner bypasses the transport entirely: that stage records no
+  // attempts, which is correct — the tally answers "did this stage reach the
+  // model", nothing else. Worker TURNS run on the raw transport's turn seam
+  // (`turnFnOf`) — session usage still accounts under `guard.generate` through
+  // the turn requests' stage field.
+  const rawTransport = options.transport ?? cliTransport()
+  const audit = auditTransport(rawTransport)
   const transport = audit.transport
+  const workerTurn = options.turnFn ?? turnFnOf(rawTransport)
 
   if (!hasGuardUniverse(repoRoot)) {
     return emptyResult('no-docs', {
@@ -796,37 +858,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const matchRunner =
     options.matchRunner ??
     spawnMatchRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
-  const generateRunner =
-    options.generateRunner ??
-    spawnGenerateRunner({
-      transport,
-      model: options.models?.generate,
-      retryModel: options.models?.retry,
-      fallbackModel: options.models?.fallback,
-    })
-  // The two ADJUDICATION runners — the fidelity reviewer that audits each green
-  // scenario before it persists, and the triage judge that rules on each failing
-  // test — spawn exactly like the stages above: unconditionally, on the SAME
-  // materialized transport. Their construction is never conditional. An absent
-  // `options.transport` does NOT mean "this caller has no model access": the
-  // orchestrator materializes the cli default for every other stage a few lines up,
-  // and the OSS CLI installs no default transport, so gating on it disables both
-  // stages in every OSS run — green scenarios persist unreviewed, every red test
-  // commits with no verdict, and the estimate still charges for both. A caller that
-  // genuinely cannot reach a model loses every call and aborts at the adjudication
-  // gate below. Tests inject stub runners, never transports.
+  // The ADJUDICATION runner — the fidelity reviewer that audits each green
+  // scenario before it persists — spawns exactly like the stages above:
+  // unconditionally, on the SAME materialized transport. Its construction is
+  // never conditional. An absent `options.transport` does NOT mean "this caller
+  // has no model access": the orchestrator materializes the cli default for every
+  // other stage a few lines up, and the OSS CLI installs no default transport, so
+  // gating on it disables the stage in every OSS run — green scenarios would
+  // persist unreviewed. A caller that genuinely cannot reach a model loses every
+  // call and lands in the adjudication carve-out below. Tests inject stub
+  // runners, never transports.
   const fidelityRunner: FidelityRunner =
     options.fidelityRunner ??
     spawnFidelityRunner({
       transport,
       model: options.models?.fidelity,
-      fallbackModel: options.models?.fallback,
-    })
-  const triageRunner: TriageRunner =
-    options.triageRunner ??
-    spawnTriageRunner({
-      transport,
-      model: options.models?.triage,
       fallbackModel: options.models?.fallback,
     })
 
@@ -861,22 +907,58 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const taintFlow = (flowId: string, surface: GuardDriverId, title: string, mismatch: string): void => {
     flaggedFlows.set(autoResolutionKey(flowId, surface), { flowId, surface, title, mismatch, updatedAt: nowIso })
   }
-  // This run's auto-resolution bumps, applied to the ledger at run end.
+  // This run's auto-resolution bumps, applied to the ledger at run end. Each bump
+  // records its verdict too, so a later retirement can show WHAT was judged wrong.
   // `autoResolveCount` reads prior + bumps, so the escalation budget holds WITHIN
   // a run too (a fidelity discard and a triage retirement of the same flow count).
-  const ledgerBumps = new Map<string, { times: number; source: GuardAutoResolutionSource }>()
-  const bumpLedger = (key: string, source: GuardAutoResolutionSource): void => {
+  const ledgerBumps = new Map<
+    string,
+    { times: number; source: GuardAutoResolutionSource; attempts: GuardAutoResolvedAttempt[] }
+  >()
+  const bumpLedger = (
+    key: string,
+    source: GuardAutoResolutionSource,
+    attempt: { title: string; detail: string },
+  ): void => {
+    const record: GuardAutoResolvedAttempt = { source, title: attempt.title, detail: attempt.detail, at: nowIso }
     const bump = ledgerBumps.get(key)
     if (bump) {
       bump.times++
       bump.source = source
-    } else ledgerBumps.set(key, { times: 1, source })
+      bump.attempts.push(record)
+    } else ledgerBumps.set(key, { times: 1, source, attempts: [record] })
   }
   const autoResolveCount = (key: string): number =>
     (priorLedger.entries[key]?.count ?? 0) + (ledgerBumps.get(key)?.times ?? 0)
   // The auto-resolved rows this run — the report's visible record of what the
   // ledger counted.
   const autoResolved: GuardAutoResolved[] = []
+
+  // RETIREMENT — the flows authoring has given up on (the ledger budget
+  // exhausted). An ACTIVE retirement settles its surface as a `retired` gap with
+  // zero calls; exactly three resets clear it (and its ledger count): the flow's
+  // bound spec content moved, the surface's authoring prompt moved (the engine
+  // improved), or a newer `reenabledFlows` entry in `scenarios/decisions.json`.
+  const sectionsContentKey = (keys: readonly string[]): string =>
+    createHash('sha256').update([...keys].sort().join('~')).digest('hex')
+  const reenabledAtMs = (flowId: string, surface: GuardDriverId): number => {
+    let at = -Infinity
+    for (const r of decisions.reenabledFlows) {
+      if (r.flowId !== flowId || (r.surface !== undefined && r.surface !== surface)) continue
+      const t = Date.parse(r.reenabledAt)
+      if (Number.isFinite(t) && t > at) at = t
+    }
+    return at
+  }
+  const retirementResets = (r: GuardFlowRetirement, sectionsKey: string): boolean =>
+    r.sectionsKey !== sectionsKey ||
+    r.promptFingerprint !== authorPromptFingerprint(r.surface) ||
+    reenabledAtMs(r.flowId, r.surface) >= Date.parse(r.retiredAt)
+  /** Retirements a reset cleared this run — dropped from the ledger (with their
+   *  counts) at run end; their flows are forced back into work. */
+  const clearedRetirements = new Set<string>()
+  /** Retirements recorded this run, written to the ledger at run end. */
+  const newRetirements = new Map<string, GuardFlowRetirement>()
 
   // 3. Extract — one (cached) read per document VIEW, across the WHOLE universe: a
   // flow spans sections, and its area's synthesis needs the complete claim
@@ -1032,6 +1114,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
+  // The repo's own product names, from the same pass — the identity a blocked-on
+  // reason may never canonicalize onto (see `enrichBlockedOn`).
+  const ownProductNames = mapped.ownProductNames
   // The AUTHORING hint per service: its canonical name plus, when one was detected, the
   // env var that overrides its base URL — the precondition for a `setup.http` stub.
   // The user-provided external accounts are joined onto the detected list. A
@@ -1057,6 +1142,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const journeysReport: GuardJourneysReport = {
     total: catalog.length,
     bySurface: Object.fromEntries([...catalogs].map(([surface, c]) => [surface, c.journeys.length])),
+    ...(mapped.diagnostics.length > 0 ? { diagnostics: mapped.diagnostics } : {}),
   }
 
   // 5. Flow synthesis — the spec-side generation unit. Reads claims and outlines
@@ -1154,10 +1240,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       written: [],
       coverageGaps,
       birthFindings: [],
+      journeyDefects: [],
       errors,
       extractionFailures,
       llmFailures: audit.failures(),
-      // The run stops before birth, so neither adjudication stage ever ran.
+      // The run stops before birth, so the adjudication stage never ran.
       unadjudicated: [],
       orphaned: orphanedSections,
       birthPassed: 0,
@@ -1176,7 +1263,31 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // accounting ("realizable on web — awaiting the web driver"), not silence.
   const surfaces = accountedSurfaces(recipe, catalogs)
   const works: FlowWork[] = []
-  const matchPairs = liveFlows.length * surfaces.filter((s) => matchable(s, recipe, catalogs)).length
+  // THE HTTP TRANSPORT GATE: the api surface is a candidate only for the flows whose
+  // own spec names an HTTP transport. A request/response contract over stdio (or any
+  // other pipe) is a real, testable contract, but not one an `api` recipe block could
+  // ever describe — pairing it with the api surface can only produce an unsatisfiable
+  // ask, so it never becomes a candidate here and the surface simply does not appear
+  // in the flow's accounting. See {@link flowHttpSignal}.
+  const apiEligible = new Set(
+    liveFlows
+      .filter(
+        (flow) =>
+          flowHttpSignal({
+            flow,
+            sections: boundSections(flow, sectionByKey),
+            basePaths: plan.basePaths,
+            apiJourneys,
+          }) !== null,
+      )
+      .map((f) => f.id),
+  )
+  const candidateSurfaces = (flow: GuardFlow): GuardDriverId[] =>
+    surfaces.filter((s) => s !== 'api' || apiEligible.has(flow.id))
+  const matchPairs = liveFlows.reduce(
+    (total, flow) => total + candidateSurfaces(flow).filter((s) => matchable(s, recipe, catalogs)).length,
+    0,
+  )
   let matchDone = 0
   // Match outcomes, for the total-loss abort after the loop. A cache HIT makes no
   // call and is counted nowhere; an `unrealizable` verdict is an ANSWER, not a loss.
@@ -1209,7 +1320,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const plans = new Map<GuardDriverId, RealizationPlan>()
     const gaps: GuardManifestGap[] = []
     const serverBySurface = new Map<GuardDriverId, string>()
-    for (const surface of surfaces) {
+    const candidates = candidateSurfaces(flow)
+    for (const surface of candidates) {
+      // A RETIRED surface settles as its gap with ZERO calls — no match, no
+      // author — unless a reset fires, which clears the record (and its ledger
+      // count) and forces the flow back into work below.
+      const retirement = priorLedger.retired[autoResolutionKey(flow.id, surface)]
+      if (retirement) {
+        if (!retirementResets(retirement, sectionsContentKey(sectionKeys))) {
+          gaps.push({ surface, kind: 'retired', reason: retiredGapReason(retirement.attempts) })
+          continue
+        }
+        clearedRetirements.add(autoResolutionKey(flow.id, surface))
+      }
       const surfaceCatalog = catalogs.get(surface)
       const journeyCount = surfaceCatalog?.journeys.length ?? 0
       if (!isRunnableDriver(surface)) {
@@ -1299,6 +1422,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
     }
 
+    // The gate may take away a flow's LAST candidate — a repo whose only surface is
+    // the api one, over a spec that never names HTTP. Coverage honesty holds either
+    // way: the flow settles with a stated `unrealizable` reason instead of silently
+    // recording no test and no gap at all. A flow the gate merely re-routed (another
+    // surface still accounts for it) records nothing here.
+    if (candidates.length === 0 && surfaces.length > 0) {
+      gaps.push({ surface: 'api', kind: 'unrealizable', reason: NO_HTTP_SIGNAL_REASON })
+    }
+
     const journeyFingerprints = [...plans.values()].flatMap((p) => p.journeys.map((j) => j.fingerprint))
     const inputsHash = flowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
@@ -1310,14 +1442,29 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
-    const changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior)
+    // So is the hash of a flow whose retirement RESET this run (the gap it settled
+    // with no longer stands), and of one whose prior `retired` gap lost its ledger
+    // record (the ledger is safe to delete — deleting it earns a fresh attempt).
+    const retirementCleared = candidates.some((s) => clearedRetirements.has(autoResolutionKey(flow.id, s)))
+    const staleRetiredGap = (prior?.gaps ?? []).some(
+      (g) => g.kind === 'retired' && !priorLedger.retired[autoResolutionKey(flow.id, g.surface)],
+    )
+    const changed =
+      !prior ||
+      prior.generationInputsHash !== inputsHash ||
+      violatesSettleInvariant(prior) ||
+      retirementCleared ||
+      staleRetiredGap
     if (!changed && prior) {
       // Unchanged ⇒ authoring does not run, so the gaps the AUTHOR stage settled last
       // time (a refusal: "blocked on world-state the sandbox cannot provide") cannot
       // be re-derived — only the MATCH-stage gaps above can. Carrying them forward is
       // what keeps the settle outcome and the settle hash together; without it the
       // first no-op re-run erases the reason while keeping the hash that skips it.
+      // A `retired` gap is never carried: an active retirement re-derived it above
+      // from the ledger, and anything else means the retirement ended.
       for (const gap of prior.gaps) {
+        if (gap.kind === 'retired') continue
         if (plans.has(gap.surface) && !gaps.some((g) => sameGap(g, gap))) gaps.push(gap)
       }
     }
@@ -1377,6 +1524,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         flowId: w.flow.id,
         surface: gap.surface,
         ...(gap.driver ? { driver: gap.driver } : {}),
+        ...(gap.blockedMilestones ? { blockedMilestones: gap.blockedMilestones } : {}),
       })
     }
   }
@@ -1387,8 +1535,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // so the live counter is never a bare count without context.
   options.onFlowSettled?.(0, changedWorks.length)
 
-  // 7. Author — one call per (flow, surface with a plan). The build starts here, in
-  // parallel with authoring: every birth round reuses it (skipBuild).
+  // 7. Author — every surface authors through per-flow WORKER SESSIONS (one
+  // agentic session per task: draft → run in the sandbox → observe → revise →
+  // settle a structured outcome). The build starts here, in parallel: every
+  // sandbox run reuses it (skipBuild).
   const authorTasks: AuthorTask[] = changedWorks.flatMap((work) =>
     [...work.plans.entries()].map(([surface, plan]) => ({
       work,
@@ -1397,9 +1547,106 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ...(work.serverBySurface.get(surface) ? { server: work.serverBySurface.get(surface)! } : {}),
     })),
   )
+  const taskByKey = new Map(authorTasks.map((t) => [taskKey(t), t]))
+
+  // The per-task authoring state feed (`onFlowState`) — the unit is the
+  // (flow, surface with a plan) pair, changed AND unchanged alike, so a counter
+  // over the events always sums. The map keeps the LAST state per task; a
+  // terminal is emitted exactly once (later attempts are dropped), and the epic
+  // wave below reads member states out of the same map.
+  const flowStates = new Map<string, { state: FlowAuthoringState; detail?: string }>()
+  const emitFlowState = (
+    flowId: string,
+    surface: GuardDriverId,
+    state: FlowAuthoringState,
+    detail?: string,
+  ): void => {
+    const key = `${flowId}\0${surface}`
+    const prior = flowStates.get(key)
+    // Last write wins — a settle is emitted the moment the SESSION settles
+    // (flows settle continuously, not at persist), and a later resume (a
+    // fidelity flag, a confirmation flip) re-activates the same task before
+    // its final terminal. Only exact repeats and a late `queued` are dropped.
+    if (prior && (prior.state === state && prior.detail === detail)) return
+    if (prior && state === 'queued') return
+    flowStates.set(key, { state, ...(detail !== undefined ? { detail } : {}) })
+    options.onFlowState?.(flowId, surface, state, detail)
+  }
+  // Every task is queued first (deterministic order: flow corpus, then surface)…
+  for (const work of works) {
+    for (const [surface] of work.plans) emitFlowState(work.flow.id, surface, 'queued')
+  }
+  // …and an unchanged flow's tasks settle immediately: its committed scenarios
+  // stand (or its carried gap does), so the terminal states are already known.
+  for (const work of works) {
+    if (work.changed) continue
+    for (const [surface] of work.plans) {
+      const scenario = work.prior?.scenarios.find((s) => s.surface === surface)
+      if (scenario) {
+        emitFlowState(work.flow.id, surface, 'settled', scenario.status)
+      } else {
+        const gap = work.gaps.find((g) => g.surface === surface)
+        emitFlowState(work.flow.id, surface, 'blocked', gap?.reason ?? 'unchanged, no scenario recorded')
+      }
+    }
+  }
+
+  /**
+   * The MILESTONE-SCOPED blocked-on gap a partially-blocked flow settles alongside
+   * its partial scenario: the blocked milestones with their (per-service enriched)
+   * nouns, and a reason that states the split — "K of N claims blocked, the rest
+   * tested". Idempotent per gap identity, so a resume that re-settles the same
+   * split never doubles the record.
+   */
+  const settlePartialGap = (task: AuthorTask, partial: TaskPartition): void => {
+    const blockedMilestones: GuardBlockedMilestone[] = partial.blocked.map((b) => ({
+      milestone: b.milestone,
+      claim: oneLine(b.claim),
+      blockedOn: enrichBlockedOn(b.blockedOn, externalServices, { ownProductNames }),
+    }))
+    const nouns: string[] = []
+    for (const b of blockedMilestones) {
+      for (const noun of b.blockedOn) if (!nouns.includes(noun)) nouns.push(noun)
+    }
+    const total = task.work.flow.milestones.length
+    const reason = composeBlockedOnReason(
+      nouns,
+      `${blockedMilestones.length} of ${total} claims of ${oneLine(task.work.flow.title)} — the other ${partial.covered.length} are covered`,
+    )
+    const gap: GuardManifestGap = { surface: task.surface, kind: 'blocked-on', reason, blockedMilestones }
+    if (task.work.gaps.some((g) => sameGap(g, gap))) return
+    task.work.gaps.push(gap)
+    coverageGaps.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'blocked-on',
+      flowId: task.work.flow.id,
+      surface: task.surface,
+      reason,
+      blockedMilestones,
+    })
+  }
+
+  /** The whole-flow blocked settle — the api refusal and the worker's `blocked`
+   *  outcome both land here. Nouns are normalized (lowercased, trimmed, deduped)
+   *  exactly as the one-shot path always did, then service-enriched. */
+  const settleBlocked = (task: AuthorTask, nouns: readonly string[]): void => {
+    const blockedOn = enrichBlockedOn(normalizeBlockedOn([...nouns]), externalServices, { ownProductNames })
+    const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
+    task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
+    coverageGaps.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'blocked-on',
+      flowId: task.work.flow.id,
+      surface: task.surface,
+      reason,
+    })
+    emitFlowState(task.work.flow.id, task.surface, 'blocked', blockedOn.join(', '))
+  }
 
   // The build is kicked ONCE, as soon as there is anything to author, so it overlaps
-  // authoring; every birth round then reuses it (skipBuild). A run with no authoring
+  // authoring; every sandbox run then reuses it (skipBuild). A run with no authoring
   // work never builds at all. The optional recipe install runs first; a failed
   // install IS the build result (same shape, carrying the install command).
   let buildMemo: Promise<BuildResult> | null = null
@@ -1423,36 +1670,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return startBuild()
   }
 
-  // Grounded authoring: before a cli authoring call the engine probes the real
-  // program for the commands the flow's claims name (empty sandbox, cached) and
-  // injects the transcripts. A failed build skips probing entirely, leaving
-  // authoring ungrounded.
+  // Pre-flight the built entry ONCE (after the build succeeds), before any worker
+  // session runs against it. A dead entry short-circuits every cli session into
+  // ONE loud error; the judgment is GENERAL (no string matching).
   let resolvedEntryMemo: string[] | null = null
-  let groundPlanned = 0
-  let groundCaptured = 0
-  const groundClaims = async (claimTexts: string[]): Promise<ProbeTranscript[]> => {
-    if (!recipe.entry) return []
-    const build = await startBuild()
-    if (!build.ok) return []
-    resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry)
-    return groundProbes({
-      repoRoot,
-      claimTexts,
-      resolvedEntry: resolvedEntryMemo,
-      displayEntry: recipe.entry,
-      recipeFingerprint,
-      recipeEnv: recipe.env,
-      onProbesPlanned: (n) => {
-        groundPlanned += n
-        options.onGroundProgress?.(groundCaptured, groundPlanned)
-      },
-      onProbeCaptured: () => options.onGroundProgress?.(++groundCaptured, groundPlanned),
-    })
-  }
-
-  // Pre-flight the built entry ONCE (after the build succeeds), before any birth
-  // candidate runs against it. A dead entry short-circuits the whole birth phase
-  // into ONE loud error; the judgment is GENERAL (no string matching).
   let entryPreflightMemo: Promise<EntryPreflightResult | null> | null = null
   const preflightEntryOnce = (): Promise<EntryPreflightResult | null> => {
     entryPreflightMemo ??= (async () => {
@@ -1488,160 +1709,137 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return true
   }
 
-  const authorTotal = authorTasks.length
-  let authorDone = 0
-  const bumpAuthor = (): void => options.onAuthorProgress?.(++authorDone, authorTotal)
-  if (authorTotal > 0) options.onAuthorProgress?.(0, authorTotal)
-
-  const authored = new Map<string, RawGeneratedScenario>()
-  // Authoring outcomes, for the total-loss abort below. The unit is the TASK (one
-  // flow × surface), counted only when it actually reached the runner — a cache hit
-  // authors without a call and is neither an attempt nor a loss. A task whose reply
-  // failed validation twice counts here and NOT in the transport tally (the call
-  // itself answered), so this is the only record of an all-unusable-output run.
-  let authorCalls = 0
-  let authorCallErrors = 0
-  let firstAuthorCallError: string | undefined
-  await Promise.all(
-    authorTasks.map((task) =>
-      limit(async () => {
-        // A TAINTED flow (its test ended a prior run rejected) bypasses
-        // the author cache: the cache still holds the rejected scenario, and
-        // re-serving it would re-flag it and treadmill. Force a fresh author
-        // carrying the prior rejection as evidence; a completed call overwrote
-        // the poisoned entry, so the taint clears at run end unless it re-flags.
-        const taintKey = autoResolutionKey(task.work.flow.id, task.surface)
-        const taint = priorLedger.tainted[taintKey]
-        // Only a task that reached the model is accounted for; the cache read inside
-        // `authorFlowScenario` returns before this fires.
-        let called = false
-        try {
-          const attempt = await authorFlowScenario({
-            repoRoot,
-            task,
-            recipe,
-            recipeFingerprint,
-            runner: (ctx) => {
-              called = true
-              return generateRunner(ctx)
-            },
-            opIndex,
-            docText,
-            ground: groundClaims,
-            externalServices: externalServiceHints,
-            requestContracts,
-            apiJourneys,
-            outboundRequests: outboundRequestHints,
-            outboundRequestsOverflow,
-            serverIndex,
-            ...(taint ? { priorFlag: { title: taint.title, mismatch: taint.mismatch } } : {}),
-            onAuthorFailure: options.onAuthorFailure,
-          })
-          if (called) authorCalls++
-          if (taint && !('error' in attempt)) freshlyAuthoredTaints.add(taintKey)
-          if ('error' in attempt) {
-            if (called) {
-              authorCallErrors++
-              firstAuthorCallError ??= attempt.error
-            }
-            errors.push({
-              doc: task.work.primary.doc,
-              anchor: task.work.primary.anchor,
-              kind: 'authoring',
-              flowId: task.work.flow.id,
-              surface: task.surface,
-              message: `authoring (${task.surface}) ${attempt.error}`,
-            })
-            task.errored = true
-          } else if (attempt.scenario) {
-            authored.set(taskKey(task), attempt.scenario)
-          } else {
-            // A generic "external-service" becomes the repo's actual third
-            // parties, in the capability segment — so the existing
-            // `blockedOnCapabilities` tally counts per SERVICE, not per placeholder.
-            const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
-            const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
-            task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
-            coverageGaps.push({
-              doc: task.work.primary.doc,
-              anchor: task.work.primary.anchor,
-              kind: 'blocked-on',
-              flowId: task.work.flow.id,
-              surface: task.surface,
-              reason,
-            })
-          }
-        } finally {
-          bumpAuthor()
-        }
-      }),
-    ),
-  )
-
-  // Every authoring call was lost and nothing was authored. Returning `ok` here
-  // would report a run that authored nothing as a clean no-op — and persist below
-  // would then DELETE each changed flow's prior scenarios over an LLM outage. Abort
-  // before birth: prior scenarios and manifest entries survive untouched, the flows
-  // stay work for the next run, and not one second of birth execution is spent on a
-  // batch that does not exist. A run that authored ANYTHING (some flows were cache
-  // hits) is never an abort — its losses are reported in `llmFailures` instead.
-  const authoringWipeout = authorCalls > 0 && authorCallErrors === authorCalls
-  if (authored.size === 0 && (audit.isSystemicFailure('guard.generate') || authoringWipeout)) {
-    const known = {
-      recipe: recipeMeta,
-      recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
-      coverageGaps,
-      errors,
-      extractionFailures,
-      orphaned: orphanedSections,
-      orphanedDismissals,
-      orphanedFlowDismissals,
-      flows: flowsReport,
-      journeys: journeysReport,
-      externalServices,
-    }
-    // A thrown-call wipeout reads its reason off the tally; an unusable-output one
-    // has no tally to read, so it states the loss itself.
-    const head = audit.isSystemicFailure('guard.generate')
-      ? undefined
-      : unusableOutputReason('guard.generate', 'authoring call', authorCalls, firstAuthorCallError)
-    return llmFailedResult(audit, 'guard.generate', known, head)
-  }
-
-  // 8. Birth — ONE round-1 invocation for every candidate, then ONE retry round for
-  // the failures, then isolated re-confirmation of api would-be findings.
+  // The scenario-id allocator, up front: a worker's id is assigned ONCE per task
+  // and reused for every run of its session. A flow about to re-author frees its
+  // OWN prior ids (its files are deleted at persist) so it reuses its stable
+  // `<flow>.<surface>.1` without stealing a sibling's.
   const usedIds = existingScenarioIds(repoRoot)
-  // A flow about to re-author frees its OWN prior ids (its files are deleted below)
-  // so it reuses its stable `<flow>.<surface>.1` without stealing a sibling's.
   for (const w of changedWorks) {
     for (const id of w.prior?.scenarios.map((s) => s.id) ?? []) usedIds.delete(id)
   }
 
-  // The "test is wrong" verdicts — the two classes withheld from the
-  // corpus: a fidelity rejection on a green candidate, and a `generation-defect`
-  // triage verdict on a failing one. Both unsettle their flow so the next
+  /**
+   * The RUN-LEVEL refusal, recorded at most once. The runner declined to run —
+   * nothing was built, booted or executed — so this is deliberately NOT fanned out
+   * into a per-candidate error: the candidates were never judged, and N copies of
+   * one config fact read as N broken tests.
+   */
+  let runRefusal: GuardRunRefusal | null = null
+  const recordRefusal = (refusal: GuardRunRefusal): void => {
+    if (runRefusal) return
+    runRefusal = refusal
+    errors.push(runRefusalError(refusal))
+  }
+  const settleRefusal = (round: BirthRound, pool: readonly BirthCandidate[]): void => {
+    if (!round.refusal) return
+    recordRefusal(round.refusal)
+    for (const c of pool) taskByKey.get(c.ref)!.errored = true
+  }
+
+  let birthTotal = 0
+  let birthSettled = 0
+  const bumpBirth = (): void => options.onBirthProgress?.(++birthSettled, birthTotal)
+  const reconcileBirth = (): void => {
+    if (birthSettled < birthTotal) options.onBirthProgress?.((birthSettled = birthTotal), birthTotal)
+  }
+
+  // C4 — the no-op birth anomaly gate, the last line of defense against a
+  // silently inert recipe that got past every preflight. Each CONFIRMATION
+  // round's per-driver step aggregate folds into ONE cumulative sample (fresh
+  // candidates only — worker in-session runs and the isolated re-confirmations
+  // are not folded), and the moment the sample says a driver is a do-nothing
+  // surface, generate aborts through the same `recipe-failed` channel a
+  // discovery failure uses. Every fold point sits BEFORE persist, so nothing
+  // corpus-side has been written and the abort IS the rollback.
+  let birthStepStats: GuardRunStepStats | null = null
+  const foldBirthRound = (round: BirthRound): GuardNoOpAnomaly | null => {
+    if (!round.stepStats) return null
+    birthStepStats = birthStepStats ? foldStepStats(birthStepStats, round.stepStats) : round.stepStats
+    return detectNoOpAnomaly(birthStepStats)
+  }
+
+  // The "test is wrong" verdicts — the classes withheld from the corpus: a
+  // fidelity rejection on a green candidate, and a green settle whose fresh-
+  // sandbox confirmation failed twice. Both unsettle their flow so the next
   // generate re-authors.
   const fidelityRejections = new Map<string, GuardBirthFinding[]>()
   const withheldFailures = new Map<string, GuardBirthFinding[]>()
   const persisted = new Map<string, BirthCandidate[]>()
-  // Tests that FAILED their birth execution. After triage routing this holds the
-  // COMMIT class only — triage blamed the repo, or produced no verdict — committed
-  // exactly like a passing test, with the birth result recorded, so the flow
-  // settles.
+  // Tests that COMMIT FAILING: the confirmation run failed and the worker's own
+  // diagnosis (or the conservative untriaged default) rides the finding.
   const failedTests = new Map<string, { candidate: BirthCandidate; finding: GuardBirthFinding }[]>()
-  const settleFailedTest = (task: AuthorTask, o: BirthOutcome): void => {
-    pushInto(failedTests, taskKey(task), { candidate: o.candidate, finding: toFinding(o) })
+  const settleFailedTest = (task: AuthorTask, o: BirthOutcome, diagnosis?: GuardTriage): void => {
+    const finding = toFinding(o)
+    if (diagnosis) finding.triage = diagnosis
+    pushInto(failedTests, taskKey(task), { candidate: o.candidate, finding })
+  }
+
+  /**
+   * The escalation → retirement transition, at settle time: the ledger budget is
+   * exhausted and the verdict is once more "the test is wrong" (or the worker
+   * exhausted yet another session), so the surface stops burning spend and
+   * SETTLES as a quiet `retired` gap — never a finding, never a task. The
+   * retirement record absorbs the entry's count and verdict history (the entry
+   * itself is dropped at run end, so a reset starts the budget over) plus the
+   * reset anchors: the flow's spec-content key and the surface's authoring-prompt
+   * fingerprint.
+   */
+  const retireFlow = (
+    task: AuthorTask,
+    surface: GuardDriverId,
+    title: string,
+    source: GuardAutoResolutionSource,
+    detail: string,
+  ): void => {
+    const key = autoResolutionKey(task.work.flow.id, surface)
+    const attempts = autoResolveCount(key) + 1
+    const history: GuardAutoResolvedAttempt[] = [
+      ...(priorLedger.entries[key]?.attempts ?? []),
+      ...(ledgerBumps.get(key)?.attempts ?? []),
+      { source, title, detail, at: nowIso },
+    ]
+    newRetirements.set(key, {
+      flowId: task.work.flow.id,
+      surface,
+      title,
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      attempts,
+      history,
+      retiredAt: nowIso,
+      sectionsKey: sectionsContentKey(task.work.sectionKeys),
+      promptFingerprint: authorPromptFingerprint(surface),
+    })
+    autoResolved.push({
+      kind: 'retire',
+      flowId: task.work.flow.id,
+      surface,
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      title,
+      source,
+      detail,
+      attempts,
+    })
+    const reason = retiredGapReason(attempts)
+    task.work.gaps.push({ surface, kind: 'retired', reason })
+    coverageGaps.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'retired',
+      flowId: task.work.flow.id,
+      surface,
+      reason,
+    })
+    emitFlowState(task.work.flow.id, surface, 'retired', detail)
   }
 
   /**
    * The server-binding SAFETY NET, for the flows the route gates could not classify at
    * generate time (a path the manifest did not attribute, a plan whose journeys
-   * carry no path): birth ran the scenario, the bound server 404ed a path another
-   * app serves, and the runner annotated the outcome `unservedRoute`. That is the
-   * SAME fact Gate B blocks on, arriving later — so it settles as the same
+   * carry no path): the sandbox ran the scenario, the bound server 404ed a path
+   * another app serves, and the runner annotated the outcome `unservedRoute`. That
+   * is the SAME fact Gate B blocks on, arriving later — so it settles as the same
    * `blocked-on` gap instead of an `errors.push`, which would leave the flow
    * unsettled and re-authoring (and re-paying) on every future generate. Returns
    * false for every other error, which keeps its handling untouched.
@@ -1664,616 +1862,1187 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return true
   }
 
-  const round1: BirthCandidate[] = []
-  const taskByKey = new Map(authorTasks.map((t) => [taskKey(t), t]))
-  for (const task of authorTasks) {
-    const raw = authored.get(taskKey(task))
-    if (!raw) continue
-    const built = safeBuild(task, raw, usedIds, errors, defaultApiServer)
-    if (built) round1.push(built)
-  }
+  // -------------------------------------------------------------------------
+  // The worker plumbing (cli surface)
+  // -------------------------------------------------------------------------
 
-  let birthTotal = 0
-  let birthSettled = 0
-  const bumpBirth = (): void => options.onBirthProgress?.(++birthSettled, birthTotal)
-  const reconcileBirth = (): void => {
-    if (birthSettled < birthTotal) options.onBirthProgress?.((birthSettled = birthTotal), birthTotal)
-  }
+  const journeyDefects: GuardJourneyDefect[] = []
+  // One transcript run id per generate: every worker session appends its events
+  // under guard/authoring/<runId>/<flowId>.<surface>.jsonl.
+  const authoringRunId = `${new Date().toISOString().replace(/[:.]/g, '-')}_${randomUUID().slice(0, 8)}`
+  let workerSessionsRan = false
 
-  // C4 — the no-op birth anomaly gate, the last line of defense against a
-  // silently inert recipe that got past every preflight. Each birth round's
-  // per-driver step aggregate folds into ONE cumulative sample (fresh candidates
-  // only — the isolated re-confirmations re-run already-counted candidates and
-  // are not folded), and the moment the sample says a driver is a do-nothing
-  // surface, generate aborts through the same `recipe-failed` channel a
-  // discovery failure uses. Every fold point sits BEFORE stage 11 (persist), so
-  // nothing corpus-side has been written and the abort IS the rollback: no
-  // scenario files, no manifest write, no ledger write, no findings.
-  let birthStepStats: GuardRunStepStats | null = null
-  const foldBirthRound = (round: BirthRound): GuardNoOpAnomaly | null => {
-    if (!round.stepStats) return null
-    birthStepStats = birthStepStats ? foldStepStats(birthStepStats, round.stepStats) : round.stepStats
-    return detectNoOpAnomaly(birthStepStats)
-  }
+  // Session-resume accounting (a confirmation flip re-opening its session, an
+  // in-loop fidelity heal) — the `onRetryProgress` hook's meaning under workers.
+  let resumesDone = 0
+  let resumesTotal = 0
+  const noteResumeQueued = (): void => options.onRetryProgress?.(resumesDone, ++resumesTotal)
+  const noteResumeDone = (): void => options.onRetryProgress?.(++resumesDone, resumesTotal)
 
-  /**
-   * The RUN-LEVEL refusal, recorded at most once. The runner declined to run —
-   * nothing was built, booted or executed — so this is deliberately NOT fanned out
-   * into a per-candidate error: the candidates were never judged, and N copies of
-   * one config fact read as N broken tests. The affected flows still stay unsettled
-   * (`task.errored`), so the next generate re-attempts them once the config is fixed.
-   */
-  let runRefusal: GuardRunRefusal | null = null
-  const settleRefusal = (round: BirthRound, pool: BirthCandidate[]): void => {
-    if (!round.refusal) return
-    if (!runRefusal) {
-      runRefusal = round.refusal
-      errors.push(runRefusalError(round.refusal))
-    }
-    for (const c of pool) taskByKey.get(c.ref)!.errored = true
-  }
-
-  const round2Failures: BirthOutcome[] = []
-  if (round1.length > 0) {
-    const build = await awaitBuild()
-    if (!build.ok) {
-      const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
-      for (const c of round1) {
-        const task = taskByKey.get(c.ref)!
-        task.errored = true
-        errors.push(errorFrom({ candidate: c, result: { failure: { actual: message } } }))
-      }
-      reconcileBirth()
-    } else {
-      // The built entry can't start — birthing any cli candidate against it would
-      // yield N indistinguishable failures. Every cli candidate is skipped (its flow
-      // stays unsettled); the ONE loud error was recorded once. Api candidates
-      // proceed (the api server has its own preflight inside the runner).
-      const dead = round1.some((c) => c.scenario.driver === 'cli') && (await deadEntry())
-      const pool = dead ? round1.filter((c) => c.scenario.driver !== 'cli') : round1
-      if (dead) {
-        for (const c of round1) {
-          if (c.scenario.driver === 'cli') taskByKey.get(c.ref)!.errored = true
-        }
-      }
-      if (pool.length > 0) {
-        birthTotal += pool.length
-        const round1Run = await birthValidate(repoRoot, pool, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
-        reconcileBirth()
-        // A refused run yields NO outcomes, so every stage below iterates an empty
-        // list and settles nothing — the refusal was already recorded once.
-        settleRefusal(round1Run, pool)
-        // The anomaly gate fires NOW — before a single retry/fidelity/triage call
-        // is spent on scenarios validated against a do-nothing surface.
-        const round1Anomaly = foldBirthRound(round1Run)
-        if (round1Anomaly) {
-          return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(round1Anomaly, recipe) })
-        }
-        const r1 = round1Run.outcomes
-
-        // Retry classification: a fail (or a setup defect) re-authors the WHOLE flow
-        // scenario once with its evidence; anything else settles here.
-        const retryEntries: { task: AuthorTask; outcome: BirthOutcome; evidence: GuardBirthFinding }[] = []
-        for (const o of r1) {
-          const task = taskByKey.get(o.candidate.ref)!
-          if (o.result.outcome === 'fail' || isSetupDefectResult(o.result)) {
-            retryEntries.push({ task, outcome: o, evidence: toFinding(o) })
-          } else if (o.result.outcome === 'pass') {
-            pushInto(persisted, o.candidate.ref, o.candidate)
-          } else if (!settleUnservedRoute(task, o)) {
-            task.errored = true
-            errors.push(errorFrom(o))
-          }
-        }
-
-        if (retryEntries.length > 0) {
-          for (const { task } of retryEntries) {
-            for (const c of round1) if (c.ref === taskKey(task)) usedIds.delete(c.scenario.id)
-          }
-          let retryDone = 0
-          options.onRetryProgress?.(0, retryEntries.length)
-          const retryPool: BirthCandidate[] = []
-          await Promise.all(
-            retryEntries.map((entry) =>
-              limit(async () => {
-                try {
-                  const attempt = await authorFlowScenario({
-                    repoRoot,
-                    task: entry.task,
-                    recipe,
-                    recipeFingerprint,
-                    runner: generateRunner,
-                    opIndex,
-                    docText,
-                    ground: groundClaims,
-                    externalServices: externalServiceHints,
-                    requestContracts,
-                    apiJourneys,
-                    outboundRequests: outboundRequestHints,
-                    outboundRequestsOverflow,
-                    serverIndex,
-                    retry: retryContext(entry.evidence),
-                    onAuthorFailure: options.onAuthorFailure,
-                  })
-                  if ('error' in attempt) {
-                    entry.task.errored = true
-                    errors.push({
-                      doc: entry.task.work.primary.doc,
-                      anchor: entry.task.work.primary.anchor,
-                      kind: 'authoring',
-                      flowId: entry.task.work.flow.id,
-                      surface: entry.task.surface,
-                      message: `retry authoring (${entry.task.surface}) ${attempt.error}`,
-                    })
-                    return
-                  }
-                  if (!attempt.scenario) {
-                    // The retry gave up on the world it needs — the round-1 candidate
-                    // is the final word, so it is committed as a failing test with
-                    // the birth result it already produced.
-                    settleFailedTest(entry.task, entry.outcome)
-                    return
-                  }
-                  const built = safeBuild(entry.task, attempt.scenario, usedIds, errors, defaultApiServer)
-                  if (built) retryPool.push(built)
-                } finally {
-                  options.onRetryProgress?.(++retryDone, retryEntries.length)
-                }
-              }),
-            ),
-          )
-          if (retryPool.length > 0) {
-            birthTotal += retryPool.length
-            const round2Run = await birthValidate(repoRoot, retryPool, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
-            reconcileBirth()
-            settleRefusal(round2Run, retryPool)
-            // Fold the retry round too: a corpus just under the sample floor on
-            // round 1 can cross it here, and nothing is persisted yet either way.
-            const round2Anomaly = foldBirthRound(round2Run)
-            if (round2Anomaly) {
-              return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(round2Anomaly, recipe) })
-            }
-            const r2 = round2Run.outcomes
-            for (const o of r2) {
-              if (o.result.outcome === 'pass') pushInto(persisted, o.candidate.ref, o.candidate)
-              else if (o.result.outcome === 'fail') round2Failures.push(o)
-              else if (!settleUnservedRoute(taskByKey.get(o.candidate.ref)!, o)) {
-                // A setup-declaration defect that survived its evidence retry is a
-                // rejected test too: taint the flow so the next generate
-                // bypasses the author cache still holding the bad setup block.
-                if (isSetupDefectResult(o.result)) {
-                  taintFlow(
-                    o.candidate.flow.id,
-                    o.candidate.surface,
-                    o.candidate.scenario.title,
-                    o.result.failure?.actual ?? 'setup failed to materialize',
-                  )
-                }
-                taskByKey.get(o.candidate.ref)!.errored = true
-                errors.push(errorFrom(o))
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // 9. Isolated re-confirmation of the round-2 failures (layer d), for the API
-  // driver ONLY: a cli scenario already runs in its own fresh sandbox, so a re-run
-  // can never flip and would only burn a boot + cap budget. Each remaining (api)
-  // candidate is re-run ALONE in a fresh runner invocation: a PASS means shared-state
-  // pollution — keep the candidate green; a FAIL confirms the failure with CLEAN-ROOM
-  // evidence. The order (and thus the cap selection) is DETERMINISTIC — flow order,
-  // then scenario id — never LLM/authoring completion order.
-  const flowOrder = new Map(works.map((w, i) => [w.flow.id, i]))
-  const apiFailures: BirthOutcome[] = []
-  for (const o of round2Failures) {
-    if (o.candidate.scenario.driver === 'api') apiFailures.push(o)
-    else settleFailedTest(taskByKey.get(o.candidate.ref)!, o)
-  }
-  apiFailures.sort(
-    (a, b) =>
-      (flowOrder.get(a.candidate.flow.id) ?? 0) - (flowOrder.get(b.candidate.flow.id) ?? 0) ||
-      a.candidate.scenario.id.localeCompare(b.candidate.scenario.id),
-  )
-  if (apiFailures.length > 0) {
-    const toIsolate = Math.min(apiFailures.length, isolationCap)
-    if (toIsolate > 0) options.onBirthPhase?.('confirm', toIsolate)
-    for (let i = 0; i < apiFailures.length; i++) {
-      const outcome = apiFailures[i]
-      const task = taskByKey.get(outcome.candidate.ref)!
-      if (i >= isolationCap) {
-        settleFailedTest(task, outcome) // over the cap → batch evidence
-        continue
-      }
-      // NOT folded into the anomaly sample: isolation RE-RUNS candidates whose
-      // steps round 2 already counted — folding would double-count them.
-      const isoRun = await birthValidate(repoRoot, [outcome.candidate], { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs })
-      // A refusal DURING isolation says nothing about this candidate: its batch
-      // verdict already stands and is settled below, so the refusal is recorded (once)
-      // WITHOUT unsettling anything — hence the empty pool.
-      settleRefusal(isoRun, [])
-      const iso = isoRun.outcomes
-      const isoResult = iso[0]?.result
-      if (isoResult?.outcome === 'pass') {
-        pushInto(persisted, outcome.candidate.ref, outcome.candidate) // the batch polluted it
-      } else if (isoResult?.outcome === 'fail') {
-        settleFailedTest(task, iso[0]) // confirmed — clean-room evidence
-      } else {
-        settleFailedTest(task, outcome) // isolation errored (infra) — keep the batch evidence
-      }
-    }
-  }
-
-  // 10. Fidelity review: every green candidate is audited against its
-  // FLOW's milestones before it may persist. It reviews the birth PASSES only — a
-  // failing test's verdict is already "the code disagrees", and a reviewer pass over
-  // it would buy nothing the birth evidence does not already say.
+  // Fidelity accounting — the cli review runs IN-LOOP (inside the worker's settle
+  // flow); the api review runs as a batch after its birth round.
   let fidelityReviewed = 0
-  let fidelityPlanned = [...persisted.values()].reduce((n, list) => n + list.length, 0)
-  // Green tests this run persisted with NO review behind them, because the stage
-  // lost every call. Zero on a healthy run (and on a partial loss, where the
-  // per-call default still unsettles the individual flow) — see the carve-out below.
+  let fidelityPlanned = 0
+  // Green tests persisted with NO review behind them, because the stage lost every
+  // call (the adjudication carve-out below).
   let fidelityUnreviewed = 0
   // The task refs whose adjudication never happened because the stage lost EVERY
   // call. They must NOT settle: a settled flow records its inputs hash and the next
   // generate skips it as unchanged, so a corpus that shipped unadjudicated would
-  // stay unadjudicated forever — the very outcome the old abort existed to prevent.
-  // Left unsettled, the next generate re-works the flow and adjudicates it for real,
-  // and re-authoring is a CACHE hit (the flow, its sections, its journeys and the
-  // recipe are unchanged), so the re-run pays for the verdicts and nothing else.
+  // stay unadjudicated forever. Left unsettled, the next generate re-works the flow
+  // and adjudicates it for real — a cache hit, so the re-run pays for the verdicts
+  // and nothing else.
   const unadjudicatedRefs = new Set<string>()
-  if (fidelityPlanned > 0) {
-    options.onFidelityProgress?.(0, fidelityPlanned)
-    // Reviews fan out across EVERY flow through the shared pool — one scenario per
-    // (flow, surface) means a per-flow loop would review the corpus serially.
-    const reviews = await Promise.all(
-      [...persisted].flatMap(([ref, candidates]) =>
-        candidates.map((c) =>
-          limit(async () => {
-            const review = await reviewFidelity(repoRoot, taskByKey.get(ref)!, c, fidelityRunner)
-            options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
-            return { ref, c, review }
-          }),
-        ),
-      ),
+
+  /** One worker-settled candidate awaiting the CONFIRMATION round — the gate of
+   *  record. `session` present only when a live session ran this generate (a
+   *  cache-served candidate has none to resume). */
+  interface SettledCandidate {
+    task: AuthorTask
+    candidate: BirthCandidate
+    raw: RawGeneratedScenario
+    /** The worker's diagnosis when it settled the scenario FAILING. */
+    failing?: GuardTriage
+    session?: WorkerSessionState
+  }
+  const settledCandidates: SettledCandidate[] = []
+
+  const authorTotal = authorTasks.length
+  let authorDone = 0
+  const bumpAuthor = (): void => options.onAuthorProgress?.(++authorDone, authorTotal)
+  if (authorTotal > 0) options.onAuthorProgress?.(0, authorTotal)
+
+  // Authoring outcomes, for the total-loss abort below. The unit is the TASK (one
+  // flow × surface), counted only when it actually reached the model — a cache hit
+  // authors without a session and is neither an attempt nor a loss. A worker
+  // session that ended EXHAUSTED (turn budget, token budget, malformed, a dead
+  // transport) counts as a loss; a settled/blocked/journey-defect ending is an
+  // ANSWER.
+  let authorCalls = 0
+  let authorCallErrors = 0
+  let firstAuthorCallError: string | undefined
+
+  const workerAuthoringError = (task: AuthorTask, message: string): void => {
+    errors.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'authoring',
+      flowId: task.work.flow.id,
+      surface: task.surface,
+      message,
+    })
+    task.errored = true
+    emitFlowState(task.work.flow.id, task.surface, 'error', message)
+  }
+
+  const authorKeyOf = (task: AuthorTask): string =>
+    authorCacheKey(
+      task.work.flow,
+      task.surface,
+      task.work.sectionKeys,
+      task.plan.journeys.map((j) => j.fingerprint),
+      recipeFingerprint,
     )
-    const faithful = new Map<string, BirthCandidate[]>()
-    // HIGH-confidence flags with auto-resolve budget left SELF-HEAL:
-    // the candidate is discarded and its flow re-authored ONCE — an auditable
-    // ledger row, never a human task. Every other flag is a rejection: at HIGH
-    // over budget it carries the escalation note ("re-generation is not fixing
-    // this"); either way the flow is tainted so the next generate authors fresh.
-    const selfHeal: { ref: string; candidate: BirthCandidate; mismatch: string }[] = []
-    // Did the stage lose EVERYTHING (an outage, an expired login, a 429 storm)? A
-    // single lost review is a per-flow defect and keeps its per-flow default below:
-    // the candidate is dropped and its flow re-reviewed next generate, which is
-    // cheap because the rest of the run succeeded. A TOTAL loss is the opposite
-    // trade — dropping every green candidate would discard a whole run's authoring
-    // and birth spend over verdicts about tests birth already validated — so the
-    // unreviewed passes persist and the run REPORTS the stage as unadjudicated.
-    // Nothing is cached for a lost review, so the next generate reviews them for real.
-    const fidelityBlind = audit.isSystemicFailure('guard.fidelity')
-    for (const { ref, c, review } of reviews) {
-      const task = taskByKey.get(ref)!
-      if ('error' in review) {
-        if (fidelityBlind) {
-          fidelityUnreviewed++
-          unadjudicatedRefs.add(ref)
-          pushInto(faithful, ref, c)
-          continue
+
+  /** The settled outcome IS the cache: a later run replays it (re-validated)
+   *  without a session. */
+  const writeWorkerCache = (cacheKey: string, res: Extract<WorkerFlowResult, { kind: 'settled' }>): Promise<void> =>
+    setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, {
+      scenario: res.raw,
+      blockedOn: [],
+      ...(res.blockedMilestones.length > 0 ? { blockedMilestones: res.blockedMilestones } : {}),
+      ...(res.failing ? { failing: res.failing } : {}),
+    })
+
+  /** A settle's blocked milestones mapped onto the manifest `milestones` wire
+   *  shape (the partial-coverage record read surfaces already render). Null when
+   *  nothing is blocked — or everything is (that is the `blocked` outcome). */
+  const partialOf = (task: AuthorTask, blocked: readonly WorkerBlockedMilestone[]): TaskPartition | null => {
+    if (blocked.length === 0) return null
+    const orders = task.work.flow.milestones.map((m) => m.order)
+    const claimOf = new Map(task.work.flow.milestones.map((m) => [m.order, m.claimTitle]))
+    const blockedOrders = new Set(blocked.map((b) => b.milestone))
+    const covered = orders.filter((o) => !blockedOrders.has(o)).sort((a, b) => a - b)
+    if (covered.length === 0) return null
+    const rows = [...blocked]
+      .sort((a, b) => a.milestone - b.milestone)
+      .map((b) => ({ milestone: b.milestone, claim: claimOf.get(b.milestone) ?? '', blockedOn: [...b.blockedOn] }))
+    return { refusedOn: [...new Set(rows.flatMap((b) => b.blockedOn))], covered, blocked: rows }
+  }
+
+  /** The flow's doc-example blocks, mined once per task for the byte-fidelity
+   *  validator (the same mining feeds the per-milestone DOC EXAMPLE prompt blocks). */
+  const exampleDefectFor = (task: AuthorTask): ((raw: RawGeneratedScenario) => string | null) => {
+    const blocks: DocExampleBlock[] = [...new Set(task.work.sections.values())].flatMap((s) =>
+      mineExampleBlocks(s.fullText || s.ownText).map((b) => ({ ...b, doc: s.doc, anchor: s.anchor })),
+    )
+    return (raw) =>
+      exampleFidelityDefect(
+        raw.driver === 'api'
+          ? { driver: 'api', steps: raw.steps, ...(raw.setup ? { setup: raw.setup } : {}) }
+          : { driver: 'cli', steps: raw.steps, ...(raw.setup ? { setup: raw.setup } : {}) },
+        blocks,
+      )
+  }
+
+  /** The cheap pre-sandbox validators — a defective draft costs no run. */
+  const draftDefect = (
+    raw: RawGeneratedScenario,
+    exampleDefectOf: (raw: RawGeneratedScenario) => string | null,
+  ): string | null => {
+    const composition = compositionDefectOf(raw, recipe)
+    if (composition) return composition
+    const badRe = firstInvalidMatchPattern(raw.steps)
+    if (badRe) {
+      return `invalid \`matches\` regex (step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ — ${badRe.error})`
+    }
+    return exampleDefectOf(raw)
+  }
+
+  /** One sandbox execution for a worker's draft — the SAME executor seam birth
+   *  uses, one candidate per run. A run-level refusal is recorded once and THROWN
+   *  so the tool feeds it back to the still-open session. */
+  const runWorkerScenario = async (task: AuthorTask, scenario: GuardScenario): Promise<GuardScenarioResult> => {
+    // A recorded refusal reproduces identically on every run until the config
+    // changes — never spawn another sandbox against it.
+    if (runRefusal) throw new Error(runRefusal.message)
+    const round = await birthValidate(
+      repoRoot,
+      [{ flow: task.work.flow, surface: task.surface, section: task.work.primary, scenario, ref: taskKey(task) }],
+      {
+        executor,
+        recipe,
+        skipBuild: true,
+        noOpThresholdMs: options.noOpThresholdMs,
+        runTimeoutMs: birthRunTimeoutMs(1),
+      },
+    )
+    if (round.refusal) {
+      recordRefusal(round.refusal)
+      throw new Error(round.refusal.message)
+    }
+    const result = round.outcomes[0]?.result
+    if (!result) throw new Error('the sandbox produced no result for the scenario')
+    return result
+  }
+
+  const workerBudget = options.workerBudget
+  /** 15 min per turn — the authoring tier's ceiling (heavy reasoning tails). */
+  const WORKER_TURN_TIMEOUT_MS = 900_000
+
+  /** One task's surface + engine closures for `runFlowWorker` — shared by the
+   *  fresh session and every resume, so the two can never drift. `buildScenario`
+   *  stamps the bound server exactly as the confirmation build does. */
+  const workerClosures = (
+    task: AuthorTask,
+    scenarioId: string,
+  ): Pick<Parameters<typeof runFlowWorker>[0], 'surface' | 'buildScenario' | 'validate' | 'runScenario'> => {
+    const exampleDefectOf = exampleDefectFor(task)
+    return {
+      surface: task.surface === 'api' ? 'api' : 'cli',
+      buildScenario: (raw) =>
+        buildFlowScenario({
+          flow: task.work.flow,
+          journeys: task.plan.journeys,
+          raw,
+          id: scenarioId,
+          ...(task.server ? { server: task.server } : {}),
+          defaultServer: defaultApiServer,
+        }),
+      validate: (raw) => draftDefect(raw, exampleDefectOf),
+      runScenario: (scenario) => runWorkerScenario(task, scenario),
+    }
+  }
+
+  /** Resume a prior worker session with a new observation (a fidelity flag, a
+   *  confirmation flip) — same closures, same scenario id, same transcript. */
+  const resumeWorker = (
+    task: AuthorTask,
+    scenarioId: string,
+    session: WorkerSessionState,
+    observation: string,
+    seededLastRun?: { raw: RawGeneratedScenario; scenario: GuardScenario; result: GuardScenarioResult },
+  ): Promise<WorkerFlowResult> => {
+    workerSessionsRan = true
+    // A resumed session re-opens the task on the live board until it re-settles.
+    emitFlowState(task.work.flow.id, task.surface, 'active', 'resumed')
+    return runFlowWorker({
+      flow: task.work.flow,
+      ...workerClosures(task, scenarioId),
+      userPrompt: observation,
+      turn: workerTurn!,
+      ...(workerBudget ? { budget: workerBudget } : {}),
+      stage: 'guard.generate',
+      subject: task.work.flow.id,
+      model: options.models?.generate,
+      fallbackModel: options.models?.fallback,
+      timeoutMs: WORKER_TURN_TIMEOUT_MS,
+      onEvent: (ev) => appendAuthoringEvent(repoRoot, authoringRunId, task.work.flow.id, task.surface, ev),
+      resume: {
+        messages: session.messages,
+        ...(session.sessionId ? { sessionId: session.sessionId } : {}),
+        observation,
+        lastRun: seededLastRun ?? session.lastRun,
+      },
+    })
+  }
+
+  /** An EXHAUSTED worker session (turn budget, token budget, malformed, a dead
+   *  transport): an authoring error + the taint, and the ledger's `author` budget
+   *  — past the threshold the flow retires exactly like every other exhausted
+   *  auto behavior. */
+  const settleExhausted = (task: AuthorTask, res: Extract<WorkerFlowResult, { kind: 'exhausted' }>): void => {
+    if (runRefusal) {
+      // The session died of the RUN-LEVEL refusal (already recorded once): a
+      // config fact, not an authoring loss — the flow stays unsettled with no
+      // ledger bump, no taint, and no per-flow error copy of the one refusal.
+      // The refusal record still NAMES every flow it cancelled.
+      if (!runRefusal.flowIds.includes(task.work.flow.id)) {
+        runRefusal.flowIds.push(task.work.flow.id)
+      }
+      task.errored = true
+      emitFlowState(task.work.flow.id, task.surface, 'error', 'the runner refused the run')
+      return
+    }
+    const detail = res.detail ? `${res.reason} — ${authorFailureReason(res.detail)}` : res.reason
+    options.onAuthorFailure?.({
+      flowId: task.work.flow.id,
+      flowTitle: task.work.flow.title,
+      surface: task.surface,
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      reason: `worker session ended: ${detail}`,
+      attempt: 1,
+      willRetry: false,
+    })
+    authorCallErrors++
+    firstAuthorCallError ??= detail
+    taintFlow(task.work.flow.id, task.surface, task.work.flow.title, `authoring session ended without settling (${detail})`)
+    errors.push({
+      doc: task.work.primary.doc,
+      anchor: task.work.primary.anchor,
+      kind: 'authoring',
+      flowId: task.work.flow.id,
+      surface: task.surface,
+      message: `authoring (${task.surface}) worker session ended: ${detail}`,
+    })
+    const key = autoResolutionKey(task.work.flow.id, task.surface)
+    if (autoResolveCount(key) < escalateAfter) {
+      bumpLedger(key, 'author', { title: task.work.flow.title, detail })
+      task.errored = true
+      emitFlowState(task.work.flow.id, task.surface, 'error', `worker session ended: ${detail}`)
+    } else {
+      retireFlow(task, task.surface, task.work.flow.title, 'author', detail)
+    }
+  }
+
+  // JOURNEY SELF-HEAL — a worker's `journey-defect` ending is verified against
+  // the LIVE program before it may error the task: the surface adapter re-probes
+  // the disputed grammar/contract in a fresh sandbox (cli: the command's
+  // `--help`, re-parsed and unioned into the journey grammar; api: a fresh boot
+  // of the bound server answering the disputed operation) and the SAME session
+  // resumes once with the verdict, so the flow completes in-run. ONE heal per
+  // task; a second defect from the resumed session errors exactly as before.
+  const journeyHealAttempted = new Set<string>()
+  const healProbeFor = (task: AuthorTask): JourneyHealProbe => {
+    if (options.journeyHealProbe) return options.journeyHealProbe
+    if (task.surface === 'api') {
+      return apiJourneyHealProbe({
+        repoRoot,
+        recipe,
+        ...(task.server ? { server: task.server } : {}),
+        journeys: task.plan.journeys,
+      })
+    }
+    return cliJourneyHealProbe({
+      repoRoot,
+      journeys: task.plan.journeys,
+      resolvedEntry: (resolvedEntryMemo ??= resolveEntry(repoRoot, recipe.entry ?? [])),
+      displayEntry: recipe.entry ?? [],
+      ...(recipe.env ? { recipeEnv: recipe.env } : {}),
+    })
+  }
+
+  /** Record one journey-defect report row. Recorded for EVERY defect ending,
+   *  healed or not — the row is the journey-mapper's feedback loop. */
+  const recordJourneyDefect = (
+    task: AuthorTask,
+    res: Extract<WorkerFlowResult, { kind: 'journey-defect' }>,
+    extra: { healed?: boolean; corrected?: string } = {},
+  ): void => {
+    journeyDefects.push({
+      flowId: task.work.flow.id,
+      surface: task.surface,
+      ...(res.argv ? { argv: res.argv } : {}),
+      promised: res.promised,
+      observed: res.observed,
+      ...extra,
+    })
+  }
+
+  /** The defect's terminal ending — the pre-heal behavior: the row + the task
+   *  error; the flow stays unsettled. A failed heal probe appends its reason. */
+  const journeyDefectTerminal = (
+    task: AuthorTask,
+    res: Extract<WorkerFlowResult, { kind: 'journey-defect' }>,
+    probeFailure?: string,
+  ): 'error' => {
+    task.errored = true
+    const detail = probeFailure
+      ? `journey defect: ${oneLine(res.promised)} (heal probe failed: ${oneLine(probeFailure)})`
+      : `journey defect: ${oneLine(res.promised)}`
+    emitFlowState(task.work.flow.id, task.surface, 'error', detail)
+    return 'error'
+  }
+
+  /**
+   * A worker's `journey-defect` ending: a first-class run output (a mapper bug
+   * with a reproduction attached) — and a dispute the run VERIFIES before it
+   * errors. The surface's heal probe re-derives the disputed grammar from the
+   * live program; the session then resumes once with the corrected grammar
+   * (probe sided with the worker) or the confirmation (probe sided with the
+   * grammar), and the resumed result routes through the normal outcome routing.
+   * A failed probe skips the heal and takes the terminal path with the failure
+   * appended. Returns the final routing word so the caller can free the
+   * scenario id on a non-settle.
+   */
+  const settleJourneyDefect = async (
+    task: AuthorTask,
+    scenarioId: string,
+    res: Extract<WorkerFlowResult, { kind: 'journey-defect' }>,
+  ): Promise<'settled' | 'blocked' | 'error'> => {
+    const healKey = taskKey(task)
+    if (journeyHealAttempted.has(healKey)) {
+      // The resumed session contradicted the grammar AGAIN: the one heal is
+      // spent, so this ending errors exactly as it did before the heal existed.
+      recordJourneyDefect(task, res)
+      return journeyDefectTerminal(task, res)
+    }
+    journeyHealAttempted.add(healKey)
+    let verdict: JourneyHealVerdict
+    try {
+      verdict = await healProbeFor(task).probe({
+        ...(res.argv ? { argv: res.argv } : {}),
+        promised: res.promised,
+        observed: res.observed,
+      })
+    } catch (e) {
+      verdict = { verdict: 'probe-failed', detail: e instanceof Error ? e.message : String(e) }
+    }
+    if (verdict.verdict === 'probe-failed') {
+      // The dispute could not be verified: no resume — the terminal path, with
+      // the probe failure appended so the loss is diagnosable.
+      recordJourneyDefect(task, res)
+      return journeyDefectTerminal(task, res, verdict.detail)
+    }
+    const observation =
+      verdict.verdict === 'grammar-confirmed'
+        ? [
+            verdict.observed,
+            'Trust the given grammar: compose the invocation exactly from the facts it lists, and continue from your last draft.',
+          ].join(' ')
+        : verdict.corrected
+          ? [
+              'The grammar was re-derived from the live program and corrected. Corrected grammar:',
+              ...verdict.corrected.rendered,
+              'Continue from your last draft.',
+            ].join('\n')
+          : [
+              `Your report was verified against the live program: ${verdict.observed}`,
+              'The grammar layer will be fixed from this report. Finish this flow now:',
+              'settle your last-run scenario with a failing diagnosis recording this',
+              'disagreement, or report blocked if nothing remains provable.',
+            ].join('\n')
+    recordJourneyDefect(task, res, {
+      healed: true,
+      ...(verdict.verdict === 'defect-confirmed' && verdict.corrected
+        ? { corrected: verdict.corrected.summary }
+        : {}),
+    })
+    noteResumeQueued()
+    let resumed: WorkerFlowResult
+    try {
+      resumed = await resumeWorker(task, scenarioId, res.session, observation)
+    } finally {
+      noteResumeDone()
+    }
+    const cacheKey = authorKeyOf(task)
+    switch (resumed.kind) {
+      case 'settled':
+        await routeSettled(task, cacheKey, resumed, true)
+        return 'settled'
+      case 'blocked':
+        await settleBlockedOutcome(task, cacheKey, resumed)
+        return 'blocked'
+      case 'journey-defect':
+        return settleJourneyDefect(task, scenarioId, resumed)
+      case 'exhausted':
+        return (await settleExhaustedOrImplicit(task, cacheKey, resumed, false)) ? 'settled' : 'error'
+    }
+  }
+
+  /** A worker's `blocked` ending: cache the refusal (a later run replays it for
+   *  free) and settle the whole-flow blocked-on gap. */
+  const settleBlockedOutcome = async (
+    task: AuthorTask,
+    cacheKey: string,
+    res: Extract<WorkerFlowResult, { kind: 'blocked' }>,
+  ): Promise<void> => {
+    await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, {
+      scenario: null,
+      blockedOn: res.blockedOn,
+      ...(res.blockedMilestones.length > 0 ? { blockedMilestones: res.blockedMilestones } : {}),
+    })
+    settleBlocked(task, [...res.blockedOn, ...res.blockedMilestones.flatMap((b) => b.blockedOn)])
+  }
+
+  /**
+   * The in-loop fidelity heal: the still-open session revises against the flag —
+   * ONE resume, then ONE more review (a second flag is a rejection at any
+   * confidence). Returns the ledger row's outcome word.
+   */
+  const healFlagged = async (
+    task: AuthorTask,
+    cacheKey: string,
+    candidate: BirthCandidate,
+    session: WorkerSessionState,
+    mismatch: string,
+  ): Promise<'resolved' | 'finding' | 'unresolved'> => {
+    noteResumeQueued()
+    let res: WorkerFlowResult
+    try {
+      res = await resumeWorker(
+        task,
+        candidate.scenario.id,
+        session,
+        [
+          'A fresh-context reviewer read the settled scenario against its flow and',
+          'FLAGGED it: it does not truly verify what the flow promises. Revise the',
+          'scenario to CLOSE the gap below (assert the exact values the claims quote,',
+          'on the exact observables they name), run it, and settle again. The flag:',
+          `  ${mismatch}`,
+        ].join('\n'),
+      )
+    } finally {
+      noteResumeDone()
+    }
+    switch (res.kind) {
+      case 'settled': {
+        await writeWorkerCache(cacheKey, res)
+        const partial = partialOf(task, res.blockedMilestones)
+        if (partial) {
+          task.partial = partial
+          settlePartialGap(task, partial)
         }
-        task.errored = true
-        errors.push({
-          doc: task.work.primary.doc,
-          anchor: task.work.primary.anchor,
-          message: `fidelity review (${task.surface}) ${review.error}`,
-        })
-      } else if (review.verdict === 'flagged') {
-        const key = autoResolutionKey(c.flow.id, c.surface)
-        if (review.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
-          selfHeal.push({ ref, candidate: c, mismatch: review.mismatch })
-          bumpLedger(key, 'fidelity')
-        } else {
-          const finding = fidelityFinding(c, review.mismatch)
-          if (review.confidence === 'high') {
-            finding.autoResolveEscalation = { count: autoResolveCount(key), source: 'fidelity' }
-          }
-          pushInto(fidelityRejections, ref, finding)
-          taintFlow(c.flow.id, c.surface, c.scenario.title, review.mismatch)
+        const revised: BirthCandidate = { ...candidate, scenario: res.scenario }
+        if (res.failing) {
+          settledCandidates.push({ task, candidate: revised, raw: res.raw, failing: res.failing, session: res.session })
+          return 'finding'
         }
+        options.onFidelityProgress?.(fidelityReviewed, ++fidelityPlanned)
+        const second = await reviewFidelity(repoRoot, task, revised, fidelityRunner)
+        options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+        if ('error' in second) {
+          errors.push(adjudicationError('fidelity', task, revised.scenario.id, second.error))
+          task.errored = true
+          return 'unresolved'
+        }
+        if (second.verdict === 'flagged') {
+          pushInto(fidelityRejections, revised.ref, fidelityFinding(revised, second.mismatch))
+          return 'finding'
+        }
+        settledCandidates.push({ task, candidate: revised, raw: res.raw, session: res.session })
+        return 'resolved'
+      }
+      case 'blocked':
+        await settleBlockedOutcome(task, cacheKey, res)
+        return 'unresolved'
+      case 'journey-defect':
+        // The defect takes the heal path (verify, resume once, route) exactly
+        // like a fresh session's; a heal that re-settles resolves the flag.
+        return (await settleJourneyDefect(task, candidate.scenario.id, res)) === 'settled'
+          ? 'resolved'
+          : 'unresolved'
+      case 'exhausted':
+        return (await settleExhaustedOrImplicit(task, cacheKey, res, false)) ? 'resolved' : 'unresolved'
+    }
+  }
+
+  /**
+   * The IN-LOOP fidelity review of a green settle: independence by context, not
+   * by sequencing — a fresh-context judge reads the candidate while the worker's
+   * session is still resumable, and a high-confidence flag returns to it as an
+   * observation (ONE heal). A candidate with no session (a cache hit) takes the
+   * rejection path instead. A faithful verdict queues the candidate for the
+   * confirmation round.
+   */
+  const adjudicateGreen = async (
+    task: AuthorTask,
+    cacheKey: string,
+    candidate: BirthCandidate,
+    raw: RawGeneratedScenario,
+    session: WorkerSessionState | undefined,
+    allowHeal: boolean,
+  ): Promise<void> => {
+    options.onFidelityProgress?.(fidelityReviewed, ++fidelityPlanned)
+    const review = await reviewFidelity(repoRoot, task, candidate, fidelityRunner)
+    options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
+    if ('error' in review) {
+      errors.push(adjudicationError('fidelity', task, candidate.scenario.id, review.error))
+      if (audit.isSystemicFailure('guard.fidelity')) {
+        // The adjudication carve-out (live): the stage has lost every call so far —
+        // the candidate persists unreviewed and its flow stays unsettled, so the
+        // next generate reviews it for real.
+        fidelityUnreviewed++
+        unadjudicatedRefs.add(candidate.ref)
+        settledCandidates.push({ task, candidate, raw, ...(session ? { session } : {}) })
       } else {
-        pushInto(faithful, ref, c)
+        task.errored = true
+      }
+      return
+    }
+    if (review.verdict !== 'flagged') {
+      settledCandidates.push({ task, candidate, raw, ...(session ? { session } : {}) })
+      return
+    }
+    const key = autoResolutionKey(candidate.flow.id, candidate.surface)
+    if (review.confidence === 'high' && allowHeal && session && autoResolveCount(key) < escalateAfter) {
+      bumpLedger(key, 'fidelity', { title: candidate.scenario.title, detail: review.mismatch })
+      const outcome = await healFlagged(task, cacheKey, candidate, session, review.mismatch)
+      autoResolved.push({
+        kind: 'fidelity-discard',
+        flowId: candidate.flow.id,
+        surface: candidate.surface,
+        doc: candidate.section.doc,
+        anchor: candidate.section.anchor,
+        title: candidate.scenario.title,
+        mismatch: review.mismatch,
+        outcome,
+      })
+      if (outcome !== 'resolved') {
+        taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, review.mismatch)
+      }
+      return
+    }
+    if (review.confidence === 'high' && autoResolveCount(key) >= escalateAfter) {
+      // Budget exhausted: the flow RETIRES — a settled gap, never a task.
+      retireFlow(task, candidate.surface, candidate.scenario.title, 'fidelity', review.mismatch)
+      taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, review.mismatch)
+      return
+    }
+    // Medium/low — and a high flag with no session to heal (a cache-served
+    // candidate): the rejection finding + taint; the re-author is owed to the
+    // next generate. A session-less high flag still bumps the ledger so repeated
+    // flags eventually retire.
+    if (review.confidence === 'high') {
+      bumpLedger(key, 'fidelity', { title: candidate.scenario.title, detail: review.mismatch })
+    }
+    pushInto(fidelityRejections, candidate.ref, fidelityFinding(candidate, review.mismatch))
+    taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, review.mismatch)
+  }
+
+  /**
+   * A turn-budget death whose LAST run PASSED with full milestone coverage is
+   * a settle the session had no turn left to declare: the last run is the
+   * answer (the settle gate's own rule), applied engine-side. Verification
+   * still follows in full — fidelity now, the confirmation round after.
+   * Returns true when the implicit settle ran.
+   */
+  const settleExhaustedOrImplicit = async (
+    task: AuthorTask,
+    cacheKey: string,
+    res: Extract<WorkerFlowResult, { kind: 'exhausted' }>,
+    allowHeal: boolean,
+  ): Promise<boolean> => {
+    const last = res.session.lastRun
+    if (
+      !runRefusal &&
+      res.reason === 'turn-budget' &&
+      last &&
+      last.result.outcome === 'pass' &&
+      uncoveredMilestones(task.work.flow, last.raw).length === 0 &&
+      unknownMilestones(task.work.flow, last.raw).length === 0
+    ) {
+      await routeSettled(
+        task,
+        cacheKey,
+        {
+          kind: 'settled',
+          raw: last.raw,
+          scenario: last.scenario,
+          runResult: last.result,
+          blockedMilestones: [],
+          session: res.session,
+        },
+        allowHeal,
+      )
+      return true
+    }
+    settleExhausted(task, res)
+    return false
+  }
+
+  /** Route one worker SETTLE: cache it, map partial blocks, and hand the
+   *  candidate to fidelity (green) or straight to the confirmation pool (failing,
+   *  with the worker's diagnosis). */
+  const routeSettled = async (
+    task: AuthorTask,
+    cacheKey: string,
+    res: Extract<WorkerFlowResult, { kind: 'settled' }>,
+    allowHeal: boolean,
+  ): Promise<void> => {
+    // The session settling IS the settle the live board reports — flows settle
+    // continuously. Fidelity, a heal, or a confirmation flip may re-activate
+    // this task; the persist stage re-emits the final word.
+    emitFlowState(
+      task.work.flow.id,
+      task.surface,
+      'settled',
+      res.failing ? `failing: ${res.failing.verdict}` : 'passing',
+    )
+    await writeWorkerCache(cacheKey, res)
+    const partial = partialOf(task, res.blockedMilestones)
+    if (partial) {
+      task.partial = partial
+      settlePartialGap(task, partial)
+    }
+    const candidate: BirthCandidate = {
+      flow: task.work.flow,
+      surface: task.surface,
+      section: task.work.primary,
+      scenario: res.scenario,
+      ref: taskKey(task),
+    }
+    if (res.failing) {
+      settledCandidates.push({ task, candidate, raw: res.raw, failing: res.failing, session: res.session })
+      return
+    }
+    await adjudicateGreen(task, cacheKey, candidate, res.raw, res.session, allowHeal)
+  }
+
+  /** The per-flow user prompt context: the same blocks the pre-worker author
+   *  consumed, minus authoring-time probes — journeys carry the grammar (cli)
+   *  and the operation contracts (api) now. The api grounding blocks (inbound
+   *  contracts, the rest of the surface, outbound construction) are built per
+   *  task because the setup catalog is the BOUND server's own surface: an
+   *  operation the route manifest positively attributes to ANOTHER app is
+   *  unreachable from this scenario, and advertising it is exactly how foreign
+   *  paths ended up in scenarios. An operation nobody claims stays offered —
+   *  unknown is not foreign (R6). */
+  const workerContext = (task: AuthorTask, taint?: GuardFlowTaint): AuthorUserContext => {
+    const { work, surface, plan } = task
+    const grounding =
+      surface === 'api'
+        ? (() => {
+            const journeyContracts = buildJourneyContractHints(plan.journeys, requestContracts)
+            const boundApp = appDirOfServer(serverIndex, task.server)
+            const reachableJourneys = boundApp
+              ? apiJourneys.filter((j) => !servedByOtherApp(serverIndex, boundApp, journeyEntryPath(j)))
+              : apiJourneys
+            const other = buildOtherOperationHints(reachableJourneys, requestContracts, journeyContracts)
+            return {
+              journeyContracts,
+              otherOperations: other.operations,
+              otherOperationsOverflow: other.overflow,
+              outboundRequests: outboundRequestHints,
+              outboundRequestsOverflow: outboundRequestsOverflow,
+            }
+          })()
+        : {
+            journeyContracts: [],
+            otherOperations: [],
+            otherOperationsOverflow: 0,
+            outboundRequests: [],
+            outboundRequestsOverflow: 0,
+          }
+    return {
+      ...buildAuthorCtx(work, surface, plan, recipe, [], opIndex, docText, externalServiceHints, serverIndex, grounding),
+      ...(taint ? { priorFlag: { title: taint.title, mismatch: taint.mismatch } } : {}),
+    }
+  }
+
+  // --- Epic scheduling (the dependency DAG, two waves) -----------------------
+  // An epic flow (non-empty `composedOf`) authors AFTER its members, and its
+  // prompt carries the settled members' scenarios read-only. `composedOf` is one
+  // level deep by construction, so two waves realize the whole DAG.
+  const workByFlowId = new Map(works.map((w) => [w.flow.id, w]))
+  let scenarioFilesMemo: Map<string, string> | null = null
+  const scenarioFiles = (): Map<string, string> => (scenarioFilesMemo ??= scenarioFileIndex(repoRoot))
+
+  /** One member's contribution to an epic prompt: its settled scenario's YAML
+   *  (from this run's settles, or the committed file of an unchanged flow), or
+   *  the state line an unsettled member is listed with. */
+  const memberReference = (memberId: string, surface: GuardDriverId): { yaml: string } | { state: string } => {
+    const settled = settledCandidates.find(
+      (sc) => sc.candidate.flow.id === memberId && sc.candidate.surface === surface,
+    )
+    if (settled) return { yaml: serializeScenarioYaml(settled.candidate.scenario) }
+    const memberWork = workByFlowId.get(memberId)
+    if (memberWork && !memberWork.changed) {
+      const id = memberWork.prior?.scenarios.find((s) => s.surface === surface)?.id
+      const file = id ? scenarioFiles().get(id) : undefined
+      if (file && fs.existsSync(file)) return { yaml: fs.readFileSync(file, 'utf-8') }
+    }
+    const st = flowStates.get(`${memberId}\0${surface}`)
+    if (!st) return { state: 'no scenario on this surface' }
+    if (st.state === 'blocked') return { state: `blocked on ${st.detail ?? 'world-state the sandbox cannot provide'}` }
+    return { state: st.detail ? `${st.state} (${st.detail})` : st.state }
+  }
+
+  /** The read-only member block an epic task's user prompt ends with. */
+  const epicMemberBlock = (task: AuthorTask): string => {
+    const lines = [
+      '',
+      'MEMBER SCENARIOS (settled, read-only) — this flow is an EPIC: it chains the',
+      'member flows below. Their settled scenarios are given verbatim for reference',
+      "(never modify or re-author them; author THIS flow's own scenario, which walks",
+      'the chained path end to end). A member without a settled scenario is listed',
+      'with its state instead — judge whether the epic path is still walkable, and',
+      'name what blocks it otherwise.',
+    ]
+    for (const memberId of task.work.flow.composedOf) {
+      const ref = memberReference(memberId, task.surface)
+      if ('yaml' in ref) lines.push('', `--- member ${memberId} (settled)`, ref.yaml.trimEnd())
+      else lines.push('', `--- member ${memberId}: ${ref.state}`)
+    }
+    return lines.join('\n')
+  }
+
+  /** One authoring task: cache first (a hit re-validates and skips the
+   *  session), else ONE worker session to a structured end. */
+  const runAuthorWorker = async (task: AuthorTask): Promise<void> => {
+    const { work, surface } = task
+    emitFlowState(work.flow.id, surface, 'active')
+    const taintKey = autoResolutionKey(work.flow.id, surface)
+    const taint = priorLedger.tainted[taintKey]
+    const cacheKey = authorKeyOf(task)
+    const exampleDefectOf = exampleDefectFor(task)
+
+    // A prior rejection poisons the cache entry (it IS the rejected scenario) —
+    // skip the read; the fresh session's settle overwrites it under the same key.
+    const cached = taint ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
+    if (cached) {
+      const parsed = AuthoredCacheSchema.safeParse(cached)
+      if (parsed.success) {
+        if (!parsed.data.scenario) {
+          settleBlocked(task, [
+            ...parsed.data.blockedOn,
+            ...(parsed.data.blockedMilestones ?? []).flatMap((b) => b.blockedOn),
+          ])
+          return
+        }
+        if (parsed.data.scenario.driver === surface) {
+          const raw = parsed.data.scenario
+          const partial = partialOf(task, parsed.data.blockedMilestones ?? [])
+          const allowed = partial ? new Set(partial.covered) : undefined
+          if (
+            uncoveredMilestones(work.flow, raw, allowed).length === 0 &&
+            unknownMilestones(work.flow, raw, allowed).length === 0 &&
+            !firstInvalidMatchPattern(raw.steps) &&
+            !compositionDefectOf(raw, recipe) &&
+            !exampleDefectOf(raw)
+          ) {
+            const built = safeBuild(task, raw, usedIds, errors, defaultApiServer)
+            if (!built) {
+              emitFlowState(work.flow.id, surface, 'error', 'the cached scenario failed to build')
+              return
+            }
+            if (partial) {
+              task.partial = partial
+              settlePartialGap(task, partial)
+            }
+            if (parsed.data.failing) {
+              settledCandidates.push({ task, candidate: built, raw, failing: parsed.data.failing })
+            } else {
+              await adjudicateGreen(task, cacheKey, built, raw, undefined, false)
+            }
+            return
+          }
+        }
       }
     }
-    for (const ref of persisted.keys()) persisted.set(ref, faithful.get(ref) ?? [])
 
-    if (selfHeal.length > 0) {
-      // Free the discarded ids so each re-author reuses its stable `<flow>.<surface>.1`.
-      for (const { candidate } of selfHeal) usedIds.delete(candidate.scenario.id)
-      let healDone = 0
-      options.onRetryProgress?.(0, selfHeal.length)
-      const replacements: BirthCandidate[] = []
-      const healOutcomes = new Map<string, 'resolved' | 'finding' | 'unresolved'>()
-      await Promise.all(
-        selfHeal.map((h) =>
-          limit(async () => {
-            const task = taskByKey.get(h.ref)!
-            try {
-              const attempt = await authorFlowScenario({
-                repoRoot,
-                task,
-                recipe,
-                recipeFingerprint,
-                runner: generateRunner,
-                opIndex,
-                docText,
-                ground: groundClaims,
-                externalServices: externalServiceHints,
-                requestContracts,
-                apiJourneys,
-                outboundRequests: outboundRequestHints,
-                outboundRequestsOverflow,
-                serverIndex,
-                // The rejection is the correction evidence; it also bypasses the
-                // author cache, which still holds the discarded scenario.
-                priorFlag: { title: h.candidate.scenario.title, mismatch: h.mismatch },
-                onAuthorFailure: options.onAuthorFailure,
-              })
-              if ('error' in attempt) {
-                task.errored = true
-                errors.push({
-                  doc: task.work.primary.doc,
-                  anchor: task.work.primary.anchor,
-                  kind: 'authoring',
-                  flowId: task.work.flow.id,
-                  surface: task.surface,
-                  message: `re-author after fidelity discard (${task.surface}) ${attempt.error}`,
-                })
-                healOutcomes.set(h.ref, 'unresolved')
-                return
-              }
-              if (!attempt.scenario) {
-                const blockedOn = enrichBlockedOn(attempt.blockedOn, externalServices)
-                const reason = composeBlockedOnReason(blockedOn, oneLine(task.work.flow.title))
-                task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
-                coverageGaps.push({
-                  doc: task.work.primary.doc,
-                  anchor: task.work.primary.anchor,
-                  kind: 'blocked-on',
-                  flowId: task.work.flow.id,
-                  surface: task.surface,
-                  reason,
-                })
-                healOutcomes.set(h.ref, 'unresolved')
-                return
-              }
-              const built = safeBuild(task, attempt.scenario, usedIds, errors, defaultApiServer)
-              if (built) replacements.push(built)
-              else healOutcomes.set(h.ref, 'unresolved')
-            } finally {
-              options.onRetryProgress?.(++healDone, selfHeal.length)
-            }
-          }),
-        ),
+    if (!workerTurn) {
+      workerAuthoringError(
+        task,
+        `authoring (${surface}) needs a turn-capable LLM transport — the configured transport supports one-shot calls only, so no worker session can run; use the claude-code or api transport`,
       )
-      if (replacements.length > 0) {
-        birthTotal += replacements.length
-        const healRun = await birthValidate(repoRoot, replacements, { executor, recipe, skipBuild: true, noOpThresholdMs: options.noOpThresholdMs, onPhase: options.onBirthPhase, onScenarioSettled: bumpBirth })
-        reconcileBirth()
-        settleRefusal(healRun, replacements)
-        // The heal round runs fresh scenarios — its steps join the same sample.
-        const healAnomaly = foldBirthRound(healRun)
-        if (healAnomaly) {
-          return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(healAnomaly, recipe) })
-        }
-        if (healRun.refusal) for (const c of replacements) healOutcomes.set(c.ref, 'unresolved')
-        const healPasses: BirthOutcome[] = []
-        for (const o of healRun.outcomes) {
-          const task = taskByKey.get(o.candidate.ref)!
-          if (o.result.outcome === 'pass') healPasses.push(o)
-          else if (o.result.outcome === 'fail') {
-            // A failing replacement is just another failing test: the triage +
-            // routing below decide commit vs withhold.
-            settleFailedTest(task, o)
-            healOutcomes.set(o.candidate.ref, 'finding')
-          } else if (settleUnservedRoute(task, o)) {
-            healOutcomes.set(o.candidate.ref, 'unresolved')
-          } else {
-            task.errored = true
-            errors.push(errorFrom(o))
-            healOutcomes.set(o.candidate.ref, 'unresolved')
-          }
-        }
-        // The replacement is reviewed again — a flag at ANY confidence is now a
-        // rejection (at most one self-heal per flow per run).
-        fidelityPlanned += healPasses.length
-        const finalReviews = await Promise.all(
-          healPasses.map((o) =>
-            limit(async () => {
-              const review = await reviewFidelity(repoRoot, taskByKey.get(o.candidate.ref)!, o.candidate, fidelityRunner)
-              options.onFidelityProgress?.(++fidelityReviewed, fidelityPlanned)
-              return { o, review }
-            }),
-          ),
-        )
-        for (const { o, review } of finalReviews) {
-          const c = o.candidate
-          const task = taskByKey.get(c.ref)!
-          if ('error' in review) {
-            task.errored = true
-            errors.push({
-              doc: task.work.primary.doc,
-              anchor: task.work.primary.anchor,
-              message: `fidelity review (${task.surface}) ${review.error}`,
-            })
-            healOutcomes.set(c.ref, 'unresolved')
-          } else if (review.verdict === 'flagged') {
-            pushInto(fidelityRejections, c.ref, fidelityFinding(c, review.mismatch))
-            taintFlow(c.flow.id, c.surface, c.scenario.title, review.mismatch)
-            healOutcomes.set(c.ref, 'finding')
-          } else {
-            pushInto(persisted, c.ref, c)
-            healOutcomes.set(c.ref, 'resolved')
-          }
-        }
+      return
+    }
+    // The session runs against the BUILT program: a failed build (or a dead
+    // entry) ends the task before a turn is spent — the flow stays unsettled.
+    const build = await awaitBuild()
+    if (!build.ok) {
+      workerAuthoringError(
+        task,
+        `authoring (${surface}) could not run: build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`,
+      )
+      return
+    }
+    if (await deadEntry()) {
+      task.errored = true
+      emitFlowState(work.flow.id, surface, 'error', 'the built entry failed to start')
+      return
+    }
+
+    const ctx = workerContext(task, taint)
+    const userPrompt =
+      buildAuthorUserPrompt(ctx) + (work.flow.composedOf.length > 0 ? epicMemberBlock(task) : '')
+    const scenarioId = assignScenarioId(work.flow.id, surface, usedIds)
+    authorCalls++
+    workerSessionsRan = true
+    const result = await runFlowWorker({
+      flow: work.flow,
+      ...workerClosures(task, scenarioId),
+      userPrompt,
+      turn: workerTurn,
+      ...(workerBudget ? { budget: workerBudget } : {}),
+      stage: 'guard.generate',
+      subject: work.flow.id,
+      model: options.models?.generate,
+      fallbackModel: options.models?.fallback,
+      timeoutMs: WORKER_TURN_TIMEOUT_MS,
+      onEvent: (ev) => appendAuthoringEvent(repoRoot, authoringRunId, work.flow.id, surface, ev),
+    })
+    switch (result.kind) {
+      case 'settled':
+        if (taint) freshlyAuthoredTaints.add(taintKey)
+        await routeSettled(task, cacheKey, result, true)
+        break
+      case 'blocked':
+        usedIds.delete(scenarioId)
+        if (taint) freshlyAuthoredTaints.add(taintKey)
+        await settleBlockedOutcome(task, cacheKey, result)
+        break
+      case 'journey-defect': {
+        // The heal path: verify against the live program, resume once, route
+        // the resumed outcome normally. Only a settle keeps the scenario id; an
+        // unhealed defect leaves the flow unsettled ('pending next generate')
+        // with the defect row as the record, exactly as before the heal.
+        const final = await settleJourneyDefect(task, scenarioId, result)
+        if (final !== 'error' && taint) freshlyAuthoredTaints.add(taintKey)
+        if (final !== 'settled') usedIds.delete(scenarioId)
+        break
       }
-      // The ledger rows — one per discard, with the re-author's outcome. A heal
-      // that did NOT converge leaves the flow tainted, so the NEXT generate
-      // re-authors fresh again (a `resolved` heal settles clean and needs none).
-      for (const h of selfHeal) {
-        const outcome = healOutcomes.get(h.ref) ?? 'unresolved'
-        autoResolved.push({
-          kind: 'fidelity-discard',
-          flowId: h.candidate.flow.id,
-          surface: h.candidate.surface,
-          doc: h.candidate.section.doc,
-          anchor: h.candidate.section.anchor,
-          title: h.candidate.scenario.title,
-          mismatch: h.mismatch,
-          outcome,
-        })
-        if (outcome !== 'resolved') {
-          taintFlow(h.candidate.flow.id, h.candidate.surface, h.candidate.scenario.title, h.mismatch)
+      case 'exhausted': {
+        const settled = await settleExhaustedOrImplicit(task, cacheKey, result, true)
+        if (settled) {
+          if (taint) freshlyAuthoredTaints.add(taintKey)
+        } else {
+          usedIds.delete(scenarioId)
         }
+        break
       }
     }
   }
 
-  // 10.5 Triage — ONE judgment call per failing test, after every birth
-  // round has settled. The verdict (+ confidence, brief, unblock recommendation)
-  // attaches to the TEST's birth finding in place; the flow rolls it up read-side.
-  // Setup-class failures never reach here — the runner's deterministic machinery
-  // (run refusals, unserved routes, setup-defect results, authoring `blockedOn`)
-  // routed them to the needs-setup/blocked states before any verdict existed, which
-  // is why the verdict set has no `environment`. Fail-soft and cached per failure
-  // identity: a re-generate re-triages only new or changed failures, and a test
-  // whose call cannot complete commits untriaged.
-  const failedEntries = [...failedTests.values()].flat()
-  if (failedEntries.length > 0) {
-    let triaged = 0
-    options.onTriageProgress?.(0, failedEntries.length)
-    await Promise.all(
-      failedEntries.map((entry) =>
-        limit(async () => {
-          try {
-            const { candidate, finding } = entry
-            const section = sectionByKey.get(flowSectionKey(finding.doc, finding.anchor))
-            const milestones: TriageMilestone[] = [...candidate.flow.milestones]
-              .sort((a, b) => a.order - b.order)
-              .map((m) => ({
-                order: m.order,
-                claim: m.claimTitle,
-                ...(m.order === finding.failedMilestone ? { failed: true } : {}),
-              }))
-            // The request-surface grounding the pipeline already holds: real probe
-            // transcripts for a cli test (a cache hit — authoring grounded the same
-            // claim), the plan's inbound request contracts for an api test.
-            const probes =
-              candidate.surface === 'cli' && finding.claim ? await groundClaims([finding.claim]) : []
-            const plan = taskByKey.get(candidate.ref)?.plan
-            const journeyContracts =
-              candidate.surface === 'api' && plan
-                ? buildJourneyContractHints(plan.journeys, requestContracts)
-                : []
-            const triage = await runTriage(
-              repoRoot,
-              finding,
-              {
-                flow: { id: candidate.flow.id, title: candidate.flow.title, goal: candidate.flow.goal },
-                surface: candidate.surface,
-                sectionHeading: section?.headingText ?? finding.anchor,
-                sectionText: section ? section.fullText || section.ownText : '',
-                milestones,
-                probes,
-                journeyContracts,
-              },
-              triageRunner,
-            )
-            if (triage) finding.triage = triage
-          } finally {
-            options.onTriageProgress?.(++triaged, failedEntries.length)
+  // The author fan-out: one shared pLimit slot per task — a task's whole
+  // session (turns, sandbox runs, in-loop review, heal) occupies its slot.
+  // TWO WAVES: every non-epic task first, then the epics, so an epic's prompt
+  // can carry its settled members' scenarios. Order within a wave follows the
+  // flow corpus, so scheduling is deterministic; members' outcomes are settled
+  // records by the time an epic reads them and are never changed by it.
+  const runTask = (task: AuthorTask): Promise<void> =>
+    limit(async () => {
+      try {
+        await runAuthorWorker(task)
+      } finally {
+        bumpAuthor()
+      }
+    })
+  await Promise.all(authorTasks.filter((t) => t.work.flow.composedOf.length === 0).map(runTask))
+  await Promise.all(authorTasks.filter((t) => t.work.flow.composedOf.length > 0).map(runTask))
+
+  // Every authoring unit was lost and nothing was authored. Returning `ok` here
+  // would report a run that authored nothing as a clean no-op — and persist below
+  // would then DELETE each changed flow's prior scenarios over an LLM outage. Abort
+  // before anything is written: prior scenarios and manifest entries survive
+  // untouched, the flows stay work for the next run. A run that authored ANYTHING
+  // (some flows were cache hits, some sessions settled) is never an abort — its
+  // losses are reported in `llmFailures` and `errors` instead.
+  const authoringWipeout = authorCalls > 0 && authorCallErrors === authorCalls
+  if (settledCandidates.length === 0 && (audit.isSystemicFailure('guard.generate') || authoringWipeout)) {
+    const known = {
+      recipe: recipeMeta,
+      recipeFingerprint,
+      sectionsTotal: plan.sections.length,
+      sectionsChanged: plan.work.length,
+      skippedUnchanged: plan.sections.length - plan.work.length,
+      coverageGaps,
+      errors,
+      extractionFailures,
+      orphaned: orphanedSections,
+      orphanedDismissals,
+      orphanedFlowDismissals,
+      flows: flowsReport,
+      journeys: journeysReport,
+      externalServices,
+    }
+    // A thrown-call wipeout reads its reason off the tally; a worker/unusable-
+    // output one has no tally to read, so it states the loss itself.
+    const head = audit.isSystemicFailure('guard.generate')
+      ? undefined
+      : unusableOutputReason('guard.generate', 'authoring call', authorCalls, firstAuthorCallError)
+    return llmFailedResult(audit, 'guard.generate', known, head)
+  }
+
+  // 8. Confirmation — the gate of record: every worker-settled candidate
+  // (passing and failing alike) executes ONCE in a sandbox the session never
+  // touched. cli candidates batch into ONE run (each already gets its own fresh
+  // sandbox inside it); api candidates would share datastore state in a batched
+  // run, so each confirms ALONE in a fresh runner invocation (services.up +
+  // seed + boot per candidate), bounded by the isolation cap — beyond it the
+  // remainder confirms in one batched run and settles on that (possibly
+  // polluted) evidence. A worker-settled-FAILING candidate whose confirmation
+  // PASSES drops its diagnosis and commits passing; a worker-settled-PASSING
+  // candidate that FAILS confirmation re-opens its session once with the
+  // evidence — ONE flip-resume routing serves both surfaces.
+  // The api order (and thus the cap selection) is DETERMINISTIC — flow order,
+  // then scenario id — never authoring completion order.
+  const flowOrder = new Map(works.map((w, i) => [w.flow.id, i]))
+  const confirmOrder = (a: SettledCandidate, b: SettledCandidate): number =>
+    (flowOrder.get(a.candidate.flow.id) ?? 0) - (flowOrder.get(b.candidate.flow.id) ?? 0) ||
+    a.candidate.scenario.id.localeCompare(b.candidate.scenario.id)
+  let isolationLeft = isolationCap
+
+  /** One confirmation round over a mixed pool: the cli batch, then the isolated
+   *  api runs, then the api overflow batch. Returns the settled outcomes, or
+   *  the no-op anomaly that aborts the run; a refusal unsettles the candidates
+   *  it cancelled. */
+  const confirmRound = async (
+    pool: readonly SettledCandidate[],
+  ): Promise<{ anomaly: GuardNoOpAnomaly } | { outcomes: BirthOutcome[] }> => {
+    const outcomes: BirthOutcome[] = []
+    const runBatch = async (batch: BirthCandidate[]): Promise<GuardNoOpAnomaly | null> => {
+      const run = await birthValidate(repoRoot, batch, {
+        executor,
+        recipe,
+        skipBuild: true,
+        noOpThresholdMs: options.noOpThresholdMs,
+        onPhase: options.onBirthPhase,
+        onScenarioSettled: bumpBirth,
+      })
+      settleRefusal(run, batch)
+      const anomaly = foldBirthRound(run)
+      if (!anomaly) outcomes.push(...run.outcomes)
+      return anomaly
+    }
+    const cli = pool.filter((sc) => sc.candidate.surface !== 'api').map((sc) => sc.candidate)
+    if (cli.length > 0) {
+      const anomaly = await runBatch(cli)
+      if (anomaly) return { anomaly }
+    }
+    const api = [...pool.filter((sc) => sc.candidate.surface === 'api')].sort(confirmOrder)
+    const isolate = api.slice(0, Math.max(0, isolationLeft))
+    isolationLeft -= isolate.length
+    if (isolate.length > 0) options.onBirthPhase?.('confirm', isolate.length)
+    for (const sc of isolate) {
+      if (runRefusal) {
+        // A recorded refusal reproduces identically until the config changes:
+        // the remaining candidates were never judged, so they stay unsettled.
+        sc.task.errored = true
+        emitFlowState(sc.task.work.flow.id, sc.task.surface, 'error', 'the runner refused the run')
+        continue
+      }
+      const run = await birthValidate(repoRoot, [sc.candidate], {
+        executor,
+        recipe,
+        skipBuild: true,
+        noOpThresholdMs: options.noOpThresholdMs,
+      })
+      settleRefusal(run, [sc.candidate])
+      const anomaly = foldBirthRound(run)
+      if (anomaly) return { anomaly }
+      const outcome = run.outcomes[0]
+      if (outcome) {
+        outcomes.push(outcome)
+        bumpBirth()
+      }
+    }
+    const overflow = api.slice(isolate.length).map((sc) => sc.candidate)
+    if (overflow.length > 0) {
+      const anomaly = await runBatch(overflow)
+      if (anomaly) return { anomaly }
+    }
+    return { outcomes }
+  }
+
+  /**
+   * Route ONE confirmation outcome — the same routing for a cli batch verdict
+   * and an api isolated one. A pass persists; a fail commits failing with the
+   * worker's diagnosis, flips into a session resume (`flips` given, session
+   * live), commits untriaged (a cache-served candidate has no session), or —
+   * on the SECOND round (`flips` null) — is withheld: the session re-settled
+   * PASSING and the fresh sandbox still disagrees, so the scenario is defective
+   * (state-dependent or nondeterministic), never committed, and the flow
+   * re-authors next generate with its cache bypassed. An api setup-declaration
+   * defect taints the flow so the next generate bypasses the poisoned cache.
+   */
+  const routeConfirmed = (
+    sc: SettledCandidate,
+    o: BirthOutcome,
+    flips: { sc: SettledCandidate; outcome: BirthOutcome }[] | null,
+  ): void => {
+    const task = sc.task
+    if (o.result.outcome === 'pass') {
+      // A worker-settled-FAILING candidate whose fresh sandbox PASSES commits
+      // passing — the confirmation is the evidence of record, so the
+      // diagnosis is dropped with the failure it explained.
+      pushInto(persisted, o.candidate.ref, o.candidate)
+    } else if (o.result.outcome === 'fail') {
+      if (sc.failing) {
+        settleFailedTest(task, o, sc.failing)
+      } else if (flips && sc.session) {
+        flips.push({ sc, outcome: o })
+      } else if (flips) {
+        // A cache-served candidate has no session to resume: the flip commits
+        // failing on the confirmation evidence (the conservative default —
+        // red drift is never silently withheld), untriaged.
+        settleFailedTest(task, o)
+      } else {
+        pushInto(withheldFailures, o.candidate.ref, toFinding(o))
+        taintFlow(
+          o.candidate.flow.id,
+          o.candidate.surface,
+          o.candidate.scenario.title,
+          o.result.failure?.actual ?? 'the confirmation run failed twice against a scenario the session settled passing',
+        )
+      }
+    } else if (o.candidate.surface === 'api' && isSetupDefectResult(o.result)) {
+      // A setup-declaration defect is a rejected test: taint the flow so the
+      // next generate bypasses the author cache still holding the bad setup.
+      taintFlow(
+        o.candidate.flow.id,
+        o.candidate.surface,
+        o.candidate.scenario.title,
+        o.result.failure?.actual ?? 'setup failed to materialize',
+      )
+      task.errored = true
+      errors.push(errorFrom(o))
+      emitFlowState(o.candidate.flow.id, o.candidate.surface, 'error', 'the declared setup failed to materialize')
+    } else if (!settleUnservedRoute(task, o)) {
+      task.errored = true
+      errors.push(errorFrom(o))
+    }
+  }
+
+  if (settledCandidates.length > 0) {
+    const build = await awaitBuild()
+    if (!build.ok) {
+      const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
+      for (const sc of settledCandidates) {
+        sc.task.errored = true
+        errors.push(errorFrom({ candidate: sc.candidate, result: { failure: { actual: message } } }))
+        emitFlowState(sc.task.work.flow.id, sc.task.surface, 'error', 'the recipe build failed before confirmation')
+      }
+    } else if (await deadEntry()) {
+      for (const sc of settledCandidates) {
+        sc.task.errored = true
+        emitFlowState(sc.task.work.flow.id, sc.task.surface, 'error', 'the built entry failed to start')
+      }
+    } else {
+      const byId = new Map(settledCandidates.map((sc) => [sc.candidate.scenario.id, sc]))
+      birthTotal += settledCandidates.length
+      const first = await confirmRound(settledCandidates)
+      reconcileBirth()
+      if ('anomaly' in first) {
+        return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(first.anomaly, recipe) })
+      }
+
+      const flips: { sc: SettledCandidate; outcome: BirthOutcome }[] = []
+      for (const o of first.outcomes) {
+        routeConfirmed(byId.get(o.candidate.scenario.id)!, o, flips)
+      }
+
+      // ONE resume per flipped candidate — the session wakes to the fresh-sandbox
+      // evidence — then the revised settles get ONE more confirmation round.
+      if (flips.length > 0) {
+        const revised: SettledCandidate[] = []
+        await Promise.all(
+          flips.map(({ sc, outcome }) =>
+            limit(async () => {
+              noteResumeQueued()
+              let res: WorkerFlowResult
+              try {
+                res = await resumeWorker(
+                  sc.task,
+                  sc.candidate.scenario.id,
+                  sc.session!,
+                  confirmObservation(outcome),
+                  { raw: sc.raw, scenario: sc.candidate.scenario, result: outcome.result },
+                )
+              } finally {
+                noteResumeDone()
+              }
+              const cacheKey = authorKeyOf(sc.task)
+              switch (res.kind) {
+                case 'settled': {
+                  await writeWorkerCache(cacheKey, res)
+                  const partial = partialOf(sc.task, res.blockedMilestones)
+                  if (partial) {
+                    sc.task.partial = partial
+                    settlePartialGap(sc.task, partial)
+                  }
+                  revised.push({
+                    task: sc.task,
+                    candidate: { ...sc.candidate, scenario: res.scenario },
+                    raw: res.raw,
+                    ...(res.failing ? { failing: res.failing } : {}),
+                    session: res.session,
+                  })
+                  break
+                }
+                case 'blocked':
+                  await settleBlockedOutcome(sc.task, cacheKey, res)
+                  break
+                case 'journey-defect':
+                  // No heal after a confirmation flip: the confirmation pools
+                  // are closed, so a heal-resumed settle would have no round
+                  // left to confirm in — the defect records and errors as it
+                  // always did, and the next generate re-authors the flow.
+                  recordJourneyDefect(sc.task, res)
+                  journeyDefectTerminal(sc.task, res)
+                  break
+                case 'exhausted':
+                  // No implicit settle here: the confirmation pools are closed,
+                  // so a session-passing last run would have no round left to
+                  // confirm in — the exhaustion records as it always did.
+                  settleExhausted(sc.task, res)
+                  break
+              }
+            }),
+          ),
+        )
+        if (revised.length > 0) {
+          const revisedById = new Map(revised.map((sc) => [sc.candidate.scenario.id, sc]))
+          birthTotal += revised.length
+          const second = await confirmRound(revised)
+          reconcileBirth()
+          if ('anomaly' in second) {
+            return emptyResult('recipe-failed', { llmFailures: audit.failures(), reason: noOpAnomalyReason(second.anomaly, recipe) })
           }
-        }),
-      ),
-    )
+          for (const o of second.outcomes) {
+            routeConfirmed(revisedById.get(o.candidate.scenario.id)!, o, null)
+          }
+        }
+      }
+    }
   }
 
   // THE ADJUDICATION CARVE-OUT (plan item 88). Every OTHER stage aborts the run
   // (`llm-failed`, nothing written) when it loses every call, because those stages
   // gate CONTENT: a blind extraction or a blind authoring pass would rewrite the
-  // committed corpus with an outage's noise. Fidelity and triage gate VERDICTS
-  // ABOUT content that already exists and that birth has already executed against
-  // the real app — a lost fidelity review means a green test persists unreviewed, a
-  // lost triage means a red test commits with no verdict. That costs ANNOTATION,
-  // not correctness, and adjudication is the LAST thing a generate does: extract,
-  // flows, match, authoring and birth have all already been paid for. Aborting here
-  // would throw away a 258-scenario run's entire spend — strictly more expensive
-  // than shipping it annotated — over an outage that started after the user's
-  // confirm, where the pre-flight estimate could not have warned them.
-  //
-  // So the collapse never aborts. It is not silent either: the stage is recorded
-  // here, rides the persisted `guard/result.json`, and every surface that renders
-  // the generate summary says the corpus shipped unadjudicated. Both stages always
-  // spawn on the run's transport (#858 — gating them on the CALLER's transport made
-  // them dead in every OSS run), so a caller that cannot reach a model attempts,
-  // loses every call, and lands HERE — loud — instead of reading like a healthy run.
+  // committed corpus with an outage's noise. Fidelity gates VERDICTS ABOUT content
+  // that already exists and that the sandbox has already executed against the real
+  // app — a lost review means a green test persists unreviewed. That costs
+  // ANNOTATION, not correctness, and aborting would throw away the whole run's
+  // authoring spend — strictly more expensive than shipping it annotated. So the
+  // collapse never aborts. It is not silent either: the stage is recorded here,
+  // rides the persisted `guard/result.json`, and every surface that renders the
+  // generate summary says the corpus shipped unadjudicated.
   const unadjudicated: GuardUnadjudicatedStage[] = []
   if (audit.isSystemicFailure('guard.fidelity')) {
     unadjudicated.push({ stage: 'guard.fidelity', affected: fidelityUnreviewed })
-  }
-  if (audit.isSystemicFailure('guard.triage')) {
-    unadjudicated.push({ stage: 'guard.triage', affected: failedEntries.length })
-    // Same reason as fidelity: a committed failing test whose flow settles is never
-    // re-triaged, so the "re-run to get the verdicts" line would be a lie.
-    for (const entry of failedEntries) unadjudicatedRefs.add(entry.candidate.ref)
-  }
-
-  // Birth-failure routing. A failing test commits only when triage
-  // blamed the REPO (`code-drift` / `doc-drift`) or produced no verdict (the
-  // conservative default: red drift is the product's value, so an untriaged
-  // failure is never silently withheld). A `generation-defect` verdict says OUR
-  // scenario is faulty — it is withheld from the corpus and its flow stays
-  // unsettled, so the next generate re-authors it (tainted, so the poisoned
-  // author cache is bypassed). At HIGH confidence with auto-resolve budget left
-  // the failure is RETIRED to the ledger — an auditable row, never a
-  // human task — and past the budget it escalates as one ("re-generation is not
-  // fixing this"). Setup-class failures never got this far: the deterministic
-  // machinery settled them without a verdict.
-  const autoRetiredRefs = new Set<string>()
-  for (const [ref, entries] of failedTests) {
-    const commitClass: typeof entries = []
-    for (const e of entries) {
-      const triage = e.finding.triage
-      if (triage?.verdict !== 'generation-defect') {
-        commitClass.push(e)
-        continue
-      }
-      const c = e.candidate
-      const key = autoResolutionKey(c.flow.id, c.surface)
-      taintFlow(c.flow.id, c.surface, e.finding.title, triage.brief)
-      if (triage.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
-        autoResolved.push({
-          kind: 'triage-resolve',
-          flowId: c.flow.id,
-          surface: c.surface,
-          doc: e.finding.doc,
-          anchor: e.finding.anchor,
-          title: e.finding.title,
-          verdict: triage.verdict,
-          brief: triage.brief,
-        })
-        bumpLedger(key, 'triage')
-        autoRetiredRefs.add(ref)
-        continue
-      }
-      if (triage.confidence === 'high') {
-        e.finding.autoResolveEscalation = { count: autoResolveCount(key), source: 'triage' }
-      }
-      pushInto(withheldFailures, ref, e.finding)
-    }
-    failedTests.set(ref, commitClass)
   }
 
   // 11. Persist — INDEPENDENTLY, per scenario, whatever its birth execution said.
@@ -2329,6 +3098,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const task = taskByKey.get(ref)
       const commit = (c: BirthCandidate, status: GuardTestStatus, finding?: GuardBirthFinding): string => {
         const file = writeScenarioFile(repoRoot, slug, c.scenario)
+        // A PARTIAL scenario records the milestone orders it covers — the honest
+        // "N of M claims tested" half; the blocked rest is on the sibling gap.
+        const covered = task?.partial ? { milestones: task.partial.covered } : {}
         written.push({
           id: c.scenario.id,
           title: c.scenario.title,
@@ -2338,6 +3110,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           flowId: work.flow.id,
           surface,
           status,
+          ...covered,
         })
         // A failing test COMMITS WITH its diagnosis: the manifest entry
         // is the durable record — it travels with the corpus and survives every
@@ -2346,29 +3119,55 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           id: c.scenario.id,
           surface,
           status,
+          ...covered,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
         return file
       }
-      for (const c of persisted.get(ref) ?? []) commit(c, 'passing')
+      for (const c of persisted.get(ref) ?? []) {
+        commit(c, 'passing')
+        emitFlowState(work.flow.id, surface, 'settled', 'passing')
+      }
       for (const { candidate, finding } of failedTests.get(ref) ?? []) {
         const file = commit(candidate, 'failing', finding)
         // The birth result rides the report keyed on the test it belongs to, so
         // every failure now names a scenario the user can open, re-run, or delete.
         birthFindings.push({ ...finding, scenarioId: candidate.scenario.id, committed: true, file })
+        emitFlowState(
+          work.flow.id,
+          surface,
+          'settled',
+          finding.triage ? `failing: ${finding.triage.verdict}` : 'failing',
+        )
       }
       const rejections = fidelityRejections.get(ref) ?? []
       const withheld = withheldFailures.get(ref) ?? []
       birthFindings.push(...rejections, ...withheld)
-      // An auto-retired failure left no row — but the flow still re-attempts.
       if (
         rejections.length > 0 ||
         withheld.length > 0 ||
-        autoRetiredRefs.has(ref) ||
         unadjudicatedRefs.has(ref) ||
         task?.errored
       ) {
         unsettledFlow = true
+      }
+      // The terminal backstop, so the state feed's counters always sum. A
+      // rejection or a withhold OVERRIDES a session-time settle (the flow did
+      // not, in the end, settle); a task that already carries its own terminal
+      // (retired, an authoring error) keeps it.
+      if (rejections.length > 0) {
+        emitFlowState(work.flow.id, surface, 'error', 'the scenario was rejected as not verifying its flow')
+      } else if (withheld.length > 0) {
+        emitFlowState(work.flow.id, surface, 'error', 'withheld: the confirmation run failed twice')
+      } else if (unadjudicatedRefs.has(ref)) {
+        emitFlowState(work.flow.id, surface, 'error', 'no fidelity verdict landed')
+      } else {
+        // Generic backstop: only a task that never reached ANY terminal —
+        // a settled state here means the surface genuinely settled; keep it.
+        const current = flowStates.get(`${work.flow.id}\0${surface}`)?.state
+        if (!current || current === 'queued' || current === 'active') {
+          emitFlowState(work.flow.id, surface, 'error', 'the flow did not settle this run')
+        }
       }
     }
     // A flow left unsettled on some surface keeps a manifest entry (its committed
@@ -2438,21 +3237,27 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // refused to overwrite an existing `api.seed` — so the stage was dead by
   // construction the moment setup became a prerequisite.
 
-  // Reconcile the durable ledger ONCE — counts and taints together:
+  // Reconcile the durable ledger ONCE — counts, taints and retirements together:
   //  - counts: prior entries carry; this run's auto-resolutions bump theirs; a
-  //    flow that CONVERGED (committed a passing test) clears its budget.
+  //    flow that CONVERGED (committed a passing test) clears its budget, and a
+  //    cleared retirement clears its count too (the budget starts over).
   //  - taints: a tainted flow freshly re-authored this run clears (the poisoned
   //    cache entry was overwritten) unless it re-flagged; a flow that ended
   //    rejected is (re)tainted with the latest evidence; a flow neither
   //    re-authored nor cleared keeps its prior taint.
+  //  - retirements: a reset drops its record; a new retirement lands with the
+  //    count + history it absorbed, and its entry is dropped with it.
   // Written only when something is (or was) in the ledger, so a clean run never
   // creates the file.
   const nextEntries: Record<string, GuardAutoResolutionEntry> = { ...priorLedger.entries }
+  for (const key of clearedRetirements) delete nextEntries[key]
   for (const [key, bump] of ledgerBumps) {
+    const carried = clearedRetirements.has(key) ? undefined : priorLedger.entries[key]
     nextEntries[key] = {
-      count: (priorLedger.entries[key]?.count ?? 0) + bump.times,
+      count: (carried?.count ?? 0) + bump.times,
       source: bump.source,
       updatedAt: nowIso,
+      attempts: [...(carried?.attempts ?? []), ...bump.attempts],
     }
   }
   for (const w of written) {
@@ -2461,23 +3266,37 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const nextTainted: Record<string, GuardFlowTaint> = { ...priorLedger.tainted }
   for (const key of freshlyAuthoredTaints) delete nextTainted[key]
   for (const [key, taint] of flaggedFlows) nextTainted[key] = taint
+  const nextRetired: Record<string, GuardFlowRetirement> = { ...priorLedger.retired }
+  for (const key of clearedRetirements) delete nextRetired[key]
+  for (const [key, retirement] of newRetirements) {
+    nextRetired[key] = retirement
+    delete nextEntries[key]
+  }
   if (
     Object.keys(nextEntries).length > 0 ||
     Object.keys(nextTainted).length > 0 ||
+    Object.keys(nextRetired).length > 0 ||
     Object.keys(priorLedger.entries).length > 0 ||
-    Object.keys(priorLedger.tainted).length > 0
+    Object.keys(priorLedger.tainted).length > 0 ||
+    Object.keys(priorLedger.retired).length > 0
   ) {
-    writeGuardAutoResolutions(repoRoot, { version: 1, entries: nextEntries, tainted: nextTainted })
+    writeGuardAutoResolutions(repoRoot, {
+      version: 1,
+      entries: nextEntries,
+      tainted: nextTainted,
+      retired: nextRetired,
+    })
   }
 
   // The surviving-pass identity (B6): one count per birth pass that reached a
-  // reported bucket — a committed passing test, a fidelity rejection, or a
-  // fidelity-discard ledger row. A pass whose review could not complete reaches
-  // no bucket and is not counted.
+  // reported bucket — a committed passing test, a fidelity rejection, a
+  // fidelity-discard ledger row, or a fidelity-driven retirement. A pass whose
+  // review could not complete reaches no bucket and is not counted.
   const birthPassed =
     written.filter((w) => w.status === 'passing').length +
     [...fidelityRejections.values()].reduce((n, list) => n + list.length, 0) +
-    autoResolved.filter((a) => a.kind === 'fidelity-discard').length
+    autoResolved.filter((a) => a.kind === 'fidelity-discard').length +
+    autoResolved.filter((a) => a.kind === 'retire' && a.source === 'fidelity').length
 
   return {
     status: 'ok',
@@ -2491,6 +3310,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     written,
     coverageGaps,
     birthFindings,
+    journeyDefects,
+    ...(workerSessionsRan ? { authoringRunId } : {}),
     errors,
     extractionFailures,
     llmFailures: audit.failures(),
@@ -2560,6 +3381,23 @@ interface AuthorTask {
   server?: string
   /** Set when authoring/birth/fidelity errored — the flow stays unsettled. */
   errored?: boolean
+  /**
+   * Set when the worker settled this flow PARTIALLY (some milestones named
+   * blocked): the scenario covers `covered` only, and every later stage of this
+   * task (fidelity, confirmation, manifest) reads the split from here.
+   */
+  partial?: TaskPartition
+}
+
+/** A partially-blocked flow's settled split — covered subset + blocked rest.
+ *  The manifest `milestones` wire shape derives from it, unchanged. */
+interface TaskPartition {
+  /** The blocked milestones' capability nouns, deduped. */
+  refusedOn: string[]
+  /** The flow milestone orders the scenario covers, ascending. */
+  covered: number[]
+  /** The blocked milestones, nouns as the worker named them (enriched at the gap). */
+  blocked: { milestone: number; claim: string; blockedOn: string[] }[]
 }
 
 const taskKey = (task: { work: FlowWork; surface: GuardDriverId }): string => `${task.work.flow.id}\0${task.surface}`
@@ -2595,6 +3433,17 @@ function primarySection(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput
     if (section) return section
   }
   return null
+}
+
+/** Every live section the flow binds — its milestones' and its bindings', deduped. */
+function boundSections(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput>): SectionInput[] {
+  const out = new Map<string, SectionInput>()
+  for (const ref of [...flow.milestones, ...flow.bindings]) {
+    const key = flowSectionKey(ref.doc, ref.anchor)
+    const section = byKey.get(key)
+    if (section) out.set(key, section)
+  }
+  return [...out.values()]
 }
 
 /**
@@ -2681,6 +3530,8 @@ function providedHint(account: ResolvedExternal): ExternalServiceHint {
 interface MappedSurface {
   journeys: Journey[]
   externalServices: DetectedExternalService[]
+  /** The repo's own product names — never a third party, never a blocked-on noun. */
+  ownProductNames: string[]
   /** Per-operation inbound request contracts — the per-journey authoring grounding. */
   requestContracts: ApiRequestContract[]
   /** The app's own outbound request construction — the stub-fidelity grounding. */
@@ -2689,6 +3540,8 @@ interface MappedSurface {
   database: SeedDraftDatabase | null
   /** The connection URLs the app writes down — the generated datastore's source. */
   datastoreUrls: DatastoreUrlRef[]
+  /** The mapping's static-vs-runtime disagreements; the journeys report carries them. */
+  diagnostics: JourneyDiagnostic[]
 }
 
 /**
@@ -2704,10 +3557,12 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
       return {
         journeys: mapped.journeys,
         externalServices: mapped.externalServices ?? [],
+        ownProductNames: mapped.ownProductNames ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
         requestContracts: mapped.requestContracts ?? [],
         outboundRequests: mapped.outboundRequests ?? [],
+        diagnostics: mapped.diagnostics ?? [],
       }
     } catch {
       /* fall through to the snapshot */
@@ -2716,13 +3571,16 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
   // The snapshot carries journeys only — external services are derived from the
   // working tree, never persisted, so a degraded run reports none rather than a
   // stale list.
+  const snapshot = readJourneyCatalog(repoRoot)
   return {
-    journeys: readJourneyCatalog(repoRoot)?.journeys ?? [],
+    journeys: snapshot?.journeys ?? [],
     externalServices: [],
+    ownProductNames: [],
     database: null,
     datastoreUrls: [],
     requestContracts: [],
     outboundRequests: [],
+    diagnostics: snapshot?.diagnostics ?? [],
   }
 }
 
@@ -2802,6 +3660,7 @@ function emptyResult(
     written: [],
     coverageGaps: [],
     birthFindings: [],
+    journeyDefects: [],
     errors: [],
     extractionFailures: [],
     llmFailures: [],
@@ -2893,236 +3752,20 @@ function dismissedReason(subject: string, note?: string): string {
 
 // --- Authoring ---------------------------------------------------------------
 
-type AuthorAttempt = { scenario: RawGeneratedScenario | null; blockedOn: string[] } | { error: string }
-
-/** The cached authored output for one (flow, surface): its scenario, or the
- *  capabilities the flow is blocked on. */
+/**
+ * The cached authored output for one (flow, surface): its scenario (with the
+ * blocked-milestone split and the failing diagnosis the settle carried), or the
+ * capabilities the flow is blocked on. Entries the pre-worker path wrote carry
+ * only the first two fields, and still parse.
+ */
 const AuthoredCacheSchema = z.object({
   scenario: RawGeneratedScenarioSchema.nullable(),
   blockedOn: z.array(z.string().min(1)).default([]),
+  blockedMilestones: z
+    .array(z.object({ milestone: z.number().int().positive(), blockedOn: z.array(z.string().min(1)).min(1) }))
+    .optional(),
+  failing: GuardTriageSchema.optional(),
 })
-
-/**
- * Author ONE scenario for one (flow, surface): cache → call → one corrective
- * re-ask when the output is invalid OR leaves a milestone unrealized. The
- * milestone-coverage check is the engine's, not the prompt's: a scenario that
- * silently drops a milestone would guard less than the flow promises.
- */
-async function authorFlowScenario(opts: {
-  repoRoot: string
-  task: AuthorTask
-  recipe: Recipe
-  recipeFingerprint: string
-  runner: GenerateRunner
-  opIndex: OperationEntry[]
-  /** Doc path → its raw text, for the OpenAPI security resolution the prompt carries. */
-  docText: ReadonlyMap<string, string>
-  ground: (claimTexts: string[]) => Promise<ProbeTranscript[]>
-  /** The third parties this repo imports — canonical name + base-URL env var when
-   *  one was detected (a `setup.http` stub's precondition). Api prompts only. */
-  externalServices: ExternalServiceHint[]
-  /** Per-operation inbound contracts, joined to THIS flow's journeys below. */
-  requestContracts: ApiRequestContract[]
-  /**
-   * The WHOLE api journey catalog, so the prompt can offer the operations
-   * this flow does NOT walk as setup material (signing up before signing in). Empty
-   * on a cli batch or a repo with no api surface.
-   */
-  apiJourneys: Journey[]
-  /** The repo's outbound request construction, already capped. */
-  outboundRequests: OutboundRequestHint[]
-  outboundRequestsOverflow: number
-  /** The app↔server join, so the catalog this prompt advertises is the
-   *  BOUND server's own surface and never another service's. */
-  serverIndex: ServerRouteIndex
-  retry?: BirthRetryContext
-  /**
-   * The prior-rejection evidence (a taint from an earlier generate, or
-   * this run's fidelity self-heal). Its presence BYPASSES the round-1 cache read:
-   * the cache still holds the rejected scenario. The fresh result overwrites it.
-   */
-  priorFlag?: { title: string; mismatch: string }
-  /** Live failure sink — fires per failed attempt, before the call sequence resolves. */
-  onAuthorFailure?: (failure: AuthorFailure) => void
-}): Promise<AuthorAttempt> {
-  const { repoRoot, task, recipe, recipeFingerprint, runner, opIndex, retry } = opts
-  const { work, surface, plan } = task
-  // Fires the moment an attempt fails, so a live surface can say WHICH flow and WHY
-  // while the run is still going. Undefined sink ⇒ nothing is built or called.
-  const failed = (reason: string, attempt: number, willRetry: boolean): void =>
-    opts.onAuthorFailure?.({
-      flowId: work.flow.id,
-      flowTitle: work.flow.title,
-      surface,
-      doc: work.primary.doc,
-      anchor: work.primary.anchor,
-      reason,
-      attempt,
-      willRetry,
-    })
-  const journeyFingerprints = plan.journeys.map((j) => j.fingerprint)
-  const cacheKey = retry
-    ? retryCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint, {
-        ...emptyFinding(),
-        ...retry,
-        title: retry.scenarioTitle,
-      })
-    : authorCacheKey(work.flow, surface, work.sectionKeys, journeyFingerprints, recipeFingerprint)
-
-  // D3 — the flow's doc-example blocks, mined once for the byte-fidelity
-  // validator (the same mining feeds the per-milestone DOC EXAMPLE prompt
-  // blocks through `authorMilestones`).
-  const exampleBlocks: DocExampleBlock[] = [...new Set(work.sections.values())].flatMap((s) =>
-    mineExampleBlocks(s.fullText || s.ownText).map((b) => ({ ...b, doc: s.doc, anchor: s.anchor })),
-  )
-  const exampleDefectOf = (scenario: RawGeneratedScenario): string | null =>
-    exampleFidelityDefect(
-      scenario.driver === 'api'
-        ? { driver: 'api', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) }
-        : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
-      exampleBlocks,
-    )
-
-  // A prior rejection poisons the cache entry (it IS the rejected scenario) —
-  // skip the read; the fresh result below overwrites it under the same key.
-  const cached = opts.priorFlag ? null : await getCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey)
-  if (cached) {
-    const parsed = AuthoredCacheSchema.safeParse(cached)
-    if (parsed.success) {
-      if (!parsed.data.scenario) return { scenario: null, blockedOn: parsed.data.blockedOn }
-      if (
-        uncoveredMilestones(work.flow, parsed.data.scenario).length === 0 &&
-        !firstInvalidMatchPattern(parsed.data.scenario.steps) &&
-        !compositionDefectOf(parsed.data.scenario, recipe) &&
-        !exampleDefectOf(parsed.data.scenario)
-      ) {
-        return { scenario: parsed.data.scenario, blockedOn: [] }
-      }
-    }
-  }
-
-  // Probes ground CLI commands against the built entry — api scenarios are authored
-  // ungrounded (birth evidence supplies the real responses).
-  const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
-  const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
-  // The setup catalog is the BOUND server's own surface. An operation the
-  // route manifest positively attributes to ANOTHER app is unreachable from this
-  // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
-  // in a scenario bound to `apps/web`. An operation nobody claims stays offered —
-  // unknown is not foreign (R6). The flow's OWN operations need no such filter:
-  // Gate B already bound the server from those very paths.
-  const boundApp = appDirOfServer(opts.serverIndex, task.server)
-  const reachableJourneys = boundApp
-    ? opts.apiJourneys.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, journeyEntryPath(j)))
-    : opts.apiJourneys
-  const other = buildOtherOperationHints(reachableJourneys, opts.requestContracts, journeyContracts)
-  const base: AuthorUserContext = {
-    ...buildAuthorCtx(work, surface, plan, recipe, probes, opIndex, opts.docText, opts.externalServices, opts.serverIndex, {
-      journeyContracts,
-      otherOperations: other.operations,
-      otherOperationsOverflow: other.overflow,
-      outboundRequests: opts.outboundRequests,
-      outboundRequestsOverflow: opts.outboundRequestsOverflow,
-    }, retry),
-    ...(opts.priorFlag ? { priorFlag: opts.priorFlag } : {}),
-  }
-
-  let ctx: AuthorUserContext = base
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let raw: unknown
-    try {
-      raw = await runner(ctx)
-    } catch (e) {
-      failed(authorFailureReason((e as Error).message), attempt + 1, false)
-      return { error: attempt === 0 ? `call failed: ${(e as Error).message}` : `re-ask failed: ${(e as Error).message}` }
-    }
-    const parsed = AuthoredFlowScenarioSchema.safeParse(raw)
-    if (!parsed.success) {
-      if (attempt > 0) {
-        failed('invalid output twice', attempt + 1, false)
-        return { error: `output invalid after re-ask: ${flattenZodError(parsed.error)}` }
-      }
-      failed('invalid output', attempt + 1, true)
-      ctx = { ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } }
-      continue
-    }
-    if (!parsed.data.scenario) {
-      const blockedOn = normalizeBlockedOn(parsed.data.blockedOn)
-      await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { scenario: null, blockedOn })
-      return { scenario: null, blockedOn }
-    }
-    const scenario = parsed.data.scenario
-    const uncovered = uncoveredMilestones(work.flow, scenario)
-    const unknown = unknownMilestones(work.flow, scenario)
-    if (uncovered.length > 0 || unknown.length > 0) {
-      if (attempt > 0) {
-        failed(`${uncovered.length} milestone(s) still unrealized`, attempt + 1, false)
-        return {
-          error: `scenario left ${uncovered.length} milestone(s) unrealized after re-ask (${uncovered.join(', ')})`,
-        }
-      }
-      failed('milestones unrealized', attempt + 1, true)
-      ctx = { ...base, issues: { uncoveredMilestones: uncovered, unknownMilestones: unknown } }
-      continue
-    }
-    // A scenario the schema accepts but the engine cannot COMPOSE — a cli step
-    // re-stating the program, an api `${var}` nothing captured, a stub the
-    // scenario points at but never declares. Each dies as an infra error mid-run
-    // (a wasted sandbox, and a failure that reads like drift), so it is corrected
-    // here on the same one re-ask.
-    const composition = compositionDefectOf(scenario, recipe)
-    if (composition) {
-      if (attempt > 0) {
-        failed('does not compose twice', attempt + 1, false)
-        return { error: `scenario still does not compose after re-ask (${composition})` }
-      }
-      failed('does not compose', attempt + 1, true)
-      ctx = {
-        ...base,
-        issues: { uncoveredMilestones: [], unknownMilestones: [], composition },
-      }
-      continue
-    }
-    // D3 — a scenario embedding a REFORMATTED copy of a doc's own example runs
-    // different bytes than the ones the doc promised an outcome for. Corrected
-    // on the same single re-ask a composition defect gets.
-    const exampleDefect = exampleDefectOf(scenario)
-    if (exampleDefect) {
-      if (attempt > 0) {
-        failed('reformats a doc example twice', attempt + 1, false)
-        return { error: `scenario still reformats the doc's own example after re-ask (${exampleDefect})` }
-      }
-      failed('reformats a doc example', attempt + 1, true)
-      ctx = {
-        ...base,
-        issues: { uncoveredMilestones: [], unknownMilestones: [], exampleFidelity: exampleDefect },
-      }
-      continue
-    }
-    // A `matches` the schema accepts but `new RegExp` rejects would throw (log
-    // matcher) or never match (stream/body/json) at birth, after a sandbox run has
-    // already been paid for. Correct it here, on the same one re-ask.
-    const badRe = firstInvalidMatchPattern(scenario.steps)
-    if (badRe) {
-      if (attempt > 0) {
-        failed('invalid `matches` regex twice', attempt + 1, false)
-        return {
-          error: `scenario keeps an invalid \`matches\` regex after re-ask (step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ — ${badRe.error})`,
-        }
-      }
-      failed('invalid `matches` regex', attempt + 1, true)
-      ctx = {
-        ...base,
-        issues: { uncoveredMilestones: [], unknownMilestones: [], invalidPattern: badRe },
-      }
-      continue
-    }
-    await setCacheEntry(repoRoot, GENERATE_CACHE_NAME, cacheKey, { scenario, blockedOn: [] })
-    return { scenario, blockedOn: [] }
-  }
-  failed('authoring exhausted its attempts', 2, false)
-  return { error: 'authoring exhausted its attempts' }
-}
 
 /**
  * A clean one-line reason for a thrown authoring call — a timeout collapses to
@@ -3149,24 +3792,6 @@ function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): st
       : { driver: 'cli', steps: scenario.steps, ...(scenario.setup ? { setup: scenario.setup } : {}) },
     recipe.entry,
   )
-}
-
-/** The flow milestones no step of the scenario realizes. */
-function uncoveredMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): number[] {
-  const covered = new Set(scenario.steps.map((s) => s.milestone).filter((m): m is number => typeof m === 'number'))
-  return flow.milestones.map((m) => m.order).filter((order) => !covered.has(order))
-}
-
-/** `milestone` values on the scenario's steps that match no milestone of the flow. */
-function unknownMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): number[] {
-  const known = new Set(flow.milestones.map((m) => m.order))
-  const out: number[] = []
-  for (const step of scenario.steps) {
-    if (typeof step.milestone === 'number' && !known.has(step.milestone) && !out.includes(step.milestone)) {
-      out.push(step.milestone)
-    }
-  }
-  return out
 }
 
 /** Lowercase, trim, and dedupe (first-seen order) the capability nouns a blocked flow named. */
@@ -3202,7 +3827,6 @@ function buildAuthorCtx(
     outboundRequests: OutboundRequestHint[]
     outboundRequestsOverflow: number
   },
-  retry?: BirthRetryContext,
 ): AuthorUserContext {
   const sections = [...new Set([...work.sections.values()])]
   // The server this flow's scenario runs against. The prompt describes THAT
@@ -3212,6 +3836,7 @@ function buildAuthorCtx(
   // what every single-server repo's prompt has always described.
   const serverName = work.serverBySurface.get(surface)
   const bound = serverName ? resolveApiServers(recipe).servers.get(serverName) : undefined
+  const commandGrammar = surface === 'api' ? [] : commandGrammarOf(plan.journeys)
   return {
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: authorMilestones(work, plan, surface),
@@ -3257,11 +3882,39 @@ function buildAuthorCtx(
               }
             : {}),
         }
-      : { recipeEntry: recipe.entry }),
+      : {
+          recipeEntry: recipe.entry,
+          // The bound commands' parsed flag grammar — gated on non-empty, so a
+          // mapping that derived no cli grammar renders the prompt it always did.
+          ...(commandGrammar.length > 0 ? { commandGrammar } : {}),
+        }),
     recipeBuild: recipe.build,
     probes,
-    ...(retry ? { retry } : {}),
   }
+}
+
+/**
+ * The parsed grammar of the commands a plan's cli journeys invoke, one entry per
+ * command path. Journeys derived before the option schema existed still render:
+ * their bare flag list degrades to name-only options.
+ */
+function commandGrammarOf(journeys: readonly Journey[]): CommandGrammarEntry[] {
+  const byPath = new Map<string, CommandGrammarEntry>()
+  for (const journey of journeys) {
+    if (journey.type !== 'cli') continue
+    for (const step of journey.steps) {
+      if (step.kind !== 'invoke') continue
+      const key = step.command.join(' ')
+      if (byPath.has(key)) continue
+      const options = step.options ?? step.flags.map((flag) => ({ flag }))
+      byPath.set(key, {
+        command: [...step.command],
+        ...(step.label ? { label: step.label } : {}),
+        options,
+      })
+    }
+  }
+  return [...byPath.values()]
 }
 
 /** The flow's milestones as authoring sees them, in path order. */
@@ -3560,21 +4213,32 @@ function diagnosisOf(finding: GuardBirthFinding, file: string): GuardScenarioDia
   }
 }
 
-/** A zeroed finding — the retry cache key only reads the evidence fields. */
-function emptyFinding(): GuardBirthFinding {
-  return { doc: '', anchor: '', title: '', step: 1, expected: '', actual: '' }
-}
-
-/** The retry prompt's evidence block, from the finding being re-authored. */
-function retryContext(evidence: GuardBirthFinding): BirthRetryContext {
-  return {
-    scenarioTitle: evidence.title,
-    step: evidence.step,
-    expected: evidence.expected,
-    actual: evidence.actual,
-    ...(evidence.failedMilestone ? { milestone: evidence.failedMilestone } : {}),
-    ...excerptsOf(evidence),
-  }
+/**
+ * The observation a CONFIRMATION FLIP re-opens its worker session with: the
+ * fresh-sandbox evidence, and the same doc-first discipline the session already
+ * works under — fix mechanics, never weaken an assertion; a genuine
+ * disagreement settles FAILING with a diagnosis.
+ */
+function confirmObservation(o: BirthOutcome): string {
+  const f = o.result.failure
+  const indent = (text: string): string =>
+    text
+      .split('\n')
+      .map((line) => `    ${line}`)
+      .join('\n')
+  const lines = [
+    'The CONFIRMATION run failed: the scenario you settled was executed once more',
+    'in a fresh sandbox this session never touched, and it did not pass there.',
+    'Fix COMMANDS, ARGUMENTS, and SETUP when the scenario is at fault — but when',
+    "the evidence shows a genuine doc-vs-code disagreement, keep the claim's",
+    'assertion and settle FAILING with a diagnosis. The evidence:',
+    `  failing step: ${f?.step ?? 1}${o.result.failedMilestone ? ` (milestone ${o.result.failedMilestone})` : ''}`,
+    `  expected: ${f?.expected ?? ''}`,
+    `  actual:   ${f?.actual ?? ''}`,
+  ]
+  if (f?.stdout) lines.push('  program stdout:', indent(f.stdout))
+  if (f?.stderr) lines.push('  program stderr:', indent(f.stderr))
+  return lines.join('\n')
 }
 
 /**
@@ -3598,6 +4262,29 @@ function errorFrom(o: {
     // error: a boot failure's server stdout/stderr — so `result.json` shows WHY the
     // server never became healthy — or a step-level infra error's excerpts.
     ...excerptsOf(f),
+  }
+}
+
+/**
+ * One lost ADJUDICATION call, as an error row that NAMES what it was judging. The
+ * work itself is intact — the test was authored and birth ran it — so this row is
+ * never counted or worded as an authoring failure; what is missing is the verdict,
+ * and the only useful thing it can say is WHICH test now carries none.
+ */
+function adjudicationError(
+  kind: 'fidelity',
+  task: AuthorTask,
+  scenarioId: string,
+  error: string,
+): GuardGenerateError {
+  return {
+    doc: task.work.primary.doc,
+    anchor: task.work.primary.anchor,
+    kind,
+    flowId: task.work.flow.id,
+    surface: task.surface,
+    scenarioId,
+    message: `fidelity review (${task.surface}) ${error}`,
   }
 }
 
@@ -3643,7 +4330,11 @@ async function reviewFidelity(
   runner: FidelityRunner,
 ): Promise<FidelityResult> {
   const work = task.work
-  const cacheKey = fidelityCacheKey(scenarioBehavior(candidate.scenario), work)
+  // A PARTIAL scenario is judged against its covered subset only — reviewing it
+  // against the whole flow would flag the blocked milestones' absence as a gap.
+  const partial = task.partial
+  const coveredSet = partial ? new Set(partial.covered) : null
+  const cacheKey = fidelityCacheKey(scenarioBehavior(candidate.scenario), work, partial?.covered)
 
   const cached = await getCacheEntry(repoRoot, FIDELITY_CACHE_NAME, cacheKey)
   if (cached) {
@@ -3655,6 +4346,7 @@ async function reviewFidelity(
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: [...work.flow.milestones]
       .sort((a, b) => a.order - b.order)
+      .filter((m) => !coveredSet || coveredSet.has(m.order))
       .map((m) => {
         const section = work.sections.get(m.order)
         return {
@@ -3665,7 +4357,12 @@ async function reviewFidelity(
           sectionText: section?.fullText || section?.ownText || '',
         }
       }),
+    ...(partial
+      ? { blocked: partial.blocked.map((b) => ({ order: b.milestone, blockedOn: b.blockedOn })) }
+      : {}),
     scenarioYaml: serializeScenarioYaml(candidate.scenario),
+    scenarioId: candidate.scenario.id,
+    surface: candidate.surface,
   }
   const attempt = await callFidelityWithReask(ctx, runner)
   if ('error' in attempt) return { error: attempt.error }
@@ -3704,8 +4401,10 @@ function scenarioBehavior(scenario: GuardScenario): string {
 }
 
 /** Per-scenario fidelity cache key: it moves with the scenario BEHAVIOR, the flow's
- *  milestone composition, its sections' content, the format, or the fidelity prompt. */
-function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork): string {
+ *  milestone composition, its sections' content, the format, or the fidelity prompt.
+ *  A PARTIAL scenario's covered subset joins the key (the review context differs);
+ *  a full scenario's key is byte-identical to before partial flows existed. */
+function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork, covered?: readonly number[]): string {
   return createHash('sha256')
     .update(
       [
@@ -3714,6 +4413,7 @@ function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork): string {
         work.flow.fingerprint,
         [...work.sectionKeys].sort().join('~'),
         scenarioBehaviorKey,
+        ...(covered ? [`covered:${[...covered].sort((a, b) => a - b).join(',')}`] : []),
       ].join('::'),
     )
     .digest('hex')
@@ -3722,27 +4422,24 @@ function fidelityCacheKey(scenarioBehaviorKey: string, work: FlowWork): string {
 type FidelityAttempt = { review: { verdict: 'faithful' | 'flagged'; mismatch?: string } } | { error: string }
 
 /**
- * Call the fidelity runner and validate its verdict; on a schema failure re-ask
- * ONCE with the invalid output quoted back, then validate again. A thrown call is
- * not re-asked. Returns `{ error }` on a still-invalid or thrown call.
+ * Call the fidelity runner and validate its verdict; a call that THREW is retried
+ * once (an unreviewed green is the suspect class the reviewer exists for — far
+ * dearer than a second call), and a call that answered unusably is re-asked ONCE
+ * with the invalid output quoted back, then validated again. Returns `{ error }`
+ * when both attempts threw or the re-ask was still invalid.
  */
 async function callFidelityWithReask(ctx: FidelityUserContext, runner: FidelityRunner): Promise<FidelityAttempt> {
-  let raw: unknown
-  try {
-    raw = await runner(ctx)
-  } catch (e) {
-    return { error: `call failed: ${(e as Error).message}` }
-  }
-  const parsed = FidelityReviewSchema.safeParse(raw)
+  const attempt = await callWithRetry(runner, ctx)
+  if ('error' in attempt) return { error: `call failed: ${attempt.error}` }
+  const parsed = FidelityReviewSchema.safeParse(attempt.raw)
   if (parsed.success) return { review: parsed.data }
 
-  let reRaw: unknown
-  try {
-    reRaw = await runner({ ...ctx, correction: { invalidOutput: quoteInvalidOutput(raw) } })
-  } catch (e) {
-    return { error: `re-ask failed: ${(e as Error).message}` }
-  }
-  const reParsed = FidelityReviewSchema.safeParse(reRaw)
+  const reAttempt = await callWithRetry(runner, {
+    ...ctx,
+    correction: { invalidOutput: quoteInvalidOutput(attempt.raw) },
+  })
+  if ('error' in reAttempt) return { error: `re-ask failed: ${reAttempt.error}` }
+  const reParsed = FidelityReviewSchema.safeParse(reAttempt.raw)
   if (reParsed.success) return { review: reParsed.data }
   return { error: `output invalid after re-ask: ${flattenZodError(reParsed.error)}` }
 }

@@ -77,16 +77,32 @@ reusing `verify` (would collide with the live contract command).
 ```
 specs (unchanged)                guard generate                     guard run
 ─────────────────                ────────────────────────────       ─────────────────────────
-docs → spec scan → corpus.json → section index → testability →      build via recipe →
-       decisions.json            recipe discovery → scenario        run scenarios in sandboxes →
-                                 generation → birth validation →    failures → drift (by section) →
-                                 .truecourse/scenarios/ (committed) guard store → dashboard/gate
+docs → spec scan → corpus.json → section index → claims → flows →   build via recipe →
+       decisions.json            journeys → match → author          run scenarios in sandboxes →
+                                 (per-flow WORKER SESSIONS,         failures → drift (by section) →
+                                 cli AND api, with in-loop          guard store → dashboard/gate
+                                 fidelity; epics wave 2) →
+                                 confirmation run →
+                                 .truecourse/scenarios/ (committed)
 ```
+
+The authoring core is the per-flow WORKER SESSION of `docs/GUARD_AGENT_PLAN.md`
+(one agentic loop per flow×surface, BOTH surfaces: draft → run in the sandbox →
+revise → settle a structured outcome, with the fidelity review in-loop and a
+CONFIRMATION round the session never touched as the gate of record — cli batched,
+api isolated per candidate under the isolation cap). Epic flows (non-empty
+`composedOf`) author as a second wave, their prompts carrying the settled
+members' scenarios read-only. The former evidence-retry, partition,
+and triage stages are gone — a failing scenario's verdict is the worker's own
+diagnosis, and worker exhaustion feeds the auto-resolve ledger (`author` source).
+Items below that describe those stages (or the api one-shot author) are
+historical records of the pre-worker pipeline.
 
 Two new packages, mirroring the extractor/verifier split:
 
-- **`packages/guard-generator/`** — the LLM-side pipeline: section indexing, testability
-  classification, recipe discovery, scenario generation, birth validation.
+- **`packages/guard-generator/`** — the LLM-side pipeline: section indexing, claim
+  extraction, flow synthesis, realization matching, recipe discovery, the worker
+  sessions (cli + api), confirmation (birth) validation.
 - **`packages/guard-runner/`** — the deterministic side: scenario schema validation, sandbox
   lifecycle, drivers, normalizers, evidence capture, result mapping. Zero LLM dependencies;
   fully testable with hand-written scenarios.
@@ -5147,3 +5163,315 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
     line is written by a real transition. The analysis pass is reported from `mapOnce`, so
     it lands on step 1 or step 2 depending on which one actually pays for it.
+
+90. **cli authoring receives the command grammar — flags are parsed facts, not guesses
+    (issue #869).** One field run burned 14 generation-defects, all wrong-invocation
+    (`store-and-inspect-the-api-key-securely` alone lost 5 attempts to a missing
+    `--transport api`): the api author gets OpenAPI operations, the cli author got prose.
+    STATUS: BUILT 2026-08-05.
+
+    As built, three layers. (1) `JourneyInvokeStepSchema` gains an optional `options`
+    array (`JourneyCliOptionSchema`: flag, required?, takesValue?, valueHint?, choices?,
+    description?) — additive, and deliberately NEVER fingerprinted: `flags` remains the
+    fingerprinted surface, so a derivation learning MORE about an unchanged flag set moves
+    no journey fingerprint and sprays no drift. The tree derivation fills flag+description
+    (what the analyzer's `CliCommandFlag` preserves today); the probe derivation parses
+    the full schema out of help text (`<hint>`/`[hint]` placeholders, argparse metavars,
+    commander `(choices: …)` clauses). (2) Authoring: `AuthorUserContext.commandGrammar`
+    renders a COMMAND GRAMMAR block — one derived usage line per bound command (required
+    options bare, optional bracketed, `<a|b>` for choices) plus per-option description
+    lines — on the base AND retry prompts; the cli system prompt states the rule (compose
+    argv from the grammar; a DOC EXAMPLE still runs byte-for-byte even against the
+    grammar), which ROLLS `GENERATE_PROMPT_FINGERPRINT` — every cli flow re-authors once,
+    against facts it never had. (3) Belt-and-braces: `deriveStaticProbes` takes the plan's
+    bound cli command paths and grounds a deterministic `<command> --help` per bound
+    command, ranked right after the unconditional `--help` (never evicted by salvage),
+    riding the existing probe cache/truncation conventions; triage grounds with the same
+    bound helps.
+
+    KNOWN GAPS (analyzer-owned, out of this item's scope): the extractor strips value
+    placeholders and does not record `requiredOption`, so tree journeys carry name+
+    description only until it preserves the raw spec; and `.addOption(new Option(…)
+    .choices(…))` — a chained call on the Option — drops the flag entirely (the exact
+    field-case registration shape), which the bound `--help` probe covers meanwhile.
+    Python click/argparse still have no tree extractor; their CLIs take the probe path,
+    where the enriched help parser now captures the full option schema.
+
+91. **Partitioned authoring — a refusal never holds testable claims hostage (issue
+    #868).** A flow authored exactly one scenario walking ALL its milestones, so ONE
+    unsatisfiable milestone refused the whole flow: the field case
+    (`set-up-guard-and-generate-scenarios-from-the-spec`, 6 claims — 3 free, 3 needing
+    an LLM) shipped ZERO coverage of `generate`/`run`. Product verdict: "it shouldn't
+    be one test then" — the flow is a narrative grouping, never the unit of
+    testability. STATUS: BUILT 2026-08-05.
+
+    As built. SEAM: round 1 is untouched (byte-identical system prompt, same cache
+    key, same refusal shape), and a whole-flow refusal on the round-1 path flows into
+    ONE PARTITION follow-up call (`partitionFlowScenario`) that does both halves in a
+    single reply: a scenario walking the milestones the sandbox CAN test, plus
+    `blockedMilestones: [{milestone, blockedOn}]` naming each blocked milestone's
+    blocker. Follow-up over a fatter round-1 contract on purpose — the common case
+    pays nothing and re-keys nothing, each call keeps one job (robust for
+    Sonnet-class authors), and the extra call fires only where a dead-end refusal
+    used to. The partition rules ride the USER prompt (`PARTITION_RULES`), state the
+    DEPENDENCY RULE explicitly (a milestone acting on a blocked prerequisite's state
+    synthesizes the precondition via `setup` or joins the blocked subset — never
+    asserts against a world a blocked sibling was to create; birth remains the safety
+    net), and tolerate a round-1-shaped `blockedOn` reply. The engine validates the
+    split with the authoring loop's own discipline (blocked orders must exist; the
+    scenario realizes exactly the covered subset — `uncoveredMilestones`/
+    `unknownMilestones` are subset-aware; composition/example/regex checks unchanged)
+    with one corrective re-ask; `scenario: null` degrades to exactly the whole-flow
+    blocked gap guard always produced. IDENTITY: the partial scenario is the flow's
+    ordinary `<flow>.<surface>.1` — a changed flow re-authors wholesale (prior files
+    deleted, ids freed), so an unblock GROWS `.1` rather than minting `.2`; one
+    scenario per satisfiable set. BOOKKEEPING: the manifest scenario entry and
+    `result.json` written row gain optional `milestones` (covered orders — absent
+    means all); the `blocked-on` gap (manifest + coverage) gains optional
+    `blockedMilestones` (order + claim + enriched nouns, `#866`/`#867` naming via the
+    existing `enrichBlockedOn`), and its reason reads "blocked on <nouns>: K of N
+    claims of <flow> — the other M are tested" (still `composeBlockedOnReason`
+    format, so the per-service tally parses unchanged). A partitioned flow SETTLES
+    with both a test and a gap on one surface. Fidelity reviews the covered subset
+    with the blocked list in view (its cache key gains a `covered:` segment only when
+    partial); triage marks blocked milestones so absence never reads as a defect; a
+    retry/heal of a partial re-authors against the covered subset (the
+    `blockedMilestones` context block). CACHE/FINGERPRINTS: the partition result is
+    cached under round-1-key + refusal nouns + `PARTITION_PROMPT_FINGERPRINT`;
+    that fingerprint also joins `flowGenerationInputsHash`, which ROLLS every flow
+    once (full flows re-settle from cache; previously-blocked flows re-run and
+    partition). Declaring an external still re-authors via the recipe fingerprint —
+    already in both the author cache key and the flow hash. No client change:
+    coverage surfaces read the additive fields server-side.
+
+92. **A stdio protocol is not an HTTP API — the api surface requires an HTTP transport
+    signal (issue #865).** The field case: `analyze-project-reports-errors-without-crashing-
+    the-host` (from `tools/csharp-roslyn-host/README.md#protocol` — newline-delimited JSON
+    over stdin/stdout) was paired with the api surface because its claims use
+    request/response vocabulary, and then reported "blocked on a recipe `api` block" every
+    generate: an ask no recipe edit can satisfy, indistinguishable from the legitimate
+    "your API journeys need an api block" asks of item 850. STATUS: BUILT 2026-08-05.
+
+    As built. THE GATE is deterministic and engine-side (`packages/guard-generator/src/
+    http-signal.ts` → `flowHttpSignal`), evaluated per flow BEFORE the surface loop in
+    `generate.ts`: the api surface enters a flow's `candidates` only when the flow's own
+    spec — its title, goal, milestone claims, and every bound section's text — names an
+    HTTP transport. Five literal readings, no LLM and no inference: a documented path (an
+    OpenAPI operation section, `GET /v2/bookings` in prose, a `curl` URL — reusing
+    `documentedApiPaths` / the new `documentedPathsInText`), a status code (`HTTP/1.1 200`,
+    `404 Not Found`, `responds with 401`), a named header (`Authorization:`, "the
+    Authorization header", `X-*`), the protocol itself (uppercase `HTTP`/`HTTPS`/`REST`, a
+    loopback URL — case-sensitivity is what separates the named protocol from a lowercase
+    `https://…` link), or a route THIS repo serves (the api journeys' static route
+    prefixes, joined on the literal text: "the /todos endpoint" counts). No signal ⇒ the
+    api surface is not a candidate: no match call, no gap of any kind, no manifest entry —
+    the unsatisfiable ask disappears rather than becoming a different ask. The bias is
+    deliberate and one-directional: a false signal only means the matcher decides as
+    before (and may answer `unrealizable`), while a false block would delete coverage
+    silently — the same asymmetry `server-binding.ts` states as R6.
+
+    ROUTING, not dropping. The gate only removes the api candidacy; the flow's other
+    surfaces are untouched, so the field case still lands on cli (its real remaining
+    requirement is dotnet-sdk, which stays). A raw JSON-RPC pipe with no CLI wrapper is
+    item 862's territory (driver capability), never a recipe ask. COVERAGE HONESTY: when
+    the gate takes a flow's LAST candidate (an api-only repo over a spec that never names
+    HTTP), the flow settles with an `unrealizable` gap on api (`NO_HTTP_SIGNAL_REASON`)
+    instead of recording no test and no gap at all — a flow has never been allowed to
+    settle in silence.
+
+    BOOKKEEPING + FINGERPRINTS. Coverage totals shrink by exactly the (flow × api) pairs
+    the gate removes; `result.json`, the manifest and the read surfaces already derive
+    per-surface rows from what a flow HAS, so a flow with fewer surface entries needs no
+    client change. The pre-flight estimate applies the same gate (`spec-estimate.ts`), so
+    it prices the pairs the run will actually make. NO PROMPT ROLLS: the matching prompt is
+    untouched (the gate is the guarantee — a prompt line would only re-author every flow in
+    every repo for a pairing that can no longer happen), so `MATCH_PROMPT_FINGERPRINT` and
+    every other prompt fingerprint stand. `flowGenerationInputsHash` moves only for a flow
+    that previously GROUNDED on api journeys and no longer does (its `journeyFingerprints`
+    shrink) — that flow re-authors once and its stale api scenario is deleted; a flow that
+    only carried the api blocked-on gap keeps its hash and simply stops re-deriving the
+    gap, because match-stage gaps are re-derived on every run, even for a skipped flow.
+
+    NOT IN SCOPE (deliberate): the CLAIM-level `blocked-on` gate (a claim whose extracted
+    driver is `api` in a repo with no api block is dropped before flow synthesis) is
+    unchanged — the field case is flow-level, and the claim-level path would change which
+    claims enter synthesis.
+
+93. **Adjudication is budgeted, retried, and attributed — a lost verdict names its test
+    (issue #863).** The field case: 2 of 22 `guard.fidelity` calls hit the 120s ceiling
+    (`claude timed out after 120000ms`) while authoring stages get 900s, and the `errors[]`
+    rows they produced carried `flowId: null` — so a run that discarded 5 of 22 greens as
+    unfaithful (~23%) also shipped two greens nobody reviewed, with no way to say which.
+    STATUS: BUILT 2026-08-05.
+
+    As built, three changes on the adjudication call path. (1) BUDGET: one
+    `ADJUDICATION_TIMEOUT_MS = 600_000` (`runners.ts`) for BOTH `guard.fidelity` and
+    `guard.triage` — the heavy-stage tier (extraction, flow synthesis), replacing 120s and
+    300s. A fidelity prompt carries a scenario, its flow's milestones and every bound
+    section verbatim; triage adds the failing run's whole transcript. The ceiling only
+    backstops pre-first-token SILENCE — the stall timer
+    (`TRUECOURSE_LLM_STALL_TIMEOUT_MS`, 5 min without a stream event) stays the hang guard,
+    and `TRUECOURSE_LLM_TIMEOUT_SCALE` scales both as before. Authoring keeps its 900s as
+    the widest ceiling; the fidelity request id gains its surface
+    (`guard.fidelity:<flow>:<surface>`), which a flow's two reviews used to share.
+    (2) RETRY: `callWithRetry` (`validate.ts`) gives a call that THREW exactly one plain
+    second attempt — no correction, no backoff — the other half of the same discipline as
+    the corrective re-ask (which answers the opposite case: the model DID answer,
+    unusably). It sits in the ENGINE, not the spawned runner, so an injected runner is
+    retried too. Nothing is cached for a failure, so a retry is always a fresh call and a
+    repeated loss keeps paying for real attempts. (3) ATTRIBUTION: every lost adjudication
+    call is an `errors[]` row of its own kind (`fidelity` / `triage`, additive to the
+    `kind` enum) carrying `flowId`, `surface` and the new optional `scenarioId` — including
+    the SYSTEMIC case, which previously recorded no row at all. In parallel the transport
+    seam learns `LlmRequest.subject`, which `auditTransport` keeps on the stage tally as
+    `StageTransportTally.subjects[]` (deduped, capped at 50), so `llmFailures` names the
+    lost calls' subjects and not just their count.
+
+    SEMANTICS UNCHANGED (verified by test): per-call fail-soft is exactly as before — a
+    partial fidelity loss still drops that candidate and leaves its flow unsettled, a
+    partial triage loss still commits its failing test untriaged, and a stage that loses
+    EVERY call still ships the corpus and reports itself `unadjudicated` (item 88) rather
+    than aborting, while the content stages still abort `llm-failed` pre-write. The new
+    rows are reporting only: nothing they say withholds work.
+
+    SURFACES. `GuardLastGenerateSummary` gains `unreviewedTests` / `untriagedTests` (names,
+    from the rows) and its `errors` count now EXCLUDES adjudication rows, because every
+    surface words that count as "nothing was written for these units" — which a lost
+    verdict never means. The CLI generate summary and `guard status` render one shared
+    sentence (`guardAdjudicationLossLine`): "N tests passed unreviewed: <ids>" /
+    "N failing tests committed untriaged: <ids>". Dashboard: the rows ride into the
+    existing "What failed" block on the generate overview (the flow detail's authoring
+    block already filters on `kind === 'authoring'`, so it ignores them); a dedicated
+    named block there is deliberately left for the coverage-view pass.
+
+94. **A run's end states are never silent, and an exhausted flow RETIRES — no human-task
+    state (issue #861, the two remaining halves).** The field case: a generate ended `ok`
+    with 23 of 60 flow×surface units carrying no test and the outro said nothing — and the
+    ledger's past-threshold escalation rendered a flow as "failed with no tests" when its
+    code was fine. Product decision (issue comments, verbatim): retire the test → retire
+    the flow; the "needs human review" task state was proposed and rejected.
+    STATUS: BUILT 2026-08-05.
+
+    LOUDNESS. One shared composition (`summarizeFlowSettle` + `guardSettleLine`,
+    `packages/shared/src/guard/summary.ts`) derives the flow×surface settle breakdown from
+    the MANIFEST — the corpus truth, so the closing summary, `guard status` and the
+    dashboard can never disagree: a unit is SETTLED when a committed test realizes it
+    (a partial scenario's milestone-scoped sibling gap never double-counts — settled-with-
+    gap, item 91's rule), and every other unit is unsettled with a reason — `blocked-on`
+    gaps aggregate by their parsed capability nouns (`parseBlockedOnCapabilities`),
+    a retirement reads `retired`, the other kinds read their shared gap label, and a
+    hash-null flow's planned-but-unaccounted surfaces read `pending next generate` (a
+    hash-null flow with nothing recorded at all counts as one such unit, so it never
+    vanishes from the accounting). Rendered as ONE line — `37/60 settled · 23 unsettled:
+    14 blocked on anthropic, 8 blocked on dotnet-sdk, 1 retired` — by the generate
+    closing summary (the flows row, run bookkeeping like `12 unchanged` riding the head)
+    and by `guard status` (replacing the guarded/partial/blocked row; that rollup stays in
+    the composed data). An all-settled corpus stays terse: `60/60 settled`, no unsettled
+    segment. `GuardCoverageSummary` gains `settle`, so the dashboard status payload
+    carries the same numbers; client rendering of the breakdown is left to the
+    coverage-view pass (the data is there).
+
+    RETIREMENT. A past-threshold HIGH-confidence "the test is wrong" verdict (a fidelity
+    flag over budget, a generation-defect triage over budget) no longer surfaces an
+    escalation finding. The flow×surface RETIRES at settle time (`retireFlow`,
+    `generate.ts`): it settles as a `retired` coverage gap — reason `no test — authoring
+    retired after N defective attempts` (`retiredGapReason`, N = ledger count + the
+    retiring attempt) — in the report AND the manifest, so the flow records its hash and
+    every later generate skips it whole (no match, no author: zero calls). The ledger
+    (`guard/auto-resolutions.json`) gains `retired`: per flow×surface the attempt count,
+    the verdict HISTORY (entries now append each bump's `{source, title, detail, at}`),
+    `retiredAt`, and the two reset anchors — `sectionsKey` (hash over the flow's bound
+    `sectionInputsKey`s) and `promptFingerprint` (that surface's authoring-prompt
+    fingerprint). The retiring run also records a visible `autoResolved` row
+    (`kind: 'retire'`) and keeps the flow TAINTED, so whichever reset re-authors bypasses
+    the poisoned author cache. The entry's count moves INTO the retirement record —
+    `entries[key]` is dropped, so a reset starts the budget over. The escalation-era
+    `autoResolveEscalation` field and the `escalation` finding class stay schema-legal for
+    old reports; no new producer.
+
+    EXACTLY THREE RESETS, resolved at work classification (before matching): (a) the
+    flow's bound spec content moved (`sectionsKey` mismatch), (b) the user re-enabled it —
+    `reenabledFlows` in `scenarios/decisions.json` (`{flowId, surface?, reenabledAt}`,
+    the dismissedFlows shape; an entry clears only retirements recorded BEFORE it, so a
+    later re-retirement stands), (c) the authoring engine improved (the surface's
+    author-prompt fingerprint moved). A reset clears the retirement AND its ledger count
+    and FORCES the flow back into work (its hash is disregarded), so it re-authors that
+    run. A prior `retired` manifest gap whose ledger record is gone (the ledger is safe to
+    delete) forces work the same way; `retired` gaps are never carried forward — an active
+    retirement re-derives its gap from the ledger every run, single source.
+
+    SURFACES. Gap kind `retired` joins `GuardCoverageGapKindSchema` (and therefore the
+    display kinds, the coverage-status precedence — ranked with the could-not-test tier
+    after `no-journey` — and the client vocab/colour maps: label "Authoring retired",
+    muted gap grey, plain word Blocked; never red, never a task). The flow detail still
+    exposes the retired attempts' verdicts: `GuardFlowGap` gains an optional `retirement`
+    `{attempts, retiredAt, history[]}`, joined server-side off the working tree's ledger
+    (`guardRetirementsForView`, null on hosted stores — the gap renders bare). Client UI
+    for the history block is deliberately not built here. TRADE-OFF (accepted): a retired
+    surface skips matching, so its manifest `journeys` planning record is not re-derived
+    while retired — the journeys view loses that spec→code planning edge until a reset.
+    B6 identity: a fidelity-driven retirement is a surviving birth pass, so `birthPassed`
+    counts `retire` rows with `source: 'fidelity'` alongside the discard rows. NO PROMPT
+    ROLLS: no prompt text changed, every fingerprint stands — verified by test snapshots.
+
+95. **The cli driver drives long-running services — daemon flows are testable, not
+    eternal infra errors (issue #862).** The field case:
+    `start-monitor-and-stop-the-truecourse-dashboard` authored a cli step running
+    `truecourse dashboard` — a console-mode service that never exits — so the step hit
+    its 30s budget and was killed, every run, forever (on next.2 that scenario
+    deadlocked the whole generate; #843 §5 made it fail cleanly, but
+    cleanly-failing-forever is still a dead end). "Unauthorable with this driver" was
+    REJECTED; the api driver already had the lifecycle vocabulary, so this is
+    convergence, not new machinery. STATUS: BUILT 2026-08-05.
+
+    As built. SCHEMA (`packages/shared/src/guard/scenario.ts`): the cli step set
+    becomes a union (`GuardCliStepSchema`) of the ordinary `run` step plus three
+    lifecycle kinds mirroring the api driver's words — `boot` starts a MANAGED
+    service (`run` argv appended to the entrypoint exactly like an ordinary step's,
+    optional per-boot `env`, and a REQUIRED `ready: { stream, match, withinMs? }` —
+    a cli service has no health path, so the readiness line IS the signal; `match`
+    is the `logs` matcher, substring or `{pattern}`); `signal` and `logs` REUSE the
+    api schemas verbatim (`GuardSignalSchema` / `GuardLogsSchema` — same words for
+    the same concepts, `sinceLastStep` windowing included). Additive: no
+    `GUARD_FORMAT_VERSION` bump, run-only scenarios parse byte-identically. The
+    regex pre-validation (`firstInvalidMatchPattern`) covers `boot.ready.match` and
+    cli `logs.match`; the step view and the story renderer speak the new kinds.
+
+    RUNNER (`run-scenario.ts`). The api server's file-capture spawn was EXTRACTED
+    into `service-process.ts` (`spawnServiceProcess`: group-led, death-sweep
+    registered, stdio to files with the forward-read drain barrier) — `api/server.ts`
+    composes it with port allocation, the cli boot uses it bare, so there is ONE
+    managed-process spawn shape and no second path to drift. Lifecycle rules mirror
+    the api driver: at most one service per scenario (a second `boot` replaces the
+    first, its output folded into the scenario-spanning log accumulator, so a
+    restart's earlier lines stay readable); a `signal`/`logs` step with no service
+    is a clear `error`; readiness classification follows the api boot — a spawn
+    failure is an `error`, but a service that exits early or never prints its line
+    within the budget (default: the step timeout) FAILS, quoting the captured
+    output; the service is killed (process group) at scenario end whatever the
+    outcome. Ordinary `run` steps execute while the service stays up — how "check
+    the running service" is written. Evidence: lifecycle rows join the cli bundle
+    (kind/action/expectation, the same shared description the dashboard renders)
+    and the service's output rides as `service.stdout.txt`/`service.stderr.txt`
+    (the api `server.*.txt` analog).
+
+    AUTHORING. The cli system prompt gains one section — when to reach for the
+    service shape (the milestones speak of starting/staying up/tailing/stopping)
+    and the exact step syntax, with the explicit boundary that a command that EXITS
+    (failing startup included) stays an ordinary `run` step. Composition covers
+    `boot.run[0]` under the same entrypoint/foreign-binary rule. The embedded
+    scenario schema moved with the union, so `GENERATE_PROMPT_FINGERPRINT` ROLLS
+    (51c1ea533c42a935 → 2528d52c09f0e75a) — deliberate and productive: every cli
+    flow re-authors once with the service verbs available, and a daemon flow
+    RETIRED under the old author wakes through item 94's prompt-fingerprint reset
+    to re-author against the vocabulary it was missing (pinned by test). The api
+    prompt and every other fingerprint stand.
+
+    FIELD CASE (pinned e2e): the relkit fixture gained a real long-running `serve`
+    monitor (readiness banner, marker-file request handling, graceful
+    SIGTERM/SIGINT with state cleanup, env knobs for silent/fail/ignore-signals
+    modes) plus a `status` health-check command; the hand-written YAML a model
+    would author — boot on the readiness line, `status` against the live service,
+    `logs` with `sinceLastStep`, `signal` SIGTERM → exit 0 within budget, `status`
+    showing it stopped — runs green through the real runner with the service
+    transcript in evidence (`tests/guard-runner/cli-lifecycle.test.ts`).

@@ -19,7 +19,7 @@
 import { z } from 'zod'
 import {
   GuardSetupSchema,
-  GuardStepSchema,
+  GuardCliStepSchema,
   GuardApiStepSchema,
   GuardNormalizerSchema,
   GuardTestabilityVerdictSchema,
@@ -257,7 +257,7 @@ export const RawGeneratedCliScenarioSchema = z
     title: z.string().min(1),
     driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
-    steps: z.array(GuardStepSchema).min(1),
+    steps: z.array(GuardCliStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
   })
   .passthrough()
@@ -279,49 +279,6 @@ export const RawGeneratedScenarioSchema = z.discriminatedUnion('driver', [
   RawGeneratedApiScenarioSchema,
 ])
 export type RawGeneratedScenario = z.infer<typeof RawGeneratedScenarioSchema>
-
-/**
- * One (flow, surface) authoring call's output: the scenario that realizes the
- * flow's whole path on that surface, or an honest refusal. `scenario` absent (or
- * `null`) with a `blockedOn` list means the flow needs world-state neither the
- * sandbox nor the recipe can provide (a running service, a database, network,
- * credentials); the engine records it as a `blocked-on` gap rather than authoring
- * a scenario that could only die at birth. At least one of the two must be
- * present — a reply with neither is malformed and earns the corrective re-ask,
- * never a silent empty settle.
- */
-export const AuthoredFlowScenarioSchema = z
-  .object({
-    scenario: RawGeneratedScenarioSchema.nullish(),
-    blockedOn: z.array(z.string().min(1)).optional(),
-  })
-  .refine((a) => a.scenario != null || (a.blockedOn?.length ?? 0) > 0, {
-    message: 'expected a "scenario" object or a non-empty "blockedOn" array',
-  })
-  .transform((a) => ({
-    scenario: a.scenario ?? null,
-    blockedOn: a.scenario == null ? (a.blockedOn ?? []) : [],
-  }))
-export type AuthoredFlowScenario = z.infer<typeof AuthoredFlowScenarioSchema>
-
-/** The reply's two fields, narrowed to one driver's scenario shape. */
-function authoredResponse(scenario: z.ZodTypeAny) {
-  return z.object({
-    scenario: scenario.nullish(),
-    blockedOn: z.array(z.string().min(1)).optional(),
-  })
-}
-
-/**
- * The authored reply as ONE driver's system prompt asks for it — the same two
- * fields {@link AuthoredFlowScenarioSchema} parses, narrowed to the driver whose
- * prompt the call carries (`.strip()` renders the scenario closed, exactly as the
- * prompt's canonical scenario schema is). Sent as the request's response schema so
- * the wire contract and the prompt come from ONE Zod source; the engine still
- * parses every reply with the driver-union above.
- */
-export const AuthoredCliResponseSchema = authoredResponse(RawGeneratedCliScenarioSchema.strip())
-export const AuthoredApiResponseSchema = authoredResponse(RawGeneratedApiScenarioSchema.strip())
 
 // ---------------------------------------------------------------------------
 // Fidelity review (one call per green scenario, after birth passes)

@@ -117,10 +117,10 @@ describe('needs-setup vocabulary and paint', () => {
    */
   it('has a full-sentence headline for the banner, and keeps the compact phrase for chips', () => {
     expect(guardNeedsSetupHeadline({ services: ['open-meteo'], provided: [] })).toBe(
-      'Not testable yet — open-meteo is an external service that needs an account before guard can test against it.',
+      'Not testable yet — open-meteo is an external service that needs an account before guard can run scenarios against it.',
     );
     expect(guardNeedsSetupHeadline({ services: ['apple', 'googleapis'], provided: [] })).toBe(
-      'Not testable yet — apple and googleapis are external services that need accounts before guard can test against them.',
+      'Not testable yet — apple and googleapis are external services that need accounts before guard can run scenarios against them.',
     );
     // Seed data is not a third party anyone signs up for — it never reads as one.
     // An OUTSTANDING seed noun only exists when a seed already fed the last
@@ -129,15 +129,15 @@ describe('needs-setup vocabulary and paint', () => {
       'Not testable yet — the seed script ran, but doesn’t create the data this flow needs.',
     );
     expect(guardNeedsSetupHeadline({ services: ['apple', MISSING_DATA_NOUN], provided: [] })).toBe(
-      'Not testable yet — apple is an external service that needs an account before guard can test against it.' +
+      'Not testable yet — apple is an external service that needs an account before guard can run scenarios against it.' +
         ' It also needs data the seed script doesn’t create yet.',
     );
     // The done sub-state states the FACT; the command beneath it is the action.
     expect(guardNeedsSetupHeadline({ services: [], provided: ['open-meteo'] })).toBe(
-      'open-meteo is already set up — these tests just haven’t been authored since.',
+      'open-meteo is already set up — these scenarios just haven’t been authored since.',
     );
     expect(guardNeedsSetupHeadline({ services: [], provided: ['apple', 'googleapis'] })).toBe(
-      'apple and googleapis are already set up — these tests just haven’t been authored since.',
+      'apple and googleapis are already set up — these scenarios just haven’t been authored since.',
     );
     // The one-line contexts (chips, journey needs, section flow rows) are untouched.
     expect(guardNeedsSetupNeed({ services: ['apple', 'googleapis'], provided: [] })).toBe(
@@ -154,7 +154,7 @@ describe('needs-setup vocabulary and paint', () => {
 
   it('the follow-up line adds what the headline leaves out, and never restates it', () => {
     expect(GUARD_NEEDS_SETUP_NEXT).toBe(
-      'A real or sandbox account both work — provide one, then re-run `truecourse guard generate` to author these tests.',
+      'A real or sandbox account both work — provide one, then re-run `truecourse guard generate` to author these scenarios.',
     );
   });
 
@@ -373,7 +373,7 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
   it('carries the service, the explainer and the link — not a bare three-word label', () => {
     const needsSetup = { services: ['open-meteo'], provided: [] };
     renderDetail(needsSetup);
-    const row = within(screen.getByRole('list', { name: 'Tests' })).getAllByRole('listitem')[0];
+    const row = within(screen.getByRole('list', { name: 'Scenarios' })).getAllByRole('listitem')[0];
     // The full sentence, not the chip's compact phrase.
     expect(within(row).getByText(guardNeedsSetupHeadline(needsSetup))).toBeInTheDocument();
     expect(within(row).queryByText(guardNeedsSetupNeed(needsSetup))).not.toBeInTheDocument();
@@ -405,7 +405,7 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
   it('gives every outstanding service its OWN link', async () => {
     const onOpenExternals = vi.fn();
     renderDetail({ services: ['open-meteo', 'stripe'], provided: [] }, onOpenExternals);
-    const row = within(screen.getByRole('list', { name: 'Tests' })).getAllByRole('listitem')[0];
+    const row = within(screen.getByRole('list', { name: 'Scenarios' })).getAllByRole('listitem')[0];
     const links = within(row).getAllByRole('button', { name: /Provide/ });
     expect(links.map((b) => b.textContent)).toEqual([
       'Provide open-meteo→ External APIs',

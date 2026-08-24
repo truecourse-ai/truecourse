@@ -261,14 +261,14 @@ describe('GuardDriftsView — PR run timeline (prNumber)', () => {
 });
 
 /**
- * The run's result rows, in render order — the SHARED test row (the Tests tab
- * renders the same component), grouped by outcome, so they are gathered from
+ * The run's result rows, in render order — the SHARED scenario row (the Scenarios
+ * tab renders the same component), grouped by outcome, so they are gathered from
  * every group list rather than from one container.
  */
 const runRows = (): HTMLElement[] =>
   screen
     .getAllByRole('list')
-    .filter((l) => /tests$/.test(l.getAttribute('aria-label') ?? ''))
+    .filter((l) => /scenarios$/.test(l.getAttribute('aria-label') ?? ''))
     .flatMap((l) => within(l).getAllByRole('listitem'));
 
 describe('GuardDriftsView — ordering + list', () => {
@@ -278,13 +278,19 @@ describe('GuardDriftsView — ordering + list', () => {
     renderView();
     await screen.findByText('login rate limits');
     // The severity tiers are the GROUP headers; the rows inside them are the
-    // shared test row, which wears the plain status word and nothing else.
+    // shared scenario row, which wears the plain status word and nothing else.
     expect(
       screen
         .getAllByRole('list')
         .map((l) => l.getAttribute('aria-label'))
-        .filter((l) => l?.endsWith('tests')),
-    ).toEqual(['Failing tests', 'Error tests', 'Stale tests', 'Orphaned tests', 'Passed tests']);
+        .filter((l) => l?.endsWith('scenarios')),
+    ).toEqual([
+      'Failing scenarios',
+      'Error scenarios',
+      'Stale scenarios',
+      'Orphaned scenarios',
+      'Passed scenarios',
+    ]);
     const rows = runRows();
     // 4 non-pass drifts, then the single pass (auto-expanded — 1 ≤ threshold).
     expect(rows).toHaveLength(5);
@@ -346,12 +352,12 @@ describe('GuardDriftsView — passed group', () => {
     // Collapsed: the pass rows are hidden, but the failing drift still shows.
     expect(screen.queryByText('green 0')).not.toBeInTheDocument();
     // The group header carries the count and an expand affordance.
-    const header = screen.getByRole('button', { name: 'Expand passed tests' });
+    const header = screen.getByRole('button', { name: 'Expand passed scenarios' });
     expect(header).toHaveTextContent(String(PASS_GROUP_EXPAND_MAX + 1));
     await user.click(header);
     expect(await screen.findByText('green 0')).toBeInTheDocument();
     // The affordance flips to collapse.
-    expect(screen.getByRole('button', { name: 'Collapse passed tests' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse passed scenarios' })).toBeInTheDocument();
   });
 
   it('opens a passing scenario WITHOUT evidence (older run) — last result, no evidence section', async () => {
@@ -373,12 +379,12 @@ describe('GuardDriftsView — passed group', () => {
     // binding sits in the footer where the reader can jump into the spec. The
     // container is stable — it renders "Loading steps…" from the first paint —
     // so the wait is for the CONTENT the scenario fetch brings, not the element.
-    await waitFor(() => expect(screen.getByLabelText('test steps')).toHaveTextContent('guard: 2'));
+    await waitFor(() => expect(screen.getByLabelText('scenario steps')).toHaveTextContent('guard: 2'));
     expect(screen.getByText('§ auth/ok')).toBeInTheDocument();
     // No source view anywhere on the page — the steps ARE the content, and the
     // footer's File row is how a developer opens the real file.
     expect(screen.queryByText('View source')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('test source')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('scenario source')).not.toBeInTheDocument();
     // No expected/actual failure detail for a pass.
     expect(screen.queryByText('Expected')).not.toBeInTheDocument();
   });

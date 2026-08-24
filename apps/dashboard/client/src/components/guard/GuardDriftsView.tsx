@@ -124,7 +124,7 @@ export function GuardDriftsView({
           title="Blocked by open spec conflicts"
           body={
             <>
-              Spec Guard can't run until its tests are generated, which is blocked by unresolved spec
+              Spec Guard can't run until its scenarios are generated, which is blocked by unresolved spec
               conflicts.{' '}
               <button
                 type="button"
@@ -146,7 +146,7 @@ export function GuardDriftsView({
         body={
           <>
             Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to run the
-            committed tests and surface what disagrees here.
+            committed scenarios and surface what disagrees here.
           </>
         }
       />

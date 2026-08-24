@@ -170,13 +170,13 @@ describe('describeGuardScenario — the api journey vocabulary', () => {
         ],
       }),
     )!
-    expect(story.steps[0]).toMatchObject({ does: '(re)start the server under test', env: ['PORT_MODE=strict'] })
+    expect(story.steps[0]).toMatchObject({ does: '(re)start the app server', env: ['PORT_MODE=strict'] })
     expect(story.steps[0].expectations).toEqual([
       'the process exits with code 1',
       'its stderr contains “missing DATABASE_URL”',
     ])
     expect(story.steps[1]).toMatchObject({
-      does: 'start the server under test',
+      does: 'start the app server',
       expectations: ['the server answers its health path and is ready to serve'],
     })
     expect(story.steps[3]).toMatchObject({ does: 'read what the server wrote to stdout' })
@@ -233,7 +233,7 @@ describe('describeGuardScenario — the world a setup block declares', () => {
       }),
     )!
     expect(story.world).toEqual([
-      'A fake `weather` service answers GET /v1/forecast, POST /v1/track — a call to anything else fails the test. 1 of them assert what the app sent; POST /v1/track must never be called.',
+      'A fake `weather` service answers GET /v1/forecast, POST /v1/track — a call to anything else fails the scenario. 1 of them assert what the app sent; POST /v1/track must never be called.',
     ])
   })
 

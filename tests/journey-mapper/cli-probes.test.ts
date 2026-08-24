@@ -104,6 +104,17 @@ describe('deriveCliJourneysFromProbes', () => {
     expect(journeys.find((j) => j.id === 'cli/status')?.steps[0]).toMatchObject({ flags: ['--json'] })
   })
 
+  it('carries each flag documented in --help as a schema-bearing option', async () => {
+    const journeys = await deriveCliJourneysFromProbes({ entry: ENTRY, exec: fakeExec(transcripts) })
+    expect(journeys.find((j) => j.id === 'cli/deploy')?.steps[0]).toMatchObject({
+      options: [
+        { flag: '--env', takesValue: true, valueHint: 'name' },
+        { flag: '--dry-run', description: 'Print the plan without applying it' },
+        { flag: '--help' },
+      ],
+    })
+  })
+
   it('probes bare, --help, and one --help per listed command — nothing deeper', async () => {
     const calls: string[][] = []
     await deriveCliJourneysFromProbes({ entry: ENTRY, exec: fakeExec(transcripts, calls) })
@@ -216,7 +227,46 @@ Flags:
     expect(parseCliHelp(help)).toEqual({
       subcommands: ['apply', 'describe', 'logs'],
       flags: ['--namespace'],
+      options: [{ flag: '--namespace', description: 'Namespace scope' }],
     })
+  })
+
+  it('parses each option declaration into its schema — value hint, switch-ness, description', () => {
+    expect(parseCliHelp(DEPLOY_HELP).options).toEqual([
+      { flag: '--env', takesValue: true, valueHint: 'name', description: 'Target environment (default: "staging")' },
+      { flag: '--dry-run', description: 'Print the plan without applying it' },
+      { flag: '--help', description: 'display help for command' },
+    ])
+  })
+
+  it('promotes a commander choices clause into the option schema', () => {
+    const help = `Usage: tc setup [options]
+
+Options:
+  --transport <mode>  Transport to save (choices: "claude-code", "api")
+  --model <id>        Model id every stage runs on
+`
+    expect(parseCliHelp(help).options).toEqual([
+      {
+        flag: '--transport',
+        takesValue: true,
+        valueHint: 'mode',
+        choices: ['claude-code', 'api'],
+        description: 'Transport to save',
+      },
+      { flag: '--model', takesValue: true, valueHint: 'id', description: 'Model id every stage runs on' },
+    ])
+  })
+
+  it('reads an argparse metavar as the value hint', () => {
+    const help = `usage: todo add [-h] [--due DATE]
+
+options:
+  --due DATE  Due date for the task
+`
+    expect(parseCliHelp(help).options).toEqual([
+      { flag: '--due', takesValue: true, valueHint: 'DATE', description: 'Due date for the task' },
+    ])
   })
 
   it('reads an argparse brace list', () => {
@@ -232,6 +282,63 @@ options:
   -h, --help       show this help message and exit
 `
     expect(parseCliHelp(help).subcommands).toEqual(['add', 'list', 'done'])
+  })
+
+  // Real commander output wraps long descriptions, and their `(choices: …)`
+  // clauses, at the description column. Measured on TrueCourse's own
+  // `config llm setup --help` before the joiner existed: `--transport` lost its
+  // choices and kept a truncated description.
+  it('joins wrapped option lines, so a split (choices: …) clause survives', () => {
+    const help = `Usage: truecourse config llm setup [options]
+
+Options:
+  --transport <mode>   Transport to save (skips the prompts) (choices:
+                       "claude-code", "api")
+  --provider <name>    API provider (choices: "anthropic", "openai",
+                       "bedrock", "copilot")
+  --model <id>         Model id every stage runs on
+`
+    expect(parseCliHelp(help).options).toEqual([
+      {
+        flag: '--transport',
+        takesValue: true,
+        valueHint: 'mode',
+        choices: ['claude-code', 'api'],
+        description: 'Transport to save (skips the prompts)',
+      },
+      {
+        flag: '--provider',
+        takesValue: true,
+        valueHint: 'name',
+        choices: ['anthropic', 'openai', 'bedrock', 'copilot'],
+        description: 'API provider',
+      },
+      { flag: '--model', takesValue: true, valueHint: 'id', description: 'Model id every stage runs on' },
+    ])
+  })
+
+  it('joins a wrapped description without inventing options from its continuation', () => {
+    const help = `Usage: truecourse analyze [options]
+
+Options:
+  --llm-transport <mode>  How to reach the LLM for this run: 'cli' (spawn claude
+                          -p), 'agent' (filesystem mailbox), or 'api' (the
+                          provider in config.json)
+  --stash                 Pre-approve stashing pending changes before analysis
+`
+    const parsed = parseCliHelp(help)
+    expect(parsed.flags).toEqual(['--llm-transport', '--stash'])
+    expect(parsed.options[0]).toMatchObject({
+      flag: '--llm-transport',
+      takesValue: true,
+      valueHint: 'mode',
+      description:
+        "How to reach the LLM for this run: 'cli' (spawn claude -p), 'agent' (filesystem mailbox), or 'api' (the provider in config.json)",
+    })
+  })
+
+  it('a wrapped COMMAND description never joins onto an option line across a heading', () => {
+    expect(parseCliHelp(ROOT_HELP).flags).toEqual(['--version', '--help'])
   })
 
   it('takes no commands from prose or usage examples', () => {

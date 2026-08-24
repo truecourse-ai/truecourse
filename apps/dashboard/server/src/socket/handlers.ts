@@ -6,6 +6,7 @@ import {
   type AnalysisProgressPayload,
 } from '@truecourse/core/progress';
 import type { LlmEstimate } from '@truecourse/core/commands/analyze-in-process';
+import { ensureAuthoringTail, stopIdleAuthoringTails } from '../services/authoring-tail.service.js';
 
 // Track in-progress analyses so we can inform clients that join mid-analysis
 const activeAnalyses = new Map<string, AnalysisProgressPayload>();
@@ -32,17 +33,21 @@ export function setupHandlers(io: SocketServer): void {
         socket.emit('spec:progress', { repoId, ...specProgress });
       }
 
-
+      // Live guard authoring feed: tail the repo's transcript files while the
+      // room has an audience (same keying the activeSpec replay uses).
+      ensureAuthoringTail(repoId);
     });
 
     socket.on('leaveRepo', async (repoId: string) => {
       const room = `repo:${repoId}`;
       await socket.leave(room);
       log.info(`[Socket] ${socket.id} left room ${room}`);
+      stopIdleAuthoringTails(io);
     });
 
     socket.on('disconnect', () => {
       log.info(`[Socket] Client disconnected: ${socket.id}`);
+      stopIdleAuthoringTails(io);
     });
   });
 }

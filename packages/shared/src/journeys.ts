@@ -29,6 +29,37 @@ export const JourneyStepKindSchema = z.enum([
 ])
 export type JourneyStepKind = z.infer<typeof JourneyStepKindSchema>
 
+/**
+ * One flag's parsed fact sheet — what the surface DECLARES about a `flags` entry
+ * beyond its name. Authoring metadata over the same flag set: `flags` stays the
+ * fingerprinted surface, so a derivation growing richer metadata (a hint, a
+ * description) never moves a journey fingerprint.
+ */
+export const JourneyCliOptionSchema = z
+  .object({
+    /** Canonical flag, long form where one exists — matches the `flags` entry. */
+    flag: z.string().min(1),
+    /** The command refuses to run without it. Unset = not stated by the source. */
+    required: z.boolean().optional(),
+    /** The flag takes a value (`--limit <n>`) rather than being a boolean switch. */
+    takesValue: z.boolean().optional(),
+    /** The declared value placeholder, e.g. `mode` from `--transport <mode>`. */
+    valueHint: z.string().optional(),
+    /** The closed value set, when the declaration names one. */
+    choices: z.array(z.string()).optional(),
+    /** The option's own one-liner, as declared. */
+    description: z.string().optional(),
+    /**
+     * `program`: the option is registered on the PROGRAM, not this command; a
+     * user passes it before the subcommand. Rides only in `options` (never in the
+     * step's own `flags`), so carrying it moves no fingerprint. Unset = the
+     * command's own option.
+     */
+    scope: z.literal('program').optional(),
+  })
+  .strict()
+export type JourneyCliOption = z.infer<typeof JourneyCliOptionSchema>
+
 /** Run a command (cli / tui): the argv PATH plus the flags that command accepts. */
 export const JourneyInvokeStepSchema = z
   .object({
@@ -37,6 +68,13 @@ export const JourneyInvokeStepSchema = z
     command: z.array(z.string()).min(1),
     /** Flags the command accepts, e.g. `["--json", "--force"]`. */
     flags: z.array(z.string()).default([]),
+    /** Per-flag option schema, where the derivation parsed one — the command
+     *  GRAMMAR authoring renders. Metadata, never fingerprinted (see
+     *  {@link JourneyCliOptionSchema}). May carry flags BEYOND the `flags` list:
+     *  program-scope options (`scope: 'program'`) and facts a runtime probe
+     *  observed that the static tree missed; `flags` stays the fingerprinted
+     *  tree truth either way. */
+    options: z.array(JourneyCliOptionSchema).optional(),
     /** Human one-liner for display; cosmetic — never fingerprinted. */
     label: z.string().optional(),
   })
@@ -149,11 +187,40 @@ export type Journey = z.infer<typeof JourneySchema>
 
 /**
  * How ONE surface's catalog was derived: `tree` = the analyzer's own artifacts
- * (the primary path, every surface), `probes` = the cli fallback ladder for a
- * framework no extractor recognizes. A degradation marker, not a quality claim.
+ * only (no probe executor / no recipe entry to probe), `probes` = the cli
+ * fallback ladder for a framework no extractor recognizes (the tree was empty),
+ * `union` = both ran and the catalog merges them, cross-checked. A derivation-
+ * mode marker, not a quality claim.
  */
-export const JourneyCatalogSourceSchema = z.enum(['tree', 'probes'])
+export const JourneyCatalogSourceSchema = z.enum(['tree', 'probes', 'union'])
 export type JourneyCatalogSource = z.infer<typeof JourneyCatalogSourceSchema>
+
+/**
+ * One static-vs-runtime disagreement the union derivation observed: a fact one
+ * source states that the other lacks. The union already carries the fact, so
+ * scenarios stay whole; the diagnostic is the feedback queue for the mapper
+ * (a `tree-missing-*` is an extractor gap; a `probe-missing-*` is help output
+ * hiding real surface, or a help-parser gap).
+ */
+export const JourneyDiagnosticSchema = z
+  .object({
+    /** The surface the disagreement is about — a driver-registry id (`cli`). */
+    surface: z.string().min(1),
+    /** The command's argv path; `[]` for the program level. */
+    path: z.array(z.string()),
+    /** The flag in dispute, when the disagreement is flag-scoped. */
+    flag: z.string().optional(),
+    kind: z.enum([
+      'tree-missing-flag',
+      'probe-missing-flag',
+      'tree-missing-command',
+      'probe-missing-command',
+    ]),
+    /** One human-readable sentence saying exactly what disagrees. */
+    detail: z.string().min(1),
+  })
+  .strict()
+export type JourneyDiagnostic = z.infer<typeof JourneyDiagnosticSchema>
 
 /** `.truecourse/guard/journeys.json` — the last mapping's catalog (gitignored). */
 export const JourneysFileSchema = z
@@ -166,6 +233,9 @@ export const JourneysFileSchema = z
     journeys: z.array(JourneySchema),
     /** Per journey TYPE (a driver-registry id) → how that catalog was derived. */
     source: z.record(z.string(), JourneyCatalogSourceSchema).optional(),
+    /** The union derivation's static-vs-runtime disagreements. Absent when the
+     *  mapping had one source (or predates the cross-check). */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
   })
   .strict()
 export type JourneysFile = z.infer<typeof JourneysFileSchema>
@@ -204,6 +274,8 @@ function normalizeToken(text: string): string {
  * the command path and its flag set, the method + path template, the route, the
  * target. `label` is cosmetic and never folded in. Flags fold as a SET (sorted):
  * which flags a command accepts is the surface, the order help prints them is not.
+ * `options` never folds either — it is metadata about the SAME flag set, and a
+ * derivation learning more about an unchanged flag must not move a fingerprint.
  */
 function stepIdentity(step: JourneyStep): string {
   switch (step.kind) {

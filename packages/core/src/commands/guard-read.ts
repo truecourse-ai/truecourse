@@ -20,6 +20,7 @@ import {
   guardLatestPath,
   guardResultPath,
   manifestPath,
+  readGuardAutoResolutions,
   readJourneyCatalog,
   RecipeSchema,
   resolveApiServers,
@@ -46,11 +47,13 @@ import {
   isManualFlowId,
   manualFlowId,
   manualFlowScenarioId,
+  autoResolutionKey,
   parseBlockedOnCapabilities,
   runRefusalError,
   worstCoverageStatus,
   guardFindingClass,
   type GuardBirthFinding,
+  type GuardFlowRetirement,
   type GuardTriage,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
@@ -58,6 +61,7 @@ import {
   type GuardClaimIdentity,
   type GuardDismissedClaim,
   type GuardDismissedFlow,
+  type GuardReenabledFlow,
   type GuardDocCoverage,
   type GuardDriverId,
   type GuardFailureDetail,
@@ -77,6 +81,8 @@ import {
   type GuardJourneyRow,
   type GuardJourneysView,
   type GuardJourneySurface,
+  type JourneyCatalogSource,
+  type JourneyDiagnostic,
   type GuardLatest,
   type GuardExternalSetupIndex,
   type GuardManifest,
@@ -183,6 +189,19 @@ export function guardExternalSetupIndexForView(repoKey: string): GuardExternalSe
   return readGuardExternalSetupIndex(repoKey)
 }
 
+/**
+ * The retirement records a read surface joins `retired` gaps against, keyed by
+ * flow×surface ({@link autoResolutionKey}), or `null` where they cannot exist.
+ * They live in the gitignored `guard/auto-resolutions.json` in the WORKING TREE,
+ * so a hosted store answers `null` and its `retired` gaps render without the
+ * attempt history — the gap itself (manifest + report) still stands.
+ */
+function guardRetirementsForView(repoKey: string): Map<string, GuardFlowRetirement> | null {
+  if (!guardsMaterializeInPlace()) return null
+  const ledger = readGuardAutoResolutions(repoKey)
+  return new Map(Object.entries(ledger.retired))
+}
+
 // ---------------------------------------------------------------------------
 // Per-section coverage join (pure).
 // ---------------------------------------------------------------------------
@@ -207,6 +226,13 @@ export interface GuardCoverageSources {
    * degrades to plain `blocked-on` — never an error, never a fabricated CTA.
    */
   externals?: GuardExternalSetupIndex | null
+  /**
+   * Flow×surface → its retirement record, off the working tree's
+   * `guard/auto-resolutions.json` ({@link autoResolutionKey} keys). Joined onto
+   * `retired` gaps so the flow detail exposes the retired attempts' verdicts.
+   * Absent (a hosted store, a deleted ledger) degrades to the bare gap.
+   */
+  retirements?: Map<string, GuardFlowRetirement> | null
 }
 
 /**
@@ -322,6 +348,8 @@ interface FlowJoin {
   flowIdsBySection: Map<string, string[]>
   /** Providable-external index; null ⇒ every `blocked-on` stays plain. */
   externals: GuardExternalSetupIndex | null
+  /** Flow×surface → retirement record; null ⇒ `retired` gaps render bare. */
+  retirements: Map<string, GuardFlowRetirement> | null
 }
 
 function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
@@ -417,6 +445,7 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     authoringErrorsByFlow,
     flowIdsBySection,
     externals: sources.externals ?? null,
+    retirements: sources.retirements ?? null,
   }
 }
 
@@ -449,7 +478,9 @@ function gapNeedsSetup(
   return deriveNeedsSetup(gap.reason, externals) ?? undefined
 }
 
-/** A gap as the UI renders it — kind + reason + the shared one-line label. */
+/** A gap as the UI renders it — kind + reason + the shared one-line label. A
+ *  `retired` gap carries its ledger record when the caller has one, so the flow
+ *  detail can show the retired attempts' verdicts. */
 function toFlowGap(
   gap: {
     kind: GuardCoverageGapKind
@@ -457,6 +488,7 @@ function toFlowGap(
     driver?: GuardDriverId
   },
   externals: GuardExternalSetupIndex | null = null,
+  retirement?: GuardFlowRetirement,
 ): GuardFlowGap {
   const needsSetup = gapNeedsSetup(gap, externals)
   return {
@@ -465,6 +497,15 @@ function toFlowGap(
     ...(gap.driver ? { driver: gap.driver } : {}),
     label: guardGapLabel(gap.kind, gap.driver),
     ...(needsSetup ? { needsSetup } : {}),
+    ...(gap.kind === 'retired' && retirement
+      ? {
+          retirement: {
+            attempts: retirement.attempts,
+            retiredAt: retirement.retiredAt,
+            history: retirement.history,
+          },
+        }
+      : {}),
   }
 }
 
@@ -505,7 +546,11 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
   )
   const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
   for (const gap of gaps) {
-    const flowGap = toFlowGap(gap, join.externals)
+    const retirement =
+      gap.kind === 'retired' && gap.surface
+        ? join.retirements?.get(autoResolutionKey(flowId, gap.surface))
+        : undefined
+    const flowGap = toFlowGap(gap, join.externals, retirement)
     surfaces.push({
       ...(gap.surface ? { surface: gap.surface } : {}),
       status: gapStatus(gap, flowGap.needsSetup),
@@ -913,6 +958,7 @@ async function loadFlowView(repoKey: string, ref?: string): Promise<FlowViewSour
       flows: flowsFile,
       scenarios: corpus.scenarios,
       externals: guardExternalSetupIndexForView(repoKey),
+      retirements: guardRetirementsForView(repoKey),
     }),
     flowsFile,
     latest,
@@ -1371,7 +1417,7 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
 
   const countByType = new Map<string, number>()
   for (const j of catalog.journeys) countByType.set(j.type, (countByType.get(j.type) ?? 0) + 1)
-  const surfaces = journeySurfaces(countByType, catalog.source)
+  const surfaces = journeySurfaces(countByType, catalog.source, catalog.diagnostics)
 
   return {
     mapped: true,
@@ -1385,6 +1431,7 @@ export async function readGuardJourneys(repoKey: string, ref?: string): Promise<
       grounded: journeys.filter((j) => j.flows.length > 0).length,
       ungrounded: journeys.filter((j) => j.flows.length === 0).length,
     },
+    ...(catalog.diagnostics?.length ? { diagnostics: catalog.diagnostics } : {}),
   }
 }
 
@@ -1461,11 +1508,13 @@ function journeyReverseIndex(
 /** The detected-surface banner: one row per driver-registry surface, registry order. */
 function journeySurfaces(
   countByType: ReadonlyMap<string, number>,
-  source: Record<string, 'tree' | 'probes'> | undefined,
+  source: Record<string, JourneyCatalogSource> | undefined,
+  diagnostics?: readonly JourneyDiagnostic[],
 ): GuardJourneySurface[] {
   return GUARD_DRIVERS.map((row) => {
     const driver: GuardDriverDef = row
     const journeys = countByType.get(driver.id) ?? 0
+    const diagnosed = diagnostics?.filter((d) => d.surface === driver.id).length ?? 0
     return {
       surface: driver.id as GuardDriverId,
       label: driver.label,
@@ -1474,6 +1523,7 @@ function journeySurfaces(
       journeys,
       detected: journeys > 0,
       ...(source?.[driver.id] ? { source: source[driver.id] } : {}),
+      ...(diagnosed > 0 ? { diagnostics: diagnosed } : {}),
     }
   })
 }
@@ -1918,8 +1968,9 @@ function assertNoGuardPrInPlace(pr?: number): void {
 
 /**
  * Merge a PR's guard decisions overlay over the repo row. Pure. `dismissedClaims`
- * union by their `dismissedClaimKey` identity (doc+anchor+title) and
- * `dismissedFlows` by their `flowId`; the overlay wins on a colliding identity.
+ * union by their `dismissedClaimKey` identity (doc+anchor+title), `dismissedFlows`
+ * by their `flowId`, and `reenabledFlows` by flowId+surface; the overlay wins on a
+ * colliding identity.
  */
 export function mergeGuardDecisions(base: GuardDecisions, overlay: GuardDecisions): GuardDecisions {
   const byKey = new Map<string, GuardDismissedClaim>()
@@ -1928,10 +1979,15 @@ export function mergeGuardDecisions(base: GuardDecisions, overlay: GuardDecision
   const flowsById = new Map<string, GuardDismissedFlow>()
   for (const f of base.dismissedFlows) flowsById.set(f.flowId, f)
   for (const f of overlay.dismissedFlows) flowsById.set(f.flowId, f)
+  const reenabledByKey = new Map<string, GuardReenabledFlow>()
+  // Decisions written before reenabledFlows existed (or built as literals) lack it.
+  for (const r of base.reenabledFlows ?? []) reenabledByKey.set(`${r.flowId}\0${r.surface ?? ''}`, r)
+  for (const r of overlay.reenabledFlows ?? []) reenabledByKey.set(`${r.flowId}\0${r.surface ?? ''}`, r)
   return {
     version: 1,
     dismissedClaims: [...byKey.values()],
     dismissedFlows: [...flowsById.values()],
+    reenabledFlows: [...reenabledByKey.values()],
   }
 }
 

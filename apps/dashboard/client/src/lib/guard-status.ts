@@ -140,6 +140,7 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
   'no-claim': GAP_COLOUR,
   'no-journey': GAP_COLOUR,
   unrealizable: GAP_COLOUR,
+  retired: GAP_COLOUR,
   // The user dismissed this claim's finding (won't-fix / noise) — its own zinc
   // tint separates it from the "can't test" gaps.
   dismissed: {

@@ -211,7 +211,7 @@ function Header({ view }: { view: GuardExternalsView }) {
       </div>
       <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
         The third parties this app calls. Hand guard a real or sandbox account for one and its
-        flows are tested against the live service; leave it unprovided and they stay blocked.
+        flows run against the live service; leave it unprovided and they stay blocked.
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
         <span>
@@ -297,7 +297,7 @@ function ServiceCard({ service, editing, onEdit, onCancel, onSave, saving, error
         </span>
         {service.blockedFlows > 0 && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {service.blockedFlows} blocked test{service.blockedFlows === 1 ? '' : 's'}
+            {service.blockedFlows} blocked flow{service.blockedFlows === 1 ? '' : 's'}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">

@@ -8,14 +8,17 @@
  * a teammate who clones and re-runs generate inherits your dismissals, so a claim
  * you judged noise stays dismissed for everyone.
  *
- * It holds two lists. `dismissedClaims`: findings the user judged a generation
+ * It holds three lists. `dismissedClaims`: findings the user judged a generation
  * defect / won't-fix / noise. A dismissed claim (identity = its section anchor +
  * the extracted claim's stable text) is skipped by generate — never re-authored,
  * never re-findinged — and settles as an explicit `dismissed` coverage gap. It is
  * excluded from flow synthesis too, so it never becomes a milestone.
  * `dismissedFlows`: whole flows (identity = the flow id) the user judged not worth
  * guarding — dropped with their scenarios at generate. Undo either by removing its
- * entry (the UI's Un-dismiss, or by hand).
+ * entry (the UI's Un-dismiss, or by hand). `reenabledFlows`: the manual reset for
+ * a RETIRED flow (authoring gave up after repeated defective attempts) — an entry
+ * newer than the retirement clears it and its ledger count, so the next generate
+ * authors fresh.
  */
 
 import { z } from 'zod'
@@ -71,12 +74,33 @@ export const GuardDismissedFlowSchema = z.object({
 })
 export type GuardDismissedFlow = z.infer<typeof GuardDismissedFlowSchema>
 
-/** The whole decisions file. Both lists default to `[]` so a partial or
+/**
+ * One RE-ENABLED flow — the user's reset for a retirement (authoring gave up on
+ * the flow after repeated defective attempts). Identity is `flowId` plus the
+ * optional `surface` (absent ⇒ every retired surface of the flow). The entry
+ * clears a retirement recorded BEFORE `reenabledAt` — it stays in the file, so a
+ * later re-retirement (with a newer `retiredAt`) stands until re-enabled again.
+ * Not `.strict()`, like its siblings above.
+ */
+export const GuardReenabledFlowSchema = z.object({
+  /** The flow's id — the identity. */
+  flowId: z.string().min(1),
+  /** One surface to re-enable; absent means every retired surface of the flow. */
+  surface: z.string().optional(),
+  /** ISO timestamp of the re-enable — only retirements recorded before it clear. */
+  reenabledAt: z.string(),
+  /** Optional free-text rationale. */
+  note: z.string().optional(),
+})
+export type GuardReenabledFlow = z.infer<typeof GuardReenabledFlowSchema>
+
+/** The whole decisions file. Every list defaults to `[]` so a partial or
  *  freshly-created file still parses. */
 export const GuardDecisionsSchema = z.object({
   version: z.literal(1),
   dismissedClaims: z.array(GuardDismissedClaimSchema).default([]),
   dismissedFlows: z.array(GuardDismissedFlowSchema).default([]),
+  reenabledFlows: z.array(GuardReenabledFlowSchema).default([]),
 })
 export type GuardDecisions = z.infer<typeof GuardDecisionsSchema>
 
@@ -85,6 +109,7 @@ export const EMPTY_GUARD_DECISIONS: GuardDecisions = {
   version: 1,
   dismissedClaims: [],
   dismissedFlows: [],
+  reenabledFlows: [],
 }
 
 /** The stable identity key a dismissal / claim matches on: doc + anchor + title. */

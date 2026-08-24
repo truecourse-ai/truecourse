@@ -15,7 +15,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
-import type { AuthorUserContext, MatchRunner } from '@truecourse/guard-generator'
+import type { MatchRunner } from '@truecourse/guard-generator'
+import { isGuardAdjudicationError } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -23,7 +24,7 @@ import {
   writeDoc,
   writeCorpus,
   extractBy,
-  authorBy,
+  apiWorkerTurnBy,
   flowOfAll,
   noEpics,
   runGenerate,
@@ -121,7 +122,7 @@ describe('generateGuards — the route gate', () => {
         matchCalls++
         return { plan: ctx.milestones.map((m) => ({ journeyId: ctx.journeys[0].id, milestone: m.order })) }
       },
-      generateRunner: authorBy({}, () => {
+      turnFn: apiWorkerTurnBy({}, () => {
         authorCalls++
       }),
     })
@@ -166,19 +167,19 @@ describe('generateGuards — the route gate', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, V2_DOC)
 
-    let ctx: AuthorUserContext | undefined
+    const openings: string[] = []
     const res = await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, apiJourney('GET', '/v2/bookings'), apiJourney('GET', '/api/version')),
       extractRunner: v2Extract,
-      generateRunner: authorBy(
+      turnFn: apiWorkerTurnBy(
         {
           bookings: rawApi('GET /v2/ping answers 200', [
             { request: { method: 'GET', path: '/v2/ping' }, expect: { status: 200 } },
           ]),
         },
-        (c) => {
-          ctx = c
+        (req) => {
+          if (req.messages.length === 1) openings.push(req.messages[0].text)
         },
       ),
     })
@@ -195,9 +196,9 @@ describe('generateGuards — the route gate', () => {
     expect(committed.server).toBe('api-v2')
     // The prompt described THAT service — and only its own operations: the web
     // app's `/api/version` is another service's, so the setup catalog drops it.
-    expect(ctx?.server).toEqual({ name: 'api-v2', app: 'apps/api/v2' })
-    expect(ctx?.recipeHealthPath).toBe('/v2/health')
-    expect((ctx?.otherOperations ?? []).map((o) => o.path)).not.toContain('/api/version')
+    expect(openings[0]).toContain('Service: "api-v2" — the workspace app apps/api/v2.')
+    expect(openings[0]).toContain('Health endpoint: GET /v2/health')
+    expect(openings[0]).not.toContain('GET /api/version')
   }, 60_000)
 
   it('binds a known route of an opaque app to its declared server and stamps the YAML', async () => {
@@ -206,30 +207,32 @@ describe('generateGuards — the route gate', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, WEB_DOC)
 
-    let ctx: AuthorUserContext | undefined
+    const openings: string[] = []
     const res = await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, apiJourney('GET', '/api/version')),
       extractRunner: webExtract,
-      generateRunner: authorBy(
+      turnFn: apiWorkerTurnBy(
         {
           version: rawApi('GET /api/version answers 200', [
             { request: { method: 'GET', path: '/api/version' }, expect: { status: 200 } },
           ]),
         },
-        (c) => {
-          ctx = c
+        (req) => {
+          if (req.messages.length === 1) openings.push(req.messages[0].text)
         },
       ),
     })
 
-    expect(res.errors).toEqual([])
+    // Work errors only: the suite's triage stub answers nothing, so a failing test
+    // records the lost verdict — nothing to do with the binding under test.
+    expect(res.errors.filter((e) => !isGuardAdjudicationError(e))).toEqual([])
     expect(res.written).toHaveLength(1)
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
       server?: string
     }
     expect(committed.server).toBe('web')
-    expect(ctx?.server).toEqual({ name: 'web', app: 'apps/web' })
+    expect(openings[0]).toContain('Service: "web" — the workspace app apps/web.')
   }, 60_000)
 
   it('blocks a flow that spans two declared servers — a scenario runs against one', async () => {
@@ -246,7 +249,7 @@ describe('generateGuards — the route gate', () => {
       flowsRunner: flowOfAll('Book through the api, then read the web version'),
       flowsEpicRunner: noEpics,
       matchRunner: matchEachJourney,
-      generateRunner: authorBy({}, () => {
+      turnFn: apiWorkerTurnBy({}, () => {
         authorCalls++
       }),
     })
@@ -274,25 +277,27 @@ describe('generateGuards — the route gate', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, V2_DOC)
 
-    let ctx: AuthorUserContext | undefined
+    const openings: string[] = []
     await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
       extractRunner: v2Extract,
-      generateRunner: authorBy(
+      turnFn: apiWorkerTurnBy(
         {
           bookings: rawApi('GET /v2/ping answers 200', [
             { request: { method: 'GET', path: '/v2/ping' }, expect: { status: 200 } },
           ]),
         },
-        (c) => {
-          ctx = c
+        (req) => {
+          if (req.messages.length === 1) openings.push(req.messages[0].text)
         },
       ),
     })
 
     // A web session cookie is not an api-v2 credential; one with no allowlist is.
-    expect((ctx?.credentials ?? []).map((c) => c.name)).toEqual(['api-key', 'shared'])
+    expect(openings[0]).toContain('{{cred:api-key}}')
+    expect(openings[0]).toContain('{{cred:shared}}')
+    expect(openings[0]).not.toContain('{{cred:web-session}}')
   }, 60_000)
 
   it('authors exactly as before in a repo the route manifest knows nothing about', async () => {
@@ -303,19 +308,19 @@ describe('generateGuards — the route gate', () => {
     // block, so the flow authors exactly as it did before the gate existed.
     writeDoc(r, DOC, V2_DOC)
 
-    let ctx: AuthorUserContext | undefined
+    const openings: string[] = []
     const res = await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
       extractRunner: v2Extract,
-      generateRunner: authorBy(
+      turnFn: apiWorkerTurnBy(
         {
           bookings: rawApi('GET /todos answers 200', [
             { request: { method: 'GET', path: '/todos' }, expect: { status: 200 } },
           ]),
         },
-        (c) => {
-          ctx = c
+        (req) => {
+          if (req.messages.length === 1) openings.push(req.messages[0].text)
         },
       ),
     })
@@ -324,6 +329,6 @@ describe('generateGuards — the route gate', () => {
     expect(res.written).toHaveLength(1)
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as { server?: string }
     expect(committed.server).toBeUndefined()
-    expect(ctx?.server).toBeUndefined()
+    expect(openings[0]).not.toContain('This repository runs several HTTP services')
   }, 60_000)
 })

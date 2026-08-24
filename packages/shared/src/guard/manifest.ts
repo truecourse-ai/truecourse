@@ -18,7 +18,7 @@ import { z } from 'zod'
 import { GUARD_FORMAT_VERSION } from './scenario.js'
 import { GuardDriverIdSchema, type GuardDriverId } from './drivers.js'
 import { GuardFlowBindingSchema } from './flows.js'
-import { GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
+import { GuardBlockedMilestoneSchema, GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
 import { GuardTestStatusSchema } from './result.js'
 
 /**
@@ -59,6 +59,13 @@ export const GuardManifestScenarioSchema = z
      * tests fall back to the prior report's carried rows).
      */
     diagnosis: GuardScenarioDiagnosisSchema.optional(),
+    /**
+     * The flow milestone orders this scenario covers, present ONLY when it covers a
+     * SUBSET — the flow's other milestones are recorded on a sibling `blocked-on`
+     * gap's `blockedMilestones`. Absent means the scenario walks every milestone,
+     * which is also how every entry written before partial flows existed reads.
+     */
+    milestones: z.array(z.number().int().positive()).optional(),
   })
   .strict()
 export type GuardManifestScenario = z.infer<typeof GuardManifestScenarioSchema>
@@ -76,10 +83,19 @@ export const GuardManifestGapSchema = z
     reason: z.string(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
+    /**
+     * On a MILESTONE-SCOPED `blocked-on` gap: the blocked milestones + their
+     * nouns. The flow's other milestones are covered by a committed scenario
+     * (its entry's `milestones`), so the flow reads as partial coverage.
+     */
+    blockedMilestones: z.array(GuardBlockedMilestoneSchema).optional(),
   })
   .strict()
   .refine((g) => (g.kind === 'awaiting-driver') === (g.driver !== undefined), {
     message: 'awaiting-driver gaps carry a driver; other kinds carry none',
+  })
+  .refine((g) => g.blockedMilestones === undefined || g.kind === 'blocked-on', {
+    message: 'blockedMilestones only rides a blocked-on gap',
   })
 export type GuardManifestGap = z.infer<typeof GuardManifestGapSchema>
 
@@ -162,7 +178,9 @@ export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
     ...flow.scenarios.map((s) => s.surface),
     ...flow.gaps.map((g) => g.surface),
   ])
-  return flow.journeys.map((j) => j.surface).filter((surface) => !accounted.has(surface))
+  // `?? []` mirrors the schema default, so an entry that never went through the
+  // parser (a raw literal) reads the same as a parsed pre-journeys manifest.
+  return (flow.journeys ?? []).map((j) => j.surface).filter((surface) => !accounted.has(surface))
 }
 
 /**

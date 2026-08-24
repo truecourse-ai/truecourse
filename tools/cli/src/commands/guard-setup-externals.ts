@@ -139,7 +139,7 @@ async function provisionOne(
       initialValue: existing?.mode ?? "sandbox",
       options: [
         { value: "sandbox", label: "sandbox", hint: "test-mode credentials" },
-        { value: "real", label: "real", hint: "the live service — tests will hit it" },
+        { value: "real", label: "real", hint: "the live service — scenarios will hit it" },
         { value: "", label: "don't say" },
       ],
     }),

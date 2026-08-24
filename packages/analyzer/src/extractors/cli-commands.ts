@@ -226,6 +226,7 @@ function requiredModule(node: SyntaxNode | null): string | null {
 interface CommandDraft {
   name: string
   path: string[]
+  kind?: FrameworkKind
   location: SourceLocation | null
   description?: string
   handlerName?: string
@@ -233,6 +234,13 @@ interface CommandDraft {
    *  so they are re-sorted into declaration order at emit. */
   flags: (CliCommandFlag & { offset: number })[]
   flagKeys: Set<string>
+  /** A commander `.version(…)` call on this command: its custom flag spec and
+   *  description when passed, and where the call sits. */
+  version?: { spec?: string; description?: string; offset: number }
+  /** A commander `.helpOption(flags, desc)` customization on this command. */
+  help?: { spec: string; description?: string }
+  /** `.helpOption(false)`: commander generates no help flag for this command. */
+  helpDisabled?: boolean
 }
 
 function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
@@ -240,15 +248,31 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
   if (!bindings.present) return []
 
   const varRefs = resolveVariables(tree, bindings)
+  const literals: LiteralContext = {
+    factories: collectOptionFactories(tree),
+    arrayConsts: collectStringArrayConsts(tree),
+  }
   const drafts = new Map<string, CommandDraft>()
+  // Whether any subcommand is registered on a commander program, which is what
+  // makes the program itself (path `[]`) an invocable surface worth emitting.
+  let commanderSubcommands = false
 
-  const draftFor = (path: string[]): CommandDraft => {
+  const draftFor = (path: string[], kind?: FrameworkKind): CommandDraft => {
     const key = pathKey(path)
     let draft = drafts.get(key)
     if (!draft) {
-      draft = { name: path[path.length - 1], path, location: null, flags: [], flagKeys: new Set() }
+      draft = { name: path[path.length - 1] ?? '', path, location: null, flags: [], flagKeys: new Set() }
       drafts.set(key, draft)
     }
+    if (kind) draft.kind ??= kind
+    return draft
+  }
+
+  /** The root has no `.command(…)` call of its own; its first program-level
+   *  registration is where it is "declared". */
+  const touchRoot = (ref: CommandRef, node: SyntaxNode): CommandDraft => {
+    const draft = draftFor(ref.path, ref.kind)
+    if (ref.path.length === 0) draft.location ??= commandCallLocation(node, filePath)
     return draft
   }
 
@@ -267,8 +291,9 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
         const parent = resolveIn(receiver, scope)
         const name = commandName(node)
         if (parent && name) {
+          if (parent.kind === 'commander') commanderSubcommands = true
           const path = [...parent.path, name]
-          const draft = draftFor(path)
+          const draft = draftFor(path, parent.kind)
           if (!draft.location) draft.location = commandCallLocation(node, filePath)
           applyInlineArgs(draft, node, parent.kind)
           // Only the ARGUMENTS see the builder binding (yargs' `(y) => y.command(…)`);
@@ -282,16 +307,43 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
       } else if (callee?.type === 'member_expression') {
         if (OPTION_METHODS.has(property)) {
           const ref = resolveIn(receiver, scope)
-          if (ref && ref.path.length > 0) addFlags(draftFor(ref.path), property, node)
+          if (ref) addFlags(touchRoot(ref, node), property, node, literals)
         } else if (DESCRIPTION_METHODS.has(property)) {
           const ref = resolveIn(receiver, scope)
           const args = node.childForFieldName('arguments')
           const text = args?.namedChildCount === 1 ? stringLiteral(args.namedChild(0)) : null
-          if (ref && ref.path.length > 0 && text) draftFor(ref.path).description ??= text
+          if (ref && text) touchRoot(ref, node).description ??= text
         } else if (HANDLER_METHODS.has(property)) {
           const ref = resolveIn(receiver, scope)
           const handler = handlerName(node.childForFieldName('arguments')?.namedChild(0) ?? null)
-          if (ref && ref.path.length > 0 && handler) draftFor(ref.path).handlerName ??= handler
+          if (ref && handler) touchRoot(ref, node).handlerName ??= handler
+        } else if (property === 'version') {
+          const ref = resolveIn(receiver, scope)
+          const args = node.childForFieldName('arguments')
+          // A `.version('1.2.3')` SETTER only; commander's zero-argument form reads.
+          if (ref && ref.kind === 'commander' && args && args.namedChildCount > 0) {
+            const spec = stringLiteral(args.namedChild(1))
+            const description = stringLiteral(args.namedChild(2))
+            touchRoot(ref, node).version ??= {
+              ...(spec ? { spec } : {}),
+              ...(description ? { description } : {}),
+              offset: args.startIndex,
+            }
+          }
+        } else if (property === 'helpOption') {
+          const ref = resolveIn(receiver, scope)
+          const args = node.childForFieldName('arguments')
+          const first = args?.namedChild(0)
+          if (ref && ref.kind === 'commander' && first) {
+            const draft = touchRoot(ref, node)
+            if (first.text === 'false') {
+              draft.helpDisabled = true
+            } else {
+              const spec = stringLiteral(first)
+              const desc = stringLiteral(args?.namedChild(1) ?? null)
+              if (spec) draft.help ??= { spec, ...(desc ? { description: desc } : {}) }
+            }
+          }
         }
       }
     }
@@ -301,9 +353,16 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
 
   visit(tree.rootNode, new Map())
 
+  finalizeRoot(drafts, commanderSubcommands)
+
   return [...drafts.values()]
     .filter((d): d is CommandDraft & { location: SourceLocation } => d.location !== null)
-    .sort((a, b) => a.location.startLine - b.location.startLine || a.location.startColumn - b.location.startColumn)
+    .sort(
+      (a, b) =>
+        a.location.startLine - b.location.startLine ||
+        a.location.startColumn - b.location.startColumn ||
+        a.path.length - b.path.length,
+    )
     .map((d) => ({
       name: d.name,
       path: d.path,
@@ -314,6 +373,56 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
       ...(d.handlerName ? { handlerName: d.handlerName } : {}),
       location: d.location,
     }))
+}
+
+/**
+ * Whether the program itself (path `[]`) is emitted, and with which generated
+ * flags. The root is a command when it carries program-level flags, declares a
+ * version, or (on commander) registers any subcommand; a root draft touched
+ * only by a description or handler is dropped. Commander generates `--version`
+ * (behind `.version(…)`) and `--help` (always, unless `.helpOption(false)`), so
+ * an emitted commander root carries both as `synthesized` flags.
+ */
+function finalizeRoot(drafts: Map<string, CommandDraft>, commanderSubcommands: boolean): void {
+  let root = drafts.get('')
+  if (!root && commanderSubcommands) {
+    root = { name: '', path: [], kind: 'commander', location: null, flags: [], flagKeys: new Set() }
+    drafts.set('', root)
+  }
+  if (!root) return
+
+  const qualifies =
+    root.flags.length > 0 ||
+    root.version !== undefined ||
+    (root.kind === 'commander' && commanderSubcommands)
+  if (!qualifies) {
+    drafts.delete('')
+    return
+  }
+
+  if (root.kind === 'commander') {
+    if (root.version) {
+      pushFlag(root, root.version.spec ?? '--version', root.version.description ?? null, root.version.offset, {
+        synthesized: true,
+      })
+    }
+    if (!root.helpDisabled) {
+      pushFlag(root, root.help?.spec ?? '-h, --help', root.help?.description ?? null, Number.MAX_SAFE_INTEGER, {
+        synthesized: true,
+      })
+    }
+  }
+
+  // Declared where its first registration happens: a program-level call when one
+  // exists, else the first subcommand declaration.
+  if (!root.location) {
+    const locations = [...drafts.values()]
+      .map((d) => d.location)
+      .filter((l): l is SourceLocation => l !== null)
+      .sort((a, b) => a.startLine - b.startLine || a.startColumn - b.startColumn)
+    root.location = locations[0] ?? null
+  }
+  if (!root.location) drafts.delete('')
 }
 
 /**
@@ -538,7 +647,27 @@ function firstParameterName(fn: SyntaxNode): string | null {
 // Flags
 // ---------------------------------------------------------------------------
 
-function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): void {
+/** What a declaration says about a flag beyond its name and one-liner. */
+type FlagFacts = Pick<CliCommandFlag, 'required' | 'takesValue' | 'valueHint' | 'choices' | 'synthesized'>
+
+/**
+ * The module-scope literals flag declarations resolve through: option FACTORIES
+ * (`.addOption(llmTransportOption())`, a function returning an Option builder
+ * chain) and string-array consts (`.choices([...LLM_PROVIDER_KINDS])`).
+ */
+interface LiteralContext {
+  /** Function name → the single expression its body returns. */
+  factories: Map<string, SyntaxNode>
+  /** Const name → its string-literal array value. */
+  arrayConsts: Map<string, string[]>
+}
+
+function addFlags(
+  draft: CommandDraft,
+  method: string,
+  callNode: SyntaxNode,
+  literals: LiteralContext,
+): void {
   const args = callNode.childForFieldName('arguments')
   if (!args) return
   const first = args.namedChild(0)
@@ -546,16 +675,21 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
   // The ARGUMENT list's offset, not the call's: every call in a fluent chain starts
   // at the same receiver, while its arguments advance with the declaration order.
   const offset = args.startIndex
+  // `requiredOption` says the command refuses to run without the flag.
+  const required: FlagFacts = method === 'requiredOption' ? { required: true } : {}
 
   if (method === 'addOption') {
-    // `addOption(new Option('--json', 'desc'))`
-    if (first.type !== 'new_expression') return
-    const optionArgs = first.childForFieldName('arguments')
+    // `addOption(new Option('--json', 'desc'))`, and the same construction with the
+    // builder chained onto it (`.choices([…]).default('x')`).
+    const builder = readOptionBuilder(first, literals, new Set())
+    if (!builder) return
+    const optionArgs = builder.construction.childForFieldName('arguments')
     pushFlag(
       draft,
       stringLiteral(optionArgs?.namedChild(0) ?? null),
       stringLiteral(optionArgs?.namedChild(1) ?? null),
       offset,
+      builder.facts,
     )
     return
   }
@@ -569,7 +703,7 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
       const describe = value?.type === 'object'
         ? stringLiteral(pairValue(value, ['describe', 'desc', 'description']))
         : null
-      pushFlag(draft, key, describe, pair.startIndex)
+      pushFlag(draft, key, describe, pair.startIndex, value?.type === 'object' ? yargsFacts(value, literals) : {})
     }
     return
   }
@@ -580,7 +714,8 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
   const describe = second?.type === 'object'
     ? stringLiteral(pairValue(second, ['describe', 'desc', 'description']))
     : stringLiteral(second ?? null)
-  pushFlag(draft, spec, describe, offset)
+  const options = second?.type === 'object' ? yargsFacts(second, literals) : {}
+  pushFlag(draft, spec, describe, offset, { ...options, ...required })
 }
 
 function pushFlag(
@@ -588,18 +723,239 @@ function pushFlag(
   spec: string | null,
   description: string | null,
   offset: number,
+  facts: FlagFacts = {},
 ): void {
   const flag = canonicalFlag(spec)
   if (!flag || draft.flagKeys.has(flag)) return
   draft.flagKeys.add(flag)
-  draft.flags.push({ flag, ...(description ? { description } : {}), offset })
+  draft.flags.push({
+    flag,
+    ...(description ? { description } : {}),
+    // The spec's own placeholder, unless the declaration form already stated one.
+    ...valueFacts(spec),
+    ...facts,
+    offset,
+  })
+}
+
+/** A commander `new Option(…)` construction plus what its builder chain declared. */
+interface OptionBuilder {
+  construction: SyntaxNode
+  facts: FlagFacts
+}
+
+/**
+ * The `new Option(…)` behind an `addOption` argument. Commander's option builder is
+ * FLUENT (`new Option('--transport <mode>', 'd').choices([…]).default('api')`), so
+ * the argument is a call expression whose receiver chain ends at the construction —
+ * reading only `new_expression` dropped every configured option, which is most of
+ * the ones worth having. A bare `factory()` call resolves through the module-scope
+ * function's returned expression (`seen` breaks factory-calls-factory cycles).
+ */
+function readOptionBuilder(
+  node: SyntaxNode | null,
+  literals: LiteralContext,
+  seen: Set<string>,
+): OptionBuilder | null {
+  if (!node) return null
+  switch (node.type) {
+    case 'parenthesized_expression':
+    case 'non_null_expression':
+    case 'as_expression':
+    case 'satisfies_expression':
+      return readOptionBuilder(node.namedChild(0), literals, seen)
+    case 'new_expression':
+      return { construction: node, facts: {} }
+    case 'call_expression': {
+      const callee = node.childForFieldName('function')
+      if (callee?.type === 'identifier') {
+        const factory = literals.factories.get(callee.text)
+        if (!factory || seen.has(callee.text)) return null
+        seen.add(callee.text)
+        return readOptionBuilder(factory, literals, seen)
+      }
+      if (callee?.type !== 'member_expression') return null
+      const inner = readOptionBuilder(callee.childForFieldName('object'), literals, seen)
+      if (!inner) return null
+      applyBuilderMethod(inner, callee.childForFieldName('property')?.text ?? '', node, literals)
+      return inner
+    }
+    default:
+      return null
+  }
+}
+
+/** What one chained builder method states about the option it configures. */
+function applyBuilderMethod(
+  builder: OptionBuilder,
+  method: string,
+  callNode: SyntaxNode,
+  literals: LiteralContext,
+): void {
+  const args = callNode.childForFieldName('arguments')
+  if (method === 'choices') {
+    const choices = stringArray(args?.namedChild(0) ?? null, literals)
+    if (choices) builder.facts.choices ??= choices
+  } else if (method === 'makeOptionMandatory') {
+    // The single argument, when present, is the boolean it sets.
+    const explicit = args?.namedChild(0)?.text
+    builder.facts.required ??= explicit !== 'false'
+  }
+}
+
+/** The yargs option-object facts: its closed value set and whether it is demanded. */
+function yargsFacts(objectNode: SyntaxNode, literals: LiteralContext): FlagFacts {
+  const facts: FlagFacts = {}
+  const choices = stringArray(pairValue(objectNode, ['choices']), literals)
+  if (choices) facts.choices = choices
+  const demanded = pairValue(objectNode, ['demandOption', 'demand', 'require', 'required'])?.text
+  if (demanded === 'true') facts.required = true
+  return facts
+}
+
+/**
+ * Every string of an array literal, or null when any element is not resolvable.
+ * A spread of a module-scope const (`[...LLM_PROVIDER_KINDS]`) splices the
+ * const's own string literals in; a spread of anything else (an import, a call)
+ * stays unresolvable and nulls the whole list.
+ */
+function stringArray(node: SyntaxNode | null, literals: LiteralContext): string[] | null {
+  if (!node || node.type !== 'array') return null
+  const values: string[] = []
+  for (const element of node.namedChildren) {
+    if (!element) continue
+    if (element.type === 'spread_element') {
+      const inner = element.namedChild(0)
+      const resolved = inner?.type === 'identifier' ? literals.arrayConsts.get(inner.text) : undefined
+      if (!resolved) return null
+      values.push(...resolved)
+      continue
+    }
+    const value = stringLiteral(element)
+    if (value === null) return null
+    values.push(value)
+  }
+  return values.length > 0 ? values : null
+}
+
+/**
+ * Module-scope functions whose body returns a single expression: the shape of an
+ * option factory (`function llmTransportOption() { return new Option(…).choices(…) }`,
+ * or the same as a const arrow). Only the returned expression is kept; a body with
+ * several returns names no single construction and is skipped.
+ */
+function collectOptionFactories(tree: Tree): Map<string, SyntaxNode> {
+  const factories = new Map<string, SyntaxNode>()
+  for (const node of moduleScopeDeclarations(tree)) {
+    if (node.type === 'function_declaration') {
+      const name = node.childForFieldName('name')?.text
+      const value = soleReturnExpression(node.childForFieldName('body'))
+      if (name && value && !factories.has(name)) factories.set(name, value)
+      continue
+    }
+    if (node.type !== 'lexical_declaration' && node.type !== 'variable_declaration') continue
+    for (const declarator of node.namedChildren) {
+      if (!declarator || declarator.type !== 'variable_declarator') continue
+      const name = declarator.childForFieldName('name')
+      const value = declarator.childForFieldName('value')
+      if (!name || name.type !== 'identifier' || !value || !isFunctionNode(value)) continue
+      const body = value.childForFieldName('body')
+      const returned = body?.type === 'statement_block' ? soleReturnExpression(body) : (body ?? null)
+      if (returned && !factories.has(name.text)) factories.set(name.text, returned)
+    }
+  }
+  return factories
+}
+
+/** The expression of a body's single `return`, ignoring nested functions. */
+function soleReturnExpression(body: SyntaxNode | null): SyntaxNode | null {
+  if (!body) return null
+  const returns: SyntaxNode[] = []
+  const walk = (n: SyntaxNode): void => {
+    if (isFunctionNode(n)) return
+    if (n.type === 'return_statement') {
+      returns.push(n)
+      return
+    }
+    for (const child of n.namedChildren) if (child) walk(child)
+  }
+  for (const child of body.namedChildren) if (child) walk(child)
+  return returns.length === 1 ? (returns[0].namedChild(0) ?? null) : null
+}
+
+/** Module-scope const arrays of string literals (`as const` unwrapped): what a
+ *  spread inside `.choices([…])` may name. */
+function collectStringArrayConsts(tree: Tree): Map<string, string[]> {
+  const consts = new Map<string, string[]>()
+  const empty: LiteralContext = { factories: new Map(), arrayConsts: new Map() }
+  for (const node of moduleScopeDeclarations(tree)) {
+    if (node.type !== 'lexical_declaration' && node.type !== 'variable_declaration') continue
+    for (const declarator of node.namedChildren) {
+      if (!declarator || declarator.type !== 'variable_declarator') continue
+      const name = declarator.childForFieldName('name')
+      if (!name || name.type !== 'identifier' || consts.has(name.text)) continue
+      const values = stringArray(unwrapExpression(declarator.childForFieldName('value')), empty)
+      if (values) consts.set(name.text, values)
+    }
+  }
+  return consts
+}
+
+/** Module-level statements, with `export` wrappers peeled off. */
+function moduleScopeDeclarations(tree: Tree): SyntaxNode[] {
+  const nodes: SyntaxNode[] = []
+  for (const child of tree.rootNode.namedChildren) {
+    if (!child) continue
+    if (child.type === 'export_statement') {
+      const declaration = child.childForFieldName('declaration')
+      if (declaration) nodes.push(declaration)
+      continue
+    }
+    nodes.push(child)
+  }
+  return nodes
+}
+
+/** Strip the wrappers an expression may sit inside (`(…)`, `as const`, `x!`). */
+function unwrapExpression(node: SyntaxNode | null): SyntaxNode | null {
+  if (!node) return null
+  switch (node.type) {
+    case 'parenthesized_expression':
+    case 'non_null_expression':
+    case 'as_expression':
+    case 'satisfies_expression':
+      return unwrapExpression(node.namedChild(0))
+    default:
+      return node
+  }
+}
+
+/** `<mode>` / `[name]` / `<files...>` — the value a flag spec declares it takes. */
+const VALUE_PLACEHOLDER = /^[<[]([^>\]]+)[>\]]$/
+
+/**
+ * What a flag spec says about its ARGUMENT: `--transport <mode>` takes a required
+ * value called `mode`, `--tag [name]` an optional one, `--json` none. Both bracket
+ * forms take a value — the distinction between them is whether it may be omitted,
+ * not whether the flag has one.
+ */
+function valueFacts(spec: string | null): FlagFacts {
+  if (!spec) return {}
+  for (const token of spec.trim().split(/[\s,|]+/).filter(Boolean)) {
+    const match = VALUE_PLACEHOLDER.exec(token)
+    if (!match) continue
+    const hint = match[1].replace(/\.{3}$/, '').trim()
+    return hint ? { takesValue: true, valueHint: hint } : { takesValue: true }
+  }
+  return {}
 }
 
 /**
  * The canonical form of a flag declaration: the LONG form when one is declared
  * (`"-y, --yes"` → `--yes`), the short form otherwise, and a bare yargs option name
  * normalized to its long form (`"verbose"` → `--verbose`). Value placeholders
- * (`--limit <n>`) are stripped — the flag is the surface, its argument syntax is not.
+ * (`--limit <n>`) are stripped from the NAME — they survive as `takesValue` /
+ * `valueHint`, which is what a caller needs to build an invocation.
  */
 function canonicalFlag(spec: string | null): string | null {
   if (!spec) return null

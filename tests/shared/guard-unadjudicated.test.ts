@@ -15,16 +15,16 @@ import {
 describe('guardUnadjudicatedEffect', () => {
   it('says what a lost fidelity stage left behind, pluralized', () => {
     expect(guardUnadjudicatedEffect({ stage: 'guard.fidelity', affected: 41 })).toBe(
-      '41 tests persisted passing, never reviewed against their flow',
+      '41 scenarios persisted passing, never reviewed against their flow',
     )
-    expect(guardUnadjudicatedEffect({ stage: 'guard.fidelity', affected: 1 })).toContain('1 test persisted')
+    expect(guardUnadjudicatedEffect({ stage: 'guard.fidelity', affected: 1 })).toContain('1 scenario persisted')
   })
 
   it('says what a lost triage stage left behind, pluralized', () => {
     expect(guardUnadjudicatedEffect({ stage: 'guard.triage', affected: 7 })).toContain(
-      '7 tests committed failing and untriaged',
+      '7 scenarios committed failing and untriaged',
     )
-    expect(guardUnadjudicatedEffect({ stage: 'guard.triage', affected: 1 })).toContain('1 test committed')
+    expect(guardUnadjudicatedEffect({ stage: 'guard.triage', affected: 1 })).toContain('1 scenario committed')
   })
 
   // The remedy is only true because the affected flows are left UNSETTLED and

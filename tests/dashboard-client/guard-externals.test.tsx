@@ -138,7 +138,7 @@ describe('GuardExternalsPane — reading', () => {
     expect(await screen.findByText('stripe')).toBeInTheDocument();
     expect(screen.getByText('incomplete')).toBeInTheDocument();
     expect(screen.getByText('payment')).toBeInTheDocument();
-    expect(screen.getByText('3 blocked tests')).toBeInTheDocument();
+    expect(screen.getByText('3 blocked flows')).toBeInTheDocument();
     // The reason comes from the engine and is rendered verbatim.
     expect(screen.getByText(/no base URL provided/)).toBeInTheDocument();
     // A resolved secret reads as stored, never as its characters.

@@ -17,6 +17,8 @@ import {
 import {
   emptyGapDisplayTotals,
   gapDisplayKind,
+  guardErrorSubject,
+  isGuardAdjudicationError,
   parseBlockedOnCapabilities,
   type GuardCoverageGapKind,
   type GuardGapDisplayKind,
@@ -27,6 +29,7 @@ import {
 import type { StageTransportTally } from '../llm/tally.js'
 import {
   guardManifestSections,
+  unaccountedSurfaces,
   type GuardManifest,
   type GuardManifestFlow,
   type GuardManifestGap,
@@ -56,6 +59,32 @@ export interface GuardFlowsCoverageSummary {
   gapLabels: string[]
 }
 
+/** One reason a flow surface has no scenario, with how many units it explains. */
+export interface GuardSettleReason {
+  label: string
+  count: number
+}
+
+/**
+ * The settled-vs-unsettled breakdown over FLOW×SURFACE units — the one honest
+ * line every closing surface renders, so a run that ends `ok` with untested
+ * flows can never read like "nothing pending". A unit is SETTLED when a
+ * committed test realizes it (a partial scenario's milestone-scoped sibling gap
+ * does not unsettle it — settled-with-gap counts once); every other unit is
+ * UNSETTLED with a reason: its gap's label (`blocked-on` gaps aggregate by their
+ * parsed capability nouns, a retirement reads `retired`), or — for a flow whose
+ * hash is unrecorded and a planned surface has neither test nor gap — the
+ * pending-work label (`pending next generate`).
+ */
+export interface GuardSettleBreakdown {
+  /** Flow×surface units the manifest tracks. `settled` + Σ`unsettled` = `total`. */
+  total: number
+  /** Units realized by a committed test. */
+  settled: number
+  /** The untested units by reason, most common first (count desc, then label). */
+  unsettled: GuardSettleReason[]
+}
+
 /** Section-coverage rollup from `scenarios/manifest.json`. */
 export interface GuardCoverageSummary {
   /** Sections the manifest's flows bind. */
@@ -71,6 +100,8 @@ export interface GuardCoverageSummary {
   classification: Record<GuardDriverId, number> & { untestable: number; unclassified: number }
   /** The flow-led rollup over the same manifest. */
   flows: GuardFlowsCoverageSummary
+  /** The flow×surface settle breakdown over the same manifest. */
+  settle: GuardSettleBreakdown
 }
 
 /** Last-run rollup from `guard/LATEST.json`. */
@@ -109,7 +140,22 @@ export interface GuardLastGenerateSummary {
    * `birthFindings` are committed failing tests (already counted in `testsFailing`).
    */
   fidelityRejections: number
+  /**
+   * Errors that cost WORK — authoring, birth, a run refusal. Adjudication losses
+   * are excluded on purpose: they are counted and named by `unreviewedTests` /
+   * `untriagedTests` below, and every surface words this one as "nothing was
+   * written for these units", which a lost verdict never means.
+   */
   errors: number
+  /**
+   * Green tests whose fidelity review was lost, by name — the suspect class the
+   * reviewer exists to catch, shipped with nobody's judgment on it. Empty on a run
+   * whose reviews all landed.
+   */
+  unreviewedTests: string[]
+  /** Failing tests whose triage verdict was lost, by name — committed red with no
+   *  word on whether the repo or the test is wrong. */
+  untriagedTests: string[]
   /**
    * Ready-but-held scenarios: birth-passed candidates a section's unsettled state
    * withheld (the `M` in `N written · M ready but held (F findings · E errors)`).
@@ -187,10 +233,10 @@ export function guardGapDisplayLabel(kind: GuardGapDisplayKind): string {
  * unreviewed corpus starts reading as a reviewed one on one of them.
  */
 export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string {
-  const tests = `${entry.affected} test${entry.affected === 1 ? '' : 's'}`
+  const subjects = `${entry.affected} scenario${entry.affected === 1 ? '' : 's'}`
   return entry.stage === 'guard.fidelity'
-    ? `${tests} persisted passing, never reviewed against their flow`
-    : `${tests} committed failing and untriaged — nothing says whether the repo or the test is wrong`
+    ? `${subjects} persisted passing, never reviewed against their flow`
+    : `${subjects} committed failing and untriaged — nothing says whether the repo or the scenario is wrong`
 }
 
 /**
@@ -200,7 +246,7 @@ export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string
  * so an unchanged corpus re-adjudicates without paying for authoring again.
  */
 export const GUARD_UNADJUDICATED_REMEDY =
-  'The tests are committed and their flows were left unsettled, so re-running `truecourse guard generate` once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the tests again.'
+  'The scenarios are committed and their flows were left unsettled, so re-running `truecourse guard generate` once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the scenarios again.'
 
 /** What a section's flows say about the driver it would be tested on. */
 interface SectionSurfaces {
@@ -239,6 +285,76 @@ function primaryDriver(candidates: ReadonlySet<GuardDriverId>): GuardDriverId | 
   return null
 }
 
+/** The reason label for a flow whose surface is pending work (hash unrecorded,
+ *  no test and no gap): it re-runs on the next generate. */
+const PENDING_SETTLE_LABEL = 'pending next generate'
+
+/** One unsettled unit's reason label — a `blocked-on` gap names its capability
+ *  nouns, every other kind reads its shared gap label. */
+function settleReasonLabel(gap: GuardManifestGap): string {
+  if (gap.kind === 'blocked-on') {
+    const caps = parseBlockedOnCapabilities(gap.reason)
+    if (caps.length > 0) return `blocked on ${caps.join(' + ')}`
+    return 'blocked'
+  }
+  return guardGapLabel(gap.kind, gap.driver)
+}
+
+/**
+ * The flow×surface settle breakdown over the manifest — see
+ * {@link GuardSettleBreakdown}. Pure and deterministic, so the CLI generate
+ * summary, `guard status` and the dashboard compose identical numbers.
+ */
+export function summarizeFlowSettle(manifest: GuardManifest): GuardSettleBreakdown {
+  let settled = 0
+  const reasons = new Map<string, number>()
+  const bump = (label: string): void => {
+    reasons.set(label, (reasons.get(label) ?? 0) + 1)
+  }
+  for (const flow of manifest.flows) {
+    const tested = new Set(flow.scenarios.map((s) => s.surface))
+    settled += tested.size
+    // One unit per gap-only surface; a gap beside a test on the same surface is
+    // partial coverage (settled-with-gap) and never double-counts.
+    const gapped = new Set<string>()
+    for (const gap of flow.gaps) {
+      if (tested.has(gap.surface) || gapped.has(gap.surface)) continue
+      gapped.add(gap.surface)
+      bump(settleReasonLabel(gap))
+    }
+    if (flow.generationInputsHash === null) {
+      // Pending work: planned surfaces that recorded neither a test nor a gap
+      // re-run next generate — and a flow with nothing recorded at all is one
+      // pending unit, so it never disappears from the accounting.
+      const pending = Math.max(
+        unaccountedSurfaces(flow).length,
+        tested.size === 0 && gapped.size === 0 ? 1 : 0,
+      )
+      for (let i = 0; i < pending; i++) bump(PENDING_SETTLE_LABEL)
+    }
+  }
+  const unsettled = [...reasons.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+  const total = settled + unsettled.reduce((n, r) => n + r.count, 0)
+  return { total, settled, unsettled }
+}
+
+/**
+ * The settle breakdown as the ONE closing line — `37/60 settled · 23 unsettled:
+ * 14 blocked on anthropic, 8 blocked on dotnet-sdk, 1 retired`. An all-settled
+ * corpus stays terse (`60/60 settled`, no unsettled segment). `extras` (run
+ * bookkeeping like `12 unchanged`) slot between the head and the unsettled tail
+ * so the reason list always closes the line.
+ */
+export function guardSettleLine(b: GuardSettleBreakdown, extras: readonly string[] = []): string {
+  const head = [`${b.settled}/${b.total} settled`, ...extras].join(' · ')
+  const unsettledTotal = b.total - b.settled
+  if (unsettledTotal === 0) return head
+  const reasons = b.unsettled.map((r) => `${r.count} ${r.label}`).join(', ')
+  return `${head} · ${unsettledTotal} unsettled: ${reasons}`
+}
+
 function summarizeCoverage(manifest: GuardManifest): GuardCoverageSummary {
   const classification = emptyClassification()
   const sections = guardManifestSections(manifest)
@@ -255,7 +371,13 @@ function summarizeCoverage(manifest: GuardManifest): GuardCoverageSummary {
     else if (view?.untestable) classification.untestable++
     else classification.unclassified++
   }
-  return { totalSections: sections.length, withScenarios, classification, flows: summarizeFlows(manifest) }
+  return {
+    totalSections: sections.length,
+    withScenarios,
+    classification,
+    flows: summarizeFlows(manifest),
+    settle: summarizeFlowSettle(manifest),
+  }
 }
 
 /** A flow's coverage bucket: fully guarded, partly guarded, or nothing realized. */
@@ -326,7 +448,9 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     blockedOnCapabilities,
     birthFindings: r.birthFindings.length,
     fidelityRejections: r.birthFindings.filter((f) => f.kind === 'fidelity').length,
-    errors: r.errors.length,
+    errors: r.errors.filter((e) => !isGuardAdjudicationError(e)).length,
+    unreviewedTests: r.errors.filter((e) => e.kind === 'fidelity').map(guardErrorSubject),
+    untriagedTests: r.errors.filter((e) => e.kind === 'triage').map(guardErrorSubject),
     readyButHeld,
     heldByFindings,
     heldByErrors,

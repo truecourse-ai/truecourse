@@ -5,16 +5,11 @@ import yaml from 'js-yaml'
 import {
   generateGuards,
   birthValidate,
-  spawnGenerateRunner,
-  retryCacheKey,
-  type GenerateRunner,
   type ExtractRunner,
   type BirthCandidate,
-  type AuthorUserContext,
-  type ProbeTranscript,
 } from '@truecourse/guard-generator'
-import type { GuardBirthFinding, GuardFlow, Journey } from '@truecourse/shared'
-import type { LlmTransport } from '@truecourse/shared/llm'
+import type { GuardFlow, Journey } from '@truecourse/shared'
+import type { LlmTurnFn, LlmTurnRequest } from '@truecourse/shared/llm'
 import {
   loadScenarios,
   readManifest,
@@ -45,7 +40,6 @@ import {
   bindsFor,
   raw,
   extractBy,
-  authorBy,
   runGenerate,
   flowOfAll,
   flowPerClaim,
@@ -54,10 +48,29 @@ import {
   cliJourney,
   journeysOf,
   stampMilestones,
+  workerTurnBy,
+  turnReply,
   PASSING_STEPS,
   FAILING_STEPS,
   writeScenarioFile,
 } from './helpers.js'
+
+/** A hand-scripted turn fn for the tests that drive the session turn by turn. */
+function scriptedTurn(steps: Array<unknown | ((req: LlmTurnRequest) => unknown)>): {
+  turn: LlmTurnFn
+  requests: LlmTurnRequest[]
+} {
+  const requests: LlmTurnRequest[] = []
+  let i = 0
+  const turn: LlmTurnFn = async (req) => {
+    requests.push({ ...req, messages: [...req.messages] })
+    const step = steps[i++]
+    if (step === undefined) throw new Error(`scripted turn exhausted after ${i - 1} steps`)
+    const value = typeof step === 'function' ? (step as (r: LlmTurnRequest) => unknown)(req) : step
+    return turnReply(value)
+  }
+  return { turn, requests }
+}
 
 const repos: string[] = []
 afterEach(() => {
@@ -118,7 +131,7 @@ describe('generateGuards — extraction honesty + gaps', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version prints the version', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -278,7 +291,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
       // The flow needs world-state the sandbox can't express — no scenario, a reason.
-      generateRunner: authorBy({ version: { blockedOn: ['Git', ' git ', 'DB'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['Git', ' git ', 'DB'] } }),
     })
 
     expect(res.written).toEqual([])
@@ -304,7 +317,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('relkit --version', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('relkit --version', PASSING_STEPS) }),
     })
 
     const entry = flowEntry(r, 'version')!
@@ -317,7 +330,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     const opts = {
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: { blockedOn: ['db'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['db'] } }),
     }
     await runGenerate(opts)
     const second = await runGenerate(opts)
@@ -333,7 +346,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     const opts = {
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: { blockedOn: ['db'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['db'] } }),
     }
     await runGenerate(opts)
     const before = flowEntry(r, 'version')!
@@ -360,7 +373,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     const opts = {
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: { blockedOn: ['db'] } }, () => authorCalls++),
+      turnFn: workerTurnBy({ version: { blockedOn: ['db'] } }, () => authorCalls++),
     }
     await runGenerate(opts)
     authorCalls = 0
@@ -392,8 +405,8 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      // One flow authors a test, the other refuses — both must settle accounted for.
-      generateRunner: authorBy({
+      // One flow authors a test, the other blocks — both must settle accounted for.
+      turnFn: workerTurnBy({
         version: raw('relkit --version', PASSING_STEPS),
         help: { blockedOn: ['db'] },
       }),
@@ -404,37 +417,21 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     expect(flows.filter((f) => violatesSettleInvariant(f))).toEqual([])
   })
 
-  it('an authored scenario wins over a stray blockedOn list', async () => {
+  it('a session whose replies carry no action ends malformed after one re-ask, then errors', async () => {
     const r = seed()
-
-    const runner: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length),
-      blockedOn: ['db'],
+    let turns = 0
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({ version: { malformed: true } }, () => turns++),
     })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
-    expect(res.coverageGaps.some((g) => g.kind === 'blocked-on')).toBe(false)
-  })
-
-  it('a reply with neither a scenario nor a blockedOn is re-asked once, then errors', async () => {
-    const r = seed()
-    let calls = 0
-    const runner: GenerateRunner = async () => {
-      calls++
-      return {} // says nothing: neither an authored scenario nor an honest refusal
-    }
-
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-
-    expect(calls).toBe(2) // the call + one corrective re-ask
+    expect(turns).toBe(2) // the malformed reply + the one re-ask
     expect(res.written).toEqual([])
-    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    // The repo's ONLY authoring call came back unusable, so the run aborts rather
-    // than reporting an empty settle: nothing is recorded at all, and the flow is
-    // work again next generate (the per-flow unsettle is covered by
-    // llm-failure-accounting's half-bad run, where a sibling flow does land).
+    expect(res.errors.some((e) => e.kind === 'authoring' && e.message.includes('malformed'))).toBe(true)
+    // The repo's ONLY authoring session ended without settling, so the run aborts
+    // rather than reporting an empty settle: nothing is recorded at all, and the
+    // flow is work again next generate.
     expect(res.status).toBe('llm-failed')
     expect(readManifest(r)).toBeNull()
   })
@@ -445,7 +442,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: { blockedOn: ['db'] } }),
+      turnFn: workerTurnBy({ version: { blockedOn: ['db'] } }),
     })
 
     // Reset the manifest so the flow is work again; authoring is a cache HIT.
@@ -454,7 +451,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     const res2 = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: { blockedOn: ['db'] } }, () => authorCalls++),
+      turnFn: workerTurnBy({ version: { blockedOn: ['db'] } }, () => authorCalls++),
     })
 
     expect(authorCalls).toBe(0) // served from the per-(flow, surface) authoring cache
@@ -469,7 +466,7 @@ describe('generateGuards — change detection', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     let extractCalls = 0
@@ -481,7 +478,7 @@ describe('generateGuards — change detection', () => {
       extractRunner: extractBy({ background: { untestable: 'bg' } }, () => extractCalls++),
       flowsRunner: flowPerClaim(() => flowCalls++),
       matchRunner: matchAll(() => matchCalls++),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }, () => authorCalls++),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }, () => authorCalls++),
     })
 
     expect(res2.noChanges).toBe(true)
@@ -498,7 +495,7 @@ describe('generateGuards — change detection', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     // Force the whole pipeline to re-run (fresh manifest) with the same doc:
@@ -508,7 +505,7 @@ describe('generateGuards — change detection', () => {
     const res2 = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }, () => authorCalls++),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }, () => authorCalls++),
     })
 
     expect(res2.written.map((w) => w.flowId)).toEqual(['version'])
@@ -538,16 +535,16 @@ describe('generateGuards — change detection', () => {
     })
 
     // `version`'s journey gained a flag; `help`'s is untouched.
-    let authored: string[] = []
+    const authored = new Set<string>()
     const res = await runGenerate({
       repoRoot: r,
       journeys: journeysOf(r, cliJourney(['relkit', 'version'], ['--json']), twoJourneys[1]),
       extractRunner: extractBy({}),
       matchRunner: perFlow,
-      generateRunner: authorBy({}, (ctx) => authored.push(ctx.flow.id)),
+      turnFn: workerTurnBy({}, (req) => authored.add(req.subject ?? '')),
     })
 
-    expect(authored).toEqual(['version'])
+    expect([...authored]).toEqual(['version'])
     expect(res.flows).toMatchObject({ total: 2, skipped: 1 })
   })
 })
@@ -568,7 +565,7 @@ describe('generateGuards — the committed scenario', () => {
       repoRoot: r,
       extractRunner: extractBy({}),
       flowsRunner: flowOfAll('a user checks the version then the help'),
-      generateRunner: authorBy({ 'a-user-checks-the-version-then-the-help': wrong }),
+      turnFn: workerTurnBy({ 'a-user-checks-the-version-then-the-help': wrong }),
     })
 
     const { scenarios, errors } = loadScenarios(r)
@@ -595,32 +592,36 @@ describe('generateGuards — the committed scenario', () => {
     expect(fs.existsSync(path.join(scenariosDir(r), 'tools-relkit', `${written.id}.yaml`))).toBe(true)
   })
 
-  it('rejects a scenario that leaves a milestone unrealized, after ONE corrective re-ask', async () => {
+  it('re-asks a settle that leaves a milestone unrealized, then commits the corrected scenario', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, ['## version', 'v claim.', '', '## help', 'h claim.'].join('\n'))
 
-    let issues: AuthorUserContext['issues']
-    let calls = 0
-    const forgetful: GenerateRunner = async (ctx) => {
-      calls++
-      issues = ctx.issues ?? issues
-      // Only ever realizes milestone 1 — milestone 2 would go unguarded.
-      return { scenario: raw('half a path', [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }]) }
-    }
+    const half = raw('half a path', [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }])
+    const whole = raw('the whole path', [
+      { run: ['--version'], expect: { exit: 0 }, milestone: 1 },
+      { run: ['--version'], expect: { exit: 0 }, milestone: 2 },
+    ])
+    const { turn, requests } = scriptedTurn([
+      { tool: 'run_scenario', args: { scenario: half } },
+      { outcome: { result: 'settled' } }, // milestone 2 unrealized — the gate re-asks
+      { tool: 'run_scenario', args: { scenario: whole } },
+      { outcome: { result: 'settled' } },
+    ])
 
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
       flowsRunner: flowOfAll('version then help'),
-      generateRunner: forgetful,
+      turnFn: turn,
     })
 
-    expect(calls).toBe(2) // the call + exactly one corrective re-ask
-    expect(issues?.uncoveredMilestones).toEqual([2]) // the engine said exactly what was missing
-    expect(res.written).toEqual([])
-    expect(res.errors[0].message).toContain('milestone(s) unrealized')
+    // The settle gate said exactly what was missing, in the session.
+    const reask = requests[2].messages[requests[2].messages.length - 1]
+    expect(reask.text).toContain('unrealized')
+    expect(res.written.map((w) => w.title)).toEqual(['the whole path'])
+    expect(res.errors).toEqual([])
   })
 
   it('assigns `<flow-id>.<surface>.<n>` ids and never reuses a hand-written one', async () => {
@@ -640,7 +641,7 @@ describe('generateGuards — the committed scenario', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('generated', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('generated', PASSING_STEPS) }),
     })
 
     // The generated id skips the taken `.1`.
@@ -657,7 +658,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
     expect(res.written).toHaveLength(1)
     expect(res.birthFindings).toEqual([])
@@ -700,7 +701,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       executor: unservedExecutor,
     })
 
@@ -734,7 +735,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({
+      turnFn: workerTurnBy({
         version: raw('relkit --version', PASSING_STEPS),
         help: raw('relkit --help', PASSING_STEPS),
       }),
@@ -757,19 +758,23 @@ describe('generateGuards — birth validation', () => {
     expect(res.flows).toMatchObject({ unsettled: 2 })
   })
 
-  it('retries a failing flow ONCE with the evidence, then persists the fix', async () => {
+  it('a session revises a failing draft against the capture, then persists the fix', async () => {
     const r = seed()
 
-    let calls = 0
+    const seen: LlmTurnRequest[] = []
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy(
+      turnFn: workerTurnBy(
         { version: { first: raw('broken', FAILING_STEPS), retry: raw('fixed', PASSING_STEPS) } },
-        () => calls++,
+        (req) => seen.push({ ...req, messages: [...req.messages] }),
       ),
     })
-    expect(calls).toBe(2) // round 1 + exactly one evidence retry
+    // The session SAW the failing capture before revising — the evidence loop.
+    const evidence = seen.find((req) =>
+      req.messages[req.messages.length - 1]?.text.includes('"verdict": "fail"'),
+    )
+    expect(evidence).toBeDefined()
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
     expect(res.birthFindings).toEqual([])
     expect(loadScenarios(r).scenarios).toHaveLength(1)
@@ -781,7 +786,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('always broken', FAILING_STEPS) }),
     })
 
     // The test is written like any other, with the status its birth run gave it.
@@ -818,25 +823,29 @@ describe('generateGuards — birth validation', () => {
       file: res.written[0].file,
     })
     expect(committed[0].diagnosis!.evidencePath).toMatch(/guard\/evidence/)
+    // The worker's own diagnosis rides the finding and the durable manifest record
+    // (the triage wire shape, now fed in-session).
+    expect(result.triage).toMatchObject({ verdict: 'code-drift', confidence: 'high' })
+    expect(committed[0].diagnosis!.triage).toMatchObject({ verdict: 'code-drift' })
     expect(flowEntry(r, 'version')?.generationInputsHash).not.toBeNull()
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   })
 
   it('re-generating a settled failing test is a no-op — no authoring, no birth run', async () => {
     const r = seed()
-    let authorCalls = 0
+    let turns = 0
     const run = () =>
       runGenerate({
         repoRoot: r,
         extractRunner: versionCliBgUntestable,
-        generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }, () => authorCalls++),
+        turnFn: workerTurnBy({ version: raw('always broken', FAILING_STEPS) }, () => turns++),
       })
 
     await run()
-    expect(authorCalls).toBe(2) // round 1 + the one evidence retry
+    expect(turns).toBe(2) // one run + the failing settle
 
     const second = await run()
-    expect(authorCalls).toBe(2) // unchanged inputs → nothing re-authored
+    expect(turns).toBe(2) // unchanged inputs → no session at all
     expect(second.noChanges).toBe(true)
     expect(second.flows.skipped).toBe(1)
     // The committed red test — its status AND its diagnosis — stand.
@@ -855,7 +864,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({
+      turnFn: workerTurnBy({
         version: raw('good', PASSING_STEPS),
         help: raw('bad', FAILING_STEPS),
       }),
@@ -885,7 +894,7 @@ describe('generateGuards — birth validation', () => {
       repoRoot: r,
       extractRunner: extractBy({}), // one claim per section, named `<anchor> claim`
       flowsRunner: flowOfAll('the two-step path'),
-      generateRunner: authorBy({
+      turnFn: workerTurnBy({
         'the-two-step-path': raw('chain', [
           { run: ['--version'], expect: { exit: 0 }, milestone: 1 },
           { run: ['boom'], expect: { exit: 0 }, milestone: 2 },
@@ -910,7 +919,7 @@ describe('generateGuards — birth validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('broken', FAILING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('broken', FAILING_STEPS) }),
     })
 
     const finding = res.birthFindings[0]
@@ -928,57 +937,30 @@ describe('generateGuards — failure output excerpts (Fix 1)', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('always broken', FAILING_STEPS) }),
     })
     const finding = res.birthFindings[0]
     expect(finding.stderr).toContain('fatal: intentional failure')
     expect(finding.stdout).toBeUndefined()
   })
 
-  it('threads the failing run output into the retry evidence the model sees', async () => {
+  it('threads the failing run output into the capture the session sees', async () => {
     const r = seed()
 
-    let retryStderr: string | undefined
-    let retryStdout: unknown = 'SENTINEL'
-    const runner: GenerateRunner = async (ctx) => {
-      if (ctx.retry) {
-        retryStderr = ctx.retry.stderr
-        retryStdout = ctx.retry.stdout
-        return { scenario: stampMilestones(raw('fixed', PASSING_STEPS), ctx.milestones.length) }
-      }
-      return { scenario: stampMilestones(raw('broken', FAILING_STEPS), ctx.milestones.length) }
-    }
-
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const seen: string[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy(
+        { version: { first: raw('broken', FAILING_STEPS), retry: raw('fixed', PASSING_STEPS) } },
+        (req) => seen.push(req.messages[req.messages.length - 1]?.text ?? ''),
+      ),
+    })
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
-    expect(retryStderr).toContain('fatal: intentional failure')
-    // boom writes nothing to stdout → the retry evidence omits it.
-    expect(retryStdout).toBeUndefined()
-  })
-})
-
-describe('retryCacheKey — evidence sensitivity (Fix 1)', () => {
-  const flow = { fingerprint: 'sha256:flow' }
-  const sectionKeys = ['sha256:s']
-  const journeys = ['sha256:j']
-  const base: GuardBirthFinding = { doc: DOC, anchor: 'add', title: 't', step: 1, expected: 'exit 3', actual: 'exit 2' }
-  const keyFor = (evidence: GuardBirthFinding) =>
-    retryCacheKey(flow, 'cli', sectionKeys, journeys, 'fp', evidence)
-
-  it('moves when the evidence excerpts differ', () => {
-    expect(keyFor({ ...base, stderr: 'usage A' })).not.toBe(keyFor({ ...base, stderr: 'usage B' }))
-  })
-
-  it('is stable for identical evidence', () => {
-    expect(keyFor({ ...base, stderr: 'usage A' })).toBe(keyFor({ ...base, stderr: 'usage A' }))
-  })
-
-  it('an entry with no excerpts never collides with one carrying excerpts', () => {
-    expect(keyFor(base)).not.toBe(keyFor({ ...base, stderr: 'usage' }))
-  })
-
-  it('moves with the failing MILESTONE — the same message on another step is another re-ask', () => {
-    expect(keyFor({ ...base, failedMilestone: 1 })).not.toBe(keyFor({ ...base, failedMilestone: 2 }))
+    const capture = seen.find((t) => t.includes('"verdict": "fail"'))!
+    expect(capture).toContain('fatal: intentional failure')
+    // boom writes nothing to stdout → the capture omits it.
+    expect(capture).not.toContain('"stdout"')
   })
 })
 
@@ -997,7 +979,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
       repoRoot: r,
       extractRunner: twoClaims,
       flowsRunner: flowOfAll('the bad path'),
-      generateRunner: authorBy({ 'the-bad-path': raw('bad', FAILING_STEPS) }),
+      turnFn: workerTurnBy({ 'the-bad-path': raw('bad', FAILING_STEPS) }),
     })
 
     const finding = res.birthFindings.find((f) => f.title === 'bad')!
@@ -1013,7 +995,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
         repoRoot: r,
         extractRunner: twoClaims,
         flowsRunner: flowOfAll('the whole path'),
-        generateRunner: authorBy({ 'the-whole-path': raw('walks it', PASSING_STEPS) }),
+        turnFn: workerTurnBy({ 'the-whole-path': raw('walks it', PASSING_STEPS) }),
       })
 
     const first = await runOnce()
@@ -1041,7 +1023,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
       runGenerate({
         repoRoot: r,
         extractRunner: versionCliBgUntestable,
-        generateRunner: authorBy({ version: raw('always broken', FAILING_STEPS) }),
+        turnFn: workerTurnBy({ version: raw('always broken', FAILING_STEPS) }),
       })
 
     // The disagreement is committed as a red test — the user's decision surface.
@@ -1077,7 +1059,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.orphanedDismissals).toEqual([{ doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT' }])
@@ -1091,7 +1073,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
       runGenerate({
         repoRoot: r,
         extractRunner: versionCliBgUntestable,
-        generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+        turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
       })
 
     await run()
@@ -1137,69 +1119,48 @@ describe('generateGuards — dismissals (decisions.json)', () => {
   })
 })
 
-describe('generateGuards — capability/materialization-error retry routing', () => {
+describe('generateGuards — setup materialization errors reach the session', () => {
   // A scenario declaring a git commit of a file it never seeded via `setup.files`
-  // fails materialization with a precise provider message — a generation defect,
-  // routed through the same one evidence-retry as a birth `fail`.
+  // fails materialization with a precise provider message — the capture carries it
+  // into the still-open session, which revises and settles.
   const UNSEEDED_GIT = { git: { commits: [{ files: ['README.md'] }] } }
 
-  it('retries a materialization error ONCE with the capability message as evidence, then persists the fix', async () => {
+  it('the session reads the capability message off the capture and fixes the setup', async () => {
     const r = seed()
 
-    let calls = 0
-    let retryEvidence: { expected?: string; actual?: string } | undefined
-    const runner: GenerateRunner = async (ctx) => {
-      calls++
-      if (ctx.retry) {
-        retryEvidence = { expected: ctx.retry.expected, actual: ctx.retry.actual }
-        return { scenario: stampMilestones(raw('fixed', PASSING_STEPS), ctx.milestones.length) }
-      }
-      // Round 1: a git commit of an unseeded file → materialization fails.
-      return {
-        scenario: stampMilestones(raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT }), ctx.milestones.length),
-      }
-    }
-
-    const retries: Array<[number, number]> = []
+    const seen: string[] = []
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: runner,
-      onRetryProgress: (done, total) => retries.push([done, total]),
+      turnFn: workerTurnBy(
+        {
+          version: {
+            first: raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT }),
+            retry: raw('fixed', PASSING_STEPS),
+          },
+        },
+        (req) => seen.push(req.messages[req.messages.length - 1]?.text ?? ''),
+      ),
     })
 
-    expect(calls).toBe(2) // round 1 + exactly one retry
-    // The retry carried the git provider's precise message as its evidence.
-    expect(retryEvidence?.actual).toContain('declared file does not exist in the sandbox: README.md')
-    expect(retryEvidence?.actual).toContain('seed it via setup.files')
-    // The capability error ticked the retry round exactly like a birth fail.
-    expect(retries).toEqual([
-      [0, 1],
-      [1, 1],
-    ])
+    // The session saw the git provider's precise message as its evidence.
+    const capture = seen.find((t) => t.includes('declared file does not exist in the sandbox: README.md'))!
+    expect(capture).toContain('seed it via setup.files')
     expect(res.written.map((w) => w.title)).toEqual(['fixed'])
     expect(res.errors).toEqual([])
     expect(res.birthFindings).toEqual([])
     expect(res.birthPassed).toBe(1)
   })
 
-  it('records an error and leaves the flow unsettled when the materialization error persists (one retry, never two)', async () => {
+  it('a persisting materialization error surfaces as a birth error and the flow stays unsettled', async () => {
     const r = seed()
 
-    let calls = 0
-    const runner: GenerateRunner = async (ctx) => {
-      calls++
-      return {
-        scenario: stampMilestones(
-          raw(ctx.retry ? 'still-broken' : 'broken', PASSING_STEPS, { setup: UNSEEDED_GIT }),
-          ctx.milestones.length,
-        ),
-      }
-    }
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({ version: raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT }) }),
+    })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-
-    expect(calls).toBe(2) // round 1 + exactly one retry, no second
     expect(res.written).toEqual([])
     expect(res.birthFindings).toEqual([])
     const err = res.errors.find((e) => e.anchor === 'version')!
@@ -1208,34 +1169,35 @@ describe('generateGuards — capability/materialization-error retry routing', ()
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
   })
 
-  it('caches the materialization-error retry: a rerun reaches the same outcome without re-authoring', async () => {
+  it('caches the converged settle: a rerun reaches the same outcome without a session', async () => {
     const r = seed()
 
-    let round1Calls = 0
-    let retryCalls = 0
-    const runner: GenerateRunner = async (ctx) => {
-      if (ctx.retry) retryCalls++
-      else round1Calls++
-      return {
-        scenario: stampMilestones(
-          ctx.retry ? raw('fixed', PASSING_STEPS) : raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT }),
-          ctx.milestones.length,
-        ),
-      }
+    let turns = 0
+    const spec = {
+      version: {
+        first: raw('broken', PASSING_STEPS, { setup: UNSEEDED_GIT }),
+        retry: raw('fixed', PASSING_STEPS),
+      },
     }
-
-    const res1 = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    const res1 = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy(spec, () => turns++),
+    })
     expect(res1.written.map((w) => w.title)).toEqual(['fixed'])
-    expect([round1Calls, retryCalls]).toEqual([1, 1])
+    expect(turns).toBeGreaterThan(0)
 
-    // Reset the manifest so the flow is work again; BOTH the round-1 authoring and
-    // the capability-error retry are cache hits — the runner is not called.
+    // Reset the manifest so the flow is work again; the settled outcome is the
+    // cache — the session never re-opens.
     writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
-    round1Calls = 0
-    retryCalls = 0
-    const res2 = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
+    turns = 0
+    const res2 = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy(spec, () => turns++),
+    })
 
-    expect([round1Calls, retryCalls]).toEqual([0, 0])
+    expect(turns).toBe(0)
     expect(res2.written.map((w) => w.title)).toEqual(['fixed'])
     expect(res2.birthPassed).toBe(1)
   })
@@ -1260,7 +1222,7 @@ describe('generateGuards — malformed extraction (re-ask + fail-soft)', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: runner,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(calls).toBe(2) // one call + one corrective re-ask
@@ -1316,75 +1278,81 @@ describe('generateGuards — authoring robustness', () => {
     writeCorpus(r, [{ ref: TWO_CLI_DOC }])
     writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
 
-    const gen: GenerateRunner = async (ctx) => {
-      if (ctx.flow.id === 'version') throw new Error('transport exploded')
-      return { scenario: stampMilestones(raw('help works', PASSING_STEPS), ctx.milestones.length) }
-    }
-
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({}),
+      turnFn: workerTurnBy({
+        version: { throws: 'transport exploded' },
+        help: raw('help works', PASSING_STEPS),
+      }),
+    })
 
     expect(res.status).toBe('ok')
     expect(res.written.map((w) => w.flowId)).toEqual(['help'])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    expect(res.errors[0].message).toContain('worker session ended')
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
     expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help.cli.1', surface: 'cli', status: 'passing' }])
   })
 
-  // A `matches` the schema accepts but `new RegExp` rejects would throw or never
-  // match at BIRTH, after a sandbox execution has already been paid for.
-  it('re-asks on an authored `matches` that does not compile, and persists the correction', async () => {
+  // A `matches` the schema accepts but `new RegExp` rejects is caught by the
+  // run_scenario tool's cheap validators BEFORE any sandbox spend — the session
+  // reads the defect off the tool result and revises.
+  it('an uncompilable `matches` draft costs no sandbox run and the session corrects it', async () => {
     const r = seed()
-    const contexts: AuthorUserContext[] = []
-    let calls = 0
-    const gen: GenerateRunner = async (ctx) => {
-      contexts.push(ctx)
-      calls++
-      const steps =
-        calls === 1
-          ? [{ run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } }]
-          : [{ run: ['--version'], expect: { exit: 0 } }]
-      return { scenario: stampMilestones(raw('version prints', steps as never), ctx.milestones.length) }
-    }
+    const bad = raw('version prints', [
+      { run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } },
+    ] as never)
+    const good = raw('version prints', PASSING_STEPS)
+    const { turn, requests } = scriptedTurn([
+      (req: LlmTurnRequest) => ({
+        tool: 'run_scenario',
+        args: { scenario: stampMilestones(bad, 1) },
+      }),
+      { tool: 'run_scenario', args: { scenario: stampMilestones(good, 1) } },
+      { outcome: { result: 'settled' } },
+    ])
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
+    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, turnFn: turn })
 
-    expect(calls).toBe(2)
-    // The re-ask names the offending step, where it sits, and the compile error.
-    expect(contexts[1].issues?.invalidPattern).toMatchObject({ step: 1, where: 'expect.stdout' })
+    const invalid = requests[1].messages[requests[1].messages.length - 1]
+    expect(invalid.text).toContain('"verdict": "invalid"')
+    expect(invalid.text).toContain('invalid `matches` regex')
     expect(res.errors).toEqual([])
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
   })
 
-  it('records an error when the authored `matches` is still uncompilable after the re-ask', async () => {
+  it('a session that never produces a valid draft exhausts its budget honestly', async () => {
     const r = seed()
-    const gen: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(
-        raw('version prints', [{ run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } }] as never),
-        ctx.milestones.length,
-      ),
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({
+        version: raw('version prints', [
+          { run: ['--version'], expect: { stdout: { matches: '1\\.[0-9' } } },
+        ] as never),
+      }),
+      workerBudget: { maxTurns: 3 },
     })
-
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
 
     expect(res.written).toEqual([])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    expect(res.errors[0].message).toContain('invalid `matches` regex after re-ask')
+    expect(res.errors[0].message).toContain('worker session ended')
+    // The only session of the run produced nothing — the abort, not a clean settle.
+    expect(res.status).toBe('llm-failed')
   })
 
-  it('re-asks ONCE on a malformed authoring output, then records an error', async () => {
+  it('two consecutive malformed replies end the session, then the run aborts', async () => {
     const r = seed()
 
-    let calls = 0
-    const gen: GenerateRunner = async () => {
-      calls++
-      return { scenario: { nope: true } } // invalid on both the call and the re-ask
-    }
+    let turns = 0
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({ version: { malformed: true } }, () => turns++),
+    })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
-
-    expect(calls).toBe(2) // authoring call + one corrective re-ask
-    // The only authoring call of the run came back unusable — an abort, not a
-    // clean settle (see llm-failure-accounting).
+    expect(turns).toBe(2) // the malformed reply + the one re-ask
     expect(res.status).toBe('llm-failed')
     expect(res.written).toEqual([])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
@@ -1413,7 +1381,7 @@ describe('generateGuards — manifest + orphans', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     // Reported, never deleted: the next `guard run` surfaces those scenarios as
@@ -1437,7 +1405,7 @@ describe('generateGuards — manifest + orphans', () => {
     const r = seed()
     const runners = {
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     }
     // A first, ordinary generate — `version` settles and flows.json is written.
     await runGenerate({ repoRoot: r, ...runners })
@@ -1483,7 +1451,7 @@ describe('generateGuards — manifest + orphans', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
     expect(() => GuardGenerateReportSchema.parse({ ...res, generatedAt: '2026-07-25T00:00:00.000Z' })).not.toThrow()
   })
@@ -1564,7 +1532,7 @@ describe('generateGuards — universe + recipe discovery', () => {
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', (await import('./helpers.js')).FIXTURE_BIN] }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -1587,7 +1555,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -1610,7 +1578,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('recipe-failed')
@@ -1762,38 +1730,54 @@ describe('generateGuards — live progress', () => {
     expect(views).toEqual([[0, 2], [1, 2], [2, 2]])
   })
 
-  it('fires onRetryProgress with the pooled failed-flow total', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: TWO_CLI_DOC }])
-    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
+  it('fires onRetryProgress once per session RESUME (a confirmation flip re-opens the session)', async () => {
+    const r = seed()
 
-    // Both flows fail birth in round 1; each retry (evidence attached) fixes it.
-    const runner: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(
-        ctx.retry ? raw('fixed', PASSING_STEPS) : raw('broken', FAILING_STEPS),
-        ctx.milestones.length,
-      ),
-    })
+    // The sandbox flips: the in-session run passes, every later run fails — so the
+    // confirmation round disagrees with the settle and the session resumes once.
+    let executions = 0
+    const flippingExecutor: GuardExecutor = async (input) => {
+      executions++
+      const pass = executions === 1
+      return {
+        status: 'ok',
+        latestPath: '',
+        loadErrors: [],
+        manifest: null,
+        latest: {
+          scenarios: input.scenarios.map((s) => ({
+            id: s.id,
+            title: s.title,
+            binds: s.binds[0],
+            ...(s.flow ? { flowId: s.flow.id } : {}),
+            outcome: pass ? 'pass' : 'fail',
+            durationMs: 1,
+            ...(pass
+              ? {}
+              : { failure: { step: 1, expected: 'exit 0', actual: 'exit 7' }, failedMilestone: 1 }),
+          })),
+        },
+      } as unknown as Awaited<ReturnType<GuardExecutor>>
+    }
 
     const retries: Array<[number, number]> = []
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: runner,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({ version: raw('flappy', PASSING_STEPS) }),
+      executor: flippingExecutor,
       onRetryProgress: (done, total) => retries.push([done, total]),
     })
 
-    expect(res.written.map((w) => w.title).sort()).toEqual(['fixed', 'fixed'])
-    expect(res.birthFindings).toEqual([])
-    expect(res.birthPassed).toBe(2) // both retries passed in round 2
-    // Batched birth pools BOTH flows' failures into one retry round, so the total is
-    // known up front — announced once, then ticked as each re-authoring completes.
+    // Queued once, done once — the resume counter is the old retry line's meaning.
     expect(retries).toEqual([
-      [0, 2],
-      [1, 2],
-      [2, 2],
+      [0, 1],
+      [1, 1],
     ])
+    // The resumed session re-ran (fail), settled FAILING, and the second
+    // confirmation committed it red with the diagnosis.
+    expect(res.written.map((w) => w.status)).toEqual(['failing'])
+    expect(res.birthFindings[0].triage).toMatchObject({ verdict: 'code-drift' })
   })
 
   it('fires onFlowSettled per flow, and an unsettled flow still ticks (its gaps are recorded)', async () => {
@@ -1806,7 +1790,7 @@ describe('generateGuards — live progress', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: raw('good', PASSING_STEPS), help: raw('bad', FAILING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('good', PASSING_STEPS), help: raw('bad', FAILING_STEPS) }),
       onFlowSettled: (settled, total) => ticks.push([settled, total]),
     })
 
@@ -1822,50 +1806,46 @@ describe('generateGuards — live progress', () => {
   })
 })
 
-describe('generateGuards — grounded authoring', () => {
-  it('captures real behavior and passes the transcripts to the authoring runner', async () => {
+describe('generateGuards — the worker session context + build gating', () => {
+  it('opens the session with the flow context blocks and NO probe transcripts', async () => {
     const r = seed()
 
-    let received: ProbeTranscript[] | undefined
-    const extract = extractBy({
-      version: [{ claim: '`--version` prints the version and exits 0' }],
-      background: { untestable: 'bg' },
+    const openings: string[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: extractBy({
+        version: [{ claim: '`--version` prints the version and exits 0' }],
+        background: { untestable: 'bg' },
+      }),
+      turnFn: workerTurnBy({}, (req) => openings.push(req.messages[0]?.text ?? '')),
     })
-    const gen: GenerateRunner = async (ctx) => {
-      received = ctx.probes
-      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
-    }
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: gen })
-
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
-    expect(received).toBeDefined()
-    // The claim named `--version`; relkit prints 2.4.1 at exit 0 in the empty sandbox.
-    const probe = received!.find((p) => p.argv.join(' ') === '--version')
-    expect(probe).toBeDefined()
-    expect(probe!.exit).toBe(0)
-    expect(probe!.stdout).toContain('2.4.1')
+    expect(res.written).toHaveLength(1)
+    const opening = openings[0]
+    expect(opening).toContain('FLOW: ')
+    expect(opening).toContain('Program entrypoint:')
+    // Journeys carry the grammar now; authoring-time probes are gone.
+    expect(opening).not.toContain('REAL BEHAVIOR')
   })
 
-  it('authors ungrounded (empty probes) when the recipe build fails', async () => {
+  it('a failed recipe build ends every cli task before a turn is spent', async () => {
     const r = repo()
-    writeRecipe(r, { build: 'false' }) // build fails → no probing
+    writeRecipe(r, { build: 'false' }) // build fails → no session
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    let received: ProbeTranscript[] | undefined
-    const gen: GenerateRunner = async (ctx) => {
-      received = ctx.probes
-      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
-    }
+    let turns = 0
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({}, () => turns++),
+    })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
-
-    // The authoring call still happened, but with no transcripts; birth then errors
-    // on the broken build so nothing settles.
-    expect(received).toEqual([])
+    expect(turns).toBe(0)
     expect(res.written).toEqual([])
-    expect(res.errors.length).toBeGreaterThan(0)
+    const err = res.errors.find((e) => e.anchor === 'version')!
+    expect(err.message).toContain('build failed')
+    expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
   })
 
   it('runs the recipe install before the birth build (the build sees the install marker)', async () => {
@@ -1878,7 +1858,7 @@ describe('generateGuards — grounded authoring', () => {
     const res = await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     expect(res.status).toBe('ok')
@@ -1886,66 +1866,22 @@ describe('generateGuards — grounded authoring', () => {
     expect(res.errors).toEqual([])
   })
 
-  it('authors ungrounded and errors on birth when the recipe install fails (exactly like a failing build)', async () => {
+  it('a failed recipe install ends every cli task exactly like a failing build', async () => {
     const r = repo()
-    writeRecipe(r, { install: 'false', build: 'true' }) // install fails → no probing, birth errors
+    writeRecipe(r, { install: 'false', build: 'true' })
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    let received: ProbeTranscript[] | undefined
-    const gen: GenerateRunner = async (ctx) => {
-      received = ctx.probes
-      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
-    }
-
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
-
-    expect(received).toEqual([])
-    expect(res.written).toEqual([])
-    expect(res.errors.length).toBeGreaterThan(0)
-  })
-
-  it('fires onGroundProgress as probes are planned then captured', async () => {
-    const r = seed()
-
-    const ground: Array<[number, number]> = []
+    let turns = 0
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({
-        version: [{ claim: '`--version` prints the version and exits 0' }],
-        background: { untestable: 'bg' },
-      }),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-      onGroundProgress: (captured, planned) => ground.push([captured, planned]),
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({}, () => turns++),
     })
 
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
-    // Phase 1 is the `--help` surface alone (0/1, 1/1); the exact `--version`
-    // fragment runs in phase 2 (1/2, 2/2). No expansion probes (the fixture's
-    // help surface names no subcommand the claim also mentions).
-    expect(ground).toEqual([
-      [0, 1],
-      [1, 1],
-      [1, 2],
-      [2, 2],
-    ])
-  })
-
-  it('does not fire onGroundProgress when authoring is fully cached (no probes run)', async () => {
-    const r = seed()
-
-    const runners = {
-      extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
-    }
-    await runGenerate({ repoRoot: r, ...runners })
-
-    // Reset the manifest so the flow is work again; authoring is a cache HIT → no
-    // authoring call and therefore no grounding.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
-    let groundCalls = 0
-    await runGenerate({ repoRoot: r, ...runners, onGroundProgress: () => groundCalls++ })
-    expect(groundCalls).toBe(0)
+    expect(turns).toBe(0)
+    expect(res.written).toEqual([])
+    expect(res.errors.length).toBeGreaterThan(0)
   })
 })
 
@@ -1970,29 +1906,27 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.cli.1.yaml'))).toBe(true)
   })
 
-  it('kicks the recipe build at run start, parallel with authoring', async () => {
+  it('builds ONCE before the first session turn — every sandbox run reuses it', async () => {
     const r = repo()
-    // The build writes a marker in the repo root; the author runner waits for it.
-    writeRecipe(r, { build: 'touch build-marker' })
+    // The build appends to a marker; a rebuild per run would append again.
+    writeRecipe(r, { build: 'echo x >> build-marker' })
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
-    let sawMarker = false
-    const gen: GenerateRunner = async (ctx) => {
-      // The build was kicked as soon as there was authoring work (not after it), so
-      // its marker shows up WHILE authoring runs — a barrier build never would.
-      const start = Date.now()
-      while (!fs.existsSync(path.join(r, 'build-marker'))) {
-        if (Date.now() - start > 4000) throw new Error('the build never ran alongside authoring')
-        await new Promise((res) => setTimeout(res, 10))
-      }
-      sawMarker = true
-      return { scenario: stampMilestones(raw('v', PASSING_STEPS), ctx.milestones.length) }
-    }
+    let markerAtFirstTurn: boolean | undefined
+    const res = await runGenerate({
+      repoRoot: r,
+      extractRunner: versionCliBgUntestable,
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }, () => {
+        markerAtFirstTurn ??= fs.existsSync(path.join(r, 'build-marker'))
+      }),
+    })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: gen })
-    expect(sawMarker).toBe(true)
+    // The build completed before the session's first turn…
+    expect(markerAtFirstTurn).toBe(true)
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+    // …and ran exactly once for the whole generate (session run + confirmation).
+    expect(fs.readFileSync(path.join(r, 'build-marker'), 'utf-8').trim().split('\n')).toHaveLength(1)
   })
 
   it('a flow reuses its own prior id and never steals a sibling’s', async () => {
@@ -2038,55 +1972,6 @@ describe('generateGuards — the per-flow pipeline', () => {
   })
 })
 
-describe('spawnGenerateRunner — retry stage attribution', () => {
-  const ctxFor = (retry?: AuthorUserContext['retry']): AuthorUserContext => ({
-    flow: { id: 'version', title: 'version', goal: 'the version prints' },
-    milestones: [
-      {
-        order: 1,
-        claim: 'v',
-        doc: DOC,
-        sectionHeading: 'version',
-        sectionText: '`relkit --version` prints the version.',
-        realization: ['run: ["--version"]   (journey cli/relkit)'],
-      },
-    ],
-    journeyPath: ['cli/relkit'],
-    areaTags: [],
-    driver: 'cli',
-    recipeEntry: ['node', 'bin.mjs'],
-    recipeBuild: 'true',
-    ...(retry ? { retry } : {}),
-  })
-  const retry = { scenarioTitle: 't', step: 1, expected: 'e', actual: 'a' }
-
-  it('logs round-1 under guard.generate and a retry under guard.retry with the retry model', async () => {
-    const seen: Array<{ stage: string; model?: string }> = []
-    const transport: LlmTransport = async (req) => {
-      seen.push({ stage: req.stage, model: req.model })
-      return '{}'
-    }
-    const runner = spawnGenerateRunner({ transport, model: 'opus', retryModel: 'sonnet' })
-    await runner(ctxFor())
-    await runner(ctxFor(retry))
-    expect(seen).toEqual([
-      { stage: 'guard.generate', model: 'opus' },
-      { stage: 'guard.retry', model: 'sonnet' },
-    ])
-  })
-
-  it('a retry defaults to the generate model when no retry model is configured', async () => {
-    const seen: Array<{ stage: string; model?: string }> = []
-    const transport: LlmTransport = async (req) => {
-      seen.push({ stage: req.stage, model: req.model })
-      return '{}'
-    }
-    const runner = spawnGenerateRunner({ transport, model: 'opus' })
-    await runner(ctxFor(retry))
-    expect(seen).toEqual([{ stage: 'guard.retry', model: 'opus' }])
-  })
-})
-
 describe('generateGuards — the committed flow corpus', () => {
   it('writes flows.json and references its flows by id from the scenarios', async () => {
     const r = seed()
@@ -2094,7 +1979,7 @@ describe('generateGuards — the committed flow corpus', () => {
     await runGenerate({
       repoRoot: r,
       extractRunner: versionCliBgUntestable,
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }),
+      turnFn: workerTurnBy({ version: raw('v', PASSING_STEPS) }),
     })
 
     const flows = JSON.parse(fs.readFileSync(path.join(scenariosDir(r), 'flows.json'), 'utf-8'))

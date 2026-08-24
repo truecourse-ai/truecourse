@@ -5,16 +5,48 @@
  * a `fail` (code-side drift candidate). Evidence is written for every EXECUTED
  * outcome — pass included (a green transcript is the proof of what ran) — but not
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
+ *
+ * Beyond `run` steps, a scenario may drive ONE managed SERVICE — a long-running
+ * command started by a `boot` step (readiness asserted on a stdout/stderr line,
+ * never on exit), signalled by `signal` steps, observed by `logs` steps — the cli
+ * analog of the api driver's server-process lifecycle, on the same spawn shape
+ * (`service-process.ts`). At most one service runs at a time (a second `boot`
+ * replaces the first), and the service is killed at scenario end no matter how
+ * the scenario exits.
  */
 
-import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
-import { blockedPreconditionAnnotation } from '@truecourse/shared'
+import type {
+  GuardCliBootStep,
+  GuardCliLogsStep,
+  GuardCliScenario,
+  GuardCliSignalStep,
+  GuardExpect,
+  GuardScenarioResult,
+  OutputExcerpts,
+} from '@truecourse/shared'
+import {
+  blockedPreconditionAnnotation,
+  describeCliLifecycleStep,
+  isCliBootStep,
+  isCliRunStep,
+  isCliSignalStep,
+} from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
 import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
 import { startExternalProxies } from './capabilities/external-proxy.js'
 import { executeStep, type StepCapture } from './executor.js'
+import {
+  spawnServiceProcess,
+  matchingLogLines,
+  logMatchLabel,
+  exitLabel,
+  SIGNAL_EXIT_TIMEOUT_MS,
+  LOGS_WAIT_MS,
+  LOGS_POLL_INTERVAL_MS,
+  type ServiceProcessHandle,
+} from './service-process.js'
 import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
@@ -155,6 +187,18 @@ function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
   }
 }
 
+/** The captured output of every service process one scenario ran, in boot order. */
+interface ServiceLogs {
+  stdout: string
+  stderr: string
+}
+
+/** A position in each captured stream — the base of a `sinceLastStep` window. */
+interface LogMark {
+  stdout: number
+  stderr: number
+}
+
 export async function runScenario(
   scenario: GuardCliScenario,
   ctx: RunScenarioContext,
@@ -226,6 +270,41 @@ export async function runScenario(
   const normText = (t: string): string => normalize(t, scenario.normalize, normCtx)
   const records: EvidenceStep[] = []
 
+  // The managed SERVICE — at most one runs at a time; a `boot` replaces it, and the
+  // `finally` below kills whatever is left however the scenario exits. Its output is
+  // ACCUMULATED across boots (the api driver's rule), so a restart's earlier lines
+  // stay readable and in evidence after the second boot replaced the handle.
+  let service: ServiceProcessHandle | null = null
+  const retired: ServiceLogs = { stdout: '', stderr: '' }
+  /** Everything every service of this scenario has written so far. */
+  const serviceLogs = (): ServiceLogs => {
+    const live = service?.logs() ?? { stdout: '', stderr: '' }
+    return { stdout: retired.stdout + live.stdout, stderr: retired.stderr + live.stderr }
+  }
+  /** The same accumulator, read AFTER the live service's stdio flush barrier — the
+   *  only form a verdict, excerpt or evidence bundle may be built from. */
+  const settledLogs = async (): Promise<ServiceLogs> => {
+    await service?.drain()
+    return serviceLogs()
+  }
+  /** Stop the running service (if any) and fold its output into the accumulator. */
+  const retireService = async (): Promise<void> => {
+    if (!service) return
+    await service.stop()
+    await service.drain()
+    const last = service.logs()
+    retired.stdout += last.stdout
+    retired.stderr += last.stderr
+    service = null
+  }
+  /** True once ANY service process of this scenario has been spawned. */
+  let everBooted = false
+  /** Settled log lengths as of the START of the previous step — a `logs` window's base. */
+  let previousStepMark: LogMark = { stdout: 0, stderr: 0 }
+  /** The service's output for an evidence bundle — absent until a boot happened. */
+  const evidenceServiceLogs = async (): Promise<{ serviceLogs?: ServiceLogs }> =>
+    everBooted ? { serviceLogs: await settledLogs() } : {}
+
   try {
     // Materialize declared setup capabilities (git, …) after files seeding. A
     // provider failure is infrastructure — an `error` outcome naming the
@@ -242,11 +321,236 @@ export async function runScenario(
       }
     }
 
+    /** An `error` outcome for a lifecycle step — infrastructure, never a verdict. */
+    const errorAt = (
+      stepIndex: number,
+      milestone: number | undefined,
+      expected: string,
+      actual: string,
+    ): GuardScenarioResult => ({
+      ...base,
+      outcome: 'error',
+      durationMs: Date.now() - start,
+      ...(milestone ? { failedMilestone: milestone } : {}),
+      failure: { step: stepIndex, expected, actual },
+    })
+
+    /** A lifecycle step's `fail`, with its evidence bundle (mirrors the api driver). */
+    const lifecycleFail = async (
+      step: GuardCliBootStep | GuardCliSignalStep | GuardCliLogsStep,
+      stepIndex: number,
+      expected: string,
+      actual: string,
+      detail?: string[],
+    ): Promise<GuardScenarioResult> => {
+      records.push(lifecycleRecord(stepIndex, step))
+      const evidencePath = writeEvidence({
+        repoRoot: ctx.repoRoot,
+        runId: ctx.runId,
+        scenarioId: scenario.id,
+        title: scenario.title,
+        ...evidenceRefs,
+        outcome: 'fail',
+        steps: records,
+        failingStep: stepIndex,
+        mismatch: {
+          subject: 'process',
+          expected,
+          actual,
+          detail: detail ?? [`expected: ${expected}`, `actual:   ${actual}`],
+        },
+        sandboxCwd: sandbox.cwd,
+        envPins: ENV_PINS,
+        ...(await evidenceServiceLogs()),
+      })
+      return {
+        ...base,
+        outcome: 'fail',
+        durationMs: Date.now() - start,
+        ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+        ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
+        failure: { step: stepIndex, expected, actual },
+        evidencePath,
+      }
+    }
+
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
+      // Taken BEFORE the step runs, and handed to the NEXT step: a `logs` step's
+      // `sinceLastStep` window is everything that arrived after the step before it
+      // began. Read through the flush barrier ({@link ServiceProcessHandle.drain}),
+      // so every byte the service had handed to the OS before this step settles on
+      // the EARLIER side of the boundary.
+      await service?.drain()
+      const atMark = serviceLogs()
+      const markAtStart: LogMark = { stdout: atMark.stdout.length, stderr: atMark.stderr.length }
+
+      // --- The service-lifecycle steps -------------------------------------
+      if (!isCliRunStep(step)) {
+        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+
+        if (isCliBootStep(step)) {
+          // A boot always replaces whatever is running — its output is folded into
+          // the scenario's accumulator first, so nothing a restart printed is lost.
+          await retireService()
+          const argv = [...ctx.resolvedEntry, ...step.boot.run.map((a) => applyUnique(a, ctx.unique))]
+          const bootEnv = overlayStepEnv(
+            sandbox.env,
+            step.boot.env ? applyUniqueEnv(step.boot.env, ctx.unique) : undefined,
+          )
+          let spawned
+          try {
+            spawned = spawnServiceProcess({ argv, cwd: sandbox.cwd, env: bootEnv })
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e)
+            return errorAt(stepIndex, step.milestone, 'the service to start', `failed to spawn: ${message}`)
+          }
+          service = spawned.handle
+          everBooted = true
+
+          // Readiness: poll THIS boot's captured output for the declared line. The
+          // budget is the step timeout unless the step narrows it. A readiness that
+          // never appears is a FAIL (the api driver's unhealthy-boot rule — the
+          // process existed and was judged), never an error; only a child that could
+          // not be spawned at all is infrastructure.
+          const { stream, match } = step.boot.ready
+          const budget = step.boot.ready.withinMs ?? ctx.stepTimeoutMs
+          const deadline = Date.now() + budget
+          let ready = false
+          for (;;) {
+            if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+            await service.drain()
+            if (matchingLogLines(service.logs()[stream], match).length > 0) {
+              ready = true
+              break
+            }
+            const exit = service.exit()
+            if (exit?.exited) {
+              const spawnError = spawned.spawnError()
+              const bootLogs = service.logs()
+              await retireService()
+              if (spawnError) {
+                return errorAt(stepIndex, step.milestone, 'the service to start', `failed to spawn: ${spawnError}`)
+              }
+              return lifecycleFail(
+                step,
+                stepIndex,
+                `the service to keep running and print a ${stream} line matching ${logMatchLabel(match)}`,
+                `it ${exitLabel(exit)} before the readiness line appeared`,
+                [`--- stdout ---`, bootLogs.stdout.slice(-FAILURE_OUTPUT_LIMIT), `--- stderr ---`, bootLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT)],
+              )
+            }
+            if (Date.now() > deadline) break
+            await new Promise((r) => setTimeout(r, LOGS_POLL_INTERVAL_MS))
+          }
+          if (!ready) {
+            // The service came up but never said so — it must not outlive the failed boot.
+            const window = (await settledLogs())[stream].slice(markAtStart[stream])
+            await retireService()
+            return lifecycleFail(
+              step,
+              stepIndex,
+              `a ${stream} line matching ${logMatchLabel(match)} within ${budget}ms of the service starting`,
+              'the service produced no such line',
+              [`--- ${stream} ---`, window.slice(-FAILURE_OUTPUT_LIMIT)],
+            )
+          }
+          records.push(lifecycleRecord(stepIndex, step))
+          previousStepMark = markAtStart
+          continue
+        }
+
+        if (isCliSignalStep(step)) {
+          if (!service) {
+            return errorAt(
+              stepIndex,
+              step.milestone,
+              'a running service to signal',
+              'no service is running — a `boot` step must start one before it can be signalled',
+            )
+          }
+          service.signal(step.signal.name)
+          const expectation = step.signal.expect
+          if (expectation) {
+            const budget = expectation.withinMs ?? SIGNAL_EXIT_TIMEOUT_MS
+            const exit = await service.waitForExit(budget)
+            if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+            if (!exit.exited) {
+              await retireService()
+              return lifecycleFail(
+                step,
+                stepIndex,
+                `the service to exit within ${budget}ms of ${step.signal.name}`,
+                'it was still running at the deadline',
+              )
+            }
+            if (expectation.exitCode !== undefined && exit.code !== expectation.exitCode) {
+              const detail = [`--- stderr ---`, (await settledLogs()).stderr.slice(-FAILURE_OUTPUT_LIMIT)]
+              await retireService()
+              return lifecycleFail(
+                step,
+                stepIndex,
+                `the service to exit with code ${expectation.exitCode} on ${step.signal.name}`,
+                `it ${exitLabel(exit)}`,
+                detail,
+              )
+            }
+          }
+          // A dead process is retired immediately, so a later step sees "no service
+          // running" rather than a handle onto a corpse.
+          if (service.exit()) await retireService()
+          records.push(lifecycleRecord(stepIndex, step))
+          previousStepMark = markAtStart
+          continue
+        }
+
+        // `logs` — assert on what the service process wrote.
+        if (!everBooted) {
+          return errorAt(
+            stepIndex,
+            step.milestone,
+            'a service whose output can be read',
+            'no service has been started yet — a `boot` step must precede a `logs` step',
+          )
+        }
+        const { stream, match } = step.logs
+        const from = step.logs.sinceLastStep ? previousStepMark[stream] : 0
+        const want = step.logs.count ?? 1
+        const deadline = Date.now() + (step.logs.withinMs ?? LOGS_WAIT_MS)
+        // Every read of the window goes through the flush barrier, so a line the
+        // service already wrote is judged on this attempt rather than costing a poll
+        // interval — and the verdict is never taken on a half-read stream.
+        const readWindow = async (): Promise<string> => (await settledLogs())[stream].slice(from)
+        let window = await readWindow()
+        let matches = matchingLogLines(window, match)
+        while (matches.length < want && Date.now() < deadline) {
+          if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+          await new Promise((r) => setTimeout(r, LOGS_POLL_INTERVAL_MS))
+          window = await readWindow()
+          matches = matchingLogLines(window, match)
+        }
+        const satisfied = step.logs.count === undefined ? matches.length >= 1 : matches.length === step.logs.count
+        if (!satisfied) {
+          const scope = step.logs.sinceLastStep ? ' since the previous step' : ''
+          return lifecycleFail(
+            step,
+            stepIndex,
+            step.logs.count === undefined
+              ? `a ${stream} line matching ${logMatchLabel(match)}${scope}`
+              : `exactly ${step.logs.count} ${stream} line(s) matching ${logMatchLabel(match)}${scope}`,
+            `${matches.length} line(s) matched`,
+            [`--- ${stream}${scope} ---`, window.slice(-FAILURE_OUTPUT_LIMIT)],
+          )
+        }
+        records.push(lifecycleRecord(stepIndex, step))
+        previousStepMark = markAtStart
+        continue
+      }
+
+      // --- A run step -------------------------------------------------------
       // Substitute `${unique}` in the scenario-authored argv + stdin + env overlay
       // (the recipe-owned `resolvedEntry` is left verbatim). The cli driver has no
       // other `${var}` mechanism, so this is a surgical token replacement, not a
@@ -307,6 +611,7 @@ export async function runScenario(
             infraMessage: infra,
             sandboxCwd: sandbox.cwd,
             envPins: ENV_PINS,
+            ...(await evidenceServiceLogs()),
           })
           return {
             ...base,
@@ -343,6 +648,7 @@ export async function runScenario(
             mismatch,
             sandboxCwd: sandbox.cwd,
             envPins: ENV_PINS,
+            ...(await evidenceServiceLogs()),
           })
           return {
             ...base,
@@ -370,6 +676,7 @@ export async function runScenario(
       if (lastCapture) {
         records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: repeat }, lastCapture, normText))
       }
+      previousStepMark = markAtStart
     }
 
     // Every step met its expectations — but the scenario passes only if its stubs also
@@ -398,6 +705,7 @@ export async function runScenario(
         },
         sandboxCwd: sandbox.cwd,
         envPins: ENV_PINS,
+        ...(await evidenceServiceLogs()),
       })
       const milestone = scenario.steps[violationStep - 1]?.milestone
       return {
@@ -425,10 +733,14 @@ export async function runScenario(
           steps: records,
           sandboxCwd: sandbox.cwd,
           envPins: ENV_PINS,
+          ...(await evidenceServiceLogs()),
         })
       : undefined
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
   } finally {
+    // The service must not outlive the scenario, however it ended (pass, fail,
+    // error, throw): SIGKILL the whole process group.
+    await service?.stop()
     await stubs?.stop()
     sandbox.cleanup()
   }
@@ -445,6 +757,34 @@ function abortedResult(
     outcome: 'error',
     durationMs: Date.now() - start,
     failure: { step, expected: 'the step to run', actual: 'run aborted' },
+  }
+}
+
+/**
+ * A lifecycle step's evidence row: what it did and what it asserted, in the SAME
+ * words the dashboard's step list uses ({@link describeCliLifecycleStep}), so the
+ * transcript and the UI can never describe one step two ways.
+ */
+function lifecycleRecord(
+  index: number,
+  step: GuardCliBootStep | GuardCliSignalStep | GuardCliLogsStep,
+): EvidenceStep {
+  const described = describeCliLifecycleStep(step)
+  const env = described.env ? ` (env: ${described.env.join(' ')})` : ''
+  return {
+    index,
+    kind: isCliBootStep(step) ? 'boot' : isCliSignalStep(step) ? 'signal' : 'logs',
+    action: `${described.command}${env}`,
+    ...(described.expectation ? { expectation: described.expectation } : {}),
+    repeat: 1,
+    iterationsRun: 1,
+    exitCode: null,
+    timedOut: false,
+    rawStdout: '',
+    rawStderr: '',
+    normStdout: '',
+    normStderr: '',
+    durationMs: 0,
   }
 }
 

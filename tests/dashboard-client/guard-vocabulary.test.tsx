@@ -2,8 +2,8 @@
  * THE ACCEPTANCE SWEEP — no retired term may reach a reader.
  *
  * Guard's UI went through three review rounds whose single recurring complaint was
- * vocabulary: engine words (findings, grounds, scenarios, held, guarded, blocked-on)
- * leaking into copy a user reads. A grep would rot the moment someone re-words a
+ * vocabulary: engine words (findings, grounds, held, guarded, blocked-on) leaking
+ * into copy a user reads. The artifact itself is a SCENARIO, never a "test". A grep would rot the moment someone re-words a
  * component, so the rule ships as a TEST: render the guard surfaces over a fixture
  * set that covers all four states, harvest everything a reader can actually see —
  * text nodes, aria-labels, titles, placeholders, hover copy — and assert no banned
@@ -11,12 +11,12 @@
  *
  * Exempt by construction:
  *  - engine identifiers and wire field names (never rendered, never harvested);
- *  - DATA a test detail shows verbatim — the committed YAML, the run transcript,
- *    and the ids/paths the house style renders mono. A test file called
- *    `…scenario.yaml` is a fact about the repo, not UI copy.
+ *  - DATA a scenario detail shows verbatim — the committed YAML, the run
+ *    transcript, and the ids/paths the house style renders mono. A file called
+ *    `…test.yaml` is a fact about the repo, not UI copy.
  *
- * "birth" is deliberately NOT banned: it is the stage name a committed-red test
- * carries ("failed (birth)"), and the user kept it.
+ * "birth" is deliberately NOT banned: it is the stage name a committed-red
+ * scenario carries ("failed (birth)"), and the user kept it.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -68,16 +68,17 @@ function decisionsStub(over: Partial<GuardDecisionsState> = {}): GuardDecisionsS
 // ---------------------------------------------------------------------------
 
 const BANNED: { term: string; pattern: RegExp }[] = [
-  // The entity is a TEST. "Finding" was the engine's name for a failed one.
+  // The entity is a SCENARIO. "Finding" was the engine's name for a failed one.
   { term: 'finding(s)', pattern: /\bfindings?\b/i },
   // Replaced by "Used by flows".
   { term: 'grounds', pattern: /\bgrounds\b/i },
-  // The retired all-caps section header (it became "Tests"). The surface NAMES
+  // The retired all-caps section header (it became "Scenarios"). The surface NAMES
   // (CLI / API / Web) and the Journeys banner's "Detected surfaces" both stay —
   // the complaint was the shouted engine header, not the English word.
   { term: 'SURFACES header', pattern: /\bSURFACES\b/ },
-  // The technical artifact's name — it renders as "test" everywhere.
-  { term: 'scenario(s)', pattern: /\bscenarios?\b/i },
+  // The engine-era name for the artifact — it renders as "scenario" everywhere.
+  // ("testable"/"untestable" are a different word and stay.)
+  { term: 'test(s)', pattern: /\btests?\b/i },
   // Raw kind / bucket tokens off the wire.
   { term: 'blocked-on', pattern: /blocked-on/i },
   { term: 'unrealizable', pattern: /\bunrealizable\b/i },
@@ -643,7 +644,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         onOpenSpec={() => {}}
       />,
     );
-    await screen.findByLabelText('test steps');
+    await screen.findByLabelText('scenario steps');
     expectCleanVocabulary('GuardTestDetail');
   });
 
@@ -670,7 +671,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         onOpenSpec={() => {}}
       />,
     );
-    await screen.findByLabelText('test steps');
+    await screen.findByLabelText('scenario steps');
     expectCleanVocabulary('GuardTestDetail (dismissed claim)');
   });
 
@@ -696,7 +697,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         />
       </MemoryRouter>,
     );
-    await screen.findByLabelText('test steps');
+    await screen.findByLabelText('scenario steps');
     expectCleanVocabulary('GuardDriftDetail');
   });
 
@@ -710,7 +711,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         onOpenSpec={() => {}}
       />,
     );
-    await screen.findByLabelText('test steps');
+    await screen.findByLabelText('scenario steps');
     expectCleanVocabulary('GuardDriftDetail (orphaned)');
   });
 

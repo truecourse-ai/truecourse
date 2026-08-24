@@ -302,6 +302,7 @@ describe('guard decisions — dismissedFlows', () => {
       dismissedFlows: [
         { flowId: 'task-lifecycle', title: 'Task lifecycle', dismissedAt: '2026-07-24T12:00:00.000Z', note: 'not a user path' },
       ],
+      reenabledFlows: [],
     }
     expect(GuardDecisionsSchema.parse(file)).toEqual(file)
     expect(GuardDecisionsSchema.parse({ version: 1 })).toEqual(EMPTY_GUARD_DECISIONS)

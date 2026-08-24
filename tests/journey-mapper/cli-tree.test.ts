@@ -71,12 +71,86 @@ describe('deriveCliJourneysFromTree', () => {
     })
   })
 
+  it('carries a per-flag option schema alongside the flag list', () => {
+    const deploy = journeys.find((j) => j.id === 'cli/deploy')
+    expect(deploy?.steps[0]).toMatchObject({
+      options: [
+        { flag: '--env', description: 'Target environment' },
+        { flag: '--dry-run', description: 'Print the plan without applying it' },
+      ],
+    })
+    // A command whose registration declares no flags carries no options field.
+    const config = journeys.find((j) => j.id === 'cli/config')
+    expect(config?.steps[0]).not.toHaveProperty('options')
+  })
+
   it('maps nothing for a repo with no cli surface', () => {
     const service = analyze(
       'src/report.ts',
       `export function buildReport(rows: string[]): string { return rows.join('\\n') }`,
     )
     expect(deriveCliJourneysFromTree([service])).toEqual([])
+  })
+
+  it('derives the ROOT journey from the tree when the program name is known', () => {
+    const withRoot = deriveCliJourneysFromTree([analyze('src/cli.ts', CLI_SOURCE)], {
+      programName: 'shipit',
+    })
+    expect(withRoot.map((j) => j.id)).toEqual([
+      'cli/root',
+      'cli/config',
+      'cli/config-get',
+      'cli/config-set',
+      'cli/deploy',
+      'cli/status',
+    ])
+    expect(withRoot[0]).toMatchObject({
+      type: 'cli',
+      title: 'shipit',
+      entry: { command: ['shipit'] },
+      steps: [{ kind: 'invoke', command: ['shipit'], flags: ['--version', '--help'] }],
+    })
+    // Without a program name there is nothing to root the journey at.
+    expect(journeys.map((j) => j.id)).not.toContain('cli/root')
+  })
+
+  it('marks program-level options scope program on every subcommand grammar', () => {
+    const source = `
+      import { Command } from 'commander'
+      const program = new Command()
+      program.option('--verbose', 'Print every step')
+      program.command('deploy').option('--env <name>', 'Target environment').action(runDeploy)
+      program.parse()
+    `
+    const derived = deriveCliJourneysFromTree([analyze('src/cli.ts', source)], { programName: 'ship' })
+    const deploy = derived.find((j) => j.id === 'cli/deploy')
+    // The program flag rides the grammar only, never the fingerprinted flag set.
+    expect(deploy?.steps[0]).toMatchObject({ flags: ['--env'] })
+    expect(deploy?.steps[0].options).toEqual([
+      { flag: '--env', description: 'Target environment', takesValue: true, valueHint: 'name' },
+      { flag: '--verbose', description: 'Print every step', scope: 'program' },
+    ])
+    // The root journey carries it as its own (unscoped) option.
+    const root = derived.find((j) => j.id === 'cli/root')
+    expect(root?.steps[0].options?.map((o) => o.flag)).toEqual(['--verbose', '--help'])
+    expect(root?.steps[0].options?.every((o) => o.scope === undefined)).toBe(true)
+  })
+
+  it('program-scope options never move a subcommand fingerprint', () => {
+    const without = `
+      import { Command } from 'commander'
+      const program = new Command()
+      program.command('deploy').option('--env <name>', 'Target environment').action(runDeploy)
+      program.parse()
+    `
+    const withProgramFlag = without.replace(
+      `program.command('deploy')`,
+      `program.option('--verbose', 'Print every step')\n      program.command('deploy')`,
+    )
+    const a = deriveCliJourneysFromTree([analyze('src/cli.ts', without)], { programName: 'ship' })
+    const b = deriveCliJourneysFromTree([analyze('src/cli.ts', withProgramFlag)], { programName: 'ship' })
+    const deployOf = (list: typeof a) => list.find((j) => j.id === 'cli/deploy')?.fingerprint
+    expect(deployOf(b)).toBe(deployOf(a))
   })
 
   it('collapses a command declared in two files onto one journey, flags unioned', () => {
@@ -100,7 +174,13 @@ describe('deriveCliJourneysFromTree', () => {
     )
     const merged = deriveCliJourneysFromTree([base, plugin])
     expect(merged.map((j) => j.id)).toEqual(['cli/db', 'cli/db-migrate'])
-    expect(merged[1].steps[0]).toMatchObject({ flags: ['--to', '--dry-run'] })
+    expect(merged[1].steps[0]).toMatchObject({
+      flags: ['--to', '--dry-run'],
+      options: [
+        { flag: '--to', description: 'Target revision' },
+        { flag: '--dry-run', description: 'Plan only' },
+      ],
+    })
   })
 })
 
@@ -132,6 +212,17 @@ describe('journey fingerprints — surface-visible shape only', () => {
     const idOf = (id: string) => (list: typeof before) => list.find((j) => j.id === id)?.fingerprint
     expect(idOf('cli/status')(after)).not.toBe(idOf('cli/status')(before))
     expect(idOf('cli/deploy')(after)).toBe(idOf('cli/deploy')(before))
+  })
+
+  it('survives a flag-description rewrite — options are metadata, never fingerprinted', () => {
+    const before = deriveCliJourneysFromTree([analyze('src/cli.ts', CLI_SOURCE)])
+    const after = deriveCliJourneysFromTree([
+      analyze(
+        'src/cli.ts',
+        CLI_SOURCE.replace('Emit machine-readable JSON', 'Print JSON to stdout'),
+      ),
+    ])
+    expect(after.map((j) => j.fingerprint)).toEqual(before.map((j) => j.fingerprint))
   })
 
   it('ignores the order flags are declared in', () => {

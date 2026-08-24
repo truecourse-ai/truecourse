@@ -29,7 +29,7 @@
  * claim-faithfulness rules, not here.
  */
 
-import { isApiRequestStep, type GuardApiStep, type GuardSetup, type GuardStep } from '@truecourse/shared'
+import { isApiRequestStep, type GuardApiStep, type GuardCliStep, type GuardSetup } from '@truecourse/shared'
 
 /** One fenced block mined from a section, byte-exact. */
 export interface MinedExampleBlock {
@@ -114,7 +114,7 @@ interface ExampleCarrier {
  *  is feasible: seeded file content, cli stdin, api raw request body. */
 function exampleCarriers(
   scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
+    | { driver: 'cli'; steps: readonly GuardCliStep[]; setup?: GuardSetup }
     | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
 ): ExampleCarrier[] {
   const carriers: ExampleCarrier[] = []
@@ -123,7 +123,9 @@ function exampleCarriers(
   }
   if (scenario.driver === 'cli') {
     scenario.steps.forEach((step, i) => {
-      if (typeof step.stdin === 'string') carriers.push({ where: `step ${i + 1} stdin`, value: step.stdin })
+      if ('stdin' in step && typeof step.stdin === 'string') {
+        carriers.push({ where: `step ${i + 1} stdin`, value: step.stdin })
+      }
     })
   } else {
     scenario.steps.forEach((step, i) => {
@@ -144,7 +146,7 @@ function exampleCarriers(
  */
 export function exampleFidelityDefect(
   scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
+    | { driver: 'cli'; steps: readonly GuardCliStep[]; setup?: GuardSetup }
     | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
   examples: readonly DocExampleBlock[],
 ): string | null {

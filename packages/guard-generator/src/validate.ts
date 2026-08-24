@@ -3,7 +3,9 @@
  * runners return the model's raw parsed JSON (unknown); each stage Zod-validates
  * it, and on a schema failure re-asks ONCE with the invalid output quoted back
  * (see the per-stage prompts). These render the two pieces that re-ask needs: a
- * safe-to-embed quote of the offending output and a one-line reason.
+ * safe-to-embed quote of the offending output and a one-line reason — plus the
+ * other half of the discipline, the single retry a call that THREW gets before any
+ * of it applies (no answer is not an answer to correct).
  *
  * Beyond schema shape, an authored scenario must obey COMPOSITION rules the
  * schema accepts but the engine cannot execute. They are PER DRIVER, because the
@@ -27,7 +29,7 @@ import type { ZodError } from 'zod'
 import {
   isApiRequestStep,
   type GuardApiStep,
-  type GuardStep,
+  type GuardCliStep,
   type GuardSetup,
 } from '@truecourse/shared'
 import { programNamesOf } from './ground.js'
@@ -49,6 +51,30 @@ export function quoteInvalidOutput(raw: unknown): string {
 /** Flatten a ZodError to a single-line `path: message; …` summary. */
 export function flattenZodError(error: ZodError): string {
   return error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
+}
+
+/**
+ * One call, with ONE retry when it THREW — the model never answered (a timeout, a
+ * dead transport), so there is nothing to correct and asking again is the whole
+ * fix. A retry is a fresh call: nothing is cached for a failure, so it never
+ * replays one. Distinct from the corrective re-ask, which handles the opposite
+ * case (the model DID answer, unusably) and is never stacked on top of this.
+ * Returns the raw output, or the second failure's message.
+ */
+export async function callWithRetry<Ctx>(
+  runner: (ctx: Ctx) => Promise<unknown>,
+  ctx: Ctx,
+): Promise<{ raw: unknown } | { error: string }> {
+  try {
+    return { raw: await runner(ctx) }
+  } catch {
+    // Fall through to the single retry; only its failure is reported.
+  }
+  try {
+    return { raw: await runner(ctx) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
 }
 
 // --- Composition rules (per driver) ------------------------------------------
@@ -80,13 +106,17 @@ function tokenNames(token: string): { base: string; stem: string } {
  * or null when every step composes.
  */
 export function cliCompositionDefect(
-  steps: readonly GuardStep[],
+  steps: readonly GuardCliStep[],
   entry: readonly string[],
 ): string | null {
   const programNames = programNamesOf(entry)
   for (let i = 0; i < steps.length; i++) {
-    const head = steps[i].run[0]
-    if (head === undefined) continue
+    const step = steps[i]
+    // The rule covers every argv a cli scenario composes: a `run` step's, and a
+    // `boot` step's service command (appended to the same entrypoint).
+    const where = 'run' in step ? 'run[0]' : 'boot' in step ? 'boot.run[0]' : null
+    const head = 'run' in step ? step.run[0] : 'boot' in step ? step.boot.run[0] : undefined
+    if (where === null || head === undefined) continue
     const { base, stem } = tokenNames(head)
     const isEntry = programNames.has(head) || programNames.has(base) || programNames.has(stem)
     const isForeign = FOREIGN_BINARIES.has(head) || FOREIGN_BINARIES.has(base) || FOREIGN_BINARIES.has(stem)
@@ -95,7 +125,7 @@ export function cliCompositionDefect(
       ? `repeats the entrypoint (${JSON.stringify([...entry])})`
       : `is the foreign binary "${head}"`
     return (
-      `step ${i + 1}: run[0] "${head}" ${which}. A step's "run" is the argv APPENDED to the ` +
+      `step ${i + 1}: ${where} "${head}" ${which}. A step's "run" is the argv APPENDED to the ` +
       `entrypoint — it must contain ONLY the arguments (a subcommand and/or flags), never the ` +
       `program name and never another binary. E.g. with entry ${JSON.stringify([...entry])}, to run ` +
       `\`${[...entry, 'check', '--strict'].join(' ')}\` set run: ["check","--strict"].`
@@ -192,7 +222,7 @@ export function apiCompositionDefect(
  */
 export function scenarioCompositionDefect(
   scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
+    | { driver: 'cli'; steps: readonly GuardCliStep[]; setup?: GuardSetup }
     | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
   entry: readonly string[] | undefined,
 ): string | null {
@@ -202,4 +232,39 @@ export function scenarioCompositionDefect(
     return entry && entry.length > 0 ? cliCompositionDefect(scenario.steps, entry) : null
   }
   return apiCompositionDefect(scenario.steps, scenario.setup)
+}
+
+/**
+ * The flow milestones a scenario leaves unrealized: every milestone order (in
+ * `allowed` when given — a partial flow's covered subset) with no step carrying
+ * its number. The engine's coverage check, not the prompt's: a scenario that
+ * silently drops a milestone would guard less than the flow promises.
+ */
+export function uncoveredMilestones(
+  flow: { milestones: readonly { order: number }[] },
+  scenario: { steps: readonly { milestone?: number }[] },
+  allowed?: ReadonlySet<number>,
+): number[] {
+  const covered = new Set(scenario.steps.map((s) => s.milestone).filter((m): m is number => typeof m === 'number'))
+  return flow.milestones
+    .map((m) => m.order)
+    .filter((order) => (!allowed || allowed.has(order)) && !covered.has(order))
+}
+
+/** `milestone` values on the scenario's steps that match no milestone of the flow
+ *  — or, with `allowed`, none of a PARTIAL flow's covered subset (a step must
+ *  never realize a blocked milestone). */
+export function unknownMilestones(
+  flow: { milestones: readonly { order: number }[] },
+  scenario: { steps: readonly { milestone?: number }[] },
+  allowed?: ReadonlySet<number>,
+): number[] {
+  const known = allowed ?? new Set(flow.milestones.map((m) => m.order))
+  const out: number[] = []
+  for (const step of scenario.steps) {
+    if (typeof step.milestone === 'number' && !known.has(step.milestone) && !out.includes(step.milestone)) {
+      out.push(step.milestone)
+    }
+  }
+  return out
 }

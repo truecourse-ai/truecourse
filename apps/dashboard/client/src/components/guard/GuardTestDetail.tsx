@@ -160,8 +160,8 @@ export function GuardTestDetail({
       notes={
         row != null && !row.outcome && row.stage !== 'birth' ? (
           <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-            The last run has no result for this test — run{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test it.
+            The last run has no result for this scenario — run{' '}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to run it.
           </p>
         ) : null
       }
@@ -192,7 +192,7 @@ export function GuardTestDetail({
               <HoverPopover portal
                 align="start"
                 width="wide"
-                content="Removes this claim from testing. The next generate rebuilds the flow without it and deletes this test."
+                content="Removes this claim from the flow. The next generate rebuilds the flow without it and deletes this scenario."
               >
                 <button
                   type="button"
@@ -201,7 +201,7 @@ export function GuardTestDetail({
                   className={`${BTN} disabled:opacity-50`}
                 >
                   <Ban className="h-3 w-3 shrink-0" />
-                  Don&apos;t test this claim
+                  Rule this claim out
                 </button>
               </HoverPopover>
             </div>

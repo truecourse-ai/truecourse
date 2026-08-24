@@ -26,12 +26,18 @@ import {
   GuardGenerateErrorSchema,
   GuardTriageSchema,
 } from './report.js'
+import { GuardAutoResolvedAttemptSchema } from './auto-resolutions.js'
 import type { GuardGapDisplayKind } from './report.js'
 import type { GuardScenarioStepView } from './scenario.js'
 import type { GuardScenarioStory } from './describe.js'
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
-import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } from '../journeys.js'
+import {
+  JourneyCatalogSourceSchema,
+  JourneyDiagnosticSchema,
+  JourneyEntrySchema,
+  JourneyStepSchema,
+} from '../journeys.js'
 
 /**
  * A live doc section's coverage status — the single value the coverage view
@@ -98,6 +104,7 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   'blocked-on',
   'unrealizable',
   'no-journey',
+  'retired',
   ...awaitingDriverIds,
   'untestable',
   'no-claim',
@@ -201,6 +208,20 @@ export const GuardFlowGapSchema = z
      * without externals data, simply carries no field and reads as plain blocked.
      */
     needsSetup: GuardNeedsSetupSchema.optional(),
+    /**
+     * Present on a `retired` gap when the ledger still holds the retirement —
+     * the retired attempts' verdicts the flow detail exposes. Server-joined off
+     * the gitignored `guard/auto-resolutions.json`, so a hosted view (or a repo
+     * whose ledger was deleted) simply carries none and the gap reads plain.
+     */
+    retirement: z
+      .object({
+        attempts: z.number().int().positive(),
+        retiredAt: z.string(),
+        history: z.array(GuardAutoResolvedAttemptSchema),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 export type GuardFlowGap = z.infer<typeof GuardFlowGapSchema>
@@ -849,6 +870,8 @@ export const GuardJourneySurfaceSchema = z
     journeys: z.number().int().nonnegative(),
     detected: z.boolean(),
     source: JourneyCatalogSourceSchema.optional(),
+    /** How many union diagnostics the mapping recorded for this surface. */
+    diagnostics: z.number().int().nonnegative().optional(),
   })
   .strict()
 export type GuardJourneySurface = z.infer<typeof GuardJourneySurfaceSchema>
@@ -878,6 +901,9 @@ export const GuardJourneysViewSchema = z
         ungrounded: z.number().int().nonnegative(),
       })
       .strict(),
+    /** The mapping's static-vs-runtime disagreements, verbatim from the catalog
+     *  snapshot. Absent when the mapping recorded none. */
+    diagnostics: z.array(JourneyDiagnosticSchema).optional(),
     /**
      * Why the catalog is unavailable, when it is: `no-working-tree` (a hosted repo
      * has no tree to map). Absent when the read succeeded (mapped or simply empty).

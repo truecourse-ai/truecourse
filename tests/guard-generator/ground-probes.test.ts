@@ -150,6 +150,46 @@ describe('deriveStaticProbes', () => {
     )
     expect(fragments).toHaveLength(11)
   })
+
+  // The bound commands the realization plan walks each get a deterministic
+  // `<command> --help` — the usage text is the flag grammar authoring composes
+  // argv from, so it must never depend on a claim happening to quote the command.
+  it('probes each bound command with --help, ranked before salvaged prefixes', () => {
+    expect(
+      deriveStaticProbes(
+        ['`config set currency EUR` sets the currency'],
+        ENTRY,
+        [],
+        [['config', 'llm', 'setup']],
+      ),
+    ).toEqual({
+      helps: [['--help'], ['config', 'llm', 'setup', '--help'], ['config', 'set', '--help']],
+      fragments: [],
+    })
+  })
+
+  it('derives bound-command helps even when no claim names a command', () => {
+    expect(deriveStaticProbes([], ENTRY, [], [['deploy']])).toEqual({
+      helps: [['--help'], ['deploy', '--help']],
+      fragments: [],
+    })
+  })
+
+  it('collapses the ROOT journey (the program itself) onto the unconditional --help', () => {
+    expect(deriveStaticProbes(['`report` runs'], ENTRY, ['xpn'], [['xpn']])).toEqual({
+      helps: [['--help']],
+      fragments: [['report']],
+    })
+  })
+
+  it('dedupes a bound command against a salvaged prefix — the bound rank wins', () => {
+    expect(
+      deriveStaticProbes(['`add 12.50 lunch` records an expense'], ENTRY, [], [['add']]),
+    ).toEqual({
+      helps: [['--help'], ['add', '--help']],
+      fragments: [],
+    })
+  })
 })
 
 describe('deriveExpansionProbes', () => {

@@ -76,6 +76,17 @@ describe('deriveExternalsSkeleton', () => {
     expect(skeleton.undeclarable).toEqual(['twilio'])
   })
 
+  // A spawned program is satisfied by being installed, not by a base URL — so it
+  // rides the same "never invent a variable" rule rather than getting a guessed one.
+  it('carries a spawned-binary detection through without inventing a declaration', () => {
+    const skeleton = deriveExternalsSkeleton(apiRecipe(), [
+      detected({ service: 'claude', source: 'binary', evidence: [{ filePath: 'src/llm.ts', program: 'claude' }] }),
+    ])
+
+    expect(skeleton.declare).toEqual({})
+    expect(skeleton.undeclarable).toEqual(['claude'])
+  })
+
   it('leaves an already-declared service byte-identical', () => {
     const recipe = apiRecipe({
       stripe: { baseUrlEnv: 'MY_STRIPE_URL', baseUrl: 'https://sandbox.stripe.test', mode: 'sandbox' },

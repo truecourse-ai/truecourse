@@ -71,7 +71,7 @@ const FOOT_BTN =
 /** A truncating label inside a footer button — it must shrink, or it stretches the row. */
 const FOOT_TEXT = 'min-w-0 truncate';
 
-/** One labelled footer row — "Test — <id>", "File — <path>". */
+/** One labelled footer row — "Scenario — <id>", "File — <path>". */
 function FootRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 items-baseline gap-2">
@@ -305,7 +305,7 @@ export function GuardTestView({
   lead?: ReactNode;
   /** The one ruling this page offers (entity view only). */
   action?: ReactNode;
-  /** A link out of this page (the run instance's "open this test"). */
+  /** A link out of this page (the run instance's "open this scenario"). */
   headerAction?: ReactNode;
   /** Extra verdict-card notes (stale/orphaned bindings, "no result yet"). */
   notes?: ReactNode;
@@ -429,7 +429,7 @@ export function GuardTestView({
         {mode === 'YAML' ? (
           // The whole file — a reader who switched here asked for all of it. The
           // pane's own scroll carries it; the block never scrolls on its own.
-          <pre className={PRE} aria-label="test source">
+          <pre className={PRE} aria-label="scenario source">
             {source?.content ?? 'Loading…'}
           </pre>
         ) : mode === 'Story' ? (
@@ -439,7 +439,7 @@ export function GuardTestView({
             <GuardScenarioStory story={source.story} />
           ) : (
             <p className="text-[12px] text-muted-foreground">
-              {source == null ? 'Loading the story…' : 'This file does not parse as a guard test — read it as YAML.'}
+              {source == null ? 'Loading the story…' : 'This file does not parse as a guard scenario — read it as YAML.'}
             </p>
           )
         ) : (
@@ -461,7 +461,7 @@ export function GuardTestView({
             <div className="flex flex-wrap items-center gap-2">
               <GuardFlowStatusChip status={test.status.plain} word={verdictWord} className="text-[11px]" />
               {/* WHOSE fault the failure is, beside the fact that it failed. The
-                  status says the test is red; this says whether that is drift in
+                  status says the scenario is red; this says whether that is drift in
                   the repo or a defect of ours. */}
               {test.triage && <GuardTriageChip triage={test.triage} />}
               {test.durationMs != null && (
@@ -470,7 +470,7 @@ export function GuardTestView({
               {failed && test.status.birth && (
                 <HoverPopover portal
                   width="wide"
-                  content="This test failed the first time it ran, when it was written. It is committed anyway — the doc and the code disagree, and the next run that turns it green closes that gap."
+                  content="This scenario failed the first time it ran, when it was written. It is committed anyway — the doc and the code disagree, and the next run that turns it green closes that gap."
                 >
                   <span className="text-[11px] text-muted-foreground underline decoration-dotted">
                     what does birth mean?
@@ -518,11 +518,11 @@ export function GuardTestView({
               <HoverPopover portal
                 align="start"
                 width="wide"
-                content="The live journey catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
+                content="The live journey catalog no longer matches the fingerprints this scenario was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
               >
                 <div className="mt-2 flex items-center gap-2 text-[12px] text-amber-600 dark:text-amber-400">
                   <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-                  Journey drift — the mapped surface moved since this test was written
+                  Journey drift — the mapped surface moved since this scenario was written
                 </div>
               </HoverPopover>
             )}
@@ -540,7 +540,7 @@ export function GuardTestView({
               for a file that doesn't parse as a known driver — its own text. A
               failure never depends on that parse: when there are no steps to hang
               it on, it reads as its own block rather than disappearing. */}
-          <div aria-label="test steps">
+          <div aria-label="scenario steps">
             {source != null && source.steps.length > 0 ? (
               <div key={resultKey} className="rounded border border-border">
                 {groupStepsByMilestone(source.steps).map((group, i) => (
@@ -550,7 +550,7 @@ export function GuardTestView({
                         // "Setup" is the one group header that names no claim, so it
                         // says what it IS on hover rather than leaving a reader to
                         // wonder which promise these steps serve.
-                        <HoverPopover portal width="narrow" content="Prepares the test — not tied to a spec promise.">
+                        <HoverPopover portal width="narrow" content="Prepares the scenario — not tied to a spec promise.">
                           <span className="font-medium text-foreground underline decoration-dotted underline-offset-2">
                             Setup
                           </span>
@@ -608,7 +608,7 @@ export function GuardTestView({
           <div className={LABEL}>Journey</div>
           {test.journeyPath.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
-              This test records no journey path (hand-written, or written before mapping).
+              This scenario records no journey path (hand-written, or written before mapping).
             </p>
           ) : (
             <div className="space-y-2">
@@ -643,7 +643,7 @@ export function GuardTestView({
             — never a pile of bare strings. The file path is how a developer opens
             the real file; the page itself never shows its text. */}
         <dl className="space-y-1 border-t border-border pt-3 text-[11px]">
-          <FootRow label="Test">
+          <FootRow label="Scenario">
             <span className="truncate font-mono text-muted-foreground">{test.id}</span>
           </FootRow>
           {source?.file && (
