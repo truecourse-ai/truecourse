@@ -777,6 +777,30 @@ export function buildSeedSession(
     };
     const services = servicesController(input.repoRoot, input.recipe, opts.signal);
 
+    // The app is BUILT before anything here boots it: the session's and the
+    // fold's credential probes both start the recipe's server, and a checkout
+    // that never ran `recipe.build` has nothing to boot (2026-08-24 bench,
+    // cal.diy: draft verified, probe dead on a missing dist — unfixable from
+    // inside the session on a heavy-build repo). Once, outside the session
+    // cache, so a cache hit's fold probe gets a built app too; the fold's
+    // fresh world resets the datastore, never the app binary.
+    if (input.recipe.build) {
+      input.onPhase?.(`building the app (\`${input.recipe.build}\`)`, 'build');
+      const built = await runBuild(
+        input.repoRoot,
+        input.recipe.build,
+        input.recipe.env,
+        DEFAULT_BUILD_TIMEOUT_MS,
+        opts.signal,
+      );
+      if (!built.ok) {
+        return {
+          status: 'failed',
+          reason: `the recipe \`build\` failed${built.timedOut ? ' (timed out)' : ''}: ${tail(built.output)}`,
+        };
+      }
+    }
+
     try {
       const outcome = await cachedSessionOutcome<SeedSessionOutcome>({
         repoRoot: input.repoRoot,

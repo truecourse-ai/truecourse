@@ -86,9 +86,10 @@ function fixtureRepo(): string {
  * The recipe the seam runs against. `api.services` up/down are shell one-liners
  * that append to a log, so the world's lifecycle is observable without docker.
  */
-function writeRecipe(r: string, over: Record<string, unknown> = {}): void {
+function writeRecipe(r: string, over: Record<string, unknown> = {}, top: Record<string, unknown> = {}): void {
   const recipe = {
     build: 'true',
+    ...top,
     api: {
       serve: ['node', path.join(r, 'server.mjs')],
       healthPath: '/health',
@@ -326,6 +327,45 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
     expect(result.status).toBe('failed');
     expect(result.status === 'failed' && result.reason).toMatch(/does not run the target script/);
     expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// The app is built before anything boots it
+// (2026-08-24 bench, cal.diy: the draft verified but the credential probe was
+// dead on a missing dist — the checkout had never run `recipe.build`, and a
+// heavy-build repo cannot self-rescue from inside the session)
+// ---------------------------------------------------------------------------
+
+describe('buildSeedSession — builds the app before the world boots', () => {
+  it('runs `recipe.build` once, before services.up', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, { build: `printf 'build\\n' >> ${path.join(r, 'services.log')}` });
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result.status).toBe('ok');
+    // ONE build, then the session's world, then the fold's fresh world — the
+    // fold resets the datastore, never the app binary.
+    expect(servicesLog(r)).toEqual(['build', 'up', 'seed', 'down', 'up', 'seed', 'down']);
+  }, 60_000);
+
+  it('fails the step honestly when the build fails, before any session starts', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, { build: "printf 'tsc: dist is on fire\\n' >&2 && false" });
+    const h = harness(null); // any session start throws
+
+    const result = await buildSeedSession(h.context)(seedInput(r));
+
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/`build` failed/);
+    expect(result.status === 'failed' && result.reason).toMatch(/dist is on fire/);
+    expect(h.acquires()).toBe(0);
+    expect(servicesLog(r)).toEqual([]);
   }, 60_000);
 });
 

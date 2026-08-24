@@ -6962,3 +6962,18 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     Tests: `tests/core/guard-setup-seed-session.test.ts` (probe pass/Bearer
     drift/ungated endpoint/fold coverage, salvage incident-verbatim,
     machinery walk) over the fixture's new auth-gated `GET /me`.
+
+124. **The seed step builds the app before the session (2026-08-24 cal.diy
+    drafting bench).** STATUS: BUILT. Item 123's credential probes boot the
+    recipe's server — in-session and in the fold — and a checkout that never
+    ran `recipe.build` has nothing to boot: cal.diy run 3 verified its draft
+    and then died on the probe's missing dist, twice, with no legal
+    self-rescue (a heavy nest build does not fit inside a seed command the
+    way documenso's remix build did). `buildSeedSession` now runs
+    `recipe.build` once, before the world boots and OUTSIDE the session
+    cache (a cache hit's fold probe needs the built app too); a failed
+    build fails the step honestly before any session tokens are spent. The
+    fold's fresh world keeps resetting only the datastore, never the app
+    binary. `packages/core/src/services/guard-setup/seed-session.ts`; tests
+    in `tests/core/guard-setup-seed-session.test.ts` (build-before-up
+    ordering, failing-build refusal with zero sessions).
