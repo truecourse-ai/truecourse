@@ -6930,3 +6930,35 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `packages/guard-runner/src/{drivers/api-driver.ts,api/run-api-scenario.ts,api/executor.ts}`;
     regression `tests/guard-runner/api-eventual.test.ts` over the fixture's
     new `/eventual` pair (ack now, readable 400ms later).
+
+123. **Seed session hardening (2026-08-23 documenso drafting bench).** STATUS:
+    BUILT. Four fixes from the 08-drafting runs (run 2 died budget-exhausted at
+    43 turns holding a draft the engine had already run and verified; run 3
+    converged with one turn to spare; both spent their whole first grant
+    exploring; a `Bearer `-prefixed token passed every static check twice):
+    (1) **`draftCheckpoint` on the seed session** — item 118's mechanism,
+    third session: `run_seed_draft` at turn 10 (execution errors steer better
+    than more reading).
+    (2) **Salvage** — a session that dies without an outcome (budget,
+    malformed, dead provider — never an abort) while holding a draft
+    `run_seed_draft` FULLY verified gets that draft folded as its outcome;
+    the fresh-world proof still gates the write, and the step record + CLI
+    say `salvaged`.
+    (3) **Credential probes** — every minted credential must declare a live
+    probe (`probes: {name: {method?, path}}`, in `run_seed_draft` args and
+    the outcome; never in the committed recipe). The engine boots the
+    recipe's server (`preflightApiServer`) and sends the minted value
+    VERBATIM: refused (401/403) with the credential fails the draft, and so
+    does an endpoint that answers WITHOUT it (ungated proves nothing). Runs
+    in-session and again in the fold's fresh world. Closes the boot-green
+    Goodhart hole the Bearer drift sailed through.
+    (4) **Seed-machinery briefing** — `existingSeedMachinery` walks the repo
+    for seed-named files (capped, excerpted, dependency dirs skipped) and the
+    briefing carries them, so sessions stop re-finding the app's own seed
+    helpers by search (~10 turns/session on the bench).
+    As built: `packages/core/src/services/guard-setup/seed-session.ts`,
+    `packages/{shared/src/guard/setup.ts,guard-generator/src/setup.ts}`
+    (`salvaged` on the step record), `tools/cli/src/commands/guard-setup.ts`.
+    Tests: `tests/core/guard-setup-seed-session.test.ts` (probe pass/Bearer
+    drift/ungated endpoint/fold coverage, salvage incident-verbatim,
+    machinery walk) over the fixture's new auth-gated `GET /me`.

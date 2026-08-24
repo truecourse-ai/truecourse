@@ -334,6 +334,8 @@ export type GuardSetupSeedSessionResult =
       credentials?: string[]
       sessionRunId?: string
       fromCache?: boolean
+      /** The session died without an outcome and its last verified draft was folded. */
+      salvaged?: boolean
     }
   | { status: 'failed' | 'skipped'; reason: string; sessionRunId?: string }
 export type GuardSetupSeedSession = (
@@ -1216,6 +1218,7 @@ async function runSeedStep(args: {
         command: result.command,
         ...(result.fixtures && result.fixtures.length > 0 ? { fixtures: result.fixtures } : {}),
         ...(result.credentials && result.credentials.length > 0 ? { credentials: result.credentials } : {}),
+        ...(result.salvaged ? { salvaged: true } : {}),
         // Trust the recipe on disk over the seam's echo when both exist.
         ...(written ? declaredNames(written) : {}),
       },
@@ -1432,5 +1435,6 @@ function seedSummary(step: GuardSetupSeedStep): string {
   if (step.credentials?.length) {
     parts.push(`${step.credentials.length} principal${step.credentials.length === 1 ? '' : 's'}`)
   }
+  if (step.salvaged) parts.push('salvaged from a session that produced no outcome')
   return parts.join(' · ')
 }

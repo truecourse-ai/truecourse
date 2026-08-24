@@ -39,13 +39,15 @@ import {
 import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
 import {
   buildSeedSession,
+  existingSeedMachinery,
   seedScriptTargetPath,
+  seedSessionBriefing,
   seedSessionCacheKey,
   seedSessionDef,
   providesWarnings,
 } from '../../packages/core/src/services/guard-setup/seed-session';
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
-import { memoryPersistence, stubDriver, outcome } from './spec-scan-session-stub';
+import { memoryPersistence, stubDriver, outcome, malformedFailure } from './spec-scan-session-stub';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 const TARGET = '.truecourse/scenarios/guard-seed.mjs';
@@ -328,6 +330,210 @@ describe('buildSeedSession — the draft never lands in the repo until the fold'
 });
 
 // ---------------------------------------------------------------------------
+// Credential probes — a minted credential proves itself against the live server
+// (2026-08-23 bench: a `Bearer `-prefixed token sailed through two runs because
+// the verify never made an authenticated request)
+// ---------------------------------------------------------------------------
+
+/** A script that mints a token into the store (what the server checks) AND the
+ *  manifest (what the runner injects) — `emitted` lets a test drift the two. */
+function mintingScript(stored = 'tok-guard-1', emitted = stored): string {
+  return [
+    '// Idempotent: the store is one JSON document, rewritten wholesale.',
+    "import fs from 'node:fs'",
+    'const org = { id: 42, slug: "acme" }',
+    `fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org], tokens: [${JSON.stringify(stored)}] }))`,
+    'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
+    '  fixtures: { org },',
+    `  credentials: { owner: { value: ${JSON.stringify(emitted)} } },`,
+    '}))',
+    '',
+  ].join('\n');
+}
+
+const MINT_PROVIDES = {
+  fixtures: { org: ['id', 'slug'] },
+  credentials: { owner: { header: 'Authorization', description: 'org owner' } },
+};
+const PROBES = { owner: { path: '/me' } };
+
+describe('buildSeedSession — credential probes', () => {
+  it('refuses a draft that mints credentials without declaring probes', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/probes/);
+      expect(refusal.content).toMatch(/owner/);
+      // Comply, so the session ends green and nothing else is under test here.
+      await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('proves a minted credential against the live server, in-session and at the fold', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      expect(verdict.content).toMatch(/probe/i);
+      return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result).toMatchObject({ status: 'ok', scriptPath: TARGET, credentials: ['owner'] });
+    // The probes are session-side verification, never part of the committed recipe.
+    expect(recipeOf(r).api?.seed).toEqual({ command: COMMAND, script: TARGET, provides: MINT_PROVIDES });
+  }, 60_000);
+
+  it('fails the probe when the minted value does not authenticate (the Bearer drift)', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      // The store holds the raw token; the manifest emits a `Bearer `-prefixed
+      // value the server matches VERBATIM — exactly the 2026-08-23 incident.
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript('tok-guard-1', 'Bearer tok-guard-1'),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/401|refused/);
+      // Fix the drift and finish green.
+      await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('refuses a probe endpoint that answers without the credential', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: { owner: { path: '/orgs' } },
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/does not gate/);
+      await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('the fold refuses an outcome whose credentials carry no probes, and restores the tree', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      // The outcome drops the probes — the fold must not accept unproven credentials.
+      return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/probe/);
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// Salvage — a draft the tool itself verified is an implicit outcome
+// (2026-08-23 bench: the session died budget-exhausted holding a draft the
+// engine had ALREADY run and verified, and the engine threw it away)
+// ---------------------------------------------------------------------------
+
+describe('buildSeedSession — salvages the last verified draft when the session dies', () => {
+  it('folds the verified draft after a session failure, marked salvaged', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: goodScript(),
+        command: COMMAND,
+        provides: PROVIDES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      // The session dies without ever producing the outcome — the incident shape.
+      return malformedFailure('the model never produced an outcome');
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result).toMatchObject({ status: 'ok', scriptPath: TARGET, command: COMMAND, salvaged: true });
+    expect(fs.readFileSync(path.join(r, TARGET), 'utf-8')).toBe(goodScript());
+    expect(recipeOf(r).api?.seed).toEqual({ command: COMMAND, script: TARGET, provides: PROVIDES });
+    // The salvaged draft still went through the fresh-world proof.
+    expect(servicesLog(r)).toEqual(['up', 'seed', 'down', 'up', 'seed', 'down']);
+  }, 60_000);
+
+  it('does not salvage a draft that never verified', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: 'throw new Error("boom")',
+        command: COMMAND,
+        provides: PROVIDES,
+      });
+      expect(verdict.isError).toBe(true);
+      return malformedFailure();
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+
+    expect(result.status).toBe('failed');
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
 // Secret hygiene
 // ---------------------------------------------------------------------------
 
@@ -341,7 +547,7 @@ describe('buildSeedSession — minted credentials never enter a transcript', () 
       "import fs from 'node:fs'",
       "const token = ['secret', 'xyz'].join('-')",
       'const org = { id: 42, slug: "acme" }',
-      'fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org] }))',
+      'fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org], tokens: [token] }))',
       'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
       '  fixtures: { org },',
       '  credentials: { owner: { value: token } },',
@@ -358,9 +564,9 @@ describe('buildSeedSession — minted credentials never enter a transcript', () 
 
     let readBack = '';
     const stub = stubDriver(async (call) => {
-      await callTool(call.input, 'run_seed_draft', { script, command: COMMAND, provides });
+      await callTool(call.input, 'run_seed_draft', { script, command: COMMAND, provides, probes: PROBES });
       readBack = (await callTool(call.input, 'read_file', { path: 'notes.txt' })).content;
-      return outcome({ script, command: COMMAND, provides, findings: [] });
+      return outcome({ script, command: COMMAND, provides, probes: PROBES, findings: [] });
     });
     const h = harness(stub.driver);
 
@@ -430,6 +636,10 @@ describe('the seed session definition', () => {
 
     expect(def.kind).toBe('guard-setup.seed');
     expect(def.outcomePrecondition?.tool).toBe('run_seed_draft');
+    // The item-118 checkpoint, extended to the seed session (2026-08-23 bench:
+    // two sessions spent their whole first grant exploring with zero drafts).
+    expect(def.draftCheckpoint).toMatchObject({ tool: 'run_seed_draft', afterTurn: 10 });
+    expect(def.draftCheckpoint?.message).toMatch(/run_seed_draft/);
     expect(def.tools.map((t) => t.name).sort()).toEqual([
       'check_provides',
       'db_query',
@@ -458,6 +668,53 @@ describe('the seed session definition', () => {
     expect(
       seedScriptTargetPath({ ecosystem: 'js', existingScript: { scriptPath: 'scripts/mine.mjs' } }),
     ).toBe('scripts/mine.mjs');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The briefing carries the repo's own seed machinery
+// (2026-08-23 bench: both sessions spent ~10 turns re-finding the app's seed
+// helpers by search — grounding every session must read is briefing material)
+// ---------------------------------------------------------------------------
+
+describe('seedSessionBriefing — the repository’s own seed machinery', () => {
+  const worldFor = (r: string) =>
+    ({
+      input: seedInput(r),
+      server: { name: 'default', serve: ['node', 'x'], cwd: 'sandbox', healthPath: '/health', readyTimeoutMs: 1, env: {} },
+      targetPath: TARGET,
+      scratchDir: path.join(r, 'scratch'),
+      knownSchemes: new Set(),
+      secrets: new Map(),
+    }) as never;
+
+  it('lists and excerpts seed-named files, skipping dependency dirs', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    fs.mkdirSync(path.join(r, 'packages/prisma/seed'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, 'packages/prisma/seed/users.ts'),
+      'export const seedUser = async () => {};\n',
+    );
+    fs.writeFileSync(path.join(r, 'packages/prisma/seed.ts'), 'export const main = 1;\n');
+    fs.mkdirSync(path.join(r, 'node_modules/dep/seed'), { recursive: true });
+    fs.writeFileSync(path.join(r, 'node_modules/dep/seed/index.js'), 'nope\n');
+
+    const machinery = existingSeedMachinery(r);
+    expect(machinery.map((m) => m.path)).toEqual(['packages/prisma/seed.ts', 'packages/prisma/seed/users.ts']);
+
+    const briefing = seedSessionBriefing(worldFor(r));
+    expect(briefing).toMatch(/own seed machinery/i);
+    expect(briefing).toContain('packages/prisma/seed/users.ts');
+    expect(briefing).toContain('export const seedUser');
+    expect(briefing).not.toContain('node_modules');
+  });
+
+  it('renders no machinery section when the repo has none', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    expect(existingSeedMachinery(r)).toEqual([]);
+    expect(seedSessionBriefing(worldFor(r))).not.toMatch(/own seed machinery/i);
   });
 });
 

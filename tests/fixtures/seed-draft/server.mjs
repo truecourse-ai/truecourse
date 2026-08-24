@@ -9,6 +9,9 @@
  * Surface:
  *   GET /health → 200 {"ok":true}
  *   GET /orgs   → 200 {"orgs":[…]} (empty when nothing has been seeded)
+ *   GET /me     → 200 when the Authorization header matches a seeded token
+ *                 (store `tokens` array, matched VERBATIM), else 401 — the
+ *                 auth-gated route the credential probes prove against
  *   GET /boom   → 500
  */
 
@@ -43,6 +46,11 @@ http
     }
     if (url.pathname === '/health') return json(200, { ok: true })
     if (url.pathname === '/orgs') return json(200, { orgs: read().orgs ?? [] })
+    if (url.pathname === '/me') {
+      const auth = req.headers.authorization ?? ''
+      if ((read().tokens ?? []).includes(auth)) return json(200, { me: 'guard' })
+      return json(401, { error: 'unauthorized' })
+    }
     if (url.pathname === '/boom') return json(500, { error: 'kaboom' })
     json(404, { error: 'not found' })
   })

@@ -188,6 +188,8 @@ export const GuardSetupSeedStepSchema = z
     fixtures: z.array(z.string()).optional(),
     /** Credential names the seed mints — one principal per detected role. */
     credentials: z.array(z.string()).optional(),
+    /** The session died without an outcome; the engine folded its last verified draft. */
+    salvaged: z.boolean().optional(),
   })
   .strict()
 export type GuardSetupSeedStep = z.infer<typeof GuardSetupSeedStepSchema>

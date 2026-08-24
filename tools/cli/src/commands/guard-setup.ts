@@ -302,7 +302,14 @@ export function printSetupReport(report: GuardSetupReport, reportPath: string): 
       p.log.message(`  command     ${s.command}`);
       if (s.fixtures?.length) p.log.message(`  fixtures    ${s.fixtures.join(", ")}`);
       if (s.credentials?.length) p.log.message(`  principals  ${s.credentials.join(", ")}`);
-      p.log.message("  The script RAN, its manifest matched `provides`, and the server booted against it.");
+      if (s.salvaged) {
+        p.log.message("  salvaged    the session ended without an outcome; the engine folded its last verified draft");
+      }
+      p.log.message(
+        s.credentials?.length
+          ? "  The script RAN in a fresh world, its manifest matched `provides`, and every principal answered a live authenticated probe."
+          : "  The script RAN in a fresh world and its manifest matched `provides`.",
+      );
     } else if (s.status === "ok") {
       p.log.step(`seed        already present (${s.command})`);
     } else if (s.status === "failed") {

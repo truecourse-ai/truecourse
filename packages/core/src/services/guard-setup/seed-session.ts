@@ -69,12 +69,15 @@ import {
   buildCredentialRedactor,
   guardSetupFindingsPath,
   loadDependencyCatalog,
+  preflightApiServer,
   recipePath,
   resolveApiServers,
+  resolveEntry,
   runBuild,
   runSeed,
   type Recipe,
   type ResolvedApiServer,
+  type ResolvedCredential,
 } from '@truecourse/guard-runner';
 import { cachedSessionOutcome, promptFingerprint } from '../agent/session-cache.js';
 import { appendFindingsLedger } from '../agent/findings-ledger.js';
@@ -101,6 +104,23 @@ const DB_QUERY_TIMEOUT_MS = 20_000;
 // ---------------------------------------------------------------------------
 
 /**
+ * One live-probe declaration per minted credential: an endpoint that REQUIRES
+ * the credential, so the verify can make a real authenticated request instead
+ * of trusting the manifest's shape (2026-08-23 bench: a `Bearer `-prefixed
+ * token passed every static check and would have 401'd at guard run).
+ * Session-side verification only — probes never enter the committed recipe.
+ */
+export const SeedCredentialProbeSchema = z
+  .object({
+    /** HTTP method; GET when omitted. */
+    method: z.string().min(1).optional(),
+    /** Request path (starts with `/`) of an endpoint that requires the credential. */
+    path: z.string().min(1).regex(/^\//, 'a probe path starts with `/`'),
+  })
+  .strict();
+export type SeedCredentialProbe = z.infer<typeof SeedCredentialProbeSchema>;
+
+/**
  * `findings` is REQUIRED (empty array fine), not `.default([])` — a default
  * gives the schema a different input than output type, which `SessionDef`'s
  * `z.ZodType<TOutcome>` refuses (same rule as the catalog draft).
@@ -112,6 +132,8 @@ export const SeedSessionOutcomeSchema = z
     /** One shell command, repo root, that runs the script AT THE TARGET PATH. */
     command: z.string().min(1),
     provides: SeedProvidesProposalSchema,
+    /** Required (by the fold) for every declared credential; see the probe schema. */
+    probes: z.record(z.string(), SeedCredentialProbeSchema).optional(),
     findings: z.array(z.string()),
   })
   .strict();
@@ -192,6 +214,16 @@ interface SeedSessionWorld {
   knownSchemes: ReadonlySet<string>;
   /** Grows as drafts mint values; every tool result is passed through it. */
   secrets: Map<string, string>;
+  /**
+   * The last draft `run_seed_draft` FULLY verified (seed ran, manifest matched,
+   * probes passed when credentials are declared). When the session dies without
+   * an outcome, this is folded in its place — the engine already ran it, so
+   * discarding it repeats the 2026-08-23 incident (a proven draft thrown away
+   * at budget exhaustion). The fresh-world proof still gates the write.
+   */
+  lastVerified?: Pick<SeedSessionOutcome, 'script' | 'command' | 'provides' | 'probes'>;
+  /** Set when the fold consumed `lastVerified` instead of a session outcome. */
+  salvaged?: boolean;
   signal?: AbortSignal;
 }
 
@@ -210,7 +242,73 @@ export function seedSessionDef(world: SeedSessionWorld): SessionDef<SeedSessionO
       message:
         'Outcome refused: you never ran `run_seed_draft` in this session. Run it on your complete draft now — it executes the script against the live services and validates its manifest against your `provides`, exactly as the fold will. Fix anything it reports, then call `outcome` again.',
     },
+    // The item-118 checkpoint, extended here after the 2026-08-23 bench: two
+    // seed sessions spent their entire first grant (20/20 turns) exploring
+    // with zero drafts, and only the exhaustion warning forced drafting.
+    draftCheckpoint: {
+      tool: 'run_seed_draft',
+      afterTurn: 10,
+      message:
+        '[checkpoint] You have spent more than half your first turn grant without running a draft. Write your best current seed script and call `run_seed_draft` NOW — its real execution errors (imports, constraints, enum casing) steer better than more reading. Iterate from the draft; do not return to open-ended exploration.',
+    },
   };
+}
+
+/** How many seed-machinery files the briefing carries, and how much of each. */
+const SEED_MACHINERY_MAX_FILES = 8;
+const SEED_MACHINERY_MAX_LINES = 60;
+const SEED_MACHINERY_MAX_CHARS = 3_000;
+/** Dirs the machinery walk never descends into. */
+const SEED_MACHINERY_SKIP = new Set([
+  'node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.next', '.truecourse', '.cache',
+]);
+
+/**
+ * The repository's own seed files — `seed`-named scripts and directories, the
+ * helpers a drafter should REUSE instead of re-deriving (they carry the app's
+ * side effects). Briefing material because every session otherwise re-finds
+ * them by search: the 2026-08-23 bench spent ~10 turns per session on exactly
+ * these reads. Shallowest paths first, capped, excerpted.
+ */
+export function existingSeedMachinery(repoRoot: string): { path: string; excerpt: string }[] {
+  const found: string[] = [];
+  const stack = [''];
+  while (stack.length > 0 && found.length < 200) {
+    const rel = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(path.join(repoRoot, rel), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (!SEED_MACHINERY_SKIP.has(entry.name) && !entry.name.startsWith('.')) stack.push(childRel);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name)) continue;
+      if (!/(^|\/)seeds?([._-]|\/|\.)/i.test(childRel)) continue;
+      found.push(childRel);
+    }
+  }
+  found.sort((a, b) => {
+    const depth = a.split('/').length - b.split('/').length;
+    return depth !== 0 ? depth : a.localeCompare(b);
+  });
+  return found.slice(0, SEED_MACHINERY_MAX_FILES).map((rel) => {
+    let excerpt = '';
+    try {
+      const lines = fs.readFileSync(path.join(repoRoot, rel), 'utf-8').split('\n');
+      excerpt = lines.slice(0, SEED_MACHINERY_MAX_LINES).join('\n');
+      if (excerpt.length > SEED_MACHINERY_MAX_CHARS) excerpt = excerpt.slice(0, SEED_MACHINERY_MAX_CHARS);
+      if (lines.length > SEED_MACHINERY_MAX_LINES) excerpt += `\n… (${lines.length - SEED_MACHINERY_MAX_LINES} more lines — read_file for the rest)`;
+    } catch {
+      /* unreadable file: list the path alone */
+    }
+    return { path: rel, excerpt };
+  });
 }
 
 /** The opening message: the one-shot draft's grounding (verbatim — the same
@@ -234,6 +332,7 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     ecosystem: input.ecosystem,
     suggestedPath: world.targetPath,
   });
+  const machinery = existingSeedMachinery(input.repoRoot);
   const lines = [
     'Author the ONE seed script this repository needs — the rows AND the authenticated principals its spec-derived tests reference.',
     '',
@@ -246,10 +345,18 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
       : catalog.dependencies
           .map((d) => `- ${d.name} · ${d.class} · ${d.summary}`)
           .join('\n'),
+    ...(machinery.length > 0
+      ? [
+          '',
+          "## The repository's own seed machinery",
+          'These seed files already exist in this repository. REUSE their helpers — they carry the app\'s side effects (hashes, defaults, join rows) — and import them the way the app does; do not re-derive what they already do:',
+          ...machinery.map((m) => `### ${m.path}\n${m.excerpt}`),
+        ]
+      : []),
     '',
     grounding,
     '',
-    'Work loop: read what you must, draft, `check_provides` for the free shape check, `run_seed_draft` to PROVE it (idempotence included: run it twice — the second run against the rows the first left behind is the real test), revise on its report, then produce the outcome `{script, command, provides, findings}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty.',
+    'Work loop: draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then produce the outcome `{script, command, provides, probes, findings}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty.',
   ];
   return lines.join('\n');
 }
@@ -287,8 +394,115 @@ const RunSeedDraftInputSchema = z
     command: z.string().min(1),
     /** The provides the manifest is validated against, in the same call. */
     provides: SeedProvidesProposalSchema,
+    /** One per declared credential — see {@link SeedCredentialProbeSchema}. */
+    probes: z.record(z.string(), SeedCredentialProbeSchema).optional(),
   })
   .strict();
+
+/** Wall clock for one probe request. */
+const PROBE_TIMEOUT_MS = 15_000;
+
+/** The declared credential names a `probes` record fails to cover. */
+function uncoveredCredentials(
+  provides: SeedProvidesProposal,
+  probes: Record<string, SeedCredentialProbe> | undefined,
+): string[] {
+  return Object.keys(provides.credentials ?? {}).filter((name) => !probes?.[name]);
+}
+
+/**
+ * Prove each minted credential against the LIVE server: the probe request with
+ * the credential must not be refused (401/403), and the SAME request without it
+ * must be — an endpoint that answers anonymously gates nothing and proves
+ * nothing. Values are sent VERBATIM, exactly as the runner will inject them.
+ */
+async function probeCredentials(opts: {
+  baseUrl: string;
+  probes: Record<string, SeedCredentialProbe>;
+  credentials: ReadonlyMap<string, ResolvedCredential>;
+  signal?: AbortSignal;
+}): Promise<{ ok: true; lines: string[] } | { ok: false; reason: string }> {
+  const lines: string[] = [];
+  for (const [name, cred] of opts.credentials) {
+    const probe = opts.probes[name];
+    if (!probe) continue; // Coverage is the caller's refusal; here we prove what is declared.
+    const method = probe.method ?? 'GET';
+    const url = new URL(probe.path, opts.baseUrl).toString();
+    const request = async (withCredential: boolean): Promise<number> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+      const onAbort = (): void => controller.abort();
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
+      try {
+        const response = await fetch(url, {
+          method,
+          redirect: 'manual',
+          headers: withCredential ? { [cred.header]: cred.value } : {},
+          signal: controller.signal,
+        });
+        return response.status;
+      } finally {
+        clearTimeout(timer);
+        opts.signal?.removeEventListener('abort', onAbort);
+      }
+    };
+    let authed: number;
+    let control: number;
+    try {
+      authed = await request(true);
+      control = await request(false);
+    } catch (error) {
+      return { ok: false, reason: `probe ${method} ${probe.path} for "${name}" failed: ${message(error)}` };
+    }
+    if (authed === 401 || authed === 403) {
+      return {
+        ok: false,
+        reason:
+          `credential "${name}" was refused (HTTP ${authed}) at ${method} ${probe.path} — the minted value, sent verbatim in the ${cred.header} header, does not authenticate. Fix the value (or its shape: prefix, casing) in the script.`,
+      };
+    }
+    if (control !== 401 && control !== 403) {
+      return {
+        ok: false,
+        reason:
+          `probe ${method} ${probe.path} answers HTTP ${control} WITHOUT the credential — it does not gate on auth, so it proves nothing about "${name}". Pick an endpoint that requires it.`,
+      };
+    }
+    lines.push(`${name}: ${method} ${probe.path} → ${authed} with the credential, ${control} without`);
+  }
+  return { ok: true, lines };
+}
+
+/**
+ * Boot the recipe's default server once (the same preflight the runner uses)
+ * and run the credential probes against it — shared verbatim by the in-session
+ * tool and the fold's fresh-world proof, so a draft cannot pass one and fail
+ * the other for a different reason.
+ */
+async function bootAndProbe(
+  world: SeedSessionWorld,
+  probes: Record<string, SeedCredentialProbe>,
+  credentials: ReadonlyMap<string, ResolvedCredential>,
+  signal?: AbortSignal,
+): Promise<{ ok: true; lines: string[] } | { ok: false; reason: string }> {
+  let probed: Awaited<ReturnType<typeof probeCredentials>> | null = null;
+  const boot = await preflightApiServer({
+    resolvedServe: resolveEntry(world.input.repoRoot, [...world.server.serve]),
+    displayServe: world.server.serve,
+    ...(world.server.cwd === 'repo' ? { cwd: world.input.repoRoot } : {}),
+    recipeEnv: world.server.env,
+    healthPath: world.server.healthPath,
+    readyTimeoutMs: world.server.readyTimeoutMs,
+    ...(signal ? { signal } : {}),
+    onReady: async (baseUrl) => {
+      probed = await probeCredentials({ baseUrl, probes, credentials, ...(signal ? { signal } : {}) });
+    },
+  });
+  if (!boot.ok) {
+    return { ok: false, reason: `the server would not boot for the credential probes: ${boot.stderr || 'unknown'}` };
+  }
+  return probed ?? { ok: false, reason: 'the server booted but the probes never ran' };
+}
 
 function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
   let drafts = 0;
@@ -304,6 +518,19 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
       if (!args.command.includes(world.targetPath)) {
         return {
           content: `the command must run the script at its target path \`${world.targetPath}\` (the fold writes it there); got: ${args.command}`,
+          isError: true,
+        };
+      }
+      // A minted credential is proven by a LIVE authenticated request, never by
+      // its manifest shape — refuse before spending an execution on a draft the
+      // fold would refuse anyway.
+      const uncovered = uncoveredCredentials(args.provides, args.probes);
+      if (uncovered.length > 0) {
+        return {
+          content:
+            `your provides declares credential(s) with no live probe: ${uncovered.join(', ')}. ` +
+            `Add \`probes\` to this same call — per credential, an endpoint that REQUIRES it, e.g. ` +
+            `{"${uncovered[0]}": {"method": "GET", "path": "/…"}}. The engine sends the minted value verbatim and expects the request to be accepted, and the same request WITHOUT the credential to be refused.`,
           isError: true,
         };
       }
@@ -333,6 +560,23 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
         for (const [name, cred] of result.credentials) {
           if (cred.value.length > 0) world.secrets.set(name, cred.value);
         }
+        // The live half of the proof: boot the server once and make one real
+        // authenticated request per minted credential (skipped entirely when
+        // the draft mints none — nothing to prove, no boot to pay for).
+        let probeLines: string[] = [];
+        if (result.credentials.size > 0 && args.probes) {
+          const probed = await bootAndProbe(world, args.probes, result.credentials, toolCtx.signal);
+          if (!probed.ok) {
+            return { content: `the seed ran and its manifest matched, but the credential probe refused it:\n${probed.reason}`, isError: true };
+          }
+          probeLines = probed.lines;
+        }
+        world.lastVerified = {
+          script: args.script,
+          command: args.command,
+          provides: args.provides,
+          ...(args.probes ? { probes: args.probes } : {}),
+        };
         const fixtures = [...result.fixtures.entries()]
           .map(([name, fields]) => `${name}{${Object.keys(fields).join(', ')}}`)
           .join(' · ');
@@ -340,6 +584,7 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
           content:
             `VERIFIED against the live world: the script ran clean and the manifest matched \`provides\`.\n` +
             `credentials minted: ${[...result.credentials.keys()].join(', ') || '(none)'}\n` +
+            (probeLines.length > 0 ? `probes passed: ${probeLines.join(' · ')}\n` : '') +
             `fixtures emitted: ${fixtures || '(none)'}\n` +
             `Run it AGAIN to prove idempotence if you have not, then produce the outcome (script + a command naming ${world.targetPath}).`,
         };
@@ -577,6 +822,21 @@ export function buildSeedSession(
             }
             context.note(result.status);
             context.addSpend(1, result.spent);
+            // SALVAGE: a session that died (budget exhausted, malformed, a dead
+            // provider) while holding a draft `run_seed_draft` FULLY verified is
+            // not a lost session — the tool already ran that draft against the
+            // live world, and its args are exactly the outcome's shape. Fold the
+            // verified draft; the fresh-world proof below still gates the write.
+            // Never on an abort: a cancelled run writes nothing.
+            if (result.status !== 'completed' && world.lastVerified && !opts.signal?.aborted) {
+              world.salvaged = true;
+              return {
+                status: 'completed',
+                output: { ...world.lastVerified, findings: [] },
+                pendingQuestions: [],
+                spent: result.spent,
+              };
+            }
             return result;
           } finally {
             await services.down();
@@ -614,6 +874,7 @@ export function buildSeedSession(
         ...(folded.credentials.length > 0 ? { credentials: folded.credentials } : {}),
         ...(sessionRunId ? { sessionRunId } : {}),
         ...(outcome.fromCache ? { fromCache: true } : {}),
+        ...(world.salvaged ? { salvaged: true } : {}),
       };
     } catch (error) {
       return {
@@ -640,6 +901,17 @@ async function foldSeedOutcome(
   if (!output.command.includes(targetPath)) {
     return {
       reason: `the outcome's command does not run the target script \`${targetPath}\`: ${output.command}`,
+    };
+  }
+  // A credential without a live probe is unproven — the same rule
+  // `run_seed_draft` applies, re-checked here because the outcome's probes are
+  // what the fresh-world proof runs (a session could verify with probes and
+  // then drop them from the outcome).
+  const unprobed = uncoveredCredentials(output.provides, output.probes);
+  if (unprobed.length > 0) {
+    return {
+      reason:
+        `the outcome declares credential(s) with no live probe: ${unprobed.join(', ')} — every minted credential must name an endpoint that proves it (\`probes\`)`,
     };
   }
   const scriptAbs = path.resolve(input.repoRoot, targetPath);
@@ -690,6 +962,16 @@ async function foldSeedOutcome(
     for (const [name, cred] of proof.credentials) {
       if (cred.value.length > 0) world.secrets.set(name, cred.value);
     }
+    // The live half of the proof: the fresh world's own minted values, probed
+    // through a real server boot — the same check the session iterated against.
+    if (proof.credentials.size > 0 && output.probes) {
+      input.onPhase?.('probing the minted credentials against the booted server', 'credential probes');
+      const probed = await bootAndProbe(world, output.probes, proof.credentials, world.signal);
+      if (!probed.ok) {
+        restore();
+        return { reason: `the fresh-world credential probe refused the seed: ${probed.reason}` };
+      }
+    }
     return {
       fixtures: [...proof.fixtures.keys()].sort(),
       credentials: [...proof.credentials.keys()].sort(),
@@ -728,15 +1010,16 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - NO ANCHOR STALENESS: the ids/slugs/emails you declare in \`provides\` are what scenarios interpolate for the life of the corpus. Mint STABLE values (fixed emails, fixed slugs), never timestamps or randoms — a value that moves re-anchors every test that references it.
 - FAIL LOUDLY: any error — a failed connection, a rejected insert, a missing env var — prints a diagnostic and exits non-zero. Never exit 0 on a partial seed.
 - The manifest: the engine sets GUARD_SEED_OUT to a file path; write ONE JSON object there — {"credentials": {"<name>": {"value": "<minted secret>"}}, "fixtures": {"<name>": {"<field>": <any JSON value>}}} — matching \`provides\` EXACTLY. Values keep their native JSON type.
-- Principals: one per role the app actually distinguishes; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" if that is what the API expects).
+- Principals: one per role the app actually distinguishes; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
+- CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the server, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Pick the cheapest truly-gated read endpoint the route surface offers.
 
 # Your tools
 
 - \`read_file\` / \`search_repo\` — the repository, read-only.
 - \`db_query\` — ONE read-only SELECT/WITH against the live database. Verify what a draft wrote, read enum casing, count rows.
 - \`check_provides\` — free static shape check of a \`provides\` declaration.
-- \`run_seed_draft\` — the REAL thing: your script (scratch copy), your command, your provides, executed with GUARD_SEED_OUT and the server env against the live services, manifest validated. Run it at least twice on the final draft — the second run proves idempotence.
+- \`run_seed_draft\` — the REAL thing: your script (scratch copy), your command, your provides (+ \`probes\` when credentials are minted), executed with GUARD_SEED_OUT and the server env against the live services, manifest validated, credentials probed against the booted server. Run it at least twice on the final draft — the second run proves idempotence.
 
 # The outcome
 
-\`{script, command, provides, findings}\` — the script's full source, the one shell command (repo root) that runs it AT THE TARGET PATH the briefing names, the provides declaration, and any code-vs-docs contradictions you established (verbatim, two named sides; usually empty). The fold writes the files, then proves the outcome in a FRESH world (services down → up → run) — an outcome that only worked against your session's warmed-up state will be refused, which is why pristine-state discipline matters. Never write repository files yourself; the fold owns every write.`;
+\`{script, command, provides, probes, findings}\` — the script's full source, the one shell command (repo root) that runs it AT THE TARGET PATH the briefing names, the provides declaration, the credential probes (required for every declared credential; omit the field only when no credentials are minted), and any code-vs-docs contradictions you established (verbatim, two named sides; usually empty). The fold writes the files, then proves the outcome in a FRESH world (services down → up → run → probe) — an outcome that only worked against your session's warmed-up state will be refused, which is why pristine-state discipline matters. Never write repository files yourself; the fold owns every write.`;
