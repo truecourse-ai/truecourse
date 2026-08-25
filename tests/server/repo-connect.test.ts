@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -26,23 +26,56 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
     emitFilesChanged: vi.fn(),
     emitAnalysisCanceled: vi.fn(),
     createSocketTracker: () => new NoopTracker(),
+    createSocketSpecTracker: () => new NoopTracker(),
     createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
     createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
+    emitSpecProgress: vi.fn(),
+    emitSpecComplete: vi.fn(),
+  };
+});
+
+// The onboarding scan's entry point. Stubbed so the connect path is exercised
+// without an LLM, an agent session, or a run store — and so a test can hold the
+// scan open and watch the response come back anyway.
+const scan = vi.hoisted(() => ({
+  calls: [] as string[],
+  impl: (async () => ({})) as (repoRoot: string) => Promise<unknown>,
+}));
+
+vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
+  return {
+    ...actual,
+    curateInProcess: (repoRoot: string) => {
+      scan.calls.push(repoRoot);
+      return scan.impl(repoRoot);
+    },
   };
 });
 
 import { createApp } from '../../apps/dashboard/server/src/app';
 import { readRegistry, unregisterProject } from '../../packages/core/src/config/registry';
+import { createSessionRun } from '../../packages/core/src/lib/sessions-store';
 import {
   getClonesDir,
   normalizeRemoteUrl,
   parseRemoteUrl,
 } from '../../apps/dashboard/server/src/services/repo-clone.service';
+import {
+  isOnboardingScanRunning,
+  startOnboardingScan,
+} from '../../apps/dashboard/server/src/services/onboarding-scan.service';
 
 /**
  * Connect-by-URL (POST /api/repos/connect). The end-to-end cases clone a real
  * local git repository over a `file://` URL, so the suite never touches the
  * network while still exercising the actual `git clone` path.
+ *
+ * Connecting also starts the repository's ONBOARDING SCAN in the background
+ * (§4.3). The scan entry is stubbed here — the point is the wiring: that it runs
+ * on the clone, that the 201 does not wait for it, that a failure stays out of
+ * the response, and that two scans of one repository never overlap.
  */
 
 const tmpDirs: string[] = [];
@@ -243,6 +276,133 @@ describe('POST /api/repos/connect', () => {
     // The failed attempt leaves nothing behind — no temp dir, no half-clone.
     expect(fs.readdirSync(getClonesDir())).toEqual([]);
     expect(await readRegistry()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The onboarding scan (docs/ONE_PRODUCT_PLAN.md §4.3)
+// ---------------------------------------------------------------------------
+
+interface Deferred {
+  promise: Promise<unknown>;
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+
+/** A scan the test holds open, so "the response did not wait" is observable. */
+function heldScan(): Deferred {
+  let resolve!: () => void;
+  let reject!: (err: Error) => void;
+  const promise = new Promise<unknown>((res, rej) => {
+    resolve = () => res({});
+    reject = rej;
+  });
+  // Nothing awaits this promise but the service; a rejection there is handled.
+  promise.catch(() => {});
+  return { promise, resolve, reject };
+}
+
+/** Let the background work run a little (it shells out to git on the way in). */
+const settle = (ms = 100): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Wait for a background effect, rather than guessing how long git will take. */
+async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) await settle(10);
+}
+
+describe('connecting a repository starts its spec scan', () => {
+  const held: Deferred[] = [];
+
+  beforeEach(() => {
+    scan.calls.length = 0;
+    scan.impl = async () => ({});
+  });
+
+  afterEach(async () => {
+    // Release anything still held so the service's in-flight set clears.
+    for (const d of held.splice(0)) d.resolve();
+    await settle();
+  });
+
+  it('runs the scan on the clone, in the background of the 201', async () => {
+    const origin = makeOriginRepo('widgets');
+    const res = await request(app)
+      .post('/api/repos/connect')
+      .send({ url: `file://${origin}` })
+      .expect(201);
+
+    await until(() => scan.calls.length > 0);
+    expect(scan.calls).toEqual([res.body.path]);
+  });
+
+  it('answers before the scan finishes — a held scan does not hold the response', async () => {
+    const origin = makeOriginRepo('widgets');
+    const pending = heldScan();
+    held.push(pending);
+    scan.impl = () => pending.promise;
+
+    // Only passes if the route never awaits the scan: this one never settles.
+    const res = await request(app)
+      .post('/api/repos/connect')
+      .send({ url: `file://${origin}` })
+      .expect(201);
+
+    await until(() => scan.calls.length > 0);
+    expect(scan.calls).toEqual([res.body.path]);
+    expect(isOnboardingScanRunning(res.body.path)).toBe(true);
+  });
+
+  it('a scan that fails leaves the connect response alone and rejects nothing', async () => {
+    const origin = makeOriginRepo('widgets');
+    scan.impl = () => Promise.reject(new Error('no LLM transport configured'));
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const res = await request(app)
+        .post('/api/repos/connect')
+        .send({ url: `file://${origin}` })
+        .expect(201);
+      expect(res.body.remoteUrl).toBe(`file://${origin}`);
+
+      await until(() => !isOnboardingScanRunning(res.body.path));
+      expect(scan.calls).toHaveLength(1);
+      expect(unhandled).toEqual([]);
+      // The failure released the repo: a later scan is not blocked by it.
+      expect(isOnboardingScanRunning(res.body.path)).toBe(false);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('does not start a second scan while one is running', async () => {
+    const repo = makeOriginRepo('twice');
+    const pending = heldScan();
+    held.push(pending);
+    scan.impl = () => pending.promise;
+
+    expect(startOnboardingScan('twice', repo)).toBe(true);
+    expect(startOnboardingScan('twice', repo)).toBe(false);
+
+    await until(() => scan.calls.length > 0);
+    expect(scan.calls).toEqual([repo]);
+  });
+
+  it('sees a scan another process started, through the sessions store', async () => {
+    const repo = makeOriginRepo('elsewhere');
+    expect(isOnboardingScanRunning(repo)).toBe(false);
+
+    // A run record left `running` by a live process — what a CLI `spec scan` in
+    // the same clone looks like from here.
+    createSessionRun(repo, { command: 'spec-scan', gitRef: 'HEAD' });
+
+    expect(isOnboardingScanRunning(repo)).toBe(true);
+    expect(startOnboardingScan('elsewhere', repo)).toBe(false);
+    await settle();
+    expect(scan.calls).toEqual([]);
   });
 });
 

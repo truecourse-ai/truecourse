@@ -32,8 +32,9 @@ import { Badge } from '@/components/ui/badge';
 import { USER } from '@/preview/data';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { usePreviewState } from './preview-state';
+import { PREVIEW_BASE } from './base';
 
-export const PREVIEW_BASE = '/preview';
+export { PREVIEW_BASE };
 
 /** The brand wordmark face, the one place the UI uses the logo's font (the agentic branch's `.brand-wordmark`). */
 const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace", letterSpacing: '0.01em' } as const;

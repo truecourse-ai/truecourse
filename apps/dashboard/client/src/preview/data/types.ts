@@ -315,6 +315,12 @@ export interface JobChain {
   title: string;
   repoFullName: string;
   steps: JobStep[];
+  /**
+   * Where the job is watched, when it has an address of its own. A real run
+   * carries the repository's Activity; a fixture leaves it out and the toast
+   * falls back to the repository named on the job.
+   */
+  href?: string;
 }
 
 export interface PreviewNotification {
@@ -324,6 +330,8 @@ export interface PreviewNotification {
   body: string;
   at: string;
   read: boolean;
+  /** Where the row opens, for a notification that has a place to go. */
+  href?: string;
 }
 
 export interface AdminJob {

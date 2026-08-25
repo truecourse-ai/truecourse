@@ -8,9 +8,14 @@
  * A row's level is the status idiom (a dot and a word), not a tinted capsule,
  * and unread is a dot on the row itself. Reading one clears its dot; "Mark all
  * read" clears the badge.
+ *
+ * The rows of the REAL (URL-connected) repositories are derived client-side from
+ * the runs the shell is watching — there is no server-side notification store —
+ * and they carry an address: opening one goes to that repository's Activity.
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { EntityList } from '@/preview/ui/entity-list';
 import { PageHeader } from '@/preview/ui/bits';
 import { StatusWord, type StatusTone } from '@/preview/ui/status-word';
@@ -34,6 +39,7 @@ const LEVEL_WORD: Record<PreviewNotification['level'], string> = {
 export default function NotificationsPage() {
   const { notifications, unreadCount, markRead, markAllRead } = usePreviewState();
   const [readFilter, setReadFilter] = useState<string[]>([]);
+  const navigate = useNavigate();
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -71,7 +77,11 @@ export default function NotificationsPage() {
                 <StatusWord tone={LEVEL_TONE[n.level]} word={LEVEL_WORD[n.level]} />
               </>
             )}
-            onOpen={(id) => markRead(id)}
+            onOpen={(id) => {
+              markRead(id);
+              const href = notifications.find((n) => n.id === id)?.href;
+              if (href) navigate(href);
+            }}
             search={{
               placeholder: 'Search notifications',
               ariaLabel: 'Search notifications',

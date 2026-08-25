@@ -5,6 +5,10 @@
  * repository's Activity tab. Nothing in the toast moves: no steps, no counter,
  * no bar. Progress lives in one place, the Activity surface, and the toast only
  * says where to look. Renders nothing itself.
+ *
+ * Both kinds of job pass through here. A REAL run (a repository connected by
+ * URL, scanning) carries its own preview address and lands on the real Activity
+ * view; a fixture job derives one from the repository it names.
  */
 
 import { useEffect, useRef } from 'react';
@@ -26,7 +30,10 @@ export function JobToasts() {
     for (const job of jobs) {
       if (announced.current.has(job.id)) continue;
       announced.current.add(job.id);
-      announceJob(job, () => navigate(`${PREVIEW_BASE}/repos/${slugOf(job.repoFullName)}/activity`));
+      // A real run carries its own Activity address (the registry slug is not
+      // always the repository's last path segment); a fixture derives one.
+      const to = job.href ?? `${PREVIEW_BASE}/repos/${slugOf(job.repoFullName)}/activity`;
+      announceJob(job, () => navigate(to));
     }
   }, [jobs, navigate]);
 

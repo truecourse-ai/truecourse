@@ -14,8 +14,16 @@
  * unlinking one really disconnects it. With no server behind the preview that
  * read yields nothing and the mock is exactly what it was.
  *
- * Nothing else is persisted: no localStorage, no socket. A reload is a fresh
- * mock, which is the point.
+ * That exception now includes their WORK: `useRealRunStream` follows the agent
+ * runs of the real repositories over the shell's one socket, so a real run is a
+ * real job (a toast, an in-flight chain whose steps are the run's own phase
+ * checklist), a real pair of notifications (started, settled), and the real
+ * `onboarding` marker and last check on the repository's Home row. Real jobs and
+ * notifications are merged AHEAD of the fixtures; the fixtures are untouched, so
+ * a fixture repository's preview is exactly what it was.
+ *
+ * Nothing is persisted: no localStorage, and the socket only listens. A reload
+ * is a fresh mock — the real notifications included — which is the point.
  */
 
 import {
@@ -40,6 +48,7 @@ import {
   WORKSPACES,
 } from '@/preview/data';
 import { disconnectRealRepo, fetchRealRepos } from '@/preview/data/real-repos';
+import { useRealRunStream } from './real-runs';
 import type {
   ConnectableRepo,
   JobChain,
@@ -54,7 +63,11 @@ interface PreviewStateValue {
   workspace: Workspace;
   workspaces: Workspace[];
   setWorkspaceId: (id: string) => void;
-  /** The real URL-connected repositories first, then the fixtures. */
+  /**
+   * The real URL-connected repositories first, then the fixtures. A real row
+   * carries what its runs say: onboarding while its first scan is up, and the
+   * settled run's own words as its last check afterwards.
+   */
   repos: Repo[];
   updateRepo: (id: string, patch: Partial<Repo>) => void;
   unlinkRepo: (id: string) => void;
@@ -68,10 +81,12 @@ interface PreviewStateValue {
   connectRepositories: (fullNames: string[]) => void;
   privateReposUsed: number;
   privateRepoLimit: number;
+  /** The real runs' notifications (newest first), then the fixture feed. */
   notifications: PreviewNotification[];
   unreadCount: number;
   markRead: (id: string) => void;
   markAllRead: () => void;
+  /** The real runs in flight, then the fixture jobs. */
   jobs: JobChain[];
   /** Coverage versions regenerated in this session (a PR version that got its scenarios). */
   generatedVersions: ReadonlySet<string>;
@@ -229,17 +244,39 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     ]);
   }, [connectableRepos]);
 
-  const markRead = useCallback((id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-  }, []);
+  // The real repositories' runs, followed live. Inert without a server.
+  const realRuns = useRealRunStream(realRepos);
+
+  const markRead = useCallback(
+    (id: string) => {
+      realRuns.markRead(id);
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    },
+    [realRuns],
+  );
 
   const markAllRead = useCallback(() => {
+    realRuns.markAllRead();
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }, []);
+  }, [realRuns]);
 
   const value = useMemo<PreviewStateValue>(() => {
     const workspace = WORKSPACES.find((w) => w.id === workspaceId) ?? WORKSPACES[0]!;
-    const allRepos = [...realRepos, ...repos];
+    // A real repository's row tells the truth about its runs: the onboarding
+    // marker while its first scan is up, and a settled run's own words after.
+    const allRepos = [
+      ...realRepos.map((repo) => {
+        const state = realRuns.repoState.get(repo.id);
+        if (!state) return repo;
+        return {
+          ...repo,
+          onboarding: state.onboarding,
+          ...(state.lastCheck ? { lastCheck: state.lastCheck } : {}),
+        };
+      }),
+      ...repos,
+    ];
+    const allNotifications = [...realRuns.notifications, ...notifications];
     return {
       workspace,
       workspaces: WORKSPACES,
@@ -255,11 +292,12 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       connectRepositories,
       privateReposUsed: allRepos.filter((r) => r.visibility === 'private').length,
       privateRepoLimit: PRIVATE_REPO_ALLOWANCE.limit,
-      notifications,
-      unreadCount: notifications.filter((n) => !n.read).length,
+      notifications: allNotifications,
+      unreadCount: allNotifications.filter((n) => !n.read).length,
       markRead,
       markAllRead,
-      jobs,
+      // Real jobs first: they are the ones actually happening.
+      jobs: [...realRuns.jobs, ...jobs],
       generatedVersions,
       regenerateVersion,
     };
@@ -267,6 +305,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     workspaceId,
     repos,
     realRepos,
+    realRuns,
     connections,
     notifications,
     jobs,

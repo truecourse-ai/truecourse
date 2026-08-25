@@ -24,6 +24,7 @@ import {
   normalizeRemoteUrl,
   parseRemoteUrl,
 } from '../services/repo-clone.service.js';
+import { startOnboardingScan } from '../services/onboarding-scan.service.js';
 
 const router: Router = Router();
 
@@ -69,6 +70,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 // Synchronous: the clone happens inside the request and the client shows a
 // pending state. No job system, deliberately — this is the first step toward
 // provider-connected repos, not the destination.
+//
+// The ONBOARDING SCAN is the exception to that synchrony: once the clone is
+// registered the response goes out and the repo's spec scan starts in the
+// background of this process (../services/onboarding-scan.service.ts). Its
+// progress reaches the client over the socket and the sessions store, not over
+// this response.
 router.post('/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parsed = ConnectRepoSchema.safeParse(req.body);
@@ -117,6 +124,12 @@ router.post('/connect', async (req: Request, res: Response, next: NextFunction) 
       remoteUrl: entry.remoteUrl ?? null,
       lastAnalyzed: null,
     });
+
+    // Onboarding (§4.3): connecting a repository starts its spec scan. AFTER
+    // the response, never inside it — the scan takes minutes and its outcome is
+    // no part of "the repository is connected". Fire-and-forget and never
+    // throwing (see the service), so nothing here can reach `next` post-response.
+    startOnboardingScan(entry.slug, entry.path);
   } catch (error) {
     next(error);
   }

@@ -444,6 +444,12 @@ export function installPreviewFetch(): void {
     if (!match) return real(input, init);
     const repoId = decodeURIComponent(match[1]!);
     const rest = match[2]!;
+    // The agent-sessions store is REAL for every repository: the shell follows
+    // the real repos' runs through it, and a real repository's Activity tab is
+    // the real view. There are no session fixtures to answer with, so these go
+    // to the server — and a repository the server does not know simply 404s,
+    // which is what the callers already expect.
+    if (rest === 'sessions' || rest.startsWith('sessions/')) return real(input, init);
     const method = (init?.method ?? 'GET').toUpperCase();
     let body: Record<string, unknown> = {};
     if (typeof init?.body === 'string') {
