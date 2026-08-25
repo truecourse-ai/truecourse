@@ -27,6 +27,10 @@ const TRUECOURSE_DIR = '.truecourse';
 // accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH
 // services exist (and is committed so the team shares the declaration), this file
 // holds the values that must never reach git.
+//
+// `sessions/` is the agent-session store — per-run `run.json` plus one
+// append-only JSONL transcript per session. Pure run output, re-derived by the
+// next run and never read back by a teammate, so it never reaches git.
 /** The template written to `<repo>/.truecourse/.gitignore` on first use — the
  *  materialized committable-vs-derived split (exported so a test can pin it). */
 export const GITIGNORE_CONTENTS = [
@@ -45,6 +49,7 @@ export const GITIGNORE_CONTENTS = [
   'guard/journeys.json',
   'guard/auto-resolutions.json',
   'scenarios/externals.local.json',
+  'sessions/',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------
@@ -122,6 +127,11 @@ export function resolveRepoDir(startDir: string): string | null {
  * Ensure `<repoDir>/.truecourse/` exists, writing a default `.gitignore`
  * alongside it so runtime state (db, ui-state, logs) stays out of version
  * control while `config.json` can be committed by the team.
+ *
+ * An EXISTING `.gitignore` is upgraded in place: every template line it is
+ * missing is appended (user additions are preserved, nothing is removed). The
+ * template grows entries over time, and a repo initialized before an entry
+ * existed must not be able to `git add` state that was never meant for git.
  */
 export function ensureRepoTruecourseDir(repoDir: string): string {
   const tcDir = getRepoTruecourseDir(repoDir);
@@ -130,6 +140,14 @@ export function ensureRepoTruecourseDir(repoDir: string): string {
   const gitignore = path.join(tcDir, '.gitignore');
   if (!fs.existsSync(gitignore)) {
     fs.writeFileSync(gitignore, GITIGNORE_CONTENTS, 'utf-8');
+    return tcDir;
+  }
+  const existing = fs.readFileSync(gitignore, 'utf-8');
+  const have = new Set(existing.split('\n').map((line) => line.trim()));
+  const missing = GITIGNORE_CONTENTS.split('\n').filter((line) => line !== '' && !have.has(line));
+  if (missing.length > 0) {
+    const joined = existing.endsWith('\n') || existing === '' ? existing : existing + '\n';
+    fs.writeFileSync(gitignore, joined + missing.join('\n') + '\n', 'utf-8');
   }
   return tcDir;
 }

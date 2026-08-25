@@ -149,7 +149,7 @@ function primePriceTable(): void {
  * cache-written) is charged at the list input rate — providers only ever
  * discount those, so the real bill lands at or below this.
  */
-function priceCall(
+export function priceCall(
   modelId: string,
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreateTokens: number },
 ): number {

@@ -91,9 +91,10 @@ interface CapturedResult {
 /**
  * Split the SDK's usage into the four non-overlapping buckets `StageUsage`
  * tracks. `inputTokens` is the input TOTAL, so the fresh-input bucket is the
- * non-cached detail when the provider reports one.
+ * non-cached detail when the provider reports one. Shared with the session
+ * driver, whose per-turn usage rides the same buckets.
  */
-function callUsageOf(usage: CapturedResult['usage']): CallUsage {
+export function callUsageOf(usage: CapturedResult['usage']): CallUsage {
   const details = usage?.inputTokenDetails;
   return {
     inputTokens: details?.noCacheTokens ?? usage?.inputTokens ?? 0,

@@ -104,6 +104,10 @@
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
     },
+    "./lib/sessions-store": {
+      "types": "./dist/lib/sessions-store.d.ts",
+      "import": "./dist/lib/sessions-store.js"
+    },
     "./lib/contract-store": {
       "types": "./dist/lib/contract-store.d.ts",
       "import": "./dist/lib/contract-store.js"
@@ -244,6 +248,10 @@
       "types": "./dist/services/llm/model-prices.d.ts",
       "import": "./dist/services/llm/model-prices.js"
     },
+    "./services/llm/session-driver": {
+      "types": "./dist/services/llm/session-driver.d.ts",
+      "import": "./dist/services/llm/session-driver.js"
+    },
     "./services/llm/install-transport": {
       "types": "./dist/services/llm/install-transport.d.ts",
       "import": "./dist/services/llm/install-transport.js"
@@ -267,6 +275,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@truecourse/agent-loop": "workspace:*",
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/contract-verifier": "workspace:*",
@@ -275,6 +284,7 @@
     "@truecourse/journey-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/llm-api": "workspace:*",
+    "@truecourse/llm-claude-agent": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "cross-spawn": "^7.0.6",

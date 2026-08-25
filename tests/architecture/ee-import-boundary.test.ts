@@ -73,6 +73,16 @@ const STATIC_AISDK_IMPORT =
 const STATIC_CLOUD_SDK_IMPORT =
   /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|(?:^|\n)\s*import\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|require\(\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]/;
 
+// The Claude Agent SDK wrapper has exactly ONE sanctioned home in OSS:
+// `packages/llm-claude-agent`, the claude-code session driver (AGENTIC_
+// PIPELINE_PLAN §3.3). Everything else runs sessions through the
+// `SessionDriver` seam in `@truecourse/shared/llm`. Any mention of the
+// package specifier counts — the sanctioned home itself loads it through a
+// lazy, assembled-specifier import (it is an optional peer).
+const CLAUDE_AGENT_SDK_HOME = 'packages/llm-claude-agent';
+
+const CLAUDE_AGENT_SDK_REFERENCE = /@anthropic-ai\/claude-agent-sdk/;
+
 describe('open-core import boundary', () => {
   it('no OSS source statically imports @truecourse/ee-*', () => {
     const files: string[] = [];
@@ -117,6 +127,37 @@ describe('open-core import boundary', () => {
       STATIC_AISDK_IMPORT.test(fs.readFileSync(f, 'utf8')),
     );
     expect(importers.length).toBeGreaterThan(0);
+  });
+
+  it('only packages/llm-claude-agent references the Claude Agent SDK', () => {
+    const files: string[] = [];
+    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = path.relative(repoRoot, file);
+      if (rel.startsWith(`${CLAUDE_AGENT_SDK_HOME}${path.sep}`)) continue;
+      const src = fs.readFileSync(file, 'utf8');
+      if (CLAUDE_AGENT_SDK_REFERENCE.test(src)) offenders.push(rel);
+    }
+
+    expect(
+      offenders,
+      `OSS files referencing the Claude Agent SDK outside ${CLAUDE_AGENT_SDK_HOME} (run sessions through the SessionDriver seam instead):\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  it('the Claude Agent SDK home actually declares it (exemption is not dead)', () => {
+    // The home never writes the literal specifier in source (its lazy import
+    // assembles it so the optional peer stays out of type resolution), so
+    // liveness is asserted on the package manifest instead.
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(repoRoot, CLAUDE_AGENT_SDK_HOME, 'package.json'), 'utf8'),
+    );
+    expect(manifest.peerDependencies?.['@anthropic-ai/claude-agent-sdk']).toBeTruthy();
+    expect(
+      manifest.peerDependenciesMeta?.['@anthropic-ai/claude-agent-sdk']?.optional,
+    ).toBe(true);
   });
 
   it('no OSS source statically imports a cloud blob SDK (@aws-sdk/* / @azure/*)', () => {
