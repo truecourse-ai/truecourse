@@ -40,9 +40,10 @@ import {
   RecipeSchema,
   type Recipe,
   type RecipeApiCredential,
+  type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
-import type { DatastoreUrlRef, Journey } from '@truecourse/shared'
+import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
 
 /** One operation of the derived api surface — all the health ranking needs. */
@@ -69,6 +70,13 @@ export interface ProposeRecipeInputs {
    * step at all. Absent ⇒ nothing is generated, exactly as before.
    */
   datastores?: readonly DatastoreUrlRef[]
+  /**
+   * The route manifest's workspace apps — what lets the WORKSPACE branch derive
+   * an api proposal at all. Before this a monorepo either shipped exactly one
+   * `bin`-declaring member (cli) or punted to the model with nothing, and the
+   * 2026-08-20 bench showed what the model does with nothing.
+   */
+  manifestApps?: readonly RouteManifestApp[]
 }
 
 /** A deterministic proposal, or the reason the path refused to produce one. */
@@ -105,6 +113,12 @@ interface RecipeSignals {
   serve?: string[]
   /** Env the server needs (may carry `${PORT}`). */
   serveEnv?: Record<string, string>
+  /** The workspace member dir the serve argv drives (`apps/api/v2`). Implies the
+   *  argv is workspace-mediated and must run at the repo root (`cwd: "repo"`). */
+  serveApp?: string
+  /** The health path read off the member's OWN routes — outranks the generic
+   *  route-surface ranking, which spans every app at once. */
+  serveHealthPath?: string
 }
 
 /** Health endpoints in the order a repo most likely means "I am up". */
@@ -115,6 +129,8 @@ const HEALTH_PATH_RANKING = [
   '/livez',
   '/healthcheck',
   '/_health',
+  '/api/health',
+  '/api/healthz',
   '/ping',
   '/status',
 ]
@@ -160,7 +176,7 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
 
   const ecosystem = ecosystems[0]
   const detected =
-    ecosystem === 'js' ? detectJs(repoRoot) : ecosystem === 'python' ? detectPython(repoRoot) : detectDotnet(repoRoot)
+    ecosystem === 'js' ? detectJs(repoRoot, inputs) : ecosystem === 'python' ? detectPython(repoRoot) : detectDotnet(repoRoot)
   if (!('ecosystem' in detected)) return detected
 
   return assemble(repoRoot, detected, inputs)
@@ -168,12 +184,18 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
 
 /**
  * The api route surface as the proposer consumes it — the method + path of every
- * operation-rooted journey. Lets a caller that already mapped journeys hand the
+ * operation-rooted interface. Lets a caller that already mapped interfaces hand the
  * surface over without a second analysis pass.
+ *
+ * RPC-derived operations are left out (item 12): they are the same procedure
+ * behind one adapter address, so probing them says nothing a probe of the app's
+ * own routes does not, and they are excluded from scenario generation this round
+ * anyway.
  */
-export function routesFromJourneys(journeys: readonly Journey[]): ApiRouteRef[] {
+export function routesFromInterfaces(interfaces: readonly Interface[]): ApiRouteRef[] {
   const routes: ApiRouteRef[] = []
-  for (const j of journeys) {
+  for (const j of interfaces) {
+    if (j.procedure) continue
     const entry = j.entry as { method?: string; path?: string }
     if (typeof entry?.method === 'string' && typeof entry.path === 'string') {
       routes.push({ method: entry.method, path: entry.path })
@@ -202,8 +224,10 @@ export function detectEcosystems(repoRoot: string): RecipeEcosystem[] {
 // JS / TS
 // ---------------------------------------------------------------------------
 
-/** Watch/dev markers: a watcher is not a server under test. */
-const DEV_SCRIPT_MARKERS = [
+/** Watch/dev markers: a watcher is not a server under test. Exported for the
+ *  static proposal check in `recipe-discovery.ts` (`staticProposalComplaints`),
+ *  so the refusal rule and the derivation share one list. */
+export const DEV_SCRIPT_MARKERS = [
   'nodemon',
   '--watch',
   'watch ',
@@ -217,13 +241,14 @@ const DEV_SCRIPT_MARKERS = [
   'react-scripts',
 ]
 
-/** Shell metacharacters an argv cannot carry — a compound command is not argv. */
-const SHELL_OPERATORS = ['&&', '||', '|', ';', '>', '<', '`', '$(', '&']
+/** Shell metacharacters an argv cannot carry — a compound command is not argv.
+ *  Exported for `staticProposalComplaints` in `recipe-discovery.ts` — one list. */
+export const SHELL_OPERATORS = ['&&', '||', '|', ';', '>', '<', '`', '$(', '&']
 
 /** Framework dependencies that mean "this package serves HTTP". */
 const JS_SERVER_DEPS = ['express', 'fastify', 'koa', '@hapi/hapi', '@nestjs/core', 'hono', 'restify', 'polka']
 
-function detectJs(repoRoot: string): RecipeSignals | { ok: false; reason: string } {
+function detectJs(repoRoot: string, inputs: ProposeRecipeInputs = {}): RecipeSignals | { ok: false; reason: string } {
   const pkg = readJson(path.join(repoRoot, 'package.json'))
   if (!pkg) return { ok: false, reason: 'package.json is not readable JSON' }
 
@@ -238,21 +263,30 @@ function detectJs(repoRoot: string): RecipeSignals | { ok: false; reason: string
     (pkg.workspaces != null && typeof pkg.workspaces === 'object') ||
     exists(repoRoot, 'pnpm-workspace.yaml')
   let memberBin: string | null = null
+  let memberServe: WorkspaceMemberServe | null = null
   if (workspaceRoot) {
+    // The api half first: the route manifest names which members SERVE, so a
+    // monorepo whose most-routed member has a plain `start` script derives an api
+    // proposal — the cli-bin rules below used to be this branch's only exit.
+    memberServe = workspaceMemberServe(repoRoot, inputs.manifestApps ?? [])
     const members = binDeclaringMembers(repoRoot)
-    if (members.length === 0) {
-      return {
-        ok: false,
-        reason: 'the repo declares workspaces and no workspace package declares a `bin` — the app under test is one of several packages',
+    if (!memberServe) {
+      if (members.length === 0) {
+        return {
+          ok: false,
+          reason: 'the repo declares workspaces and no workspace package declares a `bin` — the app under test is one of several packages',
+        }
+      }
+      if (members.length > 1) {
+        return {
+          ok: false,
+          reason: `the repo declares workspaces and ${members.length} packages declare a \`bin\` (${members.map((m) => m.dir).join(', ')}) — the cli entrypoint is not deterministic`,
+        }
       }
     }
-    if (members.length > 1) {
-      return {
-        ok: false,
-        reason: `the repo declares workspaces and ${members.length} packages declare a \`bin\` (${members.map((m) => m.dir).join(', ')}) — the cli entrypoint is not deterministic`,
-      }
-    }
-    memberBin = members[0].bin
+    // With an api member decided, the cli half is optional: exactly one bin still
+    // rides along; zero or several just means the proposal is api-only.
+    if (members.length === 1) memberBin = members[0].bin
   }
 
   const pm = detectPackageManager(repoRoot)
@@ -270,11 +304,19 @@ function detectJs(repoRoot: string): RecipeSignals | { ok: false; reason: string
   // The cli half: `bin` as a string, or a single-entry object — from the workspace
   // member that declares it, else from this package. Several bins is a multi-tool
   // package — which one a scenario drives is not deterministic.
-  const bin = memberBin ?? binPath(pkg.bin)
+  const bin = workspaceRoot ? memberBin : binPath(pkg.bin)
   if (bin === 'ambiguous') {
     return { ok: false, reason: 'package.json declares several `bin` entries — the cli entrypoint is not deterministic' }
   }
   if (bin && (hasBuild || existsFile(repoRoot, bin))) signals.entry = ['node', bin]
+
+  // The api half of a WORKSPACE: the member the route manifest crowned, driven
+  // through the package manager so it runs from the repo root.
+  if (memberServe) {
+    signals.serve = memberServe.serve
+    signals.serveApp = memberServe.app
+    if (memberServe.healthPath) signals.serveHealthPath = memberServe.healthPath
+  }
 
   // The api half: a tokenized `start` script, kept only when it is a plain
   // single-command invocation of something this repo produces. A workspace ROOT's
@@ -297,6 +339,58 @@ function detectJs(repoRoot: string): RecipeSignals | { ok: false; reason: string
     }
   }
   return signals
+}
+
+/** One derivable workspace api member: what `workspaceMemberServe` decides. */
+interface WorkspaceMemberServe {
+  serve: string[]
+  /** Repo-relative member dir — becomes `api.app`, and implies `cwd: "repo"`. */
+  app: string
+  /** A health route the member ITSELF declares, when it declares one. */
+  healthPath?: string
+}
+
+/** Dirs that ship alongside the product without BEING it — a routed app under
+ *  one of these is a demo, never the server under test (the item-107 rule,
+ *  applied to recipes: cal.com's `example-apps/credential-sync` is routed and
+ *  must still lose to `apps/api/v2`). */
+const EXAMPLE_DIR = /(^|\/)(examples?|example-apps|demos?|fixtures?|samples?|e2e|__tests?__|tests?)(\/|$)/
+
+/**
+ * The workspace member the deterministic api proposal drives: the most-routed
+ * non-example app with a plain (non-watcher) `start` script. One member, single
+ * `serve` — a second routed app is the SESSION's to add under `api.servers`;
+ * this path only has to beat "no prior proposal at all". Null when no member
+ * qualifies, which keeps the old punt (with the manifest riding into the model's
+ * briefing) exactly as it was.
+ */
+function workspaceMemberServe(
+  repoRoot: string,
+  apps: readonly RouteManifestApp[],
+): WorkspaceMemberServe | null {
+  const routed = apps
+    .filter((app) => app.routes.length > 0 && !EXAMPLE_DIR.test(app.dir))
+    .sort((a, b) => b.routes.length - a.routes.length)
+  const best = routed[0]
+  if (!best) return null
+  const memberPkg = readJson(path.join(repoRoot, best.dir, 'package.json'))
+  const name = typeof memberPkg?.name === 'string' && memberPkg.name ? memberPkg.name : null
+  const start = asRecord(memberPkg?.scripts).start
+  if (!name || typeof start !== 'string' || !start.trim()) return null
+  if (DEV_SCRIPT_MARKERS.some((marker) => start.toLowerCase().includes(marker))) return null
+  const healthPath = rankHealthPath(best.routes.map((route) => ({ method: 'GET', path: route })))
+  return {
+    serve: workspaceRunArgv(repoRoot, name),
+    app: best.dir,
+    ...(healthPath ? { healthPath } : {}),
+  }
+}
+
+/** The argv that runs one member's `start` from the repo root, per package manager. */
+function workspaceRunArgv(repoRoot: string, pkgName: string): string[] {
+  if (exists(repoRoot, 'pnpm-lock.yaml')) return ['pnpm', '--filter', pkgName, 'run', 'start']
+  if (exists(repoRoot, 'yarn.lock')) return ['yarn', 'workspace', pkgName, 'start']
+  return ['npm', 'run', 'start', '-w', pkgName]
 }
 
 /** `npm ci` / `pnpm install --frozen-lockfile` / `yarn install --immutable`, from
@@ -626,7 +720,7 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
 
   let compose: ComposePlan | undefined
   if (signals.serve) {
-    const healthPath = rankHealthPath(inputs.routes ?? [])
+    const healthPath = signals.serveHealthPath ?? rankHealthPath(inputs.routes ?? [])
     const schemes = inputs.securitySchemes ?? readCorpusSecuritySchemes(repoRoot)
     const { credentials, notes } = credentialStubs(schemes)
     todos.push(...notes)
@@ -646,6 +740,10 @@ function assemble(repoRoot: string, signals: RecipeSignals, inputs: ProposeRecip
     }
     recipe.api = {
       serve: signals.serve,
+      // A workspace-mediated argv must run at the repo root, and the member dir
+      // it drives is a fact the recipe states (`api.app`) so downstream mapping
+      // knows which app is the one under test.
+      ...(signals.serveApp ? { app: signals.serveApp, cwd: 'repo' } : {}),
       ...(healthPath ? { healthPath } : {}),
       ...(Object.keys(apiEnv).length > 0 ? { env: apiEnv } : {}),
       ...(services ? { services } : {}),

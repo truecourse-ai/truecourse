@@ -519,6 +519,12 @@ function extractExportName(node: SyntaxNode): string | null {
     }
   }
 
+  // `export default <expression>` — see the note on the TypeScript extractor's
+  // twin of this function. Only `function` and `class` defaults reach the
+  // declaration branch; `export default HomePage;` lands here.
+  const value = node.childForFieldName('value')
+  if (value) return value.type === 'identifier' ? value.text : 'default'
+
   return null
 }
 
@@ -526,6 +532,13 @@ function extractExportName(node: SyntaxNode): string | null {
  * Check if export is default
  */
 function isDefaultExport(node: SyntaxNode): boolean {
+  // `export { default } from './index'` — see the TypeScript extractor's twin.
+  const clause = node.children.find((c) => c.type === 'export_clause')
+  const first = clause?.children.find((c) => c.type === 'export_specifier')
+  if (first) {
+    const exported = first.childForFieldName('alias') ?? first.childForFieldName('name')
+    if (exported?.text === 'default') return true
+  }
   for (const child of node.children) {
     if (child.type === 'default' || child.text === 'default') {
       return true

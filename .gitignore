@@ -24,3 +24,5 @@ assets/*.pdf
 # .NET build artifacts (fixture projects)
 tests/fixtures/**/bin/
 tests/fixtures/**/obj/
+truecourse_tests/
+platai/

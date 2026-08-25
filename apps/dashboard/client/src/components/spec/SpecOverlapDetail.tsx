@@ -17,10 +17,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Loader2 } from 'lucide-react';
-import { buildCorpusConflicts, type ConflictResolutionLike } from '@truecourse/shared';
+import type { ConflictResolutionLike, CorpusConflict } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
-import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlapReview } from '@/lib/api';
+import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverlapReview } from '@/lib/api';
 import { webDocLabel } from '@/lib/spec-web-source';
 import { SpecDocViewer } from './SpecDocViewer';
 import { WorkspaceBadge } from './WorkspaceBadge';
@@ -32,15 +32,12 @@ const PR_GATE_HINT = 'Available after the PR gate runs.';
 /** Caption above a detail card — the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
-/** Same set as the shared derivation: is this the same unordered doc pair? */
-const samePair = (a1: string, b1: string, a2: string, b2: string): boolean =>
-  (a1 === a2 && b1 === b2) || (a1 === b2 && b1 === a2);
-
 export function SpecOverlapDetail({
   repoId,
   area,
   docA,
   docB,
+  conflict,
   data,
   prNumber = null,
   prRef,
@@ -52,6 +49,14 @@ export function SpecOverlapDetail({
   area: string;
   docA: string;
   docB: string;
+  /**
+   * The dispute this pane is showing, already resolved from the URL's conflict id
+   * by the page. Passed in rather than re-found here: a doc PAIR can carry several
+   * genuine disputes (disjoint sections), so any lookup by pair lands on the first
+   * one and this pane would read — and WRITE a verdict against — the wrong dispute.
+   * `undefined` when the id addresses nothing in the current corpus (a stale link).
+   */
+  conflict: CorpusConflict<SpecOverlap> | undefined;
   data: SpecCorpusResponse;
   /** EE PR view: scope the resolution to this PR. Repo view when null/undefined. */
   prNumber?: number | null;
@@ -89,22 +94,11 @@ export function SpecOverlapDetail({
   // side stays unbadged). Inert on OSS / repo-local corpora.
   const isWorkspace = (ref: string): boolean => docMeta.get(ref)?.layer === 'workspace';
 
-  const overlap = data.corpus.areas
-    .find((ar) => ar.id === area)
-    ?.overlaps.find(
-      (o) => (o.docs[0] === docA && o.docs[1] === docB) || (o.docs[0] === docB && o.docs[1] === docA),
-    );
-
-  // The ONE shared derivation: classify this pair as open/resolved, carrying HOW
-  // (a section verdict or an exclude). Reused so this pane never disagrees with
-  // the sidebar or the gate about resolution.
-  const conflict = useMemo(() => {
-    const conflicts = buildCorpusConflicts(data.corpus, {
-      manualExcludes: data.manualExcludes ?? [],
-      conflictResolutions: data.conflictResolutions ?? [],
-    });
-    return conflicts.find((c) => samePair(c.a, c.b, docA, docB) && (c.area === area || c.areas.includes(area)));
-  }, [data, docA, docB, area]);
+  // The representative overlap of THIS dispute — carried by the conflict the
+  // shared derivation produced, so the note, the review and the section pointers
+  // all belong to the dispute the reader clicked rather than to whichever one
+  // happens to be listed first on the pair.
+  const overlap = conflict?.overlap;
 
   const derivedResolution = conflict?.resolution;
   const resolution = override !== undefined ? override : derivedResolution;
@@ -134,8 +128,11 @@ export function SpecOverlapDetail({
   const preambleFor = (d: string): boolean =>
     (overlap?.sections ?? []).some((s) => s.doc === d && s.heading === null);
 
-  // On open (or when the overlap changes), scroll each pane to its first
-  // conflicting section, and drop any stale optimistic verdict from a prior pair.
+  // On open (or when the dispute changes), scroll each pane to its first
+  // conflicting section, and drop any stale optimistic verdict from a prior one.
+  // Keyed on the conflict ID, not the doc pair: two disputes on the SAME pair are
+  // distinct panes, and keying on the pair would leave the second showing the
+  // first's scroll position and optimistic verdict.
   useEffect(() => {
     setOverride(undefined);
     const a = sectionsFor(docA)[0];
@@ -143,7 +140,7 @@ export function SpecOverlapDetail({
     if (a) setScrollA({ heading: a, nonce: 1 });
     if (b) setScrollB({ heading: b, nonce: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docA, docB, area]);
+  }, [conflict?.id, docA, docB, area]);
 
   const lastTouched = new Map(data.corpus.docs.map((d) => [d.ref, d.lastTouched] as const));
   const newerDoc = (lastTouched.get(docB) ?? '') >= (lastTouched.get(docA) ?? '') ? docB : docA;
@@ -248,15 +245,20 @@ export function SpecOverlapDetail({
           // Resolved by a section verdict — render in place with an Undo.
           <div data-testid="conflict-verdict" className="mt-2 flex flex-wrap items-center gap-2 text-xs">
             {resolution.verdict === 'dismissed' ? (
-              <span className="text-emerald-600 dark:text-emerald-400">Dismissed — not a real conflict</span>
+              <span className="text-emerald-600 dark:text-emerald-400">
+                {resolution.resolvedBy === 'auto' ? 'Auto-dismissed — not a real conflict' : 'Dismissed — not a real conflict'}
+              </span>
             ) : (
               <span className="flex flex-wrap items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                Resolved —
+                {resolution.resolvedBy === 'auto' ? 'Auto-resolved —' : 'Resolved —'}
                 <HoverPopover content={titleOf(winnerOf(resolution))}>
                   <span className="max-w-[22rem] truncate font-medium">{titleOf(winnerOf(resolution))}</span>
                 </HoverPopover>
                 is right
               </span>
+            )}
+            {resolution.resolvedBy === 'auto' && (
+              <ConfidenceBar confidence="high" testId="auto-applied-badge" />
             )}
             <HoverPopover content={decisionsDisabled ? PR_GATE_HINT : null}>
               <button
@@ -380,7 +382,7 @@ function ConflictAssessment({
   applying: boolean;
   onApply: () => void;
 }) {
-  const { action, rationale, fix } = review.recommendation;
+  const { action, rationale, fix, confidence } = review.recommendation;
   // A pick-a-side or a dismissal is a ruling the reader can take right here; a
   // fix-doc is homework, so only the former earns the accent.
   const actionable = action !== 'fix-doc';
@@ -395,6 +397,7 @@ function ConflictAssessment({
             <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
               {recActionLabel(action, winner)}
             </span>
+            {confidence && <ConfidenceBar confidence={confidence} />}
             {canApply && (
               <HoverPopover content={applyDisabledReason} side="top">
                 <Button size="sm" disabled={applyDisabled} onClick={onApply}>
@@ -409,6 +412,37 @@ function ConflictAssessment({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The judge's confidence grade on its recommendation, as a signal-strength bar:
+ * 1 of 3 segments filled = low, 2 = medium, 3 = high, toned like the coverage
+ * palette. Hover names the grade ("High confidence"), nothing more.
+ */
+function ConfidenceBar({
+  confidence,
+  testId = 'confidence-chip',
+}: {
+  confidence: 'low' | 'medium' | 'high';
+  testId?: string;
+}) {
+  const filled = confidence === 'high' ? 3 : confidence === 'medium' ? 2 : 1;
+  const tone =
+    confidence === 'high' ? 'bg-emerald-500' : confidence === 'medium' ? 'bg-amber-500' : 'bg-rose-500';
+  const label = `${confidence[0].toUpperCase()}${confidence.slice(1)} confidence`;
+  const heights = ['h-1.5', 'h-2', 'h-2.5'];
+  return (
+    <HoverPopover content={label}>
+      <span data-testid={testId} aria-label={label} className="flex items-end gap-0.5">
+        {heights.map((h, i) => (
+          <span
+            key={h}
+            className={`w-1 rounded-sm ${h} ${i < filled ? tone : 'bg-muted-foreground/25'}`}
+          />
+        ))}
+      </span>
+    </HoverPopover>
   );
 }
 

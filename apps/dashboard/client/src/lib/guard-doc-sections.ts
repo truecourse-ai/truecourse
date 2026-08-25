@@ -171,12 +171,18 @@ export function buildAnchorTargets(
 }
 
 /**
- * Coverage section aligned to each rendered block, parallel to `blocks`. A
- * preamble block, or a block whose heading doesn't match the next unconsumed
- * section, gets `null` (rendered without a status band). With the fence-aware
- * split above this consumes the sections in lockstep; the guard only matters if
- * the two heading rules ever diverge, and then it fails safe (unmarked) rather
- * than mis-colouring.
+ * Coverage section aligned to each rendered block, parallel to `blocks`. A block
+ * whose heading doesn't match the next unconsumed section gets `null` (rendered
+ * without a status band). With the fence-aware split above this consumes the
+ * sections in lockstep; the guard only matters if the two heading rules ever
+ * diverge, and then it fails safe (unmarked) rather than mis-colouring.
+ *
+ * The preamble block is the doc's LEAD REGION, which the server derives as a
+ * section of its own (level 0, named by the frontmatter title). It has no heading
+ * for the text guard to compare, so it aligns structurally: the leading preamble
+ * takes a leading level-0 section, and both are first by construction. Consuming
+ * it is what keeps the rest in lockstep — leaving it unconsumed would push every
+ * heading block against the lead and unmark the whole document.
  */
 export function alignSections(
   blocks: DocBlock[],
@@ -184,9 +190,11 @@ export function alignSections(
 ): Array<GuardSectionCoverage | null> {
   const out: Array<GuardSectionCoverage | null> = [];
   let si = 0;
-  for (const block of blocks) {
+  for (const [i, block] of blocks.entries()) {
     if (block.level === 0 || block.headingText === '') {
-      out.push(null);
+      const lead = i === 0 && si === 0 && sections[0]?.level === 0 ? sections[0] : null;
+      if (lead) si++;
+      out.push(lead);
       continue;
     }
     const next = sections[si];

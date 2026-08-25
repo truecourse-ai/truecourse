@@ -54,7 +54,13 @@ import { runGuardFindings } from "./commands/guard-findings.js";
 import { runGuardSetup } from "./commands/guard-setup.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runGuardExternals } from "./commands/guard-externals.js";
+import {
+  runGuardInterfaces,
+  runGuardInterfacesAuthor,
+  runGuardInterfacesReconcile,
+} from "./commands/guard-interfaces.js";
 import { runGuardSeed } from "./commands/guard-seed.js";
+import { runGuardAdjudicate } from "./commands/guard-adjudicate.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -78,6 +84,11 @@ function llmTransportOption(): Option {
     "--llm-transport <mode>",
     "How to reach the LLM for this run: 'cli' (spawn claude -p), 'agent' (filesystem mailbox), or 'api' (the provider in ~/.truecourse/config.json)",
   ).choices(["cli", "agent", "api"]);
+}
+
+/** Accumulate repeatable `--place <id>` values. */
+function collectPlace(value: string, previous: string[]): string[] {
+  return [...previous, value];
 }
 
 /** Accumulate repeatable `--header k=v` values. */
@@ -234,8 +245,34 @@ specCmd
   .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
+  // Single-step mode: run one of the scan's four session steps in isolation.
+  // Prior steps replay from their stored artifacts (a missing one fails loud),
+  // later steps never start; only --only-overlap writes corpus.json.
+  .option("--only-orchestrate", "Run only the scan-scope step (writes scope verdicts to decisions.json; corpus.json untouched)")
+  .option("--only-curate", "Run only the doc-curation step (scope replayed from stored verdicts; corpus.json untouched)")
+  .option("--only-settle", "Run only the area-settling step (curation replayed from cache; corpus.json untouched)")
+  .option("--only-overlap", "Run only the overlap step (earlier steps replayed from cache) and write corpus.json")
   .action(async (options) => {
-    await runSpecScan({ yes: !!options.yes, llm: options.llmTransport, io: options.io });
+    const only = (
+      [
+        ["orchestrate", options.onlyOrchestrate],
+        ["curate", options.onlyCurate],
+        ["settle", options.onlySettle],
+        ["overlap", options.onlyOverlap],
+      ] as const
+    )
+      .filter(([, picked]) => !!picked)
+      .map(([step]) => step);
+    if (only.length > 1) {
+      console.error("error: the --only-<step> flags are mutually exclusive — pick one");
+      process.exit(1);
+    }
+    await runSpecScan({
+      yes: !!options.yes,
+      llm: options.llmTransport,
+      io: options.io,
+      ...(only[0] ? { only: only[0] } : {}),
+    });
   });
 
 specCmd
@@ -389,11 +426,31 @@ guardCmd
   .option("-y, --yes", "Skip the pre-flight cost-estimate confirmation")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  // Single-step mode: run one of the pipeline's three session steps in
+  // isolation. Prior steps replay from their outcome caches (a missing one
+  // fails loud), later steps never start; only --only-worker writes anything.
+  .option("--only-extract", "Run only the claim-extraction sessions (nothing is written)")
+  .option("--only-flows", "Run only the flow-synthesis sessions (extraction replayed from cache; nothing is written)")
+  .option("--only-worker", "Run only the flow-worker sessions (earlier steps replayed from cache) and write the scenarios")
   .action(async (options) => {
+    const only = (
+      [
+        ["extract", options.onlyExtract],
+        ["flows", options.onlyFlows],
+        ["worker", options.onlyWorker],
+      ] as const
+    )
+      .filter(([, picked]) => !!picked)
+      .map(([step]) => step);
+    if (only.length > 1) {
+      console.error("error: the --only-<step> flags are mutually exclusive — pick one");
+      process.exit(1);
+    }
     await runGuardGenerate({
       yes: options.yes,
       llmTransport: options.llmTransport,
       io: options.io,
+      ...(only[0] ? { only: only[0] } : {}),
     });
   });
 
@@ -406,15 +463,42 @@ guardCmd
   .command("setup")
   .description("Prepare the repo for guard: recipe, external APIs, and the data + auth seed")
   .option("--refresh", "Re-derive the recipe and re-draft the seed even when both exist")
+  .option("--replace", "Interfaces step: re-author web tasks on places that already carry them")
   .option("-y, --yes", "Skip the cost confirm (and, with --refresh, consent to replacing the seed)")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
+  // Single-step mode: run one of setup's five LLM-bearing steps in isolation.
+  // Prior steps replay from what they left on disk (a step nobody ran fails
+  // loud), later steps never start; the free `detect` pass always runs, and
+  // guard/setup.json is merged so the untouched steps keep their record.
+  .option("--only-recipe", "Run only the recipe step (derive, verify and probe the recipe; nothing downstream)")
+  .option("--only-catalog", "Run only the dependency-catalog step (recipe replayed from recipe.json)")
+  .option("--only-interfaces", "Run only the interface-authoring step (earlier steps replayed from disk)")
+  .option("--only-seed", "Run only the seed step (earlier steps replayed from disk)")
+  .option("--only-auth", "Run only the auth-proof step (earlier steps replayed from disk)")
   .action(async (options) => {
+    const only = (
+      [
+        ["recipe", options.onlyRecipe],
+        ["catalog", options.onlyCatalog],
+        ["interfaces", options.onlyInterfaces],
+        ["seed", options.onlySeed],
+        ["auth", options.onlyAuth],
+      ] as const
+    )
+      .filter(([, picked]) => !!picked)
+      .map(([step]) => step);
+    if (only.length > 1) {
+      console.error("error: the --only-<step> flags are mutually exclusive — pick one");
+      process.exit(1);
+    }
     await runGuardSetup({
       refresh: !!options.refresh,
+      replace: !!options.replace,
       yes: !!options.yes,
       llmTransport: options.llmTransport,
       io: options.io,
+      ...(only[0] ? { only: only[0] } : {}),
     });
   });
 
@@ -435,6 +519,47 @@ guardCmd
     await runGuardSeed({ init: !!options.init });
   });
 
+// The interface catalog: the derived half is read off the tree by `guard setup`;
+// the web TASKS are authored, one agent session per place (SPEC_GUARD_PLAN 104).
+const guardInterfacesCmd = guardCmd
+  .command("interfaces")
+  .description("Show the interface catalog's places and the tasks authored on them (read-only)")
+  .action(async () => {
+    await runGuardInterfaces({});
+  });
+
+guardInterfacesCmd
+  .command("author")
+  .description("Author the web tasks no derivation produces — one agent session per place")
+  .option("--place <id>", "Author only this place (repeatable)", collectPlace, [])
+  .option("--replace", "Re-author places that already carry tasks")
+  .option("--limit <n>", "Author at most N places", parseInt)
+  .option("--concurrency <n>", "Run N sessions at once (default: min(cpus, 4))", parseInt)
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardInterfacesAuthor({
+      place: options.place,
+      replace: !!options.replace,
+      limit: options.limit,
+      concurrency: options.concurrency,
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
+  });
+
+guardInterfacesCmd
+  .command("reconcile")
+  .description("Collapse the state registry's synonyms — one LLM call, no authoring")
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardInterfacesReconcile({
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
+  });
+
 guardCmd
   .command("externals")
   .description("Show the third-party APIs this repo depends on and how each resolves (read-only)")
@@ -446,10 +571,9 @@ guardCmd
 const guardFlowsCmd = guardCmd
   .command("flows")
   .description("List the synthesized flows with their per-surface coverage (LLM-free)")
-  .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, journeys, gaps")
-  .option("--story", "With --show: read the flow's committed tests in plain words")
+  .option("--show <id>", "Show one flow: goal, milestones, binds, surfaces, interfaces, gaps")
   .action(async (options) => {
-    await runGuardFlows({ show: options.show, story: !!options.story });
+    await runGuardFlows({ show: options.show });
   });
 
 // The FLOW is the one manual dismissal unit — a generated test's id moves when
@@ -469,6 +593,29 @@ guardFlowsCmd
   .description("Put a dismissed flow back — the next generate authors tests for it again")
   .action(async (flowId) => {
     await runGuardFlowUndismiss(flowId);
+  });
+
+// Adjudication — classify the board's failures (plan 05): deterministic
+// pre-pass + verdict cache first, one agent session per surprise. Verdicts
+// land on the run snapshot and the board; `--report` renders guard/findings.md.
+guardCmd
+  .command("adjudicate")
+  .description("Classify the board's failing scenarios — expected-red, drift, bug, defect, or infrastructure")
+  .option("--run <id>", "Only failures recorded by this run")
+  .option("--scenario <id>", "Adjudicate only this scenario (repeatable; re-adjudicates a verdicted row)", collectPlace, [])
+  .option("--report", "Render guard/findings.md from the board's bug/drift verdicts")
+  .option("--concurrency <n>", "Run N sessions at once (default: min(cpus, 4))", parseInt)
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardAdjudicate({
+      run: options.run,
+      scenario: options.scenario,
+      report: !!options.report,
+      concurrency: options.concurrency,
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
   });
 
 guardCmd

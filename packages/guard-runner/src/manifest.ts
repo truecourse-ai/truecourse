@@ -9,8 +9,8 @@
 import fs from 'node:fs'
 import {
   GuardManifestSchema,
-  GUARD_FORMAT_VERSION,
   flowFingerprint,
+  guardScenarioDrivers,
   type GuardDriverId,
   type GuardFlowBinding,
   type GuardManifest,
@@ -63,8 +63,9 @@ function manualFlow(scenario: GuardScenario): { id: string; fingerprint: string 
 /**
  * Derive the manifest from the committed scenarios: group them by the flow they
  * realize (hand-written scenarios each take their Manual pseudo-flow), union the
- * sections their `binds` name, and record one scenario entry per surface. The
- * generation-inputs hash is left unset — the generator stamps it when it authors.
+ * sections their `binds` name, and record one entry per scenario with the drivers
+ * its STEPS exercise. The generation-inputs hash is left unset — the generator
+ * stamps it when it authors.
  */
 export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
   const { scenarios } = loadScenarios(repoRoot)
@@ -74,8 +75,8 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
       flowFingerprint: string
       bindings: Map<string, GuardFlowBinding>
       scenarios: GuardManifestScenario[]
-      /** Surface → the journeys its scenarios ground on, first-seen order. */
-      journeys: Map<GuardDriverId, string[]>
+      /** Surface → the interfaces its scenarios ground on, first-seen order. */
+      interfaces: Map<GuardDriverId, string[]>
     }
   >()
 
@@ -83,7 +84,7 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
     const flow = s.flow ?? manualFlow(s)
     let entry = byFlow.get(flow.id)
     if (!entry) {
-      entry = { flowFingerprint: flow.fingerprint, bindings: new Map(), scenarios: [], journeys: new Map() }
+      entry = { flowFingerprint: flow.fingerprint, bindings: new Map(), scenarios: [], interfaces: new Map() }
       byFlow.set(flow.id, entry)
     }
     for (const b of s.binds) {
@@ -96,15 +97,18 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
     // Rebuilding from the committed YAML alone cannot know a test's birth status
     // (the manifest is where that lives), so a recovered entry reads as passing —
     // the next run states the truth.
-    entry.scenarios.push({ id: s.id, surface: s.driver, status: 'passing' })
-    // Rebuilding from the COMMITTED scenarios can only recover the journeys they
+    const drivers = guardScenarioDrivers(s)
+    entry.scenarios.push({ id: s.id, drivers, status: 'passing' })
+    // Rebuilding from the COMMITTED scenarios can only recover the interfaces they
     // actually ground on — a plan the generator made for a surface that authored
-    // nothing left no file to read it back from.
-    const path = s.journey?.path ?? []
+    // nothing left no file to read it back from. They file under the scenario's
+    // PRIMARY driver: the interface path was planned for one surface, whatever
+    // other surfaces the finished steps touch.
+    const path = s.interface?.path ?? []
     if (path.length > 0) {
-      const ids = entry.journeys.get(s.driver) ?? []
+      const ids = entry.interfaces.get(drivers[0]) ?? []
       for (const id of path) if (!ids.includes(id)) ids.push(id)
-      entry.journeys.set(s.driver, ids)
+      entry.interfaces.set(drivers[0], ids)
     }
   }
 
@@ -116,13 +120,13 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
         (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor),
       ),
       scenarios: e.scenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
-      journeys: [...e.journeys.entries()]
-        .map(([surface, journeyIds]) => ({ surface, journeyIds }))
+      interfaces: [...e.interfaces.entries()]
+        .map(([surface, interfaceIds]) => ({ surface, interfaceIds }))
         .sort((a, b) => a.surface.localeCompare(b.surface)),
       generationInputsHash: null,
       gaps: [],
     }))
     .sort((a, b) => a.flowId.localeCompare(b.flowId))
 
-  return { version: GUARD_FORMAT_VERSION, flows }
+  return { flows }
 }

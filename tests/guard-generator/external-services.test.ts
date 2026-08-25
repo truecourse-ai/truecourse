@@ -30,16 +30,18 @@ import {
   writeRecipe,
   writeDoc,
   writeCorpus,
-  extractBy,
-  authorBy,
+  extractSessionBy,
+  submitWorkerSessions,
+  raw,
+  PASSING_STEPS,
   runGenerate,
   withExternalServices,
   writeApiRecipe,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
   rawApi,
   PASSING_API_STEPS,
-  DEFAULT_JOURNEYS,
+  DEFAULT_INTERFACES,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -103,13 +105,13 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(
-        DEFAULT_JOURNEYS(r),
+      interfaces: withExternalServices(
+        DEFAULT_INTERFACES(r),
         { service: 'stripe', category: 'payment' },
         { service: 'sendgrid', category: 'messaging' },
       ),
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: { blockedOn: ['external-service'] } }),
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'external-service' }] })),
     })
 
     const gap = res.coverageGaps.find((g) => g.kind === 'blocked-on')!
@@ -126,8 +128,8 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
 
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({ version: { blockedOn: ['external-service'] } }),
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'external-service' }] })),
     })
 
     expect(res.coverageGaps.find((g) => g.kind === 'blocked-on')!.reason).toBe('blocked on external-service: version')
@@ -139,10 +141,10 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(DEFAULT_JOURNEYS(r), { service: 'stripe', category: 'payment' }),
-      extractRunner: extractBy({}),
+      interfaces: withExternalServices(DEFAULT_INTERFACES(r), { service: 'stripe', category: 'payment' }),
+      extractSession: extractSessionBy({}),
       // Nothing is blocked — the dependency is still a fact about the repo.
-      generateRunner: authorBy({}),
+      flowWorkerSession: submitWorkerSessions(() => raw('the version prints', PASSING_STEPS)),
     })
 
     expect(res.externalServices.map((s) => s.service)).toEqual(['stripe'])
@@ -152,38 +154,45 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
   })
 })
 
-describe('generateGuards — the api authoring prompt advertises the detected services', () => {
-  it('hands the canonical names to an api author context, and nothing to a cli one', async () => {
+describe('generateGuards — the api worker briefing advertises the detected services', () => {
+  it('names the canonical services in the api worker briefing', async () => {
     const r = makeTempRepo()
     repos.push(r)
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const briefings: string[] = []
 
     await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(
-        journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: withExternalServices(
+        interfacesOf(r, apiInterface('GET', '/todos')),
         { service: 'stripe', category: 'payment' },
       ),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+        onBriefing: (_task, text) => briefings.push(text),
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([{ name: 'stripe' }])
-    // The prompt renders them as the blockers worth naming — never as a capability.
-    const prompt = buildAuthorUserPrompt(api)
-    expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON — detected in its source: stripe.')
-    expect(prompt).toContain('"blockedOn": ["stripe"]')
+    // The api worker's BRIEFING renders them as the blockers worth naming —
+    // never as a capability.
+    expect(briefings).toHaveLength(1)
+    expect(briefings[0]).toContain('THIRD PARTIES THIS REPO DEPENDS ON — detected in its source: stripe.')
+    expect(briefings[0]).toContain('"blockedOn": ["stripe"]')
 
-    // A repo with no detection renders the prompt exactly as before.
-    const bare = buildAuthorUserPrompt({ ...api, externalServices: undefined })
+    // A context with no detection renders the prompt exactly as before.
+    const bare = buildAuthorUserPrompt({
+      flow: { id: 'f', title: 't', goal: 'g' },
+      milestones: [],
+      interfacePath: [],
+      areaTags: [],
+      driver: 'api',
+      recipeEntry: [],
+      recipeBuild: 'true',
+    } as AuthorUserContext)
     expect(bare).not.toContain('THIRD PARTIES')
   })
 
@@ -195,27 +204,24 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const briefings: string[] = []
 
     await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(
-        journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: withExternalServices(
+        interfacesOf(r, apiInterface('GET', '/todos')),
         { service: 'stripe', category: 'payment', baseUrlEnv: 'STRIPE_API_BASE' },
       ),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+        onBriefing: (_task, text) => briefings.push(text),
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([{ name: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
-    const prompt = buildAuthorUserPrompt(api)
-    expect(prompt).toContain('stripe (base URL env: STRIPE_API_BASE — stubable via setup.http, or provide it)')
-    expect(prompt).toContain('${HTTP_STUB:<name>}')
+    expect(briefings[0]).toContain('stripe (base URL env: STRIPE_API_BASE — stubable via setup.http, or provide it)')
+    expect(briefings[0]).toContain('${HTTP_STUB:<name>}')
   })
 
   // An HTTP-detected vendor is often reached through SEVERAL hosts, each with
@@ -227,11 +233,11 @@ describe('generateGuards — the api authoring prompt advertises the detected se
     writeApiRecipe(r, { entry: null })
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
-    const contexts: AuthorUserContext[] = []
+    const briefings: string[] = []
 
     await runGenerate({
       repoRoot: r,
-      journeys: withExternalServices(journeysOf(r, apiJourney('GET', '/todos')), {
+      interfaces: withExternalServices(interfacesOf(r, apiInterface('GET', '/todos')), {
         service: 'open-meteo',
         source: 'http',
         baseUrlEnv: 'GEOCODING_BASE_URL',
@@ -248,27 +254,18 @@ describe('generateGuards — the api authoring prompt advertises the detected se
           },
         ],
       }),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-        contexts.push(ctx),
-      ),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+        onBriefing: (_task, text) => briefings.push(text),
+      }),
     })
 
-    const api = contexts.find((c) => c.driver === 'api')!
-    expect(api.externalServices).toEqual([
-      {
-        name: 'open-meteo',
-        baseUrlEnv: 'GEOCODING_BASE_URL',
-        baseUrlEnvs: ['GEOCODING_BASE_URL', 'FORECAST_BASE_URL'],
-      },
-    ])
-    const prompt = buildAuthorUserPrompt(api)
-    expect(prompt).toContain(
+    expect(briefings[0]).toContain(
       'open-meteo (base URL envs: GEOCODING_BASE_URL, FORECAST_BASE_URL — stubable via setup.http, or provide it)',
     )
-    expect(prompt).toContain('EVERY one of that service')
+    expect(briefings[0]).toContain('EVERY one of that service')
   })
 })
 

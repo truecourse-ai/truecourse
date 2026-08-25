@@ -2,7 +2,7 @@
  * EXTERNAL-SERVICE DETECTION — which named third parties the repo depends on.
  *
  * A PURE function over `FileAnalysis[]` (no I/O, no parse pass of its own), so a
- * caller that already analyzed the tree — guard generate's journey mapping does —
+ * caller that already analyzed the tree — guard generate's interface mapping does —
  * pays nothing extra for it.
  *
  * It reads the SAME registry `layer-detector.ts` reads (`externalLayerPatterns`),

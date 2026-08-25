@@ -2,15 +2,14 @@
  * `truecourse guard flows` — the flow inventory, its drill-down, and the one
  * ruling a user makes about a flow.
  *
- *   guard flows                     list every synthesized flow with its per-surface state
- *   guard flows --show <id>         one flow: goal, milestones, binds, surfaces, journeys, gaps
- *   guard flows --show <id> --story each committed test of the flow, in plain words
- *   guard flows dismiss <id>        rule the flow out of testing (`--note <text>`)
- *   guard flows undismiss <id>      put it back
+ *   guard flows                  list every synthesized flow with its per-surface state
+ *   guard flows --show <id>      one flow: goal, milestones, binds, surfaces, interfaces, gaps
+ *   guard flows dismiss <id>     rule the flow out of testing (`--note <text>`)
+ *   guard flows undismiss <id>   put it back
  *
  * The reads are deterministic and LLM-free: they join the committed flow corpus
  * (`scenarios/flows.json`), the flow-keyed manifest (`scenarios/manifest.json`),
- * the committed scenarios (for their journey paths), and the last run
+ * the committed scenarios (for their interface paths), and the last run
  * (`guard/LATEST.json`). Any of them may be missing — each absence renders as an
  * empty state pointing at the command that produces it, never as an error.
  *
@@ -24,14 +23,23 @@ import * as p from "@clack/prompts";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { loadScenarios } from "@truecourse/guard-runner";
 import { readManifest, readGuardLatest } from "@truecourse/core/lib/guard-store";
-import { dismissGuardFlow, undismissGuardFlow, readGuardDecisions } from "@truecourse/core/commands/guard-read";
-import { describeGuardScenario } from "@truecourse/shared";
+import {
+  dismissGuardFlow,
+  undismissGuardFlow,
+  listGuardFlows,
+  readGuardDecisions,
+} from "@truecourse/core/commands/guard-read";
+import {
+  GUARD_COVERAGE_PLAIN_ORDER,
+  GUARD_COVERAGE_STATUS_WORD,
+  guardFlowPlainStatus,
+} from "@truecourse/shared";
 import type {
+  GuardCoveragePlainStatus,
   GuardFlow,
   GuardManifestFlow,
   GuardManifestGap,
   GuardScenarioResult,
-  GuardScenarioStory,
 } from "@truecourse/shared";
 import { gapChipLabel, gapLine, milestoneChain } from "../lib/guard-flow-format.js";
 
@@ -39,12 +47,6 @@ export interface RunGuardFlowsOptions {
   cwd?: string;
   /** Show ONE flow's detail instead of the list (`--show <id>`). */
   show?: string;
-  /**
-   * With `--show`, print each committed test of the flow in PLAIN WORDS (`--story`)
-   * — the promise it defends, the world it runs in, and every step with what it
-   * asserts. Off by default: the detail is a compact read, and a story is pages.
-   */
-  story?: boolean;
 }
 
 /** Per-scenario run marks — the same glyphs `guard run` and `guard status` use. */
@@ -54,16 +56,20 @@ const MARK: Record<GuardScenarioResult["outcome"], string> = {
   error: "⚠",
   stale: "~",
   orphaned: "○",
+  blocked: "⊘",
 };
-
-/** A flow's coverage state — the list glyph and the header tally both key on it. */
-type FlowState = "guarded" | "gap" | "ungenerated";
 
 interface FlowView {
   flow: GuardFlow;
   /** The manifest entry, absent when the flow was synthesized but never generated. */
   entry: GuardManifestFlow | undefined;
-  state: FlowState;
+  /**
+   * The flow's coverage status in the FIVE words — Succeeded / Failed / Blocked /
+   * Not testable / Never run. Derived by `guardFlowPlainStatus` over the same
+   * `listGuardFlows` join the dashboard's Flows tab renders, so the terminal and
+   * the browser can never word a flow differently.
+   */
+  status: GuardCoveragePlainStatus;
   /** Worst run outcome across the flow's scenarios; null when nothing ran. */
   runOutcome: GuardScenarioResult["outcome"] | null;
   /** One chip per surface, scenarios first then gaps: `api ✓`, `web awaiting driver`. */
@@ -82,25 +88,25 @@ function worstRunOutcome(results: GuardScenarioResult[]): GuardScenarioResult["o
   return null;
 }
 
-function flowState(entry: GuardManifestFlow | undefined): FlowState {
-  if (!entry) return "ungenerated";
-  if (entry.scenarios.length === 0) return "gap";
-  return entry.gaps.length === 0 ? "guarded" : "gap";
-}
-
-/** The row glyph: a run outcome outranks coverage, since a red flow is the story. */
+/** The row glyph: the run outcome when one exists (a red flow is the story), else
+ *  the shape of the coverage status. */
 function flowGlyph(view: FlowView): string {
   if (view.runOutcome && view.runOutcome !== "pass") return MARK[view.runOutcome];
-  if (view.state === "ungenerated") return MARK.orphaned;
-  return view.state === "guarded" ? "✓" : "✗";
+  return STATUS_GLYPH[view.status];
 }
 
-/** Worst-first ordering: run drift, then coverage gaps, then healthy flows. */
+const STATUS_GLYPH: Record<GuardCoveragePlainStatus, string> = {
+  failed: MARK.fail,
+  blocked: "✗",
+  "never-run": MARK.stale,
+  succeeded: "✓",
+  "not-testable": MARK.orphaned,
+};
+
+/** Worst-first ordering — the shared severity order, so the terminal list and the
+ *  dashboard list rank flows identically. */
 function severityRank(view: FlowView): number {
-  if (view.runOutcome && view.runOutcome !== "pass") return 0;
-  if (view.state === "ungenerated") return 1;
-  if (view.state === "gap") return 2;
-  return 3;
+  return GUARD_COVERAGE_PLAIN_ORDER.indexOf(view.status);
 }
 
 /** Join the flow corpus with the manifest and the last run — the list's data model. */
@@ -109,6 +115,7 @@ function buildViews(
   entries: Map<string, GuardManifestFlow>,
   resultsByScenario: Map<string, GuardScenarioResult>,
   dismissals: Map<string, { note?: string }>,
+  statusByFlow: Map<string, GuardCoveragePlainStatus>,
 ): FlowView[] {
   return flows.map((flow) => {
     const entry = entries.get(flow.id);
@@ -118,15 +125,22 @@ function buildViews(
     const chips = [
       ...(entry?.scenarios ?? []).map((s) => {
         const result = resultsByScenario.get(s.id);
-        // No run yet ⇒ the scenario is committed, i.e. it passed birth: `api ✓`.
-        return `${s.surface} ${result ? MARK[result.outcome] : "✓"}`;
+        // A scenario spanning surfaces wears them all — `cli+web ✓` — because that
+        // is what its steps drive.
+        const drivers = s.drivers.join("+");
+        if (result) return `${drivers} ${MARK[result.outcome]}`;
+        // No run: the chip speaks for the manifest's inventory status. A test that
+        // never executed says so — `✓` there would be a pass nothing ever earned.
+        return `${drivers} ${s.status === "never-run" ? "never run" : "✓"}`;
       }),
       ...(entry?.gaps ?? []).map((g) => `${g.surface} ${gapChipLabel(g)}`),
     ];
     return {
       flow,
       entry,
-      state: flowState(entry),
+      // A flow the join never saw has no coverage record at all, which is exactly
+      // what `blocked` means: the next generate is what clears it.
+      status: statusByFlow.get(flow.id) ?? "blocked",
       runOutcome: worstRunOutcome(results),
       chips,
       dismissal: dismissals.get(flow.id),
@@ -155,7 +169,12 @@ export async function runGuardFlows(opts: RunGuardFlowsOptions = {}): Promise<vo
     return;
   }
 
-  const views = buildViews(flowsFile.flows, entries, resultsByScenario, dismissals);
+  // The SAME join the dashboard's Flows tab renders — read here only for each
+  // flow's coverage status, so one derivation words both surfaces.
+  const statusByFlow = new Map(
+    (await listGuardFlows(repoRoot)).flows.map((f) => [f.flowId, guardFlowPlainStatus(f)]),
+  );
+  const views = buildViews(flowsFile.flows, entries, resultsByScenario, dismissals, statusByFlow);
 
   if (opts.show) {
     const view = views.find((v) => v.flow.id === opts.show);
@@ -167,7 +186,7 @@ export async function runGuardFlows(opts: RunGuardFlowsOptions = {}): Promise<vo
       process.exit(1);
       return;
     }
-    printFlowDetail(view, repoRoot, resultsByScenario, { story: !!opts.story });
+    printFlowDetail(view, repoRoot, resultsByScenario);
     return;
   }
 
@@ -269,11 +288,15 @@ export async function runGuardFlowUndismiss(
 
 /** The inventory: a header tally, then one padded row per flow, worst first. */
 function printFlowList(views: FlowView[], noFlowClaims: number): void {
-  const guarded = views.filter((v) => v.state === "guarded").length;
-  const gap = views.filter((v) => v.state === "gap").length;
-  const ungenerated = views.filter((v) => v.state === "ungenerated").length;
-  const header = [`FLOWS (${views.length})`, `${guarded} guarded`, `${gap} gap`];
-  if (ungenerated > 0) header.push(`${ungenerated} not generated`);
+  // The header tally is the coverage vocabulary and nothing else — one count per
+  // non-zero status, worst first, in the same words the dashboard's chips wear.
+  const header = [
+    `FLOWS (${views.length})`,
+    ...GUARD_COVERAGE_PLAIN_ORDER.flatMap((status) => {
+      const n = views.filter((v) => v.status === status).length;
+      return n > 0 ? [`${n} ${GUARD_COVERAGE_STATUS_WORD[status].toLowerCase()}`] : [];
+    }),
+  ];
   p.log.step(header.join(" · "));
 
   const rows = [...views].sort((a, b) => severityRank(a) - severityRank(b) || a.flow.id.localeCompare(b.flow.id));
@@ -281,7 +304,8 @@ function printFlowList(views: FlowView[], noFlowClaims: number): void {
   const chipWidth = Math.min(34, Math.max(...rows.map((v) => v.chips.join(" · ").length)));
 
   for (const view of rows) {
-    const chips = view.chips.length > 0 ? view.chips.join(" · ") : "not generated";
+    const chips =
+      view.chips.length > 0 ? view.chips.join(" · ") : GUARD_COVERAGE_STATUS_WORD[view.status].toLowerCase();
     const milestones = view.flow.milestones.length;
     const sections = view.flow.bindings.length;
     const counts = `${milestones} milestone${milestones === 1 ? "" : "s"} · ${sections} section${sections === 1 ? "" : "s"}`;
@@ -302,12 +326,11 @@ function printFlowList(views: FlowView[], noFlowClaims: number): void {
   p.outro("Inspect one with `truecourse guard flows --show <id>`.");
 }
 
-/** The drill-down: goal, milestones, binds, per-surface scenarios, journeys, gaps. */
+/** The drill-down: goal, milestones, binds, per-surface scenarios, interfaces, gaps. */
 function printFlowDetail(
   view: FlowView,
   repoRoot: string,
   resultsByScenario: Map<string, GuardScenarioResult>,
-  opts: { story: boolean } = { story: false },
 ): void {
   const { flow, entry } = view;
   p.log.step(`${flow.title} — ${flow.goal}`);
@@ -325,23 +348,12 @@ function printFlowDetail(
   const surfaceText = surfaces.length > 0 ? surfaces.join(" · ") : "(none) — run `truecourse guard generate`";
   p.log.message(`  surfaces    ${surfaceText}`);
 
-  const journeys = journeyIds(repoRoot, entry);
-  if (journeys.length > 0) p.log.message(`  journeys    ${journeys.join(" · ")}`);
+  const interfaces = interfaceIds(repoRoot, entry);
+  if (interfaces.length > 0) p.log.message(`  interfaces  ${interfaces.join(" · ")}`);
 
   const gaps = entry?.gaps ?? [];
   for (const [i, gap] of gaps.entries()) {
     p.log.message(`  ${i === 0 ? "gaps       " : "           "} ${gapLine(gap)}`);
-  }
-
-  // `--story`: the flow's committed tests told in plain words, from the SAME
-  // shared renderer the dashboard's Story mode reads, so the terminal and the
-  // browser can never describe one file differently.
-  if (opts.story) {
-    const stories = flowStories(repoRoot, entry);
-    if (stories.length === 0) {
-      p.log.message("  story       (no committed test yet)");
-    }
-    for (const story of stories) printScenarioStory(story);
   }
 
   if (view.dismissal) {
@@ -351,7 +363,7 @@ function printFlowDetail(
   }
 
   p.outro(
-    view.state === "guarded"
+    view.status === "succeeded" || view.status === "never-run"
       ? "Run it with `truecourse guard run`."
       : "Re-run `truecourse guard generate` after closing the gaps.",
   );
@@ -368,7 +380,7 @@ function bindLines(flow: GuardFlow): string[] {
   return [...byDoc.entries()].map(([doc, anchors]) => `${doc}  ${anchors.map((a) => `§${a}`).join(" · ")}`);
 }
 
-/** `api → task-lifecycle.api.1 (pass ✓)` — the run state when there is one, else birth. */
+/** `api → task-lifecycle (pass ✓)` — the run state when there is one, else birth. */
 function surfaceLines(
   entry: GuardManifestFlow | undefined,
   resultsByScenario: Map<string, GuardScenarioResult>,
@@ -377,72 +389,25 @@ function surfaceLines(
     const result = resultsByScenario.get(s.id);
     // A committed scenario passed birth by construction; a run outcome supersedes it.
     const state = result ? `${result.outcome} ${MARK[result.outcome]}` : "birth ✓";
-    const drift = result?.journeyDrifted ? " · journey drifted" : "";
-    return `${s.surface} → ${s.id} (${state}${drift})`;
+    const drift = result?.interfaceDrifted ? " · interface drifted" : "";
+    return `${s.drivers.join("+")} → ${s.id} (${state}${drift})`;
   });
   for (const gap of entry?.gaps ?? []) lines.push(`${gap.surface} → ${gapChipLabel(gap)}`);
   return lines;
 }
 
-/** Each committed test of the flow, as its plain-words story (unparseable files
- *  are skipped — the loader reports them; a story is never half-rendered). */
-function flowStories(repoRoot: string, entry: GuardManifestFlow | undefined): GuardScenarioStory[] {
-  if (!entry || entry.scenarios.length === 0) return [];
-  const wanted = new Set(entry.scenarios.map((s) => s.id));
-  const stories: GuardScenarioStory[] = [];
-  for (const scenario of loadScenarios(repoRoot).scenarios) {
-    if (!wanted.has(scenario.id)) continue;
-    const story = describeGuardScenario(scenario);
-    if (story) stories.push(story);
-  }
-  return stories;
-}
-
 /**
- * ONE test in plain words: the promise, the world it runs in, then every step —
- * what it does, what it remembers, and what must be true. The same order (and the
- * same sentences) the dashboard's Story mode renders.
- */
-function printScenarioStory(story: GuardScenarioStory): void {
-  p.log.message("");
-  p.log.step(`${story.id}  (${story.driver})`);
-  p.log.message(`  promise     ${story.promise ?? story.title}`);
-  if (story.promise && story.promise !== story.title) p.log.message(`  title       ${story.title}`);
-  if (story.server) p.log.message(`  server      ${story.server}`);
-  for (const [i, line] of story.world.entries()) {
-    p.log.message(`  ${i === 0 ? "world      " : "           "} ${line}`);
-  }
-  for (const step of story.steps) {
-    const repeat = step.repeat != null ? ` — ${step.repeat} times, every time` : "";
-    p.log.message(`  ${String(step.n).padStart(2)}. ${step.does}${repeat}`);
-    if (step.env && step.env.length > 0) p.log.message(`      with ${step.env.join(" ")}`);
-    if (step.stdin !== undefined) p.log.message(`      piping "${step.stdin}" to its input`);
-    if (step.uses && step.uses.length > 0) {
-      p.log.message(`      using ${step.uses.map((v) => `\`${v}\``).join(", ")} remembered earlier`);
-    }
-    for (const capture of step.captures ?? []) p.log.message(`      ${capture}`);
-    if (step.expectations.length === 0) {
-      p.log.message("      asserts nothing — this step only prepares the world");
-    }
-    for (const expectation of step.expectations) p.log.message(`      must be true: ${expectation}`);
-  }
-  for (const [i, n] of story.normalizers.entries()) {
-    p.log.message(`  ${i === 0 ? "before     " : "           "} ${n}`);
-  }
-}
-
-/**
- * The realization plan behind the flow's scenarios — the journey ids each one is
- * grounded on, read from the committed YAMLs (journeys are derived, never
+ * The realization plan behind the flow's scenarios — the interface ids each one is
+ * grounded on, read from the committed YAMLs (interfaces are derived, never
  * committed; only the ids/fingerprints ride in the scenario).
  */
-function journeyIds(repoRoot: string, entry: GuardManifestFlow | undefined): string[] {
+function interfaceIds(repoRoot: string, entry: GuardManifestFlow | undefined): string[] {
   if (!entry || entry.scenarios.length === 0) return [];
   const wanted = new Set(entry.scenarios.map((s) => s.id));
   const ids: string[] = [];
   for (const scenario of loadScenarios(repoRoot).scenarios) {
     if (!wanted.has(scenario.id)) continue;
-    for (const id of scenario.journey?.path ?? []) if (!ids.includes(id)) ids.push(id);
+    for (const id of scenario.interface?.path ?? []) if (!ids.includes(id)) ids.push(id);
   }
   return ids;
 }

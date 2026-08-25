@@ -67,6 +67,79 @@ describe('deriveExternalsSkeleton', () => {
     })
   })
 
+  // The third rule (cal.diy 2026-08-20/21, three runs in a row): detection's
+  // candidates include credential/id variables, the app's own callbacks, and
+  // variables the recipe itself pins — none an origin the runner could proxy.
+  describe('the plausible-origin rule', () => {
+    it('never declares a credential or identifier variable as a baseUrlEnv', () => {
+      // The finding-58 mint-time class, cal.diy verbatim.
+      const skeleton = deriveExternalsSkeleton(apiRecipe(), [
+        detected({ service: 'daily', baseUrlEnv: 'DAILY_API_KEY' }),
+        detected({ service: 'close', baseUrlEnv: 'CLOSECOM_CLIENT_ID' }),
+        detected({ service: 'cloudflare', baseUrlEnv: 'CLOUDFLARE_ZONE_ID' }),
+        detected({ service: 'avatarapi', baseUrlEnv: 'AVATARAPI_USERNAME' }),
+        detected({ service: 'vercel', baseUrlEnv: 'PROJECT_ID_VERCEL' }),
+        detected({ service: 'retellai', baseUrlEnv: 'RETELL_AI_KEY' }),
+      ])
+      expect(Object.keys(skeleton.declare)).toEqual([])
+      expect(skeleton.undeclarable).toEqual(['avatarapi', 'close', 'cloudflare', 'daily', 'retellai', 'vercel'])
+    })
+
+    it("never declares the app's own callback addresses (webhook/redirect vars)", () => {
+      const skeleton = deriveExternalsSkeleton(apiRecipe(), [
+        detected({ service: 'google', baseUrlEnv: 'GOOGLE_WEBHOOK_URL' }),
+        detected({ service: 'test-oauth-client', baseUrlEnv: 'OAUTH2_REDIRECT_URI' }),
+      ])
+      expect(Object.keys(skeleton.declare)).toEqual([])
+    })
+
+    it('never declares a variable the recipe itself pins — that is the app, not a third party', () => {
+      // cal.diy verbatim: `dub` minted on the app's own public address.
+      const recipe = {
+        build: 'true',
+        env: { NEXT_PUBLIC_WEBAPP_URL: 'http://localhost:3000' },
+        api: { serve: ['node', 'dist/index.js'] },
+      } as unknown as Recipe
+      const skeleton = deriveExternalsSkeleton(recipe, [
+        detected({ service: 'dub', baseUrlEnv: 'NEXT_PUBLIC_WEBAPP_URL' }),
+      ])
+      expect(Object.keys(skeleton.declare)).toEqual([])
+      expect(skeleton.undeclarable).toEqual(['dub'])
+    })
+
+    it('keeps origin-shaped variables, and un-shaped ones detection saw a default URL for', () => {
+      const skeleton = deriveExternalsSkeleton(apiRecipe(), [
+        detected({ service: 'tandem', baseUrlEnv: 'TANDEM_BASE_URL' }),
+        detected({ service: 'azure', baseUrlEnv: 'NEXT_PRIVATE_UPLOAD_AZURE_ENDPOINT' }),
+        detected({
+          service: 'hit-pay',
+          source: 'http',
+          baseUrlEnvs: [
+            { envVar: 'NEXT_PUBLIC_API_HITPAY_PRODUCTION', defaultUrl: 'https://api.hit-pay.com/v1', confidence: 'literal-fallback' },
+          ],
+        }),
+        // Un-shaped AND no default URL: nothing honest to point at.
+        detected({ service: 'meticulous', baseUrlEnv: 'VERCEL_ENV' }),
+      ])
+      expect(Object.keys(skeleton.declare).sort()).toEqual(['azure', 'hit-pay', 'tandem'])
+      expect(skeleton.undeclarable).toContain('meticulous')
+    })
+
+    it('falls through to the next candidate when the best-confidence one is credential-shaped', () => {
+      const skeleton = deriveExternalsSkeleton(apiRecipe(), [
+        detected({
+          service: 'acme',
+          source: 'http',
+          baseUrlEnvs: [
+            { envVar: 'ACME_API_KEY', confidence: 'literal-fallback' },
+            { envVar: 'ACME_BASE_URL', defaultUrl: 'https://api.acme.com', confidence: 'literal-fallback' },
+          ],
+        }),
+      ])
+      expect(skeleton.declare.acme.baseUrlEnv).toBe('ACME_BASE_URL')
+    })
+  })
+
   // `baseUrlEnv` is REQUIRED by the schema and is injected into the app's env at
   // every run — so a guess would silently point the app somewhere it never reads.
   it('reports a service with no detected base-URL variable as UNDECLARABLE', () => {

@@ -13,18 +13,36 @@ import {
   formatCostUsd,
 } from '../../packages/core/src/services/llm/token-estimator.js';
 import { estimateScanTokens } from '../../packages/core/src/services/llm/spec-estimate.js';
+import { curateInProcess } from '../../packages/core/src/commands/spec-in-process.js';
 import { priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
-import {
-  discoverDocs,
-  filterByRelevance,
-  planRelevanceWork,
-  tagDocs,
-  curate,
-  sourceDocRef,
-  OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  OVERLAP_WINDOW_CHARS,
-} from '../../packages/spec-consolidator/src/index.js';
+import { discoverDocs, sourceDocRef, writeDecisions } from '../../packages/spec-consolidator/src/index.js';
+import type { DecisionsFile, RepoIdentity, ScopeVerdict } from '../../packages/spec-consolidator/src/index.js';
 import { seedSource } from '../spec-consolidator/sources-fixture.js';
+import { resetKvCacheStore } from '@truecourse/llm';
+import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run.js';
+import {
+  CURATE_DOC_BUDGET,
+  CURATE_DOC_SESSION_KIND,
+} from '../../packages/core/src/services/spec-scan/curate-doc.js';
+import {
+  SETTLE_AREAS_BUDGET,
+  SETTLE_AREAS_SESSION_KIND,
+} from '../../packages/core/src/services/spec-scan/settle-areas.js';
+import {
+  OVERLAP_SESSION_BUDGET,
+  OVERLAP_SESSION_KIND,
+} from '../../packages/core/src/services/spec-scan/overlap.js';
+import { SPEC_SCAN_ORCHESTRATE_SESSION_KIND } from '../../packages/core/src/services/spec-scan/orchestrate.js';
+import { writeGlobalConfig } from '../../packages/core/src/config/global-config.js';
+import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index.js';
+import type {
+  DriverResult,
+  SessionDriver,
+  SessionEvent,
+  SessionIndexEntry,
+  SessionPersistence,
+  SessionRunInput,
+} from '../../packages/agent-loop/src/index.js';
 
 // A fixed price table so cost assertions are deterministic (no network).
 const PRICES: PriceTable = {
@@ -169,393 +187,454 @@ describe('priceForModel / formatCostUsd', () => {
   });
 });
 
-describe('estimateScanTokens (fixture)', () => {
+
+// ---------------------------------------------------------------------------
+// The SCAN estimate models SESSIONS (plan 02 step 7)
+//
+// The headline contract is AGREEMENT: the estimate probes the run's own cache
+// names with the run's own exported key builders, so a warmed repo estimates to
+// nothing (and `curateInProcess` skips the confirm prompt) while any input the
+// run would re-key — a doc edit, a standing instruction, a different identity —
+// shows up here as work. Everything below drives the REAL run through a
+// scripted session driver to warm those caches; nothing stubs the estimate.
+// ---------------------------------------------------------------------------
+
+/** A driver that answers every scan kind trivially and counts the sessions. */
+function warmDriver(): { driver: SessionDriver; kinds: string[] } {
+  const kinds: string[] = [];
+  const driver: SessionDriver = {
+    capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
+    attribution: { provider: 'test', model: 'scripted' },
+    runSession(input) {
+      kinds.push(input.def.kind);
+      for (const content of input.initialMessages) input.onEvent({ type: 'user-message', content });
+      const done = (async (): Promise<DriverResult> => {
+        await new Promise((r) => setTimeout(r, 0));
+        switch (input.def.kind) {
+          case SPEC_SCAN_ORCHESTRATE_SESSION_KIND:
+            return { kind: 'outcome', value: { scopeVerdicts: [], instructions: [] } };
+          case CURATE_DOC_SESSION_KIND:
+            return {
+              kind: 'outcome',
+              value: { keep: true, reason: 'spec', areas: [{ product: 'core', concern: 'misc' }] },
+            };
+          case SETTLE_AREAS_SESSION_KIND:
+            return {
+              kind: 'outcome',
+              value: { concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] },
+            };
+          case OVERLAP_SESSION_KIND:
+            input.onEvent({
+              type: 'tool-result',
+              toolName: 'check_findings',
+              content: 'valid',
+              isError: false,
+            });
+            return { kind: 'outcome', value: { overlaps: [], notReached: [] } };
+          default:
+            throw new Error(`unscripted kind ${input.def.kind}`);
+        }
+      })();
+      return { done, status: () => 'running' as const, steer: () => {}, interrupt: async () => {} };
+    },
+  };
+  return { driver, kinds };
+}
+
+function memoryPersistence(): SessionPersistence {
+  const events = new Map<string, SessionEvent[]>();
+  const index = new Map<string, SessionIndexEntry>();
+  return {
+    appendEvent(sessionId, event) {
+      const list = events.get(sessionId) ?? [];
+      list.push(event);
+      events.set(sessionId, list);
+    },
+    updateIndex(entry) {
+      index.set(entry.sessionId, entry);
+    },
+    readEvents(sessionId) {
+      return events.get(sessionId) ?? [];
+    },
+  };
+}
+
+const verdictRow = (p: string, v: 'keep' | 'exclude' = 'keep'): ScopeVerdict => ({
+  path: p,
+  verdict: v,
+  reason: 'fixture',
+  decidedAt: '2026-01-01T00:00:00Z',
+  resolvedBy: 'user',
+});
+
+const decisionsFile = (over: Partial<DecisionsFile> = {}): DecisionsFile => ({
+  version: 2,
+  manualIncludes: [],
+  manualExcludes: [],
+  manualAreas: [],
+  conflictResolutions: [],
+  scopeVerdicts: [],
+  instructions: [],
+  ...over,
+});
+
+describe('estimateScanTokens — sessions, not calls', () => {
   let repo: string;
+  const stage = (est: Awaited<ReturnType<typeof estimateScanTokens>>, kind: string) =>
+    (est.stages ?? []).find((s) => s.stage === kind);
+  /** A stage's LOW bound — one session per cache-missing item. */
+  const items = (est: Awaited<ReturnType<typeof estimateScanTokens>>, kind: string): number | undefined =>
+    stage(est, kind)?.callsRange?.low;
+
+  /** Run the real scan on the scripted driver, warming every session cache. */
+  async function warmScan(
+    opts: { identity?: RepoIdentity | null; disableOverlapDetection?: boolean } = {},
+  ): Promise<string[]> {
+    const { driver, kinds } = warmDriver();
+    await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => driver,
+      persistence: memoryPersistence(),
+      skipGit: true,
+      ...(opts.identity !== undefined ? { repoIdentity: opts.identity } : {}),
+      ...(opts.disableOverlapDetection ? { disableOverlapDetection: true } : {}),
+    });
+    return kinds;
+  }
+
+  function writeDocs(files: Record<string, string>): void {
+    for (const [rel, content] of Object.entries(files)) {
+      const abs = path.join(repo, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content);
+    }
+  }
+
+  const AUTH = '# Auth\n\n## Tokens\n\nAccess tokens expire after 15 minutes.\n';
+  const SESSION_DOC = '# Session\n\n## Tokens\n\nAccess tokens expire after 60 minutes.\n';
+
   beforeEach(() => {
+    resetKvCacheStore();
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-'));
   });
   afterEach(() => {
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
-  it('scan estimate: per-stage breakdown over the discovered docs', async () => {
-    const docs = path.join(repo, 'docs');
-    fs.mkdirSync(docs, { recursive: true });
-    fs.writeFileSync(path.join(docs, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
-    fs.writeFileSync(path.join(docs, 'b.md'), '# B\n' + 'more spec. '.repeat(200));
+  // -- the headline: estimate and run agree on the keys ----------------------
 
-    const est = await estimateScanTokens(repo);
-    expect(est.totalEstimatedTokens).toBeGreaterThan(0);
-    const stageNames = est.stages!.map((s) => s.stage);
-    expect(stageNames).toContain('relevance');
-    expect(stageNames).toContain('areaTag');
-    expect(est.subjectLabel).toMatch(/docs?$/);
-    // cold cache: relevance runs once per doc that survives the prefilter.
-    expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(2);
+  it('a cold repo estimates one curate-doc session per doc; a warmed one estimates NOTHING', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+
+    const cold = await estimateScanTokens(repo);
+    expect(items(cold, CURATE_DOC_SESSION_KIND)).toBe(2);
+    expect((cold.stages ?? []).length).toBeGreaterThan(0);
+
+    await warmScan();
+
+    const warm = await estimateScanTokens(repo);
+    // The exact gate `curateInProcess` uses to skip the confirm prompt.
+    expect((warm.stages?.length ?? 0) === 0).toBe(true);
+    expect(warm.totalEstimatedTokens).toBe(0);
+    expect(warm.subjectLabel).toBe('all 2 docs cached');
   });
 
-  it('scan estimate: overlap calls scale by the per-pair window factor', async () => {
-    // Small docs — a single OVERLAP_WINDOW_CHARS window each → per-pair factor 1.
-    const smallDir = path.join(repo, 'docs');
-    fs.mkdirSync(smallDir, { recursive: true });
-    fs.writeFileSync(path.join(smallDir, 'a.md'), '# Endpoints\n' + 'Each endpoint validates its request body against the schema. '.repeat(40));
-    fs.writeFileSync(path.join(smallDir, 'b.md'), '# Auth\n' + 'Every session token is signed and expires after one hour. '.repeat(40));
-    const smallEst = await estimateScanTokens(repo);
-    const smallOverlap = smallEst.stages!.find((s) => s.stage === 'overlap')!;
-    expect(smallOverlap.calls).toBeGreaterThan(0);
+  it('an UNCOVERED universe keeps exactly one stage — the scope orchestrator — even with warm doc caches', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+    await warmScan();
 
-    // Large docs — several OVERLAP_WINDOW_CHARS windows each → factor > 1.
-    const bigRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-big-'));
+    // Drop the coverage: the universe is unchanged, but no verdict covers it.
+    writeDecisions(repo, decisionsFile());
+    const est = await estimateScanTokens(repo);
+    expect((est.stages ?? []).map((s) => s.stage)).toEqual([SPEC_SCAN_ORCHESTRATE_SESSION_KIND]);
+    expect(items(est, SPEC_SCAN_ORCHESTRATE_SESSION_KIND)).toBe(1);
+  });
+
+  it('one added instruction re-keys every doc — the estimate says so before the run pays', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+    await warmScan();
+    expect((await estimateScanTokens(repo)).stages ?? []).toEqual([]);
+
+    writeDecisions(
+      repo,
+      decisionsFile({
+        scopeVerdicts: [verdictRow('.'), verdictRow('docs')],
+        instructions: ['docs under handbook/ are process, not product'],
+      }),
+    );
+    const est = await estimateScanTokens(repo);
+    expect(items(est, CURATE_DOC_SESSION_KIND)).toBe(2);
+    expect(est.subjectLabel).toBe('2 docs');
+  });
+
+  // -- the session math ------------------------------------------------------
+
+  it('turns items into calls with the budget ceiling and the per-kind expected turns', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+
+    const est = await estimateScanTokens(repo);
+    const K = 2;
+    const curate = stage(est, CURATE_DOC_SESSION_KIND)!;
+    expect(curate.callsRange).toEqual({
+      low: K,
+      high: K * ((CURATE_DOC_BUDGET.maxResumes + 1) * CURATE_DOC_BUDGET.turns + WRAP_UP_TURNS),
+    });
+    expect(curate.expectedCalls).toBe(K * 2); // EXPECTED_TURNS['spec-scan.curate-doc']
+
+    // With docs unknown, the settlement is a 0..1 range, expected 1.
+    const settle = stage(est, SETTLE_AREAS_SESSION_KIND)!;
+    expect(settle.callsRange).toEqual({
+      low: 0,
+      high: (SETTLE_AREAS_BUDGET.maxResumes + 1) * SETTLE_AREAS_BUDGET.turns + WRAP_UP_TURNS,
+    });
+    expect(settle.expectedCalls).toBe(4); // EXPECTED_TURNS['spec-scan.settle-areas']
+  });
+
+  it('prices the overlap kind at items × the budget ceiling', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+    const est = await estimateScanTokens(repo);
+    const overlap = stage(est, OVERLAP_SESSION_KIND)!;
+    const ceiling = (OVERLAP_SESSION_BUDGET.maxResumes + 1) * OVERLAP_SESSION_BUDGET.turns + WRAP_UP_TURNS;
+    const areas = overlap.callsRange!.high / ceiling;
+    expect(Number.isInteger(areas)).toBe(true);
+    expect(areas).toBeGreaterThan(0);
+    // The point estimate is the same item count × the kind's EXPECTED turns (8).
+    expect(overlap.expectedCalls).toBe(overlap.calls);
+    expect(overlap.calls % 8).toBe(0);
+  });
+
+  // -- one model (§3.4) ------------------------------------------------------
+
+  it('runs every scan stage on ONE model — the claude-code tier by default', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    const est = await estimateScanTokens(repo);
+    const models = new Set((est.stages ?? []).map((s) => s.model));
+    expect(models.size).toBe(1);
+    expect([...models]).toEqual(['opus']);
+  });
+
+  it('follows the run transport: an api-mode estimate quotes the configured model', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-estimate-home-'));
+    const saved = process.env.TRUECOURSE_HOME;
+    process.env.TRUECOURSE_HOME = home;
     try {
-      const bigDir = path.join(bigRepo, 'docs');
-      fs.mkdirSync(bigDir, { recursive: true });
-      fs.writeFileSync(path.join(bigDir, 'a.md'), '# Endpoint Reference\n' + 'Each endpoint validates its request body against the schema. '.repeat(1300));
-      fs.writeFileSync(path.join(bigDir, 'b.md'), '# Auth Reference\n' + 'Every session token is signed and expires after one hour. '.repeat(1300));
-
-      const discovered = discoverDocs(bigRepo);
-      const avgDocChars = Math.round(discovered.reduce((n, d) => n + d.size, 0) / discovered.length);
-      // The FULL window matrix — the estimate prices complete coverage, uncapped.
-      const factor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
-      expect(factor).toBeGreaterThan(1); // the fixture must span multiple windows
-
-      const bigEst = await estimateScanTokens(bigRepo);
-      const bigOverlap = bigEst.stages!.find((s) => s.stage === 'overlap')!;
-
-      // Both repos hold the same 2-doc pair count; only the large run multiplies each
-      // pair by the window factor.
-      expect(bigOverlap.calls).toBe(smallOverlap.calls * factor);
-      // Each call's body is clamped to one OVERLAP_WINDOW_CHARS window, so per-call
-      // tokens stay well below what the full multi-window doc size would imply.
-      const perCallTokens = bigOverlap.estimatedTokens / bigOverlap.calls;
-      const unclampedInputTokens = tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, avgDocChars * 2);
-      expect(perCallTokens).toBeLessThan(unclampedInputTokens);
+      writeGlobalConfig({
+        llm: { transport: 'api', api: { provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-test' } },
+      });
+      writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+      const est = await estimateScanTokens(repo, undefined, { mode: 'api' });
+      const models = new Set((est.stages ?? []).map((s) => s.model));
+      expect([...models]).toEqual(['gpt-5.5']);
+      // …and a run forced onto `cli` still quotes the pinned session tier.
+      const cli = await estimateScanTokens(repo, undefined, { mode: 'claude-code' });
+      expect([...new Set((cli.stages ?? []).map((s) => s.model))]).toEqual(['opus']);
     } finally {
-      fs.rmSync(bigRepo, { recursive: true, force: true });
+      if (saved === undefined) delete process.env.TRUECOURSE_HOME;
+      else process.env.TRUECOURSE_HOME = saved;
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it('scan estimate: the verify stage scales with the flagged-pair heuristic', async () => {
-    const dir = path.join(repo, 'docs');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'a.md'), '# Endpoints\n' + 'Each endpoint validates its request body. '.repeat(40));
-    fs.writeFileSync(path.join(dir, 'b.md'), '# Auth\n' + 'Every session token is signed. '.repeat(40));
+  // -- the honesty of the bounds --------------------------------------------
+
+  it('degrades the overlap bound to a RANGE while any doc verdict is unknown', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+
+    const cold = await estimateScanTokens(repo);
+    expect(stage(cold, OVERLAP_SESSION_KIND)!.bound).toMatch(
+      /^~\d+ of ~\d+ comparisons? changed \(changed docs may reshape clusters\)$/,
+    );
+
+    // One changed doc is enough to re-open the question: its verdict can move a
+    // label, and a moved label reshapes the areas.
+    await warmScan();
+    writeDocs({ 'docs/session.md': `${SESSION_DOC}\nTokens are opaque.\n` });
+    expect(stage(await estimateScanTokens(repo), OVERLAP_SESSION_KIND)!.bound).toContain('~');
+  });
+
+  it('states an EXACT `N of M comparisons changed` once every doc verdict is settled', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+    // The workspace-sync shape: curate + settle warmed, overlap never run. Every
+    // doc verdict is cached, so the areas ARE knowable and the count is exact.
+    await warmScan({ disableOverlapDetection: true });
 
     const est = await estimateScanTokens(repo);
-    const overlap = est.stages!.find((s) => s.stage === 'overlap')!;
-    const verify = est.stages!.find((s) => s.stage === 'verifyOverlap')!;
-    expect(verify).toBeTruthy();
-    // Small docs → per-pair window factor 1, so overlap.calls IS the pair count.
-    // Verify runs on a 0.15 fraction of the flagged pairs, capped at every pair.
-    expect(verify.calls).toBe(Math.round(0.15 * overlap.calls));
-    // The expected count is the realistic (flag-rate) point shown beside the ceiling.
-    expect(verify.expectedCalls).toBe(Math.round(0.15 * overlap.calls));
-    expect(verify.callsRange?.high).toBe(overlap.calls);
-    expect(verify.model).toBe('opus');
+    const overlap = stage(est, OVERLAP_SESSION_KIND)!;
+    expect(overlap.bound).toMatch(/^\d+ of \d+ comparisons? changed$/);
+    expect(overlap.bound).not.toContain('~');
+    // Exact means the LOW bound is the real cache-miss count, not a heuristic.
+    expect(overlap.callsRange!.low).toBe(1);
+    expect(est.subjectLabel).toBe('all 2 docs cached');
   });
 
-  it('scan estimate: overlap pairs come from the corpus area structure when present', async () => {
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    // Two small docs on disk → cold cache → hasWork, per-pair window factor 1.
-    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'Each endpoint validates its body. '.repeat(40));
-    fs.writeFileSync(path.join(docsDir, 'b.md'), '# B\n' + 'Every token expires hourly. '.repeat(40));
-
-    // Heuristic path first (no corpus): mean-area estimate. With 2 kept docs the
-    // heuristic yields one mean-sized area of 6 pairs — deliberately unequal to the
-    // corpus structure below so the two paths are distinguishable.
-    const heuristicEst = await estimateScanTokens(repo);
-    const heuristicOverlap = heuristicEst.stages!.find((s) => s.stage === 'overlap')!;
-
-    // Seed a prior corpus with UNEQUAL area sizes: areas of 3 and 5 docs.
-    // Σ n·(n-1)/2 = 3 + 10 = 13 within-area pairs.
-    const smallRefs = ['docs/s1.md', 'docs/s2.md', 'docs/s3.md'];
-    const bigRefs = ['docs/b1.md', 'docs/b2.md', 'docs/b3.md', 'docs/b4.md', 'docs/b5.md'];
-    const mkDoc = (ref: string) => ({ ref, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: [] });
-    const specs = path.join(repo, '.truecourse', 'specs');
-    fs.mkdirSync(specs, { recursive: true });
-    fs.writeFileSync(
-      path.join(specs, 'corpus.json'),
-      JSON.stringify({
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [...smallRefs, ...bigRefs].map(mkDoc),
-        areas: [
-          { id: 'a/one', product: 'a', concern: 'one', docRefs: smallRefs, overlaps: [] },
-          { id: 'a/two', product: 'a', concern: 'two', docRefs: bigRefs, overlaps: [] },
-        ],
-        relations: [],
-      }),
+  it('never quotes a doc an EXCLUDE verdict drops — not in a stage, not in the subject', async () => {
+    writeDocs({ 'docs/keep.md': AUTH, 'vendor/mirror/drop.md': SESSION_DOC });
+    writeDecisions(
+      repo,
+      decisionsFile({ scopeVerdicts: [verdictRow('docs'), verdictRow('vendor', 'exclude')] }),
     );
-
-    const pairs = (3 * 2) / 2 + (5 * 4) / 2; // 13 within-area pairs
-    const corpusEst = await estimateScanTokens(repo, PRICES);
-    const corpusOverlap = corpusEst.stages!.find((s) => s.stage === 'overlap')!;
-    const corpusVerify = corpusEst.stages!.find((s) => s.stage === 'verifyOverlap')!;
-
-    // Factor 1 (small docs) → overlap.calls IS the corpus pair count, not the heuristic.
-    expect(corpusOverlap.calls).toBe(pairs);
-    expect(corpusOverlap.calls).not.toBe(heuristicOverlap.calls);
-    // Verify ceiling + expected both derive from the corpus pair count.
-    expect(corpusVerify.callsRange?.high).toBe(pairs);
-    expect(corpusVerify.expectedCalls).toBe(Math.round(0.15 * pairs));
-    // End-to-end: the priced estimate carries an expected total below its ceiling.
-    expect(corpusEst.expectedCostUsd).not.toBeUndefined();
-    expect(corpusEst.expectedCostUsd!).toBeLessThanOrEqual(corpusEst.estimatedCostUsd!);
-  });
-
-  it('scan estimate: an OpenAPI doc costs zero relevance calls, exactly as the run', async () => {
-    // A prose doc (relevance-classified) plus a structural OpenAPI doc (admitted
-    // deterministically, never classified). The estimate and the runtime both
-    // plan the relevance stage through the shared `planRelevanceWork`, so the
-    // OpenAPI doc must be excluded IDENTICALLY — the run makes zero relevance
-    // calls for it, and the estimate must plan zero for it too — estimate and
-    // runtime must never disagree about what will be spent.
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
-    fs.mkdirSync(path.join(repo, 'api'), { recursive: true });
-    fs.writeFileSync(
-      path.join(repo, 'api', 'openapi.yaml'),
-      `openapi: 3.0.3\ninfo: { title: T, version: 1.0.0 }\npaths:\n  /todos:\n    get:\n      operationId: listTodos\n      responses: { '200': { description: ok } }\n`,
-    );
-
-    // The runtime plan: only the prose doc reaches the classifier; the OpenAPI
-    // doc is neither classified nor prefilter-skipped.
-    const discovered = discoverDocs(repo, { skipGit: true });
-    const plan = await planRelevanceWork(repo, discovered, { identity: null });
-    expect(plan.needsCall.map((d) => d.path)).toEqual(['docs/a.md']);
-    expect(plan.needsCall.map((d) => d.path)).not.toContain('api/openapi.yaml');
-
-    // The estimate: exactly one relevance call (the prose doc), never the OpenAPI one.
-    const est = await estimateScanTokens(repo, undefined, { identity: null });
-    const relevance = est.stages!.find((s) => s.stage === 'relevance')!;
-    expect(relevance.calls).toBe(plan.needsCall.length);
-    expect(relevance.calls).toBe(1);
-  });
-
-  it('scan estimate honors spec.include and agrees with discovery', async () => {
-    // In-scope + out-of-scope markdown, plus a config that scopes to docs/**.
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
-    fs.writeFileSync(path.join(docsDir, 'b.md'), '# B\n' + 'more spec. '.repeat(200));
-    fs.mkdirSync(path.join(repo, 'reference'), { recursive: true });
-    fs.writeFileSync(path.join(repo, 'reference', 'out.md'), '# Out\n' + 'ignored. '.repeat(200));
-    fs.mkdirSync(path.join(repo, '.truecourse'), { recursive: true });
-    fs.writeFileSync(
-      path.join(repo, '.truecourse', 'config.json'),
-      JSON.stringify({ spec: { include: ['docs/**'] } }),
-    );
-
-    // The scan's discovery sees only the two in-scope docs...
-    const discovered = discoverDocs(repo).map((d) => d.path).sort();
-    expect(discovered).toEqual(['docs/a.md', 'docs/b.md']);
-
-    // ...and the estimate, sharing that discovery, counts exactly the same docs.
     const est = await estimateScanTokens(repo);
-    expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(2);
-    expect(est.subjectLabel).toMatch(/2 docs?$/);
+    expect(items(est, CURATE_DOC_SESSION_KIND)).toBe(1);
+    expect(est.subjectLabel).toBe('1 doc');
   });
 
-  it('scan estimate prices a registered web source, exactly as the run will', async () => {
-    // The estimate and curate share `discoverDocs`, so a snapshot doc is priced
-    // with no estimate-side change at all. Proven against the runtime plan rather
-    // than a hardcoded number: whatever `planRelevanceWork` will call, we count.
-    const docs = path.join(repo, 'docs');
-    fs.mkdirSync(docs, { recursive: true });
-    fs.writeFileSync(path.join(docs, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
+  it('agrees with discovery under spec.include', async () => {
+    writeDocs({
+      'docs/a.md': AUTH,
+      'docs/b.md': SESSION_DOC,
+      'reference/out.md': '# Out\nignored\n',
+      '.truecourse/config.json': JSON.stringify({ spec: { include: ['docs/**'] } }),
+    });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('docs')] }));
+    expect(discoverDocs(repo).map((d) => d.path).sort()).toEqual(['docs/a.md', 'docs/b.md']);
+    const est = await estimateScanTokens(repo);
+    expect(items(est, CURATE_DOC_SESSION_KIND)).toBe(2);
+    expect(est.subjectLabel).toBe('2 docs');
+  });
 
+  it('prices a registered web source exactly as the run discovers it', async () => {
+    writeDocs({ 'docs/a.md': AUTH });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
     const repoOnly = await estimateScanTokens(repo, undefined, { identity: null });
-    expect(repoOnly.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
+    expect(items(repoOnly, CURATE_DOC_SESSION_KIND)).toBe(1);
 
     const source = seedSource(repo);
-
     const discovered = discoverDocs(repo, { skipGit: true });
     expect(discovered.map((d) => d.path)).toEqual([
       'docs/a.md',
       ...source.docs.map((d) => sourceDocRef(source.id, d.path)).sort(),
     ]);
-
-    const plan = await planRelevanceWork(repo, discovered, { identity: null });
+    // The source is a NEW subtree, so scope re-opens; cover it and the snapshots
+    // are priced exactly like repo docs.
+    writeDecisions(
+      repo,
+      decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs'), verdictRow(source.id)] }),
+    );
     const est = await estimateScanTokens(repo, undefined, { identity: null });
-    const relevance = est.stages!.find((s) => s.stage === 'relevance')!;
-    expect(relevance.calls).toBe(plan.needsCall.length);
-    expect(relevance.calls).toBe(4);
-    expect(est.subjectLabel).toBe('4 docs');
+    expect(items(est, CURATE_DOC_SESSION_KIND)).toBe(discovered.length);
+    expect(est.subjectLabel).toBe(`${discovered.length} docs`);
     expect(est.totalEstimatedTokens).toBeGreaterThan(repoOnly.totalEstimatedTokens);
   });
 
-  it('scan estimate is cache-aware: unchanged docs are skipped', async () => {
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    fs.writeFileSync(path.join(docsDir, 'a.md'), '# A\n' + 'spec content. '.repeat(200));
-    fs.writeFileSync(path.join(docsDir, 'b.md'), '# B\n' + 'more spec. '.repeat(200));
+  /**
+   * The 2026-07-07 silent-spend class, in its surviving form. A doc the
+   * deterministic PREFILTER drops never reaches a session — until the user
+   * force-includes it, at which point the run spends one. The estimate runs the
+   * SAME `prefilterDocs` over the SAME decisions, so the gate cannot be skipped.
+   *
+   * (The old relevance-verdict form of this bug is structurally gone: curation
+   * judges relevance and areas in ONE session, so a force-include over a cached
+   * `keep: false` verdict costs no second call.)
+   */
+  it('gates on a force-included PREFILTERED doc (no silent spend)', async () => {
+    writeDocs({ 'docs/keep.md': AUTH, 'docs/archive/old.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+    await warmScan();
+    // The archived doc never cost a session, and the warm repo estimates nothing.
+    expect((await estimateScanTokens(repo)).stages ?? []).toEqual([]);
 
-    // Warm the relevance + area-tag caches with stub runners (no LLM).
-    const discovered = discoverDocs(repo);
-    const kept = await filterByRelevance(repo, discovered, {
-      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'stub' }),
-    });
-    await tagDocs(repo, kept.included, {
-      runner: async () => ({ tags: [{ product: 'core', concern: 'x' }] }),
-    });
-
-    const est = await estimateScanTokens(repo, undefined, { identity: null });
-    expect(est.subjectLabel).toBe('all 2 docs cached');
-    expect(est.stages).toEqual([]); // every doc cached → no LLM work
-    expect(est.totalEstimatedTokens).toBe(0);
-  });
-
-  function writeDecisions(d: Record<string, unknown>): void {
-    const dir = path.join(repo, '.truecourse', 'specs');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, 'decisions.json'),
-      JSON.stringify({ version: 1, manualIncludes: [], manualExcludes: [], relations: [], manualAreas: [], ...d }),
+    writeDecisions(
+      repo,
+      decisionsFile({
+        scopeVerdicts: [verdictRow('.'), verdictRow('docs')],
+        manualIncludes: ['docs/archive/old.md'],
+      }),
     );
-  }
-
-  // How many relevance + area-tag LLM calls a real curate() would make.
-  async function runtimeCalls(decisions?: unknown): Promise<{ rel: number; tag: number }> {
-    let rel = 0;
-    let tag = 0;
-    await curate(repo, {
-      skipGit: true,
-      skipCorpusWrite: true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      decisions: decisions as any,
-      disableVocabNormalization: true,
-      disableOverlapDetection: true,
-      relevanceRunner: async ({ doc }) => {
-        rel++;
-        return { path: doc.path, include: doc.path === 'docs/keep.md', reason: 'stub' };
-      },
-      areaTagRunner: async () => {
-        tag++;
-        return { tags: [{ product: 'core', concern: 'x' }] };
-      },
-    });
-    return { rel, tag };
-  }
-
-  // The live 2026-07-07 silent-spend bug: the estimate reported "all cached" (no
-  // gate) while the scan cache-missed and spent. It happened because the estimate
-  // never loaded decisions.json — so a force-INCLUDED doc the relevance filter had
-  // dropped (cached include:false) was absent from the estimate's kept set, yet
-  // the run keeps it and area-tags it (a real LLM call). Estimate and run now
-  // share `planRelevanceWork` over the same decisions, so the gate can't be skipped.
-  it('scan estimate: a force-included dropped doc still gates (no silent spend)', async () => {
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    fs.writeFileSync(path.join(docsDir, 'keep.md'), '# Keep\n' + 'Endpoint requires auth. '.repeat(50));
-    fs.writeFileSync(path.join(docsDir, 'vendor.md'), '# Vendor research\n' + 'ServiceTitan third-party. '.repeat(50));
-
-    // Warm caches as a prior scan would: keep -> included+tagged, vendor -> DROPPED.
-    const discovered = discoverDocs(repo, { skipGit: true });
-    await filterByRelevance(repo, discovered, {
-      identity: null,
-      runner: async ({ doc }) => ({ path: doc.path, include: doc.path === 'docs/keep.md', reason: 's' }),
-    });
-    await tagDocs(repo, discovered.filter((d) => d.path === 'docs/keep.md'), {
-      runner: async () => ({ tags: [{ product: 'core', concern: 'x' }] }),
-    });
-
-    // User force-includes the dropped doc.
-    const decisions = { manualIncludes: ['docs/vendor.md'] };
-    writeDecisions(decisions);
-
-    // The estimate is the pre-flight gate — measured BEFORE the run. It MUST
-    // surface at least one stage for the force-included doc's area-tag call.
     const est = await estimateScanTokens(repo);
-    expect((est.stages ?? []).length).toBeGreaterThan(0);
-    expect(est.stages!.some((s) => s.stage === 'areaTag' && s.calls >= 1)).toBe(true);
+    // The pre-flight gate names exactly the one newly-reachable doc…
+    expect(items(est, CURATE_DOC_SESSION_KIND)).toBe(1);
 
-    // ...and the run really would make that call (guardrail direction).
-    const rt = await runtimeCalls(decisions);
-    expect(rt.tag).toBeGreaterThanOrEqual(1);
+    // …and the run really does spend that session.
+    const { driver, kinds } = warmDriver();
+    await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => driver,
+      persistence: memoryPersistence(),
+      skipGit: true,
+    });
+    expect(kinds.filter((k) => k === CURATE_DOC_SESSION_KIND)).toHaveLength(1);
   });
 
-  // Regression guardrail: whenever the runtime would make >=1 relevance/area
-  // call, the estimate has >=1 stage. Exercised across the states that broke it
-  // (force-include a dropped doc; a manual-include that changes the dedup pool so
-  // a near-duplicate the estimate would drop gets classified at runtime).
-  it('scan estimate: runtime would call => estimate has a stage (guardrail)', async () => {
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    // keep.md is the only doc the stub keeps; make a near-duplicate pair to move
-    // the dedup pool when full.md is force-included.
-    const body = Array.from({ length: 30 }, (_, i) => `Line ${i}: invariant ${i} holds.`).join('\n');
-    fs.writeFileSync(path.join(docsDir, 'keep.md'), '# Full\n' + body + '\nunique tail line');
-    fs.writeFileSync(path.join(docsDir, 'copy.md'), '# Copy\n' + body);
+  // -- the no-changes contract the CLI/dashboard gate on ---------------------
 
-    // Warm caches WITHOUT the include, so the near-dup copy is deduped away and
-    // never cached — exactly the stale state a prior scan leaves.
-    const discovered = discoverDocs(repo, { skipGit: true });
-    const kept = await filterByRelevance(repo, discovered, {
-      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 's' }),
+  it('curateInProcess skips the confirm prompt (and every session) on a fully warmed repo', async () => {
+    writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
+    await warmScan();
+
+    let prompted = false;
+    const result = await curateInProcess(repo, {
+      skipGit: true,
+      onLlmEstimate: async () => {
+        prompted = true;
+        return true;
+      },
+      driver: {
+        capabilities: { steering: 'turn-boundary', structuredOutcome: 'tool', resumeAtMessage: false },
+        attribution: { provider: 'test', model: 'never-used' },
+        runSession() {
+          throw new Error('a fully warmed re-scan must start no session');
+        },
+      },
     });
-    await tagDocs(repo, kept.included, { runner: async () => ({ tags: [{ product: 'core', concern: 'x' }] }) });
-
-    const decisions = { manualIncludes: ['docs/keep.md'] };
-    writeDecisions(decisions);
-
-    // Estimate first (the pre-flight gate), then confirm the run would call.
-    const est = await estimateScanTokens(repo);
-    const rt = await runtimeCalls(decisions);
-    if (rt.rel + rt.tag > 0) {
-      expect((est.stages ?? []).length).toBeGreaterThan(0);
-    }
+    expect(prompted).toBe(false);
+    expect(result.noChanges).toBe(true);
   });
 });
 
 /**
  * The estimate and the run must resolve the SAME repo identity. Identity is part
- * of the relevance cache key, so if the two disagree the estimate reads a cache
+ * of the curate-doc cache key, so if the two disagree the estimate reads a cache
  * the run will never hit: it reports "all cached", the confirm prompt is skipped,
  * and the run silently spends the whole corpus. This is the exact failure class
- * `spec-estimate.ts` already documents, which is why `identity` is
- * required-and-nullable rather than an optional parameter everywhere it touches
- * the key. These two tests are what stop someone re-adding a defaulted param.
+ * `spec-estimate.ts` documents, which is why `identity` is required-and-nullable
+ * rather than an optional parameter everywhere it touches the key.
  */
 describe('scan estimate — identity is part of the cache key', () => {
   let repo: string;
   beforeEach(() => {
+    resetKvCacheStore();
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-est-identity-'));
+    fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'docs', 'api.md'), '# API\n' + 'Endpoint requires auth. '.repeat(50));
+    writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
   });
   afterEach(() => fs.rmSync(repo, { recursive: true, force: true }));
 
-  const IDENTITY_A = { name: 'alpha', aliases: ['Alpha'], sources: ['git-remote'] };
-  const IDENTITY_B = { name: 'beta', aliases: ['Betaa'], sources: ['git-remote'] };
+  const IDENTITY_A: RepoIdentity = { name: 'alpha', aliases: ['Alpha'], sources: ['git-remote'] };
+  const IDENTITY_B: RepoIdentity = { name: 'beta', aliases: ['Betaa'], sources: ['git-remote'] };
 
-  function writeDocs(): void {
-    const docsDir = path.join(repo, 'docs');
-    fs.mkdirSync(docsDir, { recursive: true });
-    fs.writeFileSync(path.join(docsDir, 'api.md'), '# API\n' + 'Endpoint requires auth. '.repeat(50));
+  async function scanAs(identity: RepoIdentity): Promise<void> {
+    const { driver } = warmDriver();
+    await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => driver,
+      persistence: memoryPersistence(),
+      skipGit: true,
+      repoIdentity: identity,
+    });
   }
 
+  const curateCalls = async (identity: RepoIdentity): Promise<number> => {
+    const est = await estimateScanTokens(repo, undefined, { identity });
+    return (est.stages ?? []).find((s) => s.stage === CURATE_DOC_SESSION_KIND)?.callsRange?.low ?? 0;
+  };
+
   it('a run with the estimated identity leaves nothing to re-estimate', async () => {
-    writeDocs();
-    const before = await estimateScanTokens(repo, undefined, { identity: IDENTITY_A });
-    expect(before.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
-
-    await filterByRelevance(repo, discoverDocs(repo, { skipGit: true }), {
-      identity: IDENTITY_A,
-      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'ok' }),
-    });
-
-    const after = await estimateScanTokens(repo, undefined, { identity: IDENTITY_A });
-    expect(after.stages!.find((s) => s.stage === 'relevance')?.calls ?? 0).toBe(0);
+    expect(await curateCalls(IDENTITY_A)).toBe(1);
+    await scanAs(IDENTITY_A);
+    expect(await curateCalls(IDENTITY_A)).toBe(0);
   });
 
   it('a run under a DIFFERENT identity does not satisfy the estimate', async () => {
-    writeDocs();
-    await filterByRelevance(repo, discoverDocs(repo, { skipGit: true }), {
-      identity: IDENTITY_B,
-      runner: async ({ doc }) => ({ path: doc.path, include: true, reason: 'ok' }),
-    });
-
-    // Warm under B, estimated under A — still a full relevance call, correctly.
-    const est = await estimateScanTokens(repo, undefined, { identity: IDENTITY_A });
-    expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(1);
+    await scanAs(IDENTITY_B);
+    expect(await curateCalls(IDENTITY_A)).toBe(1);
   });
 });

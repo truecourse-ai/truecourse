@@ -45,8 +45,8 @@ export interface GuardDriverDef {
  * rest are recorded for coverage honesty. ADD A ROW to introduce a driver — every
  * derived array, schema, status, and label below picks it up automatically.
  *
- * A registry row also names a JOURNEY TYPE — the surface a journey is mapped for
- * maps 1:1 to the driver that would execute its scenarios. A journey on a
+ * A registry row also names a INTERFACE TYPE — the surface an interface is mapped for
+ * maps 1:1 to the driver that would execute its scenarios. An interface on a
  * non-runnable driver still EXISTS: it grounds coverage accounting ("this flow is
  * realizable on web — awaiting the web driver").
  *

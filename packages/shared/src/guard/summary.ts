@@ -15,6 +15,14 @@ import {
   type GuardDriverId,
 } from './drivers.js'
 import {
+  GUARD_COVERAGE_PLAIN_ORDER,
+  guardCoveragePlainStatus,
+  worstCoverageStatus,
+  worstCoveragePlainStatus,
+  type GuardCoveragePlainStatus,
+  type GuardSectionCoverageStatus,
+} from './dashboard.js'
+import {
   emptyGapDisplayTotals,
   gapDisplayKind,
   parseBlockedOnCapabilities,
@@ -54,6 +62,13 @@ export interface GuardFlowsCoverageSummary {
   blocked: number
   /** The gap labels behind the partial/blocked flows, most common first (top 3). */
   gapLabels: string[]
+  /**
+   * The flows counted under the FIVE coverage words — the tally every user-facing
+   * surface renders. The buckets above are the manifest's own shape (how much of a
+   * flow was realized); this is what a reader is told, and it is the same
+   * derivation the dashboard's Flows list uses.
+   */
+  byStatus: Record<GuardCoveragePlainStatus, number>
 }
 
 /** Section-coverage rollup from `scenarios/manifest.json`. */
@@ -69,6 +84,14 @@ export interface GuardCoverageSummary {
    * scenarios run on, else under the driver an `awaiting-driver` gap names.
    */
   classification: Record<GuardDriverId, number> & { untestable: number; unclassified: number }
+  /**
+   * The sections counted under the FIVE coverage words, each section taking the
+   * worst status of the flows that bind it — the coverage line a reader sees.
+   * `withScenarios` says how many sections own a test; this says what is KNOWN
+   * about them, which is a different (and more honest) question: a section whose
+   * every test has never executed is `never-run`, not a green.
+   */
+  byStatus: Record<GuardCoveragePlainStatus, number>
   /** The flow-led rollup over the same manifest. */
   flows: GuardFlowsCoverageSummary
 }
@@ -85,16 +108,30 @@ export interface GuardLastRunSummary {
 export interface GuardLastGenerateSummary {
   generatedAt: string
   status: GuardGenerateReport['status']
+  /**
+   * The runner-refusal status id (`seed-failed`, `missing-external-env`, …) when
+   * the run latched a REFUSAL mid-validation — `status` alone reads `ok` on such
+   * a run (the scenarios settled before the latch are real), so a status surface
+   * that omits this line reports a refused generate as a clean one.
+   */
+  refused: string | null
   noChanges: boolean
   written: number
   /**
    * The written tests split by the status they were committed with — guard commits
-   * every authored test, so `testsPassing + testsFailing = written`. A report
-   * written before failing tests were committed records no status, so every one of
-   * its written rows counts as passing.
+   * every authored test, so `testsPassing + testsFailing + testsNeverRun = written`.
+   * A report written before failing tests were committed records no status, so every
+   * one of its written rows counts as passing.
    */
   testsPassing: number
   testsFailing: number
+  /**
+   * Written but NEVER EXECUTED — a hand-authored corpus, which has no birth
+   * execution behind it. Counted apart from `testsPassing` because a test nothing
+   * ever ran has earned no verdict, and rolling it into the green would be the one
+   * lie an inventory line must not tell.
+   */
+  testsNeverRun: number
   /** Null on older reports written before birth counting existed. */
   birthPassed: number | null
   /** Counts keyed by the flat display kind (awaiting-driver gaps split per driver). */
@@ -135,8 +172,25 @@ export interface GuardLastGenerateSummary {
   usage?: GuardGenerateUsage
 }
 
+/**
+ * The ALL-sections tally: every section of every kept spec doc, counted under
+ * the five coverage words through the SAME per-section derivation the doc view
+ * renders (`composeDocCoverage`) — so the overview bar and the doc detail can
+ * never disagree, and it always sums to the real section count. This is the
+ * whole-corpus truth the manifest-scoped `GuardCoverageSummary.byStatus` is not:
+ * that one counts only flow-bound sections, so Blocked/Not-testable sections
+ * (no flows to bind them) are invisible to it by construction.
+ */
+export interface GuardSectionTotals {
+  /** Every section across the kept docs — the bar's denominator. */
+  total: number
+  byStatus: Record<GuardCoveragePlainStatus, number>
+}
+
 export interface GuardStatusSummary {
   coverage: GuardCoverageSummary | null
+  /** Null when the caller could not derive it (no corpus / doc reads unavailable). */
+  sections: GuardSectionTotals | null
   lastRun: GuardLastRunSummary | null
   lastGenerate: GuardLastGenerateSummary | null
 }
@@ -146,9 +200,11 @@ export function composeGuardStatus(
   manifest: GuardManifest | null,
   latest: GuardLatest | null,
   result: GuardGenerateReport | null,
+  sections: GuardSectionTotals | null = null,
 ): GuardStatusSummary {
   return {
-    coverage: manifest ? summarizeCoverage(manifest) : null,
+    coverage: manifest ? summarizeCoverage(manifest, latest) : null,
+    sections,
     lastRun: latest
       ? { ranAt: latest.run.ranAt, branch: latest.run.branch, commit: latest.run.commit, summary: latest.summary }
       : null,
@@ -167,7 +223,7 @@ function emptyClassification(): GuardCoverageSummary['classification'] {
  * One line naming a gap, the SINGLE copy the CLI (`guard flows`, the generate
  * summary, `guard status`) and the dashboard both render: an `awaiting-driver`
  * gap names the driver it waits on, every other kind reads as its own kind with
- * the hyphens spelled out (`no-journey` → `no journey`).
+ * the hyphens spelled out (`no-interface` → `no interface`).
  */
 export function guardGapLabel(kind: GuardCoverageGapKind, driver?: GuardDriverId): string {
   if (kind === 'awaiting-driver') return driver ? `awaiting ${driver} driver` : 'awaiting driver'
@@ -196,7 +252,7 @@ export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string
 /**
  * What the user does about it, said the same way everywhere. The flows are left
  * UNSETTLED for exactly this reason (a settled flow carries its inputs hash and the
- * next generate skips it), and authoring is cached per flow+sections+journeys+recipe,
+ * next generate skips it), and authoring is cached per flow+sections+interfaces+recipe,
  * so an unchanged corpus re-adjudicates without paying for authoring again.
  */
 export const GUARD_UNADJUDICATED_REMEDY =
@@ -204,7 +260,11 @@ export const GUARD_UNADJUDICATED_REMEDY =
 
 /** What a section's flows say about the driver it would be tested on. */
 interface SectionSurfaces {
-  /** Drivers the section's flows actually own a scenario on. */
+  /**
+   * Drivers the section's flows actually own a scenario on — the UNION over each
+   * scenario's own drivers, so a test that drives the UI and reads the result over
+   * HTTP puts its section under both.
+   */
   scenarios: Set<GuardDriverId>
   /** Drivers an `awaiting-driver` gap on the section's flows waits for. */
   awaiting: Set<GuardDriverId>
@@ -223,7 +283,7 @@ function sectionSurfaces(manifest: GuardManifest): Map<string, SectionSurfaces> 
         view = { scenarios: new Set(), awaiting: new Set(), untestable: false }
         bySection.set(key, view)
       }
-      for (const s of flow.scenarios) view.scenarios.add(s.surface)
+      for (const s of flow.scenarios) for (const driver of s.drivers) view.scenarios.add(driver)
       for (const gap of flow.gaps) {
         if (gap.kind === 'awaiting-driver' && gap.driver) view.awaiting.add(gap.driver)
         else if (gap.kind === 'untestable' || gap.kind === 'no-claim') view.untestable = true
@@ -239,10 +299,15 @@ function primaryDriver(candidates: ReadonlySet<GuardDriverId>): GuardDriverId | 
   return null
 }
 
-function summarizeCoverage(manifest: GuardManifest): GuardCoverageSummary {
+function summarizeCoverage(manifest: GuardManifest, latest: GuardLatest | null): GuardCoverageSummary {
   const classification = emptyClassification()
   const sections = guardManifestSections(manifest)
   const surfaces = sectionSurfaces(manifest)
+  const outcomeOf = runOutcomeLookup(latest)
+  const flowStatus = new Map(
+    manifest.flows.map((f) => [f.flowId, manifestFlowCoverageStatus(f, outcomeOf)] as const),
+  )
+  const byStatus = emptyPlainTotals()
   let withScenarios = 0
   for (const s of sections) {
     if (s.scenarioIds.length > 0) withScenarios++
@@ -254,8 +319,58 @@ function summarizeCoverage(manifest: GuardManifest): GuardCoverageSummary {
     if (driver) classification[driver]++
     else if (view?.untestable) classification.untestable++
     else classification.unclassified++
+    // …and ONCE more under its coverage WORD: the worst of the flows binding it,
+    // by the one precedence every guard rollup uses.
+    byStatus[
+      worstCoveragePlainStatus(s.flowIds.map((id) => flowStatus.get(id) ?? 'unguarded'))
+    ]++
   }
-  return { totalSections: sections.length, withScenarios, classification, flows: summarizeFlows(manifest) }
+  return {
+    totalSections: sections.length,
+    withScenarios,
+    classification,
+    byStatus,
+    flows: summarizeFlows(manifest, outcomeOf),
+  }
+}
+
+/** A zeroed count per coverage word. */
+function emptyPlainTotals(): Record<GuardCoveragePlainStatus, number> {
+  const out = {} as Record<GuardCoveragePlainStatus, number>
+  for (const key of GUARD_COVERAGE_PLAIN_ORDER) out[key] = 0
+  return out
+}
+
+/** Each scenario's outcome in the last run, or `undefined` when no run covered it. */
+function runOutcomeLookup(latest: GuardLatest | null): (id: string) => GuardOutcome | undefined {
+  const byId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s.outcome]))
+  return (id) => byId.get(id)
+}
+
+/**
+ * A manifest flow's coverage status: the worst over its realized surfaces and its
+ * gaps. A scenario paints its RUN outcome when a run covered it, else the status
+ * it was committed with — `never-run` for a test nothing ever executed, `fail` for
+ * one committed red, `guarded` for one that passed its birth. Gaps paint under
+ * their display kind. It is the manifest-only twin of the core read join, and both
+ * fold through the same precedence, so the two can only ever agree on the WORD.
+ */
+function manifestFlowCoverageStatus(
+  flow: GuardManifestFlow,
+  outcomeOf: (id: string) => GuardOutcome | undefined,
+): GuardSectionCoverageStatus {
+  const statuses: GuardSectionCoverageStatus[] = [
+    ...flow.scenarios.map((s): GuardSectionCoverageStatus => {
+      const outcome = outcomeOf(s.id)
+      if (outcome) return outcome
+      return s.status === 'never-run' ? 'never-run' : s.status === 'failing' ? 'fail' : 'guarded'
+    }),
+    ...flow.gaps.flatMap((g): GuardSectionCoverageStatus[] => {
+      const kind = gapDisplayKind(g)
+      return kind ? [kind] : []
+    }),
+  ]
+  return worstCoverageStatus(statuses)
 }
 
 /** A flow's coverage bucket: fully guarded, partly guarded, or nothing realized. */
@@ -264,12 +379,17 @@ function flowBucket(flow: GuardManifestFlow): 'guarded' | 'partial' | 'blocked' 
   return flow.gaps.length === 0 ? 'guarded' : 'partial'
 }
 
-function summarizeFlows(manifest: GuardManifest): GuardFlowsCoverageSummary {
+function summarizeFlows(
+  manifest: GuardManifest,
+  outcomeOf: (id: string) => GuardOutcome | undefined,
+): GuardFlowsCoverageSummary {
   let guarded = 0
   let partial = 0
   let blocked = 0
+  const byStatus = emptyPlainTotals()
   const labels = new Map<string, number>()
   for (const flow of manifest.flows) {
+    byStatus[guardCoveragePlainStatus(manifestFlowCoverageStatus(flow, outcomeOf))]++
     const bucket = flowBucket(flow)
     if (bucket === 'guarded') {
       guarded++
@@ -286,7 +406,7 @@ function summarizeFlows(manifest: GuardManifest): GuardFlowsCoverageSummary {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 3)
     .map(([label]) => label)
-  return { total: manifest.flows.length, guarded, partial, blocked, gapLabels }
+  return { total: manifest.flows.length, guarded, partial, blocked, gapLabels, byStatus }
 }
 
 /** One gap per (kind, driver) — a flow that awaits the same driver twice counts once. */
@@ -317,10 +437,12 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
   return {
     generatedAt: r.generatedAt,
     status: r.status,
+    refused: r.refusal?.status ?? null,
     noChanges: r.noChanges,
     written: r.written.length,
     testsFailing: r.written.filter((w) => w.status === 'failing').length,
-    testsPassing: r.written.filter((w) => w.status !== 'failing').length,
+    testsNeverRun: r.written.filter((w) => w.status === 'never-run').length,
+    testsPassing: r.written.filter((w) => w.status !== 'failing' && w.status !== 'never-run').length,
     birthPassed: r.birthPassed ?? null,
     coverageGapsByKind,
     blockedOnCapabilities,
@@ -340,10 +462,16 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
 export const GUARD_DRIFT_ORDER: readonly GuardOutcome[] = ['fail', 'error', 'stale', 'orphaned']
 
 /**
- * A run's non-pass scenarios, ordered by outcome severity (fail → error → stale →
+ * A run's DRIFT scenarios, ordered by outcome severity (fail → error → stale →
  * orphaned) with original order preserved within each tier (`Array.sort` is
  * stable). Empty for a missing run or an all-pass run. Accepts the scenarios array
  * directly so any run (not just LATEST) can be ordered.
+ *
+ * `blocked` is excluded with `pass`: the scenario never executed for want of a
+ * registered supplied dependency, so it has no expected/actual and nothing about
+ * the repo is in dispute. Listing it as drift would send a reader to the drift
+ * detail to inspect a comparison that was never made; its home is the coverage
+ * surfaces, which name the dependency to register.
  */
 export function orderGuardDrifts(
   scenarios: readonly GuardScenarioResult[] | null | undefined,
@@ -353,5 +481,7 @@ export function orderGuardDrifts(
     const i = GUARD_DRIFT_ORDER.indexOf(o)
     return i === -1 ? GUARD_DRIFT_ORDER.length : i
   }
-  return scenarios.filter((s) => s.outcome !== 'pass').sort((a, b) => rank(a.outcome) - rank(b.outcome))
+  return scenarios
+    .filter((s) => s.outcome !== 'pass' && s.outcome !== 'blocked')
+    .sort((a, b) => rank(a.outcome) - rank(b.outcome))
 }

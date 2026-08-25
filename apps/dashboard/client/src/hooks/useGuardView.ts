@@ -4,8 +4,9 @@
  * section on the Guard coverage tab: it lands the Guard section + coverage tab and
  * writes `?guard=`+`?gsec=` in ONE param update so the writes never race (and drops
  * the `?gdrift` tab selection the Runs view was showing). `openGuardFlow` /
- * `openGuardJourney` are the same jump in the other direction — a section's flow
- * row into the Flows tab, a flow's journey into the Journeys tab — and
+ * `openGuardInterface` are the same jump in the other direction
+ * — a section's flow row into the Flows tab, a flow's interface into the Interfaces
+ * tab — and
  * `openSpecDoc` / `openSpecSources` connect the Sources page to the doc viewer
  * and back.
  *
@@ -18,13 +19,6 @@ import { useSearchParams } from 'react-router-dom';
 
 export interface GuardViewState {
   openSpecSection: (doc: string, section: string) => void;
-  /**
-   * Jump to the Coverage tab with a specific conflict's resolution detail open —
-   * the route the Scenarios-tab blocked panel takes for each open conflict. Writes
-   * `?gconf=<overlapKey>` and drops the doc/section tab so the conflict wins the
-   * coverage read.
-   */
-  openSpecConflict: (overlapKey: string) => void;
   /**
    * Jump to the Coverage tab with no specific selection — the route the Runs-tab
    * blocked note takes ("resolve the conflicts on Coverage"). Lands the tab; the
@@ -44,19 +38,18 @@ export interface GuardViewState {
   openSpecSources: () => void;
   /**
    * Jump to the Flows tab with one flow's detail open (`?gflow=`) — the route a
-   * Coverage section's flow row and a journey's "grounds" link both take.
+   * Coverage section's flow row and an interface's "grounds" link both take.
    */
   openGuardFlow: (flowId: string) => void;
-  /** Jump to the Journeys tab with one journey's detail open (`?gjourney=`). */
-  openGuardJourney: (journeyId: string) => void;
   /**
-   * Jump to the Tests tab with one test's detail open (`?gtest=`) — the route a
-   * flow's test row and a run instance's "open this test" link both take. A test
-   * has exactly ONE home, and this is it.
+   * Jump to the Interfaces tab with one interface open (`?ginterface=`). The tab's
+   * subject is the PLACE that owns the member, which only the catalog can say —
+   * so this writes the interface id and the pane resolves it, selecting the place
+   * and expanding (and scrolling to) that member.
    */
-  openGuardTest: (testId: string) => void;
+  openGuardInterface: (interfaceId: string) => void;
   /**
-   * Jump to the External APIs tab — the CTA of a `needs-setup` section, flow or
+   * Jump to the Dependencies tab — the CTA of a `needs-setup` section, flow or
    * chip. The CTA names ONE service, and that service is the card the
    * user is looking for, so it rides along as `?gext=` and the page opens that
    * card's account form. Called with no service (a CTA that names none, or the
@@ -67,7 +60,7 @@ export interface GuardViewState {
 
 /** Drop every guard tab selection — each jump owns the pane it lands on. */
 function clearGuardSelections(q: URLSearchParams): void {
-  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney', 'gext', 'gsrc']) {
+  for (const key of ['gdrift', 'gflow', 'gfind', 'ginterface', 'gjourney', 'gplace', 'gclaim', 'gext', 'gsrc']) {
     q.delete(key);
   }
 }
@@ -88,23 +81,6 @@ export function useGuardView(): GuardViewState {
         q.delete('gconf');
         q.set('guard', doc);
         q.set('gsec', section);
-        return q;
-      });
-    },
-    [setParams],
-  );
-
-  const openSpecConflict = useCallback(
-    (overlapKey: string) => {
-      setParams((prev) => {
-        const q = new URLSearchParams(prev);
-        q.set('section', 'guard');
-        q.set('tab', 'coverage');
-        clearGuardSelections(q);
-        // The conflict owns the coverage read — drop any active doc tab + section.
-        q.delete('guard');
-        q.delete('gsec');
-        q.set('gconf', overlapKey);
         return q;
       });
     },
@@ -163,28 +139,14 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
-  const openGuardJourney = useCallback(
-    (journeyId: string) => {
+  const openGuardInterface = useCallback(
+    (interfaceId: string) => {
       setParams((prev) => {
         const q = new URLSearchParams(prev);
         q.set('section', 'guard');
-        q.set('tab', 'journeys');
+        q.set('tab', 'interfaces');
         clearGuardSelections(q);
-        q.set('gjourney', journeyId);
-        return q;
-      });
-    },
-    [setParams],
-  );
-
-  const openGuardTest = useCallback(
-    (testId: string) => {
-      setParams((prev) => {
-        const q = new URLSearchParams(prev);
-        q.set('section', 'guard');
-        q.set('tab', 'tests');
-        clearGuardSelections(q);
-        q.set('gtest', testId);
+        q.set('ginterface', interfaceId);
         return q;
       });
     },
@@ -198,8 +160,8 @@ export function useGuardView(): GuardViewState {
         q.set('section', 'guard');
         q.set('tab', 'externals');
         clearGuardSelections(q);
-        // A one-shot selection: the externals pane consumes it (opens that card's
-        // form) and drops it, so a later manual visit to the tab is a plain read.
+        // The dependencies pane's own selection param — a row is a link, so the
+        // CTA lands on that dependency's detail and the address stays true.
         if (service) q.set('gext', service);
         return q;
       });
@@ -209,13 +171,11 @@ export function useGuardView(): GuardViewState {
 
   return {
     openSpecSection,
-    openSpecConflict,
     openSpecCoverage,
     openSpecDoc,
     openSpecSources,
     openGuardFlow,
-    openGuardJourney,
-    openGuardTest,
+    openGuardInterface,
     openGuardExternals,
   };
 }

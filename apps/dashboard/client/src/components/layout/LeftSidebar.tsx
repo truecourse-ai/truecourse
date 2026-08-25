@@ -1,5 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   getTab,
   useVisibleTabsForSection,
@@ -42,6 +43,8 @@ export function LeftSidebar({
   hideRail = false,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
+  const [collapsed, setCollapsed] = useState(false);
+  const toggleCollapsed = useCallback(() => setCollapsed((c) => !c), []);
   const [maxWidth, setMaxWidth] = useState(800);
   const isDragging = useRef(false);
 
@@ -104,7 +107,7 @@ export function LeftSidebar({
               className={`group relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
                 isActive
                   ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  : 'text-foreground hover:bg-muted'
               }`}
               aria-label={tab.label}
             >
@@ -143,8 +146,23 @@ export function LeftSidebar({
       </div>
       )}
 
+      {/* Collapsed: a thin strip that re-opens the panel. */}
+      {isOpen && collapsed && (
+        <div className="flex h-full w-8 flex-shrink-0 flex-col items-center border-r border-border bg-card pt-2">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={`Expand ${activeTabLabel} panel`}
+            aria-expanded={false}
+            className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Content panel */}
-      {isOpen && (
+      {isOpen && !collapsed && (
         <aside
           className="relative flex-shrink-0 border-r border-border bg-card"
           style={{ width }}
@@ -154,6 +172,15 @@ export function LeftSidebar({
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {activeTabLabel}
             </span>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label={`Collapse ${activeTabLabel} panel`}
+              aria-expanded
+              className="ml-auto order-last rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;
               if (badge == null) return null;
@@ -185,7 +212,7 @@ export function LeftSidebar({
 
           {/* Resize handle on right edge */}
           <div
-            className="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
+            className="absolute inset-y-0 right-0 z-30 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
             onMouseDown={handleMouseDown}
           />
         </aside>

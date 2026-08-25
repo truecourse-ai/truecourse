@@ -1,0 +1,368 @@
+id: run-an-analysis-from-the-dashboard
+title: A developer presses Analyze, answers both gates, and watches the run to completion
+promise: >-
+  A developer presses Analyze in the dashboard, answers the dirty-tree and LLM gates, and
+  watches the run to completion.
+flow:
+  id: run-an-analysis-from-the-dashboard
+  fingerprint: sha256:91651d8bbaaad0660439c3de91c3e87a8a51e4ebc631a1e4dab681826cf59825
+interface:
+  path:
+    - cli/add
+    - web/open-an-unanalyzed-repository
+    - web/run-an-analysis-from-the-header
+    - web/analyze-working-tree-without-stashing
+    - web/approve-the-llm-rules-for-a-run
+    - cli/list
+    - cli/analyze
+    - web/open-the-graphs-tab
+    - api/get-api-repos-id-violations
+    - api/get-api-repos-id-analyses
+    - cli/config-llm-show
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b
+    - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
+    - sha256:c5258cd7c25e4f8b5a00f8e84aa6c1d0c4fffa5a62f99bbf52f3467dba3d2083
+    - sha256:3fe0121eef3d02251e93c109949965a4e45210570d805a6b86d31b1e001fe6dc
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:a8f319bb14ef3182f51fa57b6ce896ee8fe0b6fedbc3591efe3921ff3d842c8f
+    - sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02
+    - sha256:9f14c34aa3bce7a0b7a932adbcacac3414f81efcbb05332005a13d4d338449a1
+    - sha256:451106df5bf860a602f1feb5ecc1f2cea68e82b0f2f78231ef24a0b25faad50c
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: getting-around
+    fingerprint: sha256:b64d05bfdef7ef3cce1d95c719c53884d5a0c419c170d00526cc29d0f98842b2
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: before-the-run-starts
+    fingerprint: sha256:03a985b61a5a89f0a9b9dcf4b466c831ae0b27f0a7433c18bbe7bf9d008b9d85
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: running-an-analysis
+    fingerprint: sha256:a9c2bd895f631408f92f838c08fc2c718a7579063bd7ca19f87101ee67a34085
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: while-it-runs
+    fingerprint: sha256:a27ab4d1266e81788003f16740125500ad471fbdcff529a139a257b44405084a
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: which-llm-the-dashboard-uses
+    fingerprint: sha256:595b0ae9a4ffbd1f7727bb2ca79e8557caf8bf34ea2e57441e4b2a250c876c49
+needs:
+  - claude-login
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    sample-app/src/index.js: |
+      export function main(input) {
+        return input
+      }
+    sample-app/src/unsafe.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+    sample-app/.truecourse/config.json: |
+      {
+        "enableLlmRules": true
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+          - src/unsafe.js
+        message: seed the sample app
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    cwd: sample-app
+    tty: true
+    stdin:
+      - marker: How should TrueCourse run its LLM calls?
+        answer: "\r"
+    expect:
+      exit: 0
+      output:
+        matches: How should TrueCourse run its LLM calls
+      files:
+        sample-app/.truecourse/logs/analyze.log:
+          absent: true
+    note: >-
+      Three arrangements in one command, none of them a claim of this area. It registers
+      the repository so the surface can resolve it; it answers the first-run transport
+      question on a terminal, which is what SAVES a transport selection — the selection
+      the two closing milestones are about, taken here through the documented question
+      rather than fabricated into the home directory; and its file assertion pins the
+      before-state of the analyze log, which no command has written yet.
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      url:
+        equals: /repos/sample-app
+      visible:
+        role: button
+        name: Analyze
+      text:
+        contains: No analysis yet
+    note: >-
+      The entry affordance, asserted where the doc's header inventory puts it and in the
+      state that makes it meaningful: a repository with nothing stored, whose only way
+      forward is this button. Everything below is what pressing it does.
+    milestone:
+      - dashboard-overview-header-carries-the-analyze-button
+  - write:
+      sample-app/src/index.js: |
+        export function main(input) {
+          console.log('starting')
+          return input
+        }
+      sample-app/src/dirty.js: |
+        export function renderTemplate(source) {
+          return eval(source)
+        }
+    expect:
+      files:
+        sample-app/src/dirty.js:
+          contains: eval
+    note: >-
+      The transient, flow-specific state the dirty-tree claims are themselves about: one
+      tracked file edited and one new file that git has never seen — exactly one modified
+      and one untracked, which is what the dialog's counts are checked against below. The
+      new file carries a finding of its own, so "analyze the working tree as-is" has
+      something to find that the committed state does not contain.
+  - driver: web
+    click:
+      role: button
+      name: Analyze
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Stash pending changes\?)(?=[\s\S]*1 modified and 1 untracked)(?![\s\S]*Run LLM rules)[\s\S]*$'
+    note: >-
+      One press, three promises. The run did not start — a dialog opened instead. Its
+      numbers are the working tree's real ones, one modified and one untracked, which is
+      what `git status --porcelain` would report for the writes above. And the ORDER is
+      the negative: LLM rules are enabled for this repository, so the model gate is armed
+      and yet it is NOT on screen while the dirty-tree question is unanswered. Both
+      interrupts had to be armed for that negative to mean anything, which is why the
+      seed does both.
+    milestone:
+      - dashboard-analyze-stash-prompt-precedes-the-llm-prompt
+      - dashboard-analyze-dirty-tree-opens-a-dialog
+      - dashboard-analyze-dirty-tree-dialog-reports-the-counts
+  - driver: web
+    click:
+      role: button
+      name: Don't stash
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Run LLM rules\?)(?=[\s\S]*\d+ files, \d+ rules \(~\d+k tokens\))(?![\s\S]*LLM \d+/\d+)[\s\S]*$'
+    note: >-
+      Answering the first gate reaches the second, which is the other half of the
+      ordering above. The confirm carries all three numbers the doc lists — files, rules
+      and an estimate in tokens — asserted as the shape of that line rather than as
+      values, which move with the repository. The negative is what "before any model
+      call" comes to on this surface: the progress card's LLM phase (its `LLM N/M`
+      detail line) has not begun while the question stands, so nothing has been sent
+      yet. (First authored as the absence of `Analyzing...` — too strong: the
+      DETERMINISTIC half starts as soon as the stash question is answered and runs
+      behind the open confirm, which the doc's before-any-MODEL-call promise permits;
+      run 13-13Z showed the dialog and the deterministic progress card together. That
+      the deterministic run precedes LLM consent is real, undocumented behavior, noted
+      as doc-drift material.)
+    milestone:
+      - dashboard-analyze-llm-confirm-appears-before-any-model-call
+      - dashboard-analyze-llm-confirm-shows-files-rules-and-tokens
+  - driver: web
+    click:
+      role: button
+      name: Run LLM rules
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Analyzing\.\.\.)(?=[\s\S]*Parsing repository)[\s\S]*$'
+    note: >-
+      The approving answer, and the run it starts. The card that appears at the bottom of
+      the screen is the observation for both claims: choosing Run LLM rules PROCEEDED
+      (something is running that was not running a moment ago), and the run's progress
+      is reported in a card at the foot of the page. That the completed analysis records
+      model-detected findings is read further down, off the store, where it can be told
+      apart from the deterministic ones.
+    milestone:
+      - dashboard-analyze-run-llm-rules-proceeds
+      - dashboard-analyze-progress-card-sits-at-the-bottom
+  - driver: web
+    timeoutMs: 900000
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Parsing repository)(?=[\s\S]*\d+ services, \d+ files)(?=[\s\S]*checks)(?=[\s\S]*(Reading \d+/\d+ files|LLM \d+/\d+|Deterministic checks done))[\s\S]*$'
+    note: >-
+      The card, read for the two things it promises about itself. It LISTS the run's
+      steps by name and ticks them off: the tick itself is an icon with no text, so what
+      stands in for it is the completed step's own summary — `Parsing repository` keeps
+      the count of services and files it found once it is done, which a pending step
+      never has. And the step currently running carries a DETAIL line, matched as any one
+      of the three the phases produce (files being read, model calls done out of total,
+      or the deterministic sweep finishing). The step waits rather than sleeps: it holds
+      until that state is on screen.
+    milestone:
+      - dashboard-analyze-progress-card-ticks-off-steps
+      - dashboard-analyze-progress-card-details-the-active-step
+  - run:
+      - list
+    cwd: sample-app
+    expect:
+      exit: 0
+      files:
+        sample-app/.truecourse/logs/analyze.log:
+          exists: true
+    note: >-
+      Asked while the run is still in flight, and deliberately with a command that
+      analyzes nothing: `list` only reads. The file assertion is therefore about the
+      DASHBOARD's run — the log did not exist when the scenario began (the first step
+      asserted its absence) and no analyze has been started from this shell, so the only
+      thing that can have written it is the run the button started.
+    milestone:
+      - dashboard-analyze-logs-written-to-analyze-log
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      output:
+        matches: Another analyze is already running
+      files:
+        sample-app/.truecourse/.analyze.lock:
+          exists: true
+    note: >-
+      What "in the dashboard server's own process" can be observed as, and the note says
+      exactly how far it goes. While the button's run is in flight the repository's
+      analyze lock is HELD — the lock file is on disk and a second analyze started from
+      the shell is refused by it — so the work is happening inside a process that took
+      that lock, and it is not this shell's. What no step can add is the process
+      inventory the claim's fuller reading wants (no separate analyze process exists):
+      the sandbox runs the entrypoint and git, and nothing else, so a host process list
+      is outside the vocabulary. Filed as a gap.
+    milestone:
+      - dashboard-analyze-runs-in-the-dashboard-server-process
+  - driver: web
+    click:
+      role: button
+      name: Graphs
+      exact: true
+    expect:
+      url:
+        contains: tab=graphs
+      text:
+        contains: Analyzing...
+    note: >-
+      The run is still going, and the walk changes tab underneath it. The card is still
+      on screen on a tab that is not the one it started on, which is the whole content of
+      "stays visible on any tab".
+    milestone:
+      - dashboard-analyze-progress-card-follows-you-across-tabs
+  - driver: web
+    click:
+      role: button
+      name: Home
+      exact: true
+    timeoutMs: 1800000
+    expect:
+      text:
+        matches: '^(?![\s\S]*Analyzing\.\.\.)(?=[\s\S]*Dynamic code evaluation)(?=[\s\S]*Violation Trend)[\s\S]*$'
+    note: >-
+      Completion, read without a reload — no navigation happened in this scenario since
+      the run began, only tab moves inside the same page. The card is gone and the views
+      carry the new run's data: findings in the list and the analytics panels beside
+      them, where a moment ago this repository had no analysis at all.
+    milestone:
+      - dashboard-analyze-views-refresh-in-place-on-completion
+  - request:
+      method: GET
+      path: /api/repos/sample-app/violations?limit=200
+    capture:
+      dashTotal: total
+    expect:
+      status: 200
+      body:
+        matches: 'src/dirty\.js'
+      json:
+        total:
+          compare:
+            atLeast: 1
+    note: >-
+      The answer to "Don't stash — analyze working tree as-is", read as data rather than
+      as words: the stored run contains a finding in `src/dirty.js`, a file that exists
+      only in the uncommitted edit and is in no commit of this repository. Had the run
+      been stashed to the committed state, that file would not have been analyzed at all.
+      The total is captured here for the cross-check further down.
+    milestone:
+      - dashboard-analyze-no-stash-option-analyzes-the-tree-as-is
+  - request:
+      method: GET
+      path: /api/repos/sample-app/analyses
+    expect:
+      status: 200
+      json:
+        '[0].provider':
+          equals: claude-code
+    note: >-
+      Which model reached the run, taken off the run itself. The transport was chosen
+      once, at the first-run question in step one, and saved globally; the run the button
+      started records that same selection as its provider. The dashboard chose nothing.
+    milestone:
+      - dashboard-analyze-uses-the-saved-llm-transport
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      stdout:
+        matches: '\d+ violations \('
+        compare:
+          number: '(\d+) violations \('
+          atMost: '${captured:dashTotal}'
+    note: >-
+      The cross-check the claim asks for: the same analysis, run from the command line
+      over the same working tree, and its findings sit inside what the button produced —
+      the deterministic sweep alone cannot exceed the button's run, which did the same
+      sweep and the model rules on top. Exact equality is not the assertion because the
+      button's run carries LLM findings the `--no-llm` run never looks for; what would
+      fail it is a CLI run finding MORE than the dashboard did, which is what a different
+      analysis would look like.
+    milestone:
+      - dashboard-analyze-button-runs-the-same-analysis-as-the-cli
+  - run:
+      - config
+      - llm
+      - show
+    cwd: sample-app
+    expect:
+      exit: 0
+      output:
+        matches: '^(?=[\s\S]*transport\s+claude-code \(config file\))(?![\s\S]*No API configuration saved)[\s\S]*$'
+    note: >-
+      The negative half of the transport promise, asked after everything above. The saved
+      selection still reads exactly as the first-run answer left it — the same transport,
+      still sourced from the config file rather than from anything this run wrote — and
+      no credential block has appeared beside it. A dashboard that had written to the
+      global config would have to show it here, since this command is the only public
+      reading of that file.
+    milestone:
+      - dashboard-analyze-never-edits-credentials

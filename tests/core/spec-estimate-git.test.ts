@@ -30,6 +30,9 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 const { estimateScanTokens } = await import('../../packages/core/src/services/llm/spec-estimate.js');
 const { discoverDocs } = await import('../../packages/spec-consolidator/src/index.js');
+const { CURATE_DOC_SESSION_KIND } = await import(
+  '../../packages/core/src/services/spec-scan/curate-doc.js'
+);
 
 const DOCS = ['users', 'auth', 'billing'];
 
@@ -58,7 +61,9 @@ describe('scan estimate — git independence', () => {
 
     expect(spawned).toEqual([]);
     expect(est.subjectLabel).toBe('3 docs');
-    expect(est.stages!.find((s) => s.stage === 'relevance')!.calls).toBe(DOCS.length);
+    // One curate-doc SESSION per doc — the stage's low bound is the item count.
+    const curate = est.stages!.find((s) => s.stage === CURATE_DOC_SESSION_KIND)!;
+    expect(curate.callsRange!.low).toBe(DOCS.length);
 
     // Control: the run's own discovery DOES pay it — one `git log` per doc — which
     // is precisely the work the estimate skips, over the same doc list.

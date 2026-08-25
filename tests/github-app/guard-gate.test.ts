@@ -12,8 +12,7 @@ import {
 } from '../../ee/packages/github-app/src/index';
 import {
   dismissedClaimKey,
-  GUARD_FORMAT_VERSION,
-  type GuardOutcome,
+    type GuardOutcome,
   type GuardScenarioResult,
 } from '@truecourse/shared';
 import type { GuardExecReport } from '@truecourse/guard-runner';
@@ -45,7 +44,6 @@ function okReport(scenarios: GuardScenarioResult[]): GuardExecReport {
         branch: null,
         commit: 'headsha',
         recipeFingerprint: 'sha256:recipe',
-        scenarioFormat: GUARD_FORMAT_VERSION,
       },
       summary,
       scenarios,

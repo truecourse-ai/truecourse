@@ -19,7 +19,8 @@
 import { z } from 'zod'
 import {
   GuardSetupSchema,
-  GuardStepSchema,
+  GuardStepObjectSchema,
+  promptKeysNeedATerminal,
   GuardApiStepSchema,
   GuardNormalizerSchema,
   GuardTestabilityVerdictSchema,
@@ -41,10 +42,11 @@ export const CLAIM_DRIVERS = guardDriverIds
 /**
  * The api half of a recipe proposal — how to START the HTTP server under test.
  * A deliberate SUBSET of the runner's `RecipeApiSchema`: the model proposes only
- * what it can read off the repo (the serve argv and a health path). Credentials,
- * seed, and services are never model-proposed — they carry secrets and repo
- * orchestration, and the deterministic proposer writes them into `recipe.json`
- * directly.
+ * what it can read off the repo — the serve argv, a health path, and the
+ * datastore bring-up the repo itself ships (`services`: the compose-in-build
+ * refusal points here, so the field must be proposable — documenso 2026-08-20,
+ * where the schema gap killed an obedient session as "malformed"). Credentials
+ * and seed are never model-proposed — they carry secrets.
  */
 export const RecipeApiServerProposalSchema = z
   .object({
@@ -56,6 +58,14 @@ export const RecipeApiServerProposalSchema = z
     env: z.record(z.string(), z.string()).optional(),
     /** Repo-relative dir of the workspace package this service serves (`apps/api/v2`). */
     app: z.string().min(1).optional(),
+    /**
+     * Boot in the repo root instead of the throwaway sandbox — REQUIRED for any
+     * workspace-mediated serve (`yarn workspace …`, `npm run -w …`), which dies
+     * outside the workspace root. Mirrors the runner's `cwd`; without it the
+     * 2026-08-20 cal.diy session could not express a bootable serve at all and
+     * burned its budget on `--cwd` argv hacks.
+     */
+    cwd: z.literal('repo').optional(),
   })
   .strict()
 export type RecipeApiServerProposal = z.infer<typeof RecipeApiServerProposalSchema>
@@ -68,6 +78,19 @@ export const RecipeApiProposalSchema = z
     healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
     /** Extra env for the server process; values may carry `${PORT}`. */
     env: z.record(z.string(), z.string()).optional(),
+    /** Boot in the repo root — required for a workspace-mediated serve. */
+    cwd: z.literal('repo').optional(),
+    /** Repo-relative dir of the workspace package the single serve drives. */
+    app: z.string().min(1).optional(),
+    /**
+     * The datastore bring-up the repo ships (`docker compose … up`) and its
+     * teardown — world SETUP, owned by the runner's lifecycle, which is exactly
+     * why it may not hide inside `build`. Shared across every declared server.
+     */
+    services: z
+      .object({ up: z.string().min(1), down: z.string().min(1).optional() })
+      .strict()
+      .optional(),
     /**
      * The multi-service shape: one named entry per HTTP service the
      * workspace ships. A monorepo with a web app AND an api service must declare
@@ -126,6 +149,17 @@ export const RecipeProposalSchema = z
       .optional(),
     env: z.record(z.string(), z.string()).optional(),
     api: RecipeApiProposalSchema.optional(),
+    /**
+     * The product's OWN hostnames (`cal.com`, `api.cal.com`) — what keeps
+     * detection from minting the app itself as a third-party external service.
+     * Never a proposal-schema afterthought: without it every recipe the
+     * fallback lands leaves detection reporting the app's own domains as
+     * externals (cal.diy 2026-08-21: 81 detected services under a recipe with
+     * no ownHosts). Hostnames only, no scheme, no path.
+     */
+    ownHosts: z
+      .array(z.string().min(1).regex(/^[\w.-]+$/, 'a bare hostname — no scheme, no path'))
+      .optional(),
   })
   .strict()
   .refine((r) => r.entry !== undefined || r.api !== undefined, {
@@ -249,15 +283,37 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
  * One scenario as the model authors it: the behavioral fields only. `id`,
  * `binds`, and `guard` are engine-owned, so we tolerate (and ignore) whatever the
  * model wrote for them via `.passthrough()`. One schema per runnable driver —
- * each authoring prompt embeds ITS driver's schema, and the parse accepts either
- * (keyed on `driver`) so a batch can never smuggle a step vocabulary across drivers.
+ * each authoring prompt embeds ITS driver's schema, and the engine knows which
+ * surface it asked for, so the reply never declares one.
  */
+/**
+ * The runner's `run` step, minus the one argv form a MODEL can never write: the
+ * omittable pair, which exists to drop a flag whose value comes from a
+ * declared-optional registration field. Authoring never sees the dependency
+ * catalog and never emits a `${supplied:…}` token, so the pair could only ever be
+ * wrong here — and offering a vocabulary that cannot be used correctly costs every
+ * authoring call the prompt bytes and buys nothing. Everything else is the runner's
+ * own schema, so an authored step still cannot drift from what executes it.
+ *
+ * THE `run` STEP AND NOTHING ELSE. The cli driver executes five step kinds; a model
+ * authors one. `git`, `write`, `delete` and — since 2026-08-09 — `patch` are the
+ * REFERENCE corpus's vocabulary, hand-authored by someone who knows the subject's
+ * files; a generated scenario states the world it needs in `setup` and then only
+ * runs the program. Widening this is the Generate workstream's call to make
+ * deliberately, and it is never free: this schema IS the prompt's canonical scenario
+ * schema, so anything added here rolls `GENERATE_PROMPT_FINGERPRINT` and re-authors
+ * every cli flow in the corpus. A runner-side step kind must therefore be added to
+ * the runner's union WITHOUT touching this one, which is what `patch` did.
+ */
+const AuthoredCliStepSchema = GuardStepObjectSchema.extend({ run: z.array(z.string()) }).superRefine(
+  promptKeysNeedATerminal,
+)
+
 export const RawGeneratedCliScenarioSchema = z
   .object({
     title: z.string().min(1),
-    driver: z.literal('cli'),
     setup: GuardSetupSchema.optional(),
-    steps: z.array(GuardStepSchema).min(1),
+    steps: z.array(AuthoredCliStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
   })
   .passthrough()
@@ -266,7 +322,6 @@ export type RawGeneratedCliScenario = z.infer<typeof RawGeneratedCliScenarioSche
 export const RawGeneratedApiScenarioSchema = z
   .object({
     title: z.string().min(1),
-    driver: z.literal('api'),
     setup: GuardSetupSchema.optional(),
     steps: z.array(GuardApiStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
@@ -274,7 +329,15 @@ export const RawGeneratedApiScenarioSchema = z
   .passthrough()
 export type RawGeneratedApiScenario = z.infer<typeof RawGeneratedApiScenarioSchema>
 
-export const RawGeneratedScenarioSchema = z.discriminatedUnion('driver', [
+/**
+ * A scenario as authored, whichever surface the call was for. The arms are keyed by
+ * their STEP VOCABULARY, not by a declared driver: an authored cli step always
+ * carries `run`, an api step never does, so the union resolves without a
+ * discriminator (and each authoring call parses against its own arm anyway — the
+ * prompt and the schema follow the same `ctx.driver`, so a batch cannot smuggle one
+ * driver's vocabulary into another's).
+ */
+export const RawGeneratedScenarioSchema = z.union([
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
 ])
@@ -404,6 +467,23 @@ export const FlowSynthesisSchema = z
 export type FlowSynthesis = z.infer<typeof FlowSynthesisSchema>
 
 /**
+ * The flow-synthesis SESSION outcome (`guard-generate.flows`, plan 04 step 16) —
+ * the same {flows, noFlowClaims} pair as {@link FlowSynthesisSchema}, but
+ * `.strict()` with BOTH arrays required: the agent loop's outcome gate re-asks
+ * on a malformed reply, so the one-shot schema's omission tolerance would only
+ * hide a drifting model. It doubles as the `check_flows` tool's input schema —
+ * the validator-as-tool pattern, where the draft a session checks IS the
+ * outcome it will produce.
+ */
+export const FlowSetSchema = z
+  .object({
+    flows: z.array(SynthesizedFlowSchema),
+    noFlowClaims: z.array(SynthesizedNoFlowClaimSchema),
+  })
+  .strict()
+export type FlowSet = z.infer<typeof FlowSetSchema>
+
+/**
  * One epic flow: a cross-area path that CHAINS flows the per-area pass already
  * produced. `composedOf` carries the digest refs of the chained flows (the engine
  * rewrites them to flow ids); every milestone must be one of those flows'
@@ -429,21 +509,21 @@ export type EpicSynthesis = z.infer<typeof EpicSynthesisSchema>
 // Realization matching (one call per flow × surface)
 // ---------------------------------------------------------------------------
 
-/** One step of a realization plan: the journey that realizes a milestone. */
+/** One step of a realization plan: the interface that realizes a milestone. */
 export const RealizationStepSchema = z.object({
-  /** A journey id copied verbatim from the surface's catalog digest. */
-  journeyId: z.string().min(1),
-  /** The flow milestone (`order`) this journey realizes. */
+  /** An interface id copied verbatim from the surface's catalog digest. */
+  interfaceId: z.string().min(1),
+  /** The flow milestone (`order`) this interface realizes. */
   milestone: z.number().int().positive(),
-  /** Optional one-liner on how the journey serves the milestone. */
+  /** Optional one-liner on how the interface serves the milestone. */
   note: z.string().optional(),
 })
 export type RealizationStep = z.infer<typeof RealizationStepSchema>
 
 /**
  * One flow's realization verdict on ONE surface: an ordered `plan` walking its
- * milestones through the surface's journeys, or an explicit `unrealizable` reason
- * (no journey path serves the flow). Exactly one of the two — a reply carrying
+ * milestones through the surface's interfaces, or an explicit `unrealizable` reason
+ * (no interface path serves the flow). Exactly one of the two — a reply carrying
  * both, or neither, is malformed and earns the corrective re-ask, so "this surface
  * cannot do it" is always a STATED answer rather than an empty plan.
  */

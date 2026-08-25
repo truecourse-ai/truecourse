@@ -1,0 +1,183 @@
+{
+  "ranAt": "2026-08-07T04:12:00.000Z",
+  "status": "ok",
+  "recipe": {
+    "status": "ok",
+    "outcome": "exists"
+  },
+  "externals": {
+    "status": "skipped",
+    "reason": "the recipe has no `api` block \u2014 external services configure the api driver",
+    "declared": [],
+    "alreadyDeclared": [],
+    "undeclarable": [],
+    "unprovided": []
+  },
+  "seed": {
+    "status": "skipped",
+    "reason": "the recipe has no `api` block \u2014 a seed prepares state for the api driver"
+  },
+  "detection": {
+    "externalServices": [
+      {
+        "service": "anthropic",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "importSource": "@ai-sdk/anthropic"
+          }
+        ]
+      },
+      {
+        "service": "openai",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "importSource": "@ai-sdk/openai"
+          }
+        ]
+      },
+      {
+        "service": "aws-bedrock",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "importSource": "@ai-sdk/amazon-bedrock"
+          }
+        ]
+      },
+      {
+        "service": "githubcopilot",
+        "source": "http",
+        "evidence": [
+          {
+            "filePath": "packages/llm-api/src/model.ts",
+            "url": "https://api.githubcopilot.com"
+          }
+        ]
+      },
+      {
+        "service": "openrouter",
+        "source": "http",
+        "evidence": [
+          {
+            "filePath": "packages/core/src/services/llm/model-prices.ts",
+            "url": "https://openrouter.ai/api/v1/models"
+          }
+        ]
+      },
+      {
+        "service": "posthog",
+        "source": "sdk",
+        "evidence": [
+          {
+            "filePath": "packages/core/src/services/telemetry.service.ts",
+            "importSource": "posthog-node"
+          }
+        ]
+      },
+      {
+        "service": "claude",
+        "source": "binary",
+        "evidence": [
+          {
+            "filePath": "packages/shared/src/claude-binary.ts",
+            "binary": "claude",
+            "resolvedFrom": [
+              "CLAUDE_CODE_BINARY",
+              "CLAUDE_CODE_BIN",
+              "PATH"
+            ]
+          },
+          {
+            "filePath": "packages/shared/src/llm/transport.ts",
+            "binary": "claude"
+          },
+          {
+            "filePath": "packages/core/src/services/llm/cli-provider.ts",
+            "binary": "claude"
+          },
+          {
+            "filePath": "packages/core/src/lib/cli-binary.ts",
+            "binary": "claude"
+          }
+        ]
+      },
+      {
+        "service": "git",
+        "source": "binary",
+        "evidence": [
+          {
+            "filePath": "packages/analyzer/src/file-discovery.ts",
+            "binary": "git"
+          },
+          {
+            "filePath": "packages/core/src/lib/git.ts",
+            "binary": "git"
+          },
+          {
+            "filePath": "packages/spec-consolidator/src/discovery.ts",
+            "binary": "git"
+          },
+          {
+            "filePath": "packages/guard-runner/src/capabilities/git.ts",
+            "binary": "git"
+          },
+          {
+            "filePath": "tools/cli/src/commands/hooks.ts",
+            "binary": "git"
+          }
+        ]
+      },
+      {
+        "service": "pyright",
+        "source": "binary",
+        "evidence": [
+          {
+            "filePath": "packages/analyzer/src/lsp-servers/pyright.ts",
+            "binary": "pyright-langserver",
+            "resolvedFrom": [
+              "node_modules/.bin (nearest, walking up)",
+              "PATH"
+            ]
+          },
+          {
+            "filePath": "packages/analyzer/src/lsp-client.ts",
+            "binary": "pyright-langserver"
+          },
+          {
+            "filePath": "packages/analyzer/src/lsp-servers/registry.ts",
+            "binary": "pyright-langserver"
+          },
+          {
+            "filePath": "packages/core/src/services/analyzer.service.ts",
+            "binary": "pyright-langserver"
+          }
+        ]
+      },
+      {
+        "service": "dotnet",
+        "source": "binary",
+        "evidence": [
+          {
+            "filePath": "packages/analyzer/src/roslyn-host-client.ts",
+            "binary": "dotnet",
+            "resolvedFrom": [
+              "TRUECOURSE_ROSLYN_HOST",
+              "PATH"
+            ]
+          },
+          {
+            "filePath": "packages/core/src/services/violation-pipeline.service.ts",
+            "binary": "dotnet"
+          }
+        ]
+      }
+    ],
+    "database": null,
+    "datastoreUrls": []
+  }
+}

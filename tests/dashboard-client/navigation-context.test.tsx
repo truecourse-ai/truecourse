@@ -36,6 +36,7 @@ function Probe() {
       <button onClick={() => setSection('codequality')}>to-analysis</button>
       <button onClick={() => setLeftTab('files')}>tab-files</button>
       <button onClick={() => setLeftTab('home')}>tab-home</button>
+      <button onClick={() => setLeftTab('coverage')}>tab-coverage</button>
     </div>
   );
 }
@@ -51,10 +52,10 @@ function renderAt(initialUrl: string) {
 }
 
 describe('NavigationContext — initial state from URL', () => {
-  it('defaults to codequality/home with no params', () => {
+  it('defaults to guard/coverage with no params — Spec Guard is the landing lens', () => {
     renderAt('/repos/abc');
-    expect(screen.getByTestId('section')).toHaveTextContent('codequality');
-    expect(screen.getByTestId('tab')).toHaveTextContent('home');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
   });
 
   it('reads an explicit ?tab', () => {
@@ -118,18 +119,24 @@ describe('NavigationContext — guard section routing', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
   });
 
-  it('a ?gtest=<test> deep link opens guard/tests — a test has exactly one home', () => {
-    renderAt('/repos/abc?gtest=task-lifecycle.cli.1');
-    expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('tests');
-  });
+  // The retired TEST addresses are not addresses any more: a test has no id the URL
+  // knows, so nothing here resolves one. An old link the app itself wrote
+  // (`?section=guard&tab=guardflows&gtest=…`) still lands on the Flows tab — its
+  // own params say so — with nothing selected; a bare test param implies nothing.
+  for (const url of ['?gtest=task-lifecycle.cli.1', '?gscn=a1', '?tab=tests']) {
+    it(`the retired ${url} implies no guard tab at all`, () => {
+      renderAt(`/repos/abc${url}`);
+      // The retired params resolve nothing, so the URL falls through to the
+      // bare-repo default (guard/coverage) rather than any specific guard tab.
+      expect(screen.getByTestId('section')).toHaveTextContent('guard');
+      expect(screen.getByTestId('tab')).not.toHaveTextContent('guardflows');
+    });
+  }
 
-  it('the legacy ?gscn=<scenario> deep link resolves to the Tests tab too', () => {
-    // It used to open inside a flow; the same artifact now lives on Tests, so old
-    // links land on the destination rather than 404-ing into an overview.
-    renderAt('/repos/abc?gscn=a1');
+  it('an old test link that names the Flows tab still lands there, with nothing selected', () => {
+    renderAt('/repos/abc?section=guard&tab=guardflows&gtest=task-lifecycle.cli.1');
     expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('tests');
+    expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
   });
 
   it('a ?gflow=<flow> deep link opens guard/flows', () => {
@@ -144,10 +151,18 @@ describe('NavigationContext — guard section routing', () => {
     expect(screen.getByTestId('tab')).toHaveTextContent('guardflows');
   });
 
-  it('a ?gjourney=<journey> deep link opens guard/journeys', () => {
+  it('a ?ginterface=<interface> deep link opens guard/interfaces', () => {
+    renderAt('/repos/abc?ginterface=cli%2Ftasks-add');
+    expect(screen.getByTestId('section')).toHaveTextContent('guard');
+    expect(screen.getByTestId('tab')).toHaveTextContent('interfaces');
+  });
+
+  // The param was `?gjourney=` before the INTERFACE rename (2026-08-10); a
+  // bookmark from then still has to land on the tab it named.
+  it('a retired ?gjourney=<interface> deep link opens guard/interfaces too', () => {
     renderAt('/repos/abc?gjourney=cli%2Ftasks-add');
     expect(screen.getByTestId('section')).toHaveTextContent('guard');
-    expect(screen.getByTestId('tab')).toHaveTextContent('journeys');
+    expect(screen.getByTestId('tab')).toHaveTextContent('interfaces');
   });
 
   // The retired Guard Spec tab (merged into Coverage) — old links must still land.
@@ -226,12 +241,21 @@ describe('NavigationContext — setters write the URL', () => {
     expect(screen.getByTestId('search').textContent ?? '').toContain('tab=files');
   });
 
-  it('setLeftTab(home) strips the ?tab param', async () => {
+  it('setLeftTab(home) writes ?tab=home — the bare URL means guard/coverage now', async () => {
     const user = userEvent.setup();
     renderAt('/repos/abc?tab=files');
     await user.click(screen.getByText('tab-home'));
 
     expect(screen.getByTestId('tab')).toHaveTextContent('home');
+    expect(screen.getByTestId('search').textContent ?? '').toContain('tab=home');
+  });
+
+  it('setLeftTab(coverage) strips the ?tab param — coverage IS the bare landing', async () => {
+    const user = userEvent.setup();
+    renderAt('/repos/abc?tab=guardflows');
+    await user.click(screen.getByText('tab-coverage'));
+
+    expect(screen.getByTestId('tab')).toHaveTextContent('coverage');
     expect(screen.getByTestId('search').textContent ?? '').not.toContain('tab=');
   });
 });

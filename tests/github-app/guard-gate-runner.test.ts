@@ -56,11 +56,9 @@ const RECIPE: Recipe = { build: 'npm run build', entry: ['node', 'cli.js'] };
 
 function scenario(id: string, section = 'intro'): GuardScenario {
   return {
-    guard: 2,
     id,
     title: `t-${id}`,
     binds: [{ doc: 'README.md', section, fingerprint: 'sha256:f' }],
-    driver: 'cli',
     steps: [{ run: ['--help'], expect: { exit: 0 } }],
     normalize: [],
   };
@@ -95,7 +93,6 @@ function latestOf(
       branch: 'main',
       commit,
       recipeFingerprint: 'sha256:r',
-      scenarioFormat: 2,
     },
     summary,
     scenarios,
@@ -603,7 +600,6 @@ describe('guard-gate pipeline — corpus-absent neutral', () => {
 
 describe('guard-gate pipeline — default corpus load (store-backed)', () => {
   const SCENARIO_YAML = [
-    'guard: 2',
     'id: s1',
     'title: t-s1',
     'binds:',
@@ -1068,7 +1064,6 @@ describe('guard-gate pipeline — force re-gate (spec-change checkbox)', () => {
 
 describe('guard-gate pipeline — a force (spec-regen) run must not poison the redelivery fast path', () => {
   const SCENARIO_YAML = [
-    'guard: 2',
     'id: s1',
     'title: t-s1',
     'binds:',

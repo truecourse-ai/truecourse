@@ -45,12 +45,16 @@ const TAB_SCOPED_PARAMS = [
   'gsec',
   'gconf',
   'gdrift',
-  'gscn',
-  'gtest',
   'gflow',
   'gfind',
+  'ginterface',
   'gjourney',
+  'gplace',
+  'gclaim',
   'gview',
+  // Activity tab: the selected agent-sessions run + session.
+  'run',
+  'ses',
 ];
 
 /** Map the retired `?gview` sub-view onto the Guard section's tabs. */
@@ -81,19 +85,26 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   // Retired: the Guard Spec tab merged into Coverage (which absorbed the spec
   // surface) — re-point old `?tab=guardspec` links at it.
   if (tabParam === 'guardspec') return 'coverage';
+  // Retired: the Claims tab folded into Coverage — a claim is read inside the
+  // section that states it, so an old `?tab=guardclaims` link lands on the doc
+  // surface that now carries them.
+  if (tabParam === 'guardclaims') return 'coverage';
   if (searchParams?.get('flow')) return 'flows';
   if (searchParams?.get('file')) return 'files';
   // A Guard doc deep-link (`?guard=<doc>`) or conflict deep-link (`?gconf=`) implies
   // the Guard coverage tab.
   if (searchParams?.get('guard') || searchParams?.get('gconf')) return 'coverage';
-  // A TEST deep-link (`?gtest=`) implies the Tests tab — the one standalone test
-  // destination. The legacy `?gscn=` (a test reached through its flow, back when
-  // there was no Tests tab) points at the same place.
-  if (searchParams?.get('gtest') || searchParams?.get('gscn')) return 'tests';
   // A Guard flow (`?gflow=`) or finding (`?gfind=`) deep-link implies the Flows tab.
   if (searchParams?.get('gflow') || searchParams?.get('gfind')) return 'guardflows';
-  // A journey deep-link (`?gjourney=<id>`) implies the Journeys tab.
-  if (searchParams?.get('gjourney')) return 'journeys';
+  // A place (`?gplace=<surface>:<id>`, the tab's own selection since the page-object
+  // redesign) or an interface deep-link (`?ginterface=<id>`) implies the Interfaces
+  // tab. The pre-rename `?gjourney=` spelling is still honoured so old bookmarks land.
+  if (searchParams?.get('gplace') || searchParams?.get('ginterface') || searchParams?.get('gjourney')) {
+    return 'interfaces';
+  }
+  // A claim deep-link (`?gclaim=<id>`) implies Coverage: a claim's one home is the
+  // section that states it, and the coverage page resolves the id to that section.
+  if (searchParams?.get('gclaim')) return 'coverage';
   return null;
 }
 
@@ -102,9 +113,10 @@ function resolveSection(searchParams: URLSearchParams | null): DashboardSection 
   if (explicit === 'guard' || explicit === 'codequality') {
     return explicit;
   }
-  // No explicit section: infer it from whichever tab the URL implies.
+  // No explicit section: infer it from whichever tab the URL implies. A bare
+  // repo URL lands on Spec Guard — the product's primary lens.
   const tab = tabFromParams(searchParams);
-  return (tab && sectionForTab(tab)) || 'codequality';
+  return (tab && sectionForTab(tab)) || 'guard';
 }
 
 /**
@@ -164,13 +176,17 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
     (tab: LeftTab | null) => {
       setLeftTabState(tab);
       const url = new URL(window.location.href);
-      if (tab && tab !== 'home') {
+      if (tab && tab !== 'home' && tab !== 'coverage') {
         url.searchParams.set('tab', tab);
       } else {
-        // Home is the default landing; strip tab-scoped params so the
-        // URL shortens to /repos/:id. `view=diff` is page-level and is
+        // The two landing tabs reset their section to a clean slate: strip the
+        // tab-scoped params (a stale `?file` must not leak into Home). Coverage
+        // is the bare-URL landing (Spec Guard's default) so it strips `tab`
+        // too; Home still needs its address written, since a bare /repos/:id
+        // means guard/coverage now. `view=diff` is page-level and is
         // intentionally preserved.
         for (const key of TAB_SCOPED_PARAMS) url.searchParams.delete(key);
+        if (tab === 'home') url.searchParams.set('tab', 'home');
       }
       navigate(url.pathname + url.search);
     },

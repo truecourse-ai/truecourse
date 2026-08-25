@@ -45,6 +45,21 @@ describe('executeStep', () => {
     expect(cap.stdout).toBe('QUIET PLEASE\n')
   })
 
+  it('refuses prompt-keyed answers on a step with no terminal', async () => {
+    // The schema rejects this pairing before a run, so reaching it means options
+    // built by hand: a pipe is never asked a question, and the answers are not
+    // bytes to push into one.
+    const cap = await executeStep({
+      argv: ['node', FIXTURE_BIN, 'shout'],
+      cwd,
+      env: baseEnv,
+      stdin: [{ marker: 'Publish?', answer: 'y' }],
+    })
+    expect(cap.spawnError).toContain('typed at a terminal')
+    expect(cap.exitCode).toBeNull()
+    expect(cap.stdout).toBe('')
+  })
+
   it('enforces the per-step timeout (kills a hanging process)', async () => {
     const cap = await executeStep({
       argv: ['node', FIXTURE_BIN, 'hang'],
@@ -277,6 +292,41 @@ describe('executeStep — a process that outlives the step', () => {
     // The group kill reaches an orphan that is still writing, too.
     expect(await waitGone(helperPid(cap.stdout))).toBe(true)
   }, 20_000)
+})
+
+describe('executeStep — a held command (`until`)', () => {
+  // Each stream carries its own watch: a stderr chunk landing between two stdout
+  // chunks must not split the marker forever (one shared buffer did exactly that).
+  it('sees a marker split across stdout chunks even when stderr interleaves', async () => {
+    const SPLIT_READY = [
+      "process.stdout.write('listening ')",
+      "setTimeout(() => { process.stderr.write('warn: noisy\\n');" +
+        " setTimeout(() => { process.stdout.write('on port 3000\\n'); setInterval(() => {}, 1000) }, 80) }, 80)",
+    ].join(';')
+
+    const cap = await executeStep({
+      argv: ['node', '-e', SPLIT_READY],
+      cwd,
+      env: baseEnv,
+      until: 'listening on',
+      timeoutMs: 8_000,
+    })
+    expect(cap.endedAtMarker).toBe('listening on')
+    expect(cap.unseenMarker).toBeUndefined()
+    expect(cap.timedOut).toBe(false)
+  })
+
+  it('finds the ready line on stderr too', async () => {
+    const STDERR_READY = "process.stderr.write('listening on 4000\\n'); setInterval(() => {}, 1000)"
+    const cap = await executeStep({
+      argv: ['node', '-e', STDERR_READY],
+      cwd,
+      env: baseEnv,
+      until: 'listening on',
+      timeoutMs: 8_000,
+    })
+    expect(cap.endedAtMarker).toBe('listening on')
+  })
 })
 
 describe('executeStep — abort signal', () => {

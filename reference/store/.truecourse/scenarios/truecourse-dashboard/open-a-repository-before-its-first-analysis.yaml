@@ -1,0 +1,242 @@
+id: open-a-repository-before-its-first-analysis
+title: A developer opens a repository that has never been analyzed and finds every empty state
+promise: >-
+  A developer opens the dashboard on a repository that has never been analyzed, adds it,
+  and finds the empty states of every tab.
+flow:
+  id: open-a-repository-before-its-first-analysis
+  fingerprint: sha256:64670c3a0057b92b011fbabffb103e9591a0f61e7b5106639162122a0b5f6c27
+interface:
+  path:
+    - web/open-dashboard-home
+    - cli/add
+    - web/open-an-unanalyzed-repository
+    - web/open-the-graphs-tab
+    - web/open-the-flows-tab
+    - web/open-the-databases-tab
+    - web/open-a-file-in-the-code-viewer
+    - cli/analyze
+  fingerprints:
+    - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b
+    - sha256:a8f319bb14ef3182f51fa57b6ce896ee8fe0b6fedbc3591efe3921ff3d842c8f
+    - sha256:683da4b398098a8228b7f2f166b2bf38d2faaa253faa2ec369ead343a0371740
+    - sha256:651814ae697b721770a6f2abb7de2574ded29a89e72364e5ccdc9c4a3c07b083
+    - sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: starting-and-stopping
+    fingerprint: sha256:36db114b36152f2a4b2a916a40d68c61991646e449de6bdb048dab23f6c0b2a2
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: the-repository-list
+    fingerprint: sha256:f89f5d9052a1631481a9daf667a84c75b10a1113ef5ad3dfdc98b9792c029e09
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: before-the-first-analysis
+    fingerprint: sha256:28003188abb7f8d72b07c84be3f5cc91242dac5cbe184e4608a1a69d76609143
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    sample-app/src/index.js: |
+      export function main(input) {
+        console.log('starting')
+        return input
+      }
+    sample-app/src/unsafe.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/index.js
+          - src/unsafe.js
+        message: seed the sample app
+normalize: []
+steps:
+  - driver: web
+    navigate: /
+    expect:
+      url:
+        equals: /
+      text:
+        matches: '^(?=[\s\S]*No repositories yet)(?![\s\S]*sample-app)[\s\S]*$'
+    note: >-
+      The entry condition, observed as the page the browser is on. The seeded project has
+      no `.truecourse/` directory at or above it and no registry entry, so there is no
+      repository page for it to open — what the browser gets is the repository LIST, and
+      the list is empty. The negative on the project name is the load-bearing half: a
+      list already carrying this repository would make every later empty-state step pass
+      for the wrong reason. DEVIATION, stated plainly: the doc's sentence is about where
+      `truecourse dashboard` sends the browser, and that command holds the terminal in
+      console mode with no way to hand control back to the scenario, so the observation
+      here is the surface's own answer for a directory with no store rather than the
+      command's redirect.
+    milestone:
+      - dashboard-overview-without-a-truecourse-dir-opens-the-repository-list
+  - run:
+      - add
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      files:
+        sample-app/.truecourse/.gitignore:
+          exists: true
+    note: >-
+      The command the doc names as one of the two that create the store directory, run
+      from the project directory. The assertion is the directory on disk — the
+      `.gitignore` the store writes at first creation is a file only that creation
+      produces — which is the claim in the terms the doc states it in. What the same
+      command did to the front page is the next step's business.
+    milestone:
+      - dashboard-overview-add-or-analyze-creates-the-truecourse-dir
+  - driver: web
+    navigate: /
+    expect:
+      visible:
+        role: heading
+        name: sample-app
+      text:
+        contains: ${sandbox}/sample-app
+    note: >-
+      The front page, re-read after the add. Three promises land on this one page state:
+      the project that was NOT on the list a moment ago now has a card (which is what
+      `npx truecourse add` promises), the list is the registered repositories (this is
+      the only registered one, and it is there), and the card carries the project name
+      and its path on disk — the name as the card's own heading, the path as text, taken
+      from the sandbox itself rather than written into the scenario.
+    milestone:
+      - dashboard-overview-add-a-repo-with-truecourse-add
+      - dashboard-overview-front-page-lists-registered-repositories
+      - dashboard-overview-repo-card-shows-name-and-path
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      url:
+        equals: /repos/sample-app
+      text:
+        matches: '^(?=[\s\S]*No analysis yet)(?=[\s\S]*Click Analyze above)(?=[\s\S]*truecourse analyze)(?=[\s\S]*from the project directory)[\s\S]*$'
+      visible:
+        role: button
+        name: Analyze
+    note: >-
+      Home for a repository with nothing stored. It renders the No-analysis-yet state
+      instead of a list of findings, and it points at both ways out the doc names: the
+      Analyze button (asserted as the button itself, not as the words) and the
+      `truecourse analyze` command from the project directory.
+    milestone:
+      - dashboard-overview-home-shows-no-analysis-yet
+      - dashboard-overview-empty-home-points-at-analyze
+  - driver: web
+    click:
+      role: button
+      name: Graphs
+      exact: true
+    expect:
+      url:
+        contains: tab=graphs
+      text:
+        matches: '^(?=[\s\S]*No graph data)(?=[\s\S]*Run an analysis to generate the architecture graph)[\s\S]*$'
+    note: >-
+      The same emptiness one tab over: Graphs answers with its own run-an-analysis
+      prompt rather than a canvas. The address is asserted too, because the rail marks
+      the active tab with nothing an assertion can see — the query parameter is how a
+      reader knows which tab answered.
+    milestone:
+      - dashboard-overview-graphs-offers-the-same-empty-prompt
+  - driver: web
+    click:
+      role: button
+      name: Flows
+      exact: true
+    expect:
+      url:
+        contains: tab=flows
+      text:
+        matches: '^(?=[\s\S]*No flows detected)(?=[\s\S]*Run an analysis to detect execution flows)[\s\S]*$'
+    note: >-
+      The first half of a two-sidebar claim, and the reason this step exists: the claim
+      names Flows AND Databases, the two sidebars never share a screen, so the walk has
+      to stand in both. This step prepares; the milestone is tagged where the second
+      half is observed.
+  - driver: web
+    click:
+      role: button
+      name: Databases
+      exact: true
+    expect:
+      url:
+        contains: tab=databases
+      text:
+        matches: '^(?=[\s\S]*No databases detected)(?=[\s\S]*Run an analysis to detect databases)[\s\S]*$'
+    note: >-
+      The second sidebar, empty in the same way the first one was a step ago. Together
+      the two steps are the claim; this one carries it because it is where both have
+      been seen.
+    milestone:
+      - dashboard-overview-flows-and-databases-sidebars-are-empty
+  - driver: web
+    navigate: /repos/sample-app?tab=files&file=src/index.js
+    expect:
+      url:
+        contains: file=src
+      text:
+        matches: '^(?=[\s\S]*index\.js)(?=[\s\S]*unsafe\.js)(?=[\s\S]*package\.json)(?=[\s\S]*export function main)(?![\s\S]*\d+ issues?)[\s\S]*$'
+    note: >-
+      The documented exception, in both of its halves and with nothing analyzed. The tree
+      lists the repository's own files — three of them, from the seed, so a tree that
+      rendered but found nothing would fail — and the file named in the address opens in
+      the viewer, asserted by a line of its source that exists nowhere else on the page.
+      The tree's rows carry no role and no accessible name, so they are read as page text
+      rather than clicked; the address is the documented way in anyway. The negative on an
+      issue count pins the BEFORE half of the last step's claim: with nothing analyzed, no
+      file on this surface carries a finding.
+    milestone:
+      - dashboard-overview-files-tree-reads-the-repo-before-any-analysis
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      files:
+        sample-app/.truecourse/LATEST.json:
+          exists: true
+    note: >-
+      The exit from the empty state, and necessarily the last arrangement in this
+      scenario: every milestone above needs a repository with no analysis, and this run
+      ends that. It proves nothing itself.
+  - driver: web
+    navigate: /repos/sample-app?tab=files&file=src/unsafe.js
+    expect:
+      text:
+        matches: '^(?=[\s\S]*unsafe\.js)(?=[\s\S]*\d+ issues?)[\s\S]*$'
+    note: >-
+      DELIBERATELY PARTIAL. The claim is that file names in the tree take severity
+      COLORS once an analysis exists, and the tree paints them with an inline color and
+      nothing else — no class, no title, no aria attribute, no count on the row — so a
+      vocabulary of address, page text and element presence cannot see them. What this
+      step can see is the fact the coloring is derived from: the same file that showed no
+      finding before the run now carries the viewer's issue count, so the severity data
+      the tree colors by is really there after one analysis and was not before. The
+      missing matcher (an element's computed style or attribute) is filed as a driver
+      gap.
+    milestone:
+      - dashboard-overview-severity-coloring-appears-after-an-analysis

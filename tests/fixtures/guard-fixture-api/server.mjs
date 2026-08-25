@@ -155,6 +155,8 @@ const send = (res, status, payload, extraHeaders = {}) => {
 // and the calls that use it live inside ONE scenario, against ONE server.
 const sessions = new Map()
 let nextSession = 1
+/** When `/eventual/arm` was last hit — `/eventual` reads `ready` 400ms later. */
+let eventualArmedAt = null
 
 /** The `sid` cookie value on an incoming request, or ''. */
 const readSid = (req) => {
@@ -231,6 +233,17 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { concurrency: live })
   }
 
+  // EVENTUAL CONSISTENCY in miniature: `arm` acks immediately, but the flag it
+  // sets only reads back `ready` 400ms later — the shape of a queued flush. The
+  // api driver's GET-expect polling is proved against this pair.
+  if (req.method === 'POST' && url.pathname === '/eventual/arm') {
+    eventualArmedAt = Date.now()
+    return send(res, 200, { armed: true })
+  }
+  if (req.method === 'GET' && url.pathname === '/eventual') {
+    return send(res, 200, { ready: eventualArmedAt !== null && Date.now() - eventualArmedAt >= 400 })
+  }
+
   // Reflects the Authorization header into the body AND logs it to stderr — the two
   // ways a real service can leak an injected credential into guard evidence.
   if (req.method === 'GET' && url.pathname === '/echo-auth') {
@@ -239,7 +252,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { authorization: auth })
   }
 
-  // Reflects the request back — path, query params, Authorization header, and body.
+  // Reflects the request back — path, query params, Authorization and Origin headers, and body.
   // Used to prove fixture placeholders reached the wire in path/query/body, and that
   // a seed-provided credential reached the header.
   if (url.pathname === '/echo' || url.pathname.startsWith('/echo/')) {
@@ -248,6 +261,7 @@ const server = http.createServer(async (req, res) => {
       path: url.pathname,
       query: Object.fromEntries(url.searchParams),
       authorization: req.headers['authorization'] ?? '',
+      origin: req.headers['origin'] ?? '',
       body,
     })
   }

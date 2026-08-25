@@ -85,12 +85,11 @@ function okGenerateResult(): GuardGenerateResult {
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ build: 'npm run build', entry: ['node', 'cli.js'] }));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ flows: [] }));
     writeFile(
       dir,
       '.truecourse/scenarios/cli/s1.yaml',
       [
-        'guard: 2',
         'id: s1',
         'title: t-s1',
         'binds:',
@@ -179,8 +178,8 @@ describe('guard head-regen pipeline', () => {
     const scan = fakeScan();
     const generate = vi.fn(async (dir: string) => {
       writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ build: 'npm run build', entry: ['node', 'cli.js'] }));
-      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ flows: [] }));
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'id: s1\n');
       writeFile(dir, `${evidencePath}/transcript.txt`, 'head birth transcript');
       const result = { ...okGenerateResult(), birthFindings: [finding] };
       writeCloneGuardResult(dir, buildGuardReport(result, '2026-07-09T12:00:00.000Z'));

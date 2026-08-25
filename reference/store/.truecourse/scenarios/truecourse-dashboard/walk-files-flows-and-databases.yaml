@@ -1,0 +1,560 @@
+id: walk-files-flows-and-databases
+title: A developer walks the file tree, a code file, a detected flow and a datastore schema
+promise: >-
+  A developer browses the file tree and code viewer, opens a detected execution flow, and
+  reads a datastore's schema.
+flow:
+  id: walk-files-flows-and-databases
+  fingerprint: sha256:6b4cd72498b48219f23fbc9e44a23093659475b82d958117d57e69c18531aad1
+interface:
+  path:
+    - cli/analyze
+    - web/open-dashboard-home
+    - web/open-repo-report
+    - web/open-the-files-tab
+    - web/toggle-a-file-tree-folder
+    - web/open-a-file-in-the-code-viewer
+    - web/search-the-violation-list
+    - web/open-the-flows-tab
+    - web/search-the-flow-list
+    - web/open-a-flow-diagram
+    - web/step-forward-through-a-flow
+    - web/step-back-through-a-flow
+    - web/play-the-open-flow
+    - web/open-the-databases-tab
+    - web/open-a-database-schema
+    - web/switch-the-schema-to-the-table-list
+    - web/expand-a-schema-table
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
+    - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
+    - sha256:5fb4d0b52704c626640e10e136399172d65b2b5a85f9d5758042c7b5cb9a4dc7
+    - sha256:e3a5b581512b7d01dbb315ea48a53c63dc5356465e227862a178c84b541c3db5
+    - sha256:0d91155fc88d05252acac552593462880ca858123c32e74bea6f6be47490c106
+    - sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8
+    - sha256:683da4b398098a8228b7f2f166b2bf38d2faaa253faa2ec369ead343a0371740
+    - sha256:6f85508f5c6b7ec4027e60e2899f61d69b7faf04a3deca7cf0faaa3199bdd3f6
+    - sha256:15cf10b4168e6f254370eba9df0c6d53ab6eaa9886024f9a8d757ffa11e7d3f6
+    - sha256:15ef08076825b63ee71e79ff91e3e00b1a819deaefe1358a69b2d492b3bf2949
+    - sha256:5fbbaab3c7834358a05533a7fba4b6ab1e5de684365ee3d2138523a77eea2902
+    - sha256:3bb44c92360af7367af69e112b8e55be54a0b8acdb703109469a1b31a9c53f6e
+    - sha256:651814ae697b721770a6f2abb7de2574ded29a89e72364e5ccdc9c4a3c07b083
+    - sha256:fb1ecb0dcf861ac9f18abab27c4eadb0d245798819c019da48e93b9459cee338
+    - sha256:48a48266188b8ab5a211acad66ead6ca482d1265fdb00390b97955bd253561d5
+    - sha256:3264ac7926b539d43536b7753a37e4c85ac52e14803cce1d0284c5adf4cae009
+binds:
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: getting-around
+    fingerprint: sha256:b64d05bfdef7ef3cce1d95c719c53884d5a0c419c170d00526cc29d0f98842b2
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: files-flows-and-databases
+    fingerprint: sha256:59993604def6157ac5ec3445e98303f26b504c20c4926ffeb9253c20536aec5d
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: files
+    fingerprint: sha256:65d5a106dd7087f4943243c6d5b85ee4acd6e14354e7d43be5a05d15e6d65336
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: overview
+    fingerprint: sha256:428142f4f5b129e47fbdda4bf776c746ff031734c8940f42313c68758d92569e
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: a-violation-card
+    fingerprint: sha256:14d945d27cca01d02faed8265c3da2089c25d595eb4385a64ba555ac51d2d126
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: files/the-code-viewer
+    fingerprint: sha256:443cba96b0145936949afedc864bb80cf4ea3d6e4c8a94cbf244448b89eb9b4e
+  - doc: reference/spec-docs/dashboard/overview.mdx
+    section: shareable-urls
+    fingerprint: sha256:9d2179f678b0f8990a2708a23510b306c1ee3bf35be01dae1f6c860f71e5921a
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: flows
+    fingerprint: sha256:aa30f89321e12adadc144ecc68d11912063cbee2b40923b47c5157f82c0f5580
+  - doc: reference/spec-docs/dashboard/files-flows-databases.mdx
+    section: databases
+    fingerprint: sha256:343f87b6cc7b66f3e65dac226275b52acc4e5b114f6b55af25caf2635f91f0c1
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module",
+        "workspaces": ["services/*"]
+      }
+    sample-app/prisma/schema.prisma: |
+      datasource db {
+        provider = "postgresql"
+        url      = env("DATABASE_URL")
+      }
+
+      model User {
+        id     Int     @id @default(autoincrement())
+        email  String  @unique
+        name   String?
+        orders Order[]
+      }
+
+      model Order {
+        id     Int   @id @default(autoincrement())
+        userId Int
+        user   User  @relation(fields: [userId], references: [id])
+        total  Float
+      }
+    sample-app/services/api/package.json: |
+      {
+        "name": "api",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/server.js",
+        "dependencies": { "express": "^4.18.2", "pg": "^8.11.3" }
+      }
+    sample-app/services/api/src/server.js: |
+      import express from 'express'
+      import { listUsers, createUser } from './routes.js'
+
+      const app = express()
+
+      app.get('/users', listUsers)
+      app.post('/users', createUser)
+
+      app.listen(3000)
+
+      export default app
+    sample-app/services/api/src/routes.js: |
+      import { findAllUsers, saveUser } from './repositories/user-repository.js'
+
+      export async function listUsers(req, res) {
+        const users = await findAllUsers()
+        res.json(users)
+      }
+
+      export async function createUser(req, res) {
+        const user = await saveUser(req.body)
+        res.json(user)
+      }
+    sample-app/services/api/src/repositories/user-repository.js: |
+      import pg from 'pg'
+
+      const pool = new pg.Pool({ connectionString: 'postgres://localhost:5432/shop' })
+
+      export async function findAllUsers() {
+        const result = await pool.query('SELECT * FROM users')
+        return result.rows
+      }
+
+      export async function saveUser(user) {
+        const result = await pool.query('INSERT INTO users (email) VALUES (' + user.email + ')')
+        return result.rows
+      }
+    sample-app/services/worker/package.json: |
+      {
+        "name": "worker",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/index.js"
+      }
+    sample-app/services/worker/src/index.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+
+      export function main() {
+        console.log('worker starting')
+        return runRule('1 + 1')
+      }
+
+      main()
+      setTimeout(main, 4200)
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - prisma/schema.prisma
+          - services/api/package.json
+          - services/api/src/server.js
+          - services/api/src/routes.js
+          - services/api/src/repositories/user-repository.js
+          - services/worker/package.json
+          - services/worker/src/index.js
+        message: seed the sample app
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      files:
+        sample-app/.truecourse/LATEST.json:
+          exists: true
+    note: >-
+      Arranges the analysis these three tabs read alongside the working copy: findings in
+      three files at three severities, three detected execution flows across two entry
+      services, and one postgres datastore whose prisma schema gives it real tables and a
+      real relation. Nothing here is a milestone.
+  - driver: web
+    navigate: /
+    expect:
+      visible:
+        role: link
+        name: sample-app
+    note: Boots the browser against the served sandbox. Prepares the click below.
+  - driver: web
+    click:
+      role: link
+      name: sample-app
+    expect:
+      url:
+        contains: /repos/sample-app
+    note: Opens the repository, where the icon rail carries the three tabs this flow walks.
+  - driver: web
+    click:
+      role: button
+      name: Files
+    expect:
+      url:
+        contains: tab=files
+      text:
+        matches: ^(?=[\s\S]*package\.json)(?=[\s\S]*prisma)(?=[\s\S]*services)(?=[\s\S]*api)(?=[\s\S]*worker)[\s\S]*$
+    note: >-
+      The overview page's tab inventory, taken at its word for Files: the tab renders the
+      repository's tree, named by the entries the seed really committed at its top level.
+      The other half of that sentence — picking a file opens it in the code viewer — is
+      proved further down, where a file is actually opened and read.
+    milestone:
+      - dashboard-overview-files-tab-shows-the-tree-and-code-viewer
+      - dashboard-files-top-level-folders-start-expanded
+  - driver: web
+    click:
+      role: button
+      name: services
+    expect:
+      text:
+        matches: '^(?=[\s\S]*services)(?![\s\S]*routes\.js)(?![\s\S]*worker)[\s\S]*$'
+  - driver: web
+    click:
+      role: button
+      name: services
+    expect:
+      text:
+        matches: '^(?=[\s\S]*api)(?=[\s\S]*worker)[\s\S]*$'
+    note: The same folder row collapses its children and expands them again.
+    milestone:
+      - dashboard-files-folder-click-expands-or-collapses
+  - write:
+      sample-app/notes-scratch.js: |
+        export const note = 'not committed yet'
+    note: >-
+      A file written into the working copy and left UNTRACKED. Transient, flow-specific
+      state the tracked-files claim is itself about — the only way to ask the tree what it
+      does with a file git does not know.
+  - driver: web
+    navigate: /repos/sample-app?tab=files
+    expect:
+      text:
+        matches: ^(?![\s\S]*notes-scratch\.js)(?=[\s\S]*package\.json)[\s\S]*$
+    note: >-
+      A fresh read of the tree, and the untracked file is not in it while the committed ones
+      still are. That is the doc's "every file git tracks", asserted from its falsifiable
+      side: a tree that listed the directory would show the new file here.
+    milestone:
+      - dashboard-files-tree-lists-git-tracked-files
+  - git:
+      - add
+      - notes-scratch.js
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: Stages the file. Prepares the commit below.
+  - git:
+      - commit
+      - '-m'
+      - add a scratch note
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: >-
+      Commits it, which is what makes the next step provable at all: the tree lists tracked
+      files, so a file on disk can only appear there once git knows it. The two claims below
+      would contradict each other for an uncommitted file, and the doc's own wording is what
+      forces the commit.
+  - driver: web
+    navigate: /repos/sample-app?tab=files
+    expect:
+      text:
+        contains: notes-scratch.js
+    note: >-
+      The file exists only because it was written to this machine's checkout, and there it
+      is in the tree — no upload, no re-analysis, no store write in between. That is the
+      server reading the repository from disk, and it is the same observation that makes
+      these tabs "read your working copy directly": what they render came from the
+      repository present on the machine the server runs on.
+    milestone:
+      - dashboard-panes-three-tabs-read-the-working-copy
+      - dashboard-overview-server-reads-the-repository-from-disk
+  - driver: web
+    click:
+      role: button
+      name: Home
+    expect:
+      url:
+        matches: ^(?![\s\S]*tab=)[\s\S]*/repos/sample-app[\s\S]*$
+    note: >-
+      Back to the report, because the entry into the code viewer this flow uses is a
+      violation card's own action. Prepares the search below.
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: SQL injection
+    expect:
+      text:
+        contains: Potential SQL injection
+    note: >-
+      Narrows the list to the one finding whose card this flow acts on. Mechanical
+      necessity: every card carries an `Open` with the same accessible name, so the action
+      is only addressable once one card is on screen.
+  - driver: web
+    click:
+      role: button
+      name: Open
+    expect:
+      url:
+        contains: tab=files
+      text:
+        contains: INSERT INTO users
+    note: >-
+      `Open` on a code finding lands in the code viewer with THAT FILE open — asserted on a
+      line of the file's own source, which nothing else on the page could produce. The
+      scrolled-to-the-line half of the promise is a viewport position with no text, no
+      address and no accessible state, and is left unasserted rather than faked.
+    milestone:
+      - dashboard-violations-open-opens-the-file-at-the-line
+  - driver: web
+    expect:
+      text:
+        matches: >-
+          ^(?=[\s\S]*repositories)(?=[\s\S]*user-repository\.js)(?=[\s\S]*3 issues)[\s\S]*$
+    note: >-
+      The viewer's own surface: the path rendered as a breadcrumb (asserted on two of its
+      segments) and the count of issues in the file — three, which is exactly what the
+      analysis recorded for `user-repository.js`. Syntax highlighting is a CSS treatment the
+      driver cannot read and is recorded as a gap rather than asserted here.
+    milestone:
+      - dashboard-files-viewer-shows-highlighting-breadcrumb-and-issue-count
+  - driver: web
+    expect:
+      text:
+        matches: >-
+          ^(?=[\s\S]*HIGH)(?=[\s\S]*Potential SQL injection)(?=[\s\S]*Use parameterized queries
+          instead)[\s\S]*$
+    note: >-
+      The row the viewer renders underneath the offending line, carrying the three things
+      the doc says it carries: the severity, the title and the description — all three the
+      analyzer's own output for this finding, not page furniture.
+    milestone:
+      - dashboard-files-finding-row-under-the-line
+  - driver: web
+    expect:
+      url:
+        matches: ^[\s\S]*file=[\s\S]*user-repository\.js[\s\S]*$
+    note: >-
+      With the file open, the address carries it — the state this claim can only be checked
+      in. Asserted origin-stripped and on the file's own name, so the path separator's
+      encoding is not what the test is about.
+    milestone:
+      - dashboard-overview-url-carries-the-open-file
+  - driver: web
+    click:
+      role: button
+      name: Flows
+    expect:
+      url:
+        contains: tab=flows
+      text:
+        contains: routes.listUsers
+    note: >-
+      The rail's Flows entry, taken at its word: it lists the detected execution flows. The
+      sequence-diagram half of the same sentence is proved below, where one is opened.
+    milestone:
+      - dashboard-overview-flows-tab-shows-flows-and-sequence-diagrams
+  - driver: web
+    expect:
+      text:
+        matches: >-
+          ^(?=[\s\S]*routes\.listUsers)(?=[\s\S]*routes\.createUser)(?=[\s\S]*src\.runRule)[\s\S]*$
+    note: >-
+      All three flows the analysis recorded, and only they: the two http entry points of the
+      api service and the worker's startup path. Each name is `<module>.<method>` from the
+      trace, so a sidebar that invented or dropped one fails here.
+    milestone:
+      - dashboard-flows-are-the-detected-execution-paths
+  - driver: web
+    expect:
+      text:
+        matches: ^[\s\S]*API\s*2[\s\S]*routes\.listUsers[\s\S]*WORKER\s*1[\s\S]*src\.runRule[\s\S]*$
+    note: >-
+      The grouping, read as ORDER rather than as a picture: the api heading with its two
+      flows under it, then the worker heading with its one. Both headings are the entry
+      service the trace recorded, asserted in the case the page RENDERS them (CSS uppercases the
+      headings), and the counts beside them are how many flows enter there.
+    milestone:
+      - dashboard-flows-sidebar-groups-by-entry-service
+  - driver: web
+    fill:
+      role: textbox
+      name: Search flows...
+    value: listUsers
+    expect:
+      text:
+        matches: '^(?=[\s\S]*routes\.listUsers)(?![\s\S]*routes\.createUser)(?![\s\S]*src\.runRule)[\s\S]*$'
+    note: The flow sidebar search narrows all service groups to the matching flow.
+    milestone:
+      - dashboard-flows-sidebar-has-a-search-box
+  - driver: web
+    click:
+      role: button
+      name: routes.listUsers
+    expect:
+      text:
+        matches: >-
+          ^(?=[\s\S]*3 steps)(?=[\s\S]*routes)(?=[\s\S]*user-repository)(?=[\s\S]*PostgreSQL)(?=[\s\S]*findAllUsers)(?=[\s\S]*query
+          \[db-read\])[\s\S]*$
+    note: >-
+      Opening a flow draws it as a sequence diagram, asserted on the structure the doc
+      promises: a column per participating module (`routes`, `user-repository`) and per
+      datastore (`PostgreSQL`), a row per recorded step (three of them), and the target
+      METHOD on each — `findAllUsers` for the call, `query` for the read, with the step type
+      the trace classified it as. Arrow direction is geometry the driver cannot read; the
+      participants and methods it can.
+    milestone:
+      - dashboard-flows-open-as-a-sequence-diagram
+      - dashboard-overview-url-carries-the-open-flow
+  - driver: web
+    click:
+      role: button
+      name: Step forward
+    expect:
+      text:
+        contains: Step 1 of 3
+    note: >-
+      One press of the player's forward control moves it off its resting position onto the
+      first step. Prepares the step below, which is where the claim is proved — a counter
+      that only ever went up would satisfy this half on its own.
+  - driver: web
+    click:
+      role: button
+      name: Step back
+    expect:
+      text:
+        contains: Step 0 of 3
+    note: >-
+      And back again. The player's position is readable as the counter it renders, so
+      forward-then-back is a round trip a reader can check; which step is LIT is an opacity
+      treatment the driver cannot see, and the counter is the honest stand-in.
+    milestone:
+      - dashboard-flows-player-steps-forward-and-back
+  - driver: web
+    click:
+      role: button
+      name: Play
+      exact: true
+    expect:
+      text:
+        contains: Step 3 of 3
+    note: Play advances the open flow to its final recorded step.
+    milestone:
+      - dashboard-flows-player-plays-the-flow-through
+  - driver: web
+    click:
+      role: button
+      name: Databases
+    expect:
+      url:
+        contains: tab=databases
+      text:
+        contains: postgres
+    note: >-
+      The rail's Databases entry, taken at its word: it lists the detected datastores. The
+      schema half of the same sentence is proved below, where one is opened.
+    milestone:
+      - dashboard-overview-databases-tab-shows-datastores-and-schemas
+  - driver: web
+    expect:
+      text:
+        matches: ^(?=[\s\S]*PostgreSQL)(?=[\s\S]*2 tables)(?=[\s\S]*1 service)[\s\S]*$
+    note: >-
+      The datastore the analysis found, described as the analysis recorded it: its type, the
+      two tables its schema declares, and the one service that connects to it. Every number
+      comes from the run, so a sidebar listing a datastore nobody detected — or losing its
+      schema — fails here.
+    milestone:
+      - dashboard-databases-sidebar-lists-detected-datastores
+      - dashboard-databases-sidebar-shows-type-tables-and-services
+  - driver: web
+    click:
+      role: button
+      name: postgres
+    expect:
+      text:
+        matches: ^(?=[\s\S]*User)(?=[\s\S]*email)(?=[\s\S]*userId)[\s\S]*$
+    note: >-
+      Opening the datastore lands on the ER diagram with nothing chosen — the assertion is
+      on what only that view renders: the table's COLUMNS, `email` and the foreign key
+      `userId`, which the table list keeps folded away until a table is expanded. This is
+      the only moment the default is falsifiable; after a view has been picked the question
+      cannot be asked again.
+    milestone:
+      - dashboard-databases-er-diagram-is-the-default
+  - driver: web
+    click:
+      role: button
+      name: Table List
+    expect:
+      text:
+        matches: ^[\s\S]*User\s*3 cols[\s\S]*$
+    note: >-
+      The second of the two ways: the same schema as an expandable table list, each row
+      naming its table and how many columns it holds — three for `User`, which is what the
+      prisma schema declares. Both views are therefore on offer for one datastore, which is
+      the claim.
+    milestone:
+      - dashboard-databases-schema-shown-two-ways
+  - driver: web
+    click:
+      role: button
+      name: User
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Column)(?=[\s\S]*id)(?=[\s\S]*email)(?=[\s\S]*name)(?=[\s\S]*Relations)(?=[\s\S]*Order)[\s\S]*$'
+    note: Expanding a table exposes its columns and the relation attached to that table.
+    milestone:
+      - dashboard-databases-table-list-expands-columns-and-relations
+  - driver: web
+    click:
+      role: button
+      name: Flows
+    expect:
+      text:
+        contains: routes.listUsers
+  - driver: web
+    click:
+      role: button
+      name: Databases
+    expect:
+      text:
+        matches: '^(?=[\s\S]*user-repository\.js)(?=[\s\S]*routes\.listUsers)(?=[\s\S]*postgres)(?=[\s\S]*User)(?=[\s\S]*email)[\s\S]*$'
+    note: Switching away and back restores the datastore that was last open in this pane.
+    milestone:
+      - dashboard-panes-shared-tab-strip
+      - dashboard-panes-switching-back-reopens-the-last-item

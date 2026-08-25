@@ -1,17 +1,14 @@
 /**
- * Minimal authenticated fetch for the enterprise client pages. Resolves
- * the API base the same way the OSS client does (dev: client :3000 →
- * API :3001; prod: same origin) and sends the session cookie.
+ * Minimal authenticated fetch for the enterprise client pages. Sends the
+ * session cookie, and resolves the API base through the OSS client's helper
+ * rather than a copy of it — one rule for both halves of the app, so a built
+ * enterprise page reaches the origin that served it just like an OSS page does.
  */
 
-export function serverUrl(): string {
-  if (typeof window === 'undefined') return '';
-  const port = window.location.port;
-  if (port && port !== '3001') {
-    return `http://${window.location.hostname}:3001`;
-  }
-  return '';
-}
+import { getServerUrl } from '@/lib/server-url';
+
+/** The API base, under this package's local name. */
+export const serverUrl = getServerUrl;
 
 /** Surface a server-sent `{ error }` message when a request fails. */
 async function failure(res: Response): Promise<Error> {

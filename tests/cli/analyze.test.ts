@@ -253,3 +253,126 @@ describe('resolveStashDecision', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The store dir is not user dirt: `.truecourse/` is TrueCourse's own output
+// (mostly gitignored by its own template, but the dir + the committable files
+// show up as untracked until someone commits them). It must never be what
+// makes analyze demand a stash decision — otherwise a clean repo can't be
+// analyzed non-interactively at all, since `resolveOrInitProject` creates the
+// dir moments before the check runs.
+// ---------------------------------------------------------------------------
+
+import { ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
+import { getGit, summarizeUserWorkingTree } from '../../packages/core/src/lib/git';
+
+describe('resolveStashDecision — the TrueCourse store is not user dirt', () => {
+  let workDir: string;
+  let originalIsTTY: boolean | undefined;
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'test',
+    GIT_AUTHOR_EMAIL: 't@t',
+    GIT_COMMITTER_NAME: 'test',
+    GIT_COMMITTER_EMAIL: 't@t',
+  };
+
+  beforeAll(() => {
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-stash-store-'));
+    execSync('git init -q -b main', { cwd: workDir, env });
+    execSync('git config user.name test', { cwd: workDir, env });
+    execSync('git config user.email t@t', { cwd: workDir, env });
+    fs.writeFileSync(path.join(workDir, 'a.js'), 'export function a() { return 1; }\n');
+    execSync('git add -A', { cwd: workDir, env });
+    execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
+
+    // Non-interactive: the exact condition under which the decision must not
+    // be demanded. `process.exit` throws so a demand fails the test loudly.
+    originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
+  });
+
+  afterAll(() => {
+    exitSpy.mockRestore();
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('clean repo + the store dir analyze just created: no stash decision demanded', async () => {
+    // Exactly what `resolveOrInitProject` does before `resolveStashDecision`.
+    ensureRepoTruecourseDir(workDir);
+    expect(execSync('git status --porcelain', { cwd: workDir, env }).toString()).toContain(
+      '.truecourse/',
+    );
+
+    const result = await resolveStashDecision({}, workDir);
+    expect(result).toEqual({ skipStash: false });
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('pre-existing untracked store (a previous run left it behind): still no demand', async () => {
+    const tcDir = ensureRepoTruecourseDir(workDir);
+    fs.writeFileSync(path.join(tcDir, 'config.json'), '{}\n');
+    fs.writeFileSync(path.join(tcDir, 'LATEST.json'), '{}\n');
+    fs.mkdirSync(path.join(tcDir, 'logs'), { recursive: true });
+    fs.writeFileSync(path.join(tcDir, 'logs', 'analyze.log'), 'log\n');
+    fs.mkdirSync(path.join(tcDir, 'contracts'), { recursive: true });
+    fs.writeFileSync(path.join(tcDir, 'contracts', 'manifest.json'), '{}\n');
+
+    const result = await resolveStashDecision({}, workDir);
+    expect(result).toEqual({ skipStash: false });
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('real user dirt alongside the store: still exits demanding the decision', async () => {
+    ensureRepoTruecourseDir(workDir);
+    fs.writeFileSync(path.join(workDir, 'a.js'), 'export function a() { return 2; }\n');
+    try {
+      await expect(resolveStashDecision({}, workDir)).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockClear();
+      execSync('git checkout -- a.js', { cwd: workDir, env });
+    }
+  });
+
+  it('untracked user file alongside the store: still exits demanding the decision', async () => {
+    ensureRepoTruecourseDir(workDir);
+    fs.writeFileSync(path.join(workDir, 'untracked.js'), 'export const b = 1;\n');
+    try {
+      await expect(resolveStashDecision({}, workDir)).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockClear();
+      fs.rmSync(path.join(workDir, 'untracked.js'), { force: true });
+    }
+  });
+
+  it('summarizeUserWorkingTree: excludes store paths (incl. nested), keeps user counts', async () => {
+    const tcDir = ensureRepoTruecourseDir(workDir);
+    // A store in a subdirectory (monorepo package analyzed on its own) is
+    // still TrueCourse output, wherever git reports it from.
+    const nested = path.join(workDir, 'packages', 'api');
+    fs.mkdirSync(nested, { recursive: true });
+    ensureRepoTruecourseDir(nested);
+    fs.writeFileSync(path.join(tcDir, 'LATEST.json'), '{"x":1}\n');
+    fs.writeFileSync(path.join(workDir, 'a.js'), 'export function a() { return 3; }\n');
+    fs.writeFileSync(path.join(workDir, 'untracked.js'), 'export const b = 1;\n');
+
+    try {
+      const status = await (await getGit(workDir)).status();
+      const summary = summarizeUserWorkingTree(status);
+      expect(summary.isClean).toBe(false);
+      expect(summary.modifiedCount).toBe(1);
+      expect(summary.untrackedCount).toBe(1);
+    } finally {
+      fs.rmSync(path.join(workDir, 'untracked.js'), { force: true });
+      fs.rmSync(path.join(workDir, 'packages'), { recursive: true, force: true });
+      execSync('git checkout -- a.js', { cwd: workDir, env });
+    }
+  });
+});

@@ -4,76 +4,181 @@
  * the shared {@link estimateStageTokens}, so the calculation lives in one place
  * and the CLI + dashboard render identical numbers.
  *
- * Deterministic, no LLM, no transport: SCAN is accurate in CALL COUNT (discovery
- * + the same deterministic prefilter the real run uses); token sizes are
- * heuristic.
+ * Deterministic, no LLM, no transport. SCAN models SESSIONS (plan 02 step 7):
+ * per session kind the estimate counts cache-MISSING work items by probing the
+ * SAME caches with the SAME exported key builders the run uses (instructions
+ * fingerprint included), then turns items into calls with per-kind expected
+ * turn counts — `minCalls` = items (one turn each), `maxCalls` = items ×
+ * (maxResumes+1) × turns (the budget ceiling), expected = items ×
+ * EXPECTED_TURNS. One model runs every session (§3.4), so the scan estimate
+ * carries no per-stage tier labels.
  *
- * Per-stage system-prompt sizes are the REAL prompt constants (imported from the
- * packages that send them), so they can't drift from what a run actually pays.
- * The body sizes (doc/area chars) are real and dominate.
+ * Per-kind system prompts and briefing builders are the REAL ones (imported
+ * from the session modules), so sizes can't drift from what a run pays.
  */
 
 import {
+  applySubjectAttribution,
   discoverDocs,
-  planRelevanceWork,
-  readCorpus,
+  prefilterDocs,
   readCorpusDecisions,
-  isAreaTagCached,
-  RELEVANCE_SYSTEM_PROMPT,
-  relevanceUserPromptChars,
-  resolveRepoIdentity,
   readRepoIdentityInput,
-  AREA_TAGGER_SYSTEM_PROMPT,
-  VOCAB_NORMALIZER_SYSTEM_PROMPT,
-  OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  OVERLAP_WINDOW_CHARS,
-  VERIFY_OVERLAP_SYSTEM_PROMPT,
-  VERIFY_DOC_BUDGET_CHARS,
+  readSourcesFile,
+  resolveRepoIdentity,
+  groupByArea,
+  type AreaTag,
+  type DocAreaTags,
+  type DocCandidate,
 } from '@truecourse/spec-consolidator';
+import { getCacheEntry } from '@truecourse/llm';
+import type { z } from 'zod';
+import { WRAP_UP_TURNS, type SessionBudget } from '@truecourse/agent-loop';
+import {
+  CURATE_DOC_BUDGET,
+  CURATE_DOC_CACHE_NAME,
+  CURATE_DOC_SESSION_KIND,
+  CURATE_DOC_SYSTEM_PROMPT,
+  DocVerdictSchema,
+  curateDocBriefing,
+  curateDocCacheKey,
+  type DocVerdict,
+} from '../spec-scan/curate-doc.js';
+import {
+  AreaSettlementSchema,
+  SETTLE_AREAS_BUDGET,
+  SETTLE_AREAS_CACHE_NAME,
+  SETTLE_AREAS_SESSION_KIND,
+  SETTLE_AREAS_SYSTEM_PROMPT,
+  applySettlement,
+  canonicalDocTags,
+  collectAreaVocab,
+  settleAreasBriefing,
+  settleAreasCacheKey,
+  settleAreasGate,
+  type AreaSettlement,
+} from '../spec-scan/settle-areas.js';
+import {
+  OVERLAP_SESSION_BUDGET,
+  OVERLAP_SESSION_CACHE_NAME,
+  OVERLAP_SESSION_KIND,
+  OVERLAP_SESSION_SYSTEM_PROMPT,
+  OverlapOutcomeSchema,
+  deriveOverlapWorkItems,
+  overlapBriefing,
+  overlapSessionCacheKey,
+  type OverlapWorkItem,
+} from '../spec-scan/overlap.js';
+import {
+  ORCHESTRATE_BUDGET,
+  ORCHESTRATE_SYSTEM_PROMPT,
+  SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+  applyScopeVerdicts,
+  buildScanScopeUniverse,
+  orchestrateBriefing,
+  scopeCoverage,
+} from '../spec-scan/orchestrate.js';
+import { buildScanUniverse, instructionsFingerprint } from '../spec-scan/tools.js';
+import type { ScanStep } from '../spec-scan/run.js';
+import { SESSION_MODEL_CLAUDE_CODE } from './session-driver.js';
+import { apiModeModel } from '../../config/global-config.js';
 import {
   planGuardWork,
   proposeRecipe,
+  recipeCacheKey,
+  RECIPE_CACHE_NAME,
+  RecipeProposalSchema,
+  SEED_CACHE_NAME,
+  settledFingerprints,
+  interfacesFingerprint,
+  computeSeedStepFingerprint,
+  authFingerprint,
   collectWorkDocs,
-  countExtractViews,
-  countUncachedExtractViews,
-  docExtractionCached,
-  extractDocClaims,
+  snapExtraction,
   readCorpusAreaTags,
   buildFlowAreas,
   buildSurfaceCatalogs,
-  planFlowSynthesis,
   readCachedMatch,
   readFlowsFile,
   sectionInputsKey,
   flowGenerationInputsHash,
   flowAreaIdForDoc,
-  EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
-  GENERATE_SYSTEM_PROMPT,
+  workerCacheKey,
+  FlowSetSchema,
   RECIPE_SYSTEM_PROMPT,
-  SEED_SYSTEM_PROMPT,
-  FIDELITY_SYSTEM_PROMPT,
-  TRIAGE_SYSTEM_PROMPT as GUARD_TRIAGE_SYSTEM_PROMPT,
-  FLOWS_SYSTEM_PROMPT as GUARD_FLOWS_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
   type FlowAreaDocInput,
+  type FlowClaimInput,
+  type GuardSetupOnlyStep,
+  type GenerateStep,
   type GuardWorkPlan,
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
+import {
+  EXTRACT_SESSION_BUDGET,
+  EXTRACT_SESSION_CACHE_NAME,
+  EXTRACT_SESSION_KIND,
+  EXTRACT_SESSION_SYSTEM_PROMPT,
+  extractSessionBriefing,
+  extractSessionCacheKey,
+  FLOWS_SESSION_BUDGET,
+  FLOWS_SESSION_CACHE_NAME,
+  FLOWS_SESSION_KIND,
+  FLOWS_SESSION_SYSTEM_PROMPT,
+  flowsSessionCacheKey,
+  FLOW_WORKER_BUDGET,
+  FLOW_WORKER_CACHE_NAME,
+  FLOW_WORKER_CLI_SYSTEM_PROMPT,
+  FLOW_WORKER_SESSION_KIND,
+  flowWorkerPromptFingerprint,
+  CachedWorkerEntrySchema,
+  FIDELITY_SESSION_BUDGET,
+  FIDELITY_SESSION_KIND,
+  FIDELITY_SESSION_SYSTEM_PROMPT,
+} from '../guard-generate/index.js';
 import {
   loadSpecScope,
   isRunnableDriver,
   runnableDriverIds,
   violatesSettleInvariant,
+  dismissedClaimKey,
+  ExtractOutcomeSchema,
   type GuardDriverId,
   type GuardFlow,
 } from '@truecourse/shared';
 import {
+  computeRecipeFingerprint,
+  loadDependencyCatalog,
   loadRecipe,
-  readJourneyCatalog,
+  readGuardDecisions,
+  readAuthoredInterfaceCatalog,
+  readInterfaceCatalog,
+  readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
   recipePath,
+  staleAuthoredPlaceDiagnostics,
   type Recipe,
 } from '@truecourse/guard-runner';
+import {
+  AUTH_PROOF_BUDGET,
+  AUTH_PROOF_SESSION_KIND,
+  DEPENDENCY_CATALOG_BUDGET,
+  DEPENDENCY_CATALOG_SESSION_KIND,
+  RECIPE_REPAIR_BUDGET,
+  RECIPE_REPAIR_SESSION_KIND,
+  SEED_SESSION_BUDGET,
+  SEED_SESSION_KIND,
+  SeedSessionOutcomeSchema,
+  seedSessionCacheKey,
+} from '../guard-setup/index.js';
+import {
+  RECONCILE_INTERFACES_BUDGET,
+  RECONCILE_INTERFACES_SESSION_KIND,
+} from '../guard-setup/reconcile-interfaces.js';
+import {
+  INTERFACE_AUTHOR_BUDGET,
+  INTERFACE_AUTHOR_SESSION_KIND,
+  planWorkItems,
+} from '../interface-author/index.js';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import type { LlmTransportMode } from '../../config/global-config.js';
@@ -82,189 +187,373 @@ import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './
 import type { PriceTable } from './model-prices.js';
 
 // Heuristic assumptions, surfaced as ranges where they bite.
-const KEEP_RATE = 0.9; // fraction of prefiltered docs the relevance LLM keeps
-const AVG_AREA_SIZE = 4; // docs per area (drives overlap pair count)
-const FLAG_RATE = 0.15; // rough fraction of overlap PAIRS the detector flags (→ verify calls)
+const KEEP_RATE = 0.9; // fraction of curated docs a session keeps (approximation path)
+const AVG_AREA_SIZE = 4; // docs per area (sizes the changed-docs share of overlap areas)
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
 const STAGE_LABELS: Record<string, string> = {
-  // scan
-  relevance: 'Filtering docs',
-  areaTag: 'Tagging areas',
-  vocab: 'Normalizing vocabulary',
-  overlap: 'Flagging overlaps',
-  verifyOverlap: 'Verifying conflicts',
-  // guard generate
-  // guard setup
+  // scan (session kinds — plan 02)
+  [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 'Settling scan scope',
+  [CURATE_DOC_SESSION_KIND]: 'Curating docs',
+  [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
+  [OVERLAP_SESSION_KIND]: 'Flagging overlaps',
+  // guard setup (session kinds — plan 03)
+  [RECIPE_REPAIR_SESSION_KIND]: 'Repairing the recipe',
+  [DEPENDENCY_CATALOG_SESSION_KIND]: 'Classifying dependencies',
+  [RECONCILE_INTERFACES_SESSION_KIND]: 'Reconciling cli interfaces',
+  [INTERFACE_AUTHOR_SESSION_KIND]: 'Authoring web tasks',
+  [SEED_SESSION_KIND]: 'Preparing data + principals',
+  [AUTH_PROOF_SESSION_KIND]: 'Verifying supplied auth',
+  // guard generate (session kinds — plan 04; recipe + match are still one-shots)
   guardRecipe: 'Discovering recipe',
-  guardSeed: 'Preparing data + principals',
-  guardExtract: 'Extracting claims',
-  guardFlows: 'Synthesizing flows',
   guardMatch: 'Matching flows',
-  guardAuthor: 'Authoring scenarios',
-  guardRetry: 'Re-authoring on evidence',
-  guardFidelity: 'Reviewing fidelity',
-  guardTriage: 'Triaging failures',
+  [EXTRACT_SESSION_KIND]: 'Extracting claims',
+  [FLOWS_SESSION_KIND]: 'Synthesizing flows',
+  [FLOW_WORKER_SESSION_KIND]: 'Working flows',
+  [FIDELITY_SESSION_KIND]: 'Reviewing fidelity',
 };
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
 
+// --- Session-kind modeling constants (plan 02 step 7) ------------------------
+// PROVISIONAL expected turn counts per session kind, to be re-grounded on real
+// transcript data once a few scans have run. They drive the EXPECTED cost only;
+// the ceiling is always the budget's hard limit.
+const EXPECTED_TURNS: Record<string, number> = {
+  [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 6,
+  [CURATE_DOC_SESSION_KIND]: 2,
+  [SETTLE_AREAS_SESSION_KIND]: 4,
+  [OVERLAP_SESSION_KIND]: 8,
+  // guard setup (plan 03) — provisional, to re-ground on transcript data.
+  [RECIPE_REPAIR_SESSION_KIND]: 8,
+  [DEPENDENCY_CATALOG_SESSION_KIND]: 6,
+  [RECONCILE_INTERFACES_SESSION_KIND]: 5,
+  [INTERFACE_AUTHOR_SESSION_KIND]: 15, // measured mean of the 2026-08-18 documenso run
+  [SEED_SESSION_KIND]: 12,
+  [AUTH_PROOF_SESSION_KIND]: 3,
+  // guard generate (plan 04 step 20) — PROVISIONAL, to re-ground on transcript
+  // data once a few session-era generates have run.
+  [EXTRACT_SESSION_KIND]: 3,
+  [FLOWS_SESSION_KIND]: 4,
+  [FLOW_WORKER_SESSION_KIND]: 8,
+  [FIDELITY_SESSION_KIND]: 1,
+};
+// PROVISIONAL prior-turns growth: each turn's input carries the turns before it
+// (tool results, the model's own reasoning); this approximates the average
+// extra chars a mid-session turn pays beyond the briefing.
+const SESSION_TURN_GROWTH_CHARS = 1_500;
+// Rough output tokens per TURN, per kind (tool calls are short; the outcome
+// object dominates the last turn).
+const SESSION_OUTPUT_TOKENS: Record<string, number> = {
+  [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 300,
+  [CURATE_DOC_SESSION_KIND]: 120,
+  [SETTLE_AREAS_SESSION_KIND]: 250,
+  [OVERLAP_SESSION_KIND]: 400,
+  // guard setup (plan 03) — provisional.
+  [RECIPE_REPAIR_SESSION_KIND]: 300,
+  [DEPENDENCY_CATALOG_SESSION_KIND]: 500,
+  [RECONCILE_INTERFACES_SESSION_KIND]: 300,
+  [INTERFACE_AUTHOR_SESSION_KIND]: 800,
+  [SEED_SESSION_KIND]: 3000, // the outcome carries the whole script (≈ GUARD_SEED_OUTPUT_TOKENS below)
+  [AUTH_PROOF_SESSION_KIND]: 150,
+  // guard generate (plan 04 step 20) — provisional.
+  [EXTRACT_SESSION_KIND]: 1500, // the outcome carries a doc's whole claim set
+  [FLOWS_SESSION_KIND]: 1200, // an area's flows + no-flow reasons
+  [FLOW_WORKER_SESSION_KIND]: 700, // ~one scenario YAML per run/submit turn
+  [FIDELITY_SESSION_KIND]: 60, // a verdict + a one-sentence mismatch
+};
+/** Cold-cache fallback for an overlap briefing's size (outlines, no bodies). */
+const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
+
+/** One session kind's work, rolled into the `StageCallEstimate` shape the
+ *  CLI/dashboard already render. `calls` = expected TURNS (items × expected
+ *  turns per session); `minCalls` = items (one turn each); `maxCalls` = the
+ *  budget's hard limit (items × ((maxResumes+1) × turns + the shell's
+ *  wrap-up window) — §3.3, 2026-08-21). */
+function sessionKindStage(input: {
+  kind: string;
+  model: string;
+  items: number;
+  minItems?: number;
+  maxItems?: number;
+  budget: SessionBudget;
+  systemPromptChars: number;
+  briefingChars: number;
+  bound?: string;
+}): StageCallEstimate {
+  const expectedTurns = EXPECTED_TURNS[input.kind] ?? 4;
+  const ceilingTurns = (input.budget.maxResumes + 1) * input.budget.turns + WRAP_UP_TURNS;
+  const stage: StageCallEstimate = {
+    stage: input.kind,
+    model: input.model,
+    calls: input.items * expectedTurns,
+    expectedCalls: input.items * expectedTurns,
+    minCalls: input.minItems ?? input.items,
+    maxCalls: (input.maxItems ?? input.items) * ceilingTurns,
+    avgInputTokens: tokensFromChars(
+      input.systemPromptChars,
+      input.briefingChars + Math.round((expectedTurns / 2) * SESSION_TURN_GROWTH_CHARS),
+    ),
+    avgOutputTokens: SESSION_OUTPUT_TOKENS[input.kind] ?? 300,
+  };
+  if (input.bound) stage.bound = input.bound;
+  return stage;
+}
+
+/** A schema-gated cache probe — the read half of `cachedSessionOutcome`, so the
+ *  estimate counts a MISS exactly when the run would spend a session. */
+async function probeSessionCache<T>(
+  repoRoot: string,
+  cacheName: string,
+  key: string,
+  schema: z.ZodType<T>,
+): Promise<T | null> {
+  const raw = await getCacheEntry(repoRoot, cacheName, key).catch(() => null);
+  if (raw === null) return null;
+  const parsed = schema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** The one model every scan session runs on (§3.4): the configured api-mode
+ *  flagship, or claude-code mode's pinned tier. No per-stage tiers. */
+function sessionModel(mode?: LlmTransportMode): string {
+  return (mode !== undefined ? apiModeModel(mode) : apiModeModel()) ?? SESSION_MODEL_CLAUDE_CODE;
+}
+
+const mean = (ns: number[]): number =>
+  ns.length === 0 ? 0 : Math.round(ns.reduce((a, b) => a + b, 0) / ns.length);
+
 /**
- * Pre-flight token estimate for `spec scan` (curate). Pass `prices` to add a
- * ceiling cost.
+ * Pre-flight token estimate for `spec scan`. Pass `prices` to add a ceiling
+ * cost. Models SESSIONS (plan 02 step 7): per kind, `items` = cache-missing
+ * work items, probed against the run's own cache names + key builders — the
+ * instructions fingerprint included, so editing a standing instruction shows
+ * up here as the full re-scan it really is. A warmed cache yields an EMPTY
+ * estimate (no stages) and the confirm prompt is skipped.
  *
- * Cache-aware (exact — no proxy): relevance + area-tags are cached per doc,
- * content-keyed, and each cache directly gates its own LLM call. So a re-scan
- * only pays for docs whose content changed; we read the real caches up front and
- * count only the misses. The global stages (vocab/relation/overlap) re-run only
- * when the kept set changed. When nothing changed the estimate has no stages and
- * the confirm prompt is skipped.
+ * Where an upstream miss makes downstream work unknowable (changed docs feed
+ * the vocabulary that feeds the areas), the affected kind degrades to an
+ * honest range instead of a guess dressed as a count.
  */
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode } = {},
+  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode; only?: ScanStep } = {},
 ): Promise<LlmEstimate> {
+  const model = sessionModel(opts.mode);
+
   // Load the user's decisions so the estimate probes the SAME doc set the run
-  // classifies. Without the manualIncludes the prefilter (dedup pool) and the
-  // kept set diverge from the runtime — the estimate would report "all cached"
-  // while the run cache-misses and spends (silent-spend bug).
+  // classifies (manual includes/excludes, scope verdicts, instructions — all of
+  // them shift what the run spends).
   const decisions = readCorpusDecisions(repoRoot);
   const manualIncludes = decisions.manualIncludes ?? [];
+  const manualSet = new Set(manualIncludes);
   const manualExcludes = new Set(decisions.manualExcludes ?? []);
 
-  // Scope-aware, exactly as `curate` discovers: `spec.include` narrows the
-  // universe before anything else runs, and the estimate must see the same doc
-  // set the run will. It also has to, now that identity is part of the relevance
-  // cache key — a different doc set can resolve a different identity, and then
-  // the estimate reads a cache the run never hits.
-  //
-  // `skipGit` is unconditional here, and only here: `lastTouched` comes from one
-  // `git log` PER DOC — 7.6s for 492 docs, ~99% of a large repo's pre-flight —
-  // and no estimate input reads it (cache keys are path + contentHash, identity
-  // is derived from doc bodies). The curate run still derives it; the doc list,
-  // hashes and sizes the estimate prices are identical either way.
-  const docs = discoverDocs(repoRoot, { skipGit: true, scope: loadSpecScope(repoRoot) });
-  // Resolved AFTER discovery (corpus name expansion reads the docs) and folded
-  // into the relevance cache key. The estimate and the run must resolve the same
-  // identity or they key differently and the estimate under-reports — the
-  // silent-re-spend class this module already documents. An explicit `null` from
-  // the caller (EE) is honored; only `undefined` falls back to resolving here.
+  // Discovery, scope-aware and gitless, exactly as before (`lastTouched` feeds
+  // no estimate input and costs one `git log` per doc).
+  const docsAll = discoverDocs(repoRoot, { skipGit: true, scope: loadSpecScope(repoRoot) });
+
+  // The orchestrator pre-pass, mirrored: a covered universe spends no session;
+  // an uncovered one spends exactly one (no cache for that kind — the pre-pass
+  // IS its cheap path).
+  const scanScope = buildScanScopeUniverse(buildScanUniverse(docsAll), readSourcesFile(repoRoot).sources);
+  const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? []);
+  const orchestrateItems = coverage.covered ? 0 : 1;
+
+  // Scope verdicts excluded BEFORE anything below — same order as the run.
+  const docs = applyScopeVerdicts(docsAll, decisions.scopeVerdicts ?? [], scanScope.sources);
+
+  // Identity AFTER discovery + scope, as the run resolves it; it enters every
+  // curate-doc cache key, so estimate and run must agree. Explicit null (EE)
+  // is honored.
   const identity =
     opts.identity !== undefined
       ? opts.identity
       : resolveRepoIdentity({ ...readRepoIdentityInput(repoRoot), docs });
-  // Exact same planner `filterByRelevance` runs: one LLM call per doc whose
-  // verdict isn't cached (manual-includes never call). Its `known` verdicts also
-  // tell us which docs are kept (feed area-tagging).
-  const plan = await planRelevanceWork(repoRoot, docs, { manualIncludes, identity });
-  const nClassify = plan.toClassify.length;
-  const relevanceMissDocs = plan.needsCall;
-  // Kept without a call = cached-include ∪ manual-include, minus force-excludes
-  // (the run drops excluded docs before tagging).
-  const cachedKeptDocs = plan.toClassify.filter(
-    (d) => plan.known.get(d.path)?.include === true && !manualExcludes.has(d.path),
+
+  const instructions = decisions.instructions ?? [];
+  const instructionParts = [instructionsFingerprint(instructions)];
+
+  // ---- curate-doc: exact — probe the run's own per-doc cache ----------------
+  const { toClassify } = prefilterDocs(docs, manualIncludes, identity);
+  const curateItems = toClassify.filter((d) => !manualExcludes.has(d.path));
+  const cachedVerdicts = new Map<string, DocVerdict>();
+  const curateMissDocs: DocCandidate[] = [];
+  for (const doc of curateItems) {
+    const cached = await probeSessionCache(
+      repoRoot,
+      CURATE_DOC_CACHE_NAME,
+      curateDocCacheKey({ identity, doc }, instructionParts),
+      DocVerdictSchema,
+    );
+    if (cached) cachedVerdicts.set(doc.path, cached);
+    else curateMissDocs.push(doc);
+  }
+  const missCount = curateMissDocs.length;
+
+  // ---- The cached fold, reconstructed (det) ---------------------------------
+  // The kept set from CACHED verdicts, through the same subject-attribution
+  // backstop the run's fold applies. (The alias reinstatement backstop is
+  // deliberately skipped here — expected ~0 hits, and it reads every doc body.)
+  const keptTags = new Map<string, AreaTag[]>();
+  for (const [path, v] of cachedVerdicts) {
+    const attributed = applySubjectAttribution({
+      path,
+      subject: v.subject,
+      include: v.keep,
+      reason: v.reason,
+      category: v.category,
+    });
+    if (attributed.include || manualSet.has(path)) keptTags.set(path, v.areas);
+  }
+  const canonicalByPath = new Map<string, AreaTag[]>(
+    [...keptTags].map(([path, tags]) => [path, canonicalDocTags(tags)]),
   );
+  const vocab = collectAreaVocab(canonicalByPath);
 
-  // Area-tag: cached-kept docs that still lack tags + the kept share of changed
-  // docs (whose tags are necessarily uncached — same content key).
-  const cachedKeptTagged = await Promise.all(cachedKeptDocs.map((d) => isAreaTagCached(repoRoot, d)));
-  const cachedKeptTagMisses = cachedKeptTagged.filter((cached) => !cached).length;
-  const estChangedKept = Math.round(relevanceMissDocs.length * KEEP_RATE);
+  // ---- settle-areas: gate + probe when the vocabulary is knowable -----------
+  const gate = keptTags.size > 0 && settleAreasGate(vocab);
+  let settlement: AreaSettlement | null = null;
+  let settleItems = 0;
+  let settleMin = 0;
+  let settleMax = 0;
+  if (missCount === 0) {
+    if (gate) {
+      settlement = await probeSessionCache(
+        repoRoot,
+        SETTLE_AREAS_CACHE_NAME,
+        settleAreasCacheKey(vocab, instructionParts),
+        AreaSettlementSchema,
+      );
+      settleItems = settlement ? 0 : 1;
+      settleMin = settleItems;
+      settleMax = settleItems;
+    }
+  } else {
+    // Changed docs may move the label sets, so the settlement key is unknowable:
+    // the honest answer is a 0..1 range, expected 1.
+    settleItems = 1;
+    settleMin = 0;
+    settleMax = 1;
+  }
 
-  const nRelevanceCalls = relevanceMissDocs.length;
-  const nAreaTagCalls = cachedKeptTagMisses + estChangedKept;
-  const nKept = cachedKeptDocs.length + estChangedKept;
-  const changedDocs = relevanceMissDocs.length + cachedKeptTagMisses;
-  const hasWork = changedDocs > 0;
+  // ---- overlap: group from cached tags, probe per-cluster keys --------------
+  // Exactly the run's derivation whenever everything upstream is cached (the
+  // settlement applied, the same grouper, the same collision pairing and
+  // clustering via deriveOverlapWorkItems, the same key builder); with
+  // upstream misses the probed part still holds and the changed docs' share is
+  // added as a range.
+  const applied = settlement ? applySettlement(settlement, vocab) : null;
+  const vocabMap = applied?.vocab ?? { products: {}, concerns: {} };
+  if (applied) {
+    for (const [ref, perDoc] of applied.reassignments) {
+      const tags = canonicalByPath.get(ref);
+      if (!tags) continue;
+      canonicalByPath.set(
+        ref,
+        tags.map((tag) => (perDoc.has(tag.concern) ? { ...tag, concern: perDoc.get(tag.concern)! } : tag)),
+      );
+    }
+  }
+  const keptDocs = curateItems.filter((d) => keptTags.has(d.path));
+  const groupTags = new Map<string, DocAreaTags>(
+    keptDocs.map((d) => [d.path, { tags: canonicalByPath.get(d.path) ?? [] }]),
+  );
+  const grouped = groupByArea(keptDocs, groupTags, decisions.manualAreas ?? [], vocabMap);
+  const overlapItems: OverlapWorkItem[] = deriveOverlapWorkItems(grouped.areas, keptDocs, vocabMap);
+  const overlapMissItems: OverlapWorkItem[] = [];
+  for (const item of overlapItems) {
+    const cached = await probeSessionCache(
+      repoRoot,
+      OVERLAP_SESSION_CACHE_NAME,
+      overlapSessionCacheKey(item, instructionParts),
+      OverlapOutcomeSchema,
+    );
+    if (!cached) overlapMissItems.push(item);
+  }
+  // Exact only when the whole upstream is settled: every doc verdict cached AND
+  // the settlement either cached or not needed. A pending settlement can
+  // reshape the areas, so its presence downgrades the overlap count to a range.
+  const overlapExact = missCount === 0 && (settlement !== null || !gate);
+  // Comparison clusters the CHANGED docs will land in — unknowable before
+  // their sessions run; sized by the mean-area heuristic and carried as a range.
+  const changedClusters = missCount > 0 ? Math.ceil(Math.round(missCount * KEEP_RATE) / AVG_AREA_SIZE) : 0;
+  const overlapExpectedItems = overlapMissItems.length + changedClusters;
+  // A fully settled upstream with zero misses is a KNOWN no-op — the ceiling
+  // drops to zero so the stage vanishes and a warmed cache yields an EMPTY
+  // estimate (confirm skipped). An unsettled upstream keeps the honest
+  // ceiling: a fresh settlement can re-key every cluster.
+  const overlapIdle = overlapExpectedItems === 0 && overlapExact;
+  const overlapMaxItems = overlapIdle ? 0 : overlapItems.length + changedClusters;
+  const clustersTotal = overlapItems.length + changedClusters;
 
-  const avgDocChars = docs.length
-    ? Math.round(docs.reduce((n, d) => n + d.size, 0) / docs.length)
-    : 0;
-
-  // Overlap pairs (within-area): when a prior corpus is on disk, use its real area
-  // structure — Σ n·(n-1)/2 over areas (n = area docRefs) — instead of the mean-area
-  // heuristic. Heading-widened cross-area pairs need doc content and stay unmodeled.
-  // Without a corpus, estimate from the kept docs grouped into mean-sized areas.
-  // Every pair judged (no cap), reported as a range. Only when the kept set actually
-  // changed (otherwise overlap is a cache hit).
-  const corpus = readCorpus(repoRoot);
-  const areaCount = Math.max(1, Math.ceil(nKept / AVG_AREA_SIZE));
-  const pairsPerArea = (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2;
-  const overlapPairs = !hasWork
-    ? 0
-    : corpus
-      ? corpus.areas.reduce((n, a) => n + (a.docRefs.length * (a.docRefs.length - 1)) / 2, 0)
-      : nKept >= 2
-        ? areaCount * pairsPerArea
-        : 0;
-  // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: the complete
-  // window matrix (never truncated), so calls scale with the square of doc size.
-  // This estimate IS the cost gate for that completeness — the user approves it.
-  const callsPerPairFactor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
-  const overlapCalls = overlapPairs * callsPerPairFactor;
-
-  // Verify pass: one call per FLAGGED pair (not per window call) — the detector
-  // flags only a fraction of the pairs it examines, so scale by the flag rate.
-  // Bounded above by every pair being flagged and verified.
-  const verifyCalls = Math.round(FLAG_RATE * overlapPairs);
-
+  // ---- roll-up ---------------------------------------------------------------
   const stages: StageCallEstimate[] = [
-    {
-      // Exact: one call per doc whose relevance verdict isn't cached.
-      stage: 'relevance',
-      model: resolveModel('spec.relevance', undefined, repoRoot, opts.mode),
-      calls: nRelevanceCalls,
-      avgInputTokens: tokensFromChars(RELEVANCE_SYSTEM_PROMPT.length, relevanceUserPromptChars(identity)),
-      avgOutputTokens: 40,
-    },
-    {
-      // The cached-kept misses are exact; how many CHANGED docs end up kept (and
-      // thus tagged) is the only unknown → range out to +all changed docs.
-      stage: 'areaTag',
-      model: resolveModel('spec.areaTag', undefined, repoRoot, opts.mode),
-      calls: nAreaTagCalls,
-      minCalls: cachedKeptTagMisses,
-      maxCalls: cachedKeptTagMisses + nRelevanceCalls,
-      avgInputTokens: tokensFromChars(AREA_TAGGER_SYSTEM_PROMPT.length, avgDocChars),
-      avgOutputTokens: 80,
-    },
-    {
-      stage: 'vocab',
-      model: resolveModel('spec.vocab', undefined, repoRoot, opts.mode),
-      calls: hasWork && nKept > 0 ? 1 : 0,
-      avgInputTokens: tokensFromChars(VOCAB_NORMALIZER_SYSTEM_PROMPT.length, 2000),
-      avgOutputTokens: 200,
-    },
-    {
-      stage: 'overlap',
-      model: resolveModel('spec.overlap', undefined, repoRoot, opts.mode),
-      calls: overlapCalls,
-      minCalls: 0,
-      maxCalls: overlapCalls * 2,
-      avgInputTokens: tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, Math.min(avgDocChars, OVERLAP_WINDOW_CHARS) * 2),
-      avgOutputTokens: 120,
-    },
-    {
-      // Verify each flagged pair — a heuristic fraction of the overlap pairs (the
-      // exact count isn't known until detection runs). Each call carries both
-      // sides' context, each clamped to VERIFY_DOC_BUDGET_CHARS.
-      stage: 'verifyOverlap',
-      model: resolveModel('spec.verifyOverlap', undefined, repoRoot, opts.mode),
-      calls: verifyCalls,
-      expectedCalls: verifyCalls,
-      minCalls: 0,
-      maxCalls: overlapPairs,
-      avgInputTokens: tokensFromChars(
-        VERIFY_OVERLAP_SYSTEM_PROMPT.length,
-        Math.min(avgDocChars, VERIFY_DOC_BUDGET_CHARS) * 2,
-      ),
-      avgOutputTokens: 80,
-    },
+    sessionKindStage({
+      kind: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+      model,
+      items: orchestrateItems,
+      budget: ORCHESTRATE_BUDGET,
+      systemPromptChars: ORCHESTRATE_SYSTEM_PROMPT.length,
+      briefingChars:
+        orchestrateItems > 0 ? orchestrateBriefing(scanScope, decisions, coverage).length : 0,
+      bound: 'its scope verdicts + instructions re-key every stage below',
+    }),
+    sessionKindStage({
+      kind: CURATE_DOC_SESSION_KIND,
+      model,
+      items: missCount,
+      budget: CURATE_DOC_BUDGET,
+      systemPromptChars: CURATE_DOC_SYSTEM_PROMPT.length,
+      briefingChars: mean(curateMissDocs.map((d) => curateDocBriefing(d, identity, instructions).length)),
+      bound: 'keys fold the standing instructions — editing one re-scans every doc',
+    }),
+    sessionKindStage({
+      kind: SETTLE_AREAS_SESSION_KIND,
+      model,
+      items: settleItems,
+      minItems: settleMin,
+      maxItems: settleMax,
+      budget: SETTLE_AREAS_BUDGET,
+      systemPromptChars: SETTLE_AREAS_SYSTEM_PROMPT.length,
+      briefingChars:
+        settleItems > 0 ? settleAreasBriefing(vocab, buildScanUniverse(docs), instructions).length : 0,
+    }),
+    sessionKindStage({
+      kind: OVERLAP_SESSION_KIND,
+      model,
+      items: overlapExpectedItems,
+      minItems: overlapMissItems.length,
+      maxItems: overlapMaxItems,
+      budget: OVERLAP_SESSION_BUDGET,
+      systemPromptChars: OVERLAP_SESSION_SYSTEM_PROMPT.length,
+      briefingChars:
+        mean(overlapMissItems.map((i) => overlapBriefing(i, instructions).length)) ||
+        (overlapExpectedItems > 0 ? OVERLAP_BRIEFING_FALLBACK_CHARS : 0),
+      bound: overlapExact
+        ? `${overlapMissItems.length} of ${Math.max(clustersTotal, overlapMissItems.length)} comparison${clustersTotal === 1 ? '' : 's'} changed`
+        : `~${overlapExpectedItems} of ~${clustersTotal} comparison${clustersTotal === 1 ? '' : 's'} changed (changed docs may reshape clusters)`,
+    }),
   ];
 
-  return estimateStageTokens(withLabels(stages), changedSubject(nClassify, changedDocs, 'doc'), prices);
+  const changedDocs = missCount;
+  // Single-step mode prices only the chosen step — prior steps replay from
+  // cache (a miss fails the run loudly, never spends), later ones don't start.
+  const SCAN_STEP_KIND: Record<ScanStep, string> = {
+    orchestrate: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+    curate: CURATE_DOC_SESSION_KIND,
+    settle: SETTLE_AREAS_SESSION_KIND,
+    overlap: OVERLAP_SESSION_KIND,
+  };
+  const included = opts.only ? stages.filter((s) => s.stage === SCAN_STEP_KIND[opts.only!]) : stages;
+  return estimateStageTokens(
+    withLabels(included),
+    changedSubject(curateItems.length, changedDocs, 'doc'),
+    prices,
+  );
 }
+
 
 // Guard heuristics (grounded in real extractions: whole-document reads average ~2
 // runnable claims per section, with dense sections higher). Claims are no longer
@@ -272,106 +561,149 @@ export async function estimateScanTokens(
 // therefore unknowable before the run (milestones partition claims in the worst
 // case, so flows <= runnable claims).
 const GUARD_CLI_CLAIMS_PER_SECTION_MAX = 3.5; // upper bound (multi-claim sections)
-const GUARD_VIEW_CHARS_CAP = 48_000; // per-view sizing cap for the extraction estimate
-const GUARD_EXTRACT_OUTPUT_TOKENS = 1500; // ~claims + notes per document view
-const GUARD_AUTHOR_OUTPUT_TOKENS = 700; // ~one flow scenario's YAML (several steps)
-const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
-const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
-const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the review input)
+const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the fidelity child's input)
 // Seed drafting: the prompt carries the parsed schema + the blocked
 // claims, and the reply is a whole script file — the largest single output of any
 // guard stage.
 const GUARD_SEED_BODY_CHARS = 6000;
 const GUARD_SEED_OUTPUT_TOKENS = 3000;
-// Grounded authoring injects real empty-sandbox probe transcripts into each
-// authoring prompt (zero extra LLM CALLS — it just enlarges the input).
+// Grounded worker briefings inject real empty-sandbox probe transcripts (zero
+// extra LLM calls — it just enlarges the briefing).
 const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
-// Flow synthesis reads one area's claims + outlines (no document text at all), so
-// its input is small; the cold-cache fallback assumes a mid-sized area.
+// A flows-session briefing reads one area's claims + outlines (no document text
+// at all), so its input is small; the cold-cache fallback assumes a mid-sized area.
 const GUARD_FLOWS_AREA_CHARS = 6000;
-const GUARD_FLOWS_OUTPUT_TOKENS = 1200; // ~an area's flows + no-flow reasons
 // Matching reads one flow's milestones + one surface's catalog DIGEST (ids, entries,
 // step summaries — never code); a digest line is short by construction.
-const GUARD_JOURNEY_DIGEST_CHARS = 220; // ~one journey's digest block
+const GUARD_INTERFACE_DIGEST_CHARS = 220; // ~one interface's digest block
 const GUARD_MATCH_CATALOG_CHARS = 12_000; // cold-cache fallback for a catalog digest
 const GUARD_MATCH_OUTPUT_TOKENS = 300; // ~a plan over a handful of milestones
-// A flow's authoring prompt carries every milestone's section text once; sections
+// A worker briefing carries every milestone's section text once; sections
 // average this much when the corpus isn't readable offline.
 const GUARD_MILESTONES_PER_FLOW = 3; // rough milestones a synthesized flow carries
+// Cold-cache fallback for an extract-session briefing (outline + first chunk).
+const GUARD_EXTRACT_BRIEFING_FALLBACK_CHARS = 14_000;
 
-/** The flow-synthesis stage's planned work — see {@link planGuardFlowStage}. */
-interface GuardFlowStagePlan {
-  /** Per-area synthesis calls (exact when `exact`, one per changed area otherwise). */
+/** The extract + flows SESSION stages' planned work — see {@link planGuardSessionStages}. */
+interface GuardSessionWorkPlan {
+  /** Cache-missing `guard-generate.extract` sessions (one per doc). Exact —
+   *  probed against the run's own `guard/extract-session` keys. */
+  extractItems: number;
+  /** Docs in the universe (the extract pool's denominator). */
+  extractDocs: number;
+  /** Mean briefing chars across the extract misses (0 when none). */
+  extractBriefingChars: number;
+  /** Per-area `guard-generate.flows` sessions (exact when `exact`; one per
+   *  changed area otherwise). */
   areaCalls: number;
-  /** Epic-pass ceiling: 1 when more than one area can yield flows, else 0. */
+  /** Epic-session ceiling: 1 when more than one area can yield flows, else 0. */
   epicCalls: number;
-  /** Average input chars one synthesis call carries. */
+  /** Average briefing chars one area session carries. */
   areaChars: number;
   /** Runnable claims — the honest upper bound on synthesized flows (0 when unknown). */
   maxFlows: number;
-  /** True when the claim inventory was known offline and the REAL flows cache was probed. */
+  /** True when the claim inventory was knowable offline (every extract-session
+   *  entry cached) and the REAL flows keys were probed. */
   exact: boolean;
 }
 
 /**
- * Plan the `guard.flows` stage. Exact whenever the extract cache is warm for every
- * document: the claim inventory is then known offline, so this groups the SAME
- * areas the run synthesizes and probes the SAME `.cache/guard/flows` entries it
- * reads — an area whose claims are unchanged costs nothing and the estimate says so.
- * Cold (a document not yet extracted) falls back to one call per area with a
- * changed section, which is what a cold run pays.
+ * Plan the extract + flows SESSION stages (plan 04 steps 15/16, estimate per
+ * step 20). Extraction is exact by construction: one session per doc, probed
+ * against the run's own `guard/extract-session` cache with the run's own key
+ * builder. Flow synthesis is exact whenever EVERY doc's extraction is cached:
+ * the claim inventory is then known offline, so this reconstructs the SAME
+ * filtered claim set the run feeds synthesis (snap → dismissals → runnable →
+ * driver-prepared), groups the SAME areas, and probes the SAME `guard/flows`
+ * session keys. A doc not yet extracted degrades the flows count to one call
+ * per area with a changed section — what a cold run pays.
  */
-async function planGuardFlowStage(repoRoot: string, plan: GuardWorkPlan): Promise<GuardFlowStagePlan> {
+async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Promise<GuardSessionWorkPlan> {
   // A generate with no changed section returns before any stage runs, so zero
-  // synthesis calls is exact — not an under-count.
+  // sessions is exact — not an under-count.
   if (plan.work.length === 0) {
-    return { areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
+    return { extractItems: 0, extractDocs: 0, extractBriefingChars: 0, areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
   }
   const areaTags = readCorpusAreaTags(repoRoot);
   // An area's synthesis reads ALL its claims, so the estimate needs every document
   // of the universe — not only the ones with a changed section.
   const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
+
+  // The run's own claim gates, reproduced so the flows keys hash the same
+  // inventory: dismissed claims drop, only runnable claims on a PREPARED driver
+  // enter synthesis (see the extraction fold in `generateGuards`).
+  const dismissed = new Set(
+    readGuardDecisions(repoRoot).dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
+  );
+  const preparedSet = new Set(preparedSurfaces(repoRoot));
+
+  let extractItems = 0;
+  const missBriefingChars: number[] = [];
   const inputs: FlowAreaDocInput[] = [];
-  let exact = true;
+  let inventoryKnown = true;
   for (const doc of docs) {
-    if (!(await docExtractionCached(repoRoot, doc))) {
-      exact = false;
-      break;
+    const cached = await probeSessionCache(
+      repoRoot,
+      EXTRACT_SESSION_CACHE_NAME,
+      extractSessionCacheKey(doc),
+      ExtractOutcomeSchema,
+    );
+    if (!cached) {
+      extractItems++;
+      missBriefingChars.push(extractSessionBriefing(doc).length);
+      inventoryKnown = false;
+      continue;
     }
-    const extraction = await extractDocClaims(repoRoot, doc, async () => {
-      throw new Error('estimate: extraction cache miss');
-    });
-    if (!extraction.ok || !extraction.complete) {
-      exact = false;
-      break;
+    // The fold re-snap, exactly as the seam applies it — the cache holds the
+    // raw outcome (model anchors), never a pre-snapped one.
+    const snapped = snapExtraction(cached, doc.sections);
+    const live: FlowClaimInput[] = [];
+    for (const c of snapped.claims) {
+      if (dismissed.has(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))) continue;
+      if (!isRunnableDriver(c.driver)) continue;
+      if (!preparedSet.has(c.driver)) continue;
+      live.push({
+        doc: doc.doc,
+        anchor: c.sectionAnchor,
+        title: c.claim,
+        driver: c.driver,
+        ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
+      });
     }
     inputs.push({
       doc: doc.doc,
       areaTags: areaTags.get(doc.doc) ?? [],
       outline: doc.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-      untestable: extraction.data.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
-      claims: extraction.data.claims.map((c) => ({
-        doc: doc.doc,
-        anchor: c.sectionAnchor,
-        title: c.claim,
-        driver: c.driver,
-      })),
+      untestable: snapped.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
+      claims: live,
     });
   }
+  const extractBriefingChars =
+    mean(missBriefingChars) || (extractItems > 0 ? GUARD_EXTRACT_BRIEFING_FALLBACK_CHARS : 0);
 
-  if (exact) {
+  if (inventoryKnown) {
     const areas = buildFlowAreas(inputs);
-    const flowPlan = await planFlowSynthesis(repoRoot, areas);
+    let areaCalls = 0;
+    for (const area of areas) {
+      const cached = await probeSessionCache(repoRoot, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(area), FlowSetSchema);
+      if (!cached) areaCalls++;
+    }
+    const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
     const chars = areas.map(
       (a) =>
         a.claims.reduce((n, c) => n + c.doc.length + c.anchor.length + c.title.length + 40, 0) +
         a.docs.reduce((n, d) => n + d.outline.reduce((m, e) => m + e.anchor.length + e.headingText.length + 6, 0), 0),
     );
     return {
-      areaCalls: flowPlan.areaCalls,
-      epicCalls: flowPlan.epicCalls,
+      extractItems,
+      extractDocs: docs.length,
+      extractBriefingChars,
+      areaCalls,
+      // The epic key hashes the area sessions' OUTPUT digests — unknowable
+      // offline — so the epic session is always quoted as its 0..1 ceiling.
+      epicCalls: areasWithClaims > 1 ? 1 : 0,
       areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
-      maxFlows: flowPlan.maxFlows,
+      maxFlows: areas.reduce((n, a) => n + a.claims.length, 0),
       exact: true,
     };
   }
@@ -380,6 +712,9 @@ async function planGuardFlowStage(repoRoot: string, plan: GuardWorkPlan): Promis
   const changedAreas = new Set(plan.work.map((s) => areaOf(s.doc)));
   const allAreas = new Set(plan.sections.map((s) => areaOf(s.doc)));
   return {
+    extractItems,
+    extractDocs: docs.length,
+    extractBriefingChars,
     areaCalls: changedAreas.size,
     epicCalls: allAreas.size > 1 ? 1 : 0,
     areaChars: GUARD_FLOWS_AREA_CHARS,
@@ -392,9 +727,10 @@ async function planGuardFlowStage(repoRoot: string, plan: GuardWorkPlan): Promis
 interface GuardRealizationPlan {
   /** Matching calls (exact cache misses when `exact`, the ceiling otherwise). */
   matchCalls: number;
-  /** Authoring calls: one per (changed flow, surface with a plan). */
-  authorCalls: number;
-  /** The ceiling both stages are priced at: every flow re-authored on every surface. */
+  /** Flow-worker SESSIONS a run would start: one per (changed flow, surface with
+   *  a plan) whose `guard/generate` worker-cache entry misses. */
+  workerItems: number;
+  /** The ceiling both stages are priced at: every flow re-worked on every surface. */
   maxPairs: number;
   /** Flows the run will consider (known offline, else the claim-derived bound). */
   flows: number;
@@ -402,38 +738,46 @@ interface GuardRealizationPlan {
   surfaces: number;
   /** Chars one surface's catalog digest carries. */
   catalogChars: number;
-  /** True when the flow set AND the journey catalog were known offline. */
+  /** True when the flow set AND the interface catalog were known offline. */
   exact: boolean;
 }
 
 /**
- * Plan `guard.match` + `guard.generate` — the two stages whose work count is an
- * earlier stage's OUTPUT. Exact whenever the flow corpus is settled (every area's
- * synthesis cached, so `scenarios/flows.json` IS what the run will use) AND the
- * journey snapshot exists: matching then probes the SAME `.cache/guard/match`
- * entries the run reads, and authoring counts the flows whose composition moved
- * since the manifest. Otherwise both fall back to the honest ceiling — flows ≤
- * runnable claims, one authoring call per (flow, surface).
+ * Plan `guard.match` (still a one-shot) + the flow-worker sessions — the two
+ * stages whose work count is an earlier stage's OUTPUT. Exact whenever the flow
+ * corpus is settled (every area's synthesis cached, so `scenarios/flows.json`
+ * IS what the run will use) AND the interface snapshot exists: matching then
+ * probes the SAME `.cache/guard/match` entries the run reads, and the worker
+ * count probes the SAME `guard/generate` worker-cache keys (the kept
+ * `workerCacheKey` recipe under the session prompt fingerprints) for the flows
+ * whose composition moved since the manifest. Otherwise both fall back to the
+ * honest ceiling — flows ≤ runnable claims, one worker per (flow, surface).
  *
  * The ceiling is what the COST is priced at either way (`maxCalls`), so a prompt
- * change (which re-authors every flow) can never exceed the quoted bill.
+ * change (which re-works every flow) can never exceed the quoted bill. A
+ * TAINTED flow skips its cache read at run time — the estimate cannot read the
+ * taint ledger's future, so a tainted hit is a small under-count, bounded by
+ * the ceiling.
  */
 async function planGuardRealizationStages(
   repoRoot: string,
   plan: GuardWorkPlan,
-  flowStage: GuardFlowStagePlan,
+  flowStage: GuardSessionWorkPlan,
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
-  const catalog = readJourneyCatalog(repoRoot);
-  const catalogs = catalog ? buildSurfaceCatalogs(catalog.journeys) : null;
-  // Only surfaces with journeys reach the matcher; without a snapshot we cannot
+  // The MERGED catalog — the matcher runs against both halves, so an estimate that
+  // read the derived one alone would price no work at all for the hand-authored
+  // surfaces (every web surface there is).
+  const catalog = readMergedInterfaceCatalog(repoRoot);
+  const catalogs = catalog ? buildSurfaceCatalogs(catalog.interfaces) : null;
+  // Only surfaces with interfaces reach the matcher; without a snapshot we cannot
   // know which do, so every prepared surface counts (a ceiling, never a shortfall).
   const matchable: SurfaceCatalog[] = catalogs
-    ? surfaces.map((s) => catalogs.get(s)).filter((c): c is SurfaceCatalog => c !== undefined && c.journeys.length > 0)
+    ? surfaces.map((s) => catalogs.get(s)).filter((c): c is SurfaceCatalog => c !== undefined && c.interfaces.length > 0)
     : [];
   const catalogChars = catalogs
     ? Math.max(
-        ...[...catalogs.values()].map((c) => c.journeys.length * GUARD_JOURNEY_DIGEST_CHARS),
+        ...[...catalogs.values()].map((c) => c.interfaces.length * GUARD_INTERFACE_DIGEST_CHARS),
         0,
       )
     : GUARD_MATCH_CATALOG_CHARS;
@@ -447,13 +791,14 @@ async function planGuardRealizationStages(
     );
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
     let matchCalls = 0;
-    let authorCalls = 0;
+    let workerItems = 0;
     for (const flow of flows) {
       // Reconstruct the flow's realization from the SAME match cache the run reads:
-      // the journeys it grounds on are what its inputs hash folds, so an uncached
-      // pair is the only unknown — and it is counted as both a match and an author call.
-      const journeyFingerprints: string[] = [];
-      let plannedPairs = 0;
+      // the interfaces it grounds on are what its inputs hash folds, so an uncached
+      // pair is the only unknown — and it is counted as both a match call and a
+      // worker session.
+      const interfaceFingerprints: string[] = [];
+      const plannedPairs: { surface: GuardDriverId; fingerprints: string[] }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
         const cached = await readCachedMatch(repoRoot, flow, catalog);
@@ -462,14 +807,16 @@ async function planGuardRealizationStages(
           unknown = true;
           continue;
         }
-        if (!cached.plan) continue; // an `unrealizable` surface authors nothing
-        plannedPairs++;
-        journeyFingerprints.push(...cached.plan.journeys.map((j) => j.fingerprint));
+        if (!cached.plan) continue; // an `unrealizable` surface starts no worker
+        const fingerprints = cached.plan.interfaces.map((j) => j.fingerprint);
+        plannedPairs.push({ surface: catalog.surface, fingerprints });
+        interfaceFingerprints.push(...fingerprints);
       }
+      const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const inputsHash = flowGenerationInputsHash({
         flowFingerprint: flow.fingerprint,
-        sectionKeys: flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint),
-        journeyFingerprints,
+        sectionKeys,
+        interfaceFingerprints,
         recipeFingerprint: plan.recipeFingerprint,
       });
       const prior = priorByFlow.get(flow.id);
@@ -477,16 +824,35 @@ async function planGuardRealizationStages(
       // surface unaccounted for is WORK, whatever its hash says.
       const changed =
         unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior);
-      if (changed) authorCalls += unknown ? Math.max(matchable.length, 1) : plannedPairs;
+      if (!changed) continue;
+      if (unknown) {
+        workerItems += Math.max(matchable.length, 1);
+        continue;
+      }
+      // Cache-aware per (flow, surface): a `settled`/`blocked` worker entry is a
+      // hit (a settled one still pays a deterministic confirmation run — free in
+      // token terms); a miss is one session.
+      for (const pair of plannedPairs) {
+        const key = workerCacheKey(
+          flowWorkerPromptFingerprint(pair.surface),
+          flow,
+          pair.surface,
+          sectionKeys,
+          pair.fingerprints,
+          plan.recipeFingerprint,
+        );
+        const hit = await probeSessionCache(repoRoot, FLOW_WORKER_CACHE_NAME, key, CachedWorkerEntrySchema);
+        if (!hit) workerItems++;
+      }
     }
     const pairs = Math.max(matchable.length, 1);
-    // Nothing to match and nothing to author is a KNOWN no-op — the ceiling drops to
+    // Nothing to match and nothing to work is a KNOWN no-op — the ceiling drops to
     // zero so the stages vanish and the confirm prompt is skipped, exactly as the
     // run does nothing. Otherwise the ceiling is every flow on every surface.
-    const idle = matchCalls === 0 && authorCalls === 0;
+    const idle = matchCalls === 0 && workerItems === 0;
     return {
       matchCalls,
-      authorCalls,
+      workerItems,
       maxPairs: idle ? 0 : flows.length * pairs,
       flows: flows.length,
       surfaces: pairs,
@@ -505,7 +871,7 @@ async function planGuardRealizationStages(
   const perFlow = Math.max(surfaces.length, 1);
   return {
     matchCalls: boundFlows * perFlow,
-    authorCalls: boundFlows * perFlow,
+    workerItems: boundFlows * perFlow,
     maxPairs: boundFlows * perFlow,
     flows: boundFlows,
     surfaces: perFlow,
@@ -522,7 +888,7 @@ async function planGuardRealizationStages(
  * pure over the working tree (manifests, lockfiles, scripts — no LLM, no analysis
  * pass, no process), so it costs nothing here and predicts the recipe the run will
  * most likely write. The route surface is deliberately NOT supplied: deriving it
- * means a full journey-mapping pass, and it only ranks the health path — never
+ * means a full interface-mapping pass, and it only ranks the health path — never
  * which surfaces exist. When the proposer refuses to decide, the model could
  * propose either surface, so the estimate quotes EVERY runnable one — the ceiling
  * convention the whole realization plan is priced at (never a shortfall).
@@ -547,112 +913,275 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
   );
 }
 
+// --- guard setup session-modeling constants (plan 03 retirement) -------------
+// PROVISIONAL prompt/briefing sizes per setup session kind. Deliberately
+// constants rather than imports: most of these kinds keep their system prompts
+// module-private, and the estimate only needs an order-of-magnitude input size.
+// Re-ground on transcript data once a few session-era setups have run.
+const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
+  [RECIPE_REPAIR_SESSION_KIND]: { system: 2_600, briefing: 4_500 },
+  [DEPENDENCY_CATALOG_SESSION_KIND]: { system: 3_200, briefing: 4_000 },
+  [RECONCILE_INTERFACES_SESSION_KIND]: { system: 2_700, briefing: 1_500 },
+  [INTERFACE_AUTHOR_SESSION_KIND]: { system: 8_000, briefing: 12_000 },
+  [SEED_SESSION_KIND]: { system: 5_500, briefing: GUARD_SEED_BODY_CHARS + 9_000 },
+  [AUTH_PROOF_SESSION_KIND]: { system: 1_800, briefing: 1_200 },
+};
+
+/**
+ * Pre-flight estimate for `truecourse guard setup` — SESSION math (plan 03,
+ * mirroring the scan estimate's rework): per session kind, `items` counts the
+ * work a run would actually start, probed with the run's own machinery
+ * wherever it is knowable OFFLINE:
+ *
+ *  - SKIP-WHEN-SETTLED is read from the real `guard/setup.json` spine
+ *    (`settledFingerprints`) with the real fingerprint builders — the recipe,
+ *    interfaces, seed and auth fingerprints are pure tree reads. The CATALOG
+ *    fingerprint folds the detection snapshot (an analysis pass the estimate
+ *    must never pay for), so that step degrades to an honest 0..1 range.
+ *  - CACHES are probed with the REAL exported key builders where the key is
+ *    computable offline: the repair proposal (`guard/recipe`) and the seed
+ *    draft (`guard/seed`). The reconcile key folds run-time diagnostics —
+ *    unknowable here, quoted as a 0..1 range with expected 0 (an agreeing
+ *    union asks nothing).
+ *  - The AUTHORING work list is the real `planWorkItems` over the on-disk
+ *    catalog halves, stale places excluded — exactly the selection the step
+ *    makes.
+ *
+ * ONE MODEL for every session (§3.4); expected turns are the provisional
+ * per-kind constants, the ceiling is always the budget's hard limit.
+ *
+ * `only` (the `--only-<step>` flags) prices ONLY that step's kinds: prior steps
+ * replay from disk and later ones never start, so quoting them would ask the
+ * user to approve a bill this run cannot produce.
+ */
+export async function estimateGuardSetup(
+  repoRoot: string,
+  prices?: PriceTable,
+  opts: {
+    refresh?: boolean;
+    replace?: boolean;
+    mode?: LlmTransportMode;
+    only?: GuardSetupOnlyStep;
+  } = {},
+): Promise<LlmEstimate> {
+  const model = sessionModel(opts.mode);
+  const refresh = opts.refresh === true;
+  const replace = opts.replace === true;
+  let recipe: Recipe | undefined;
+  try {
+    recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
+  } catch {
+    recipe = undefined; // a broken recipe is re-derived, so it costs the session
+  }
+  const settled = settledFingerprints(repoRoot, refresh);
+
+  // ---- recipe repair: loop only on the failure path -------------------------
+  // Zero whenever a recipe exists (discovery reuses it) or the settled proposal
+  // is cached; when discovery WILL run, the deterministic proposer (pure over
+  // the tree — the same first pass the run makes) predicts whether the model is
+  // even reached, and a verify failure it cannot predict keeps the 0..1 range.
+  let repairItems = 0;
+  let repairMax = 0;
+  if (refresh || !recipe) {
+    const cached = await probeSessionCache(
+      repoRoot,
+      RECIPE_CACHE_NAME,
+      recipeCacheKey(computeRecipeFingerprint(repoRoot)),
+      RecipeProposalSchema,
+    );
+    repairMax = cached ? 0 : 1;
+    repairItems = cached ? 0 : proposeRecipe(repoRoot).ok ? 0 : 1;
+  }
+
+  // ---- dependency catalog: fingerprint folds the detection snapshot ---------
+  const catalogSettledRow = settled('catalog') !== null;
+  const catalogItems = catalogSettledRow ? 0 : 1;
+  // A settled row zeroes the ceiling too — same convention as the seed's cache
+  // probe: a detection snapshot that moves between estimate and run is unpriced.
+  const catalogMax = catalogSettledRow ? 0 : 1;
+
+  // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
+  const derivedCatalog = readInterfaceCatalog(repoRoot);
+  const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
+  const interfacesSettled =
+    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot);
+  const staleAuthoredIds = new Set(
+    staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
+  );
+  const authorable = planWorkItems(derivedCatalog, authoredCatalog).filter(
+    (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.existing.length === 0),
+  );
+  const authorItems = interfacesSettled ? 0 : authorable.length;
+  const reconcileMax = interfacesSettled ? 0 : 1;
+
+  // ---- seed: real cache key when the step will run --------------------------
+  const seedGateOpen =
+    !recipe || (recipe.api !== undefined && (recipe.api.seed === undefined || refresh));
+  const seedSettled = recipe !== undefined && settled('seed') === computeSeedStepFingerprint(repoRoot);
+  let seedItems = 0;
+  let seedMax = 0;
+  if (seedGateOpen && !seedSettled) {
+    const cached =
+      recipe !== undefined
+        ? await probeSessionCache(
+            repoRoot,
+            SEED_CACHE_NAME,
+            seedSessionCacheKey(computeSeedStepFingerprint(repoRoot)),
+            SeedSessionOutcomeSchema,
+          )
+        : null;
+    seedMax = cached ? 0 : 1;
+    seedItems = cached ? 0 : 1;
+  }
+
+  // ---- auth proof: one session per supplied catalog entry (never cached) ----
+  const suppliedEntries = loadDependencyCatalog(repoRoot).dependencies.filter(
+    (d) => d.class === 'supplied',
+  ).length;
+  const authRuns =
+    suppliedEntries > 0 &&
+    recipe?.entry !== undefined &&
+    settled('auth') !== authFingerprint(repoRoot);
+  const authItems = authRuns ? suppliedEntries : 0;
+
+  const setupStage = (input: {
+    kind: string;
+    budget: SessionBudget;
+    items: number;
+    minItems?: number;
+    maxItems?: number;
+    bound?: string;
+  }): StageCallEstimate => {
+    const chars = SETUP_KIND_CHARS[input.kind] ?? { system: 3_000, briefing: 4_000 };
+    return sessionKindStage({
+      kind: input.kind,
+      model,
+      items: input.items,
+      minItems: input.minItems ?? 0,
+      maxItems: input.maxItems ?? input.items,
+      budget: input.budget,
+      systemPromptChars: chars.system,
+      briefingChars: chars.briefing,
+      ...(input.bound ? { bound: input.bound } : {}),
+    });
+  };
+
+  const stages: StageCallEstimate[] = [
+    setupStage({
+      kind: RECIPE_REPAIR_SESSION_KIND,
+      budget: RECIPE_REPAIR_BUDGET,
+      items: repairItems,
+      maxItems: repairMax,
+      bound: 'loop only on the failure path — a deterministic proposal that verifies spends nothing',
+    }),
+    setupStage({
+      kind: DEPENDENCY_CATALOG_SESSION_KIND,
+      budget: DEPENDENCY_CATALOG_BUDGET,
+      items: catalogItems,
+      maxItems: catalogMax,
+      bound: catalogSettledRow
+        ? 'settled last run; re-runs only if detection or the catalog moved (unknowable offline)'
+        : 'one classification session over the whole detection',
+    }),
+    setupStage({
+      kind: RECONCILE_INTERFACES_SESSION_KIND,
+      budget: RECONCILE_INTERFACES_BUDGET,
+      items: 0,
+      maxItems: reconcileMax,
+      bound: 'runs only when the cli tree and probe derivations disagree — usually never',
+    }),
+    setupStage({
+      kind: INTERFACE_AUTHOR_SESSION_KIND,
+      budget: INTERFACE_AUTHOR_BUDGET,
+      items: authorItems,
+      maxItems: authorItems,
+      bound: interfacesSettled
+        ? 'unchanged places + an authored catalog — skipped'
+        : `one session per unauthored screen (${authorable.length} today)`,
+    }),
+    setupStage({
+      kind: SEED_SESSION_KIND,
+      budget: SEED_SESSION_BUDGET,
+      items: seedItems,
+      maxItems: seedMax,
+      bound: 'prove-by-execution; skipped when no database schema is detected (unknowable offline)',
+    }),
+    setupStage({
+      kind: AUTH_PROOF_SESSION_KIND,
+      budget: AUTH_PROOF_BUDGET,
+      items: authItems,
+      maxItems: authItems,
+      bound: 'one proof per supplied catalog entry; never cached (proof-class)',
+    }),
+  ];
+  // Single-step mode prices the chosen step's kinds and nothing else. The
+  // interfaces step owns TWO (the reconcile session and the authoring run).
+  const SETUP_STEP_KINDS: Record<GuardSetupOnlyStep, readonly string[]> = {
+    recipe: [RECIPE_REPAIR_SESSION_KIND],
+    catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
+    interfaces: [RECONCILE_INTERFACES_SESSION_KIND, INTERFACE_AUTHOR_SESSION_KIND],
+    seed: [SEED_SESSION_KIND],
+    auth: [AUTH_PROOF_SESSION_KIND],
+  };
+  const included = opts.only
+    ? stages.filter((s) => SETUP_STEP_KINDS[opts.only!].includes(s.stage))
+    : stages;
+  return estimateStageTokens(withLabels(included), 'preparation', prices);
+}
+
 /**
  * Pre-flight token estimate for `guard generate`. Pass `prices` to add a ceiling
  * cost. Same convention as scan/generate: cache-aware, "N of M sections changed",
  * no stages ⇒ confirm skipped.
  *
- * Every stage reads the SAME planner the run does, so the estimate can never
- * promise work the run skips (or hide work it pays for):
- *  - EXTRACTION is exact — one call per uncached document view, across the whole
- *    universe (a flow's area needs the complete claim inventory, and an unchanged
- *    document is a cache hit that costs nothing).
- *  - SYNTHESIS shares `planFlowSynthesis` (one call per area whose claim inventory
- *    isn't already synthesized, plus at most one epic pass).
- *  - MATCHING shares `planFlowMatching` whenever the flow corpus is settled and the
- *    journey snapshot exists; otherwise it quotes the claim-derived flow bound.
- *  - AUTHORING is one call per (changed flow, surface), priced at the ceiling of
- *    every flow on every prepared surface — the bill a prompt change would produce.
- *  - FIDELITY reviews one scenario per authoring call; the evidence RETRY is at most
- *    one re-author per authored scenario, so it ranges 0..authoring.
+ * Every stage reads the SAME planner the run does (plan 04 — the LLM stages are
+ * agent SESSIONS now, `guard.match` and recipe discovery the two remaining
+ * one-shots), so the estimate can never promise work the run skips (or hide
+ * work it pays for):
+ *  - EXTRACTION is exact — one session per doc whose `guard/extract-session`
+ *    entry misses, probed with the run's own key builder across the whole
+ *    universe (a flow's area needs the complete claim inventory, and an
+ *    unchanged document is a cache hit that costs nothing).
+ *  - SYNTHESIS shares `planGuardSessionStages`: one session per area whose
+ *    `guard/flows` session key misses, plus at most one epic session (its key
+ *    hashes the area sessions' OUTPUT digests, so it is always a 0..1 range).
+ *    Exact whenever every doc's extraction is cached; otherwise one call per
+ *    changed area.
+ *  - MATCHING shares `planGuardRealizationStages` whenever the flow corpus is
+ *    settled and the interface snapshot exists; otherwise it quotes the
+ *    claim-derived flow bound.
+ *  - The FLOW WORKERS are one session per (changed flow, surface with a plan)
+ *    whose worker-cache entry misses, priced at the ceiling of every flow on
+ *    every prepared surface — the bill a prompt change would produce. Each
+ *    worker authors, runs and adjudicates in one loop, subsuming the retired
+ *    author/retry/triage stages.
+ *  - FIDELITY is one depth-1 child per green submission — at most one per
+ *    worker, so it ranges 0..workers.
  */
-/**
- * Pre-flight estimate for `truecourse guard setup`.
- *
- * Setup spends on AT MOST TWO calls, so this is deliberately not a full staged
- * integration: one recipe PROPOSAL (only when `recipe.json` is absent — a committed
- * recipe is reused and the deterministic proposer may well answer for free anyway)
- * and one seed DRAFT (only when the recipe declares no `api.seed`, or the caller
- * asked to replace it). Both are ceilings: each also buys one evidence retry, which
- * `maxCalls` prices, and either can be a cache hit that costs nothing.
- *
- * Deliberately NOT probed: the database (the seed's real gate), which needs the
- * working-tree ANALYSIS pass an estimate must never pay for. So this over-counts by
- * at most one call on a repo with no datastore — exactly what a CEILING is for.
- */
-export async function estimateGuardSetup(
-  repoRoot: string,
-  prices?: PriceTable,
-  opts: { refresh?: boolean; mode?: LlmTransportMode } = {},
-): Promise<LlmEstimate> {
-  let recipe: Recipe | undefined;
-  try {
-    recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
-  } catch {
-    recipe = undefined; // a broken recipe is re-derived, so it costs the proposal
-  }
-  const recipeCalls = recipe && !opts.refresh ? 0 : 1;
-  const seedCalls = recipe?.api && recipe.api.seed && !opts.refresh ? 0 : 1;
-
-  const stages: StageCallEstimate[] = [
-    {
-      stage: 'guardRecipe',
-      model: resolveModel('guard.recipe', undefined, repoRoot, opts.mode),
-      calls: recipeCalls,
-      minCalls: 0,
-      // The deterministic proposer answers first and costs nothing; the model is the
-      // fallback, and a rejected proposal buys exactly one evidence retry.
-      maxCalls: recipeCalls * 2,
-      avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
-      avgOutputTokens: 120,
-      bound: 'the repo\'s own manifests are tried first, for free — the model is the fallback',
-    },
-    {
-      stage: 'guardSeed',
-      model: resolveModel('guard.seed', undefined, repoRoot, opts.mode),
-      calls: seedCalls,
-      minCalls: 0,
-      maxCalls: seedCalls * 2,
-      avgInputTokens: tokensFromChars(SEED_SYSTEM_PROMPT.length, GUARD_SEED_BODY_CHARS),
-      avgOutputTokens: GUARD_SEED_OUTPUT_TOKENS,
-      bound: 'one draft plus at most one evidence retry; skipped when no database is detected',
-    },
-  ];
-  return estimateStageTokens(withLabels(stages), 'preparation', prices);
-}
-
 export async function estimateGuardTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { mode?: LlmTransportMode } = {},
+  opts: { mode?: LlmTransportMode; only?: GenerateStep } = {},
 ): Promise<LlmEstimate> {
+  const model = sessionModel(opts.mode);
   const plan = planGuardWork(repoRoot);
   const work = plan.work;
-
-  // Extraction: one call per uncached view across EVERY document of the universe —
-  // synthesis reads a whole area's claims, so the run extracts them all (cached).
-  const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
-  let extractCalls = 0;
-  let totalViews = 0;
-  let docChars = 0;
-  for (const doc of docs) {
-    totalViews += countExtractViews(doc);
-    extractCalls += await countUncachedExtractViews(repoRoot, doc);
-    docChars += doc.content.length;
-  }
-  const avgViewChars = totalViews > 0 ? Math.round(Math.min(GUARD_VIEW_CHARS_CAP, docChars / totalViews)) : 0;
 
   const avgSectionChars = plan.sections.length
     ? Math.round(plan.sections.reduce((n, s) => n + (s.fullText || s.ownText).length, 0) / plan.sections.length)
     : 0;
 
-  // Flow synthesis and the realization stages both share the runtime's planners, so
-  // their call counts agree with what a run makes.
-  const flowStage = await planGuardFlowStage(repoRoot, plan);
-  const realization = await planGuardRealizationStages(repoRoot, plan, flowStage);
-  // An authoring prompt carries every milestone's section text once, plus the
+  // The session planners share the run's own cache names + key builders, so the
+  // estimate's item counts agree with what a run starts.
+  const sessions = await planGuardSessionStages(repoRoot, plan);
+  const realization = await planGuardRealizationStages(repoRoot, plan, sessions);
+  // A worker briefing carries every milestone's section text once, plus the
   // realization plan and (cli) the grounding transcripts.
-  const authorBodyChars = GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_GROUND_TRANSCRIPT_CHARS;
+  const workerBodyChars = GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_GROUND_TRANSCRIPT_CHARS;
+
+  const pairBound = realization.exact
+    ? `≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
+    : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`;
 
   const stages: StageCallEstimate[] = [
     {
@@ -663,34 +1192,38 @@ export async function estimateGuardTokens(
       avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
       avgOutputTokens: 120,
     },
-    {
-      stage: 'guardExtract',
-      model: resolveModel('guard.extract', undefined, repoRoot, opts.mode),
-      calls: extractCalls,
-      avgInputTokens: tokensFromChars(GUARD_EXTRACT_SYSTEM_PROMPT.length, avgViewChars),
-      avgOutputTokens: GUARD_EXTRACT_OUTPUT_TOKENS,
-    },
-    {
-      // Flow synthesis: one call per area whose claim inventory changed, plus at
-      // most one cross-area epic pass. The flow COUNT is a synthesis output — never
-      // knowable pre-run — so the stage quotes the claim-derived bound instead of
-      // guessing (`bound` below); the CALL count here is exact whenever the extract
-      // cache is warm, because it probes the same flows cache the run reads.
-      stage: 'guardFlows',
-      model: resolveModel('guard.flows', undefined, repoRoot, opts.mode),
-      calls: flowStage.areaCalls + flowStage.epicCalls,
-      minCalls: flowStage.areaCalls,
-      maxCalls: flowStage.areaCalls + flowStage.epicCalls,
-      avgInputTokens: tokensFromChars(GUARD_FLOWS_SYSTEM_PROMPT.length, flowStage.areaChars),
-      avgOutputTokens: GUARD_FLOWS_OUTPUT_TOKENS,
-      bound: flowStage.exact
-        ? `flows ≤ runnable claims (${flowStage.maxFlows} today) — flow count is a synthesis output`
+    // Claim extraction: one `guard-generate.extract` session per doc whose
+    // per-doc `guard/extract-session` entry misses — exact (the run's own keys).
+    sessionKindStage({
+      kind: EXTRACT_SESSION_KIND,
+      model,
+      items: sessions.extractItems,
+      budget: EXTRACT_SESSION_BUDGET,
+      systemPromptChars: EXTRACT_SESSION_SYSTEM_PROMPT.length,
+      briefingChars: sessions.extractBriefingChars,
+      bound: `${sessions.extractItems} of ${sessions.extractDocs} doc${sessions.extractDocs === 1 ? '' : 's'} changed`,
+    }),
+    // Flow synthesis: one session per area whose claim inventory changed, plus
+    // at most one epic session (its key hashes the areas' OUTPUT digests, so it
+    // is always a 0..1 range). Exact whenever the extract-session cache is warm.
+    sessionKindStage({
+      kind: FLOWS_SESSION_KIND,
+      model,
+      items: sessions.areaCalls + sessions.epicCalls,
+      minItems: sessions.areaCalls,
+      maxItems: sessions.areaCalls + sessions.epicCalls,
+      budget: FLOWS_SESSION_BUDGET,
+      systemPromptChars: FLOWS_SESSION_SYSTEM_PROMPT.length,
+      briefingChars: sessions.areaChars || (sessions.areaCalls + sessions.epicCalls > 0 ? GUARD_FLOWS_AREA_CHARS : 0),
+      bound: sessions.exact
+        ? `flows ≤ runnable claims (${sessions.maxFlows} today) — flow count is a synthesis output`
         : 'flows ≤ runnable claims — flow count is a synthesis output',
-    },
+    }),
     {
-      // Matching: one call per (flow, surface with journeys). Exact when the flow
-      // corpus is settled and the journey snapshot exists — it probes the same
-      // match cache the run reads; otherwise the claim-derived ceiling.
+      // Matching (still a one-shot): one call per (flow, surface with
+      // interfaces). Exact when the flow corpus is settled and the interface
+      // snapshot exists — it probes the same match cache the run reads;
+      // otherwise the claim-derived ceiling.
       stage: 'guardMatch',
       model: resolveModel('guard.match', undefined, repoRoot, opts.mode),
       calls: realization.matchCalls,
@@ -698,74 +1231,60 @@ export async function estimateGuardTokens(
       maxCalls: realization.maxPairs,
       avgInputTokens: tokensFromChars(GUARD_MATCH_SYSTEM_PROMPT.length, realization.catalogChars),
       avgOutputTokens: GUARD_MATCH_OUTPUT_TOKENS,
-      bound: realization.exact
-        ? `≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
-        : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`,
+      bound: pairBound,
     },
-    {
-      // Authoring: ONE call per (flow, surface with a realization plan) — the flow
-      // is the unit, so a composite flow costs one call, not one per claim.
-      stage: 'guardAuthor',
-      model: resolveModel('guard.generate', undefined, repoRoot, opts.mode),
-      calls: realization.authorCalls,
-      minCalls: 0,
-      maxCalls: realization.maxPairs,
-      avgInputTokens: tokensFromChars(GENERATE_SYSTEM_PROMPT.length, authorBodyChars),
-      avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS,
-      bound: realization.exact
-        ? `≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
-        : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`,
-    },
-    {
-      // The evidence retry: at most ONE re-author per authored scenario, and only
-      // for the ones that fail birth — so it ranges 0..authoring.
-      stage: 'guardRetry',
-      model: resolveModel('guard.retry', undefined, repoRoot, opts.mode),
-      calls: 0,
-      minCalls: 0,
-      maxCalls: realization.maxPairs,
-      avgInputTokens: tokensFromChars(GENERATE_SYSTEM_PROMPT.length, authorBodyChars + GUARD_SCENARIO_YAML_CHARS),
-      avgOutputTokens: GUARD_AUTHOR_OUTPUT_TOKENS,
-      bound: 'one re-author per scenario that fails birth',
-    },
-    {
-      stage: 'guardFidelity',
-      model: resolveModel('guard.fidelity', undefined, repoRoot, opts.mode),
-      // One review per green scenario — at most one per authoring call. Not
-      // cache-aware: scenario content is unknown until authoring + birth run.
-      calls: realization.authorCalls,
-      minCalls: 0,
-      maxCalls: realization.maxPairs,
-      // A review carries the system prompt + every milestone's section text + one YAML.
-      avgInputTokens: tokensFromChars(
-        FIDELITY_SYSTEM_PROMPT.length,
-        GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_SCENARIO_YAML_CHARS,
-      ),
-      avgOutputTokens: GUARD_FIDELITY_OUTPUT_TOKENS,
-    },
-    {
-      // Failing-test triage: one Opus judgment per test that fails birth,
-      // after every round settles. The failure count is unknowable pre-run — like
-      // the retry stage it ranges 0..authored pairs, and the ceiling drives the
-      // quoted cost.
-      stage: 'guardTriage',
-      model: resolveModel('guard.triage', undefined, repoRoot, opts.mode),
-      calls: 0,
-      minCalls: 0,
-      maxCalls: realization.maxPairs,
-      // A triage carries the system prompt + the failing milestone's section text +
-      // one scenario YAML + the request-surface grounding transcript.
-      avgInputTokens: tokensFromChars(
-        GUARD_TRIAGE_SYSTEM_PROMPT.length,
-        avgSectionChars + GUARD_SCENARIO_YAML_CHARS + GUARD_GROUND_TRANSCRIPT_CHARS,
-      ),
-      avgOutputTokens: GUARD_TRIAGE_OUTPUT_TOKENS,
-      bound: 'one triage per test that fails birth',
-    },
+    // The flow workers: ONE session per (changed flow, surface with a plan)
+    // whose kept `guard/generate` worker-cache entry misses. The session
+    // authors, runs and adjudicates in one loop — it subsumes the retired
+    // author/retry/triage stages, which is why no separate stages for those
+    // appear here any more.
+    sessionKindStage({
+      kind: FLOW_WORKER_SESSION_KIND,
+      model,
+      items: realization.workerItems,
+      maxItems: realization.maxPairs,
+      budget: FLOW_WORKER_BUDGET,
+      systemPromptChars: FLOW_WORKER_CLI_SYSTEM_PROMPT.length,
+      briefingChars: workerBodyChars,
+      bound: pairBound,
+    }),
+    // The fidelity CHILD: one depth-1 session per green submission — at most
+    // one per worker (plus in-loop revisions, covered by the ceiling). Not
+    // cache-aware: scenario content is unknown until the workers run.
+    sessionKindStage({
+      kind: FIDELITY_SESSION_KIND,
+      model,
+      items: realization.workerItems,
+      minItems: 0,
+      maxItems: realization.maxPairs,
+      budget: FIDELITY_SESSION_BUDGET,
+      systemPromptChars: FIDELITY_SESSION_SYSTEM_PROMPT.length,
+      briefingChars: GUARD_MILESTONES_PER_FLOW * avgSectionChars + GUARD_SCENARIO_YAML_CHARS,
+      bound: 'one review per green submission',
+    }),
   ];
 
-  return estimateStageTokens(withLabels(stages), changedSubject(plan.sections.length, work.length, 'section'), prices);
+  // Single-step mode prices only the chosen step — prior steps replay from
+  // their outcome caches (a miss fails the run loudly, never spends), later
+  // ones never start. `guardMatch` rides the WORKER step: it is the only
+  // pre-stage with a bill, it runs nowhere else (both earlier steps return
+  // before it), and quoting the worker step without it would under-price the
+  // run. `guardRecipe` rides nothing: generate refuses to start without the
+  // recipe `guard setup` committed, so a stepwise run never discovers one.
+  const included = opts.only
+    ? stages.filter((s) => GENERATE_STEP_STAGES[opts.only!].includes(s.stage))
+    : stages;
+  return estimateStageTokens(withLabels(included), changedSubject(plan.sections.length, work.length, 'section'), prices);
 }
+
+/** Which priced stages each `--only-<step>` flag actually runs. */
+const GENERATE_STEP_STAGES: Record<GenerateStep, readonly string[]> = {
+  extract: [EXTRACT_SESSION_KIND],
+  flows: [FLOWS_SESSION_KIND],
+  // The fidelity judge is a depth-1 CHILD of a worker session, so it prices with
+  // the worker step rather than carrying a flag of its own.
+  worker: ['guardMatch', FLOW_WORKER_SESSION_KIND, FIDELITY_SESSION_KIND],
+};
 
 /** Confirm-copy subject surfacing how many of `total` units are changed vs cached. */
 function changedSubject(total: number, changed: number, noun: string): string {

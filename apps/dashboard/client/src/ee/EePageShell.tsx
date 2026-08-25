@@ -142,7 +142,7 @@ export function EePageShell({ children }: { children: ReactNode }) {
           {!collapsed && (
             <Link to="/" className="flex items-center gap-2">
               <img src="/logo.svg" alt="" className="h-7 w-7 shrink-0" />
-              <span className="text-sm font-semibold">TrueCourse</span>
+              <span className="brand-wordmark text-sm">TrueCourse</span>
             </Link>
           )}
           <button

@@ -4,15 +4,21 @@
  * (the same {@link GuardTabStrip} + {@link useGuardTabs} idiom as Flows and
  * Runs). Sidebar doc rows open as doc tabs, conflicts as conflict tabs; the strip
  * renders only while ≥1 item tab is open, and carries NO Overview chip — with no
- * doc open the pane is already its own no-selection state: an onboarding empty
- * state picked from
- * the pipeline-stage flags (no corpus → scan; corpus but no generate → generate;
- * generated but no run → run) or "select a document". A doc tab renders that doc
+ * doc open the pane is AT REST on the {@link GuardCoverageOverview}: the
+ * corpus-wide numbers, read-only, nothing clickable. It is not a second reading
+ * of the corpus's doc LIST (the sidebar beside it is that), and not a
+ * pipeline-stage CTA (the header's own Scan / Generate / Run buttons are). A doc
+ * tab renders that doc
  * with its per-section statuses, a filtering totals strip, and a within-doc detail
  * pane multiplexing a clicked section's FLOW list (the flows that traverse it —
- * never scenarios) and a clicked conflict's resolution detail. A conflict tab renders the full-pane SpecOverlapDetail (the
+ * never scenarios) with the CLAIMS that section states, and a clicked
+ * conflict's resolution detail. Claims live HERE and nowhere else: a section says
+ * what it promises, and one of those promises drills into the claim itself —
+ * both traces included — without leaving the document.
+ * A conflict tab renders the full-pane SpecOverlapDetail (the
  * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
- * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`. The
+ * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`, and the
+ * claim read inside it `?gclaim`. The
  * registered llms.txt sites some of these docs are fetched from are managed on
  * their own Sources page — the doc surface only ever READS them.
  */
@@ -21,42 +27,35 @@ import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  BookOpen,
   ExternalLink,
   FileText,
-  FlaskConical,
   GitMerge,
   Loader2,
   PlayCircle,
 } from 'lucide-react';
-import type { GuardSectionCoverageStatus, GuardStaleness } from '@truecourse/shared';
-import {
-  overlapKey,
-  parseSpecKey,
-  type SpecCorpusState,
-} from '@/components/spec/SpecCorpusView';
+import type { GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
+import { buildCorpusConflicts, isConflictId, resolveConflictId } from '@truecourse/shared';
+import { parseSpecKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { SpecScanButton } from '@/components/spec/SpecScanButton';
 import { WebSourceBadge } from '@/components/spec/WebSourceBadge';
-import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { useCapability } from '@/contexts/CapabilityContext';
 import * as api from '@/lib/api';
 import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
+import { findGuardClaimSelection, type GuardUntestableEntry } from '@/lib/guard-claims';
 import { corpusHasDoc, parseWebDocRef, webDocLabel } from '@/lib/spec-web-source';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
+import { GuardCoverageOverview } from './GuardCoverageOverview';
 import { GuardDocCoverage, type CoverageFilterMode } from './GuardDocCoverage';
 import { GuardSectionDetail } from './GuardSectionDetail';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
 import { GuardTotalsStrip } from './GuardTotalsStrip';
 
 const FILTER_MODE_KEY = 'truecourse:guardFilterMode';
-
-/** Conflict tab ids are overlap keys; doc tab ids are plain refs. */
-const isOverlapId = (id: string): boolean => id.startsWith('overlap::');
 
 function Centered({ children }: { children: React.ReactNode }) {
   return <div className="flex h-full w-full items-center justify-center">{children}</div>;
@@ -71,12 +70,18 @@ export function GuardCoveragePage({
   prRef,
   reloadKey = 0,
   tabs,
+  claims = null,
+  untestable = [],
   onDecision,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
   staleness: GuardStaleness;
   staleLoaded: boolean;
+  /** The claim corpus — read inside the section that states each claim. */
+  claims?: GuardClaimsView | null;
+  /** The refused statements with the ids `?gclaim` addresses them by. */
+  untestable?: GuardUntestableEntry[];
   /** EE PR view: scope conflict resolution to this PR. Repo view when null. */
   prNumber?: number | null;
   /** EE PR view: the PR head SHA. Undefined in the OSS repo view. */
@@ -88,16 +93,28 @@ export function GuardCoveragePage({
   /** Fired after a verdict is recorded, so the page can refresh the spec Rescan dot. */
   onDecision?: () => void;
 }) {
-  const { activeId, openTabs, open, close, section, selectSection } = tabs;
-  // The active tab is a conflict (its overlap key) or a doc (its ref); null = Overview.
-  const activeConflict = activeId && isOverlapId(activeId) ? activeId : null;
+  const { activeId, openTabs, open, close, deselect, section, selectSection, claim, selectClaim, focusClaim } = tabs;
+  // The active tab is a conflict (its overlap key) or a doc (its ref); null = nothing open.
+  const activeConflict = activeId && isConflictId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
 
-  // A section's flow row jumps into the Flows tab (`?gflow=`) — scenarios are one
-  // level deeper, inside the flow, never here.
-  const { openGuardFlow, openGuardExternals } = useGuardView();
+  // A section's flow row jumps into the Tests tab (`?gflow=`), and a claim's
+  // source line to the doc section that states it.
+  const { openGuardFlow, openSpecSection, openGuardExternals } = useGuardView();
 
-  const [filter, setFilter] = useState<GuardSectionCoverageStatus | null>(null);
+  // A `?gclaim=` deep link (or a jump that carries only the claim id) names a
+  // claim, not a place: resolve it to its doc + section and land all three in ONE
+  // write, so the claim can be read where it is stated.
+  useEffect(() => {
+    if (!claim) return;
+    const found = findGuardClaimSelection(claims, untestable, claim);
+    if (!found) return;
+    const target = found.kind === 'claim' ? found.claim : found.row;
+    if (doc === target.doc && section === target.anchor) return;
+    focusClaim(claim, target.doc, target.anchor);
+  }, [claim, claims, untestable, doc, section, focusClaim]);
+
+  const [filter, setFilter] = useState<GuardCoveragePlainStatus | null>(null);
   const [filterMode, setFilterMode] = useState<CoverageFilterMode>(() => {
     if (typeof window === 'undefined') return 'blur';
     return localStorage.getItem(FILTER_MODE_KEY) === 'hide' ? 'hide' : 'blur';
@@ -113,7 +130,7 @@ export function GuardCoveragePage({
   const [content, setContent] = useState<string | null>(null);
   const [contentError, setContentError] = useState<string | null>(null);
 
-  const { hasCorpus, hasGenerated, hasRun } = staleness;
+  const { hasGenerated, hasRun } = staleness;
   const docs = corpus.data?.corpus.docs ?? [];
 
   const { coverage, isLoading: coverageLoading, error: coverageError } = useGuardCoverage(
@@ -133,6 +150,27 @@ export function GuardCoveragePage({
     return k.kind === 'overlap' ? k : null;
   }, [activeConflict]);
   const showConflict = overlapSel != null && corpus.data != null;
+
+  // The shared derivation over the whole corpus — the ONE conflict list this page
+  // addresses by id, for both the resolution pane and the in-doc heading markers.
+  const conflicts = useMemo(
+    () =>
+      corpus.data
+        ? buildCorpusConflicts(corpus.data.corpus, {
+            manualExcludes: corpus.data.manualExcludes ?? [],
+            conflictResolutions: corpus.data.conflictResolutions ?? [],
+          })
+        : [],
+    [corpus.data],
+  );
+  // The dispute the URL names. A doc PAIR can carry several genuine disputes, so
+  // this must resolve the ID — a lookup by pair would always land on the first.
+  // Legacy `?gconf=` links (minted before ids carried a section discriminator)
+  // still resolve, to the first dispute of their pair: the row they always opened.
+  const activeConflictRecord = useMemo(
+    () => (activeConflict ? resolveConflictId(conflicts, activeConflict) : undefined),
+    [conflicts, activeConflict],
+  );
 
   // The corpus's web-source pages, by ref: a page fetched from a registered
   // llms.txt site reads as `<site> / <page>` wherever its raw snapshot ref would
@@ -165,7 +203,7 @@ export function GuardCoveragePage({
   const tabItems = useMemo<GuardTabStripItem[]>(
     () =>
       openTabs.map((t) => {
-        if (isOverlapId(t.id)) {
+        if (isConflictId(t.id)) {
           const k = parseSpecKey(t.id);
           const label = k.kind === 'overlap' ? `${docLabel(k.a)} ↔ ${docLabel(k.b)}` : t.id;
           return { ...t, label, title: label, icon: GitMerge };
@@ -195,19 +233,21 @@ export function GuardCoveragePage({
   }, [repoId, doc]);
 
   // With a run present and a single doc, land straight on its coverage — unless a
-  // tab is already active (auto-opening would fight a deep link). Pinned so the
+  // tab is already active (auto-opening would fight a deep link) or open (a
+  // deliberate Overview deselect must not bounce back to the doc). Pinned so the
   // lone doc's tab is stable.
   useEffect(() => {
-    if (!activeId && hasRun && docs.length === 1) open(docs[0].ref, true);
-  }, [activeId, hasRun, docs, open]);
+    if (!activeId && openTabs.length === 0 && hasRun && docs.length === 1) open(docs[0].ref, true);
+  }, [activeId, openTabs, hasRun, docs, open]);
 
   const selectedSection = useMemo(
     () => (section && coverage ? coverage.sections.find((s) => s.anchor === section) ?? null : null),
     [section, coverage],
   );
 
-  // The blocked-on capability breakdown for THIS doc's grey sections — the
-  // expansion of the totals strip's blocked-on chip (moved from the Report tab).
+  // The blocked-on capability breakdown for THIS doc's blocked sections — part of
+  // the expansion of the totals strip's Blocked chip (moved from the Report tab).
+  // WHICH blocker is a detail; the counter itself is just "Blocked".
   const blockedOnCapabilities = useMemo(
     () =>
       coverage
@@ -220,9 +260,9 @@ export function GuardCoveragePage({
     [coverage],
   );
 
-  // The per-SERVICE breakdown of this doc's needs-setup sections — the
-  // expansion of the totals strip's orange chip, and the rows that link to the
-  // External APIs page that clears them.
+  // The per-SERVICE breakdown of the blocked sections a user can clear TODAY — the
+  // other half of the Blocked chip's expansion, and the rows that link to the
+  // Dependencies page that clears them.
   const needsSetupServices = useMemo(
     () =>
       coverage
@@ -238,18 +278,15 @@ export function GuardCoveragePage({
   // marks (normalized heading text → overlap key).
   const conflictHeadings = useMemo(() => {
     const map = new Map<string, string>();
-    if (!doc || !corpus.data) return map;
-    for (const area of corpus.data.corpus.areas) {
-      for (const ov of area.overlaps) {
-        const key = overlapKey(area.id, ov.docs[0], ov.docs[1]);
-        for (const s of ov.sections ?? []) {
-          // A preamble pointer (null heading) has no heading row to tag — skip it.
-          if (s.doc === doc && s.heading !== null) map.set(headingMatchKey(s.heading), key);
-        }
+    if (!doc) return map;
+    for (const cf of conflicts) {
+      for (const s of cf.sections ?? []) {
+        // A preamble pointer (null heading) has no heading row to tag — skip it.
+        if (s.doc === doc && s.heading !== null) map.set(headingMatchKey(s.heading), cf.id);
       }
     }
     return map;
-  }, [doc, corpus.data]);
+  }, [doc, conflicts]);
 
   // --- The pane for the active tab (or the Overview) --------------------------
   const pane = (() => {
@@ -259,9 +296,10 @@ export function GuardCoveragePage({
       return (
         <SpecOverlapDetail
           repoId={repoId}
-          area={overlapSel!.area}
-          docA={overlapSel!.a}
-          docB={overlapSel!.b}
+          area={activeConflictRecord?.area ?? overlapSel!.area}
+          docA={activeConflictRecord?.a ?? overlapSel!.a}
+          docB={activeConflictRecord?.b ?? overlapSel!.b}
+          conflict={activeConflictRecord}
           data={corpus.data!}
           prNumber={prNumber}
           prRef={prRef}
@@ -275,7 +313,27 @@ export function GuardCoveragePage({
       );
     }
 
-    // Initial hydration: nothing determined yet.
+    // No doc tab active: the pane is AT REST on the corpus-wide Overview —
+    // mounted immediately (it owns its loading state), so its status fetch
+    // starts in the first request wave instead of after hydration.
+    // read-only numbers, nothing clickable (the sidebar is where a doc opens).
+    // A selected doc ALWAYS falls through to the render path below — including
+    // before the first scan, where a doc opened by hand (a page of a registered
+    // web source, say) is a real file on disk with no coverage bands yet.
+    if (!doc) {
+      return (
+        <GuardCoverageOverview
+          repoId={repoId}
+          docsCount={docs.length}
+          claims={claims}
+          staleness={staleness}
+          reloadKey={reloadKey}
+          {...(prRef ? { prRef } : {})}
+        />
+      );
+    }
+
+    // Initial hydration of a doc path: nothing determined yet.
     if (!staleLoaded && !coverage) {
       return (
         <Centered>
@@ -284,65 +342,19 @@ export function GuardCoveragePage({
       );
     }
 
-    // Overview (no doc tab active): the stage CTAs, then "select a document". A
-    // selected doc ALWAYS falls through to the render path below — including
-    // before the first scan, where a doc opened by hand (a page of a registered
-    // web source, say) is a real file on disk with no coverage bands yet. The
-    // stage empty states answer the question "what next?", which only an EMPTY
-    // pane is asking.
-    if (!doc) {
-      if (!hasCorpus) {
-        return (
-          <EmptyState
-            icon={BookOpen}
-            title="No spec corpus"
-            body={
-              <>
-                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse spec scan</code> to curate the
-                documents this coverage view reads.
-              </>
-            }
-          />
-        );
-      }
-      if (!hasGenerated) {
-        return (
-          <EmptyState
-            icon={FlaskConical}
-            title="No guards generated"
-            body={
-              <>
-                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to author
-                scenarios for each spec section.
-              </>
-            }
-          />
-        );
-      }
-      if (!hasRun) {
-        return (
-          <EmptyState
-            icon={PlayCircle}
-            title="No guard run yet"
-            body={
-              <>
-                Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard run</code> to test the
-                scenarios and see pass/fail on the document.
-              </>
-            }
-          />
-        );
-      }
-      return (
-        <EmptyState icon={BookOpen} title="Select a document" body="Choose a spec document to view its guard coverage." />
-      );
-    }
-
     // --- The detail pane: the flows through the selected section -------------
     const detailPane = selectedSection ? (
       <GuardSectionDetail
+        repoId={repoId}
         section={selectedSection}
+        doc={doc}
+        claims={claims?.claims ?? []}
+        untestable={untestable}
+        activeClaimId={claim}
+        {...(prRef ? { prRef } : {})}
+        onSelectClaim={selectClaim}
         onOpenFlow={openGuardFlow}
+        onOpenSpec={openSpecSection}
         onOpenExternals={openGuardExternals}
         onClose={() => selectSection(null)}
       />
@@ -409,7 +421,7 @@ export function GuardCoveragePage({
           </div>
         )}
         {unscannedSource && (
-          <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+          <div className="flex items-center gap-2 border-b border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-700 dark:text-sky-300">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
             <span className="min-w-0 truncate">
               Fetched from <span className="font-medium">{unscannedSource.sourceId}</span> but not
@@ -429,11 +441,11 @@ export function GuardCoveragePage({
           </div>
         )}
         {hasGenerated && !hasRun && (
-          <div className="flex items-center gap-2 border-b border-border bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+          <div className="flex items-center gap-2 border-b border-border bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-700 dark:text-sky-300">
             <PlayCircle className="h-3.5 w-3.5 shrink-0" />
             <span>
-              No guard run yet — statuses reflect generate-time coverage. Run{' '}
-              <code className="rounded bg-amber-500/20 px-1 py-0.5">truecourse guard run</code> for pass/fail.
+              No run yet — run <code className="rounded bg-sky-500/20 px-1 py-0.5">truecourse guard run</code> for
+              pass/fail.
             </span>
           </div>
         )}
@@ -445,8 +457,7 @@ export function GuardCoveragePage({
             content={coverage.orphanedSections.map((o) => o.anchor).join('\n')}
           >
             <div className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-              {coverage.orphanedSections.length} orphaned guard
-              {coverage.orphanedSections.length === 1 ? '' : 's'} — section removed since generation
+              Orphaned tests — their section was removed since generation
             </div>
           </HoverPopover>
         )}
@@ -474,13 +485,12 @@ export function GuardCoveragePage({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* No Overview chip: with no doc open this pane IS its no-selection state
-          (the stage CTA / "select a document"), not a second place to go. */}
       <GuardTabStrip
         tabs={tabItems}
         activeId={activeId}
         onSelect={(t) => open(t.id, t.pinned)}
         onClose={close}
+        home={{ label: 'Overview', onSelect: deselect }}
       />
       <div className="min-h-0 flex-1 overflow-hidden">{pane}</div>
     </div>

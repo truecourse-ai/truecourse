@@ -17,31 +17,54 @@ import yaml from 'js-yaml'
 import {
   buildDocSectionIndex,
   computeRecipeFingerprint,
+  evidenceRelPath,
+  guardClaimsPath,
+  dependenciesPath,
+  guardFlowsPath,
   guardLatestPath,
   guardResultPath,
   manifestPath,
-  readJourneyCatalog,
+  readInterfaceCatalogRaw,
+  readMergedInterfaceCatalog,
+  guardAuthoredInterfacesPath,
+  guardInterfacesPath,
+  maskedRecipeText,
+  recipePath,
   RecipeSchema,
   resolveApiServers,
   scenariosDir,
   type DocSection,
   type DocSectionIndex,
 } from '@truecourse/guard-runner'
-import { flowsPath } from '@truecourse/guard-generator'
-import { corpusFilePath } from '@truecourse/spec-consolidator'
+import { corpusFilePath, readCorpus } from '@truecourse/spec-consolidator'
 import {
+  GUARD_COVERAGE_PLAIN_ORDER,
   GUARD_COVERAGE_STATUS_PRECEDENCE,
   GUARD_DRIVERS,
   type GuardDriverDef,
+  guardCoveragePlainStatus,
+  type GuardCoveragePlainStatus,
+  type GuardSectionTotals,
+  GuardClaimsFileSchema,
   GuardFlowsFileSchema,
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
   awaitingDriverIds,
+  claimIdentityKey,
+  guardClaimKey,
+  milestoneClaims,
   deriveNeedsSetup,
-  describeGuardScenario,
+  describeGuardScenarioSetup,
   describeGuardScenarioSteps,
+  parseGuardStepActuals,
+  guardEvidenceVisual,
+  guardEvidenceVisuals,
+  guardExecutionSteps,
+  type GuardEvidenceVisual,
   dismissedClaimKey,
   guardGapLabel,
+  guardNoFlowClaimGapKind,
+  guardScenarioDrivers,
   isAwaitingDriver,
   isManualFlowId,
   manualFlowId,
@@ -50,8 +73,19 @@ import {
   runRefusalError,
   worstCoverageStatus,
   guardFindingClass,
+  guardResultRunId,
   type GuardBirthFinding,
   type GuardTriage,
+  type GuardClaim,
+  type GuardClaimCoverage,
+  type GuardClaimFlowRef,
+  type GuardClaimRow,
+  type GuardClaimScenarioRef,
+  type GuardClaimsFile,
+  type GuardClaimsView,
+  type GuardUntestableRow,
+  type GuardUntestableStatement,
+  type GuardSectionClaimGap,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
   type GuardDecisions,
@@ -72,11 +106,13 @@ import {
   type GuardFlowSurfaceGap,
   type GuardFlowsFile,
   type GuardFlowsView,
+  type GuardNoFlowClaim,
   type GuardGenerateError,
-  type GuardJourneyFlowRef,
-  type GuardJourneyRow,
-  type GuardJourneysView,
-  type GuardJourneySurface,
+  type GuardInterfaceFlowRef,
+  type GuardInterfaceRow,
+  type GuardInterfacesView,
+  type GuardInterfaceSurface,
+  type InterfaceCatalogSource,
   type GuardLatest,
   type GuardExternalSetupIndex,
   type GuardManifest,
@@ -87,12 +123,14 @@ import {
   type GuardOrphanedCoverage,
   type GuardGenerateReport,
   type GuardRecipeCard,
+  type GuardRecipeSurface,
   type GuardRunFlow,
   type GuardScenario,
   type GuardScenarioInventory,
   type GuardScenarioListItem,
   type GuardScenarioResult,
   type GuardScenarioSource,
+  type GuardArtifactSource,
   type GuardTestStatus,
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
@@ -101,6 +139,7 @@ import {
   type GuardHistoryEntry,
   type GuardSectionScenario,
   type GuardStaleness,
+  type GuardStepActual,
 } from '@truecourse/shared'
 import {
   getGuardStore,
@@ -109,6 +148,8 @@ import {
   readGuardDecisions as readGuardDecisionsStore,
   readGuardEvidence as readGuardEvidenceStore,
   readGuardEvidenceAt as readGuardEvidenceAtStore,
+  listGuardEvidenceAt as listGuardEvidenceAtStore,
+  readGuardEvidenceBytesAt as readGuardEvidenceBytesAtStore,
   readGuardLatest as readGuardLatestStore,
   readGuardResult as readGuardResultStore,
   readGuardRun as readGuardRunStore,
@@ -200,6 +241,13 @@ export interface GuardCoverageSources {
    */
   flows?: GuardFlowsFile | null
   /**
+   * The extracted claim corpus (`scenarios/claims.json`) — read for ONE thing
+   * here: resolving each gapped claim to its store id, so a gap row in the
+   * coverage view can link to the claim it is about. Absent leaves the rows
+   * unlinked; it never changes a status.
+   */
+  claims?: GuardClaimsFile | null
+  /**
    * Service → provisioning state for every external the externals machinery knows
    * (`readGuardExternalSetupIndex`). It promotes a `blocked-on` gap whose
    * missing capability is a PROVIDABLE service to the `needs-setup` status. Absent
@@ -254,6 +302,24 @@ export function composeDocCoverage(
     if (g.doc === doc) push(gapsByAnchor, g.anchor, g)
   }
 
+  // Claims this doc states that reached no flow, kept per anchor — the coverage
+  // honesty record the flow corpus writes, and the half a section's RANK cannot
+  // carry (`guarded` outranks every gap status).
+  const noFlowByAnchor = new Map<string, GuardNoFlowClaim[]>()
+  for (const c of sources.flows?.noFlowClaims ?? []) {
+    if (c.doc === doc) push(noFlowByAnchor, c.anchor, c)
+  }
+  const claimByIdentity = new Map((sources.claims?.claims ?? []).map((c) => [guardClaimKey(c), c]))
+
+  // The statements extraction refused, per anchor — the OTHER half of claim-keyed
+  // accounting. A section made entirely of prose nobody can falsify has no claim,
+  // no flow and no gap; without this it would fall through to `unguarded` and read
+  // as a mute bucket, when the honest answer is that there is nothing to test.
+  const untestableByAnchor = new Map<string, GuardUntestableStatement[]>()
+  for (const s of sources.claims?.untestable ?? []) {
+    if (s.doc === doc) push(untestableByAnchor, s.anchor, s)
+  }
+
   const totals = emptyTotals()
   const sections = index.sections.map((sec) => {
     const cov = resolveSectionCoverage(sec, {
@@ -261,6 +327,9 @@ export function composeDocCoverage(
       join,
       run: runByAnchor.get(sec.anchor) ?? [],
       gaps: gapsByAnchor.get(sec.anchor) ?? [],
+      noFlow: noFlowByAnchor.get(sec.anchor) ?? [],
+      untestable: untestableByAnchor.get(sec.anchor) ?? [],
+      claimByIdentity,
     })
     totals[cov.status]++
     return cov
@@ -278,8 +347,55 @@ export function composeDocCoverage(
   }
 }
 
+/**
+ * Every kept doc's sections counted under the five coverage words, through the
+ * same per-section derivation the doc view renders ({@link composeDocCoverage})
+ * — the constraint: no summary may classify a section differently than the doc
+ * view does. The doc universe is the curated corpus; without one it falls back
+ * to the docs the guard stores name, and null means nothing to count.
+ */
+export async function readGuardSectionTotals(
+  repoKey: string,
+  ref?: string,
+): Promise<GuardSectionTotals | null> {
+  const sources: GuardCoverageSources = {
+    manifest: await readManifestForView(repoKey, ref),
+    latest: await readGuardRunForView(repoKey, ref),
+    result: await readGuardReport(repoKey, ref),
+    flows: await readGuardFlowsForView(repoKey, ref),
+    claims: await readGuardClaimsForView(repoKey, ref),
+    externals: guardExternalSetupIndexForView(repoKey),
+  }
+
+  const corpusDocs = readCorpus(repoKey)?.docs.map((d) => d.ref)
+  const docs =
+    corpusDocs && corpusDocs.length > 0
+      ? corpusDocs
+      : [
+          ...(sources.claims?.claims.map((c) => c.doc) ?? []),
+          ...(sources.claims?.untestable.map((u) => u.doc) ?? []),
+          ...(sources.flows?.flows.flatMap((f) => f.milestones.map((m) => m.doc)) ?? []),
+          ...guardManifestSections(sources.manifest).map((m) => m.doc),
+        ]
+  if (docs.length === 0) return null
+
+  const byStatus = Object.fromEntries(
+    GUARD_COVERAGE_PLAIN_ORDER.map((s) => [s, 0]),
+  ) as Record<GuardCoveragePlainStatus, number>
+  let total = 0
+  for (const doc of new Set(docs)) {
+    const content = await readRepoDoc(repoKey, doc, ref ? { commit: ref } : undefined)
+    if (content == null) continue
+    for (const sec of composeDocCoverage(doc, content, sources).sections) {
+      total++
+      byStatus[guardCoveragePlainStatus(sec.status)]++
+    }
+  }
+  return total === 0 ? null : { total, byStatus }
+}
+
 /** Everything the flow join reads: the coverage sources plus (where the caller
- *  has it) the committed corpus, which names each scenario's surface and journey. */
+ *  has it) the committed corpus, which names each scenario's surface and interface. */
 interface FlowJoinSources extends GuardCoverageSources {
   scenarios?: readonly GuardScenario[]
 }
@@ -342,12 +458,14 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     for (const s of flow.scenarios) ownerByScenario.set(s.id, flow.flowId)
   }
 
+  // The PRIMARY driver (registry order) of each scenario — what a single-surface
+  // row names. The full set a scenario exercises is `guardScenarioDrivers`.
   const driverByScenario = new Map<string, GuardDriverId>()
-  for (const s of scenarioById.values()) driverByScenario.set(s.id, s.driver)
+  for (const s of scenarioById.values()) driverByScenario.set(s.id, guardScenarioDrivers(s)[0])
   const birthStatusByScenario = new Map<string, GuardTestStatus>()
   for (const flow of manifestFlows.values()) {
     for (const s of flow.scenarios) {
-      driverByScenario.set(s.id, s.surface)
+      driverByScenario.set(s.id, s.drivers[0])
       birthStatusByScenario.set(s.id, s.status)
     }
   }
@@ -474,6 +592,7 @@ function toFlowGap(
  * failed their birth execution, so `guarded` is honest only for a test that passed
  * — a committed failing test paints `fail` from the moment it is generated, and
  * the next run that covers it overrides that (a code fix simply turns it green).
+ * A test that never executed at all paints `never-run`.
  */
 function scenarioSurface(
   scenarioId: string,
@@ -481,14 +600,17 @@ function scenarioSurface(
   join: FlowJoin,
 ): GuardFlowSurface {
   const run = join.runById.get(scenarioId)
-  const birthFailed = join.birthStatusByScenario.get(scenarioId) === 'failing'
+  const birth = join.birthStatusByScenario.get(scenarioId)
   return {
     ...(surface ? { surface } : {}),
     scenarioId,
-    status: run ? run.outcome : birthFailed ? 'fail' : 'guarded',
+    // No run: the birth verdict paints it — `fail` when it was committed red, and
+    // `never-run` when there was no birth execution at all (a hand-authored test),
+    // which must never borrow `guarded`'s passing word.
+    status: run ? run.outcome : birth === 'failing' ? 'fail' : birth === 'never-run' ? 'never-run' : 'guarded',
     ...(run ? { outcome: run.outcome } : {}),
     stage: run ? 'run' : 'birth',
-    ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
+    ...(run?.interfaceDrifted ? { interfaceDrifted: true } : {}),
   }
 }
 
@@ -600,6 +722,26 @@ function statusRank(status: GuardSectionCoverageStatus): number {
   return i === -1 ? GUARD_COVERAGE_STATUS_PRECEDENCE.length : i
 }
 
+/**
+ * The status a section shows, over EVERY claim state it carries — the claim-keyed
+ * accounting rule. Four candidate sources, and the worst of them wins by the ONE
+ * precedence (`GUARD_COVERAGE_STATUS_PRECEDENCE`, whose tiers ARE the five-word
+ * vocabulary: Failed → Blocked → Never run → Succeeded → Not testable):
+ *
+ *  - the section's FLOWS, rolled up over their surfaces — the proven half;
+ *  - the last generate's claim-level GAPS, under the status their kind paints;
+ *  - the flow corpus's NO-FLOW CLAIMS, under the kind their reason states
+ *    ({@link guardNoFlowClaimGapKind}). This is the half that used to be missing:
+ *    a section whose claims ALL landed here has no flow and often no gap row
+ *    either, and without it fell through to `unguarded` — a mute bucket where the
+ *    reasons plainly say Blocked or Not testable;
+ *  - the statements extraction REFUSED, as `no-claim`. It ranks last of all, so it
+ *    decides only a section that has nothing else — which is exactly the section
+ *    made of prose nobody can falsify.
+ *
+ * A section with a mix keeps every state visible in its detail (`flows` and
+ * `claimGaps`); only the headline is worst-first.
+ */
 function resolveSectionCoverage(
   sec: DocSection,
   joins: {
@@ -607,9 +749,12 @@ function resolveSectionCoverage(
     join: FlowJoin
     run: readonly GuardScenarioResult[]
     gaps: readonly GuardCoverageGap[]
+    noFlow: readonly GuardNoFlowClaim[]
+    untestable: readonly GuardUntestableStatement[]
+    claimByIdentity: ReadonlyMap<string, GuardClaim>
   },
 ): GuardSectionCoverage {
-  const { doc, join, run, gaps } = joins
+  const { doc, join, run, gaps, noFlow, untestable, claimByIdentity } = joins
   const flows = sectionFlows(doc, sec.anchor, join, run)
   const flowIds = new Set(flows.map((f) => f.flowId))
 
@@ -631,6 +776,11 @@ function resolveSectionCoverage(
         ...(needsSetup ? { needsSetup } : {}),
       }
     }),
+    ...noFlow.map((c) => ({
+      status: guardNoFlowClaimGapKind(c.reason) as GuardSectionCoverageStatus,
+      reason: c.reason,
+    })),
+    ...untestable.map((s) => ({ status: 'no-claim' as GuardSectionCoverageStatus, reason: s.reason })),
   ]
   const status = worstCoverageStatus(candidates.map((c) => c.status))
   const winner = candidates.find((c) => c.status === status && c.reason)
@@ -658,10 +808,54 @@ function resolveSectionCoverage(
         }
       : {}),
     flows,
+    claimGaps: sectionClaimGaps(doc, sec.anchor, noFlow, claimGaps, claimByIdentity),
     scenarioIds,
     // Deprecated flat projection — the section detail renders `flows`.
     scenarios: run.map(toSectionScenario),
   }
+}
+
+/**
+ * The section's gapped claims, as the coverage view must show them REGARDLESS of
+ * the section's rank. Two records say the same thing from different sides, so
+ * they are merged, never concatenated:
+ *
+ *  - the flow corpus's `noFlowClaims` — the claim IDENTITY plus the reason. It
+ *    is the better record (it names the claim), so it wins every merge;
+ *  - the last generate's claim-level coverage gaps — the reason, with no claim
+ *    named. Kept only where no `noFlowClaim` already states it. A gap restating a
+ *    no-flow claim reads `<claim title> — <reason>`, so the test is that the gap's
+ *    reason ENDS WITH the claim's: tight enough that a short unrelated reason can
+ *    never swallow a distinct gap, and showing a row twice is a far cheaper
+ *    mistake than hiding one.
+ *
+ * The claim id is resolved through the claims store by identity, so a row can
+ * link to the claim it is about; without a claims store the rows still render,
+ * just without the link.
+ */
+function sectionClaimGaps(
+  doc: string,
+  anchor: string,
+  noFlow: readonly GuardNoFlowClaim[],
+  gaps: readonly GuardCoverageGap[],
+  claimByIdentity: ReadonlyMap<string, GuardClaim>,
+): GuardSectionClaimGap[] {
+  const fold = (text: string): string => text.replace(/\s+/g, ' ').trim()
+  const out: GuardSectionClaimGap[] = noFlow.map((c) => {
+    const claim = claimByIdentity.get(claimIdentityKey(doc, anchor, c.claimTitle))
+    return {
+      ...(claim ? { claimId: claim.id } : {}),
+      title: c.claimTitle,
+      reason: c.reason,
+    }
+  })
+  const stated = noFlow.map((c) => fold(c.reason))
+  for (const g of gaps) {
+    const reason = fold(g.reason)
+    if (stated.some((s) => reason.endsWith(s))) continue
+    out.push({ reason: g.reason, kind: g.kind })
+  }
+  return out
 }
 
 function buildOrphanedCoverage(
@@ -721,6 +915,9 @@ const COVERAGE_STATUSES = [
   ...awaitingDriverIds,
   ...RESIDUAL_GAP_KINDS,
   'guarded',
+  // Derived from the manifest's inventory status: a test committed with no birth
+  // execution behind it.
+  'never-run',
   // A derived status, so it has no source enum to come from — it is the
   // one bucket this list names by hand, and the backstop below keeps it honest.
   'needs-setup',
@@ -793,7 +990,7 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
         file: fileById.get(s.id) ?? '',
         handWritten: !ownerByScenario.has(s.id),
         flowId,
-        surface: s.driver,
+        drivers: guardScenarioDrivers(s),
         ...(status ? { status } : {}),
       }
     })
@@ -856,7 +1053,7 @@ async function loadGuardCorpusForView(
 
 /** Repo-relative posix path of the flow corpus, the key the store seam reads by. */
 function flowsRelPath(repoKey: string): string {
-  return path.relative(repoKey, flowsPath(repoKey)).split(path.sep).join('/')
+  return path.relative(repoKey, guardFlowsPath(repoKey)).split(path.sep).join('/')
 }
 
 /**
@@ -1051,15 +1248,37 @@ function birthFailureDetail(finding: GuardBirthFinding): GuardFailureDetail {
   }
 }
 
-/** The journey ids a flow's scenarios ground on, in first-seen path order. */
-function flowJourneyIds(flowId: string, join: FlowJoin): string[] {
+/** The interface ids a flow's scenarios ground on, in first-seen path order. */
+function flowInterfaceIds(flowId: string, join: FlowJoin): string[] {
   const ids: string[] = []
   for (const scenarioId of join.scenarioIdsByFlow.get(flowId) ?? []) {
-    for (const id of join.scenarioById.get(scenarioId)?.journey?.path ?? []) {
+    for (const id of join.scenarioById.get(scenarioId)?.interface?.path ?? []) {
       if (!ids.includes(id)) ids.push(id)
     }
   }
   return ids
+}
+
+/**
+ * The drivers a flow's TESTS exercise, in registry order — read from the committed
+ * scenarios, so a flow with a cli test and a web GAP drives cli only (nothing runs
+ * on the surface it is still waiting for).
+ *
+ * A flow with no test anywhere is the one fallback: it has no steps to read, so its
+ * declared surfaces answer instead — a blocked flow still says which surface it was
+ * for, and stays reachable by the driver filter rather than vanishing from every
+ * chip.
+ */
+function flowDrivers(surfaces: readonly GuardFlowSurface[], join: FlowJoin): GuardDriverId[] {
+  const found = new Set<GuardDriverId>()
+  for (const surface of surfaces) {
+    const scenario = surface.scenarioId ? join.scenarioById.get(surface.scenarioId) : undefined
+    if (scenario) for (const driver of guardScenarioDrivers(scenario)) found.add(driver)
+  }
+  if (found.size === 0) {
+    for (const surface of surfaces) if (surface.surface) found.add(surface.surface)
+  }
+  return GUARD_DRIVERS.map((d) => d.id as GuardDriverId).filter((id) => found.has(id))
 }
 
 /**
@@ -1093,13 +1312,14 @@ function flowListItem(
     sectionCount: sections.length,
     docs: [...new Set(sections.map((s) => s.doc))].sort(),
     surfaces,
+    drivers: flowDrivers(surfaces, join),
     // Only DRIFT-class findings say the flow is failing. A withheld generation
     // defect / fidelity rejection is ours, so it rides beside the status as a
     // muted marker and never paints the flow red.
     findings: flowFindings(flowId, result).filter((f) => guardFindingClass(f) !== 'defect').length,
     toolDefects: flowFindings(flowId, result).filter((f) => guardFindingClass(f) === 'defect').length,
     errors: flowErrors(flowId, join, result).length,
-    journeyDrifted: surfaces.some((s) => s.journeyDrifted === true),
+    interfaceDrifted: surfaces.some((s) => s.interfaceDrifted === true),
     ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
   }
 }
@@ -1160,7 +1380,7 @@ function emptyFlowsView(): GuardFlowsView {
 /**
  * One flow's detail: the milestone chain joined to the LIVE spec sections (heading
  * text, live/gone, and whether the bound section drifted), the per-surface
- * scenario rows (source file, birth/run state, evidence pointer, journey path),
+ * scenario rows (source file, birth/run state, evidence pointer, interface path),
  * the gaps, and the findings the last generate attributed to the flow. `null` when
  * no flow (real or Manual) carries the id — the route answers 404.
  */
@@ -1227,7 +1447,7 @@ export async function readGuardFlowDetail(
         status: surface.status,
         birthPassed: false,
         hasEvidence: false,
-        journeyPath: [],
+        interfacePath: [],
         ...(surface.gap ? { gap: surface.gap } : {}),
       }
     }
@@ -1243,17 +1463,28 @@ export async function readGuardFlowDetail(
       ...(scenario?.title ?? run?.title ? { title: scenario?.title ?? run?.title } : {}),
       ...(file ? { file } : {}),
       status: surface.status,
+      // A test that never executed did not pass its birth either — `never-run` is
+      // not a green birth, it is the absence of one.
       birthPassed:
-        scenario != null && join.birthStatusByScenario.get(surface.scenarioId) !== 'failing',
+        scenario != null &&
+        !['failing', 'never-run'].includes(join.birthStatusByScenario.get(surface.scenarioId) ?? ''),
       ...(surface.stage ? { stage: surface.stage } : {}),
-      ...(run ? { outcome: run.outcome, durationMs: run.durationMs } : {}),
+      ...(run
+        ? {
+            outcome: run.outcome,
+            durationMs: run.durationMs,
+            // The run this row's outcome (and its evidence) came from — its own when
+            // the merged board carried it over, else the board envelope's.
+            ...(view.latest ? { runId: guardResultRunId(run, view.latest.run) } : {}),
+          }
+        : {}),
       ...(run?.failure ? { failure: run.failure } : birth ? { failure: birthFailureDetail(birth) } : {}),
       ...(run?.failedMilestone
         ? { failedMilestone: run.failedMilestone }
         : birth?.failedMilestone
           ? { failedMilestone: birth.failedMilestone }
           : {}),
-      ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
+      ...(run?.interfaceDrifted ? { interfaceDrifted: true } : {}),
       // The blocked-precondition annotation of the RUN's failure. A birth finding
       // carries no such flag (the report schema records the milestone pair, not the
       // annotation), so a birth-stage row simply renders without it.
@@ -1269,7 +1500,7 @@ export async function readGuardFlowDetail(
       // gitignored, so the manifest DIAGNOSIS is the fallback: on a fresh clone the
       // committed red test still says whose fault it is.
       ...birthTriage(run != null, surface.scenarioId, birth, diagnosisByScenario),
-      journeyPath: scenario?.journey?.path ?? [],
+      interfacePath: scenario?.interface?.path ?? [],
     }
   })
 
@@ -1290,7 +1521,7 @@ export async function readGuardFlowDetail(
     milestones,
     surfaces: rows,
     gaps,
-    journeyIds: flowJourneyIds(flowId, join),
+    interfaceIds: flowInterfaceIds(flowId, join),
     findings: flowFindings(flowId, view.result),
     errors: flowErrors(flowId, join, view.result),
     // No goal and no milestones above is a FACT about an orphaned flow, not a hole:
@@ -1333,80 +1564,315 @@ export async function readGuardRunFlows(
 }
 
 // ---------------------------------------------------------------------------
-// Journeys tab — the code-side catalog (`guard/journeys.json`).
+// Interfaces tab — the code-side catalog, BOTH halves of it
+// (`guard/interfaces.json` + `guard/interfaces.authored.json`).
 // ---------------------------------------------------------------------------
 
 /**
- * The journey catalog plus the reverse index onto the flows that ground on it.
+ * The interface catalog plus the reverse index onto the flows that ground on it.
  *
- * The catalog is DERIVED from the working tree (the free Map action writes
- * `guard/journeys.json`, which is gitignored), so it only exists where the store
+ * The catalog has two homes and this view reads the MERGE of them: the derived
+ * snapshot the Map action writes (`guard/interfaces.json`, gitignored) and the
+ * committed `guard/interfaces.authored.json` a human writes for the surfaces no
+ * derivation produces. Only `cli` and `api` are ever derived, so composing this
+ * view from the derived half alone would show a repo with no web surface at all.
+ * Each row carries `origin` for which half it came from.
+ *
+ * Both halves live in the working tree, so the view only exists where the store
  * materializes in place; a hosted repo reports `unavailable: 'no-working-tree'`
- * with an otherwise-empty payload. A missing snapshot is likewise a clean empty
+ * with an otherwise-empty payload. Neither half present is likewise a clean empty
  * payload (`mapped: false`) so the tab renders its Map CTA, never a null check.
  */
-export async function readGuardJourneys(repoKey: string, ref?: string): Promise<GuardJourneysView> {
+export async function readGuardInterfaces(repoKey: string, ref?: string): Promise<GuardInterfacesView> {
   if (!guardsMaterializeInPlace()) {
-    return { ...emptyJourneysView(), unavailable: 'no-working-tree' }
+    return { ...emptyInterfacesView(), unavailable: 'no-working-tree' }
   }
-  const catalog = readJourneyCatalog(repoKey)
-  if (!catalog) return emptyJourneysView()
+  const catalog = readMergedInterfaceCatalog(repoKey)
+  if (!catalog) return emptyInterfacesView()
 
   const corpus = await loadGuardCorpusForView(repoKey, ref)
   const flowsFile = corpus ? await readGuardFlowsFile(repoKey, corpus.commit) : null
-  const { flowRefs, scenarioIdsByJourney } = journeyReverseIndex(corpus, flowsFile)
+  const { flowRefs, scenarioIdsByInterface } = interfaceReverseIndex(corpus, flowsFile)
 
-  const journeys: GuardJourneyRow[] = catalog.journeys.map((j) => ({
+  const interfaces: GuardInterfaceRow[] = catalog.interfaces.map((j) => ({
     id: j.id,
     type: j.type,
     title: j.title,
+    // The family passes through verbatim — a catalog that established none carries
+    // none, and the panel groups by what is there.
+    ...(j.group ? { group: j.group } : {}),
     entry: j.entry,
     steps: j.steps,
+    ...(j.startingState ? { startingState: j.startingState } : {}),
+    ...(j.endState ? { endState: j.endState } : {}),
+    // The location contract passes through verbatim — the registry the ids
+    // resolve in travels once, on the view below.
+    ...(j.at ? { at: j.at } : {}),
+    ...(j.to ? { to: j.to } : {}),
+    // The owning place travels the same way, and resolves in the same registry.
+    ...(j.resource ? { resource: j.resource } : {}),
     fingerprint: j.fingerprint,
     flows: flowRefs.get(j.id) ?? [],
-    scenarioIds: scenarioIdsByJourney.get(j.id) ?? [],
+    scenarioIds: scenarioIdsByInterface.get(j.id) ?? [],
+    // How the AREA was derived, when it was. Absent for a hand-authored surface —
+    // `source` describes a derivation ladder and there was no derivation to
+    // describe; `origin` below is the row's own answer, and the honest one.
     ...(catalog.source?.[j.type] ? { source: catalog.source[j.type] } : {}),
+    // Which half of the catalog this row came from, as the merge stamped it.
+    ...(j.origin ? { origin: j.origin } : {}),
     ...(j.specOnly ? { specOnly: true as const } : {}),
+    // The contract passes through verbatim — the view renders the catalog's own
+    // words, and a catalog without one simply carries none.
+    ...(j.contract ? { contract: j.contract } : {}),
+    // What this entry's steps CALL, by id — verbatim, absence included: the
+    // client joins the ids against the api rows beside them, and `[]` (reaches
+    // no server) must stay distinguishable from "nobody established it".
+    ...(j.apiEffects ? { apiEffects: j.apiEffects } : {}),
   }))
 
   const countByType = new Map<string, number>()
-  for (const j of catalog.journeys) countByType.set(j.type, (countByType.get(j.type) ?? 0) + 1)
-  const surfaces = journeySurfaces(countByType, catalog.source)
+  for (const j of catalog.interfaces) countByType.set(j.type, (countByType.get(j.type) ?? 0) + 1)
+  const surfaces = interfaceSurfaces(countByType, catalog.source, catalog.resources)
 
   return {
     mapped: true,
     generatedAt: catalog.generatedAt,
     recipeFingerprint: catalog.recipeFingerprint,
-    journeys,
+    interfaces,
+    // The resource registry, verbatim — defined once in the catalog, joined by
+    // the client (panel labels, the open row's place card).
+    ...(catalog.resources ? { resources: catalog.resources } : {}),
+    // The state registry travels the same way and for the same reason: the ids
+    // are on the rows, the one line that says what each world IS is here.
+    ...(catalog.states ? { states: catalog.states } : {}),
     surfaces,
     totals: {
-      journeys: journeys.length,
+      interfaces: interfaces.length,
       detectedSurfaces: surfaces.filter((s) => s.detected).length,
-      grounded: journeys.filter((j) => j.flows.length > 0).length,
-      ungrounded: journeys.filter((j) => j.flows.length === 0).length,
+      grounded: interfaces.filter((j) => j.flows.length > 0).length,
+      ungrounded: interfaces.filter((j) => j.flows.length === 0).length,
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Claims tab — the extracted claim corpus and its trace.
+// ---------------------------------------------------------------------------
+
+/** Repo-relative posix path of the claim corpus, the key the store seam reads by. */
+function claimsRelPath(repoKey: string): string {
+  return path.relative(repoKey, guardClaimsPath(repoKey)).split(path.sep).join('/')
+}
+
+/**
+ * The extracted claim corpus (`scenarios/claims.json`), read through the SAME
+ * store seam as the scenario files so a hosted view reads its commit's set. A
+ * missing or malformed file reads as `null` — the Claims tab renders its empty
+ * state, never an error.
+ */
+export async function readGuardClaimsFile(
+  repoKey: string,
+  commit?: string,
+): Promise<GuardClaimsFile | null> {
+  const raw = await readScenarioFile(repoKey, claimsRelPath(repoKey), commit)
+  if (raw == null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const result = GuardClaimsFileSchema.safeParse(parsed)
+  return result.success ? result.data : null
+}
+
+/** The claim corpus a (possibly PR-scoped) view reads — baseline fallback included. */
+export function readGuardClaimsForView(repoKey: string, ref?: string): Promise<GuardClaimsFile | null> {
+  return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardClaimsFile(repoKey, c))
+}
+
+const EMPTY_CLAIMS_VIEW: GuardClaimsView = {
+  extracted: false,
+  generatedAt: null,
+  claims: [],
+  untestable: [],
+  totals: {
+    claims: 0,
+    proven: 0,
+    failing: 0,
+    planned: 0,
+    gapped: 0,
+    unplanned: 0,
+    dismissed: 0,
+    untestable: 0,
+    orphanedAnchors: 0,
+  },
+}
+
+/**
+ * The Claims tab payload: every extracted claim with the trace plan §8.2 asks for
+ * — scenario → milestone → claim → doc sentence — read in both directions.
+ *
+ * A claim is addressed two different ways by the two layers that reference it,
+ * and the join honours both: a FLOW milestone addresses it by IDENTITY
+ * (doc + anchor + title, the same key a dismissal uses), a SCENARIO step's
+ * milestone tag addresses it by ID. The section's live heading text and whether
+ * its anchor still resolves come from the live doc, so a claim whose section was
+ * removed says so instead of pointing at nothing.
+ *
+ * Coverage is claim-keyed and therefore always defined, and RUN-AWARE: a claim
+ * is `proven` only when a proof step PASSED in the latest run, `failing` when
+ * its proof steps ran and only failed, `planned` when it is carried or has a
+ * proof with no verdict yet, `gapped` when the corpus accounts for it as a
+ * `noFlowClaim` (with its reason), and `unplanned` when nothing mentions it —
+ * the honest hole, never a mute blank.
+ */
+export async function readGuardClaims(repoKey: string, ref?: string): Promise<GuardClaimsView> {
+  const corpus = await loadGuardCorpusForView(repoKey, ref)
+  const commit = corpus?.commit
+  const [claimsFile, flowsFile, decisions, latest] = await Promise.all([
+    readGuardClaimsFile(repoKey, commit),
+    readGuardFlowsFile(repoKey, commit),
+    getGuardDecisions(repoKey),
+    readGuardRunForView(repoKey, ref),
+  ])
+  if (!claimsFile) return EMPTY_CLAIMS_VIEW
+
+  const outcomeByScenarioId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s.outcome]))
+
+  const scenarios = corpus?.scenarios ?? []
+  const sections = await headingTextIndex(
+    repoKey,
+    [...claimsFile.claims.map((c) => c.doc), ...claimsFile.untestable.map((u) => u.doc)],
+    commit,
+  )
+
+  // Flow milestones, indexed by the claim IDENTITY they address.
+  const flowsByIdentity = new Map<string, GuardClaimFlowRef[]>()
+  for (const flow of flowsFile?.flows ?? []) {
+    for (const m of flow.milestones) {
+      push(flowsByIdentity, claimIdentityKey(m.doc, m.anchor, m.claimTitle), {
+        flowId: flow.id,
+        title: flow.title,
+        milestoneOrder: m.order,
+        ...(m.note ? { note: m.note } : {}),
+      })
+    }
+  }
+
+  // Scenario steps, indexed by the claim ID their milestone tag names —
+  // teardown steps included (they carry milestones like any other step).
+  const scenariosById = new Map<string, Map<string, GuardClaimScenarioRef>>()
+  for (const s of scenarios) {
+    for (const [i, step] of guardExecutionSteps(s).entries()) {
+      for (const id of milestoneClaims(step.milestone)) {
+        let byScenario = scenariosById.get(id)
+        if (!byScenario) scenariosById.set(id, (byScenario = new Map()))
+        const row = byScenario.get(s.id) ?? { scenarioId: s.id, title: s.title, steps: [] }
+        row.steps.push(i + 1)
+        byScenario.set(s.id, row)
+      }
+    }
+  }
+
+  const gapByIdentity = new Map(
+    (flowsFile?.noFlowClaims ?? []).map((c) => [claimIdentityKey(c.doc, c.anchor, c.claimTitle), c.reason]),
+  )
+  const dismissed = new Set(
+    decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
+  )
+
+  const claims: GuardClaimRow[] = claimsFile.claims.map((c) => {
+    const identity = guardClaimKey(c)
+    const flows = flowsByIdentity.get(identity) ?? []
+    const proofs = [...(scenariosById.get(c.id)?.values() ?? [])].map((p) => {
+      const outcome = outcomeByScenarioId.get(p.scenarioId)
+      return outcome ? { ...p, outcome } : p
+    })
+    const gapReason = gapByIdentity.get(identity)
+    const anyPass = proofs.some((p) => p.outcome === 'pass')
+    const anyFail = proofs.some((p) => p.outcome === 'fail' || p.outcome === 'error')
+    const coverage: GuardClaimCoverage = anyPass
+      ? 'proven'
+      : anyFail
+        ? 'failing'
+        : proofs.length > 0 || flows.length > 0
+          ? 'planned'
+          : gapReason
+            ? 'gapped'
+            : 'unplanned'
+    const headingText = sections.get(`${c.doc}\0${c.anchor}`)
+    return {
+      id: c.id,
+      doc: c.doc,
+      anchor: c.anchor,
+      title: c.title,
+      claim: c.claim,
+      contentHash: c.contentHash,
+      ...(c.verifyVia ? { verifyVia: c.verifyVia } : {}),
+      ...(headingText !== undefined ? { headingText } : {}),
+      anchorLive: headingText !== undefined,
+      coverage,
+      ...(gapReason ? { gapReason } : {}),
+      dismissed: dismissed.has(identity),
+      flows,
+      scenarios: proofs,
+    }
+  })
+
+  const untestable: GuardUntestableRow[] = claimsFile.untestable.map((u) => {
+    const headingText = sections.get(`${u.doc}\0${u.anchor}`)
+    return {
+      doc: u.doc,
+      anchor: u.anchor,
+      text: u.text,
+      reason: u.reason,
+      ...(headingText !== undefined ? { headingText } : {}),
+      anchorLive: headingText !== undefined,
+    }
+  })
+
+  // Dismissed claims count under `dismissed` alone, so the totals sum to `claims`.
+  const count = (state: GuardClaimCoverage): number =>
+    claims.filter((c) => !c.dismissed && c.coverage === state).length
+  return {
+    extracted: true,
+    generatedAt: claimsFile.generatedAt,
+    claims,
+    untestable,
+    totals: {
+      claims: claims.length,
+      proven: count('proven'),
+      failing: count('failing'),
+      planned: count('planned'),
+      gapped: count('gapped'),
+      unplanned: count('unplanned'),
+      dismissed: claims.filter((c) => c.dismissed).length,
+      untestable: untestable.length,
+      orphanedAnchors: claims.filter((c) => !c.anchorLive).length,
     },
   }
 }
 
 /**
- * Which flows use each journey, and which scenarios ground on it.
+ * Which flows use each interface, and which scenarios ground on it.
  *
  * Usage is the UNION of two records, because either alone lies:
- *  - the manifest's per-flow `journeys` — what the realization PLAN referenced,
+ *  - the manifest's per-flow `interfaces` — what the realization PLAN referenced,
  *    written for authored AND blocked surfaces alike. This is the only trace a
- *    matched-but-unauthored flow leaves, and without it a journey the spec plainly
- *    reaches reads as "no flow uses this journey";
- *  - the committed scenarios' own `journey.path` — what actually got written. Also
+ *    matched-but-unauthored flow leaves, and without it an interface the spec plainly
+ *    reaches reads as "no flow uses this interface";
+ *  - the committed scenarios' own `interface.path` — what actually got written. Also
  *    the FALLBACK for manifests written before the plan record existed, and the
  *    only source for hand-written scenarios (no manifest flow at all).
  *
  * A flow present in both is `realized`; a flow only the plan knows is not, and
  * carries the gap for the planning surface that explains what it waits on.
  */
-function journeyReverseIndex(
+function interfaceReverseIndex(
   corpus: GuardCorpusForView | null,
   flowsFile: GuardFlowsFile | null,
-): { flowRefs: Map<string, GuardJourneyFlowRef[]>; scenarioIdsByJourney: Map<string, string[]> } {
+): { flowRefs: Map<string, GuardInterfaceFlowRef[]>; scenarioIdsByInterface: Map<string, string[]> } {
   const titleByFlow = new Map((flowsFile?.flows ?? []).map((f) => [f.id, f.title]))
   const manifestFlows = corpus?.manifest?.flows ?? []
   const ownerByScenario = new Map<string, string>()
@@ -1414,79 +1880,99 @@ function journeyReverseIndex(
     for (const s of flow.scenarios) ownerByScenario.set(s.id, flow.flowId)
   }
 
-  // journeyId → flowId → the ref being assembled.
-  const byJourney = new Map<string, Map<string, GuardJourneyFlowRef>>()
-  const refFor = (journeyId: string, flowId: string): GuardJourneyFlowRef => {
-    let flows = byJourney.get(journeyId)
-    if (!flows) byJourney.set(journeyId, (flows = new Map()))
+  // interfaceId → flowId → the ref being assembled.
+  const byInterface = new Map<string, Map<string, GuardInterfaceFlowRef>>()
+  const refFor = (interfaceId: string, flowId: string): GuardInterfaceFlowRef => {
+    let flows = byInterface.get(interfaceId)
+    if (!flows) byInterface.set(interfaceId, (flows = new Map()))
     let ref = flows.get(flowId)
     if (!ref) flows.set(flowId, (ref = { flowId, title: titleByFlow.get(flowId) ?? flowId, realized: false }))
     return ref
   }
 
   for (const flow of manifestFlows) {
-    for (const planned of flow.journeys) {
+    for (const planned of flow.interfaces) {
       // The gap for the surface that planned it — what a blocked usage is waiting on.
       const gap = flow.gaps.find((g) => g.surface === planned.surface)
-      for (const journeyId of planned.journeyIds) {
-        const ref = refFor(journeyId, flow.flowId)
+      for (const interfaceId of planned.interfaceIds) {
+        const ref = refFor(interfaceId, flow.flowId)
         if (gap && !ref.gap) ref.gap = toFlowGap(gap)
       }
     }
   }
 
-  const scenarioIdsByJourney = new Map<string, string[]>()
+  const scenarioIdsByInterface = new Map<string, string[]>()
   for (const scenario of corpus?.scenarios ?? []) {
     const flowId = scenario.flow?.id ?? ownerByScenario.get(scenario.id) ?? manualFlowId(scenario.id)
-    for (const journeyId of scenario.journey?.path ?? []) {
-      const ref = refFor(journeyId, flowId)
+    for (const interfaceId of scenario.interface?.path ?? []) {
+      const ref = refFor(interfaceId, flowId)
       ref.realized = true
       delete ref.gap
-      const ids = scenarioIdsByJourney.get(journeyId) ?? []
+      const ids = scenarioIdsByInterface.get(interfaceId) ?? []
       if (!ids.includes(scenario.id)) ids.push(scenario.id)
-      scenarioIdsByJourney.set(journeyId, ids)
+      scenarioIdsByInterface.set(interfaceId, ids)
     }
   }
 
-  const flowRefs = new Map<string, GuardJourneyFlowRef[]>()
-  for (const [journeyId, flows] of byJourney) {
+  const flowRefs = new Map<string, GuardInterfaceFlowRef[]>()
+  for (const [interfaceId, flows] of byInterface) {
     flowRefs.set(
-      journeyId,
+      interfaceId,
       [...flows.values()].sort((a, b) => a.flowId.localeCompare(b.flowId)),
     )
   }
-  return { flowRefs, scenarioIdsByJourney }
+  return { flowRefs, scenarioIdsByInterface }
 }
 
-/** The detected-surface banner: one row per driver-registry surface, registry order. */
-function journeySurfaces(
+/**
+ * The detected-surface banner: one row per driver-registry surface, registry order.
+ *
+ * `source` is carried ONLY where a derivation ran, and the merged catalog keeps the
+ * derived half's map verbatim rather than inventing a value for the authored half —
+ * `source` answers "which ladder derived this area", which a hand-written area has
+ * no answer to. So a sourceless row is read together with its interface count:
+ * sourceless with interfaces is a surface a human wrote; sourceless with NONE is a
+ * derivation that found nothing. Inside a mixed area the exact answer is per row
+ * (`origin`), because one area can hold both.
+ *
+ * A surface is DETECTED when either half of it was found. Since the web
+ * derivation landed, a surface can be all places and no interfaces — a mapped web
+ * app has a screen per address and no tasks at all, because tasks are authored
+ * and places are derived. Judging the row on its interface count alone would have
+ * reported a repo whose every screen was just derived as one where nothing was
+ * found, which is the one thing the banner must never say.
+ */
+function interfaceSurfaces(
   countByType: ReadonlyMap<string, number>,
-  source: Record<string, 'tree' | 'probes'> | undefined,
-): GuardJourneySurface[] {
+  source: Record<string, InterfaceCatalogSource> | undefined,
+  resourcesByArea: Record<string, readonly unknown[]> | undefined,
+): GuardInterfaceSurface[] {
   return GUARD_DRIVERS.map((row) => {
     const driver: GuardDriverDef = row
-    const journeys = countByType.get(driver.id) ?? 0
+    const interfaces = countByType.get(driver.id) ?? 0
+    const resources = resourcesByArea?.[driver.id]?.length ?? 0
     return {
       surface: driver.id as GuardDriverId,
       label: driver.label,
       runnable: driver.runnable,
       ...(driver.waitingLabel ? { waitingLabel: driver.waitingLabel } : {}),
-      journeys,
-      detected: journeys > 0,
+      interfaces,
+      resources,
+      detected: interfaces > 0 || resources > 0,
       ...(source?.[driver.id] ? { source: source[driver.id] } : {}),
     }
   })
 }
 
-/** The empty Journeys payload — banner present, lists empty (the Map CTA state). */
-function emptyJourneysView(): GuardJourneysView {
+/** The empty Interfaces payload — banner present, lists empty (the Map CTA state). */
+function emptyInterfacesView(): GuardInterfacesView {
   return {
     mapped: false,
     generatedAt: null,
     recipeFingerprint: null,
-    journeys: [],
-    surfaces: journeySurfaces(new Map(), undefined),
-    totals: { journeys: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 },
+    interfaces: [],
+    surfaces: interfaceSurfaces(new Map(), undefined, undefined),
+    totals: { interfaces: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 },
   }
 }
 
@@ -1653,17 +2139,61 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
     serve: [...s.serve],
     ...(s.app ? { app: s.app } : {}),
   }));
-  const card = {
+  // The web surface's own preparation, verbatim from the block — the defaults
+  // the runner applies are the RUNNER's, and a card that invented them would
+  // report preparation the file never declared.
+  const web: GuardRecipeSurface | null = recipe.web
+    ? {
+        ...(recipe.web.build ? { build: recipe.web.build } : {}),
+        serve: [...recipe.web.serve],
+        ...(recipe.web.cwd ? { cwd: recipe.web.cwd } : {}),
+        ...(recipe.web.healthPath ? { healthPath: recipe.web.healthPath } : {}),
+        ...(recipe.web.readyTimeoutMs != null ? { readyTimeoutMs: recipe.web.readyTimeoutMs } : {}),
+        ...(recipe.web.env ? { env: { ...recipe.web.env } } : {}),
+      }
+    : null;
+  const cli: GuardRecipeSurface = {
+    ...(recipe.install ? { install: recipe.install } : {}),
     build: recipe.build,
-    entry: recipe.entry ? recipe.entry.slice() : null,
-    serve: recipe.api
-      ? [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])]
-      : null,
-    servers: servers.length > 1 ? servers : null,
-    services: recipe.api?.services
-      ? { up: recipe.api.services.up, ...(recipe.api.services.down ? { down: recipe.api.services.down } : {}) }
-      : null,
-    env: recipe.env ?? null,
+    ...(recipe.entry ? { entry: recipe.entry.slice() } : {}),
+    ...(recipe.env ? { env: { ...recipe.env } } : {}),
+  };
+  // THE API SURFACE'S SERVER. Its own, when the recipe declares an `api` block —
+  // otherwise the WEB block's, because the runner serves one surface for both web
+  // and `request` steps (`drivers/surface.ts`). Saying "nothing is declared" to an
+  // api reader of a web-only repo would be reporting the opposite of what runs, so
+  // the shared server is carried here and marked as the web surface's.
+  const api: GuardRecipeSurface | null = recipe.api
+    ? {
+        serve: [...(resolvedServers.servers.get(resolvedServers.defaultServer)?.serve ?? [])],
+        ...(servers.length > 1 ? { servers } : {}),
+        // The single-server shape's own preparation, verbatim from the block —
+        // same rule as the web surface above. In the multi-server shape these
+        // fields live per server (the schema refuses them at the api level), so
+        // there is nothing api-level to report; `env` is the shared layer and
+        // is legal in both shapes.
+        ...(recipe.api.cwd ? { cwd: recipe.api.cwd } : {}),
+        ...(recipe.api.healthPath ? { healthPath: recipe.api.healthPath } : {}),
+        ...(recipe.api.readyTimeoutMs != null ? { readyTimeoutMs: recipe.api.readyTimeoutMs } : {}),
+        ...(recipe.api.env ? { env: { ...recipe.api.env } } : {}),
+        ...(recipe.api.services
+          ? {
+              services: {
+                up: recipe.api.services.up,
+                ...(recipe.api.services.down ? { down: recipe.api.services.down } : {}),
+              },
+            }
+          : {}),
+      }
+    : web
+      ? { ...web, sharedWithWeb: true }
+      : null;
+  const card = {
+    surfaces: {
+      cli,
+      ...(api ? { api } : {}),
+      ...(web ? { web } : {}),
+    },
   }
   if (!guardsMaterializeInPlace()) {
     const run = await readGuardRunForView(repoKey, commit)
@@ -1742,11 +2272,46 @@ export async function readGuardHistoryForPr(repoKey: string, pr: number): Promis
   return { runs }
 }
 
-/** Find a committed scenario by id and return its raw YAML source, or `null`. */
+/**
+ * WHERE a scenario's recorded actuals live: under a run (`runId`), or at the evidence
+ * directory a birth finding stored (`evidenceDir`). The two addressing modes the
+ * evidence reads already have — the actuals ride in the same bundle.
+ */
+export type GuardEvidenceLocator = { runId: string } | { evidenceDir: string }
+
+/**
+ * The per-step actuals of one scenario in one run: exit code / status, duration and
+ * output excerpt per EXECUTED step, read out of that run's evidence bundle. Returns
+ * an empty list when there is no bundle, when it does not parse, or when the scenario
+ * did not execute — a step with no record simply has no actual half.
+ */
+export async function readGuardStepActuals(
+  repoRoot: string,
+  scenarioId: string,
+  from: GuardEvidenceLocator,
+): Promise<GuardStepActual[]> {
+  const raw =
+    'runId' in from
+      ? await readGuardEvidenceStore(repoRoot, from.runId, scenarioId, INVOCATION_FILE)
+      : await readGuardEvidenceAtStore(repoRoot, from.evidenceDir, INVOCATION_FILE)
+  return raw == null ? [] : parseGuardStepActuals(raw)
+}
+
+/** The evidence file the per-step actuals live in (written by both drivers). */
+const INVOCATION_FILE = 'invocation.json'
+
+/**
+ * Find a committed scenario by id and return its raw YAML source, or `null`. With
+ * `actualsFrom`, each step also carries what it ACTUALLY did in that run — the
+ * merged view the test detail renders: authored expectation on the left, recorded
+ * outcome on the right. A step the run never reached, and every step of a scenario
+ * that has never run, keeps the authored half alone.
+ */
 export async function readGuardScenarioSource(
   repoKey: string,
   id: string,
   ref?: string,
+  actualsFrom?: GuardEvidenceLocator,
 ): Promise<GuardScenarioSource | null> {
   const scope = await resolveGuardScope(repoKey, ref)
   if (scope.kind === 'empty') return null
@@ -1761,16 +2326,180 @@ export async function readGuardScenarioSource(
       continue
     }
     if (parsed && typeof parsed === 'object' && (parsed as { id?: unknown }).id === id) {
-      // The two renderings the detail offers — the structural step list and the
-      // plain-words story — both derived HERE from the one parsed file, so a
-      // reader's story can never describe a step the step list does not have.
-      const steps = describeGuardScenarioSteps(parsed)
-      const story = describeGuardScenario(parsed)
-      const driver = (parsed as { driver?: GuardDriverId }).driver
-      return { id, file: rel, content: raw, ...(driver ? { driver } : {}), steps, ...(story ? { story } : {}) }
+      // The detail's structural step list — and the world those steps start in —
+      // derived HERE from the one parsed file, so what a reader sees is always
+      // that file's own.
+      const authored = describeGuardScenarioSteps(parsed)
+      const setup = describeGuardScenarioSetup(parsed)
+      const actuals = actualsFrom ? await readGuardStepActuals(repoKey, id, actualsFrom) : []
+      const byStep = new Map(actuals.map((a) => [a.n, a]))
+      const steps = authored.map((step) => {
+        const actual = byStep.get(step.n)
+        return actual ? { ...step, actual } : step
+      })
+      return {
+        id,
+        file: rel,
+        content: raw,
+        steps,
+        ...(setup ? { setup } : {}),
+      }
     }
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// Raw artifact slices — the second reading every artifact-backed entity offers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pick ONE entry out of a store file's array by its `id` and pretty-print it.
+ *
+ * The file text is parsed as plain JSON, never through its Zod schema: the raw
+ * reading must be what is actually STORED, so a field the schema would strip
+ * still reaches the reader. A file that does not parse, or that holds no entry
+ * with this id, is `null` — the surface says so rather than showing an empty
+ * block. The id never touches a path (it selects inside an already-read file), so
+ * these reads add no traversal surface to the store seams they go through.
+ */
+function artifactSlice(
+  raw: string | null,
+  file: string,
+  key: 'interfaces' | 'flows' | 'claims' | 'dependencies',
+  id: string,
+  /** The field that IDENTIFIES an entry — `name` for a dependency catalog entry. */
+  idField: 'id' | 'name' = 'id',
+): GuardArtifactSource | null {
+  if (raw == null) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const entries = (parsed as Record<string, unknown> | null)?.[key]
+  if (!Array.isArray(entries)) return null
+  const entry = entries.find((e) => (e as Record<string, unknown> | null)?.[idField] === id)
+  if (entry === undefined) return null
+  return { id, file, content: JSON.stringify(entry, null, 2) }
+}
+
+/**
+ * One interface's entry, sliced out of WHICHEVER half of the catalog holds it —
+ * the derived `guard/interfaces.json` or the committed
+ * `guard/interfaces.authored.json`.
+ *
+ * The file is resolved first and only then sliced, rather than the merge being
+ * serialized back out: this reading exists to show the bytes that are actually on
+ * disk, so a reader sees a real file at a real path (the `file` label is what they
+ * would open) and none of the fields the merge stamps on top — `origin` in
+ * particular is computed, and a raw view that showed it would be showing a field
+ * no file contains. The authored half is looked at LAST for the same reason it wins
+ * the merge: where both name one id, it is the entry the view beside this one
+ * rendered.
+ *
+ * Both halves live in the working tree, so a hosted repo has no file to show and
+ * answers `null`, exactly as {@link readGuardInterfaces} reports `no-working-tree`.
+ */
+export async function readGuardInterfaceRaw(
+  repoKey: string,
+  id: string,
+): Promise<GuardArtifactSource | null> {
+  if (!guardsMaterializeInPlace()) return null
+  const halves: [string, () => string | null][] = [
+    [guardInterfacesPath(repoKey), () => readInterfaceCatalogRaw(repoKey)],
+    [guardAuthoredInterfacesPath(repoKey), () => readFileTextOr(guardAuthoredInterfacesPath(repoKey))],
+  ]
+  let found: GuardArtifactSource | null = null
+  for (const [file, read] of halves) {
+    const rel = path.relative(repoKey, file).split(path.sep).join('/')
+    found = artifactSlice(read(), rel, 'interfaces', id) ?? found
+  }
+  return found
+}
+
+/** A file's text, or `null` when it is absent or unreadable — the raw readings
+ *  never fail a view, they simply have nothing to show. */
+function readFileTextOr(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf-8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * One flow's entry in `scenarios/flows.json`, read through the SAME store seam
+ * (and the same PR-scoped commit resolution) as the flow VIEW — so the bytes a
+ * reader sees are the ones the page beside them was composed from.
+ */
+export function readGuardFlowRaw(
+  repoKey: string,
+  id: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = flowsRelPath(repoKey)
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
+    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'flows', id),
+  )
+}
+
+/** One claim's entry in `scenarios/claims.json` — the {@link readGuardFlowRaw}
+ *  sibling for the claim corpus. Refused statements (`untestable[]`) carry no id
+ *  and are addressed by nothing, so they have no slice of their own. */
+export function readGuardClaimRaw(
+  repoKey: string,
+  id: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = claimsRelPath(repoKey)
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
+    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'claims', id),
+  )
+}
+
+/**
+ * One dependency's entry in `scenarios/dependencies.json` — the {@link
+ * readGuardFlowRaw} sibling for the dependency catalog, keyed on the entry NAME
+ * (a catalog entry has no `id`; its name IS its identity). The gitignored
+ * instance overlay has no raw reading of its own and never will: it holds the
+ * registered values, and a stored secret is never echoed back.
+ */
+export function readGuardDependencyRaw(
+  repoKey: string,
+  name: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = path.relative(repoKey, dependenciesPath(repoKey)).split(path.sep).join('/')
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
+    artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'dependencies', name, 'name'),
+  )
+}
+
+/**
+ * The stored `scenarios/recipe.json` — the raw half of the recipe reading, read
+ * through the SAME store seam (and the same PR-scoped commit resolution) as the
+ * recipe CARD beside it. A repo has exactly ONE recipe, so this slice is addressed
+ * by nothing: the id echoed back is the file's own path.
+ *
+ * Inline secrets are MASKED. The recipe is committed, so what a reader may see of
+ * it is exactly what `truecourse guard recipe` prints — one mask
+ * ({@link maskedRecipeText}) behind both. A file that does not parse reads as
+ * absent rather than unmasked, matching {@link readGuardRecipeCard}, which reads
+ * an invalid recipe as no card at all.
+ */
+export function readGuardRecipeRaw(
+  repoKey: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = path.relative(repoKey, recipePath(repoKey)).split(path.sep).join('/')
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) => {
+    const raw = await readRecipeRaw(repoKey, commit)
+    if (raw == null) return null
+    const content = maskedRecipeText(raw)
+    return content == null ? null : { id: rel, file: rel, content }
+  })
 }
 
 /**
@@ -1802,6 +2531,53 @@ export function readGuardEvidenceAt(
   file = 'transcript.txt',
 ): Promise<string | null> {
   return readGuardEvidenceAtStore(repoRoot, evidenceDir, file)
+}
+
+/**
+ * The evidence DIRECTORY a locator addresses. A run-addressed read resolves to the
+ * same pointer the run itself stored (`evidenceRelPath`), so both addressing modes
+ * reach the store through ONE dir-confined read — a `../`-laced runId or evidenceDir
+ * resolves outside the evidence root and is refused there.
+ */
+function evidenceDirOf(scenarioId: string, from: GuardEvidenceLocator): string {
+  return 'runId' in from ? evidenceRelPath(from.runId, scenarioId) : from.evidenceDir
+}
+
+/**
+ * The VISUAL evidence one scenario left in one run — the per-step screenshots and the
+ * session video a browser run writes next to the transcript, in reading order (see
+ * {@link guardEvidenceVisuals}).
+ *
+ * Read by LISTING the bundle, not by trusting a pointer: the screenshots are named in
+ * `invocation.json` but the session video is named nowhere, so the directory is the
+ * only complete answer. A cli/api bundle holds none and answers `[]`, which is what
+ * makes this additive — a run recorded before the web driver existed renders exactly
+ * as it did.
+ */
+export async function listGuardEvidenceVisuals(
+  repoRoot: string,
+  scenarioId: string,
+  from: GuardEvidenceLocator,
+): Promise<GuardEvidenceVisual[]> {
+  return guardEvidenceVisuals(await listGuardEvidenceAtStore(repoRoot, evidenceDirOf(scenarioId, from)))
+}
+
+/**
+ * ONE visual's raw bytes, with what it IS — the pair a serve route needs to answer
+ * with an honest media type. `null` when the name is not a visual (a transcript is
+ * read as text, through `readGuardEvidence`), when the bundle has no such file, or
+ * when the locator points outside the evidence root.
+ */
+export async function readGuardEvidenceVisual(
+  repoRoot: string,
+  scenarioId: string,
+  from: GuardEvidenceLocator,
+  file: string,
+): Promise<{ visual: GuardEvidenceVisual; bytes: Buffer } | null> {
+  const visual = guardEvidenceVisual(file)
+  if (!visual) return null
+  const bytes = await readGuardEvidenceBytesAtStore(repoRoot, evidenceDirOf(scenarioId, from), file)
+  return bytes == null ? null : { visual, bytes }
 }
 
 // ---------------------------------------------------------------------------

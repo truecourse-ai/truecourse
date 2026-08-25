@@ -9,10 +9,12 @@
 
 export {
   generateGuards,
-  authorCacheKey,
-  retryCacheKey,
-  GENERATE_CACHE_NAME,
-  FIDELITY_CACHE_NAME,
+  workerCacheKey,
+  // Single-step mode (the CLI's `--only-<step>` flags): the pipeline's session
+  // steps in order. `@truecourse/core` enforces the cache-only replay of the
+  // prior ones against these.
+  GENERATE_SESSION_STEPS,
+  type GenerateStep,
   type GenerateGuardsOptions,
   type GuardGenerateResult,
   type GuardGenerateModels,
@@ -20,8 +22,17 @@ export {
   type GuardBirthFinding,
   type GuardGenerateError,
   type GuardExtractionFailure,
-  type AuthorFailure,
-  type JourneyProvider,
+  type InterfaceProvider,
+  // The flow-worker session seam (plan 04 steps 17 + 18) — implemented by
+  // `@truecourse/core`, injected by the command adapter.
+  type FlowWorkerSessionSeam,
+  type FlowWorkerSessionResult,
+  type FlowWorkerTask,
+  type FlowWorkerToolReport,
+  type FlowWorkerCacheMaterial,
+  type WorkerFidelityInput,
+  type WorkerFidelityVerdict,
+  type WorkerFidelityJudge,
 } from './generate.js'
 
 export {
@@ -42,7 +53,7 @@ export {
   planFlowMatching,
   readCachedMatch,
   buildSurfaceCatalogs,
-  journeyDigest,
+  interfaceDigest,
   realizationLines,
   matchCacheKey,
   MATCH_CACHE_NAME,
@@ -82,34 +93,42 @@ export {
 } from './suppression.js'
 
 export {
-  extractDocClaims,
-  docExtractionCached,
-  countExtractViews,
-  countUncachedExtractViews,
-  EXTRACT_CACHE_NAME,
+  snapExtraction,
+  isSystemicSessionLoss,
   type DocClaims,
   type ExtractResult,
+  type ExtractedClaimWithNeeds,
+  type ExtractSessionSeam,
+  type GuardSessionSummary,
 } from './extract.js'
 
 export {
   synthesizeFlows,
-  planFlowSynthesis,
   buildFlowAreas,
   flowAreaIdForDoc,
-  flowAreaCacheKey,
-  flowEpicCacheKey,
+  flowAreaClaimsMaterial,
+  flowAreaOutlinesMaterial,
+  flowEpicDigestsMaterial,
   flowSectionKey,
   flowsPath,
   readFlowsFile,
-  FLOWS_CACHE_NAME,
+  checkFlowSet,
+  checkEpicSet,
+  isFlowSetClean,
+  isFlowSynthesisWipeout,
   type SynthesizeFlowsOptions,
   type FlowSynthesisResult,
-  type FlowSynthesisPlan,
-  type FlowAreaPlan,
   type FlowSynthesisArea,
   type FlowAreaDocInput,
   type FlowClaimInput,
   type FlowDocInput,
+  type FlowSetCheckContext,
+  type FlowSetCheckReport,
+  type FlowsAreaSessionSeam,
+  type FlowsAreaSessionResult,
+  type FlowsEpicSessionSeam,
+  type FlowsEpicSessionResult,
+  type FlowsSessionGrounding,
   type SubsumedFlow,
   type UnsettledArea,
 } from './flows.js'
@@ -117,6 +136,8 @@ export {
 export {
   discoverRecipe,
   verifyProposal,
+  recipeCacheKey,
+  staticProposalComplaints,
   RECIPE_CACHE_NAME,
   type RecipeDiscoveryResult,
   type RecipeDiscoverySource,
@@ -127,11 +148,14 @@ export {
   type VerifiableProposal,
   type VerifyContext,
   type ProposalVerdict,
+  type RecipeRepairContext,
+  type RecipeRepairResult,
+  type RecipeRepairFn,
 } from './recipe-discovery.js'
 
 export {
   proposeRecipe,
-  routesFromJourneys,
+  routesFromInterfaces,
   rankHealthPath,
   credentialStubs,
   credentialEnvName,
@@ -154,7 +178,7 @@ export {
 
 export { enrichBlockedOn, isGenericExternalNoun } from './external-blocked.js'
 export {
-  buildJourneyContractHints,
+  buildInterfaceContractHints,
   buildOutboundRequestHints,
   outboundOverflow,
   MAX_OUTBOUND_REQUESTS,
@@ -180,15 +204,18 @@ export {
 } from './ground.js'
 
 export {
-  draftSeed,
   seedDraftGate,
   detectRoleColumns,
+  readExistingSeedScript,
+  connectionEnvVars,
+  suggestedScriptPath,
+  toRecipeSeed,
+  resolveScriptPath,
+  writeSeedArtifacts,
   SEED_CACHE_NAME,
-  type DraftSeedOptions,
   type DraftSeedResult,
   type SeedBlockedFlow,
   type SeedDraftDatabase,
-  type SeedDraftPhase,
 } from './seed-draft.js'
 
 // `truecourse guard setup` — the cheap preparation stage between the spec scan and
@@ -197,10 +224,31 @@ export {
   runGuardSetup,
   readSpecExcerpts,
   collectSecuritySchemes,
+  ecosystemFingerprint,
+  interfacesFingerprint,
+  computeSeedStepFingerprint,
+  authFingerprint,
+  settledFingerprints,
   GUARD_SETUP_STEPS,
+  GUARD_SETUP_ONLY_STEPS,
+  SetupStepNotReadyError,
+  type GuardSetupOnlyStep,
   type GuardSetupOptions,
   type GuardSetupResult,
   type GuardSetupStepKey,
+  type GuardSetupCatalogSession,
+  type GuardSetupCatalogSessionInput,
+  type GuardSetupCatalogSessionResult,
+  type GuardSetupInterfaceProvider,
+  type GuardSetupInterfacesStep,
+  type GuardSetupInterfacesStepInput,
+  type GuardSetupInterfacesStepResult,
+  type GuardSetupSeedSession,
+  type GuardSetupSeedSessionInput,
+  type GuardSetupSeedSessionResult,
+  type GuardSetupAuthStep,
+  type GuardSetupAuthStepInput,
+  type GuardSetupAuthStepResult,
 } from './setup.js'
 
 export {
@@ -222,21 +270,16 @@ export {
   type BirthRound,
 } from './birth.js'
 
-// Failing-test triage — the post-birth judgment stage.
-export {
-  runTriage,
-  triageCacheKey,
-  buildTriageUserPrompt,
-  TRIAGE_CACHE_NAME,
-  TRIAGE_SYSTEM_PROMPT,
-  TRIAGE_PROMPT_FINGERPRINT,
-  type TriageUserContext,
-  type TriageFlowContext,
-  type TriageMilestone,
-} from './triage.js'
+// Scenario yaml round-trip helpers the worker session path reads through.
+export { serializeScenarioYaml, parseRawScenarioYaml, parseScenarioYaml } from './serialize.js'
+
+// The failing-test TRIAGE stage is RETIRED (plan 04 step 20): a committed
+// red's adjudication is the flow worker's own confirmed `expectedReds`
+// prediction. The orphaned `.cache/guard/triage` files remain on disk
+// (derived, deletable); `GuardTriageSchema` lives on in `@truecourse/shared`
+// because committed manifests still carry historical triage verdicts read-side.
 
 export {
-  EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_API_PROMPT_FINGERPRINT,
@@ -246,10 +289,6 @@ export {
   buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
-  FLOWS_SYSTEM_PROMPT,
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_SYSTEM_PROMPT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
   GENERATE_PROMPT_FINGERPRINT,
@@ -257,10 +296,8 @@ export {
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
   buildRecipeUserPrompt,
-  buildFlowsUserPrompt,
-  buildFlowsEpicUserPrompt,
   type AuthorUserContext,
-  type JourneyContractHint,
+  type InterfaceContractHint,
   type OutboundRequestHint,
   type AuthorMilestone,
   type BirthRetryContext,
@@ -268,17 +305,14 @@ export {
   type FidelityMilestone,
   type MatchUserContext,
   type MatchMilestoneLine,
-  type JourneyDigest,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
-  type FlowClaimLine,
-  type FlowDocOutline,
+  type InterfaceDigest,
   type FlowDigest,
   type OutlineEntry,
   type SeedDraftInput,
   type SeedBlockedClaim,
   type SeedRetryContext,
   type SeedSchemaTable,
+  type RecipeAppInventoryEntry,
 } from './prompts.js'
 
 // Example mining (D3) — the doc's own examples run verbatim.
@@ -293,23 +327,9 @@ export {
 } from './examples.js'
 
 export {
-  spawnExtractRunner,
-  spawnGenerateRunner,
   spawnRecipeRunner,
-  spawnSeedRunner,
-  spawnFidelityRunner,
-  spawnTriageRunner,
-  spawnFlowsRunner,
-  spawnFlowsEpicRunner,
   spawnMatchRunner,
-  type ExtractRunner,
-  type GenerateRunner,
   type RecipeRunner,
-  type SeedRunner,
-  type FidelityRunner,
-  type TriageRunner,
-  type FlowsRunner,
-  type FlowsEpicRunner,
   type MatchRunner,
 } from './runners.js'
 
@@ -324,10 +344,12 @@ export {
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
+  RawGeneratedCliScenarioSchema,
   AuthoredFlowScenarioSchema,
   RealizationMatchSchema,
   FidelityReviewSchema,
   FlowSynthesisSchema,
+  FlowSetSchema,
   EpicSynthesisSchema,
   SynthesizedFlowSchema,
   SynthesizedMilestoneSchema,
@@ -342,12 +364,15 @@ export {
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,
+  type RawGeneratedApiScenario,
+  type RawGeneratedCliScenario,
   type RawGeneratedScenario,
   type AuthoredFlowScenario,
   type RealizationMatch,
   type RealizationStep,
   type FidelityReview,
   type FlowSynthesis,
+  type FlowSet,
   type EpicSynthesis,
   type SynthesizedFlow,
   type SynthesizedMilestone,

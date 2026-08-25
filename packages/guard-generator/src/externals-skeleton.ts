@@ -17,13 +17,24 @@
  * the skeleton changes no verdict today; it only moves the fingerprint cost to the
  * cheapest possible moment.
  *
- * TWO RULES, both about never being confidently wrong:
+ * THREE RULES, all about never being confidently wrong:
  *  - NEVER INVENT A VARIABLE. `baseUrlEnv` is required by the schema and is injected
  *    into the app's env at every run; a service detection saw no base-URL override
  *    variable for is reported as UNDECLARABLE, not declared with a guess.
  *  - NEVER EDIT AN EXISTING DECLARATION. The skeleton only ever ADDS services. A
  *    service the user already declared (possibly by hand, possibly with values) is
  *    left byte-identical.
+ *  - A `baseUrlEnv` MUST PLAUSIBLY HOLD AN ORIGIN. Detection's candidates include
+ *    credential and identifier variables (`DAILY_API_KEY`, `CLOSECOM_CLIENT_ID`,
+ *    `CLOUDFLARE_ZONE_ID` — the finding-58 class at mint time, cal.diy
+ *    2026-08-20/21: 18 invented declarations, three runs in a row), the app's own
+ *    callback addresses (`*_WEBHOOK_URL`, `*_REDIRECT_URI`), and variables the
+ *    recipe itself pins (`NEXT_PUBLIC_WEBAPP_URL` — the app's own address minted
+ *    as a third party). None of those is a base URL the runner could honestly
+ *    proxy. A candidate survives only when its NAME is origin-shaped (or detection
+ *    saw the URL it defaults to), it is not credential/callback-shaped, and the
+ *    recipe does not already pin it as the app's own configuration; a service with
+ *    no surviving candidate is UNDECLARABLE, exactly as if no variable existed.
  *
  * Pure: this module derives the patch, the caller writes it.
  */
@@ -68,6 +79,14 @@ export function deriveExternalsSkeleton(
     for (const name of Object.keys(external.endpoints ?? {})) owned.add(name)
     for (const name of Object.keys(external.env ?? {})) owned.add(name)
   }
+  // Variables the recipe pins anywhere are the app's OWN configuration — its own
+  // public address, its database, its ports — never a third party's base URL.
+  const recipePinned = new Set<string>([
+    ...Object.keys(recipe.env ?? {}),
+    ...Object.keys(recipe.api?.env ?? {}),
+    ...Object.values(recipe.api?.servers ?? {}).flatMap((s) => Object.keys(s.env ?? {})),
+    ...Object.keys(recipe.web?.env ?? {}),
+  ])
 
   const declare: Record<string, RecipeApiExternal> = {}
   const alreadyDeclared: string[] = []
@@ -78,7 +97,9 @@ export function deriveExternalsSkeleton(
       alreadyDeclared.push(service.service)
       continue
     }
-    const vars = baseUrlVars(service).filter((v) => !owned.has(v.envVar))
+    const vars = baseUrlVars(service).filter(
+      (v) => !owned.has(v.envVar) && !recipePinned.has(v.envVar) && plausibleOriginVar(v),
+    )
     const [primary, ...extra] = vars
     if (!primary) {
       undeclarable.push(service.service)
@@ -97,6 +118,22 @@ export function deriveExternalsSkeleton(
   }
 
   return { declare, alreadyDeclared, undeclarable }
+}
+
+/** A name that holds a credential or an identifier (`…_API_KEY`, `…_CLIENT_ID`,
+ *  `…_ZONE_ID`, `…_USERNAME`), or the app's own callback address (`…_WEBHOOK_URL`,
+ *  `…_REDIRECT_URI`) — never an origin the runner could proxy. */
+const CREDENTIAL_OR_CALLBACK_SHAPED =
+  /(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|USERNAME|CLIENT_ID|APP_ID|ACCOUNT_ID|PROJECT_ID|ZONE_ID|LICENSE)(?:$|_)|REDIRECT|WEBHOOK/
+/** A name that plausibly holds an origin. */
+const ORIGIN_SHAPED = /URL|URI|ENDPOINT|HOST|ORIGIN|BASE|ADDRESS/
+
+/** The third rule: origin-shaped name (or a detected default URL as evidence),
+ *  and never credential/callback-shaped — see the module doc. */
+function plausibleOriginVar(v: { envVar: string; defaultUrl?: string }): boolean {
+  const name = v.envVar.toUpperCase()
+  if (CREDENTIAL_OR_CALLBACK_SHAPED.test(name)) return false
+  return ORIGIN_SHAPED.test(name) || /^https?:\/\//i.test(v.defaultUrl ?? '')
 }
 
 /** Every base-URL override variable detection saw, best-confidence first, deduped. */

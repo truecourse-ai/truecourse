@@ -6,6 +6,10 @@
  * response body, `diff.txt`, `files.txt`, `transcript.txt` — plus the server's
  * own stdout/stderr (`server.stdout.txt` / `server.stderr.txt`), which is where
  * a 500's stack trace actually lives.
+ *
+ * `invocation.json` carries the PER-STEP ACTUALS the dashboard reads back (status,
+ * duration, response-body excerpt), one record per executed step, capped exactly as
+ * the cli bundle caps its streams.
  */
 
 import fs from 'node:fs'
@@ -13,6 +17,7 @@ import path from 'node:path'
 import type { GuardBinds } from '@truecourse/shared'
 import { evidenceScenarioDir, evidenceRelPath } from '../store.js'
 import { listSandboxFiles } from '../sandbox.js'
+import { stepExcerpt } from '../evidence.js'
 import type { ApiExpectMismatch } from './expect.js'
 
 export interface ApiEvidenceStep {
@@ -104,6 +109,9 @@ export function writeApiEvidence(params: WriteApiEvidenceParams): string {
       timedOut: s.timedOut,
       requestError: s.requestError,
       captured: s.captured,
+      // What THIS step got back, not just the focus step's files below — the record
+      // a reader gets for every executed step, raw and head-truncated.
+      body: stepExcerpt(s.rawBody),
       durationMs: s.durationMs,
     })),
   }

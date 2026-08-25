@@ -6,13 +6,15 @@
  * safe-to-embed quote of the offending output and a one-line reason.
  *
  * Beyond schema shape, an authored scenario must obey COMPOSITION rules the
- * schema accepts but the engine cannot execute. They are PER DRIVER, because the
- * two surfaces compose differently:
+ * schema accepts but the engine cannot execute. One is shared by both drivers —
+ * a CAPTURED value is assigned once and readable only by LATER steps
+ * (`captureDefects`, the same rule the loader enforces on committed scenarios) —
+ * and the rest are PER DRIVER, because the two surfaces compose differently:
  *
  *  - cli — a step's `run` is argv APPENDED to the recipe entrypoint, so `run[0]`
  *    must be an ARGUMENT: never the program's own name again, never a foreign
  *    build/package/runtime binary (`npm test …`, `cargo run …`).
- *  - api — a journey is a CHAIN. A `${var}` only exists if an EARLIER step
+ *  - api — an interface is a CHAIN. A `${var}` only exists if an EARLIER step
  *    captured it, and a `${HTTP_STUB:<name>}` only resolves if this scenario
  *    declares that stub: either miss dies as a run-level infrastructure error
  *    after a sandbox, a build and a boot have been paid for.
@@ -25,7 +27,9 @@
 import path from 'node:path'
 import type { ZodError } from 'zod'
 import {
+  captureDefects,
   isApiRequestStep,
+  isApiStep,
   type GuardApiStep,
   type GuardStep,
   type GuardSetup,
@@ -86,7 +90,9 @@ export function cliCompositionDefect(
   const programNames = programNamesOf(entry)
   for (let i = 0; i < steps.length; i++) {
     const head = steps[i].run[0]
-    if (head === undefined) continue
+    // An omittable pair leads with a FLAG, which is never a program name — the rule
+    // has nothing to say about it.
+    if (head === undefined || typeof head !== 'string') continue
     const { base, stem } = tokenNames(head)
     const isEntry = programNames.has(head) || programNames.has(base) || programNames.has(stem)
     const isForeign = FOREIGN_BINARIES.has(head) || FOREIGN_BINARIES.has(base) || FOREIGN_BINARIES.has(stem)
@@ -125,7 +131,7 @@ function referencedVars(value: unknown, into: Set<string>): void {
 const STUB_RE = /\$\{HTTP_STUB:([A-Za-z0-9_-]+)\}/g
 
 /**
- * The api rules — a journey has to compose with itself:
+ * The api rules — an interface has to compose with itself:
  *
  *  1. every `${var}` a step interpolates was captured by an EARLIER step (the
  *     runner throws `UnknownVariableError` mid-run otherwise, which reports as an
@@ -186,20 +192,26 @@ export function apiCompositionDefect(
 }
 
 /**
- * The composition defect of ONE authored scenario, by driver — the single entry
- * point authoring calls before it accepts a scenario. Returns a model-facing
- * one-liner (the corrective re-ask's seed) or null when the scenario composes.
+ * The composition defect of ONE authored scenario — the single entry point
+ * authoring calls before it accepts a scenario. Which rules apply is read off the
+ * STEPS (an all-api-verb scenario gets the api rules, anything else the cli ones),
+ * the same derivation the runner dispatches on, so the checks can never be applied
+ * to a vocabulary they were not written for. Returns a model-facing one-liner (the
+ * corrective re-ask's seed) or null when the scenario composes.
  */
 export function scenarioCompositionDefect(
-  scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
-    | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
+  scenario: { steps: readonly (GuardStep | GuardApiStep)[]; setup?: GuardSetup },
   entry: readonly string[] | undefined,
 ): string | null {
-  if (scenario.driver === 'cli') {
-    // No entry means no cli recipe — authoring never reaches here, and inventing a
-    // program name to compare against would fabricate the very rule it enforces.
-    return entry && entry.length > 0 ? cliCompositionDefect(scenario.steps, entry) : null
-  }
-  return apiCompositionDefect(scenario.steps, scenario.setup)
+  // The CAPTURED-value rules first, and whatever the steps are: they are the same
+  // sentences the loader reports, so a scenario that would be a permanent load
+  // error is corrected by a re-ask instead of being written to disk.
+  const capture = captureDefects(scenario.steps, scenario.setup)[0]
+  if (capture) return capture.message
+  if (scenario.steps.every(isApiStep)) return apiCompositionDefect(scenario.steps, scenario.setup)
+  // No entry means no cli recipe — authoring never reaches here, and inventing a
+  // program name to compare against would fabricate the very rule it enforces.
+  return entry && entry.length > 0
+    ? cliCompositionDefect(scenario.steps as readonly GuardStep[], entry)
+    : null
 }

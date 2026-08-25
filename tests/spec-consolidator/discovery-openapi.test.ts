@@ -5,10 +5,10 @@ import path from 'node:path'
 import {
   discoverDocs,
   isStructuralSpecDoc,
-  planRelevanceWork,
-  filterByRelevance,
-  curate,
+  prefilterDocs,
 } from '../../packages/spec-consolidator/src/index.js'
+import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
+import { memoryPersistence, stubDriver } from '../core/spec-scan-session-stub'
 
 let root: string
 
@@ -113,48 +113,50 @@ paths:
   })
 })
 
-describe('relevance — OpenAPI docs skip the filter identically for run and estimate', () => {
-  it('planRelevanceWork never classifies an OpenAPI doc (zero calls for it)', async () => {
+describe('OpenAPI docs bypass the prose prefilter entirely', () => {
+  it('the prefilter neither classifies nor skips an OpenAPI doc', () => {
     place('api/openapi.yaml', OPENAPI)
     place('docs/spec.md', '# Spec\n\nProse.\n')
     const docs = discoverDocs(root, { skipGit: true })
 
-    const plan = await planRelevanceWork(root, docs, { identity: null })
-    const paths = (arr: { path: string }[]): string[] => arr.map((d) => d.path)
-    expect(paths(plan.toClassify)).not.toContain('api/openapi.yaml')
-    expect(paths(plan.needsCall)).not.toContain('api/openapi.yaml')
-    expect(plan.prefilterSkipped.map((s) => s.path)).not.toContain('api/openapi.yaml')
-    // The prose doc IS in the classify universe.
-    expect(paths(plan.toClassify)).toContain('docs/spec.md')
-  })
-
-  it('filterByRelevance includes the OpenAPI doc without ever calling the classifier', async () => {
-    place('api/openapi.yaml', OPENAPI)
-    const docs = discoverDocs(root, { skipGit: true })
-    let calls = 0
-    const outcome = await filterByRelevance(root, docs, {
-      identity: null,
-      runner: async ({ doc }) => {
-        calls++
-        return { path: doc.path, include: true, reason: 'stub' }
-      },
-    })
-    expect(calls).toBe(0)
-    expect(outcome.included.map((d) => d.path)).toContain('api/openapi.yaml')
-    expect(outcome.skipped).toEqual([])
+    const { toClassify, skipped } = prefilterDocs(docs, [], null)
+    // Structural specs are admitted deterministically upstream: they are neither
+    // curated by a session nor listed as skipped — the single prefilter the run
+    // and the pre-flight estimate share, so the two can never disagree on cost.
+    expect(toClassify.map((d) => d.path)).not.toContain('api/openapi.yaml')
+    expect(skipped.map((s) => s.path)).not.toContain('api/openapi.yaml')
+    expect(toClassify.map((d) => d.path)).toContain('docs/spec.md')
   })
 })
 
-describe('curate — OpenAPI doc lands in the corpus with empty area tags', () => {
-  it('admits the OpenAPI doc deterministically, bypassing the prose stages', async () => {
+describe('the scan run — an OpenAPI doc lands in the corpus with empty area tags', () => {
+  it('admits it deterministically, spending no curate-doc session on it', async () => {
     place('api/openapi.yaml', OPENAPI)
-    const res = await curate(root, {
+    const stub = stubDriver(() => {
+      throw new Error('an OpenAPI doc must never reach a session')
+    })
+    const res = await runSpecScanSessions({
+      repoRoot: root,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
+      decisions: {
+        version: 2,
+        manualIncludes: [],
+        manualExcludes: [],
+        manualAreas: [],
+        conflictResolutions: [],
+        instructions: [],
+        scopeVerdicts: [
+          { path: '.', verdict: 'keep', reason: 't', decidedAt: '2026-01-01T00:00:00Z', resolvedBy: 'user' },
+          { path: 'api', verdict: 'keep', reason: 't', decidedAt: '2026-01-01T00:00:00Z', resolvedBy: 'user' },
+        ],
+      },
+      repoIdentity: null,
       skipGit: true,
-      disableRelevanceFilter: true,
-      disableAreaTagging: true,
-      disableVocabNormalization: true,
       disableOverlapDetection: true,
     })
+
+    expect(stub.calls).toEqual([])
     const entry = res.corpus.docs.find((d) => d.ref === 'api/openapi.yaml')
     expect(entry).toBeDefined()
     expect(entry).toMatchObject({ kind: 'openapi', areaTags: [] })

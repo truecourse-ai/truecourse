@@ -14,14 +14,27 @@ export function isCliBinaryAvailable(binary: string): boolean {
 }
 
 /**
- * Build the env a `claude` child should run with. Mirrors the LLM provider's
- * hygiene (`CliProvider.getCleanEnv`): strip our own `CLAUDE_CODE*` /
- * `CLAUDE_INTERNAL*` vars so the probe spawns `claude` exactly the way real
- * calls do and our config can't leak into the child process.
+ * The one name the strip below must not touch. `claude setup-token` mints
+ * `CLAUDE_CODE_OAUTH_TOKEN`, and it is the documented way to authenticate the
+ * CLI headlessly — on CI, in a container, in a guard run. It shares the guards'
+ * prefix by accident of naming, not because it is one of ours: deleting it
+ * leaves the child with no credential at all and every call fails to log in.
  */
-function cleanClaudeEnv(): NodeJS.ProcessEnv {
+const CLAUDE_ENV_KEEP = 'CLAUDE_CODE_OAUTH_TOKEN';
+
+/**
+ * Build the env a `claude` child should run with, shared by the login probe
+ * and the LLM provider's own spawn (`CliProvider.getCleanEnv`) so the two can
+ * never disagree about the credential.
+ *
+ * Strips our own `CLAUDE_CODE*` / `CLAUDE_INTERNAL*` vars so the child doesn't
+ * detect a parent Claude Code and our config can't leak into it — every one of
+ * those except {@link CLAUDE_ENV_KEEP}, which is the user's credential.
+ */
+export function cleanClaudeEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
+    if (key === CLAUDE_ENV_KEEP) continue;
     if (key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDE_INTERNAL')) {
       delete env[key];
     }

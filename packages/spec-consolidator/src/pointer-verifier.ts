@@ -107,7 +107,7 @@ function pathWords(p: string): string[] {
 // Section splitting — the lead definition
 // ---------------------------------------------------------------------------
 
-interface DocSection {
+export interface DocSection {
   /**
    * The section's own heading text (verbatim), or `null` when it has none — a
    * true preamble section 0 (content before the first heading). An H1-lead keeps
@@ -133,8 +133,14 @@ const HEADING_RE = /^ {0,3}#{1,6}\s+(.*)$/;
  *
  * Mirrors the viewer's `splitSections` so the anchor this stage picks is exactly
  * the band the viewer will highlight.
+ *
+ * Exported (with {@link locateQuote}) for the overlap session's in-session
+ * anchor validation (`check_findings` in core's `services/spec-scan/`), which
+ * refuses a fabricated heading or a non-verbatim quote before the outcome.
+ * `drop` is the doc-path word set — pass `new Set()` when only structure (not
+ * token scoring) is needed.
  */
-function splitDocSections(body: string, drop: Set<string>): DocSection[] {
+export function splitDocSections(body: string, drop: Set<string>): DocSection[] {
   interface Raw { heading: string; text: string }
   const raws: Raw[] = [];
   let cur: Raw = { heading: '', text: '' };
@@ -172,7 +178,7 @@ function headingKey(h: string): string {
  * Normalization is the shared {@link normalizeQuote} (one copy — the same key the
  * conflict-resolution dispute identity matches through).
  */
-function locateQuote(sections: DocSection[], quote: string): number[] {
+export function locateQuote(sections: DocSection[], quote: string): number[] {
   const needle = normalizeQuote(quote);
   if (!needle) return [];
   const hits: number[] = [];

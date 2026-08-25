@@ -21,15 +21,6 @@ export default function HomePage() {
     <div className="flex min-h-screen flex-col">
       <Header />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-foreground">
-            TrueCourse
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            Visualize and understand your codebase architecture
-          </p>
-        </div>
-
         <div className="mb-8 space-y-5">
           {/* Primary: CLI command */}
           <div className="flex flex-col items-center gap-2.5 rounded-lg border border-border bg-card p-6">

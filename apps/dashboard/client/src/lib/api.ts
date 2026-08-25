@@ -1,21 +1,26 @@
 import type {
   BrowseDirResponse,
   CapabilitiesResponse,
+  GuardArtifactSource,
   GuardClaimIdentity,
+  GuardClaimsView,
+  GuardStatusSummary,
   GuardDecisions,
   GuardDocCoverage,
+  GuardEvidenceVisual,
   GuardFlowDetail,
   GuardFlowsView,
   GuardGenerateReport,
   GuardHistory,
-  GuardJourneysView,
+  GuardInterfacesView,
   GuardLatestResponse,
   GuardLatestWithRunFlows,
   GuardScenarioInventory,
   GuardScenarioSource,
   GuardStaleness,
 } from '@truecourse/shared';
-import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
+import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-dependencies';
+import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
@@ -738,6 +743,8 @@ export interface SpecConflictResolution {
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
+  /** `auto` = the scan applied a high-confidence recommendation itself; absent/`user` = a human verdict. */
+  resolvedBy?: 'user' | 'auto';
 }
 
 /**
@@ -753,6 +760,8 @@ export interface SpecOverlapReview {
     rationale: string;
     /** For `fix-doc`: the suggested doc edit the user applies themselves. */
     fix?: string;
+    /** The judge's grade; `high` actionable recommendations are auto-applied at scan. */
+    confidence?: 'low' | 'medium' | 'high';
   };
 }
 
@@ -937,7 +946,7 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
 // Web spec sources — llms.txt documentation sites snapshotted into the repo as
 // spec docs. Pure fetching (no LLM, no estimate); add/refresh stream progress
 // over `spec:progress` and end with `spec:complete { kind: 'sources' }`.
-// Working-tree only, so the UI is `local-filesystem`-gated like External APIs.
+// Working-tree only, so the UI is `local-filesystem`-gated like Dependencies.
 // ---------------------------------------------------------------------------
 
 /** A link the fetch wrote no page for, with the reason it was passed over. */
@@ -1116,43 +1125,52 @@ export async function getGuardFlow(repoId: string, flowId: string, ref?: string)
   }
 }
 
-/** The code-derived journey catalog + its reverse index onto the flows. Always 200. */
-export function getGuardJourneys(repoId: string, ref?: string): Promise<GuardJourneysView> {
-  return fetchApi<GuardJourneysView>(withRef(`/api/repos/${repoId}/guard/journeys`, ref));
+/**
+ * The extracted claim corpus with the trace from claim to flow to scenario, plus
+ * the statements extraction refused. Always 200 — an unextracted repo answers an
+ * `extracted: false` view, never an error.
+ */
+export function getGuardClaims(repoId: string, ref?: string): Promise<GuardClaimsView> {
+  return fetchApi<GuardClaimsView>(withRef(`/api/repos/${repoId}/guard/claims`, ref));
+}
+
+/** The code-derived interface catalog + its reverse index onto the flows. Always 200. */
+export function getGuardInterfaces(repoId: string, ref?: string): Promise<GuardInterfacesView> {
+  return fetchApi<GuardInterfacesView>(withRef(`/api/repos/${repoId}/guard/interfaces`, ref));
+}
+
+/** The compact status summary (coverage + last run + last generate). Always 200. */
+export function getGuardStatus(repoId: string, ref?: string): Promise<GuardStatusSummary> {
+  return fetchApi<GuardStatusSummary>(withRef(`/api/repos/${repoId}/guard/status`, ref));
 }
 
 /**
- * Map the working tree's surfaces to journeys — deterministic, LLM-free, free.
- * The response IS the fresh catalog view, so the tab swaps state from it (no
- * refetch, no socket).
+ * The dependencies view: every class of starting state the committed catalog
+ * declares, joined with the instances THIS machine registered, the flows each one
+ * blocks, and the external-service half where the row is one. Working-tree only —
+ * a store that does not materialize in place answers 501.
  */
-export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
-  return fetchApi<GuardJourneysView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
+export function getGuardDependencies(repoId: string): Promise<GuardDependenciesView> {
+  return fetchApi<GuardDependenciesView>(`/api/repos/${repoId}/guard/dependencies`);
 }
 
 /**
- * The external API accounts view: what the analyzer detected, what
- * recipe.json declares, and how each resolves on this machine. Working-tree only
- * — a store that does not materialize in place answers 501.
+ * Register ONE dependency's instance: the values go to the gitignored
+ * `scenarios/dependencies.local.json` (a recipe-declared service's base URL and
+ * mode still go to recipe.json). The response IS the fresh view, so the page swaps
+ * state from it — and it carries resolution, never a stored value. A refused write
+ * (an undeclared variable, a class with nothing to register, a broken overlay)
+ * comes back as a 422 ApiError whose message is safe to show verbatim.
  */
-export function getGuardExternals(repoId: string): Promise<GuardExternalsView> {
-  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`);
-}
-
-/**
- * Declare (or clear, with a `null` entry) external API accounts. The response IS
- * the fresh view, so the page swaps state from it. A refused write (no recipe, no
- * `api` block, a declaration that would not load) comes back as a 422 ApiError
- * whose message is safe to show verbatim.
- */
-export function saveGuardExternals(
+export function saveGuardDependency(
   repoId: string,
-  externals: Record<string, GuardExternalPatch | null>,
-): Promise<GuardExternalsView> {
-  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`, {
+  name: string,
+  patch: GuardDependencyPatch,
+): Promise<GuardDependenciesView> {
+  return fetchApi<GuardDependenciesView>(`/api/repos/${repoId}/guard/dependencies`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ externals }),
+    body: JSON.stringify({ name, ...patch }),
   });
 }
 
@@ -1183,11 +1201,59 @@ export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardSc
   return fetchApi<GuardScenarioInventory>(withRef(`/api/repos/${repoId}/guard/scenarios`, ref));
 }
 
-/** A scenario's raw YAML source; null on 404 (unknown id). `ref` scopes to a PR head (EE). */
-export async function getGuardScenarioSource(repoId: string, id: string, ref?: string): Promise<GuardScenarioSource | null> {
+/**
+ * A scenario's source + step list; null on 404 (unknown id). `ref` scopes to a PR head
+ * (EE). `evidence` names WHERE the test ran — a run id, or a birth finding's evidence
+ * path — and makes each step carry what it actually did there; without it the steps
+ * are the authored file alone.
+ */
+export async function getGuardScenarioSource(
+  repoId: string,
+  id: string,
+  ref?: string,
+  evidence?: { runId?: string; evidencePath?: string },
+): Promise<GuardScenarioSource | null> {
+  const where = evidence?.runId
+    ? `&runId=${encodeURIComponent(evidence.runId)}`
+    : evidence?.evidencePath
+      ? `&evidencePath=${encodeURIComponent(evidence.evidencePath)}`
+      : '';
   try {
     return await fetchApi<GuardScenarioSource>(
-      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`, ref),
+      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}${where}`, ref),
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Which artifact-backed entity a raw read addresses — the route's own segment. */
+export type GuardArtifactKind = 'interface' | 'flow' | 'claim' | 'dependency' | 'recipe';
+
+/**
+ * The stored artifact behind one entity — its own pretty-printed slice of the
+ * JSON store file, for the detail's raw mode. `null` on 404 (no store yet, or no
+ * entry with that id). `ref` scopes to a PR head (EE); the interface catalog is
+ * working-tree-only and ignores it.
+ *
+ * `recipe` is the SINGLETON kind: a repo has one recipe, so it is addressed by no
+ * id and the query carries none. Its content arrives with every inline secret
+ * masked server-side.
+ *
+ * A scenario is not a kind here: its artifact is the whole YAML file, which
+ * {@link getGuardScenarioSource} already returns.
+ */
+export async function getGuardArtifactRaw(
+  repoId: string,
+  kind: GuardArtifactKind,
+  id: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  try {
+    const query = id ? `?id=${encodeURIComponent(id)}` : '';
+    return await fetchApi<GuardArtifactSource>(
+      withRef(`/api/repos/${repoId}/guard/${kind}/raw${query}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -1213,6 +1279,49 @@ export async function getGuardEvidence(
   });
   if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
   return res.text();
+}
+
+/**
+ * WHERE a scenario's evidence bundle is, as the visual reads address it: the run it
+ * ran in, or the directory a birth finding stored. The same pair the transcript
+ * reads already split across two functions — one bundle, so one handle.
+ */
+export type GuardEvidenceWhere = { runId: string; scenarioId: string } | { evidencePath: string };
+
+function evidenceWhereParams(where: GuardEvidenceWhere): URLSearchParams {
+  return new URLSearchParams(
+    'runId' in where ? { runId: where.runId, scenarioId: where.scenarioId } : { evidencePath: where.evidencePath },
+  );
+}
+
+/**
+ * The VISUAL evidence of one scenario — the per-step screenshots and the session
+ * video a browser run left, in reading order. Always 200; a run that recorded none
+ * (every cli/api run, and every run written before the web driver existed) answers
+ * with an empty list.
+ */
+export async function getGuardEvidenceVisuals(
+  repoId: string,
+  where: GuardEvidenceWhere,
+): Promise<GuardEvidenceVisual[]> {
+  const body = await fetchApi<{ visuals?: GuardEvidenceVisual[] }>(
+    `/api/repos/${repoId}/guard/evidence/visuals?${evidenceWhereParams(where).toString()}`,
+  );
+  return body.visuals ?? [];
+}
+
+/**
+ * The URL one visual's BYTES are served from — an `<img>`/`<video>` source, not a
+ * fetch: the browser loads it itself, with the media type the route sets.
+ */
+export function guardEvidenceVisualUrl(
+  repoId: string,
+  where: GuardEvidenceWhere,
+  file: string,
+): string {
+  const params = evidenceWhereParams(where);
+  params.set('file', file);
+  return `${BASE_URL}/api/repos/${repoId}/guard/evidence/visual?${params.toString()}`;
 }
 
 /**
@@ -1423,3 +1532,40 @@ export function deleteSpecConflictResolution(
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Agent sessions (the Activity tab) — the sessions-store read surface.
+// ---------------------------------------------------------------------------
+
+/** A run record as the server serializes it: `endpoint` (token) + `pid` stripped. */
+export type PublicSessionRun = Omit<RunRecord, 'endpoint' | 'pid'>;
+
+/** Every agent-sessions run of the repo, newest first (all five commands). */
+export function listSessionRuns(repoId: string): Promise<{ runs: PublicSessionRun[] }> {
+  return fetchApi<{ runs: PublicSessionRun[] }>(`/api/repos/${repoId}/sessions/runs`);
+}
+
+/** One run's current record + session index. */
+export function getSessionRun(
+  repoId: string,
+  command: SessionCommand,
+  runId: string,
+): Promise<{ run: PublicSessionRun }> {
+  return fetchApi<{ run: PublicSessionRun }>(
+    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}`,
+  );
+}
+
+/** One session's transcript; `since` returns only events past that seq cursor. */
+export function getSessionTranscript(
+  repoId: string,
+  command: SessionCommand,
+  runId: string,
+  sessionId: string,
+  since?: number,
+): Promise<{ events: SessionEvent[] }> {
+  const query = since !== undefined ? `?since=${since}` : '';
+  return fetchApi<{ events: SessionEvent[] }>(
+    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}${query}`,
+  );
+}

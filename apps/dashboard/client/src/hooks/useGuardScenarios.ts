@@ -22,13 +22,13 @@ export interface GuardScenarioRowData extends GuardScenarioListItem {
   lastResult: GuardScenarioResult | null;
 }
 
-/** The run the outcomes came from, as the overview's one line reads it. */
-export interface GuardLastRun {
+/** The run the outcomes came from. Internal: the id is what a caller needs (the
+ *  evidence fetches address it), and each ROW carries its own result. */
+interface GuardLastRun {
   runId: string;
   ranAt: string;
   commit: string | null;
   branch: string | null;
-  /** Wall time across the run's results — the same total the run overview shows. */
   durationMs: number;
 }
 
@@ -37,8 +37,6 @@ export interface GuardScenariosState {
   rows: GuardScenarioRowData[];
   /** The run the outcomes were joined from (for evidence fetches); null when never run. */
   runId: string | null;
-  /** That run's envelope + total duration; null when never run. */
-  lastRun: GuardLastRun | null;
   /** The commit the inventory was read at (hosted) — under a PR ref this can be
    *  the baseline commit (gate fallback); null on OSS / before load. */
   scenariosCommit: string | null;
@@ -95,5 +93,5 @@ export function useGuardScenarios(
     };
   }, [repoId, enabled, reloadKey, ref]);
 
-  return { recipe, rows, runId: lastRun?.runId ?? null, lastRun, scenariosCommit, loading, error };
+  return { recipe, rows, runId: lastRun?.runId ?? null, scenariosCommit, loading, error };
 }

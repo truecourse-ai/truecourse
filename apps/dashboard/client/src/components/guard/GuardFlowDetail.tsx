@@ -1,55 +1,76 @@
 /**
- * A flow's MAIN-PANE detail, on ONE rule:
+ * THE guard entity, whole — a flow AND the test that realizes it, on one page.
  *
- *   a flow either has a test or it doesn't. Has one → show the test and its
- *   status. Doesn't → say what state it is in, then why, as two separate reads.
+ * Flows and tests were two tabs over one row of data (one flow, one scenario), so
+ * a reader had to hold two addresses for one thing. There is now ONE: this detail.
+ * It reads top-down, widest fact first:
  *
- * So the "Tests" block renders exactly ONE row per surface: the TEST (clickable —
- * it opens on the Tests tab, the one place a test lives) with its status word, or
- * a WHY-NO-TEST row — the surface, its status chip, and the explanation on its own
- * line ("Needs credentials and network access.", "Awaiting web driver.",
- * "Couldn’t create the test — will retry next generate."). A why-no-test row is
- * deliberately NOT test-shaped: no "CLI test" lead, no click target, muted copy —
- * only a real test looks like a test. The ONE exception is a needs-setup row: it
- * is a to-do, not a wall, so it carries the same CTA the section side panel
- * does — the service named, the explainer, and a link straight to that
- * service's card on the External APIs page. It is still not test-shaped: orange,
- * unclickable as a whole, with one button inside it. There is no gaps block, no findings block
- * and no authoring-errors block: each was the same news told twice, in engine
- * words. An `authoring-error` row is the one place engine words earn their keep —
- * WHY authoring could not write a test is information no sentence carries — so
- * they ride INSIDE that row, deduped by message shape with an attempt count.
+ *   header       status · markers · the flow id · the View/YAML switch
+ *                the flow's TITLE and its GOAL
+ *   milestones   the claim sentences in order, each linking to the section that
+ *                states it — a plain list, carrying no state of its own. It renders
+ *                ONLY for a flow with no test: where there IS one, its step list
+ *                already groups the steps under those same claims and links those
+ *                same sections, and two renderings of one chain is one too many
+ *   ————— and then the test's own WORKSPACE ({@link GuardScenarioBody}), which
+ *   claims every pixel the header leaves: verdict · filmstrip · steps | inspector ·
+ *   drawers (transcript · interfaces · RULINGS) · footer facts. The flow-level
+ *   ruling — "don't test this flow" — lives in that drawer, after the evidence it
+ *   is made on, rather than as a standing block below a page nobody scrolled to.
  *
- * A flow with NO surface at all is the same rule, not an exception: it renders one
- * row too — "Not generated", then "No test yet — will be attempted on the next
- * generate." The block never degrades to a bare line of prose.
+ * A flow either HAS a test or it doesn't. Has one → the scenario body IS the rest
+ * of the page, and it does not scroll: its panes do. Doesn't → a WHY-NO-TEST block
+ * takes its place (and the ruling stays the page's last block): the state, then why,
+ * as two separate reads ("Needs credentials and network access.", "Awaiting web
+ * driver.", "Couldn't create the test — will retry next generate."). The one
+ * exception is a needs-setup gap: that is a to-do, not a wall, so it carries the
+ * same CTA the section side panel does — the service named, the explainer, and a
+ * link straight to that service's card on the Dependencies page. An
+ * `authoring-error` carries the run's own words for WHY authoring could not write
+ * a test, deduped by message shape with an attempt count — the one place engine
+ * words earn their keep.
  *
- * Every status word here comes from the same vocabulary the Flows LIST reads, so
- * a row and the detail it opens can never disagree.
+ * A flow with NO surface at all is the same rule, not an exception: it reads
+ * "Blocked", then "No test yet — will be attempted on the next generate."
  *
- * The milestone graph stays the spine — each node jumps to its bound spec section
- * in Coverage, so the flow always reads back to the document that claims it.
- * Read-only, no toggles (chrome-diet).
+ * MORE THAN ONE SURFACE is data the corpus does not produce today (one flow, one
+ * CLI test), but the shape allows it: each surface then renders its own block
+ * under a plain label. That label is the ONLY place a surface name appears — no
+ * chips, anywhere: with one surface they carried zero information.
+ *
+ * Every status word here comes from the same vocabulary the flow LIST reads, so a
+ * row and the detail it opens can never disagree.
  *
  * A flow the specs no longer derive (kept because its test still runs) has no goal
  * and no milestones BY NATURE. One plain sentence takes the goal's place and says
- * so; its tests render exactly like any other flow's.
+ * so; its test renders exactly like any other flow's.
  *
- * The ONE ruling a reader makes here is the FLOW-level dismissal: "don't test
- * this flow" writes `scenarios/decisions.json`, and the next generate drops
- * the flow with its tests. A dismissed flow says so in its header and offers the
- * undo — the flow is the only manual dismissal unit, since a generated test's id
- * moves on regenerate.
+ * THE TWO READINGS: the header's mode switch is the test's YAML when the flow has
+ * a test (the artifact a developer actually opens), and the flow's own
+ * `scenarios/flows.json` entry when it has none — a flow always has a stored truth
+ * to show, and it is whichever one exists ({@link ArtifactModeSwitch}).
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Ban, Layers, PenLine, Route } from 'lucide-react';
-import { guardFindingClass } from '@truecourse/shared';
-import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow, GuardGenerateError } from '@truecourse/shared';
-import { HoverPopover } from '@/components/ui/hover-popover';
-import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
-import { generatePaintNodes } from '@/lib/guard-flow-paint';
-import { collapseAuthoringAttempts } from '@/lib/guard-report';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, Ban, Braces, Layers, PenLine } from "lucide-react";
+import { guardFindingClass } from "@truecourse/shared";
+import type {
+  GuardClaimIdentity,
+  GuardFlowDetail as GuardFlowDetailData,
+  GuardFlowMilestoneView,
+  GuardFlowScenarioRow,
+  GuardGenerateError,
+  GuardInterfaceRow,
+} from "@truecourse/shared";
+import {
+  ArtifactModeSwitch,
+  ArtifactRaw,
+  useArtifactMode,
+} from "@/components/ui/artifact-view";
+import { HoverPopover } from "@/components/ui/hover-popover";
+import { useGuardArtifactRaw } from "@/hooks/useGuardArtifactRaw";
+import type { GuardDecisionsState } from "@/hooks/useGuardDecisions";
+import { collapseAuthoringAttempts } from "@/lib/guard-report";
 import {
   GUARD_DISMISS_FLOW_ACTION,
   GUARD_DISMISS_FLOW_HINT,
@@ -61,113 +82,134 @@ import {
   guardTestStatusView,
   guardWhyNoTest,
   surfaceLabel,
-} from '@/lib/guard-flow-status';
-import { guardTestLabel } from '@/lib/guard-tests';
-import { GuardMilestoneGraph } from './GuardMilestoneGraph';
-import { GuardNeedsSetupCta } from './GuardNeedsSetupCta';
-import { GuardDismissedChip, GuardFlowStatusChip, GuardNotInSpecsChip, GuardToolDefectChip } from './GuardStatusBadge';
+} from "@/lib/guard-flow-status";
+import type { GuardTestBinds } from "@/lib/guard-tests";
+import { GuardNeedsSetupCta } from "./GuardNeedsSetupCta";
+import {
+  GuardScenarioBody,
+  type GuardEvidenceRef,
+  type GuardTestViewModel,
+} from "./GuardTestView";
+import {
+  GuardDismissedChip,
+  GuardFlowStatusChip,
+  GuardNotInSpecsChip,
+  GuardToolDefectChip,
+} from "./GuardStatusBadge";
 
-const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
+const LABEL =
+  "mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground";
 
 const BTN =
-  'inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground';
+  "inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground";
 
 /**
- * One surface, one row. With a test: "CLI test · <status>", the test's title, and
- * a click that opens it on the Tests tab. Without one: the surface's own name, the
- * status chip, and the explanation beneath — a plain, unclickable read.
+ * The flow's milestones, as a PLAIN LIST — the claim sentences in order, each
+ * linking to the section that states it. It carries no state of its own: the
+ * page's one verdict is the test's, and a per-milestone paint could only ever
+ * disagree with it.
  */
-function SurfaceRow({
+function MilestoneList({
+  milestones,
+  onOpenSpec,
+}: {
+  milestones: readonly GuardFlowMilestoneView[];
+  onOpenSpec: (doc: string, section: string) => void;
+}) {
+  return (
+    <ol className="rounded border border-border" aria-label="Milestones">
+      {milestones.map((m) => (
+        <li
+          key={m.order}
+          className="flex min-w-0 items-start gap-2 border-b border-border/60 px-3 py-2 last:border-b-0"
+        >
+          <span className="w-4 shrink-0 text-[11px] text-muted-foreground">
+            {m.order}
+          </span>
+          <span className="min-w-0 flex-1 text-[12px] leading-snug text-foreground">
+            {m.claimTitle}
+          </span>
+          <button
+            type="button"
+            onClick={() => onOpenSpec(m.doc, m.anchor)}
+            title={`${m.doc} § ${m.anchor}`}
+            className="inline-flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            {/* Without `min-w-0` the label refuses to shrink and spills past the
+                button, widening the pane instead of ellipsising. */}
+            <span className="min-w-0 truncate">
+              § {m.headingText ?? m.anchor}
+            </span>
+            <ArrowUpRight className="h-3 w-3 shrink-0" />
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * WHY there is no test on this surface — the state, then the sentence. It is
+ * deliberately NOT test-shaped: no verdict card, no steps, muted copy. The one
+ * exception is the needs-setup CTA, which is a to-do the reader can clear today.
+ */
+function WhyNoTest({
   row,
   attempted,
   blocked,
   errors,
-  onOpenTest,
   onOpenExternals,
 }: {
   row: GuardFlowScenarioRow;
   /** False when nothing was ever attempted for this flow — the sentence changes. */
   attempted: boolean;
-  /** The flow's generate errors — the WHY behind an `authoring-error` row. */
-  errors: readonly GuardGenerateError[];
   /**
    * The run-level refusal that cancelled this flow's validation, when there was one.
    * It replaces the why-no-test sentence entirely: nothing here was examined, so
    * "will retry next generate" would be a promise the next run cannot keep.
    */
   blocked?: string;
-  onOpenTest: (testId: string) => void;
-  /** Jump to the External APIs tab for a needs-setup row's service. */
+  /** The flow's generate errors — the WHY behind an `authoring-error`. */
+  errors: readonly GuardGenerateError[];
   onOpenExternals?: (service?: string) => void;
 }) {
-  if (!row.scenarioId) {
-    // The one why-no-test that is a TO-DO gets the same CTA the section
-    // side panel carries — the service, the explainer, and the link that provides
-    // it. The `guardWhyNoTest` sentence is dropped here on purpose: for a
-    // needs-setup gap it IS `guardNeedsSetupNeed`, which the CTA already leads
-    // with, and saying it twice would read as two different facts.
-    // A refused run outranks even the needs-setup CTA: its gap was never re-examined.
-    const needsSetup = blocked ? undefined : row.gap?.needsSetup;
-    return (
-      <div
-        role="listitem"
-        className={`flex w-full flex-col gap-0.5 border-b border-border/60 px-3 py-2 ${
-          needsSetup ? 'bg-orange-500/[0.07]' : 'bg-muted/20'
-        }`}
-      >
-        <div className="flex w-full flex-wrap items-center gap-1">
-          {row.surface && (
-            <span className="text-[11px] font-medium text-muted-foreground">{surfaceLabel(row.surface)}</span>
-          )}
-          <GuardFlowStatusChip status={guardPlainStatus(row.status)} />
-        </div>
-        {needsSetup ? (
-          <GuardNeedsSetupCta
-            needsSetup={needsSetup}
-            onOpenExternals={onOpenExternals}
-            explain
-            className=""
-          />
-        ) : (
-          <span className="text-[12px] leading-snug text-muted-foreground">
-            {guardWhyNoTest(row.gap, { attempted, ...(blocked ? { blocked } : {}) })}
-          </span>
-        )}
-        {/* WHY authoring could not produce a test, from the run's own words —
-            deduped by message shape with the attempt count, so a flow re-asked
-            three times reads as one reason tried three times, not three rows. */}
-        {row.status === 'authoring-error' && !blocked && (
-          <AuthoringAttempts errors={errors} surface={row.surface} />
-        )}
-      </div>
-    );
-  }
-
-  const view = guardTestStatusView({ status: row.status, ...(row.stage ? { stage: row.stage } : {}) });
+  // A refused run outranks even the needs-setup CTA: its gap was never re-examined.
+  const needsSetup = blocked ? undefined : row.gap?.needsSetup;
   return (
-    <button
-      type="button"
-      role="listitem"
-      onClick={() => onOpenTest(row.scenarioId!)}
-      title={`${row.scenarioId} — open the test`}
-      className="flex w-full flex-col items-start gap-0.5 border-b border-border/60 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+    <div
+      role="group"
+      aria-label="Why there is no test yet"
+      className={`rounded border border-border px-3 py-2 ${needsSetup ? "bg-sky-500/[0.07]" : "bg-muted/20"}`}
     >
-      <div className="flex w-full flex-wrap items-center gap-1">
-        <span className="text-[11px] font-medium text-muted-foreground">{guardTestLabel(row.surface)}</span>
-        <span className="text-[11px] text-muted-foreground">·</span>
-        <GuardFlowStatusChip status={view.plain} word={view.word} />
-        {row.journeyDrifted && (
-          <HoverPopover portal width="narrow" content="The code surface this test was grounded on has moved since it was written. Never a pass/fail input.">
-            <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-          </HoverPopover>
-        )}
-        <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-[11px] text-primary">
-          open
-          <ArrowUpRight className="h-3 w-3" />
-        </span>
-      </div>
-      <span className="w-full text-[13px] leading-snug text-foreground">{row.title ?? row.scenarioId}</span>
-    </button>
+      <GuardFlowStatusChip status={guardPlainStatus(row.status)} />
+      {needsSetup ? (
+        // The `guardWhyNoTest` sentence is dropped here on purpose: for a
+        // needs-setup gap it IS `guardNeedsSetupNeed`, which the CTA already leads
+        // with, and saying it twice would read as two different facts.
+        <GuardNeedsSetupCta
+          needsSetup={needsSetup}
+          {...(onOpenExternals ? { onOpenExternals } : {})}
+          explain
+          className="mt-1.5"
+        />
+      ) : (
+        <p className="mt-1.5 text-[12px] leading-snug text-muted-foreground">
+          {guardWhyNoTest(row.gap, {
+            attempted,
+            ...(blocked ? { blocked } : {}),
+          })}
+        </p>
+      )}
+      {/* WHY authoring could not produce a test, from the run's own words —
+          deduped by message shape with the attempt count, so a flow re-asked
+          three times reads as one reason tried three times, not three rows. */}
+      {row.status === "authoring-error" && !blocked && (
+        <AuthoringAttempts
+          errors={errors}
+          {...(row.surface ? { surface: row.surface } : {})}
+        />
+      )}
+    </div>
   );
 }
 
@@ -182,14 +224,14 @@ function AuthoringAttempts({
   const attempts = collapseAuthoringAttempts(errors, surface);
   if (attempts.length === 0) return null;
   return (
-    <ul className="mt-0.5 space-y-0.5">
+    <ul className="mt-1.5 space-y-0.5">
       {attempts.map((a) => (
         <li key={a.message} className="flex items-start gap-2">
           <span className="min-w-0 flex-1 break-words font-mono text-[11px] leading-snug text-muted-foreground">
             {a.message}
           </span>
           <span className="shrink-0 text-[10px] text-muted-foreground">
-            {a.attempts} attempt{a.attempts === 1 ? '' : 's'}
+            {a.attempts} attempt{a.attempts === 1 ? "" : "s"}
           </span>
         </li>
       ))}
@@ -236,7 +278,7 @@ function DismissFlowAction({
       <div>
         <div className={LABEL}>Dismissed</div>
         <p className="text-[12px] leading-relaxed text-muted-foreground">
-          {GUARD_FLOW_DISMISSED_SENTENCE}{' '}
+          {GUARD_FLOW_DISMISSED_SENTENCE}{" "}
           <button
             type="button"
             disabled={ruling}
@@ -247,7 +289,9 @@ function DismissFlowAction({
           </button>
         </p>
         {dismissal.note && (
-          <p className="mt-1 text-[11px] italic leading-relaxed text-muted-foreground">{dismissal.note}</p>
+          <p className="mt-1 text-[11px] italic leading-relaxed text-muted-foreground">
+            {dismissal.note}
+          </p>
         )}
       </div>
     );
@@ -255,11 +299,18 @@ function DismissFlowAction({
 
   return (
     <div>
-      <HoverPopover portal align="start" width="wide" content={GUARD_DISMISS_FLOW_HINT}>
+      <HoverPopover
+        portal
+        align="start"
+        width="wide"
+        content={GUARD_DISMISS_FLOW_HINT}
+      >
         <button
           type="button"
           disabled={ruling}
-          onClick={() => void rule(() => decisions.dismissFlow({ flowId, title }))}
+          onClick={() =>
+            void rule(() => decisions.dismissFlow({ flowId, title }))
+          }
           className={`${BTN} disabled:opacity-50`}
         >
           <Ban className="h-3 w-3 shrink-0" />
@@ -270,55 +321,244 @@ function DismissFlowAction({
   );
 }
 
-export function GuardFlowDetail({
-  detail,
+/**
+ * The claim behind the failing milestone — resolved only to look up whether it
+ * already carries a dismissal, never to offer creating one. `row.failedMilestone`
+ * is the run/birth's own record of which milestone the failing step realized, so
+ * this is a lookup, not a guess; a failure that named no milestone (an unmilestoned
+ * setup step, or a hand-written test with no chain) resolves to null and the
+ * dismissal note stays hidden.
+ */
+function failedMilestoneClaim(
+  row: GuardFlowScenarioRow,
+  milestones: readonly GuardFlowMilestoneView[],
+): GuardClaimIdentity | null {
+  const failed = row.failedMilestone;
+  const milestone =
+    failed != null ? milestones.find((m) => m.order === failed) : undefined;
+  return milestone
+    ? {
+        doc: milestone.doc,
+        anchor: milestone.anchor,
+        title: milestone.claimTitle,
+      }
+    : null;
+}
+
+/**
+ * The EXISTING dismissal already recorded against the failing milestone's claim —
+ * a note and its undo, never a way to create one. Creating a dismissal is the
+ * flow-level ruling at the foot of the page, the only MANUAL unit.
+ *
+ * A dismissal the TOOL recorded (`auto`) is never passed off as the reader's own:
+ * the note names the machine and quotes the reason it gave, and the undo stays —
+ * a machine's call is exactly the kind a human revisits.
+ */
+function ClaimDismissalNote({
+  claim,
   decisions,
+}: {
+  claim: GuardClaimIdentity;
+  decisions: GuardDecisionsState;
+}) {
+  const [ruling, setRuling] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const dismissal = decisions.dismissalFor(claim);
+  if (!dismissal) return null;
+
+  const undo = async () => {
+    setRuling(true);
+    try {
+      await decisions.undismiss(claim);
+    } finally {
+      if (mounted.current) setRuling(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 text-[11px] text-muted-foreground">
+      <p>
+        {dismissal.auto
+          ? "Guard dismissed this claim automatically"
+          : "This claim is dismissed"}{" "}
+        —{" "}
+        <button
+          type="button"
+          disabled={ruling}
+          onClick={() => void undo()}
+          className="underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+        >
+          undo
+        </button>
+      </p>
+      {/* The machine's stated reason, verbatim — never re-worded. */}
+      {dismissal.auto && dismissal.reason && (
+        <p className="mt-1 italic leading-relaxed">{dismissal.reason}</p>
+      )}
+    </div>
+  );
+}
+
+/** A flow's committed test as the shared scenario model. */
+function scenarioModel(
+  row: GuardFlowScenarioRow,
+  detail: GuardFlowDetailData,
+  binds: GuardTestBinds | undefined,
+): GuardTestViewModel {
+  const view = guardTestStatusView({
+    status: row.status,
+    ...(row.stage ? { stage: row.stage } : {}),
+  });
+  // A BIRTH failure's transcript is addressed by its stored path (no run wrote it);
+  // a run's transcript is addressed by run + test id — the run THAT ROW came from,
+  // since the board is merged across runs and the detail's own `runId` is only the
+  // run that wrote it last.
+  const rowRunId = row.runId ?? detail.runId;
+  const evidence: GuardEvidenceRef | null =
+    row.stage === "birth" && row.evidencePath
+      ? { kind: "birth", path: row.evidencePath }
+      : row.hasEvidence && rowRunId != null && row.stage !== "birth"
+        ? { kind: "run", runId: rowRunId }
+        : null;
+  return {
+    id: row.scenarioId!,
+    title: row.title ?? row.scenarioId!,
+    status: view,
+    provenance: "Latest state",
+    ...(row.durationMs != null ? { durationMs: row.durationMs } : {}),
+    ...(row.failure ? { failure: row.failure } : {}),
+    // The verdict the generate reached about this birth failure — whose fault it is.
+    ...(row.triage ? { triage: row.triage } : {}),
+    ...(row.failedMilestone != null
+      ? { failedMilestone: row.failedMilestone }
+      : {}),
+    // The chain the step list is grouped under — each section headed by the claim
+    // its steps realize, addressed by position (`milestones`) or by claim id
+    // (`claimTitles`, the claim corpus). A test may use either.
+    milestones: detail.milestones,
+    ...(row.interfaceDrifted ? { interfaceDrifted: true } : {}),
+    ...(row.blockedPrecondition ? { blockedPrecondition: true } : {}),
+    // NO `goal`: the flow's goal is already the header, one screen above. What the
+    // body leads with is the TEST's own sentence — the level below it.
+    ...(binds ? { binds } : {}),
+    interfacePath: row.interfacePath,
+    evidence,
+  };
+}
+
+export function GuardFlowDetail({
+  repoId,
+  detail,
+  interfaces = null,
+  claimTitles,
+  binds,
+  decisions,
+  prRef,
   onOpenSpec,
-  onOpenTest,
-  onOpenJourney,
+  onOpenInterface,
   onOpenExternals,
 }: {
+  /** Whose store the raw mode reads the artifact out of. */
+  repoId: string;
   detail: GuardFlowDetailData;
+  /** The mapped interface catalog, for the diagrams the test drives; null = unmapped. */
+  interfaces?: GuardInterfaceRow[] | null;
+  /** Claim id → its sentence — what a claim-identity step group is headed with. */
+  claimTitles?: Readonly<Record<string, string>>;
+  /** scenarioId → the spec section it binds to (the inventory join). */
+  binds?: ReadonlyMap<string, GuardTestBinds>;
   /** The dismissals state; omitted (guard reads off / PR scope unresolved) = no ruling. */
   decisions?: GuardDecisionsState;
+  /** The PR head the raw read is scoped to (EE); absent = the repo baseline. */
+  prRef?: string;
   onOpenSpec: (doc: string, section: string) => void;
-  /** Open a test on the Tests tab — a test has exactly one home. */
-  onOpenTest: (testId: string) => void;
-  onOpenJourney: (journeyId: string) => void;
-  /** Jump to the External APIs tab, on the named service's card. */
+  onOpenInterface: (interfaceId: string) => void;
+  /** Jump to the Dependencies tab, on the named service's card. */
   onOpenExternals?: (service?: string) => void;
 }) {
-  const nodes = generatePaintNodes(detail.milestones, detail.surfaces, detail.findings);
   const dismissed = decisions?.flowDismissal(detail.flowId) != null;
   // OUR OWN withheld defects (a faulty scenario, a fidelity rejection). They are
   // never a status and never red — nothing was committed and nothing in the repo
   // is broken — so they ride as a muted marker beside the status chip.
-  const toolDefects = detail.findings.filter((f) => guardFindingClass(f) === 'defect').length;
+  const toolDefects = detail.findings.filter(
+    (f) => guardFindingClass(f) === "defect",
+  ).length;
 
   // A flow with no surface at all has no test AND no gap to explain it — whether
   // authoring ran and failed, or nothing has been attempted for it yet. Both read
-  // as ONE honest row (the state, then what happens next), never a bare line of
-  // text: the two differ only in the sentence the row carries.
+  // as ONE honest block (the state, then what happens next), never a bare line of
+  // text: the two differ only in the sentence they carry.
   const attempted = detail.errors.length > 0;
   // A run the runner REFUSED (a broken recipe, a half-configured external account)
   // cancelled this flow's validation before anything ran. That is a different fact
-  // from "authoring failed", and the rows say so instead of promising a retry.
+  // from "authoring failed", and the block says so instead of promising a retry.
   const blocked = guardRefusalError(detail.errors)?.message;
   const rows: GuardFlowScenarioRow[] =
     detail.surfaces.length > 0
       ? detail.surfaces
-      : [{ status: 'unguarded', birthPassed: false, hasEvidence: false, journeyPath: [] }];
+      : [
+          {
+            status: "unguarded",
+            birthPassed: false,
+            hasEvidence: false,
+            interfacePath: [],
+          },
+        ];
+
+  // The flow's TRUTH ON DISK: its test's YAML when it has one, else its own entry
+  // in the flow corpus. One switch, whichever artifact exists.
+  const test = rows.find((r) => r.scenarioId != null) ?? null;
+  const { mode, setMode, raw } = useArtifactMode(test ? "YAML" : "JSON");
+  const flowRaw = useGuardArtifactRaw(
+    repoId,
+    "flow",
+    detail.flowId,
+    raw && !test,
+    prRef,
+  );
+
+  // Every committed test on the flow as its scenario model, by id. Keyed rather
+  // than singular so a second surface renders its OWN test rather than nothing.
+  const models = useMemo(
+    () =>
+      new Map(
+        rows
+          .filter((r) => r.scenarioId != null)
+          .map((r) => [
+            r.scenarioId!,
+            scenarioModel(r, detail, binds?.get(r.scenarioId!)),
+          ]),
+      ),
+    [rows, detail, binds],
+  );
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="border-b border-border bg-card px-6 py-4">
+    <div className="flex h-full min-w-0 flex-col bg-background">
+      {/* The page's ONE vertical scroll, and the header scrolls WITH it — a
+          pinned title bar cost height the reading needs. x is clipped so a wide
+          line can only scroll its own block. */}
+      <div
+        data-pane
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
+      >
+      <div className="min-w-0 shrink-0 border-b border-border bg-card px-6 py-4">
         <div className="flex flex-wrap items-center gap-2">
-          {/* The SAME word the flow wears in the list — one vocabulary, one table. */}
+          {/* The SAME word the flow wears in the list, in the SAME first position
+              every guard row and header puts it — one vocabulary, one table. */}
           <GuardFlowStatusChip
             status={guardFlowPlainStatus({
               status: detail.status,
               bucket: detail.bucket,
-              findings: detail.findings.filter((f) => guardFindingClass(f) !== 'defect').length,
+              findings: detail.findings.filter(
+                (f) => guardFindingClass(f) !== "defect",
+              ).length,
             })}
           />
           {/* Not a status: the same marker the list row wears. The sentence below
@@ -329,7 +569,11 @@ export function GuardFlowDetail({
           {dismissed && <GuardDismissedChip />}
           {toolDefects > 0 && <GuardToolDefectChip />}
           {detail.epic && (
-            <HoverPopover portal width="narrow" content={`Epic flow — chains ${detail.composedOf.length} flows.`}>
+            <HoverPopover
+              portal
+              width="narrow"
+              content={`Epic flow — chains ${detail.composedOf.length} flows.`}
+            >
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <Layers className="h-3 w-3" />
                 epic
@@ -337,78 +581,196 @@ export function GuardFlowDetail({
             </HoverPopover>
           )}
           {detail.manual && (
-            <HoverPopover portal width="narrow" content="Hand-written test — it belongs to no synthesized flow.">
+            <HoverPopover
+              portal
+              width="narrow"
+              content="Hand-written test — it belongs to no synthesized flow."
+            >
               <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <PenLine className="h-3 w-3" />
                 manual
               </span>
             </HoverPopover>
           )}
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{detail.flowId}</span>
+          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+            {detail.flowId}
+          </span>
+          <ArtifactModeSwitch
+            format={test ? "YAML" : "JSON"}
+            mode={mode}
+            onSelect={setMode}
+            className="ml-auto"
+          />
         </div>
-        <h2 className="mt-1 text-sm font-semibold text-foreground">{detail.title}</h2>
+        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">
+          {detail.title}
+        </h2>
         {detail.goal ? (
-          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{detail.goal}</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+            {detail.goal}
+          </p>
         ) : (
           detail.orphaned && (
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{GUARD_UNDERIVED_SENTENCE}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              {GUARD_UNDERIVED_SENTENCE}
+            </p>
           )
         )}
       </div>
 
-      <div className="flex-1 space-y-5 overflow-auto px-6 py-4">
-        {nodes.length > 0 && (
-          <div>
-            <div className={LABEL}>Milestones</div>
-            <GuardMilestoneGraph
-              nodes={nodes}
-              onSelectMilestone={(node) => node.doc && node.anchor && onOpenSpec(node.doc, node.anchor)}
+      <div className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-4">
+        {raw ? (
+          // The stored artifact, whichever one this flow has.
+          test ? (
+            <GuardScenarioBody
+              repoId={repoId}
+              test={models.get(test.scenarioId!)!}
+              interfaces={interfaces}
+              raw
+              onOpenSpec={onOpenSpec}
             />
-          </div>
-        )}
+          ) : (
+            <ArtifactRaw content={flowRaw.content} label="flow source" />
+          )
+        ) : (
+          <>
+            {/* The chain, as a list, ONLY for a flow with no test. With a test the
+                step list below IS the chain — each group headed by the claim it
+                realizes and linking to the same section — so a list above it would
+                be the same milestones told twice. */}
+            {!test && detail.milestones.length > 0 && (
+              <div>
+                <div className={LABEL}>Milestones</div>
+                <MilestoneList
+                  milestones={detail.milestones}
+                  onOpenSpec={onOpenSpec}
+                />
+              </div>
+            )}
 
-        <div>
-          <div className={LABEL}>Tests</div>
-          <div className="rounded border border-border" role="list" aria-label="Tests">
-            {rows.map((row, i) => (
-              <SurfaceRow
-                key={`${row.surface ?? 'none'}-${row.scenarioId ?? i}`}
-                row={row}
-                attempted={attempted}
-                errors={detail.errors}
-                {...(blocked ? { blocked } : {})}
-                onOpenTest={onOpenTest}
-                {...(onOpenExternals ? { onOpenExternals } : {})}
-              />
-            ))}
-          </div>
-        </div>
-
-        {detail.journeyIds.length > 0 && (
-          <div>
-            <div className={LABEL}>Journeys</div>
-            {/* One reference per line — the same row idiom the Journeys pane uses
-                for the flows that use a journey, so both sides of the link read
-                identically. */}
-            <div className="flex flex-col items-start gap-1">
-              {detail.journeyIds.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => onOpenJourney(id)}
-                  className="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left font-mono text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+            {/* ONE block per surface. With the single surface the corpus produces
+                today there is no label at all — the page IS the test. */}
+            {rows.map((row, i) => {
+              const model = row.scenarioId
+                ? models.get(row.scenarioId)
+                : undefined;
+              // The existing-dismissal note is offered on a FAILING test only, and
+              // only when the failing milestone's claim resolves.
+              const claim =
+                model?.status.plain === "failed"
+                  ? failedMilestoneClaim(row, detail.milestones)
+                  : null;
+              return (
+                <div
+                  key={
+                    row.scenarioId ??
+                    `${row.surface ?? "none"}-${row.status}-${i}`
+                  }
+                  className={`flex min-w-0 flex-col gap-5 ${
+                    model ? "min-h-0 flex-1" : ""
+                  }`}
                 >
-                  <Route className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{id}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+                  {rows.length > 1 && row.surface && (
+                    // A surface NAME, plain — never a chip. It appears only when
+                    // there is a second surface to tell this one apart from.
+                    <div className={LABEL}>{surfaceLabel(row.surface)}</div>
+                  )}
+                  {model ? (
+                    <GuardScenarioBody
+                      repoId={repoId}
+                      test={{
+                        ...model,
+                        ...(claimTitles ? { claimTitles } : {}),
+                      }}
+                      interfaces={interfaces}
+                      showGoal={rows.length > 1 || !detail.goal}
+                      onOpenInterface={onOpenInterface}
+                      onOpenSpec={onOpenSpec}
+                      {...(decisions
+                        ? {
+                            // The rulings ride INSIDE the test's own drawer row:
+                            // a decision belongs after the evidence, and a standing
+                            // block under it was a footer nobody read.
+                            rulings: (
+                              <div className="space-y-3">
+                                <DismissFlowAction
+                                  flowId={detail.flowId}
+                                  title={detail.title}
+                                  decisions={decisions}
+                                />
+                                {claim && (
+                                  <ClaimDismissalNote
+                                    claim={claim}
+                                    decisions={decisions}
+                                  />
+                                )}
+                              </div>
+                            ),
+                          }
+                        : {})}
+                      {...(!row.outcome && row.stage !== "birth"
+                        ? {
+                            notes: (
+                              <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+                                The last run has no result for this test — run{" "}
+                                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                                  truecourse guard run
+                                </code>{" "}
+                                to test it.
+                              </p>
+                            ),
+                          }
+                        : {})}
+                    />
+                  ) : (
+                    <WhyNoTest
+                      row={row}
+                      attempted={attempted}
+                      errors={detail.errors}
+                      {...(blocked ? { blocked } : {})}
+                      {...(onOpenExternals ? { onOpenExternals } : {})}
+                    />
+                  )}
+                </div>
+              );
+            })}
 
-        {decisions && (
-          <DismissFlowAction flowId={detail.flowId} title={detail.title} decisions={decisions} />
+            {/* A flow with no test still has a realization plan — the interfaces it
+                WOULD walk. With a test, its own Interface section above says it
+                (and draws each one), so this never renders twice. */}
+            {!test && detail.interfaceIds.length > 0 && (
+              <div>
+                <div className={LABEL}>Interfaces</div>
+                <div className="flex flex-col items-start gap-1">
+                  {detail.interfaceIds.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => onOpenInterface(id)}
+                      className="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left font-mono text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                    >
+                      <Braces className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{id}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* A flow with a TEST carries its ruling inside that test's drawer
+                row, where the decision follows the evidence it is made on. A flow
+                with none has no such row — the ruling stays the page's last
+                block, exactly as it reads today. */}
+            {decisions && !test && (
+              <DismissFlowAction
+                flowId={detail.flowId}
+                title={detail.title}
+                decisions={decisions}
+              />
+            )}
+          </>
         )}
+      </div>
       </div>
     </div>
   );

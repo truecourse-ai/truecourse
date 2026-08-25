@@ -45,7 +45,7 @@ const noop = () => {};
 
 describe('the missing-data seed hint', () => {
   it('offers `guard seed --init` on a section blocked on missing data', () => {
-    render(<GuardSectionDetail section={section()} onOpenFlow={noop} onClose={noop} />);
+    render(<GuardSectionDetail repoId="r" section={section()} onOpenFlow={noop} onClose={noop} />);
 
     expect(screen.getByText(/No seed script yet/)).toBeTruthy();
     expect(screen.getByText(GUARD_SEED_INIT_COMMAND)).toBeTruthy();
@@ -53,7 +53,7 @@ describe('the missing-data seed hint', () => {
 
   it('is silent on a section blocked on anything else', () => {
     render(
-      <GuardSectionDetail
+      <GuardSectionDetail repoId="r"
         section={section({
           reason: 'blocked on stripe: charge a card',
           blockedOnCapabilities: ['stripe'],
@@ -68,7 +68,7 @@ describe('the missing-data seed hint', () => {
 
   it('is silent — and the CTA is the re-generate command — once a seed exists', () => {
     render(
-      <GuardSectionDetail
+      <GuardSectionDetail repoId="r"
         section={section({
           status: 'needs-setup',
           // What `readGuardExternalSetupIndex` derives once `api.seed` is declared.
@@ -91,7 +91,7 @@ describe('the missing-data seed hint', () => {
 
   it('says the seed is INSUFFICIENT — never "already set up" — when it fed the last generate', () => {
     render(
-      <GuardSectionDetail
+      <GuardSectionDetail repoId="r"
         section={section({
           status: 'needs-setup',
           // What `readGuardExternalSetupIndex` derives when the recipe fingerprint
@@ -112,7 +112,7 @@ describe('the missing-data seed hint', () => {
     // The action is editing the seed, then re-generating — never the externals page.
     expect(screen.getByText(/Extend the seed script to create it/)).toBeTruthy();
     expect(screen.getByText('truecourse guard generate')).toBeTruthy();
-    expect(screen.queryByText(/External APIs/)).toBeNull();
+    expect(screen.queryByText(/Dependencies/)).toBeNull();
   });
 
   it('names the synthetic key "seed data", never `missing-data`', () => {

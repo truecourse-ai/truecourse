@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "docs.truecourse.dev",
+      "llmsTxtUrl": "https://docs.truecourse.dev/llms.txt",
+      "title": "TrueCourse",
+      "fetchedAt": "2026-08-08T16:43:15.366Z",
+      "docs": [
+        {
+          "url": "https://docs.truecourse.dev/analyze/baseline-and-diff.md",
+          "path": "analyze/baseline-and-diff.md",
+          "title": "Baselines & diff",
+          "contentHash": "8bac6cc14948d892674600e85cb881bb9512719334c3bea829bda830ad584d3f"
+        },
+        {
+          "url": "https://docs.truecourse.dev/analyze/excluding-files.md",
+          "path": "analyze/excluding-files.md",
+          "title": "Excluding files",
+          "contentHash": "5ac32c0abd0dc31b28fac832ed6dfb6bf3d5359800de0dca78dbc26515a140d3"
+        },
+        {
+          "url": "https://docs.truecourse.dev/analyze/git-hooks.md",
+          "path": "analyze/git-hooks.md",
+          "title": "Git hooks",
+          "contentHash": "86cb8be0e743f8aea846be60e2570a1e3740c4aa6883b86691f6ecb88a7ab6cc"
+        },
+        {
+          "url": "https://docs.truecourse.dev/analyze/overview.md",
+          "path": "analyze/overview.md",
+          "title": "Overview",
+          "contentHash": "a1460390c43a5e56ae974af3500a8e03c6162b34375bb35eefb46fc2605eaed5"
+        },
+        {
+          "url": "https://docs.truecourse.dev/analyze/rules.md",
+          "path": "analyze/rules.md",
+          "title": "Rules",
+          "contentHash": "5101f8ec2604cb44e01762325c3aa00a09480bc9a38307bc4f26ce2a99fc2733"
+        },
+        {
+          "url": "https://docs.truecourse.dev/configuration/llm-transport.md",
+          "path": "configuration/llm-transport.md",
+          "title": "LLM transport",
+          "contentHash": "e1d6490b6f766d53f775321b9e6688a286e96dbf9a9bd1c4046c6821ba97843e"
+        },
+        {
+          "url": "https://docs.truecourse.dev/configuration/models.md",
+          "path": "configuration/models.md",
+          "title": "Models & environment",
+          "contentHash": "9af2d9c861bfbb329b68ce8535d3eaa80a51abeae9998ca2715f3255be2d3650"
+        },
+        {
+          "url": "https://docs.truecourse.dev/configuration/storage.md",
+          "path": "configuration/storage.md",
+          "title": "Storage",
+          "contentHash": "6b896c3614c82414efe7545617c880de207beb4b96060f4e7f4d953c98e9b4a4"
+        },
+        {
+          "url": "https://docs.truecourse.dev/configuration/telemetry.md",
+          "path": "configuration/telemetry.md",
+          "title": "Telemetry",
+          "contentHash": "9fbccc7e0948d4b2eb81c258a42fcee2ff1869173e28f6c3db7ce73b90fb28a8"
+        },
+        {
+          "url": "https://docs.truecourse.dev/dashboard.md",
+          "path": "dashboard.md",
+          "title": "Dashboard",
+          "contentHash": "e8a7dda88988a9861090b4b3b4bc01c483be99d8c25cd97ed4acb66ebcb8db8d"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/conflicts.md",
+          "path": "guard/conflicts.md",
+          "title": "Resolving conflicts",
+          "contentHash": "709a024c7a70c0c0230488e3d7378ce8f2702cf0aa47d095700de6e11ee14c2f"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/external-services.md",
+          "path": "guard/external-services.md",
+          "title": "External services",
+          "contentHash": "8a5ba93e44428fa5123194b8919f9dd46321951881b001459b2b7f342567e6fa"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/generate.md",
+          "path": "guard/generate.md",
+          "title": "Guard generate",
+          "contentHash": "81a3bc8451cac85d896e41eda1db13f751253c8518d8e7aa2c4c25a400834765"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/overview.md",
+          "path": "guard/overview.md",
+          "title": "Overview",
+          "contentHash": "62327e066512565497a626f4085a006a6eac6f79ba27152edf5836afa2e4b289"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/recipe.md",
+          "path": "guard/recipe.md",
+          "title": "The recipe",
+          "contentHash": "927c618b8572c262d071cda6d3cb935c039ce4376113e05130bfda4c3969c959"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/run.md",
+          "path": "guard/run.md",
+          "title": "Guard run",
+          "contentHash": "c7385b61a52ceffd24c7e1cc4e8d6b57c6722f578de5bb0b762e13fc5759c728"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/seeding.md",
+          "path": "guard/seeding.md",
+          "title": "Seeding",
+          "contentHash": "6b540088b0a3645cd5f1aacd126ea29d5467cf1b5c4a0d4b0b5dde3d9b71a10f"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/setup.md",
+          "path": "guard/setup.md",
+          "title": "Guard setup",
+          "contentHash": "c109ee1732ec3b26f62683ed9c07f53787a3eb0d5e8d9db9d5b9179d5fb1d8bc"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/spec-scan.md",
+          "path": "guard/spec-scan.md",
+          "title": "Spec scan",
+          "contentHash": "d71faa0ea3f8a9e79fefa472db8301d39f6d19e5e30ed01b666fbdab862dbd35"
+        },
+        {
+          "url": "https://docs.truecourse.dev/guard/web-sources.md",
+          "path": "guard/web-sources.md",
+          "title": "Web sources",
+          "contentHash": "7aa8315c74ded81bf0881ead990941c9dedf5f466bd6514cba8ccc0ef77785e1"
+        },
+        {
+          "url": "https://docs.truecourse.dev/index.md",
+          "path": "index.md",
+          "title": "Introduction",
+          "contentHash": "10d4eb2a06e17491209d8731d7a0b87efae42cb2ecae6462f1a4f83130328d6d"
+        },
+        {
+          "url": "https://docs.truecourse.dev/installation.md",
+          "path": "installation.md",
+          "title": "Installation",
+          "contentHash": "241d6d30da2182842541a049539506a067ba4cb0863f6fe1770959feebe79d5e"
+        },
+        {
+          "url": "https://docs.truecourse.dev/quickstart.md",
+          "path": "quickstart.md",
+          "title": "Quickstart",
+          "contentHash": "fbd8a63bd0ce78bb5b789ff703be3bbde50c303f9fc159257ebe28123a027267"
+        },
+        {
+          "url": "https://docs.truecourse.dev/reference/claude-code-skills.md",
+          "path": "reference/claude-code-skills.md",
+          "title": "Claude Code skills",
+          "contentHash": "d4503f5ec7016984f8724c31d8390c7dd30d95222412fde0d0cfd46ac94cf2df"
+        },
+        {
+          "url": "https://docs.truecourse.dev/reference/cli.md",
+          "path": "reference/cli.md",
+          "title": "CLI reference",
+          "contentHash": "1df70ef43df06af6c650b96cb1855688edaccf3ae9db3e53700cb1c0fb85290a"
+        }
+      ],
+      "skipped": []
+    }
+  ]
+}

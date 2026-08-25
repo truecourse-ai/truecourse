@@ -155,6 +155,38 @@ export const world = 42;`;
     expect(result.exports.length).toBeGreaterThanOrEqual(1);
   });
 
+  /**
+   * `export default <expression>` is how a React app usually exports its page
+   * module, and it was invisible: only the `function` and `class` forms carry a
+   * `declaration` field, so `export default HomePage;` reported NO export at
+   * all. Measured on the benchmark checkouts when a web derivation started
+   * asking "does this route module render anything": 74 of cal.diy's 79 route
+   * modules and 11 of documenso's use the value form.
+   */
+  it('records a default export in every form it is written', () => {
+    const defaults = (code: string, language: 'typescript' | 'tsx' = 'typescript') =>
+      analyzeFileContent(`/test/file.${language === 'tsx' ? 'tsx' : 'ts'}`, code, language)
+        .exports.filter((e) => e.isDefault)
+        .map((e) => e.name);
+
+    expect(defaults(`export default function Page() { return null }`)).toEqual(['Page']);
+    expect(defaults(`export default class Page {}`)).toEqual(['Page']);
+    // The value form: an identifier keeps its name, an anonymous one is `default`.
+    expect(defaults(`function Page() { return null }\nexport default Page;`)).toEqual(['Page']);
+    expect(defaults(`export default memo(Page);`)).toEqual(['default']);
+    expect(defaults(`export default () => <div />;`, 'tsx')).toEqual(['default']);
+    // Re-exported: the module still has a default, and cal.com's
+    // `pages/router/embed.tsx` is exactly this one line and nothing else.
+    expect(defaults(`export { default } from './index';`)).toEqual(['default']);
+    expect(defaults(`export { Page as default } from './Page';`)).toEqual(['Page']);
+    // A module that exports no default still reports none — the point of the fact.
+    expect(defaults(`export const loader = async () => new Response('ok');`)).toEqual([]);
+    expect(defaults(`export async function loader() { return null }`)).toEqual([]);
+    expect(defaults(`export { loader } from './loader';`)).toEqual([]);
+    // Re-exporting somebody else's default under a NAME is not a default export.
+    expect(defaults(`export { default as Page } from './Page';`)).toEqual([]);
+  });
+
   it('extracts call expressions', () => {
     const code = `function main() {
   console.log('hello');

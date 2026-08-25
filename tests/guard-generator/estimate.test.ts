@@ -1,20 +1,37 @@
+/**
+ * The pre-flight estimate for `guard generate` after the session cut-over (plan
+ * 04 step 20). Every LLM stage but realization matching and recipe discovery is
+ * an agent SESSION, so the estimate is session math: per kind, `items` × the
+ * kind's expected turns, floored at one turn per item and ceilinged at the
+ * budget's hard limit — and `items` is probed against the SAME caches with the
+ * SAME key builders the run uses, which is the property these cases exist to
+ * pin. An estimate that quotes a key the run does not probe is a lie in both
+ * directions (work promised that never runs, spend that was never quoted).
+ */
+
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runnableDriverIds } from '@truecourse/shared'
+import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index'
+import { setCacheEntry } from '@truecourse/llm'
 import { estimateGuardTokens } from '../../packages/core/src/services/llm/spec-estimate.js'
 import {
-  generateGuards,
+  EXTRACT_SESSION_CACHE_NAME,
+  EXTRACT_SESSION_BUDGET,
+  EXTRACT_SESSION_KIND,
+  extractSessionCacheKey,
+  FLOWS_SESSION_CACHE_NAME,
+  FLOWS_SESSION_KIND,
+  FLOW_WORKER_SESSION_KIND,
+  FLOW_WORKER_BUDGET,
+  FIDELITY_SESSION_KIND,
+  flowsSessionCacheKey,
+} from '../../packages/core/src/services/guard-generate/index.js'
+import {
   planGuardWork,
   collectWorkDocs,
-  extractDocClaims,
-  readCorpusAreaTags,
-  buildFlowAreas,
-  planFlowSynthesis,
-  synthesizeFlows,
-  flowSectionKey,
-  type FlowAreaDocInput,
-  type FlowsRunner,
+  type FlowSynthesisArea,
 } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
@@ -23,14 +40,13 @@ import {
   writeDoc,
   writeCorpus,
   raw,
-  extractBy,
-  authorBy,
   runGenerate,
-  flowPerClaim,
-  matchAll,
-  faithfulReviewer,
-  cliJourney,
-  writeJourneySnapshot,
+  flowStageSeams,
+  extractSessionBy,
+  flowsAreaSessionOf,
+  submitWorkerSessions,
+  cliInterface,
+  writeInterfaceSnapshot,
   PASSING_STEPS,
 } from './helpers.js'
 
@@ -53,223 +69,129 @@ const DOC_CONTENT = [
   'Design history; nothing externally observable here.',
 ].join('\n')
 
-/** An api recipe (optionally with a seed) — the seed stage's recipe-side gate. */
-function writeApiRecipeJson(r: string, seed?: unknown): void {
-  const target = path.join(r, '.truecourse', 'scenarios', 'recipe.json')
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(
-    target,
-    JSON.stringify({ build: 'true', api: { serve: ['node', 'server.js'], ...(seed ? { seed } : {}) } }, null, 2),
-  )
-}
-
-/** The last generate's report, carrying ONE blocked-on gap with `reason`. */
-function writeBlockedReport(r: string, reason: string): void {
-  const target = path.join(r, '.truecourse', 'guard', 'result.json')
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(
-    target,
-    JSON.stringify({
-      generatedAt: '2026-07-29T00:00:00.000Z',
-      status: 'ok',
-      sectionsTotal: 1,
-      sectionsChanged: 0,
-      skippedUnchanged: 1,
-      noChanges: false,
-      written: [],
-      coverageGaps: [{ doc: DOC, anchor: 'version', kind: 'blocked-on', flowId: 'version', reason }],
-      birthFindings: [],
-      errors: [],
-      extractionFailures: [],
-      orphaned: [],
-    }),
-  )
-}
-
-const extract = extractBy({ background: { untestable: 'bg' } })
-const author = authorBy({ version: raw('v', PASSING_STEPS) })
-
-describe('estimateGuardTokens', () => {
-  it('cold: one extract call for the single work doc, recipe present ⇒ no discovery call', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const est = await estimateGuardTokens(r)
-    expect(est.subjectLabel).toBe('2 sections')
-    const extractStage = est.stages!.find((s) => s.stage === 'guardExtract')!
-    expect(extractStage.calls).toBe(1) // one doc, one view (under budget)
-    expect(est.stages!.find((s) => s.stage === 'guardRecipe')).toBeUndefined() // 0 calls dropped
-    expect(est.stages!.find((s) => s.stage === 'guardAuthor')).toBeTruthy()
-    expect(est.totalEstimatedTokens).toBeGreaterThan(0)
-  })
-
-  it('adds a recipe-discovery call when no recipe.json exists', async () => {
-    const r = repo()
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const est = await estimateGuardTokens(r)
-    expect(est.stages!.find((s) => s.stage === 'guardRecipe')!.calls).toBe(1)
-  })
-
-  // The seed no longer costs anything in a GENERATE estimate — the stage
-  // moved to `guard setup`, and its price with it (`estimateGuardSetup`).
-  it('never prices a seed draft, whatever the last generate left blocked', async () => {
-    const r = repo()
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-    writeApiRecipeJson(r)
-    writeBlockedReport(r, 'blocked on missing-data, an org: list an org')
-
-    expect((await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardSeed')).toBeUndefined()
-  })
-
-  it('cache-aware: after a full generate nothing is left to do ⇒ empty estimate', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const first = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: author })
-    expect(first.written).toHaveLength(1)
-
-    // Every stage is a cache hit and every flow's inputs hash still matches the
-    // manifest, so the estimate has NO stages — the confirm prompt is skipped and
-    // the run is a deterministic no-op. (`background` states no claim, so no flow
-    // binds it: it counts as an unguarded section forever, which is honest.)
-    const est = await estimateGuardTokens(r)
-    expect(est.stages).toEqual([])
-    expect(est.totalEstimatedTokens).toBe(0)
-    expect(est.subjectLabel).toBe('1 of 2 sections changed')
-
-    const second = await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: author })
-    expect(second.noChanges).toBe(true)
-    expect(second.written).toEqual([])
-  })
-
-  it('a moved journey re-matches and re-authors the flow that grounds on it', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    await runGenerate({ repoRoot: r, extractRunner: extract, generateRunner: author })
-    expect((await estimateGuardTokens(r)).stages).toEqual([])
-
-    // The cli surface MOVED (the command gained a flag). The catalog fingerprint
-    // changes ⇒ the match cache misses ⇒ the estimate plans a matching call, and the
-    // flow it grounds re-authors (its inputs hash folds the journey fingerprint).
-    writeJourneySnapshot(r, [cliJourney(['relkit'], ['--json']), cliJourney(['relkit', 'boom'])])
-    const est = await estimateGuardTokens(r)
-    const stages = new Map(est.stages!.map((s) => [s.stage, s]))
-    expect(stages.get('guardMatch')!.calls).toBe(1)
-    expect(stages.get('guardAuthor')!.calls).toBe(1)
-    // Nothing spec-side moved, so extraction and synthesis stay silent.
-    expect(stages.has('guardExtract')).toBe(false)
-    expect(stages.has('guardFlows')).toBe(false)
-  })
-})
-
-describe('estimateGuardTokens — estimate/runtime symmetry', () => {
-  it('every stage the run calls was quoted by the estimate first', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    // The estimate BEFORE the run: whatever it quotes is what may be spent.
-    const quoted = new Set(((await estimateGuardTokens(r)).stages ?? []).map((s) => s.stage))
-
-    // The run, counting an actual call per stage.
-    const called = new Set<string>()
-    await runGenerate({
-      repoRoot: r,
-      extractRunner: extractBy({ background: { untestable: 'bg' } }, () => called.add('guardExtract')),
-      flowsRunner: flowPerClaim(() => called.add('guardFlows')),
-      matchRunner: matchAll(() => called.add('guardMatch')),
-      generateRunner: authorBy({ version: raw('v', PASSING_STEPS) }, () => called.add('guardAuthor')),
-      fidelityRunner: faithfulReviewer(() => called.add('guardFidelity')),
-    })
-
-    expect(called.size).toBeGreaterThan(0)
-    for (const stage of called) expect(quoted.has(stage)).toBe(true)
-  })
-
-  it('a cold repo quotes matching and authoring against the claim-derived flow bound', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const stages = new Map(((await estimateGuardTokens(r)).stages ?? []).map((s) => [s.stage, s]))
-    const match = stages.get('guardMatch')!
-    const author = stages.get('guardAuthor')!
-    expect(match.model).toBe('sonnet')
-    expect(author.model).toBe('opus')
-    // The flow count is a synthesis OUTPUT — both stages say so instead of guessing.
-    expect(match.bound).toContain('flows ≤ runnable claims')
-    expect(author.bound).toContain('flows ≤ runnable claims')
-    // The evidence retry is at most one re-author per authored scenario.
-    expect(stages.get('guardRetry')!.callsRange).toEqual({ low: 0, high: author.callsRange!.high })
-  })
-
-  it('quotes failing-test triage like the retry: 0..authored pairs, top tier', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const stages = new Map(((await estimateGuardTokens(r)).stages ?? []).map((s) => [s.stage, s]))
-    const author = stages.get('guardAuthor')!
-    const triage = stages.get('guardTriage')!
-    expect(triage.model).toBe('opus')
-    expect(triage.callsRange).toEqual({ low: 0, high: author.callsRange!.high })
-    expect(triage.bound).toBe('one triage per test that fails birth')
-  })
-})
-
-// --- guard.flows (flow synthesis) -------------------------------------------
-
 const AUTH_DOC = 'docs/auth.md'
 const AUTH_CONTENT = ['## signin', '`relkit login` stores the token and exits 0.'].join('\n')
 
-/** One flow per claim — the honest floor, so the honesty rule always settles. */
-const flowsForEveryClaim: FlowsRunner = async (ctx) => ({
-  flows: ctx.claims.map((c, i) => ({
-    title: `${ctx.areaId} flow ${i + 1}`,
-    goal: `a user gets what "${c.claim}" promises`,
-    milestones: [{ doc: c.doc, anchor: c.anchor, claimTitle: c.claim, order: 1 }],
-  })),
-  noFlowClaims: [],
-})
+/** The full stub-seam pipeline: one flow per claim, one passing scenario each. */
+const extract = extractSessionBy({ background: { untestable: 'bg' } })
+const worker = submitWorkerSessions(() => raw('v', PASSING_STEPS))
 
-/** Warm the extract cache (without settling the manifest) and build the areas the
- *  estimate reconstructs, so a test can compare estimate against run. */
-async function warmExtractionAreas(r: string) {
+/** A repo with a recipe, a one-doc corpus, and nothing generated yet. */
+function coldRepo(): string {
+  const r = repo()
+  writeRecipe(r)
+  writeCorpus(r, [{ ref: DOC }])
+  writeDoc(r, DOC, DOC_CONTENT)
+  return r
+}
+
+const stagesOf = async (r: string) =>
+  new Map(((await estimateGuardTokens(r)).stages ?? []).map((s) => [s.stage, s]))
+
+/**
+ * Warm the `guard/extract-session` cache with EXACTLY what the run's extraction
+ * seam answers — driven through the seam itself, so the claim inventory the
+ * estimate reconstructs offline is byte-identical to the run's. Anything less
+ * would compare the estimate against a different corpus than the run sees, which
+ * is the one thing these key-parity cases exist to rule out.
+ */
+async function warmExtractCache(r: string): Promise<void> {
   const plan = planGuardWork(r)
-  const areaTags = readCorpusAreaTags(r)
-  const inputs: FlowAreaDocInput[] = []
-  for (const doc of collectWorkDocs(r, plan)) {
-    const res = await extractDocClaims(r, doc, extract)
-    if (!res.ok) throw new Error('fixture extraction failed')
-    inputs.push({
-      doc: doc.doc,
-      areaTags: areaTags.get(doc.doc) ?? [],
-      outline: doc.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-      untestable: res.data.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
-      claims: res.data.claims.map((c) => ({ doc: doc.doc, anchor: c.sectionAnchor, title: c.claim, driver: c.driver })),
+  const docs = collectWorkDocs(r, { ...plan, work: plan.sections })
+  const { byDoc } = await extract({ docs })
+  for (const doc of docs) {
+    const result = byDoc.get(doc.doc)
+    if (!result?.ok) continue
+    await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc), {
+      claims: result.data.claims.map((c) => ({
+        claim: c.claim,
+        driver: c.driver,
+        sectionAnchor: c.sectionAnchor,
+        reason: c.reason,
+        needs: c.needs ?? [],
+      })),
+      untestable: result.data.untestable,
     })
-  }
-  return {
-    areas: buildFlowAreas(inputs),
-    sectionFingerprints: new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s.fingerprint])),
   }
 }
 
-describe('estimateGuardTokens — flow synthesis stage', () => {
-  it('cold: one call per area with a changed section, plus the epic ceiling', async () => {
+/** Run the full stub-seam pipeline and warm BOTH session caches the way the real
+ *  seams would — the "unchanged repo" state a re-run must walk for free. */
+async function generateAndWarm(r: string) {
+  const areas: FlowSynthesisArea[] = []
+  const seams = flowStageSeams(r)
+  const result = await runGenerate({
+    repoRoot: r,
+    ...seams,
+    extractSession: extract,
+    flowsAreaSession: async (input) => {
+      areas.push(...input.areas)
+      return seams.flowsAreaSession(input)
+    },
+    flowWorkerSession: worker,
+  })
+  await warmExtractCache(r)
+  for (const area of areas) {
+    await setCacheEntry(r, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(area), {
+      flows: [],
+      noFlowClaims: [],
+    })
+  }
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Session math: items, expected turns, and the budget ceiling.
+// ---------------------------------------------------------------------------
+
+describe('estimateGuardTokens — the session stages', () => {
+  it('quotes one extract SESSION per doc: min = items, max = the budget ceiling', async () => {
+    const r = coldRepo()
+
+    const stages = await stagesOf(r)
+    const extractStage = stages.get(EXTRACT_SESSION_KIND)!
+    // One doc in the universe, none cached: one session. The range is TURNS —
+    // floored at one per session, ceilinged at the budget's hard limit.
+    const ceiling = (EXTRACT_SESSION_BUDGET.maxResumes + 1) * EXTRACT_SESSION_BUDGET.turns + WRAP_UP_TURNS
+    expect(ceiling).toBe(23)
+    expect(extractStage.callsRange).toEqual({ low: 1, high: 1 * ceiling })
+    expect(extractStage.label).toBe('Extracting claims')
+    expect(extractStage.bound).toBe('1 of 1 doc changed')
+    // The retired one-shot stage ids are gone from the quote entirely.
+    for (const retired of ['guardExtract', 'guardFlows', 'guardAuthor', 'guardRetry', 'guardTriage', 'guardFidelity']) {
+      expect(stages.has(retired)).toBe(false)
+    }
+  })
+
+  it('prices the workers at every flow on every surface, at their budget ceiling', async () => {
+    const r = coldRepo()
+
+    const stages = await stagesOf(r)
+    const workerStage = stages.get(FLOW_WORKER_SESSION_KIND)!
+    // Cold: the flow count is a synthesis output, bounded by the runnable claims
+    // (2 sections × 3.5) over the recipe's one prepared surface (cli).
+    const boundFlows = Math.ceil(2 * 3.5)
+    const ceiling = (FLOW_WORKER_BUDGET.maxResumes + 1) * FLOW_WORKER_BUDGET.turns + WRAP_UP_TURNS
+    expect(ceiling).toBe(53)
+    expect(workerStage.callsRange).toEqual({ low: boundFlows, high: boundFlows * 1 * ceiling })
+    expect(workerStage.bound).toContain('flows ≤ runnable claims')
+    // The fidelity CHILD is 0..one per worker, at ITS budget's ceiling (5 turns).
+    const fidelity = stages.get(FIDELITY_SESSION_KIND)!
+    expect(fidelity.callsRange).toEqual({ low: 0, high: boundFlows * (5 + WRAP_UP_TURNS) })
+    expect(fidelity.bound).toBe('one review per green submission')
+  })
+
+  it('adds a recipe-discovery call only when no recipe.json exists', async () => {
+    const withRecipe = coldRepo()
+    expect((await stagesOf(withRecipe)).has('guardRecipe')).toBe(false)
+
+    const bare = repo()
+    writeCorpus(bare, [{ ref: DOC }])
+    writeDoc(bare, DOC, DOC_CONTENT)
+    expect((await stagesOf(bare)).get('guardRecipe')!.calls).toBe(1)
+  })
+
+  it('quotes one flows session per area, plus the epic ceiling', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [
@@ -279,68 +201,195 @@ describe('estimateGuardTokens — flow synthesis stage', () => {
     writeDoc(r, DOC, DOC_CONTENT)
     writeDoc(r, AUTH_DOC, AUTH_CONTENT)
 
-    const stage = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardFlows')!
+    const stage = (await stagesOf(r)).get(FLOWS_SESSION_KIND)!
     expect(stage.label).toBe('Synthesizing flows')
-    expect(stage.model).toBe('sonnet')
-    expect(stage.calls).toBe(3) // two areas + one epic pass
-    expect(stage.callsRange).toEqual({ low: 2, high: 3 })
-    // The flow COUNT is a synthesis output, so the estimate quotes its bound.
-    expect(stage.bound).toContain('flows ≤ runnable claims')
+    // Two areas + at most one epic pass (the epic key hashes the areas' OUTPUT
+    // digests, unknowable offline). Expected = 3 sessions × 4 turns; the floor is
+    // one turn per area session, the ceiling all three at the budget's limit.
+    expect(stage.calls).toBe(3 * 4)
+    expect(stage.callsRange).toEqual({ low: 2, high: 3 * 27 })
   })
 
   it('a single-area repo needs no epic pass', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const stage = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardFlows')!
-    expect(stage.calls).toBe(1)
-  })
-
-  it('warm extract cache: the estimate probes the real flows cache and agrees with the run', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const { areas, sectionFingerprints } = await warmExtractionAreas(r)
-    const planned = await planFlowSynthesis(r, areas)
-
-    // Exact: the claim inventory is known offline, so the bound carries its count.
-    const before = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardFlows')!
-    expect(before.calls).toBe(planned.areaCalls + planned.epicCalls)
-    expect(before.bound).toContain(`(${planned.maxFlows} today)`)
-
-    // Estimate plans a call ⇔ the run makes one.
-    const run = await synthesizeFlows({ repoRoot: r, areas, runner: flowsForEveryClaim, sectionFingerprints })
-    expect(run.calls).toBe(before.calls)
-    expect(run.unsettled).toEqual([])
-
-    // Synthesized ⇒ the stage is gone, and a re-run would indeed call nothing.
-    const after = await estimateGuardTokens(r)
-    expect(after.stages!.find((s) => s.stage === 'guardFlows')).toBeUndefined()
-    const rerun = await synthesizeFlows({
-      repoRoot: r,
-      areas,
-      runner: async () => {
-        throw new Error('the cache should have answered')
-      },
-      sectionFingerprints,
-    })
-    expect(rerun.calls).toBe(0)
+    const stage = (await stagesOf(coldRepo())).get(FLOWS_SESSION_KIND)!
+    expect(stage.calls).toBe(1 * 4)
+    expect(stage.callsRange).toEqual({ low: 1, high: 27 })
   })
 })
 
 // ---------------------------------------------------------------------------
-// The surfaces a MISSING recipe is priced on. Discovery is
-// about to run, so the estimate asks the SAME deterministic proposer it will —
-// pure over the working tree, so it costs the estimate nothing — instead of
-// assuming a cli entry, which mispriced every api-only repo.
+// Cache awareness — the estimate probes the REAL keys.
+// ---------------------------------------------------------------------------
+
+describe('estimateGuardTokens — cache awareness', () => {
+  it('a warm extract-session cache drops extraction and makes the flows count exact', async () => {
+    const r = coldRepo()
+    expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.bound).toBe(
+      'flows ≤ runnable claims — flow count is a synthesis output',
+    )
+
+    await warmExtractCache(r)
+
+    const stages = await stagesOf(r)
+    // Zero items ⇒ the stage vanishes from the quote entirely.
+    expect(stages.has(EXTRACT_SESSION_KIND)).toBe(false)
+    // The claim inventory is now knowable offline, so the flows bound carries it.
+    expect(stages.get(FLOWS_SESSION_KIND)!.bound).toContain('(1 today)')
+  })
+
+  it('the flows key the estimate probes is the key the run’s seam would use', async () => {
+    const r = coldRepo()
+    await warmExtractCache(r)
+    expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 27 })
+
+    // The areas the RUN hands its synthesis seam — the seam keys on exactly these.
+    const areas: FlowSynthesisArea[] = []
+    await runGenerate({
+      repoRoot: r,
+      ...flowStageSeams(r),
+      extractSession: extract,
+      flowsAreaSession: flowsAreaSessionOf((area) => {
+        areas.push(area)
+        return { flows: [], noFlowClaims: [] }
+      }),
+      stopAfterFlows: true,
+    })
+    expect(areas).toHaveLength(1)
+
+    // Answer that key in the cache; the estimate must count it as a hit.
+    await setCacheEntry(r, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(areas[0]), {
+      flows: [],
+      noFlowClaims: [],
+    })
+    expect((await stagesOf(r)).has(FLOWS_SESSION_KIND)).toBe(false)
+  })
+
+  it('a dismissed claim re-keys the area for the estimate exactly as it does for the run', async () => {
+    const r = coldRepo()
+    await warmExtractCache(r)
+
+    const areaFor = async (): Promise<FlowSynthesisArea> => {
+      const areas: FlowSynthesisArea[] = []
+      await runGenerate({
+        repoRoot: r,
+        ...flowStageSeams(r),
+        extractSession: extract,
+        flowsAreaSession: flowsAreaSessionOf((area) => {
+          areas.push(area)
+          return { flows: [], noFlowClaims: [] }
+        }),
+        stopAfterFlows: true,
+      })
+      return areas[0]
+    }
+    const before = await areaFor()
+    await setCacheEntry(r, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(before), {
+      flows: [],
+      noFlowClaims: [],
+    })
+    expect((await stagesOf(r)).has(FLOWS_SESSION_KIND)).toBe(false)
+
+    // Dismiss the area's one claim: the run's area material changes, so its key
+    // changes, so the previously-cached area is a MISS again.
+    fs.writeFileSync(
+      path.join(r, '.truecourse', 'scenarios', 'decisions.json'),
+      JSON.stringify({
+        version: 1,
+        dismissedClaims: [
+          { doc: DOC, anchor: 'version', title: 'version claim', dismissedAt: '2026-01-01T00:00:00Z' },
+        ],
+        dismissedFlows: [],
+      }),
+    )
+
+    const after = await areaFor()
+    expect(flowsSessionCacheKey(after)).not.toBe(flowsSessionCacheKey(before))
+    expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 27 })
+  })
+
+  it('after a full generate nothing is left to do ⇒ the estimate is empty and the confirm is skipped', async () => {
+    const r = coldRepo()
+
+    const first = await generateAndWarm(r)
+    expect(first.written).toHaveLength(1)
+
+    const est = await estimateGuardTokens(r)
+    expect(est.stages).toEqual([])
+    expect(est.totalEstimatedTokens).toBe(0)
+    // `background` states no claim, so no flow binds it: it counts as an
+    // unguarded section forever, which is honest.
+    expect(est.subjectLabel).toBe('1 of 2 sections changed')
+
+    const second = await runGenerate({
+      repoRoot: r,
+      ...flowStageSeams(r),
+      extractSession: extract,
+      flowWorkerSession: worker,
+    })
+    expect(second.noChanges).toBe(true)
+    expect(second.written).toEqual([])
+  })
+
+  it('a moved interface re-matches and re-works exactly the flow that grounds on it', async () => {
+    const r = coldRepo()
+    await generateAndWarm(r)
+    expect((await estimateGuardTokens(r)).stages).toEqual([])
+
+    // The cli surface MOVED (the command gained a flag): the catalog fingerprint
+    // changes ⇒ the match cache misses ⇒ one match call and one worker session.
+    writeInterfaceSnapshot(r, [cliInterface(['relkit'], ['--json']), cliInterface(['relkit', 'boom'])])
+
+    const stages = await stagesOf(r)
+    expect(stages.get('guardMatch')!.calls).toBe(1)
+    expect(stages.get(FLOW_WORKER_SESSION_KIND)!.callsRange).toEqual({ low: 1, high: 53 })
+    // Nothing spec-side moved, so extraction and synthesis stay silent.
+    expect(stages.has(EXTRACT_SESSION_KIND)).toBe(false)
+    expect(stages.has(FLOWS_SESSION_KIND)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Estimate/runtime symmetry: whatever the run spends was quoted first.
+// ---------------------------------------------------------------------------
+
+describe('estimateGuardTokens — estimate/runtime symmetry', () => {
+  it('every session kind the run starts was quoted by the estimate first', async () => {
+    const r = coldRepo()
+    const quoted = new Set(((await estimateGuardTokens(r)).stages ?? []).map((s) => s.stage))
+
+    const started = new Set<string>()
+    await runGenerate({
+      repoRoot: r,
+      ...flowStageSeams(r),
+      extractSession: async (input) => {
+        started.add(EXTRACT_SESSION_KIND)
+        return extract(input)
+      },
+      flowsAreaSession: async (input) => {
+        started.add(FLOWS_SESSION_KIND)
+        return flowStageSeams(r).flowsAreaSession(input)
+      },
+      matchRunner: async (ctx) => {
+        started.add('guardMatch')
+        return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
+      },
+      flowWorkerSession: async (input) => {
+        started.add(FLOW_WORKER_SESSION_KIND)
+        return worker(input)
+      },
+    })
+
+    expect(started.size).toBeGreaterThan(0)
+    for (const kind of started) expect(quoted.has(kind)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The surfaces a MISSING recipe is priced on — discovery is about to run, so the
+// estimate asks the SAME deterministic proposer it will.
 // ---------------------------------------------------------------------------
 
 describe('estimateGuardTokens — the surfaces a missing recipe is priced on', () => {
-  /** A recipe-less repo whose package.json is written by the caller. */
   function repoWithPackage(pkg: Record<string, unknown>, files: Record<string, string> = {}): string {
     const r = repo()
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify(pkg, null, 2))
@@ -352,9 +401,9 @@ describe('estimateGuardTokens — the surfaces a missing recipe is priced on', (
 
   /** The surface count the realization stages quote in their bound line. */
   async function pricedSurfaces(r: string): Promise<number> {
-    const author = (await estimateGuardTokens(r)).stages!.find((s) => s.stage === 'guardAuthor')!
-    const match = author.bound!.match(/× (\d+) surface/)
-    if (!match) throw new Error(`no surface count in the bound: ${author.bound}`)
+    const stage = (await stagesOf(r)).get(FLOW_WORKER_SESSION_KIND)!
+    const match = stage.bound!.match(/× (\d+) surface/)
+    if (!match) throw new Error(`no surface count in the bound: ${stage.bound}`)
     return Number(match[1])
   }
 
@@ -374,8 +423,6 @@ describe('estimateGuardTokens — the surfaces a missing recipe is priced on', (
   })
 
   it('prices EVERY runnable surface when the proposer cannot decide', async () => {
-    // No scripts, no bin: the deterministic path refuses, the model could propose
-    // either surface, and the estimate is a ceiling — so it quotes both.
     const r = repoWithPackage({ name: 'svc', dependencies: { express: '^4' } })
 
     expect(await pricedSurfaces(r)).toBe(runnableDriverIds.length)

@@ -1,0 +1,274 @@
+{
+  "run": {
+    "runId": "2026-08-10T05-11-23Z_dd21876c",
+    "ranAt": "2026-08-10T05:11:23.668Z",
+    "branch": "main",
+    "commit": "215a3f1bad9a777bda2e36498ef4e4dbbbf281ea",
+    "recipeFingerprint": "sha256:c4c586fe256a983495fc05222df37b0a9539c4a08a0a50626943ddc7d0c809e1"
+  },
+  "summary": {
+    "total": 14,
+    "pass": 14,
+    "fail": 0,
+    "stale": 0,
+    "orphaned": 0,
+    "error": 0,
+    "blocked": 0
+  },
+  "scenarios": [
+    {
+      "id": "add-a-duplicate-isbn",
+      "title": "Adding the same ISBN twice reports that the book is already on the shelf",
+      "binds": {
+        "doc": "docs/openapi.yaml",
+        "section": "paths/post-addbook",
+        "fingerprint": "sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815"
+      },
+      "flowId": "add-a-duplicate-isbn",
+      "outcome": "pass",
+      "durationMs": 659,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/add-a-duplicate-isbn.api.1"
+    },
+    {
+      "id": "check-service-health",
+      "title": "Health check reports the bookclub service is up",
+      "binds": {
+        "doc": "docs/openapi.yaml",
+        "section": "paths/get-health",
+        "fingerprint": "sha256:615bd256a70e64ff68494c61e7521c5d2ed57bab41cb586f0439e6a4783a892c"
+      },
+      "flowId": "check-service-health",
+      "outcome": "pass",
+      "durationMs": 566,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/check-service-health.api.1"
+    },
+    {
+      "id": "convert-a-valid-isbn",
+      "title": "Converting valid ISBN-10 and ISBN-13 values normalizes them to thirteen digits",
+      "binds": {
+        "doc": "docs/cli.md",
+        "section": "the-bookclub-cli/bookclub-isbn-value",
+        "fingerprint": "sha256:f30c071a7ecc6cdb9f046009a859c5b2d8a000ce293544bde6dac188dfd48922"
+      },
+      "flowId": "convert-a-valid-isbn",
+      "outcome": "pass",
+      "durationMs": 127,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/convert-a-valid-isbn.cli.1"
+    },
+    {
+      "id": "handle-finishing-an-unknown-book",
+      "title": "Finishing an unknown book reports that no book has that id",
+      "binds": {
+        "doc": "docs/openapi.yaml",
+        "section": "paths/post-finishbook",
+        "fingerprint": "sha256:d25950d14ed43684f287a2e4f9e5f58b754bbb899fdb7be8f30b58a8dbadf456"
+      },
+      "flowId": "handle-finishing-an-unknown-book",
+      "outcome": "pass",
+      "durationMs": 642,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/handle-finishing-an-unknown-book.api.1"
+    },
+    {
+      "id": "handle-missing-book-details",
+      "title": "Requesting details for a missing book reports that no book has that id",
+      "binds": {
+        "doc": "docs/openapi.yaml",
+        "section": "paths/get-getbook",
+        "fingerprint": "sha256:0ca74e271807375c35b4cde38b8b29cc5a6c81dc0d4c12ec54a745fe89dd375e"
+      },
+      "flowId": "handle-missing-book-details",
+      "outcome": "pass",
+      "durationMs": 580,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/handle-missing-book-details.api.1"
+    },
+    {
+      "id": "print-configuration-with-a-redacted-database-password",
+      "title": "Inspecting configuration redacts the database password",
+      "binds": {
+        "doc": "docs/cli.md",
+        "section": "the-bookclub-cli/bookclub-config",
+        "fingerprint": "sha256:28476d9f11959e15a54df328dc703015d20c7ba804d70540f7e631250ab9994a"
+      },
+      "flowId": "print-configuration-with-a-redacted-database-password",
+      "outcome": "pass",
+      "durationMs": 167,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/print-configuration-with-a-redacted-database-password.cli.1"
+    },
+    {
+      "id": "refuse-an-invalid-isbn",
+      "title": "Refusing an invalid ISBN reports a clear validation error",
+      "binds": {
+        "doc": "docs/cli.md",
+        "section": "the-bookclub-cli/bookclub-isbn-value",
+        "fingerprint": "sha256:f30c071a7ecc6cdb9f046009a859c5b2d8a000ce293544bde6dac188dfd48922"
+      },
+      "flowId": "refuse-an-invalid-isbn",
+      "outcome": "pass",
+      "durationMs": 110,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/refuse-an-invalid-isbn.cli.1"
+    },
+    {
+      "id": "reject-an-invalid-isbn",
+      "title": "Invalid ISBN values are refused when a member adds a book",
+      "binds": {
+        "doc": "docs/shelf-rules.md",
+        "section": "shelf-rules/isbns-are-stored-as-thirteen-digits",
+        "fingerprint": "sha256:795425389ae93a43aa785731fb8248f0343129d63a74ef4510de4a76ebf93590"
+      },
+      "flowId": "reject-an-invalid-isbn",
+      "outcome": "pass",
+      "durationMs": 571,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-an-invalid-isbn.api.1"
+    },
+    {
+      "id": "reject-an-unsupported-database-scheme",
+      "title": "Unsupported database schemes are rejected with a clear configuration error",
+      "binds": {
+        "doc": "docs/cli.md",
+        "section": "the-bookclub-cli/bookclub-config",
+        "fingerprint": "sha256:28476d9f11959e15a54df328dc703015d20c7ba804d70540f7e631250ab9994a"
+      },
+      "flowId": "reject-an-unsupported-database-scheme",
+      "outcome": "pass",
+      "durationMs": 101,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-an-unsupported-database-scheme.cli.1"
+    },
+    {
+      "id": "reject-shelf-changes-without-a-valid-member-token",
+      "title": "Unauthorized callers cannot add or finish books or change shelf state",
+      "binds": {
+        "doc": "docs/shelf-rules.md",
+        "section": "shelf-rules/who-may-change-the-shelf",
+        "fingerprint": "sha256:b5ffe03f72dda5183ad0c36d7e457ccf09cf2dc42f45e5455c402321a5e0544b"
+      },
+      "flowId": "reject-shelf-changes-without-a-valid-member-token",
+      "outcome": "pass",
+      "durationMs": 668,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-shelf-changes-without-a-valid-member-token.api.1"
+    },
+    {
+      "id": "reject-unusable-book-details",
+      "title": "Members receive validation errors for missing or unusable book details",
+      "binds": {
+        "doc": "docs/openapi.yaml",
+        "section": "paths/post-addbook",
+        "fingerprint": "sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815"
+      },
+      "flowId": "reject-unusable-book-details",
+      "outcome": "pass",
+      "durationMs": 428,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/reject-unusable-book-details.api.1"
+    },
+    {
+      "id": "require-an-isbn-value",
+      "title": "Calling the ISBN command without a value reports a clear error",
+      "binds": {
+        "doc": "docs/cli.md",
+        "section": "the-bookclub-cli/bookclub-isbn-value",
+        "fingerprint": "sha256:f30c071a7ecc6cdb9f046009a859c5b2d8a000ce293544bde6dac188dfd48922"
+      },
+      "flowId": "require-an-isbn-value",
+      "outcome": "pass",
+      "durationMs": 105,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/require-an-isbn-value.cli.1"
+    },
+    {
+      "id": "require-member-token-to-add-a-book",
+      "title": "Adding a book without a valid member token is rejected as unauthorized",
+      "binds": {
+        "doc": "docs/openapi.yaml",
+        "section": "paths/post-addbook",
+        "fingerprint": "sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815"
+      },
+      "flowId": "require-member-token-to-add-a-book",
+      "outcome": "pass",
+      "durationMs": 424,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/require-member-token-to-add-a-book.api.1"
+    },
+    {
+      "id": "require-member-token-to-finish-a-book",
+      "title": "Finishing a book requires a valid member token",
+      "binds": {
+        "doc": "docs/openapi.yaml",
+        "section": "paths/post-finishbook",
+        "fingerprint": "sha256:d25950d14ed43684f287a2e4f9e5f58b754bbb899fdb7be8f30b58a8dbadf456"
+      },
+      "flowId": "require-member-token-to-finish-a-book",
+      "outcome": "pass",
+      "durationMs": 445,
+      "evidencePath": ".truecourse/guard/evidence/2026-08-10T05-11-23Z_dd21876c/require-member-token-to-finish-a-book.api.1"
+    }
+  ],
+  "sections": [
+    {
+      "doc": "docs/cli.md",
+      "section": "the-bookclub-cli/bookclub-config",
+      "status": "pass",
+      "scenarioIds": [
+        "print-configuration-with-a-redacted-database-password",
+        "reject-an-unsupported-database-scheme"
+      ]
+    },
+    {
+      "doc": "docs/cli.md",
+      "section": "the-bookclub-cli/bookclub-isbn-value",
+      "status": "pass",
+      "scenarioIds": [
+        "convert-a-valid-isbn",
+        "refuse-an-invalid-isbn",
+        "require-an-isbn-value"
+      ]
+    },
+    {
+      "doc": "docs/openapi.yaml",
+      "section": "paths/get-getbook",
+      "status": "pass",
+      "scenarioIds": [
+        "handle-missing-book-details"
+      ]
+    },
+    {
+      "doc": "docs/openapi.yaml",
+      "section": "paths/get-health",
+      "status": "pass",
+      "scenarioIds": [
+        "check-service-health"
+      ]
+    },
+    {
+      "doc": "docs/openapi.yaml",
+      "section": "paths/post-addbook",
+      "status": "pass",
+      "scenarioIds": [
+        "add-a-duplicate-isbn",
+        "reject-unusable-book-details",
+        "require-member-token-to-add-a-book"
+      ]
+    },
+    {
+      "doc": "docs/openapi.yaml",
+      "section": "paths/post-finishbook",
+      "status": "pass",
+      "scenarioIds": [
+        "handle-finishing-an-unknown-book",
+        "require-member-token-to-finish-a-book"
+      ]
+    },
+    {
+      "doc": "docs/shelf-rules.md",
+      "section": "shelf-rules/isbns-are-stored-as-thirteen-digits",
+      "status": "pass",
+      "scenarioIds": [
+        "reject-an-invalid-isbn"
+      ]
+    },
+    {
+      "doc": "docs/shelf-rules.md",
+      "section": "shelf-rules/who-may-change-the-shelf",
+      "status": "pass",
+      "scenarioIds": [
+        "reject-shelf-changes-without-a-valid-member-token"
+      ]
+    }
+  ]
+}

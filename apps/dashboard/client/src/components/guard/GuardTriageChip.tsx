@@ -8,8 +8,7 @@
  * It is a chip, not a status: the test is failing either way, and this says WHOSE
  * fault that is. So the two drift verdicts take the failure's own colour (they are
  * real work in the repo) while a generation defect is muted — the same rule the
- * flow-level tool-defect marker follows, because rendering our own mistake in red
- * reports a broken repo where nothing is broken.
+ * flow-level tool-defect marker follows.
  *
  * The hover carries the BRIEF — why the verdict is what it is. The concrete unblock
  * is deliberately NOT here: the verdict card renders it as its own visible line, and
@@ -28,10 +27,15 @@ export const GUARD_TRIAGE_WORD: Record<GuardTriageVerdict, string> = {
   'generation-defect': 'our defect',
 };
 
-/** Drift is the repo's — it takes the failure colour. Our defect stays muted. */
+/**
+ * Drift is the repo's — BOTH kinds take the failure colour, because both are real
+ * work someone must do (fix the code, or fix the doc). Our defect stays muted:
+ * rendering our own mistake in red reports a broken repo where nothing is broken.
+ * Which drift it is, is the WORD's job — there is no third severity colour.
+ */
 const TONE: Record<GuardTriageVerdict, string> = {
   'code-drift': 'bg-red-500/10 text-red-600 dark:text-red-400',
-  'doc-drift': 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  'doc-drift': 'bg-red-500/10 text-red-600 dark:text-red-400',
   'generation-defect': 'bg-muted text-muted-foreground',
 };
 

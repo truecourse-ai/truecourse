@@ -7,7 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import type { GuardSectionCoverage, GuardSectionCoverageStatus } from '@truecourse/shared';
 import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
-import { GUARD_STATUS_ORDER, guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
+import { guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
+import { GUARD_COVERAGE_STATUS_PRECEDENCE } from '@truecourse/shared';
 
 function section(headingText: string, level: number, status: GuardSectionCoverageStatus): GuardSectionCoverage {
   return { anchor: headingText.toLowerCase().replace(/\s+/g, '-'), headingText, level, fingerprint: 'sha256:x', status, scenarioIds: [], scenarios: [] };
@@ -125,26 +126,41 @@ describe('buildAnchorTargets', () => {
 });
 
 describe('guard status treatments', () => {
-  it('gives every status a label and a band (except unguarded, which is unmarked)', () => {
-    for (const status of GUARD_STATUS_ORDER) {
-      expect(guardStatusMeta(status).label).toBeTruthy();
+  it('gives every status a label AND a band — nothing renders unmarked', () => {
+    for (const status of GUARD_COVERAGE_STATUS_PRECEDENCE) {
+      expect(guardStatusMeta(status).label, status).toBeTruthy();
+      expect(guardBandClasses(status), status).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + needs-setup +
-    // web/tui/library/desktop/mobile + blocked-on/untestable/no-claim/dismissed +
-    // authoring-error + unguarded (api became runnable — no awaiting row of its own).
-    expect(GUARD_STATUS_ORDER).toHaveLength(18);
+    // fail/error + stale/orphaned/blocked/authoring-error/needs-setup/blocked-on/
+    // no-interface + web/tui/library/desktop/mobile + unguarded + never-run +
+    // pass/guarded + unrealizable/untestable/no-claim/dismissed (api is runnable —
+    // no awaiting row).
+    expect(GUARD_COVERAGE_STATUS_PRECEDENCE).toHaveLength(22);
   });
 
-  it('maps each status group to its own colour treatment', () => {
+  it('maps each status group to its own colour treatment — FOUR colours, no more', () => {
+    // GREEN: proven. RED: something is wrong. BLUE: not yet, and you can move it.
+    // GREY: nothing to act on. Amber and orange are banned outright (see the
+    // palette sweep in guard-vocabulary.test.tsx) — a third severity between red
+    // and green is a distinction guard does not make.
     expect(guardBandClasses('pass')).toContain('emerald');
     expect(guardBandClasses('fail')).toContain('red');
     expect(guardBandClasses('error')).toContain('red');
-    expect(guardBandClasses('stale')).toContain('amber');
-    expect(guardBandClasses('orphaned')).toContain('amber');
+    // The two UNKNOWNS: the bind no longer holds, so the test never executed.
+    // Grey — never a colour that suggests a verdict was reached here.
+    expect(guardBandClasses('stale')).toContain('muted');
+    expect(guardBandClasses('orphaned')).toContain('muted');
     expect(guardBandClasses('guarded')).toContain('sky');
-    expect(guardBandClasses('blocked-on')).toContain('muted');
+    // BLOCKED IS BLUE, wherever the word comes from: the named blocker a user can
+    // clear, the third-party account, and the hole nothing accounts for.
+    expect(guardBandClasses('blocked-on')).toContain('sky');
+    expect(guardBandClasses('needs-setup')).toContain('sky');
+    expect(guardBandClasses('blocked')).toContain('sky');
+    expect(guardBandClasses('unguarded')).toContain('sky');
+    // Settled answers nobody can act on stay grey.
     expect(guardBandClasses('untestable')).toContain('muted');
     expect(guardBandClasses('no-claim')).toContain('muted');
+    expect(guardBandClasses('unrealizable')).toContain('muted');
     expect(guardBandClasses('web')).toContain('dashed');
     expect(guardBandClasses('tui')).toContain('dashed');
     // Generate tried and failed: red like a problem, but its own label — never the
@@ -152,6 +168,62 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('authoring-error')).toContain('red');
     expect(guardStatusMeta('authoring-error').label).toBe('Authoring error');
     expect(guardStatusMeta('error').label).toBe('Error');
-    expect(guardBandClasses('unguarded')).toBe('');
+  });
+
+  it('paints from FOUR colours and nothing else, over every status the wire can send', () => {
+    // The four, spelled as the palette names they use (slate/zinc are the grey).
+    const ALLOWED = ['red', 'emerald', 'sky', 'slate', 'zinc'];
+    for (const status of GUARD_COVERAGE_STATUS_PRECEDENCE) {
+      const meta = guardStatusMeta(status);
+      const paint = `${meta.band} ${meta.dot} ${meta.badge}`;
+      expect(paint, status).not.toMatch(/\b(amber|orange)-/);
+      const used = [...paint.matchAll(/\b(?:bg|text|border|ring)-([a-z]+)-\d{2,3}\b/g)].map((m) => m[1]);
+      expect([...new Set(used)].filter((c) => !ALLOWED.includes(c)), status).toEqual([]);
+    }
+  });
+});
+
+describe('alignSections — the lead region', () => {
+  // The server derives a frontmatter-titled doc's lead as a level-0 section of its
+  // own, and the client's preamble block is that same region.
+  const LEAD_DOC = [
+    '---',
+    'title: "Overview"',
+    '---',
+    '',
+    'Lead prose that states behaviour.',
+    '',
+    '## What it catches',
+    'body',
+    '',
+    '## Commands',
+    'body',
+  ].join('\n');
+
+  const lead = (): GuardSectionCoverage => ({ ...section('Overview', 0, 'guarded'), anchor: 'overview' });
+
+  it('aligns the preamble block to the lead section, keeping every later block in lockstep', () => {
+    const aligned = alignSections(splitDocBlocks(LEAD_DOC), [
+      lead(),
+      section('What it catches', 2, 'guarded'),
+      section('Commands', 2, 'unguarded'),
+    ]);
+    expect(aligned.map((a) => a?.anchor ?? null)).toEqual(['overview', 'what-it-catches', 'commands']);
+  });
+
+  it('still leaves the preamble unmarked when the server derived no lead section', () => {
+    const aligned = alignSections(splitDocBlocks(LEAD_DOC), [
+      section('What it catches', 2, 'guarded'),
+      section('Commands', 2, 'unguarded'),
+    ]);
+    expect(aligned.map((a) => a?.anchor ?? null)).toEqual([null, 'what-it-catches', 'commands']);
+  });
+
+  it('consumes no section for a doc that opens with a heading', () => {
+    const aligned = alignSections(splitDocBlocks('# Root\nbody\n\n## Sub\nmore'), [
+      section('Root', 1, 'guarded'),
+      section('Sub', 2, 'guarded'),
+    ]);
+    expect(aligned.map((a) => a?.anchor ?? null)).toEqual(['root', 'sub']);
   });
 });

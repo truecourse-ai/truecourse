@@ -14,7 +14,9 @@ import * as p from "@clack/prompts";
 import { guardResultPath, runFailureMessage } from "@truecourse/guard-runner";
 import { readFlowsFile } from "@truecourse/guard-generator";
 import { readManifest, readGuardLatest, readGuardResult } from "@truecourse/core/lib/guard-store";
+import { readGuardSectionTotals } from "@truecourse/core/commands/guard-read";
 import { readGuardSetup } from "@truecourse/core/commands/guard-setup";
+import { readGuardAdjudicationView } from "@truecourse/core/commands/guard-adjudicate";
 import {
   guardNeedsSetupServices,
   readGuardExternalsView,
@@ -37,7 +39,8 @@ import {
   GUARD_RUN_STEPS,
   EstimateDeclined,
   OpenConflictsError,
-  type AuthorFailure,
+  GenerateStepNotReadyError,
+  type GenerateStep,
 } from "@truecourse/core/commands/guard-in-process";
 import {
   composeGuardStatus,
@@ -45,10 +48,14 @@ import {
   guardDriverIds,
   guardGapDisplayLabel,
   guardUnadjudicatedEffect,
+  GUARD_COVERAGE_PLAIN_ORDER,
+  GUARD_COVERAGE_STATUS_WORD,
   GUARD_UNADJUDICATED_REMEDY,
   isCompositionFinding,
 } from "@truecourse/shared";
+import type { GuardCoveragePlainStatus, GuardGapDisplayKind } from "@truecourse/shared";
 import { registerProject } from "@truecourse/core/config/registry";
+import { printWatchLive, resolveDashboardUrl } from "./helpers.js";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { clip, flowInstanceLine } from "../lib/guard-flow-format.js";
 import { requireGitRepo } from "./git-guard.js";
@@ -69,6 +76,7 @@ const MARK: Record<GuardScenarioResult["outcome"], string> = {
   error: "⚠",
   stale: "~",
   orphaned: "○",
+  blocked: "⊘",
 };
 
 /** One line per scenario result: severity icon, id, title, reason/duration. */
@@ -76,8 +84,43 @@ function scenarioLine(s: GuardScenarioResult): string {
   const suffix =
     s.outcome === "stale" || s.outcome === "orphaned"
       ? `  — ${BINDING_REASON[s.outcome]}`
-      : `  (${Math.round(s.durationMs)}ms)`;
+      : s.outcome === "blocked"
+        ? `  — blocked on the supplied dependency \`${s.blockedOn?.dependency ?? "?"}\``
+        : `  (${Math.round(s.durationMs)}ms)`;
   return `${MARK[s.outcome]} ${s.id} — ${s.title}${suffix}`;
+}
+
+/**
+ * The visual judge's activity for a run, or null when it never fired (a green run,
+ * a corpus with no web steps, no transport — all of which are the normal case and
+ * none of which is worth a line).
+ *
+ * It reports COUNTS, never a verdict: the judge decided nothing. The `expected
+ * visible` tally is called out because it is the actionable half — a page that
+ * looked right under a red assertion is the test being wrong, not the app.
+ */
+export function visualJudgeSummary(scenarios: readonly GuardScenarioResult[]): string | null {
+  const verdicts = scenarios.map((s) => s.failure?.visual).filter((v) => v !== undefined);
+  if (verdicts.length === 0) return null;
+  const visible = verdicts.filter((v) => v.verdict === "yes").length;
+  const tail = visible > 0 ? ` · ${visible} where the expected result LOOKED present` : "";
+  return `visual judge ${verdicts.length} screenshot${verdicts.length === 1 ? "" : "s"} read${tail}`;
+}
+
+/**
+ * What a BLOCKED scenario prints under its line: the requirement an instance has to
+ * satisfy — attributed to the flow that asked for each part, so a reader sees why
+ * every expectation is there — and the file to register one in. Nothing executed,
+ * so there is no step, no expected/actual, and no evidence to point at; the
+ * registration IS the whole story.
+ */
+export function blockedDetailLines(s: GuardScenarioResult): string[] {
+  const blocked = s.blockedOn;
+  if (!blocked) return [];
+  const lines = [`    needs: ${blocked.requirement}`];
+  for (const need of blocked.needs) lines.push(`      · ${need.need}  (${need.flowId})`);
+  lines.push(`    register an instance in ${blocked.registerIn}`);
+  return lines;
 }
 
 /**
@@ -87,7 +130,7 @@ function scenarioLine(s: GuardScenarioResult): string {
  * renders. A failure the path can't place (plumbing step, hand-written scenario,
  * a flow the corpus no longer has) falls back to the step line. The annotations
  * ride one extra line each — never outcomes: a blocked precondition (the failing
- * step only prepared the world, so no specified behavior was reached) and journey
+ * step only prepared the world, so no specified behavior was reached) and interface
  * drift (a re-ground hint).
  */
 export function failureDetailLines(
@@ -104,8 +147,8 @@ export function failureDetailLines(
       "    ⊘ blocked precondition — a setup step failed before any specified behavior was reached",
     );
   }
-  if (s.journeyDrifted) {
-    lines.push("    ⟳ journey drifted — the code surface this was grounded on moved; re-generate to re-ground");
+  if (s.interfaceDrifted) {
+    lines.push("    ⟳ interface drifted — the code surface this was grounded on moved; re-generate to re-ground");
   }
   return lines;
 }
@@ -129,7 +172,9 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     onScenarioResult: (s) => {
       if (s.outcome === "pass") return;
       renderer.log(scenarioLine(s));
-      for (const line of failureDetailLines(s, flowsById)) renderer.log(line);
+      const detail =
+        s.outcome === "blocked" ? blockedDetailLines(s) : failureDetailLines(s, flowsById);
+      for (const line of detail) renderer.log(line);
     },
   });
   renderer.dispose();
@@ -197,19 +242,38 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
   // and how many of those flows came back with drift.
   if (manifest) {
     const exercised = new Set(latest.scenarios.map((s) => s.flowId).filter(Boolean));
+    // A blocked flow never executed, so it has no drift to report — counting it as
+    // drift would claim a disagreement between doc and code that was never tested.
     const drifted = new Set(
-      latest.scenarios.filter((s) => s.outcome !== "pass").map((s) => s.flowId).filter(Boolean),
+      latest.scenarios
+        .filter((s) => s.outcome !== "pass" && s.outcome !== "blocked")
+        .map((s) => s.flowId)
+        .filter(Boolean),
+    );
+    const blockedFlows = new Set(
+      latest.scenarios.filter((s) => s.outcome === "blocked").map((s) => s.flowId).filter(Boolean),
     );
     const driftTag = drifted.size > 0 ? ` · ${drifted.size} with drift` : "";
-    p.log.info(`flows       ${exercised.size}/${manifest.flows.length} exercised${driftTag}`);
+    const blockedTag = blockedFlows.size > 0 ? ` · ${blockedFlows.size} blocked` : "";
+    p.log.info(
+      `flows       ${exercised.size}/${manifest.flows.length} exercised${driftTag}${blockedTag}`,
+    );
   }
 
-  const { pass, fail, error, stale, orphaned } = latest.summary;
+  // What the visual judge had to say, when a failing web step gave it something to
+  // look at. Reported as ACTIVITY, never as a verdict — and the "expected visible"
+  // count is the interesting half: those are the failures where the page looked
+  // right and the ASSERTION is the likely suspect.
+  const visualLine = visualJudgeSummary(latest.scenarios);
+  if (visualLine) p.log.info(visualLine);
+
+  const { pass, fail, error, stale, orphaned, blocked } = latest.summary;
   const parts = [`${pass} passed`];
   if (fail > 0) parts.push(`${fail} failed`);
   if (error > 0) parts.push(`${error} errored`);
   if (stale > 0) parts.push(`${stale} stale`);
   if (orphaned > 0) parts.push(`${orphaned} orphaned`);
+  if (blocked > 0) parts.push(`${blocked} blocked`);
   if (loadErrors.length > 0) parts.push(`${loadErrors.length} unloadable`);
 
   const bad = fail > 0 || error > 0 || stale > 0 || orphaned > 0 || loadErrors.length > 0;
@@ -226,8 +290,19 @@ export async function runGuardRun(opts: RunGuardRunOptions = {}): Promise<void> 
     p.outro("Guard found drift.");
     process.exit(1);
   }
+  // BLOCKED is not drift: nothing about the repo is in dispute, so the run does not
+  // fail on it — but it is also not a clean bill of health, so the close says what
+  // is still unproven and never claims those sections succeeded.
+  if (blocked > 0) {
+    p.log.warn(parts.join(" · "));
+    p.log.info(
+      "Register the supplied dependencies above in .truecourse/scenarios/dependencies.local.json, then re-run.",
+    );
+    p.outro("Every section that ran succeeded — some never ran.");
+    return;
+  }
   p.log.success(parts.join(" · "));
-  p.outro("All sections guarded.");
+  p.outro("Every section that ran succeeded.");
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +317,39 @@ export interface RunGuardGenerateOptions {
   llmTransport?: "cli" | "agent" | "api";
   /** I/O dir for the `agent` transport's request/response mailbox. */
   io?: string;
+  /**
+   * Single-step mode (`--only-<step>`): run one session step in isolation —
+   * prior steps replay from their outcome caches (a missing one aborts loudly),
+   * later steps never start. Only `worker` writes anything durable.
+   */
+  only?: GenerateStep;
 }
+
+/** Human name of each `--only-<step>` generate step, for prose lines. */
+const GENERATE_STEP_LABEL: Record<GenerateStep, string> = {
+  extract: "claim extraction",
+  flows: "flow synthesis",
+  worker: "flow working",
+};
+
+/** The step to suggest after a stopped single-step run. `worker` never stops
+ *  (it completes the generate), so its row is unreachable. */
+const GENERATE_STEP_NEXT: Record<GenerateStep, GenerateStep> = {
+  extract: "flows",
+  flows: "worker",
+  worker: "worker",
+};
+
+/**
+ * The checklist a single-step run actually opens. The engine returns before the
+ * later steps start, so handing the tracker the full list would leave green-less
+ * rows pending forever.
+ */
+const GENERATE_STEP_CHECKLIST: Record<GenerateStep, readonly string[]> = {
+  extract: ["index", "extract"],
+  flows: ["index", "extract", "interfaces", "flows"],
+  worker: GUARD_GENERATE_STEPS.map((s) => s.key),
+};
 
 /**
  * Author scenarios from spec sections. Birth findings (a scenario that failed
@@ -253,12 +360,15 @@ export interface RunGuardGenerateOptions {
  */
 export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
-  p.intro("Guard generate");
+  p.intro(opts.only ? `Guard generate — ${GENERATE_STEP_LABEL[opts.only]} only` : "Guard generate");
   await requireGitRepo(repoRoot);
-  await registerProject(repoRoot);
+  const project = await registerProject(repoRoot);
+  const dashboardUrl = await resolveDashboardUrl();
 
-  if (opts.llmTransport === "agent" && !opts.io) {
-    p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
+  if (opts.llmTransport === "agent") {
+    // The generate pipeline's LLM stages run as agent SESSIONS (plan 04) — the
+    // mailbox transport has no session driver, so there is nothing it could run.
+    p.log.error("--llm-transport agent is not supported by guard generate: its stages run as agent sessions, which the mailbox transport cannot drive. Use --llm-transport cli or api.");
     p.outro("Aborted.");
     process.exit(1);
   }
@@ -267,34 +377,52 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // answers via the filesystem mailbox, so neither applies there).
   await preflightLlmOrExit(opts.llmTransport);
 
-  const autoApprove = !!opts.yes || opts.llmTransport === "agent";
+  const autoApprove = !!opts.yes;
   // The estimate resolves its own spinner line before the panel prints; the
   // checklist below only starts once the run does, so it paints exactly once.
   const renderer = createStdoutStepRenderer();
-  const tracker = new StepTracker(renderer.onProgress, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
+  // Single-step runs get a checklist of only the steps that will open.
+  const stepDefs = opts.only
+    ? GUARD_GENERATE_STEPS.filter((s) => GENERATE_STEP_CHECKLIST[opts.only!].includes(s.key))
+    : GUARD_GENERATE_STEPS;
+  const tracker = new StepTracker(renderer.onProgress, stepDefs.map((s) => ({ ...s })));
   // The ceiling the gate quoted, kept so the summary can print spend against it.
   let estimatedCostUsd: number | undefined;
   let guard;
+  let sessionsRunDir: string | undefined;
   try {
-    ({ guard } = await guardGenerateInProcess(repoRoot, {
+    ({ guard, sessionsRunDir } = await guardGenerateInProcess(repoRoot, {
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
+      ...(opts.only ? { only: opts.only } : {}),
+      // Fires when the (lazily created) run record exists — never on a
+      // fully-cached run, which opens none.
+      onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
       onEstimatePhase: estimateSpinnerPhase(),
       onLlmEstimate: (est) => {
         estimatedCostUsd = est.estimatedCostUsd;
         return promptLlmEstimate(est, { autoApprove, nouns: { verb: "Generate" } });
       },
-      // Authoring failures surface LIVE — a warn line the moment each attempt
-      // fails, above the checklist. A flow that is timing out never ticks the
-      // settle counter, so it is otherwise indistinguishable from a slow one.
-      onAuthorFailure: (f) => renderer.log(authorFailureLine(f)),
     }));
   } catch (e: unknown) {
     renderer.dispose();
     if (e instanceof EstimateDeclined) {
       p.cancel("Generate cancelled.");
       process.exit(0);
+    }
+    // A single-step run found a PRIOR step's cache missing entries: running them
+    // here would blur the step isolation (and mask cache-key drift), so it stops.
+    if (e instanceof GenerateStepNotReadyError) {
+      const n = e.missing.length;
+      p.log.error(
+        `Step not ready — ${n} item${n === 1 ? "" : "s"} missing from the ${GENERATE_STEP_LABEL[e.step]} step's cache:`,
+      );
+      for (const m of e.missing.slice(0, 10)) p.log.message(`  • ${m}`);
+      if (n > 10) p.log.message(`  … (+${n - 10} more)`);
+      p.log.step(`Run \`truecourse guard generate --only-${e.step}\` first, then re-run this step.`);
+      p.outro("Aborted.");
+      process.exit(1);
     }
     // Open spec conflicts block generate before any spend — print the FULL list
     // (area, both repo-relative paths, note) and the resolution pointers, exit 1.
@@ -383,9 +511,40 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
     }
   }
 
+  // A single-step run stopped before the final step: NOTHING durable was
+  // written (no scenario, no manifest, no flows.json, no result.json), so the
+  // whole-generate summary below has nothing to read. Report what this step
+  // did, where its transcripts landed, and which flag comes next.
+  if (guard.stoppedAfter) {
+    printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
+    if (guard.noChanges) {
+      p.log.success(
+        `Nothing to run — the ${GENERATE_STEP_LABEL[guard.stoppedAfter]} step is already settled (its inputs are unchanged).`,
+      );
+    } else if (guard.stoppedAfter === "extract") {
+      p.log.step(`sections    ${guard.sectionsChanged} of ${guard.sectionsTotal} changed`);
+      p.log.step(`claims      ${guard.coverageGaps.length} gap${guard.coverageGaps.length === 1 ? "" : "s"} settled at extraction`);
+      if (guard.extractionFailures.length > 0) {
+        p.log.warn(`${guard.extractionFailures.length} document${guard.extractionFailures.length === 1 ? "" : "s"} failed extraction — re-run this step to retry`);
+      }
+    } else {
+      const f = guard.flows;
+      p.log.step(`flows       ${f.total} synthesized · ${f.dismissed} dismissed · ${f.orphaned} orphaned · ${f.noFlowClaims} claims with no flow`);
+      if (f.unsettledAreas.length > 0) {
+        p.log.warn(`${f.unsettledAreas.length} area${f.unsettledAreas.length === 1 ? "" : "s"} produced no flows:`);
+        for (const u of f.unsettledAreas.slice(0, 10)) p.log.message(`  • ${u.areaId} — ${u.reason}`);
+      }
+    }
+    if (sessionsRunDir) p.log.step(`sessions    ${sessionsRunDir}`);
+    p.outro(
+      `Stopped after ${GENERATE_STEP_LABEL[guard.stoppedAfter]} — nothing written. Next: \`truecourse guard generate --only-${GENERATE_STEP_NEXT[guard.stoppedAfter]}\`.`,
+    );
+    return;
+  }
+
   if (guard.noChanges) {
     printGuardLlmFailures(guard.llmFailures, guard.extractionFailures);
-    p.log.success("Nothing changed — every section is already guarded since the last generate.");
+    p.log.success("Nothing changed — every section is already covered since the last generate.");
     p.outro("Done.");
     return;
   }
@@ -395,18 +554,30 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
   // the in-memory result if the file is somehow absent.
   const report: GuardGenerateReport = (await readGuardResult(repoRoot)) ?? { ...guard, generatedAt: new Date().toISOString() };
   printGuardGenerateSummary(report, path.relative(repoRoot, guardResultPath(repoRoot)), { estimatedCostUsd });
+  // Single-step mode: name where the transcripts landed — the inspection loop's
+  // whole point. (`--only-worker` completes the generate, so it prints the full
+  // summary above and this line instead of a next-flag pointer.)
+  if (opts.only && sessionsRunDir) p.log.step(`sessions    ${sessionsRunDir}`);
 
-  // The runner DECLINED the run — a broken recipe, a half-configured external
-  // account. Nothing was built, booted or validated, so this is the only news the
-  // run has: it prints last, loudly, and exits non-zero. Re-running it changes
-  // nothing until the configuration does, so it never suggests a retry.
+  // The runner DECLINED the run at some validation round, and the latch refused
+  // everything after it. What settled BEFORE the latch is real — each written
+  // scenario passed its own confirmation run — so the line must never claim
+  // "nothing was validated" over a partial corpus (the documenso 13-worker
+  // bench shipped 5 files under exactly that banner). It prints last, loudly,
+  // and exits non-zero; the refusal itself never heals by re-running, but a
+  // re-run DOES resume the refused flows from the authoring cache.
   if (guard.refusal) {
-    p.log.error(`Guard refused the run (${guard.refusal.status}) — nothing was built, started, or validated.`);
+    const written = guard.written.length;
+    p.log.error(
+      written > 0
+        ? `Guard refused the run (${guard.refusal.status}) after ${written} test${written === 1 ? "" : "s"} had already settled and been written — everything after the refusal was declined, not validated.`
+        : `Guard refused the run (${guard.refusal.status}) — nothing was built, started, or validated.`,
+    );
     for (const line of guard.refusal.message.trimEnd().split("\n")) console.log(`  ${line}`);
     if (guard.refusal.flowIds.length > 0) {
       p.log.step(`${guard.refusal.flowIds.length} flow${guard.refusal.flowIds.length === 1 ? "" : "s"} had tests authored but never validated — fix the above and re-run \`truecourse guard generate\` (authoring is cached).`);
     }
-    p.outro(guardGenerateOutro({ written: 0, problems: 0, refused: true }));
+    p.outro(guardGenerateOutro({ written, problems: 0, refused: true }));
     process.exit(1);
   }
 
@@ -427,18 +598,6 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
 }
 
 /**
- * A live authoring-failure warn line: the flow (with its surface), the one-line
- * reason, and whether a corrective re-ask follows (`retrying (2/2)`) or the flow
- * is given up on for this run.
- */
-export function authorFailureLine(f: AuthorFailure): string {
-  const subject = `${f.flowId} · ${f.surface}`;
-  return f.willRetry
-    ? `✗ ${subject} — ${f.reason}, retrying (${f.attempt + 1}/2)`
-    : `✗ ${subject} — ${f.reason}; flow failed, will retry next generate`;
-}
-
-/**
  * The closing line of `guard generate`, from what the run actually left behind.
  *
  * Its one rule: a run that wrote NO test file never says there are tests to review
@@ -451,10 +610,14 @@ export function guardGenerateOutro(o: {
   written: number;
   /** Findings + errors — anything the summary above already listed. */
   problems: number;
-  /** The runner declined the run; nothing was validated and re-running won't help. */
+  /** The runner declined the run at some round; `written` counts the tests that
+   *  settled before the latch (0 = nothing was validated at all). */
   refused?: boolean;
 }): string {
-  if (o.refused) return "Aborted — the run was refused; no tests were written.";
+  if (o.refused)
+    return o.written > 0
+      ? `Aborted — the run was refused; the ${o.written} test${o.written === 1 ? " written before the refusal stands" : "s written before the refusal stand"}.`
+      : "Aborted — the run was refused; no tests were written.";
   if (o.written === 0) return o.problems > 0 ? "No tests written — see the errors above." : "No tests written.";
   return "Review + commit the tests, then `truecourse guard run`.";
 }
@@ -593,17 +756,35 @@ export function printGuardGenerateSummary(
 }
 
 /**
+ * `18 blocked · 25 never run` — a per-coverage-word tally, worst first, silent
+ * about the words nothing is in. The ONE way `guard status` says what is known
+ * about sections or flows: exactly the five words the dashboard's chips wear.
+ */
+function statusTally(byStatus: Record<GuardCoveragePlainStatus, number>): string {
+  const parts = GUARD_COVERAGE_PLAIN_ORDER.flatMap((status) =>
+    byStatus[status] > 0 ? [`${byStatus[status]} ${GUARD_COVERAGE_STATUS_WORD[status].toLowerCase()}`] : [],
+  );
+  return parts.length > 0 ? parts.join(" · ") : "nothing recorded";
+}
+
+/**
  * `12 written · 10 passing · 2 failing (birth)` — the committed test inventory.
  * A failing test is committed like any other; "(birth)" says the stage that judged
- * it, never that it was withheld. The failing half is dropped when there is none.
+ * it, never that it was withheld. The failing and never-run halves are dropped when
+ * there are none; a never-run test is one nothing has executed, so it is never
+ * counted among the passing.
  */
 function testsLine(g: GuardLastGenerateSummary): string {
-  const parts = [`${g.written} written`, `${g.testsPassing} passing`];
+  const parts = [`${g.written} written`];
+  if (g.testsPassing > 0 || (g.testsFailing === 0 && g.testsNeverRun === 0)) {
+    parts.push(`${g.testsPassing} passing`);
+  }
   if (g.testsFailing > 0) parts.push(`${g.testsFailing} failing (birth)`);
+  if (g.testsNeverRun > 0) parts.push(`${g.testsNeverRun} never run`);
   return parts.join(" · ");
 }
 
-/** `1 no journey · 1 awaiting web driver · 2 blocked-on (git 2)` — gaps by display kind. */
+/** `1 no interface · 1 awaiting web driver · 2 blocked-on (git 2)` — gaps by display kind. */
 function gapBreakdown(g: { coverageGapsByKind: Record<string, number>; blockedOnCapabilities: Record<string, number> }): string {
   return Object.entries(g.coverageGapsByKind)
     .filter(([, n]) => n > 0)
@@ -707,8 +888,8 @@ const GUARD_STAGE_LABEL: Record<string, string> = {
 const GUARD_STAGE_EFFECT: Record<string, string> = {
   "guard.recipe": "no recipe proposed",
   "guard.seed": "no seed drafted; the flows it would unblock stay blocked",
-  "guard.extract": "affected documents yielded no claims; their sections stay unguarded",
-  "guard.flows": "affected areas composed no flow; their claims stay unguarded",
+  "guard.extract": "affected documents yielded no claims; their sections stay blocked",
+  "guard.flows": "affected areas composed no flow; their claims stay blocked",
   "guard.match": "affected flows got no realization plan and authored nothing",
   "guard.generate": "affected flows wrote no test",
   "guard.retry": "affected tests stayed birth findings",
@@ -775,10 +956,12 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   const repoRoot = opts.cwd ?? process.cwd();
   p.intro("Guard status");
 
+  const latest = await readGuardLatest(repoRoot);
   const summary = composeGuardStatus(
     await readManifest(repoRoot),
-    await readGuardLatest(repoRoot),
+    latest,
     await readGuardResult(repoRoot),
+    await readGuardSectionTotals(repoRoot),
   );
 
   // Setup — the FIRST row, because it is the first stage and the gate for
@@ -793,20 +976,21 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
   } else {
     const c = summary.coverage;
     const via = ` (via ${c.flows.total} flow${c.flows.total === 1 ? "" : "s"})`;
-    p.log.step(`coverage    ${c.withScenarios}/${c.totalSections} section${c.totalSections === 1 ? "" : "s"} guarded${via}`);
+    // The manifest summary stands in when the all-sections tally is underivable.
+    const sec = summary.sections ?? { total: c.totalSections, byStatus: c.byStatus };
+    p.log.step(
+      `coverage    ${sec.total} section${sec.total === 1 ? "" : "s"}${via} · ${statusTally(sec.byStatus)}`,
+    );
     const cl = c.classification;
-    const parts = [...guardDriverIds.map((d) => `${d} ${cl[d]}`), `untestable ${cl.untestable}`];
+    const parts = [...guardDriverIds.map((d) => `${d} ${cl[d]}`), `not testable ${cl.untestable}`];
     if (cl.unclassified > 0) parts.push(`unclassified ${cl.unclassified}`);
     p.log.message(`    ${parts.join(" · ")}`);
 
-    // The flows line — guarded / partly guarded / nothing realized, with the gap
-    // labels behind the incomplete ones so "why" needs no second command.
+    // The flows line — the same five words over the flows, with the gap labels
+    // behind the blocked ones so "why" needs no second command.
     const f = c.flows;
-    const flowParts = [`${f.total} total`, `${f.guarded} guarded`];
-    if (f.partial > 0) flowParts.push(`${f.partial} partial`);
-    if (f.blocked > 0) flowParts.push(`${f.blocked} blocked`);
     const why = f.gapLabels.length > 0 ? ` (${f.gapLabels.join(" · ")})` : "";
-    p.log.step(`flows       ${flowParts.join(" · ")}${why}`);
+    p.log.step(`flows       ${f.total} total · ${statusTally(f.byStatus)}${why}`);
   }
 
   // Last run — guard/LATEST.json.
@@ -822,7 +1006,23 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
     if (s.error > 0) parts.push(`${MARK.error} ${s.error} error`);
     if (s.stale > 0) parts.push(`${MARK.stale} ${s.stale} stale`);
     if (s.orphaned > 0) parts.push(`${MARK.orphaned} ${s.orphaned} orphaned`);
+    if (s.blocked > 0) parts.push(`${MARK.blocked} ${s.blocked} blocked`);
     p.log.message(`    ${parts.join(" · ")}`);
+    // WHICH dependency, per scenario that never ran — the tally alone says a number
+    // and leaves the reader with nothing to do about it.
+    for (const line of blockedDependencyLines(latest?.scenarios ?? [])) p.log.message(`    ${line}`);
+    // Adjudication + convergence (plan 05 step 23): how many failures carry a
+    // verdict, and whether the last two runs agree per scenario. Silent on an
+    // all-green board — there is nothing to adjudicate.
+    const adjudication = await readGuardAdjudicationView(repoRoot);
+    if (adjudication.failures.length > 0) {
+      const verdicts = adjudication.failures.length - adjudication.unadjudicated;
+      p.log.message(
+        `    adjudicated ${verdicts}/${adjudication.failures.length} failure(s) · ${
+          adjudication.converged ? "converged" : "not converged"
+        }${adjudication.unadjudicated > 0 ? " — run `truecourse guard adjudicate`" : ""}`,
+      );
+    }
   }
 
   // Last generate — guard/result.json.
@@ -836,14 +1036,28 @@ export async function runGuardStatus(opts: RunGuardStatusOptions = {}): Promise<
       p.log.step(`last gen    ${g.generatedAt} · ${g.status}`);
       printStatusLlmFailures(g.llmFailures);
       printStatusUnadjudicated(g.unadjudicated);
+    } else if (g.refused) {
+      // A refused generate reads `status: ok` (the pre-latch scenarios are real)
+      // — without this branch the status line reports it as a clean run.
+      p.log.warn(`last gen    ${g.generatedAt} · ${testsLine(g)} · REFUSED (${g.refused}) — flows after the latch were never validated; re-run \`truecourse guard generate\` (authoring is cached)`);
+      printStatusLlmFailures(g.llmFailures);
+      printStatusUnadjudicated(g.unadjudicated);
     } else {
       p.log.step(`last gen    ${g.generatedAt} · ${testsLine(g)}`);
       const gapTotal = Object.values(g.coverageGapsByKind).reduce((a, b) => a + b, 0);
       const detail: string[] = [];
       if (gapTotal > 0) {
+        // The gap breakdown is the WHY behind the blocked/not-testable counts
+        // above, so it names each gap in words (`no interface`), never as the wire
+        // kind token it is keyed by.
         const kinds = Object.entries(g.coverageGapsByKind)
           .filter(([, n]) => n > 0)
-          .map(([k, n]) => (k === "blocked-on" ? `${n} blocked-on${blockedOnBreakdown(g.blockedOnCapabilities)}` : `${n} ${k}`));
+          .map(([k, n]) => {
+            const label = guardGapDisplayLabel(k as GuardGapDisplayKind);
+            return k === "blocked-on"
+              ? `${n} ${label}${blockedOnBreakdown(g.blockedOnCapabilities)}`
+              : `${n} ${label}`;
+          });
         detail.push(`${gapTotal} gap${gapTotal === 1 ? "" : "s"} (${kinds.join(", ")})`);
       }
       if (g.readyButHeld > 0) detail.push(`${g.readyButHeld} ready but held`);
@@ -930,6 +1144,32 @@ function firstLine(reason: string | undefined): string {
  * separately: its flows convert on the next `guard generate`, not on a form.
  * Empty (and therefore silent) when no blocked flow names a known service.
  */
+/**
+ * The blocked block of `guard status`: one line per unregistered supplied
+ * dependency, with how many scenarios it holds back and what an instance must
+ * satisfy. Grouped by DEPENDENCY, not by scenario, because registering one
+ * instance clears every scenario that binds it — that is the action, so that is
+ * the unit. Empty when nothing is blocked.
+ */
+export function blockedDependencyLines(
+  scenarios: readonly GuardScenarioResult[],
+): string[] {
+  const byDependency = new Map<string, { requirement: string; count: number }>();
+  for (const s of scenarios) {
+    if (s.outcome !== "blocked" || !s.blockedOn) continue;
+    const entry = byDependency.get(s.blockedOn.dependency) ?? {
+      requirement: s.blockedOn.requirement,
+      count: 0,
+    };
+    entry.count += 1;
+    byDependency.set(s.blockedOn.dependency, entry);
+  }
+  return [...byDependency.entries()].map(
+    ([dependency, { requirement, count }]) =>
+      `${MARK.blocked} ${dependency} — ${count} scenario${count === 1 ? "" : "s"} held back; needs ${requirement}`,
+  );
+}
+
 function needsSetupLine(repoRoot: string): string | null {
   const services = guardNeedsSetupServices(readGuardExternalsView(repoRoot));
   if (services.length === 0) return null;
@@ -1013,7 +1253,7 @@ export async function runGuardDrifts(opts: RunGuardDriftsOptions = {}): Promise<
   }
 
   if (drifts.length === 0) {
-    p.log.success("No drift — every guarded section passed.");
+    p.log.success("No drift — every section that ran succeeded.");
     p.outro("Nothing to show.");
     return;
   }

@@ -1,21 +1,21 @@
 /**
  * Realization MATCHING (stage `guard.match`) — the join between the two halves of
- * guard. A flow says WHAT to test (spec-derived, code-blind); a journey catalog
+ * guard. A flow says WHAT to test (spec-derived, code-blind); an interface catalog
  * says HOW the code can be driven (code-derived, spec-blind). One call per (flow,
  * surface) reads the flow's milestones and that surface's catalog DIGEST — ids,
  * entry descriptors, step summaries; never code — and returns either an ordered
- * realization plan (which journey walks which milestone) or an explicit
+ * realization plan (which interface walks which milestone) or an explicit
  * `unrealizable` reason.
  *
  * Both failure shapes are GAPS, never findings, and they are deliberately
  * un-conflated because their remedies are opposite:
  *  - an EMPTY catalog for the surface never reaches the model at all — the caller
- *    settles it as `no-journey` ("the mapper can't see this surface");
+ *    settles it as `no-interface` ("the mapper can't see this surface");
  *  - a matcher refusal (or a plan that still misses a milestone after the one
  *    corrective re-ask) settles as `unrealizable` ("the spec promises this; no code
  *    surface offers it").
  *
- * Every journey id the model returns is validated against the catalog and every
+ * Every interface id the model returns is validated against the catalog and every
  * milestone against the flow — a plan is never trusted to name something real.
  * The cache lives under `.cache/guard/match` (derived, deletable), keyed on the
  * flow fingerprint + the surface's catalog fingerprint + the prompt fingerprint +
@@ -27,18 +27,17 @@
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
-  GUARD_FORMAT_VERSION,
-  journeyEntryLabel,
-  journeyFingerprint,
+  interfaceEntryLabel,
+  interfaceFingerprint,
   type GuardDriverId,
   type GuardFlow,
-  type Journey,
-  type JourneyStep,
+  type Interface,
+  type InterfaceStep,
 } from '@truecourse/shared'
 import { RealizationMatchSchema, type RealizationStep } from './schemas.js'
 import {
   MATCH_PROMPT_FINGERPRINT,
-  type JourneyDigest,
+  type InterfaceDigest,
   type MatchIssues,
   type MatchUserContext,
 } from './prompts.js'
@@ -51,36 +50,46 @@ export const MATCH_CACHE_NAME = 'guard/match'
 // Catalogs
 // ---------------------------------------------------------------------------
 
-/** One surface's journeys plus the fingerprint over that set (the cache key half). */
+/** One surface's interfaces plus the fingerprint over that set (the cache key half). */
 export interface SurfaceCatalog {
   surface: GuardDriverId
-  journeys: Journey[]
-  /** `sha256:…` over the surface's sorted journey fingerprints. */
+  interfaces: Interface[]
+  /** `sha256:…` over the surface's sorted interface fingerprints. */
   fingerprint: string
 }
 
 /**
- * Group a journey catalog by surface (a journey's `type` IS the driver that would
- * run its scenarios) and fingerprint each group over its journeys' own
+ * Group an interface catalog by surface (an interface's `type` IS the driver that would
+ * run its scenarios) and fingerprint each group over its interfaces' own
  * fingerprints, sorted — so the value depends on the SET of surfaces a user can
  * reach, never on derivation order.
+ *
+ * RPC-DERIVED OPERATIONS ARE NOT CANDIDATES (item 12). A tRPC procedure composed
+ * into `POST /api/trpc/viewer.bookings.create` is genuinely invocable, but its
+ * body is the procedure's input schema in tRPC's own envelope, and whether a
+ * scenario should be authored against that encoding is a decision this round did
+ * not take. They stay in the catalog — the web context pack joins a screen's
+ * `trpc.…` calls to exactly these ids — and stay out of the matcher, the
+ * grounding hints and the surface fingerprint, so a repo that gains the RPC
+ * derivation re-authors nothing.
  */
-export function buildSurfaceCatalogs(journeys: readonly Journey[]): Map<GuardDriverId, SurfaceCatalog> {
-  const byType = new Map<GuardDriverId, Journey[]>()
-  for (const journey of journeys) {
-    const list = byType.get(journey.type)
-    if (list) list.push(journey)
-    else byType.set(journey.type, [journey])
+export function buildSurfaceCatalogs(interfaces: readonly Interface[]): Map<GuardDriverId, SurfaceCatalog> {
+  const byType = new Map<GuardDriverId, Interface[]>()
+  for (const iface of interfaces) {
+    if (iface.procedure) continue
+    const list = byType.get(iface.type)
+    if (list) list.push(iface)
+    else byType.set(iface.type, [iface])
   }
   const out = new Map<GuardDriverId, SurfaceCatalog>()
   for (const [surface, list] of byType) {
     const body = list
-      .map((j) => j.fingerprint || journeyFingerprint(j))
+      .map((j) => j.fingerprint || interfaceFingerprint(j))
       .sort()
       .join('\n')
     out.set(surface, {
       surface,
-      journeys: list,
+      interfaces: list,
       fingerprint: `sha256:${createHash('sha256').update(body, 'utf-8').digest('hex')}`,
     })
   }
@@ -88,22 +97,22 @@ export function buildSurfaceCatalogs(journeys: readonly Journey[]): Map<GuardDri
 }
 
 /**
- * One journey's DIGEST — what the matcher is allowed to see. Id, title, the entry
+ * One interface's DIGEST — what the matcher is allowed to see. Id, title, the entry
  * descriptor, and one line per step naming its kind and surface-visible payload.
- * No file paths, no symbols, no source: the same surface-visible shape the journey
+ * No file paths, no symbols, no source: the same surface-visible shape the interface
  * fingerprint hashes.
  */
-export function journeyDigest(journey: Journey): JourneyDigest {
+export function interfaceDigest(iface: Interface): InterfaceDigest {
   return {
-    id: journey.id,
-    title: journey.title,
-    entry: journeyEntryLabel(journey.entry),
-    steps: journey.steps.map(stepSummary),
+    id: iface.id,
+    title: iface.title,
+    entry: interfaceEntryLabel(iface.entry),
+    steps: iface.steps.map(stepSummary),
   }
 }
 
 /** One step as a single digest line — kind plus its surface-visible payload. */
-function stepSummary(step: JourneyStep): string {
+function stepSummary(step: InterfaceStep): string {
   switch (step.kind) {
     case 'invoke':
       return `invoke: ${step.command.join(' ')}${step.flags.length > 0 ? `  flags: ${step.flags.join(' ')}` : ''}`
@@ -121,21 +130,21 @@ function stepSummary(step: JourneyStep): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Translate one journey into the DRIVER's own verbs for the authoring prompt —
+ * Translate one interface into the DRIVER's own verbs for the authoring prompt —
  * the adapter table applied exactly once, here, and never interpreted at run time:
  * `invoke` → cli `run`, `request` → api `request`, and the interaction kinds →
- * the web driver's verbs when it ships. The journey is the abstract program; the
+ * the web driver's verbs when it ships. The interface is the abstract program; the
  * committed scenario is the compiled artifact, in the driver's closed vocabulary.
  *
- * Steps a driver has no verb for still render (naming the journey step in its own
+ * Steps a driver has no verb for still render (naming the interface step in its own
  * terms) rather than vanishing: a silently thinned realization would read to the
- * author as "this journey does less than it does".
+ * author as "this interface does less than it does".
  */
-export function realizationLines(journey: Journey, driver: GuardDriverId): string[] {
-  return journey.steps.map((step) => `${driverVerb(step, driver)}   (journey ${journey.id})`)
+export function realizationLines(iface: Interface, driver: GuardDriverId): string[] {
+  return iface.steps.map((step) => `${driverVerb(step, driver)}   (interface ${iface.id})`)
 }
 
-function driverVerb(step: JourneyStep, driver: GuardDriverId): string {
+function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
   switch (step.kind) {
     case 'invoke': {
       const flags = step.flags.length > 0 ? `   accepts: ${step.flags.join(' ')}` : ''
@@ -174,7 +183,6 @@ export function matchCacheKey(
     .update(
       [
         MATCH_PROMPT_FINGERPRINT,
-        String(GUARD_FORMAT_VERSION),
         catalog.surface,
         catalog.fingerprint,
         flow.fingerprint,
@@ -187,7 +195,7 @@ export function matchCacheKey(
  * The cached verdict for one (flow, surface), re-validated against the live
  * catalog — `null` when nothing is cached (or the entry can no longer be trusted,
  * so the run would call). The pre-flight estimate reads it to reconstruct the
- * journeys a flow grounds on WITHOUT calling the model, which is what lets it
+ * interfaces a flow grounds on WITHOUT calling the model, which is what lets it
  * compute the same per-flow inputs hash the run compares against the manifest.
  */
 export async function readCachedMatch(
@@ -203,7 +211,7 @@ export async function readCachedMatch(
   if (parsed.data.unrealizable) return { plan: null, unrealizable: parsed.data.unrealizable }
   const v = validateMatch(flow, catalog, parsed.data.plan)
   if (hasIssues(v.issues)) return null
-  return { plan: { surface: catalog.surface, steps: v.steps, journeys: pathOf(v.steps) } }
+  return { plan: { surface: catalog.surface, steps: v.steps, interfaces: pathOf(v.steps) } }
 }
 
 /** One planned (flow, surface) match — the estimate and the run read the same row. */
@@ -235,7 +243,7 @@ export async function planFlowMatching(
   const pairs: MatchPairPlan[] = []
   for (const flow of flows) {
     for (const catalog of catalogs) {
-      if (catalog.journeys.length === 0) continue
+      if (catalog.interfaces.length === 0) continue
       const cacheKey = matchCacheKey(flow, catalog)
       pairs.push({
         flowId: flow.id,
@@ -252,19 +260,19 @@ export async function planFlowMatching(
 // Matching
 // ---------------------------------------------------------------------------
 
-/** One milestone's realization: the journeys chosen for it, in plan order. */
+/** One milestone's realization: the interfaces chosen for it, in plan order. */
 export interface RealizedMilestone {
   milestone: number
-  journeys: Journey[]
+  interfaces: Interface[]
 }
 
 /** A flow's realization on ONE surface — the plan the authoring call is given. */
 export interface RealizationPlan {
   surface: GuardDriverId
   /** The plan entries in the model's order, validated against flow + catalog. */
-  steps: { journey: Journey; milestone: number; note?: string }[]
-  /** The distinct journeys the plan walks, in first-use order — the scenario's `journey.path`. */
-  journeys: Journey[]
+  steps: { interface: Interface; milestone: number; note?: string }[]
+  /** The distinct interfaces the plan walks, in first-use order — the scenario's `interface.path`. */
+  interfaces: Interface[]
 }
 
 /** A flow's verdict on one surface: a plan, a stated refusal, or a stage failure. */
@@ -275,7 +283,7 @@ export type MatchOutcome =
 
 /** Validation of one raw match reply against the flow and the surface's catalog. */
 interface MatchValidation {
-  steps: { journey: Journey; milestone: number; note?: string }[]
+  steps: { interface: Interface; milestone: number; note?: string }[]
   issues: MatchIssues
 }
 
@@ -284,16 +292,16 @@ function validateMatch(
   catalog: SurfaceCatalog,
   raw: readonly RealizationStep[],
 ): MatchValidation {
-  const byId = new Map(catalog.journeys.map((j) => [j.id, j]))
+  const byId = new Map(catalog.interfaces.map((j) => [j.id, j]))
   const milestoneOrders = new Set(flow.milestones.map((m) => m.order))
-  const issues: MatchIssues = { unknownJourneys: [], uncoveredMilestones: [], unknownMilestones: [] }
-  const steps: { journey: Journey; milestone: number; note?: string }[] = []
+  const issues: MatchIssues = { unknownInterfaces: [], uncoveredMilestones: [], unknownMilestones: [] }
+  const steps: { interface: Interface; milestone: number; note?: string }[] = []
   const covered = new Set<number>()
 
   for (const entry of raw) {
-    const journey = byId.get(entry.journeyId.trim())
-    if (!journey) {
-      if (!issues.unknownJourneys.includes(entry.journeyId)) issues.unknownJourneys.push(entry.journeyId)
+    const iface = byId.get(entry.interfaceId.trim())
+    if (!iface) {
+      if (!issues.unknownInterfaces.includes(entry.interfaceId)) issues.unknownInterfaces.push(entry.interfaceId)
       continue
     }
     if (!milestoneOrders.has(entry.milestone)) {
@@ -301,7 +309,7 @@ function validateMatch(
       continue
     }
     covered.add(entry.milestone)
-    steps.push({ journey, milestone: entry.milestone, ...(entry.note ? { note: entry.note } : {}) })
+    steps.push({ interface: iface, milestone: entry.milestone, ...(entry.note ? { note: entry.note } : {}) })
   }
   issues.uncoveredMilestones = flow.milestones.map((m) => m.order).filter((order) => !covered.has(order))
   return { steps, issues }
@@ -309,20 +317,20 @@ function validateMatch(
 
 function hasIssues(issues: MatchIssues): boolean {
   return (
-    issues.unknownJourneys.length > 0 ||
+    issues.unknownInterfaces.length > 0 ||
     issues.unknownMilestones.length > 0 ||
     issues.uncoveredMilestones.length > 0
   )
 }
 
-/** The plan's distinct journeys in first-use order — the scenario's journey path. */
-function pathOf(steps: readonly { journey: Journey }[]): Journey[] {
+/** The plan's distinct interfaces in first-use order — the scenario's interface path. */
+function pathOf(steps: readonly { interface: Interface }[]): Interface[] {
   const seen = new Set<string>()
-  const out: Journey[] = []
+  const out: Interface[] = []
   for (const s of steps) {
-    if (seen.has(s.journey.id)) continue
-    seen.add(s.journey.id)
-    out.push(s.journey)
+    if (seen.has(s.interface.id)) continue
+    seen.add(s.interface.id)
+    out.push(s.interface)
   }
   return out
 }
@@ -332,7 +340,7 @@ function uncoveredReason(flow: GuardFlow, orders: readonly number[]): string {
   const titles = orders
     .map((order) => flow.milestones.find((m) => m.order === order)?.claimTitle ?? `milestone ${order}`)
     .map((t) => `"${t.replace(/\s+/g, ' ').trim()}"`)
-  return `no journey realizes ${orders.length === 1 ? 'milestone' : 'milestones'} ${orders.join(', ')} — ${titles.join('; ')}`
+  return `no interface realizes ${orders.length === 1 ? 'milestone' : 'milestones'} ${orders.join(', ')} — ${titles.join('; ')}`
 }
 
 function buildContext(flow: GuardFlow, catalog: SurfaceCatalog): MatchUserContext {
@@ -343,14 +351,14 @@ function buildContext(flow: GuardFlow, catalog: SurfaceCatalog): MatchUserContex
       .sort((a, b) => a.order - b.order)
       .map((m) => ({ order: m.order, claim: m.claimTitle, ...(m.note ? { note: m.note } : {}) })),
     surface: catalog.surface,
-    journeys: catalog.journeys.map(journeyDigest),
+    interfaces: catalog.interfaces.map(interfaceDigest),
   }
 }
 
 /**
  * Match ONE flow against ONE surface's catalog: cache → call → exactly one
  * corrective re-ask on an invalid or unusable answer. A surface whose catalog is
- * empty must never reach here (the caller settles it as `no-journey`) — matching
+ * empty must never reach here (the caller settles it as `no-interface`) — matching
  * with nothing to choose from could only produce noise.
  */
 export async function matchFlow(
@@ -368,7 +376,7 @@ export async function matchFlow(
     if (hasIssues(v.issues)) return null
     return {
       kind: 'plan',
-      plan: { surface: catalog.surface, steps: v.steps, journeys: pathOf(v.steps) },
+      plan: { surface: catalog.surface, steps: v.steps, interfaces: pathOf(v.steps) },
       calls: 0,
     }
   }
@@ -410,14 +418,14 @@ export async function matchFlow(
       if (attempt > 0) {
         // The model had its correction and still cannot walk the whole path. That IS
         // the honest verdict: uncovered milestones read as unrealizable (the signal),
-        // while an answer that keeps naming journeys the catalog doesn't have is a
+        // while an answer that keeps naming interfaces the catalog doesn't have is a
         // stage failure, not a statement about the product.
-        if (v.issues.uncoveredMilestones.length > 0 && v.issues.unknownJourneys.length === 0) {
+        if (v.issues.uncoveredMilestones.length > 0 && v.issues.unknownInterfaces.length === 0) {
           return { kind: 'unrealizable', reason: uncoveredReason(flow, v.issues.uncoveredMilestones), calls }
         }
         return {
           kind: 'error',
-          reason: `match named ${v.issues.unknownJourneys.length} journey id(s) outside the catalog after re-ask (${v.issues.unknownJourneys[0]})`,
+          reason: `match named ${v.issues.unknownInterfaces.length} interface id(s) outside the catalog after re-ask (${v.issues.unknownInterfaces[0]})`,
           calls,
         }
       }
@@ -427,7 +435,7 @@ export async function matchFlow(
     await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, parsed.data)
     return {
       kind: 'plan',
-      plan: { surface: catalog.surface, steps: v.steps, journeys: pathOf(v.steps) },
+      plan: { surface: catalog.surface, steps: v.steps, interfaces: pathOf(v.steps) },
       calls,
     }
   }

@@ -1,10 +1,10 @@
 /**
- * Guard is a top-level section (Coverage / Flows / Journeys / Runs) and its
+ * Guard is a top-level section (Coverage / Tests / Interfaces / Runs) and its
  * rail-dot policy matches BL Drift: amber STALENESS dots live on the header action
  * buttons (Generate/Run — pinned in guard-actions tests) ONLY, and there are NO
  * rail-tab dots of ANY kind. The findings marker that used to live on the
  * inventory tab is gone too; the "findings never bury" rule is served by the
- * Flows overview's "last generate" strip auto-expanding (proven in guard-scenarios).
+ * Tests inventory's "last generate" strip auto-expanding (proven in guard-scenarios).
  * These tests pin the LeftSidebar wiring for the guard section: the tabs render,
  * clicking reports the tab id, and no rail dot ever appears. The registry- and
  * URL-level pieces (three sections, coverage default, legacy aliases) live in
@@ -34,16 +34,16 @@ function renderRail({
 }
 
 describe('Guard section — rail tabs', () => {
-  it('renders the guard tabs on the rail (Coverage · Flows · Journeys · Runs; no Spec, Scenarios or Generate tab)', () => {
+  it('renders the guard tabs on the rail (Coverage · Tests · Interfaces · Runs; no Spec, Scenarios or Generate tab)', () => {
     renderRail();
-    for (const label of ['Coverage', 'Flows', 'Journeys', 'Runs']) {
+    for (const label of ['Coverage', 'Tests', 'Interfaces', 'Runs']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: 'Spec' })).toBeNull();
-    // Flows replaced the flat Scenarios inventory — a scenario is reached through
+    // Tests replaced the flat Scenarios inventory — a scenario is reached through
     // its flow, never as a top-level list.
     expect(screen.queryByRole('button', { name: 'Scenarios' })).toBeNull();
-    // The Generate/Report tab folded into Flows — no rail tab of its own.
+    // The Generate/Report tab folded into Tests — no rail tab of its own.
     expect(screen.queryByRole('button', { name: 'Generate' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();
   });
@@ -53,11 +53,11 @@ describe('Guard section — rail tabs', () => {
     const user = userEvent.setup();
     renderRail({ onTabChange: (t) => clicks.push(t) });
 
-    await user.click(screen.getByRole('button', { name: 'Flows' }));
-    await user.click(screen.getByRole('button', { name: 'Journeys' }));
+    await user.click(screen.getByRole('button', { name: 'Tests' }));
+    await user.click(screen.getByRole('button', { name: 'Interfaces' }));
     await user.click(screen.getByRole('button', { name: 'Runs' }));
 
-    expect(clicks).toEqual(['guardflows', 'journeys', 'guarddrifts']);
+    expect(clicks).toEqual(['guardflows', 'interfaces', 'guarddrifts']);
   });
 });
 
@@ -67,7 +67,7 @@ describe('Guard section — rail-dot policy (match BL Drift: dots on action butt
     // The old amber staleness/findings dot mechanism is removed entirely.
     expect(screen.queryAllByLabelText('stale')).toHaveLength(0);
     // No amber marker leaks onto any tab.
-    for (const label of ['Coverage', 'Flows', 'Journeys', 'Runs']) {
+    for (const label of ['Coverage', 'Tests', 'Interfaces', 'Runs']) {
       const tab = screen.getByRole('button', { name: label });
       expect(tab.querySelector('.bg-amber-500, .bg-amber-400')).toBeNull();
     }

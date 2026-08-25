@@ -1,1 +1,5 @@
 tests/fixtures/
+# Spec corpus comes from the connected docs site only — every repo markdown is
+# excluded. (Web-source snapshots under .truecourse/specs/sources/ are exempt
+# from this file by design, so the site always enters the scan.)
+*.md

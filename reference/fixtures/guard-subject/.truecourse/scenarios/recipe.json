@@ -1,0 +1,8 @@
+{
+  "install": "npm ci",
+  "build": "npm run build",
+  "entry": [
+    "node",
+    "./dist/cli.js"
+  ]
+}

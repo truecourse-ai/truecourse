@@ -232,10 +232,18 @@ function pageTitle(link: LlmsTxtLink): string {
   return segments[segments.length - 1] ?? link.url;
 }
 
+/**
+ * The extensions a docs site publishes its raw source under, in probe order.
+ * `.md` first because it is the common case; `.mdx` because fumadocs and
+ * Mintlify sites (docs.documenso.com among them) serve only that one and answer
+ * `.md` with a soft 404 — probing just `.md` there skips the entire site.
+ */
+const TWIN_EXTENSIONS = ['.md', '.mdx'] as const;
+
 /** `https://x/a` → `https://x/a.md` (the speculative markdown twin of a page URL). */
-function markdownTwin(url: string): string {
+function markdownTwin(url: string, extension: string): string {
   const twin = new URL(url);
-  twin.pathname = `${twin.pathname.replace(/\/+$/, '')}.md`;
+  twin.pathname = `${twin.pathname.replace(/\/+$/, '')}${extension}`;
   return twin.toString();
 }
 
@@ -243,7 +251,7 @@ type PageOutcome = { page: FetchedPage } | { skip: SourceSkip };
 
 async function fetchPage(link: LlmsTxtLink, opts: ResolvedOptions): Promise<PageOutcome> {
   const title = pageTitle(link);
-  const isMarkdownUrl = /\.md$/i.test(new URL(link.url).pathname);
+  const isMarkdownUrl = /\.mdx?$/i.test(new URL(link.url).pathname);
 
   if (isMarkdownUrl) {
     try {
@@ -254,14 +262,16 @@ async function fetchPage(link: LlmsTxtLink, opts: ResolvedOptions): Promise<Page
     }
   }
 
-  try {
-    const res = await get(markdownTwin(link.url), opts);
-    if (!HTML_CONTENT_TYPES.has(contentType(res))) {
-      return { page: { url: link.url, title, content: await res.text() } };
+  for (const extension of TWIN_EXTENSIONS) {
+    try {
+      const res = await get(markdownTwin(link.url, extension), opts);
+      if (!HTML_CONTENT_TYPES.has(contentType(res))) {
+        return { page: { url: link.url, title, content: await res.text() } };
+      }
+      await discard(res);
+    } catch {
+      /* no twin under this extension — try the next, then the page itself */
     }
-    await discard(res);
-  } catch {
-    /* no markdown twin — fall through to the page itself */
   }
 
   try {

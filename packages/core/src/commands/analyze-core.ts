@@ -17,7 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { log } from '../lib/logger.js';
-import { getGit } from '../lib/git.js';
+import { getGit, getUserWorkingTreeStatus } from '../lib/git.js';
 import { readProjectConfig } from '../config/project-config.js';
 import { touchProject } from '../config/registry.js';
 import type { RegistryEntry } from '../config/registry.js';
@@ -116,6 +116,29 @@ export interface LlmEstimate {
   costSource?: 'live' | 'cache' | 'bundled';
   /** True when some stage's model couldn't be priced (cost is a partial total). */
   costPartial?: boolean;
+}
+
+/**
+ * The LLM-rules decision for one run, from the per-run override and the repo's
+ * saved setting.
+ *
+ * The override wins. `analyze --llm` / `--no-llm` are documented as applying
+ * "for that run", and the pre-commit hook's `llm:` policy and the hosted gate's
+ * per-request flag are the same kind of explicit, this-invocation decision —
+ * none of them mean anything if the value `rules llm --enable/--disable` wrote
+ * into `config.json` outranks them. `null` is what `rules llm --reset` writes
+ * for "no opinion", so it falls through to the built-in default like an absent
+ * setting does.
+ *
+ * The CLI resolves the same precedence up front (`resolveLlmDecision`) to gate
+ * the `claude` preflight and size its checklist; this is the value the pipeline
+ * and the cost estimate run on, and the two must agree.
+ */
+export function resolveEnableLlmRules(
+  override: boolean | undefined,
+  configured: boolean | null | undefined,
+): boolean {
+  return override ?? configured ?? true;
 }
 
 export interface AnalyzeCoreOptions {
@@ -230,8 +253,10 @@ export async function analyzeCore(
     const effectiveCategories = options.enabledCategoriesOverride?.length
       ? options.enabledCategoriesOverride
       : projectConfig.enabledCategories ?? undefined;
-    const effectiveLlmRules =
-      projectConfig.enableLlmRules ?? options.enableLlmRulesOverride ?? true;
+    const effectiveLlmRules = resolveEnableLlmRules(
+      options.enableLlmRulesOverride,
+      projectConfig.enableLlmRules,
+    );
 
     // ------------------------------------------------------------
     // Stash dirty working tree so the entire pipeline (parse + LLM scan +
@@ -243,8 +268,11 @@ export async function analyzeCore(
     if (!isDiff && !skipGit && !options.skipStash) {
       try {
         stashGit = await getGit(codeDir);
-        const status = await stashGit.status();
-        if (!status.isClean()) {
+        // Only the user's own changes are worth stashing — `.truecourse/` is
+        // this run's own store (it is being written to right now), so a tree
+        // dirty only by it must not be swept into a stash.
+        const status = await getUserWorkingTreeStatus(stashGit);
+        if (!status.isClean) {
           const gitRoot = (await stashGit.revparse(['--show-toplevel'])).trim();
           // Skip stashing when the repo path is a subdirectory of a larger
           // repo (e.g., test fixtures inside the main repo). Stashing there

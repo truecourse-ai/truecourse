@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "dismissedClaims": [],
+  "dismissedFlows": [
+    {
+      "flowId": "start-the-bookclub-service-and-manage-a-book-on-the-shelf",
+      "title": "Start bookclub and manage a book on the shelf",
+      "dismissedAt": "2026-08-10T04:53:57.752Z",
+      "note": "A nine-milestone tour of the whole product in one test. Every milestone it walks is already asserted by a focused flow (check-service-health, require-member-token-to-add-a-book, add-a-duplicate-isbn, handle-missing-book-details); bundling them adds no coverage and no single scenario expresses them faithfully."
+    },
+    {
+      "flowId": "add-find-view-cover-and-finish-a-book",
+      "title": "Add, list, get, and finish a book",
+      "dismissedAt": "2026-08-10T04:53:58.600Z",
+      "note": "A five-milestone tour across four sections, duplicating flows that already pass one behaviour at a time. It also walks the experimental cover endpoint, which is deliberately outside the published contract in docs/openapi.yaml."
+    },
+    {
+      "flowId": "run-the-service",
+      "title": "Run the service",
+      "dismissedAt": "2026-08-10T04:53:59.508Z",
+      "note": "A startup tour bundling configuration defaults, boot migrations, the startup log line and the health probe into one test. The health behaviour is asserted by check-service-health and the configuration defaults by print-configuration-with-a-redacted-database-password."
+    },
+    {
+      "flowId": "keep-a-member-token-working-after-restart",
+      "title": "Keep a member token working after restart",
+      "dismissedAt": "2026-08-10T04:54:00.359Z",
+      "note": "Asserting this needs the service restarted midway through a single scenario, which the api driver cannot express — a scenario boots one server. The statelessness it rests on is a property of the token, not an endpoint response."
+    },
+    {
+      "flowId": "finish-and-re-finish-a-book",
+      "title": "Finish and re-finish a book",
+      "dismissedAt": "2026-08-10T04:54:01.191Z",
+      "note": "Re-stamping can only be shown by comparing two finishedAt timestamps across steps, which the expectation vocabulary cannot state. The finish behaviour itself is asserted by require-member-token-to-finish-a-book and handle-finishing-an-unknown-book."
+    },
+    {
+      "flowId": "add-a-book-and-prevent-another-copy-of-the-same-isbn",
+      "title": "Add a book and prevent another copy of the same ISBN",
+      "dismissedAt": "2026-08-10T05:07:21.403Z",
+      "note": "Bundles ISBN normalisation with the one-copy-per-ISBN refusal; the fidelity reviewer rejects every authored form of the pair. Both halves already pass on their own — reject-an-invalid-isbn covers normalisation and add-a-duplicate-isbn covers the 409."
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import spawn from 'cross-spawn';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../../lib/logger.js';
+import { cleanClaudeEnv } from '../../lib/cli-binary.js';
 import pLimit, { type LimitFunction } from 'p-limit';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -159,15 +160,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
     if (jsonSchema) writeFileSync(`${prefix}-schema.json`, jsonSchema, 'utf-8');
   }
 
-  /** Strip nesting guard env vars so subprocess doesn't detect parent Claude Code. */
+  /**
+   * Strip nesting guard env vars so subprocess doesn't detect parent Claude
+   * Code, keeping the headless credential. Shared with the login preflight so
+   * a probe that passes can't be followed by a call that can't authenticate.
+   */
   protected getCleanEnv(): NodeJS.ProcessEnv {
-    const env = { ...process.env };
-    for (const key of Object.keys(env)) {
-      if (key.startsWith('CLAUDE_CODE') || key.startsWith('CLAUDE_INTERNAL')) {
-        delete env[key];
-      }
-    }
-    return env;
+    return cleanClaudeEnv();
   }
 
   /** Convert a Zod schema to JSON Schema string for --json-schema flag. */

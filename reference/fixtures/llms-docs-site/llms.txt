@@ -1,0 +1,8 @@
+# Slate Docs
+> Documentation for Slate, the appointment scheduling platform.
+
+- [Getting started](http://127.0.0.1:4173/guides/getting-started.md): Install Slate and take your first booking.
+- [Cancellation policy](http://127.0.0.1:4173/guides/cancellations.md): Windows, fees, and the no-show rule.
+- [Webhooks](http://127.0.0.1:4173/guides/webhooks.md): Subscribe to appointment events.
+- [Release notes](http://127.0.0.1:4173/changelog.html): What shipped, by month.
+- [Status page](https://status.example.com/slate.md): Live service status.

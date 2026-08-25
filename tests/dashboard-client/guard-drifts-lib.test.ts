@@ -2,14 +2,13 @@
  * The guard drift/report shaping helpers — pure, deterministic, and the client
  * mirror of the core composition, so they get their own fast unit test: drift
  * ordering (fail → error → stale → orphaned, stable within tier), the report
- * settled/unsettled split, gap-by-kind + the full blocked-on tally, and error
- * pattern grouping.
+ * settled/unsettled split, and gap-by-kind + the full blocked-on tally.
  */
 
 import { describe, it, expect } from 'vitest';
 import type { GuardGenerateReport, GuardScenarioResult } from '@truecourse/shared';
 import { GUARD_DRIFT_ORDER, formatGuardDuration, orderGuardDrifts, sectionLeaf, shortFingerprint } from '@/lib/guard-drifts';
-import { blockedOnTally, deferredSectionCount, gapsByKind, groupErrorsByPattern, settledCounts } from '@/lib/guard-report';
+import { blockedOnTally, gapsByKind, settledCounts } from '@/lib/guard-report';
 
 function scn(id: string, outcome: GuardScenarioResult['outcome']): GuardScenarioResult {
   return {
@@ -128,36 +127,5 @@ describe('gapsByKind / blockedOnTally', () => {
       { capability: 'git', count: 2 },
       { capability: 'db', count: 1 },
     ]);
-  });
-});
-
-describe('groupErrorsByPattern', () => {
-  it('folds quoted spans + numbers to group, keeping a FULL message + distinct sections', () => {
-    const groups = groupErrorsByPattern(REPORT.errors);
-    // The two `invalid verb "…" at step N` messages collapse to one pattern, over
-    // their two distinct sections (doc + anchor, not bare anchors).
-    const verbGroup = groups.find((g) => g.pattern.includes('invalid verb'));
-    expect(verbGroup?.sections).toEqual([
-      { doc: 'd', anchor: 'sec/x' },
-      { doc: 'd', anchor: 'sec/z' },
-    ]);
-    // The representative message is kept verbatim (unfolded) for the detail view.
-    expect(verbGroup?.message).toBe('invalid verb "frobnicate" at step 3');
-    // The schema-mismatch message is its own group.
-    expect(groups.some((g) => g.pattern.includes('schema mismatch'))).toBe(true);
-    // Most-affected pattern first.
-    expect(groups[0].sections).toHaveLength(2);
-  });
-});
-
-describe('deferredSectionCount', () => {
-  it('counts DISTINCT sections across errors — a section erroring twice counts once', () => {
-    expect(deferredSectionCount(REPORT.errors)).toBe(3);
-    expect(
-      deferredSectionCount([
-        { doc: 'd', anchor: 'sec/x', message: 'first pattern' },
-        { doc: 'd', anchor: 'sec/x', message: 'second pattern on the same section' },
-      ]),
-    ).toBe(1);
   });
 });

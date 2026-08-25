@@ -70,6 +70,14 @@ export interface ChildEnvOptions {
   scenarioEnv?: Record<string, string>
   /** Host vars to pass through by name (the build's broader needs). */
   passthrough?: readonly string[]
+  /**
+   * Directories prepended to the child's PATH — the recipe's `expose` shim dir, so
+   * anything in the sandbox that invokes the program under test BY NAME gets the
+   * build under test rather than whatever copy the machine has installed. Prepended,
+   * never substituted: the host PATH still has to resolve `node`, `git`, and the
+   * rest of the toolchain a program legitimately needs.
+   */
+  pathPrefix?: readonly string[]
 }
 
 /**
@@ -129,9 +137,22 @@ export function constructChildEnv(opts: ChildEnvOptions): NodeJS.ProcessEnv {
     env.FORCE_COLOR = '0'
   }
 
+  // Corepack must never stop a child on its interactive "about to download"
+  // prompt — every spawn here is non-interactive, and the prompt killed real
+  // server boots (cal.diy, 2026-08-20). A default, so a recipe can still
+  // override it below.
+  env.COREPACK_ENABLE_DOWNLOAD_PROMPT = '0'
+
   // Declared additions, recipe then scenario (scenario wins).
   if (opts.recipeEnv) Object.assign(env, opts.recipeEnv)
   if (opts.scenarioEnv) Object.assign(env, opts.scenarioEnv)
+
+  // The exposed-program shims go on LAST and in FRONT, after every declared layer,
+  // so no `env` entry (recipe or scenario) can accidentally shadow the program under
+  // test with the host's copy.
+  if (opts.pathPrefix?.length) {
+    env.PATH = [...opts.pathPrefix, env.PATH].filter(Boolean).join(path.delimiter)
+  }
 
   return env
 }

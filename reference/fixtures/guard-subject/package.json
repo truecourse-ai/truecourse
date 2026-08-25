@@ -1,0 +1,19 @@
+{
+  "name": "covergate",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Coverage gate and shields.io badge generator for Istanbul json-summary reports",
+  "type": "module",
+  "bin": {
+    "covergate": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "strip-json-comments": "^5.0.1"
+  }
+}

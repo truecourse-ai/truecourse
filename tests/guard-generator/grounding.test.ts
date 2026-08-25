@@ -11,9 +11,10 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  buildJourneyContractHints,
+  buildInterfaceContractHints,
   buildOtherOperationHints,
   buildOutboundRequestHints,
+  buildResourceHints,
   outboundOverflow,
   MAX_OTHER_OPERATIONS,
   MAX_OUTBOUND_REQUESTS,
@@ -21,18 +22,18 @@ import {
   MAX_RESPONSE_FIELDS,
 } from '../../packages/guard-generator/src/grounding';
 import { buildAuthorUserPrompt, type AuthorUserContext } from '../../packages/guard-generator/src/prompts';
-import type { ApiRequestContract, DetectedExternalService, Journey, OutboundRequest } from '../../packages/shared/src';
+import type { ApiRequestContract, DetectedExternalService, Interface, OutboundRequest } from '../../packages/shared/src';
 import {
   makeTempRepo,
   rmrf,
   writeDoc,
   writeCorpus,
   writeApiRecipe,
-  extractBy,
-  authorBy,
+  extractSessionBy,
+  submitWorkerSessions,
   runGenerate,
-  journeysOf,
-  apiJourney as helperApiJourney,
+  interfacesOf,
+  apiInterface as helperApiInterface,
   withCodeTruth,
   rawApi,
   PASSING_API_STEPS,
@@ -40,7 +41,7 @@ import {
 
 const LOCATION = { filePath: '/repo/src/upstream/forecast.ts', startLine: 1, endLine: 1, startColumn: 0, endColumn: 1 };
 
-function apiJourney(method: string, path: string): Journey {
+function apiInterface(method: string, path: string): Interface {
   return {
     id: `api/${method.toLowerCase()}${path.replace(/\W+/g, '-')}`,
     type: 'api',
@@ -48,7 +49,7 @@ function apiJourney(method: string, path: string): Journey {
     entry: { method, path },
     steps: [{ kind: 'request', method, path }],
     fingerprint: `fp-${method}-${path}`,
-  } as Journey;
+  } as Interface;
 }
 
 const FORECAST: OutboundRequest = {
@@ -72,7 +73,7 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
   return {
     flow: { id: 'f', title: 'Flow', goal: 'goal' },
     milestones: [{ order: 1, claim: 'c', doc: 'd.md', sectionHeading: 'h', sectionText: 't', realization: [] }],
-    journeyPath: [],
+    interfacePath: [],
     areaTags: [],
     driver: 'api',
     recipeBuild: 'npm run build',
@@ -80,52 +81,75 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
   };
 }
 
-describe('buildJourneyContractHints', () => {
-  const contracts: ApiRequestContract[] = [
-    {
-      method: 'POST',
-      path: '/v1/auth/signup',
-      bodyFields: [
-        { name: 'email', required: true },
-        { name: 'name', required: true },
-        { name: 'referrer', required: false },
-      ],
-    },
-  ];
+/** An api interface carrying its own request contract — the catalog shape the
+ *  mapper writes since the contract found its one home (plan item 102). */
+function contracted(
+  method: string,
+  path: string,
+  request: { query?: { name: string; required: boolean | 'unknown' }[]; body?: { name: string; required: boolean | 'unknown' }[] },
+): Interface {
+  return { ...apiInterface(method, path), contract: { surface: 'api', operation: { request } } };
+}
 
-  it('carries the contract onto the operation the plan walks', () => {
-    const [hint] = buildJourneyContractHints([apiJourney('POST', '/v1/auth/signup')], contracts);
-    expect(hint.bodyFields).toEqual(contracts[0].bodyFields);
+const SIGNUP = contracted('POST', '/v1/auth/signup', {
+  body: [
+    { name: 'email', required: true },
+    { name: 'name', required: true },
+    { name: 'referrer', required: false },
+  ],
+});
+
+describe('buildInterfaceContractHints', () => {
+  it('reads the contract off the operation itself — there is nothing left to join', () => {
+    const [hint] = buildInterfaceContractHints([SIGNUP]);
+    expect(hint.bodyFields).toEqual([
+      { name: 'email', required: true },
+      { name: 'name', required: true },
+      { name: 'referrer', required: false },
+    ]);
+  });
+
+  it('renders only what the contract carries — the widened fields stay out of the prompt', () => {
+    // A hand-authored contract may say more about a field (its choices, its
+    // default, a sentence); the hint is the two facts the prompt has always
+    // shown, so enriching a catalog cannot silently re-author a scenario.
+    const rich = contracted('GET', '/v1/favorites', {
+      query: [{ name: 'limit', required: false, hint: 'n', choices: ['10', '20'], description: 'Page size.' } as never],
+    });
+    expect(buildInterfaceContractHints([rich])).toEqual([
+      { method: 'GET', path: '/v1/favorites', queryFields: [{ name: 'limit', required: false }] },
+    ]);
   });
 
   it('still lists an operation with NO contract — the exact path is itself the grounding', () => {
-    const hints = buildJourneyContractHints([apiJourney('GET', '/v1/favorites')], contracts);
+    const hints = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')]);
     expect(hints).toEqual([{ method: 'GET', path: '/v1/favorites' }]);
   });
 
-  it('ignores non-api journeys and collapses a repeated operation', () => {
-    const cli = { ...apiJourney('GET', '/x'), type: 'cli', entry: { command: ['x'] } } as unknown as Journey;
-    const hints = buildJourneyContractHints(
-      [apiJourney('POST', '/v1/auth/signup'), apiJourney('POST', '/v1/auth/signup'), cli],
-      contracts,
-    );
+  it('ignores non-api interfaces and collapses a repeated operation', () => {
+    const cli = { ...apiInterface('GET', '/x'), type: 'cli', entry: { command: ['x'] } } as unknown as Interface;
+    const hints = buildInterfaceContractHints([SIGNUP, SIGNUP, cli]);
     expect(hints).toHaveLength(1);
+  });
+
+  it('leaves an RPC-derived operation out — it is not authored against this round (item 12)', () => {
+    // The operation is real and invocable; its request grammar is the procedure's
+    // input schema in tRPC's `?input=` envelope, which no hint here describes.
+    const rpc = { ...apiInterface('GET', '/api/trpc/post.getLatest'), procedure: 'post.getLatest' };
+    expect(buildInterfaceContractHints([SIGNUP, rpc]).map((h) => h.path)).toEqual(['/v1/auth/signup']);
   });
 });
 
 describe('buildOtherOperationHints — the setup surface', () => {
-  const contracts: ApiRequestContract[] = [
-    { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
-  ];
   const catalog = [
-    apiJourney('POST', '/v1/auth/signup'),
-    apiJourney('POST', '/v1/auth/signin'),
-    apiJourney('GET', '/v1/favorites'),
+    contracted('POST', '/v1/auth/signup', { body: [{ name: 'email', required: true }] }),
+    apiInterface('POST', '/v1/auth/signin'),
+    apiInterface('GET', '/v1/favorites'),
   ];
 
   it('offers the rest of the surface, with contracts, minus what the flow walks', () => {
-    const own = buildJourneyContractHints([apiJourney('GET', '/v1/favorites')], contracts);
-    const { operations, overflow } = buildOtherOperationHints(catalog, contracts, own);
+    const own = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')]);
+    const { operations, overflow } = buildOtherOperationHints(catalog, own);
     expect(operations).toEqual([
       { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
       { method: 'POST', path: '/v1/auth/signin' },
@@ -134,13 +158,13 @@ describe('buildOtherOperationHints — the setup surface', () => {
   });
 
   it('is empty when the flow already walks the whole surface', () => {
-    const own = buildJourneyContractHints(catalog, contracts);
-    expect(buildOtherOperationHints(catalog, contracts, own).operations).toEqual([]);
+    const own = buildInterfaceContractHints(catalog);
+    expect(buildOtherOperationHints(catalog, own).operations).toEqual([]);
   });
 
   it('caps the list and counts what it dropped', () => {
-    const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiJourney('GET', `/v1/r${i}`));
-    const { operations, overflow } = buildOtherOperationHints(many, [], []);
+    const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiInterface('GET', `/v1/r${i}`));
+    const { operations, overflow } = buildOtherOperationHints(many, []);
     expect(operations).toHaveLength(MAX_OTHER_OPERATIONS);
     expect(overflow).toBe(4);
   });
@@ -202,7 +226,7 @@ describe('the authoring prompt blocks', () => {
   it('states the exact operation, its required fields, and the verbatim-path rule', () => {
     const prompt = buildAuthorUserPrompt(
       ctx({
-        journeyContracts: [
+        interfaceContracts: [
           {
             method: 'POST',
             path: '/v1/auth/signup',
@@ -244,7 +268,7 @@ describe('the authoring prompt blocks', () => {
   it('lists the OTHER operations as setup material, under the same rules', () => {
     const prompt = buildAuthorUserPrompt(
       ctx({
-        journeyContracts: [{ method: 'GET', path: '/v1/favorites' }],
+        interfaceContracts: [{ method: 'GET', path: '/v1/favorites' }],
         otherOperations: [
           { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
         ],
@@ -259,7 +283,7 @@ describe('the authoring prompt blocks', () => {
   });
 
   it('renders no OTHER-operations block when the flow walks everything', () => {
-    const prompt = buildAuthorUserPrompt(ctx({ journeyContracts: [{ method: 'GET', path: '/x' }] }));
+    const prompt = buildAuthorUserPrompt(ctx({ interfaceContracts: [{ method: 'GET', path: '/x' }] }));
     expect(prompt).toContain('OPERATIONS THIS FLOW WALKS');
     expect(prompt).not.toContain('OTHER OPERATIONS AVAILABLE');
   });
@@ -272,7 +296,7 @@ describe('the authoring prompt blocks', () => {
       ctx({
         driver: 'cli',
         recipeEntry: ['node', 'cli.js'],
-        journeyContracts: [{ method: 'POST', path: '/v1/auth/signup' }],
+        interfaceContracts: [{ method: 'POST', path: '/v1/auth/signup' }],
         outboundRequests: buildOutboundRequestHints([FORECAST], []),
       }),
     );
@@ -284,23 +308,23 @@ describe('the authoring prompt blocks', () => {
   });
 });
 
-describe('generateGuards — the grounding rides the SAME provider the journeys do', () => {
+describe('generateGuards — the grounding rides the SAME provider the interfaces do', () => {
   const repos: string[] = [];
   afterEach(() => {
     while (repos.length) rmrf(repos.pop()!);
   });
 
-  it('reaches the api authoring context per journey, and never a cli one', async () => {
+  it('reaches the api WORKER briefing per interface, and never a cli one', async () => {
     const r = makeTempRepo();
     repos.push(r);
     writeApiRecipe(r, { entry: null });
     writeCorpus(r, [{ ref: 'docs/api.md' }]);
     writeDoc(r, 'docs/api.md', ['## list', 'GET /todos returns 200 with the todo list.'].join('\n'));
-    const contexts: AuthorUserContext[] = [];
+    const briefings: string[] = [];
 
     await runGenerate({
       repoRoot: r,
-      journeys: withCodeTruth(journeysOf(r, helperApiJourney('GET', '/todos')), {
+      interfaces: withCodeTruth(interfacesOf(r, helperApiInterface('GET', '/todos')), {
         requestContracts: [
           { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
           // An operation this flow does NOT walk must not leak into its prompt.
@@ -308,24 +332,20 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
         ],
         outboundRequests: [FORECAST],
       }),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (c) =>
-        contexts.push(c),
-      ),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+        onBriefing: (_task, text) => briefings.push(text),
+      }),
     });
 
-    const api = contexts.find((c) => c.driver === 'api')!;
-    expect(api.journeyContracts).toEqual([
-      { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
-    ]);
-    expect(api.outboundRequests?.[0].path).toBe('/v1/forecast');
-    // The flow walks the only api journey, so there is no OTHER-operations block.
-    expect(api.otherOperations ?? []).toEqual([]);
-    const prompt = buildAuthorUserPrompt(api);
+    const prompt = briefings[0];
     expect(prompt).toContain('- GET /todos — query also reads limit');
     expect(prompt).toContain('timeformat="unixtime"');
+    // The flow walks the only api interface, so there is no OTHER-operations block.
+    expect(prompt).not.toContain('OTHER OPERATIONS AVAILABLE');
+    // An operation this flow does NOT walk never leaks into its briefing.
     expect(prompt).not.toContain('secretish');
   });
 
@@ -335,32 +355,150 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
     writeApiRecipe(r, { entry: null });
     writeCorpus(r, [{ ref: 'docs/api.md' }]);
     writeDoc(r, 'docs/api.md', ['## list', 'GET /todos returns 200 with the todo list.'].join('\n'));
-    const contexts: AuthorUserContext[] = [];
+    const briefings: string[] = [];
 
     await runGenerate({
       repoRoot: r,
-      journeys: withCodeTruth(
-        journeysOf(r, helperApiJourney('GET', '/todos'), helperApiJourney('POST', '/signup')),
+      interfaces: withCodeTruth(
+        interfacesOf(r, helperApiInterface('GET', '/todos'), helperApiInterface('POST', '/signup')),
         {
           requestContracts: [
             { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
           ],
         },
       ),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
-      generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (c) =>
-        contexts.push(c),
-      ),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+        onBriefing: (_task, text) => briefings.push(text),
+      }),
     });
 
-    const api = contexts.find((c) => c.driver === 'api')!;
     // The flow's plan walks /todos; /signup is the setup surface it may reach for.
-    expect(api.journeyContracts?.map((j) => j.path)).toEqual(['/todos']);
-    expect(api.otherOperations).toEqual([
-      { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
-    ]);
-    expect(buildAuthorUserPrompt(api)).toContain('OTHER OPERATIONS AVAILABLE');
+    const prompt = briefings[0];
+    expect(prompt).toContain('OTHER OPERATIONS AVAILABLE');
+    expect(prompt).toContain('POST /signup');
+    expect(prompt).toContain('email');
+  });
+});
+
+/**
+ * THE PLACES BLOCK (2026-08-12) — the resource-registry grounding: a web plan's
+ * interfaces carry a location contract (`at`/`to`), and the prompt renders the
+ * named places with their readables so assertions are grounded in what the page
+ * really shows instead of doc prose.
+ */
+describe('buildResourceHints + the PLACES block', () => {
+  const webTask = (id: string, at?: string, to?: string): Interface =>
+    ({
+      id,
+      type: 'web',
+      title: id,
+      entry: { method: 'GET', path: '/' },
+      steps: [{ kind: 'activate', target: 'button "x"' }],
+      ...(at ? { at } : {}),
+      ...(to ? { to } : {}),
+      fingerprint: `fp-${id}`,
+    }) as Interface;
+
+  const REGISTRY = {
+    web: [
+      { id: 'repo-report', kind: 'screen' as const, title: 'the repository report' },
+      {
+        id: 'violations-list',
+        kind: 'panel' as const,
+        of: 'repo-report',
+        title: 'the violation list',
+        readables: {
+          markers: [{ marker: 'Filtered by:', when: 'any filter is active' }],
+          controls: [{ control: { role: 'button' as const, name: 'More actions' }, states: ['expanded' as const] }],
+          rows: [
+            {
+              item: 'listitem' as const,
+              template: '<title> <severity>',
+              slots: [
+                { name: 'title', kind: 'text' as const },
+                { name: 'severity', kind: 'enum' as const, values: ['critical', 'high'] },
+              ],
+            },
+          ],
+        },
+      },
+      { id: 'rules-dialog', kind: 'dialog' as const, of: 'repo-report', title: 'the Rules dialog' },
+    ],
+  };
+
+  it('resolves the plan’s at/to in its area registry, of-ancestors included, deduped in plan order', () => {
+    const hints = buildResourceHints(
+      [webTask('web/a', 'violations-list'), webTask('web/b', 'violations-list', 'rules-dialog')],
+      REGISTRY,
+    );
+    // The panel first (first reached), then the screen it sits on, then the dialog.
+    expect(hints.map((r) => r.id)).toEqual(['violations-list', 'repo-report', 'rules-dialog']);
+  });
+
+  it('contributes nothing without a registry or a location contract — the prompt stays byte-identical', () => {
+    expect(buildResourceHints([webTask('web/a', 'violations-list')], undefined)).toEqual([]);
+    expect(buildResourceHints([webTask('web/a')], REGISTRY)).toEqual([]);
+    // An id the registry does not define is skipped, never guessed at.
+    expect(buildResourceHints([webTask('web/a', 'nowhere')], REGISTRY)).toEqual([]);
+  });
+
+  it('renders each place’s readables in the web driver’s own words', () => {
+    const ctx: AuthorUserContext = {
+      flow: { id: 'f', title: 'T', goal: 'G' },
+      milestones: [],
+      interfacePath: ['web/a'],
+      resources: buildResourceHints([webTask('web/a', 'violations-list')], REGISTRY),
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      probes: [],
+    };
+    const prompt = buildAuthorUserPrompt(ctx);
+    expect(prompt).toContain('PLACES THIS FLOW ACTS ON');
+    expect(prompt).toContain('the violation list (panel `violations-list`, on `repo-report`)');
+    expect(prompt).toContain('shows “Filtered by:”  [any filter is active]');
+    expect(prompt).toContain('control button “More actions” exposes expanded');
+    expect(prompt).toContain('rows: one listitem per item, text `<title> <severity>` (severity ∈ critical | high)');
+    // The bare screen renders its identity line and nothing invented under it.
+    expect(prompt).toContain('the repository report (screen `repo-report`)');
+    // Without resources, the block is absent entirely.
+    const { resources: _dropped, ...bare } = ctx;
+    expect(buildAuthorUserPrompt(bare)).not.toContain('PLACES THIS FLOW ACTS ON');
+  });
+
+  it('names a readable that has an id, and teaches the CAPTURE form beside it', () => {
+    const registry = {
+      web: [
+        {
+          id: 'violations-list',
+          kind: 'panel' as const,
+          title: 'the violation list',
+          readables: {
+            markers: [{ id: 'filter-banner', marker: 'Filtered by:' }],
+            elements: [{ element: { role: 'heading' as const, name: 'Violations' } }],
+          },
+        },
+      ],
+    };
+    const prompt = buildAuthorUserPrompt({
+      flow: { id: 'f', title: 'T', goal: 'G' },
+      milestones: [],
+      interfacePath: ['web/a'],
+      resources: buildResourceHints([webTask('web/a', 'violations-list')], registry),
+      areaTags: [],
+      driver: 'cli',
+      recipeEntry: ['node', 'cli.js'],
+      probes: [],
+    });
+    // The readable's NAME rides its line — it is what a capture points at.
+    expect(prompt).toContain('`filter-banner`');
+    // A readable without one renders exactly as it did before.
+    expect(prompt).toContain('renders heading “Violations”');
+    // …and the block says how to take a value off one of these places.
+    expect(prompt).toContain('CAPTURE');
+    expect(prompt).toContain('${captured:');
   });
 });

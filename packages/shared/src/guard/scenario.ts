@@ -1,378 +1,156 @@
 /**
- * Guard scenario format v2 — the committed, declarative test that realizes ONE
- * spec flow on ONE surface. One YAML file per scenario under
- * `.truecourse/scenarios/<area>/`.
+ * The guard scenario — the committed, declarative test that realizes ONE
+ * spec flow. One YAML file per scenario under `.truecourse/scenarios/<area>/`.
  *
  * A scenario is the executable product of a FLOW (spec-side: what to test) and a
- * JOURNEY path (code-side: how to test it): assertions come from the flow's spec
- * claims, steps from the journey, the driver from the journey's surface. It
- * carries `flow` (id + fingerprint), `journey` (the realization path + its
- * fingerprints), and the flow's section bindings DENORMALIZED into `binds`, so the
- * runner resolves staleness with no flow lookup. Hand-written scenarios omit
- * `flow`/`journey` and group under the Manual pseudo-flow.
+ * INTERFACE path (code-side: how to test it): assertions come from the flow's spec
+ * claims, steps from the interface. It carries `flow` (id + fingerprint),
+ * `interface` (the realization path + its fingerprints), and the flow's section
+ * bindings DENORMALIZED into `binds`, so the runner resolves staleness with no flow
+ * lookup. Hand-written scenarios omit `flow`/`interface` and group under the Manual
+ * pseudo-flow.
  *
- * Ids are `<flow-id>.<surface>.<n>`.
+ * The id IS the flow id — one scenario per flow.
  *
- * The envelope (`guard`, `id`, `title`, `flow`, `journey`, `binds`, `driver`,
- * `setup`, `steps`, `normalize`) is frozen across drivers; only the per-driver
- * verb sub-schema (keyed by `driver`) grows. The `cli` driver runs a `run` argv
- * appended to the recipe entrypoint, with `expect` matchers on exit code,
- * streams, and files. The `api` driver boots the recipe's HTTP server and drives
- * it with `request` steps, with `expect` matchers on status, headers, body text,
- * and JSON paths — plus the process-lifecycle steps `boot` / `signal` / `logs`,
- * which make startup, configuration, shutdown, logging and restart-persistence
- * claims assertable on the same surface. Every step MAY carry the `milestone` it
- * realizes.
+ * ONE SCHEMA, DRIVERS ON THE STEPS (2026-08-12). There is no scenario-level
+ * `driver` field: the driver belongs to the STEP, and everything a surface used to
+ * read off the envelope is derived from the steps instead —
+ * {@link guardScenarioDrivers} for what a scenario exercises,
+ * {@link isApiServerScenario} for which executor it takes. A legacy `driver:` key
+ * is accepted and DROPPED at parse, so a corpus committed before the collapse
+ * still loads; nothing writes it again.
+ *
+ * THIS MODULE IS THE COMPOSITION, not the vocabulary. The envelope (`id`,
+ * `title`, `flow`, `interface`, `binds`, `server`, `setup`, `steps`, `teardown`,
+ * `normalize`) is frozen across drivers and lives here, together with the setup
+ * capabilities every driver shares, and the cross-step passes and presentation that
+ * need to see a WHOLE scenario. Each driver's closed verb sub-schema lives in its own
+ * module, and a new driver adds one file rather than a section here:
+ *
+ *   - `step-parts.ts` — the primitives every driver's verbs are built from (the text
+ *     matcher, milestone attribution, the `cwd`/`note`/`timeoutMs` fields, the step
+ *     kinds);
+ *   - `cli-steps.ts`  — `run` / `git` / `write` / `delete` / `patch`;
+ *   - `api-steps.ts`  — `request` / `boot` / `signal` / `logs`;
+ *   - `web-steps.ts`  — `navigate` / `click` / `fill` / `upload` / `history` / `expect`.
+ *
+ * The dependency runs ONE WAY (primitives → driver verbs → this module), so a
+ * driver's vocabulary can grow without this file growing with it. Every step MAY
+ * carry the `milestone`s it realizes.
  */
 
 import { z } from 'zod'
-
-/** Scenario format version carried in every file and echoed into the run store. */
-export const GUARD_FORMAT_VERSION = 2
-
-// --- Stream & file matchers -----------------------------------------
-
-/** Stream (stdout/stderr) matcher — one of the three, compared post-normalization. */
-export const GuardStreamMatcherSchema = z
-  .object({
-    equals: z.string().optional(),
-    contains: z.string().optional(),
-    /** Regex source; matched with `RegExp(pattern).test(stream)`. */
-    matches: z.string().optional(),
-  })
-  .strict()
-  .refine(
-    (m) => m.equals !== undefined || m.contains !== undefined || m.matches !== undefined,
-    { message: 'stream matcher needs one of equals | contains | matches' },
-  )
-
-/** File matcher — presence or content of a path under the sandbox cwd. */
-export const GuardFileMatcherSchema = z
-  .object({
-    exists: z.boolean().optional(),
-    absent: z.boolean().optional(),
-    equals: z.string().optional(),
-    contains: z.string().optional(),
-  })
-  .strict()
-  .refine(
-    (m) =>
-      m.exists !== undefined ||
-      m.absent !== undefined ||
-      m.equals !== undefined ||
-      m.contains !== undefined,
-    { message: 'file matcher needs one of exists | absent | equals | contains' },
-  )
-
-export const GuardExpectSchema = z
-  .object({
-    exit: z.number().int().optional(),
-    stdout: GuardStreamMatcherSchema.optional(),
-    stderr: GuardStreamMatcherSchema.optional(),
-    /** Sandbox-relative path → matcher. */
-    files: z.record(z.string(), GuardFileMatcherSchema).optional(),
-  })
-  .strict()
-
-// --- Milestone attribution (every driver's steps) --------------------
-
-/**
- * The flow milestone (its `order`) a step realizes. Authoring emits it; the engine
- * validates every milestone is realized by at least one step. A step with no
- * milestone is plumbing (login, seeding) and paints neutral in a flow instance.
- */
-const milestone = z.number().int().positive().optional()
-
-// --- Steps (cli driver) ----------------------------------------------
-
-export const GuardStepSchema = z
-  .object({
-    /** Argv appended to the recipe entrypoint. May be empty (run the bare entry). */
-    run: z.array(z.string()),
-    stdin: z.string().optional(),
-    /**
-     * Env overlay for THIS step's child process only, applied on top of the
-     * scenario-global `setup.env` (last layer wins). Sibling steps are unaffected,
-     * so one scenario can observe the same command under several environments —
-     * the world-state a claim like "prints `disabled` when `X=0`" needs. `cli` only:
-     * an api step drives a server whose env is fixed at boot.
-     */
-    env: z.record(z.string(), z.string()).optional(),
-    /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
-    repeat: z.number().int().positive().optional(),
-    expect: GuardExpectSchema,
-    /** The flow milestone this step realizes. See {@link milestone}. */
-    milestone,
-  })
-  .strict()
-
-// --- Steps (api driver) ----------------------------------------------
-
-/** The closed HTTP method set an api step may use. */
-export const GUARD_HTTP_METHODS = [
-  'GET',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-  'HEAD',
-  'OPTIONS',
-] as const
-
-/**
- * One HTTP request against the recipe's booted server. `path` (and header/body
- * string values) may reference earlier `capture`s as `${name}`; the engine
- * interpolates before sending. Exactly one body form: `body` (raw text, sent
- * as-is) or `json` (a JSON value, serialized with `content-type: application/json`).
- */
-export const GuardHttpRequestSchema = z
-  .object({
-    method: z.enum(GUARD_HTTP_METHODS),
-    /** Request path incl. query, e.g. `/todos/${id}?full=1`. Must start with `/`. */
-    path: z.string().regex(/^\//, 'path must start with /'),
-    headers: z.record(z.string(), z.string()).optional(),
-    /** Raw request body, sent byte-for-byte. */
-    body: z.string().optional(),
-    /** JSON request body; serialized and sent with `content-type: application/json`. */
-    json: z.unknown().optional(),
-  })
-  .strict()
-  .refine((r) => r.body === undefined || r.json === undefined, {
-    message: 'a request carries `body` or `json`, not both',
-  })
-
-/**
- * Matcher on the value at one JSON path of the response body. `equals` compares
- * the JSON value (scalars compared strictly; objects/arrays structurally);
- * `contains`/`matches` compare against the value's string form.
- */
-export const GuardJsonMatcherSchema = z
-  .object({
-    equals: z.unknown().optional(),
-    contains: z.string().optional(),
-    /** Regex source; matched with `RegExp(pattern).test(String(value))`. */
-    matches: z.string().optional(),
-    exists: z.boolean().optional(),
-    absent: z.boolean().optional(),
-  })
-  .strict()
-  .refine(
-    (m) =>
-      m.equals !== undefined ||
-      m.contains !== undefined ||
-      m.matches !== undefined ||
-      m.exists !== undefined ||
-      m.absent !== undefined,
-    { message: 'json matcher needs one of equals | contains | matches | exists | absent' },
-  )
-
-export const GuardApiExpectSchema = z
-  .object({
-    /** Exact HTTP status code. */
-    status: z.number().int().optional(),
-    /** Header name (case-insensitive) → matcher on its value. */
-    headers: z.record(z.string(), GuardStreamMatcherSchema).optional(),
-    /** Matcher on the raw response body text, compared post-normalization. */
-    body: GuardStreamMatcherSchema.optional(),
-    /** JSON path (`a.b[0].c`, `""` for the root) → matcher on the value there. */
-    json: z.record(z.string(), GuardJsonMatcherSchema).optional(),
-    /**
-     * Response-schema conformance (B5): `true` asserts the whole response body
-     * conforms to the JSON response schema the BOUND OpenAPI operation declares for
-     * this step's `expect.status`. A bare boolean, not an anchor — the runner resolves
-     * the schema from the bound operation at run time (freshness comes from the stale
-     * gate). Requires the scenario to bind to an OpenAPI operation that declares a JSON
-     * response schema for the asserted status, else the scenario errors (never a silent
-     * pass). Additive — no GUARD_FORMAT_VERSION bump; old scenarios parse unchanged.
-     */
-    schema: z.boolean().optional(),
-  })
-  .strict()
-
-export const GuardApiRequestStepSchema = z
-  .object({
-    request: GuardHttpRequestSchema,
-    /**
-     * Variable name → JSON path into THIS step's response body. Captured values
-     * are available to later steps as `${name}` in path/header/body strings.
-     * A path that resolves to nothing fails the step.
-     */
-    capture: z.record(z.string(), z.string()).optional(),
-    /**
-     * Variable name → RESPONSE HEADER name (case-insensitive) on THIS step's
-     * response. The sibling of {@link GuardApiRequestStepSchema}.capture for everything
-     * that rides a header rather than the body: `x-auth-token`, an `ETag`, or the
-     * `Location` of a 3xx (the runner never follows redirects, so the redirect
-     * target IS observable). Captured values join the same `${name}` namespace as
-     * body captures — one name has one source — and a header the response does not
-     * carry fails the step exactly like a body path that resolves to nothing.
-     * `Set-Cookie` needs no capture: the per-scenario cookie jar replays session
-     * cookies onto later steps automatically.
-     */
-    captureHeaders: z.record(z.string(), z.string()).optional(),
-    /** Run the step N times; every iteration must satisfy `expect`. Default 1. */
-    repeat: z.number().int().positive().optional(),
-    expect: GuardApiExpectSchema,
-    /** The flow milestone this step realizes. See {@link milestone}. */
-    milestone,
-  })
-  .strict()
-
-// --- Steps (api driver) — the SERVER PROCESS lifecycle ---------------
-
-/**
- * What a `boot` step asserts about the process it starts. `ready: true` (the
- * default when `expect` is omitted) means the server must become HEALTHY — the
- * implicit boot every api scenario has always done, now sayable. `exitCode` /
- * `stderrContains` mean the opposite: the process must EXIT within the recipe's
- * ready budget, which is how "an invalid configuration fails startup with a
- * non-zero exit code and a descriptive error" is asserted. The two are mutually
- * exclusive — a process cannot both serve traffic and be dead.
- */
-export const GuardBootExpectSchema = z
-  .object({
-    /** The server must answer the recipe's health path with 2xx. */
-    ready: z.literal(true).optional(),
-    /** The process must exit with exactly this code. */
-    exitCode: z.number().int().optional(),
-    /** Substrings that must ALL appear in what the exiting process wrote to stderr. */
-    stderrContains: z.array(z.string().min(1)).min(1).optional(),
-  })
-  .strict()
-  .refine(
-    (e) => e.ready !== undefined || e.exitCode !== undefined || e.stderrContains !== undefined,
-    { message: 'boot expectation needs one of ready | exitCode | stderrContains' },
-  )
-  .refine((e) => e.ready === undefined || (e.exitCode === undefined && e.stderrContains === undefined), {
-    message: 'a boot expects `ready` OR an exit (`exitCode`/`stderrContains`), never both',
-  })
-
-/**
- * (Re)start the server process under test. A scenario with NO `boot` step keeps
- * the implicit boot the api driver has always done, so every existing scenario is
- * unchanged; a scenario that carries one owns its own lifecycle from the first
- * step on. `env` layers OVER the recipe's env and the scenario's `setup.env` for
- * THIS boot only — the world-state channel a claim about configuration needs —
- * and every boot allocates a FRESH port, so `${PORT}` in the serve argv/env
- * resolves per boot exactly as it does for the implicit one.
- */
-export const GuardBootSchema = z
-  .object({
-    /**
-     * Env overlay for this boot only (last layer wins over `setup.env`).
-     * `${unique}` and `${HTTP_STUB:<name>}` resolve in the values, as in `setup.env`.
-     * There is no removal channel: a variable the recipe sets is always set.
-     */
-    env: z.record(z.string(), z.string()).optional(),
-    /** What the boot must do. Omitted ⇒ `{ ready: true }`. */
-    expect: GuardBootExpectSchema.optional(),
-  })
-  .strict()
-
-/** The signals a scenario may send the running server. */
-export const GUARD_PROCESS_SIGNALS = ['SIGTERM', 'SIGINT'] as const
-
-/**
- * Send a signal to the RUNNING server process and, optionally, assert how it
- * goes down — the graceful-shutdown claim ("exits with code 0 on SIGTERM"). With
- * no `expect` the step only delivers the signal (the first half of a restart).
- */
-export const GuardSignalSchema = z
-  .object({
-    name: z.enum(GUARD_PROCESS_SIGNALS),
-    expect: z
-      .object({
-        /** The process must exit with exactly this code (a signal-killed process has none). */
-        exitCode: z.number().int().optional(),
-        /** Budget for the exit; a default is applied when omitted. */
-        withinMs: z.number().int().positive().max(600_000).optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict()
-
-/** A log-line matcher: a plain substring, or `{ pattern }` as a regex source. */
-export const GuardLogMatchSchema = z.union([
-  z.string().min(1),
-  z.object({ pattern: z.string().min(1) }).strict(),
-])
-
-/**
- * Assert on what the server process WROTE. The runner already captures the
- * server's stdout/stderr for evidence; this reads that buffer, per LINE, so
- * "one stdout log line per request, carrying method, path, status and duration"
- * is a first-class assertion instead of an invisible behavior.
- *
- * `sinceLastStep` narrows the window to output that arrived after the previous
- * step began — the way a log line is attributed to the request that caused it.
- * Output is matched RAW: `normalize` deliberately does not apply, because the
- * volatile parts (a duration, a timestamp) are often the very thing a claim is
- * about. The buffer spans the whole scenario, so a restart's earlier output is
- * still readable after the second boot.
- */
-export const GuardLogsSchema = z
-  .object({
-    stream: z.enum(['stdout', 'stderr']),
-    match: GuardLogMatchSchema,
-    /** Match only output that arrived after the previous step began. Default false. */
-    sinceLastStep: z.boolean().optional(),
-    /**
-     * Exact number of matching LINES in the window. Omitted ⇒ at least one.
-     * `0` asserts no line has matched (checked immediately, with no wait).
-     */
-    count: z.number().int().nonnegative().optional(),
-    /** How long to wait for the expected lines to appear; a default is applied. */
-    withinMs: z.number().int().positive().max(600_000).optional(),
-  })
-  .strict()
-
-export const GuardApiBootStepSchema = z
-  .object({ boot: GuardBootSchema, milestone })
-  .strict()
-
-export const GuardApiSignalStepSchema = z
-  .object({ signal: GuardSignalSchema, milestone })
-  .strict()
-
-export const GuardApiLogsStepSchema = z
-  .object({ logs: GuardLogsSchema, milestone })
-  .strict()
-
-/**
- * ONE api step — one action. A `request` drives the server over HTTP; `boot`,
- * `signal` and `logs` drive and observe the server PROCESS, which is what makes
- * startup, configuration, shutdown, logging and restart-persistence claims
- * testable on this surface. All three are additive and optional: no
- * `GUARD_FORMAT_VERSION` bump, and a scenario made only of `request` steps parses
- * and runs exactly as it did before.
- */
-export const GuardApiStepSchema = z.union([
+import { capturedNamesIn } from './capture.js'
+import type { GuardStepActual } from './step-actuals.js'
+import {
+  milestoneClaims,
+  milestoneOrder,
+  type GuardStepKind,
+  type GuardStepMilestone,
+} from './step-parts.js'
+import {
+  GuardCliStepSchema,
+  cliStepCaptureNames,
+  cliStepKind,
+  cliStepPatterns,
+  describeCliCommand,
+  describeCliExpect,
+  isProcessStep,
+  isRunStep,
+  type GuardCliStep,
+} from './cli-steps.js'
+import {
+  GUARD_HTTP_METHODS,
   GuardApiRequestStepSchema,
-  GuardApiBootStepSchema,
-  GuardApiSignalStepSchema,
-  GuardApiLogsStepSchema,
+  GuardApiStepSchema,
+  apiStepCaptureNames,
+  apiStepPatterns,
+  describeApiCommand,
+  describeApiExpect,
+  describeApiLifecycleStep,
+  isApiRequestStep,
+  isApiStep,
+  type GuardApiStep,
+} from './api-steps.js'
+import { guardDriverIds, type GuardDriverId } from './drivers.js'
+import {
+  GuardWebStepSchema,
+  describeWebCommand,
+  describeWebExpect,
+  isWebStep,
+  webStepCaptureNames,
+  webStepPatterns,
+  type GuardWebStep,
+} from './web-steps.js'
+
+// --- Steps (the sandbox's drivers) -----------------------------------
+//
+// Each driver's verbs live in its own module (`cli-steps.ts`, `web-steps.ts`,
+// `api-steps.ts`) — a driver's vocabulary is its own business, and this one only
+// COMPOSES the drivers into a scenario.
+
+/**
+ * ONE step of a sandbox scenario: a cli action, a WEB action, or an HTTP REQUEST —
+ * all taken in the SAME sandbox. They are one list because the sandbox is ONE WORLD
+ * (§2, 2026-08-09) — a real promise spans surfaces ("run the analysis, the dashboard
+ * shows it, the API answers it"), and a step list locked to one driver cannot state
+ * it. Which executor runs a step is the STEP's business.
+ *
+ * A `request` step here is the api driver's own verb ({@link
+ * GuardApiRequestStepSchema}), not a copy of it: the same schema, the same matchers,
+ * the same capture channels. What differs is only WHERE it is sent — the sandbox's
+ * served surface (the recipe's `web` block), the same origin the browser drives — so
+ * a scenario can act through the UI and then read the RESULT as structured data
+ * instead of regexing the page for it.
+ *
+ * DRIVER DISAMBIGUATION. A web verb declares `driver: web`, because a step whose only
+ * verb is `expect` would otherwise be ambiguous against every other step's `expect`
+ * BLOCK. Every other verb here is SELF-NAMING — `run`, `git`, `write`, `delete`,
+ * `patch`, `request` — so it declares nothing, and each member of this union is a
+ * `.strict()` object keyed by its own verb. There is no step this union accepts two
+ * readings of.
+ *
+ * The api LIFECYCLE verbs (`boot`, `signal`, `logs`) deliberately stay out: they
+ * drive a server PROCESS the api driver owns, and in a sandbox the served surface's
+ * lifecycle belongs to the sandbox (started at the first step that needs it, torn
+ * down with the scenario), not to a step.
+ */
+export const GuardSandboxStepSchema = z.union([
+  GuardCliStepSchema,
+  GuardWebStepSchema,
+  GuardApiRequestStepSchema,
 ])
 
-/** True when the step drives the server over HTTP (the original step kind). */
-export function isApiRequestStep(step: GuardApiStep): step is GuardApiRequestStep {
-  return 'request' in step
-}
+/**
+ * A LIST of sandbox steps — named so every field that carries one shares ONE
+ * declaration-emit-sized type reference: inlining the full step union twice into
+ * the scenario schema's declaration exceeds the compiler's serialization cap
+ * (TS7056).
+ */
+export type GuardSandboxStepListSchema = z.ZodArray<typeof GuardSandboxStepSchema>
+const sandboxStepList: GuardSandboxStepListSchema = z.array(GuardSandboxStepSchema)
 
-/** True when the step (re)starts the server process. */
-export function isApiBootStep(step: GuardApiStep): step is GuardApiBootStep {
-  return 'boot' in step
-}
+/**
+ * ONE step of ANY scenario — the whole verb vocabulary: the sandbox's three
+ * (cli, web, request) plus the api driver's process-LIFECYCLE verbs (`boot`,
+ * `signal`, `logs`). One list, because there is one scenario schema; which
+ * executor a scenario takes is derived from the steps themselves
+ * ({@link isApiServerScenario}), never declared.
+ *
+ * The lifecycle verbs drive a server PROCESS the api driver owns, so they are only
+ * well-formed in a scenario that runs on that server — the schema's own refinement
+ * below states exactly that, which is the invariant the discriminated union used
+ * to buy with a `driver` field.
+ */
+export const GuardScenarioStepSchema = z.union([
+  GuardCliStepSchema,
+  GuardWebStepSchema,
+  GuardApiStepSchema,
+])
 
-/** True when the step signals the running server process. */
-export function isApiSignalStep(step: GuardApiStep): step is GuardApiSignalStep {
-  return 'signal' in step
-}
-
-/** True when the step asserts on the server process's captured output. */
-export function isApiLogsStep(step: GuardApiStep): step is GuardApiLogsStep {
-  return 'logs' in step
-}
+/** {@link GuardSandboxStepListSchema}'s reason, for the whole-vocabulary list. */
+export type GuardScenarioStepListSchema = z.ZodArray<typeof GuardScenarioStepSchema>
+const scenarioStepList: GuardScenarioStepListSchema = z.array(GuardScenarioStepSchema)
 
 // --- The closed normalizer set --------------------------------------
 
@@ -416,6 +194,21 @@ export const GuardGitSchema = z
     staged: z.array(z.string()).optional(),
     /** Initial branch name; defaults to `main`. */
     branch: z.string().optional(),
+    /**
+     * The `user.name` / `user.email` every commit in this scenario is made under —
+     * and the identity its `git` STEPS commit with. The runner pins one either way;
+     * declaring it makes visible what a reader would otherwise have to trust: the
+     * developer's own identity is never used inside a sandbox.
+     */
+    identity: z.object({ name: z.string().min(1), email: z.string().min(1) }).strict().optional(),
+    /**
+     * Sandbox-relative directory the repository is initialized in; the sandbox cwd
+     * itself when omitted. A flow that needs SIBLINGS of the checkout (a linked
+     * worktree, a fresh clone, a second repository) puts the repo in a subdirectory
+     * so those siblings still live inside the sandbox. `commits[].files` and
+     * `staged` are relative to this root, as they are to a real repository.
+     */
+    root: z.string().min(1).optional(),
   })
   .strict()
 
@@ -680,12 +473,12 @@ export const GuardScenarioFlowRefSchema = z
   .strict()
 
 /**
- * The journey path that grounds this scenario — the realization plan's journey
+ * The interface path that grounds this scenario — the realization plan's interface
  * ids and their fingerprints at authoring time. A fingerprint mismatch against the
  * live catalog is a DRIFT ANNOTATION, never a run outcome: the steps are frozen
  * and remain a valid probe of the spec claims.
  */
-export const GuardScenarioJourneyRefSchema = z
+export const GuardScenarioInterfaceRefSchema = z
   .object({
     path: z.array(z.string().min(1)).min(1),
     fingerprints: z.array(z.string().min(1)).min(1),
@@ -696,80 +489,179 @@ export const GuardScenarioJourneyRefSchema = z
 
 /** The driver-independent envelope fields (frozen across drivers). */
 const envelope = {
-  guard: z.literal(GUARD_FORMAT_VERSION),
-  /** `<flow-id>.<surface>.<n>` for a generated scenario. */
+  /** The flow's id for a generated scenario — one scenario per flow. */
   id: z.string().min(1),
   /** Restates in one line what the scenario verifies. */
   title: z.string().min(1),
   /**
    * The PROMISE this test defends, in the flow's own plain words — its `goal`,
-   * denormalized at write time so the promise rides the artifact: a reader (or a
-   * story renderer) knows what the file is FOR without resolving `flow.id`
+   * denormalized at write time so the promise rides the artifact: a reader of the
+   * file alone knows what it is FOR without resolving `flow.id`
    * against `flows.json`, which is regenerated and may no longer name it. Written
-   * by the engine, never authored by the model. Additive and optional, so no
-   * format bump — absent on a hand-written scenario and on any file written
-   * before the field (the `journeyDrifted`/`server` precedent).
+   * by the engine, never authored by the model. Additive and optional — absent on
+   * a hand-written scenario and on any file written before the field (the
+   * `interfaceDrifted`/`server` precedent).
    */
   promise: z.string().min(1).optional(),
   /** The flow realized here; absent on a hand-written scenario (Manual pseudo-flow). */
   flow: GuardScenarioFlowRefSchema.optional(),
-  /** The grounding journey path; absent on a hand-written scenario. */
-  journey: GuardScenarioJourneyRefSchema.optional(),
+  /** The grounding interface path; absent on a hand-written scenario. */
+  interface: GuardScenarioInterfaceRefSchema.optional(),
   /** Every section the flow's milestones come from — denormalized at write time. */
   binds: z.array(GuardBindsSchema).min(1),
+  /**
+   * SUPPLIED dependencies this scenario binds, by catalog entry name
+   * (`scenarios/dependencies.json`). State the engine must never fabricate — a
+   * codebase to analyze, an authenticated config dir, provider credentials — is
+   * BOUND here, never built: the runner resolves the user-registered instance and
+   * copies it into the sandbox, and with no instance registered the scenario
+   * settles `blocked` naming the dependency instead of running against a stand-in.
+   *
+   * Declared explicitly so a binding that carries no `${supplied:…}` token (an
+   * authenticated HOME the program finds by itself) is still visible; a scenario
+   * that DOES carry tokens binds those names too, whether or not they are listed.
+   * Additive and optional.
+   */
+  needs: z.array(z.string().min(1)).optional(),
+  /**
+   * The recipe server this scenario runs against (an `api.servers` key) — an
+   * api-server scenario's binding. ENGINE-ASSIGNED at authoring from the app that
+   * serves the flow's operations; absent ⇒ the recipe's default server, which is
+   * what every pre-multi-server scenario means.
+   */
+  server: z.string().min(1).optional(),
   setup: GuardSetupSchema.optional(),
   normalize: z.array(GuardNormalizerSchema).default([]),
 }
 
-export const GuardCliScenarioSchema = z
+const GuardScenarioBodySchema = z
   .object({
     ...envelope,
-    driver: z.literal('cli'),
-    steps: z.array(GuardStepSchema).min(1),
-  })
-  .strict()
-
-export const GuardApiScenarioSchema = z
-  .object({
-    ...envelope,
-    driver: z.literal('api'),
+    steps: scenarioStepList.min(1),
     /**
-     * The recipe server this scenario runs against (an `api.servers` key).
-     * ENGINE-ASSIGNED at authoring from the app that serves the flow's operations;
-     * absent ⇒ the recipe's default server, which is what every pre-multi-server
-     * scenario means. An additive optional field, so no format bump — the
-     * `journeyDrifted`/`corpusFingerprint` precedent.
+     * TEARDOWN steps — the restoration channel for HOST state a scenario
+     * legitimately mutates OUTSIDE its sandbox (a user-level service it installs,
+     * a supervisor registration), which the sandbox's own cleanup can never undo.
+     *
+     * On a green run these are ordinary steps: they execute after `steps` in
+     * order, their expectations are verdict-affecting, and they may carry
+     * milestones (a `dashboard uninstall` teardown step IS the uninstall claim's
+     * proving step). What the channel buys is the OTHER path: after a failure,
+     * an infrastructure error, or a cancellation, the runner still executes every
+     * not-yet-reached teardown step BEST-EFFORT — recorded in evidence, never
+     * changing the settled verdict, continuing past its own misses — so the host
+     * is restored on exactly the runs that used to leak it. A best-effort miss is
+     * annotated on the result (`teardownIncomplete`), never silent.
+     *
+     * Step NUMBERING is continuous: the first teardown step is step
+     * `steps.length + 1` everywhere an index appears (failures, evidence,
+     * load errors). Sandbox-only scenarios don't need this — the sandbox is
+     * deleted either way; a teardown list that only touches sandbox state is
+     * authoring noise. Additive and optional.
      */
-    server: z.string().min(1).optional(),
-    steps: z.array(GuardApiStepSchema).min(1),
+    teardown: sandboxStepList.min(1).optional(),
   })
   .strict()
+  // The api driver's process-LIFECYCLE verbs drive a server this scenario must own
+  // outright: they restart it, signal it, read its output. That is only meaningful
+  // on the api-server path, and a sandbox has no such process — its served surface
+  // is the sandbox's to start and stop. This is the invariant the per-driver
+  // schemas used to buy with a `driver` discriminator, stated directly.
+  .refine(
+    (s) =>
+      !s.steps.some((step) => isApiStep(step) && !isApiRequestStep(step)) ||
+      s.steps.every((step) => isApiStep(step)),
+    {
+      path: ['steps'],
+      message:
+        'a `boot` / `signal` / `logs` step drives the api server process, so it may only appear in a scenario whose every step is an api verb — mix one into a sandbox scenario and there is no process to drive',
+    },
+  )
+  // …and for the same reason the teardown channel is the SANDBOX's: it restores
+  // host state the sandbox's own cleanup cannot undo, executed best-effort by the
+  // sandbox runner. The api path's server lifecycle is runner-owned end to end.
+  .refine((s) => s.teardown === undefined || !s.steps.every((step) => isApiStep(step)), {
+    path: ['teardown'],
+    message:
+      "teardown is the sandbox path's restoration channel; a scenario whose every step is an api verb runs against the recipe server, whose lifecycle the runner owns",
+  })
 
-/** A committed scenario — the per-driver variants, keyed by `driver`. */
-export const GuardScenarioSchema = z.discriminatedUnion('driver', [
-  GuardCliScenarioSchema,
-  GuardApiScenarioSchema,
-])
+/**
+ * Drop the LEGACY scenario-level keys retired by later format cuts — `driver`
+ * (2026-08-12: the driver belongs to the STEP) and `guard` (the format-version
+ * marker, retired 2026-08-13). Corpora written before a cut still carry them and
+ * must keep loading, so they are accepted and thrown away here, before the
+ * `.strict()` body ever sees them. Nothing writes them again.
+ */
+function dropLegacyDriverKey(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  if (!('driver' in value) && !('guard' in value)) return value
+  const { driver: _legacyDriver, guard: _legacyFormat, ...rest } = value as Record<string, unknown>
+  return rest
+}
 
-export type GuardStreamMatcher = z.infer<typeof GuardStreamMatcherSchema>
-export type GuardFileMatcher = z.infer<typeof GuardFileMatcherSchema>
-export type GuardExpect = z.infer<typeof GuardExpectSchema>
-export type GuardStep = z.infer<typeof GuardStepSchema>
-export type GuardHttpMethod = (typeof GUARD_HTTP_METHODS)[number]
-export type GuardHttpRequest = z.infer<typeof GuardHttpRequestSchema>
-export type GuardJsonMatcher = z.infer<typeof GuardJsonMatcherSchema>
-export type GuardApiExpect = z.infer<typeof GuardApiExpectSchema>
-export type GuardApiRequestStep = z.infer<typeof GuardApiRequestStepSchema>
-export type GuardBootExpect = z.infer<typeof GuardBootExpectSchema>
-export type GuardBoot = z.infer<typeof GuardBootSchema>
-export type GuardProcessSignal = (typeof GUARD_PROCESS_SIGNALS)[number]
-export type GuardSignal = z.infer<typeof GuardSignalSchema>
-export type GuardLogMatch = z.infer<typeof GuardLogMatchSchema>
-export type GuardLogs = z.infer<typeof GuardLogsSchema>
-export type GuardApiBootStep = z.infer<typeof GuardApiBootStepSchema>
-export type GuardApiSignalStep = z.infer<typeof GuardApiSignalStepSchema>
-export type GuardApiLogsStep = z.infer<typeof GuardApiLogsStepSchema>
-export type GuardApiStep = z.infer<typeof GuardApiStepSchema>
+/**
+ * A committed scenario. ONE schema — the driver is the STEP's, so there is no
+ * per-driver variant and no discriminator; which executor a scenario takes is
+ * derived ({@link isApiServerScenario}).
+ *
+ * The annotation is the ONE place the refinements above are handed to the type
+ * system: zod infers `steps` as the un-refined whole vocabulary, while the parsed
+ * value is always one of the two well-formed shapes ({@link GuardScenario}) —
+ * a `refine` cannot narrow its own output, so the cast states what it proved.
+ */
+export const GuardScenarioSchema: z.ZodType<GuardScenario, z.ZodTypeDef, unknown> = z.preprocess(
+  dropLegacyDriverKey,
+  GuardScenarioBodySchema,
+) as unknown as z.ZodType<GuardScenario, z.ZodTypeDef, unknown>
+
+/**
+ * A scenario's FULL execution sequence: `steps` followed by `teardown` (the sandbox
+ * path only — the api driver's server lifecycle is runner-owned, so it has no
+ * teardown channel). This is the list every whole-scenario pass walks — the
+ * loader's pattern/capture/claim cross-checks, the runner's loop, the step-view —
+ * so a teardown step is numbered, validated, and rendered exactly like the step it
+ * is: index `steps.length + n` for the n-th teardown step.
+ */
+export function guardExecutionSteps(scenario: GuardSandboxScenario): GuardSandboxStep[]
+export function guardExecutionSteps(scenario: GuardScenario): GuardScenarioStep[]
+export function guardExecutionSteps(scenario: GuardScenario): GuardScenarioStep[] {
+  return scenario.teardown ? [...scenario.steps, ...scenario.teardown] : [...scenario.steps]
+}
+
+/**
+ * THE execution-path predicate — the one thing the retired `driver` field decided,
+ * now read off the steps that actually run. A scenario whose every executed step is
+ * an api verb runs against the recipe's booted SERVER (the api path); anything else
+ * runs in a SANDBOX, whichever mix of cli, web and `request` steps it holds. The
+ * predicates are the drivers' own, so this can never disagree with what executes.
+ *
+ * Its negation narrows too: the schema's refinements make "not all api verbs" and
+ * "every step is a sandbox verb" the same statement.
+ */
+export function isApiServerScenario(scenario: GuardScenario): scenario is GuardApiScenario {
+  return guardExecutionSteps(scenario).every((step) => isApiStep(step))
+}
+
+/**
+ * The drivers ONE scenario exercises, in registry order — its STEPS' kinds. An
+ * api-server scenario is `api` throughout; a sandbox scenario wears one entry per
+ * driver its steps use, so a mixed one wears several. This is what the manifest
+ * records and what every driver chip, filter and per-driver tally reads.
+ */
+export function guardScenarioDrivers(scenario: GuardScenario): GuardDriverId[] {
+  const found = new Set<GuardDriverId>()
+  for (const step of guardExecutionSteps(scenario)) {
+    if (isWebStep(step)) found.add('web')
+    else if (isApiStep(step)) found.add('api')
+    else found.add('cli')
+  }
+  return guardDriverIds.filter((id) => found.has(id))
+}
+
+
+export type GuardSandboxStep = z.infer<typeof GuardSandboxStepSchema>
+export type GuardScenarioStep = z.infer<typeof GuardScenarioStepSchema>
 export type GuardNormalizer = z.infer<typeof GuardNormalizerSchema>
 export type GuardGitCommit = z.infer<typeof GuardGitCommitSchema>
 export type GuardGit = z.infer<typeof GuardGitSchema>
@@ -785,10 +677,41 @@ export type GuardExternals = z.infer<typeof GuardExternalsSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
 export type GuardScenarioFlowRef = z.infer<typeof GuardScenarioFlowRefSchema>
-export type GuardScenarioJourneyRef = z.infer<typeof GuardScenarioJourneyRefSchema>
-export type GuardCliScenario = z.infer<typeof GuardCliScenarioSchema>
-export type GuardApiScenario = z.infer<typeof GuardApiScenarioSchema>
-export type GuardScenario = z.infer<typeof GuardScenarioSchema>
+export type GuardScenarioInterfaceRef = z.infer<typeof GuardScenarioInterfaceRefSchema>
+
+/** Everything a scenario carries except the steps — frozen across drivers. */
+export type GuardScenarioEnvelope = Omit<
+  z.infer<typeof GuardScenarioBodySchema>,
+  'steps' | 'teardown'
+>
+
+/**
+ * A scenario the SANDBOX executes: cli, web and `request` steps in one world, plus
+ * the optional teardown channel. The mixed case is the normal one — a promise that
+ * spans surfaces is still one test.
+ */
+export interface GuardSandboxScenario extends GuardScenarioEnvelope {
+  steps: GuardSandboxStep[]
+  teardown?: GuardSandboxStep[]
+}
+
+/**
+ * A scenario the API-SERVER path executes: every step an api verb, against the
+ * recipe server `server` names (its default when absent). No teardown channel —
+ * that server's lifecycle is the runner's, start to finish.
+ */
+export interface GuardApiScenario extends GuardScenarioEnvelope {
+  steps: GuardApiStep[]
+  teardown?: undefined
+}
+
+/**
+ * A well-formed scenario: the two shapes the schema's refinements allow. The union
+ * is not a format distinction — one schema writes both — it is the type-level
+ * spelling of {@link isApiServerScenario}, so an executor can only ever be handed
+ * steps it knows how to run.
+ */
+export type GuardScenario = GuardSandboxScenario | GuardApiScenario
 
 // --- Regex-matcher validation ---------------------------------------
 
@@ -809,25 +732,11 @@ export interface InvalidMatchPattern {
   error: string
 }
 
-/** Every regex source one step carries, with the path that names it. */
-function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pattern: string }> {
-  const out: Array<{ where: string; pattern: string }> = []
-  const add = (where: string, pattern: string | undefined): void => {
-    if (pattern !== undefined) out.push({ where, pattern })
-  }
-  if ('run' in step) {
-    add('expect.stdout', step.expect.stdout?.matches)
-    add('expect.stderr', step.expect.stderr?.matches)
-    return out
-  }
-  if (isApiRequestStep(step)) {
-    add('expect.body', step.expect.body?.matches)
-    for (const [name, m] of Object.entries(step.expect.headers ?? {})) add(`expect.headers.${name}`, m.matches)
-    for (const [path, m] of Object.entries(step.expect.json ?? {})) add(`expect.json.${path || '(root)'}`, m.matches)
-    return out
-  }
-  if (isApiLogsStep(step) && typeof step.logs.match !== 'string') add('logs.match', step.logs.match.pattern)
-  return out
+/** Every regex source one step carries — each driver names its own. */
+function stepPatterns(step: GuardScenarioStep): Array<{ where: string; pattern: string }> {
+  if (isWebStep(step)) return webStepPatterns(step)
+  if (isApiStep(step)) return apiStepPatterns(step)
+  return cliStepPatterns(step as GuardCliStep)
 }
 
 /**
@@ -839,7 +748,7 @@ function stepPatterns(step: GuardStep | GuardApiStep): Array<{ where: string; pa
  * (authoring) and at load (committed scenarios) rather than after a wasted run.
  */
 export function firstInvalidMatchPattern(
-  steps: readonly (GuardStep | GuardApiStep)[],
+  steps: readonly GuardScenarioStep[],
 ): InvalidMatchPattern | null {
   for (let i = 0; i < steps.length; i++) {
     for (const { where, pattern } of stepPatterns(steps[i])) {
@@ -853,16 +762,130 @@ export function firstInvalidMatchPattern(
   return null
 }
 
+// --- Capture composition (cross-step) ---------------------------------
+
+/**
+ * The capture names ONE step assigns, in declaration order — whichever driver it
+ * belongs to. The two api channels (`capture` from the body, `captureHeaders`
+ * from a header) share one namespace, so one name has exactly one source.
+ */
+export function stepCaptureNames(step: GuardScenarioStep): string[] {
+  if (isWebStep(step)) return webStepCaptureNames(step)
+  if (isApiStep(step)) return apiStepCaptureNames(step)
+  return cliStepCaptureNames(step as GuardCliStep)
+}
+
+/**
+ * A capture rule a scenario breaks, in the words the reporting surface prints.
+ * `step` is the 1-based offender, or `null` when the defect is in `setup`.
+ */
+export interface CaptureDefect {
+  step: number | null
+  message: string
+}
+
+/**
+ * Every capture rule a scenario breaks — the checks that need the WHOLE step list,
+ * so the schema cannot state them and the runner must never discover them mid-run:
+ *
+ *  - SINGLE ASSIGNMENT — a name is captured once. A second capture of it would
+ *    silently change what every earlier reference meant, depending on where the
+ *    scenario had got to.
+ *  - NO FORWARD REFERENCE — `${captured:x}` reads a value that must already exist.
+ *    A reference no step captures at all is the same defect with a worse ending.
+ *  - NO SELF REFERENCE — a step's own capture is resolved AFTER its expectation
+ *    holds, so a step cannot use what it captures. Order is the whole mechanism.
+ *  - NOTHING IN SETUP — `setup` materializes before the first step runs, so a
+ *    `${captured:…}` there can never resolve.
+ *
+ * Reported ALL at once (not first-only): they are independent authoring mistakes,
+ * and a corpus owner fixing them wants the list. Pure — the caller decides whether
+ * they are load errors (committed scenarios) or a corrective re-ask (authoring).
+ */
+export function captureDefects(
+  steps: readonly GuardScenarioStep[],
+  setup?: GuardSetup,
+): CaptureDefect[] {
+  const defects: CaptureDefect[] = []
+  /** name → the 1-based step that captured it. */
+  const captured = new Map<string, number>()
+
+  for (const name of capturedNamesIn(setup ?? {})) {
+    defects.push({
+      step: null,
+      message:
+        `setup references \${captured:${name}}, but setup materializes BEFORE the first step — ` +
+        'nothing is captured yet',
+    })
+  }
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const stepNumber = i + 1
+    const declares = new Set(stepCaptureNames(step))
+
+    for (const name of capturedNamesIn(step)) {
+      if (captured.has(name)) continue
+      if (declares.has(name)) {
+        defects.push({
+          step: stepNumber,
+          message:
+            `step ${stepNumber} references \${captured:${name}}, which it captures itself — a captured ` +
+            'value is readable only by LATER steps (a capture resolves after the step it belongs to)',
+        })
+        continue
+      }
+      const available = [...captured.keys()]
+      defects.push({
+        step: stepNumber,
+        message:
+          `step ${stepNumber} references \${captured:${name}}, which no earlier step captures — ${
+            available.length > 0
+              ? `the values captured before it are ${available.map((n) => `\${captured:${n}}`).join(', ')}`
+              : 'no step before it captures anything'
+          }`,
+      })
+    }
+
+    for (const name of stepCaptureNames(step)) {
+      const prior = captured.get(name)
+      if (prior !== undefined) {
+        defects.push({
+          step: stepNumber,
+          message:
+            prior === stepNumber
+              ? `step ${stepNumber} captures "${name}" twice — a step's body and header captures share ` +
+                'ONE namespace, so a name has exactly one source'
+              : `step ${stepNumber} captures "${name}", which step ${prior} already captured — a capture ` +
+                'name is assigned ONCE per scenario',
+        })
+        continue
+      }
+      captured.set(name, stepNumber)
+    }
+  }
+
+  return defects
+}
+
 // --- Presentation: a committed scenario as a STEP LIST ----------------
+
+// (the step-kind vocabulary itself lives in `step-parts.ts`)
 
 /**
  * One step of a committed test, in the words a reader needs: what it does, the
  * world it does it in, and what it asserts. The dashboard renders this instead of
  * raw YAML (which stays available as the file's source).
+ *
+ * Everything here is AUTHORED — read out of the file, true of the test whether or
+ * not it ever ran. The one recorded field is {@link GuardScenarioStepView.actual},
+ * merged in when the read names a run.
  */
 export interface GuardScenarioStepView {
   /** 1-based position — the number a failure's `step` names. */
   n: number
+  /** What the step drives — every step is one of these, so every row can say so. */
+  kind: GuardStepKind
   /**
    * What the step DOES: the argv line (cli), `METHOD /path` (an api request), or
    * the lifecycle action (`boot the server`, `signal SIGTERM`, `read server stdout`).
@@ -872,126 +895,165 @@ export interface GuardScenarioStepView {
   env?: string[]
   /** What it asserts, one line — "exit 0 · stdout contains “added”". */
   expectation: string
-  /** The flow milestone this step realizes, when it names one. */
+  /** The flow milestone POSITION this step realizes, when it names one. */
   milestone?: number
+  /** The claim identities this step is tagged with, when it names any. */
+  claims?: string[]
   /** Repeat count when the step runs more than once. */
   repeat?: number
+  /** Sandbox-relative working directory, when the step declares one. */
+  cwd?: string
+  /** True when the step runs on a pseudo-terminal. */
+  tty?: true
+  /** The authoring note — why this assertion is the falsifiable form of the claim. */
+  note?: string
+  /**
+   * True for a TEARDOWN step — one that also runs best-effort after a failure to
+   * restore host state (see the scenario schema's `teardown`). Rendered as part of
+   * the one numbered list, wearing this flag.
+   */
+  teardown?: true
+  /**
+   * What this step ACTUALLY did in the run the read named — merged in from that run's
+   * evidence bundle (see {@link GuardStepActual}). Absent when the read named no run,
+   * and when the step never executed in it: the detail then shows the authored half
+   * alone, which is all that is true about such a step.
+   */
+  actual?: GuardStepActual
 }
 
-/** `contains “x”` / `matches /x/` / `is “x”` — one stream/header/body matcher. */
-function describeStreamMatcher(m: GuardStreamMatcher): string {
-  if (m.equals !== undefined) return `is “${m.equals}”`
-  if (m.contains !== undefined) return `contains “${m.contains}”`
-  return `matches /${m.matches}/`
-}
-
-function describeFileMatcher(m: GuardFileMatcher): string {
-  if (m.exists) return 'exists'
-  if (m.absent) return 'is absent'
-  if (m.equals !== undefined) return `is “${m.equals}”`
-  return `contains “${m.contains}”`
-}
-
-function describeJsonMatcher(m: GuardJsonMatcher): string {
-  if (m.exists) return 'exists'
-  if (m.absent) return 'is absent'
-  if (m.equals !== undefined) return `is ${JSON.stringify(m.equals)}`
-  if (m.contains !== undefined) return `contains “${m.contains}”`
-  return `matches /${m.matches}/`
-}
-
-function describeCliExpect(expect: GuardExpect): string {
-  const parts: string[] = []
-  if (expect.exit !== undefined) parts.push(`exit ${expect.exit}`)
-  if (expect.stdout) parts.push(`stdout ${describeStreamMatcher(expect.stdout)}`)
-  if (expect.stderr) parts.push(`stderr ${describeStreamMatcher(expect.stderr)}`)
-  for (const [path, m] of Object.entries(expect.files ?? {})) {
-    parts.push(`${path} ${describeFileMatcher(m)}`)
-  }
-  return parts.join(' · ')
-}
-
-function describeApiExpect(expect: GuardApiExpect): string {
-  const parts: string[] = []
-  if (expect.status !== undefined) parts.push(`status ${expect.status}`)
-  for (const [name, m] of Object.entries(expect.headers ?? {})) {
-    parts.push(`${name} ${describeStreamMatcher(m)}`)
-  }
-  if (expect.body) parts.push(`body ${describeStreamMatcher(expect.body)}`)
-  for (const [path, m] of Object.entries(expect.json ?? {})) {
-    parts.push(`${path || '$'} ${describeJsonMatcher(m)}`)
-  }
-  if (expect.schema) parts.push('matches the declared response schema')
-  return parts.join(' · ')
-}
-
-/** `“x”` / `/x/` — one log-line matcher, in the words a reader needs. */
-function describeLogMatch(m: GuardLogMatch): string {
-  return typeof m === 'string' ? `“${m}”` : `/${m.pattern}/`
-}
-
-/**
- * One lifecycle step as a command + expectation pair — the SINGLE rendering both
- * the dashboard step list and the runner's evidence transcript use, so the two can
- * never describe the same step differently.
- */
-export function describeApiLifecycleStep(
-  step: GuardApiBootStep | GuardApiSignalStep | GuardApiLogsStep,
-): { command: string; expectation: string; env?: string[] } {
-  if (isApiBootStep(step)) {
-    const env = Object.entries(step.boot.env ?? {}).map(([k, v]) => `${k}=${v}`)
-    const e = step.boot.expect
-    const parts: string[] = []
-    if (!e || e.ready) parts.push('becomes healthy')
-    if (e?.exitCode !== undefined) parts.push(`exits ${e.exitCode}`)
-    if (e?.stderrContains) parts.push(...e.stderrContains.map((s) => `stderr contains “${s}”`))
-    return { command: 'boot the server', expectation: parts.join(' · '), ...(env.length > 0 ? { env } : {}) }
-  }
-  if (isApiSignalStep(step)) {
-    const parts: string[] = []
-    if (step.signal.expect?.exitCode !== undefined) parts.push(`exits ${step.signal.expect.exitCode}`)
-    if (step.signal.expect?.withinMs !== undefined) parts.push(`within ${step.signal.expect.withinMs}ms`)
-    return { command: `signal ${step.signal.name}`, expectation: parts.join(' · ') }
-  }
-  const { stream, match, count, sinceLastStep } = step.logs
-  const window = sinceLastStep ? ' since the previous step' : ''
-  const n = count === undefined ? 'a line' : `exactly ${count} line${count === 1 ? '' : 's'}`
-  return {
-    command: `read server ${stream}`,
-    expectation: `${n} matching ${describeLogMatch(match)}${window}`,
-  }
-}
-
-/**
- * A parsed scenario as its step list. Anything that doesn't parse as a known
- * driver yields an empty list — the caller falls back to the raw source, never to
- * a half-rendered guess.
- */
 export function describeGuardScenarioSteps(scenario: unknown): GuardScenarioStepView[] {
   const parsed = GuardScenarioSchema.safeParse(scenario)
   if (!parsed.success) return []
   const s = parsed.data
-  if (s.driver === 'api') {
-    return s.steps.map((step, i) => {
-      const base = { n: i + 1, ...(step.milestone != null ? { milestone: step.milestone } : {}) }
-      if (!isApiRequestStep(step)) return { ...base, ...describeApiLifecycleStep(step) }
-      return {
-        ...base,
-        command: `${step.request.method} ${step.request.path}`,
-        expectation: describeApiExpect(step.expect),
-        ...(step.repeat != null ? { repeat: step.repeat } : {}),
-      }
-    })
+  /** The milestone half of a step view — position and claim identities, when named. */
+  const milestoneView = (value: GuardStepMilestone | undefined): Partial<GuardScenarioStepView> => {
+    const order = milestoneOrder(value)
+    const claims = milestoneClaims(value)
+    return {
+      ...(order != null ? { milestone: order } : {}),
+      ...(claims.length > 0 ? { claims } : {}),
+    }
   }
-  return s.steps.map((step, i) => {
-    const env = Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
+
+  // ONE numbered list across the boundary: teardown steps follow the main steps
+  // with continuous numbering, wearing the `teardown` flag — the same indices the
+  // runner's failures and evidence records use.
+  return guardExecutionSteps(s).map((step, i) => {
+    const teardown = i >= s.steps.length ? { teardown: true as const } : {}
+    // A request step reads the same wherever it is taken — `METHOD /path` and its
+    // matchers — and wears the `api` kind, because the surface it acts on is a
+    // served one, not the shell.
+    if (isApiRequestStep(step)) {
+      return {
+        n: i + 1,
+        kind: 'api' as const,
+        command: describeApiCommand(step),
+        expectation: describeApiExpect(step.expect),
+        ...milestoneView(step.milestone),
+        ...(step.repeat != null ? { repeat: step.repeat } : {}),
+        ...(step.note != null ? { note: step.note } : {}),
+        ...teardown,
+      }
+    }
+    // A web step's row reads like every other row — what it does, what it asserts —
+    // and wears the `web` kind the step-kind vocabulary already reserved for it.
+    if (isWebStep(step)) {
+      return {
+        n: i + 1,
+        kind: 'web' as const,
+        command: describeWebCommand(step),
+        expectation: describeWebExpect(step.expect),
+        ...milestoneView(step.milestone),
+        ...(step.note != null ? { note: step.note } : {}),
+        ...teardown,
+      }
+    }
+    // The api LIFECYCLE verbs — they act on the booted server process, so they wear
+    // the `api` kind and say what they do to it (`boot the server`, `signal SIGTERM`).
+    if (isApiStep(step)) {
+      return {
+        n: i + 1,
+        kind: 'api' as const,
+        ...milestoneView(step.milestone),
+        ...describeApiLifecycleStep(step),
+        ...teardown,
+      }
+    }
+    const env = isProcessStep(step)
+      ? Object.entries(step.env ?? {}).map(([k, v]) => `${k}=${v}`)
+      : []
     return {
       n: i + 1,
-      command: step.run.join(' '),
+      kind: cliStepKind(step),
+      command: describeCliCommand(step),
       ...(env.length > 0 ? { env } : {}),
       expectation: describeCliExpect(step.expect),
-      ...(step.milestone != null ? { milestone: step.milestone } : {}),
-      ...(step.repeat != null ? { repeat: step.repeat } : {}),
+      ...milestoneView(step.milestone),
+      ...(isRunStep(step) && step.repeat != null ? { repeat: step.repeat } : {}),
+      ...(step.cwd != null ? { cwd: step.cwd } : {}),
+      ...(isRunStep(step) && step.tty ? { tty: true as const } : {}),
+      ...(step.note != null ? { note: step.note } : {}),
+      ...teardown,
     }
   })
+}
+
+// --- Presentation: a committed scenario's STARTING WORLD ---------------
+
+/**
+ * The world a test STARTS in — the `setup:` block the runner materializes before
+ * the first step, in the words a reader needs. Read beside the step list, which
+ * only ever shows what the test DOES from here.
+ *
+ * The scripted-third-party capabilities (`http`, `externals`) are not part of it:
+ * those say what the test TALKS TO, not the state it begins from.
+ */
+export interface GuardScenarioSetupView {
+  /** Seeded files in declaration order: sandbox-relative path → its content. */
+  files?: { path: string; content: string }[]
+  /** The declared git world state, one line each. */
+  git?: string[]
+  /** The scenario-global env overlay as `K=V` — the shape a step's own overlay uses. */
+  env?: string[]
+}
+
+/**
+ * The declared git world as one line per fact. The block's PRESENCE means "there
+ * is a repository here", so it always leads with that; everything after it is a
+ * line only when the scenario declares it.
+ */
+function describeGuardGitSetup(git: GuardGit): string[] {
+  const lines = [
+    git.root ? `initializes a git repository in ${git.root}` : 'initializes a git repository',
+  ]
+  if (git.branch) lines.push(`on branch ${git.branch}`)
+  if (git.identity) lines.push(`commits as ${git.identity.name} <${git.identity.email}>`)
+  git.commits?.forEach((commit, i) => {
+    const message = commit.message ? ` “${commit.message}”` : ''
+    lines.push(`commit ${i + 1}${message} — ${commit.files.join(', ')}`)
+  })
+  if (git.staged && git.staged.length > 0) lines.push(`staged, uncommitted — ${git.staged.join(', ')}`)
+  return lines
+}
+
+/**
+ * A parsed scenario's setup as the detail reads it. `undefined` when the file
+ * doesn't parse as a known driver, when it declares no setup at all, and when
+ * everything it declares is outside this view — the surface then renders nothing
+ * rather than an empty heading.
+ */
+export function describeGuardScenarioSetup(scenario: unknown): GuardScenarioSetupView | undefined {
+  const parsed = GuardScenarioSchema.safeParse(scenario)
+  if (!parsed.success || !parsed.data.setup) return undefined
+  const setup = parsed.data.setup
+  const files = Object.entries(setup.files ?? {}).map(([path, content]) => ({ path, content }))
+  const git = setup.git ? describeGuardGitSetup(setup.git) : []
+  const env = Object.entries(setup.env ?? {}).map(([k, v]) => `${k}=${v}`)
+  const view: GuardScenarioSetupView = {
+    ...(files.length > 0 ? { files } : {}),
+    ...(git.length > 0 ? { git } : {}),
+    ...(env.length > 0 ? { env } : {}),
+  }
+  return Object.keys(view).length > 0 ? view : undefined
 }

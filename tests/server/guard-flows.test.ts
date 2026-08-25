@@ -8,21 +8,22 @@ import { createApp } from '../../apps/dashboard/server/src/app';
 import {
   GuardFlowDetailSchema,
   GuardFlowsViewCoreSchema,
-  GuardJourneysViewSchema,
+  GuardInterfacesViewSchema,
   GuardRunFlowSchema,
   GuardSectionFlowSchema,
+  guardCoverageWord,
 } from '../../packages/shared/src/index';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 /**
  * The FLOW read surfaces (OSS): the coverage inversion (a section lists the flows
- * that traverse it), the Flows tab's list + detail, the Journeys catalog with its
+ * that traverse it), the Flows tab's list + detail, the Interfaces catalog with its
  * reverse index, and the run payload's flow-instance join.
  *
  * The fixture is a small CLI task manager ("taskbird"): a three-section spec doc,
  * one synthesized flow across all three sections plus a second, unrealized one, a
- * generated cli scenario, a hand-written scenario (the Manual pseudo-flow), a
- * journey catalog with one journey no flow grounds on, and a run where the flow
+ * generated cli scenario, a hand-written scenario (the Manual pseudo-flow), an
+ * interface catalog with one interface no flow grounds on, and a run where the flow
  * failed at its third milestone. Temp-repo fixture + supertest over the real app.
  */
 
@@ -109,7 +110,6 @@ const FLOWS_FILE = {
 };
 
 const MANIFEST = {
-  version: 2,
   flows: [
     {
       flowId: FLOW_ID,
@@ -127,7 +127,7 @@ const MANIFEST = {
       bindings: FLOWS_FILE.flows[1].bindings,
       scenarios: [],
       generationInputsHash: 'sha256:gen',
-      gaps: [{ surface: 'cli', kind: 'no-journey', reason: 'no cli journey exports the list' }],
+      gaps: [{ surface: 'cli', kind: 'no-interface', reason: 'no cli interface exports the list' }],
     },
   ],
 };
@@ -191,7 +191,7 @@ const RESULT = {
     noFlowClaims: 1,
     unsettledAreas: [],
   },
-  journeys: { total: 4, bySurface: { cli: 4 } },
+  interfaces: { total: 4, bySurface: { cli: 4 } },
 };
 
 const LATEST = {
@@ -201,7 +201,6 @@ const LATEST = {
     branch: 'main',
     commit: 'c0ffee',
     recipeFingerprint: 'sha256:r',
-    scenarioFormat: 2,
   },
   summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
@@ -215,7 +214,7 @@ const LATEST = {
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
       flowId: FLOW_ID,
       failedMilestone: 3,
-      journeyDrifted: true,
+      interfaceDrifted: true,
     },
     {
       id: MANUAL_ID,
@@ -228,11 +227,11 @@ const LATEST = {
   sections: [],
 };
 
-const JOURNEYS = {
-  version: 1,
+const INTERFACES = {
+  version: 2,
   generatedAt: '2026-07-24T13:39:00.000Z',
   recipeFingerprint: 'sha256:r',
-  journeys: [
+  interfaces: [
     {
       id: 'cli/tasks-add',
       type: 'cli',
@@ -270,11 +269,10 @@ const JOURNEYS = {
 };
 
 const SCENARIO_YAML = [
-  'guard: 2',
   `id: ${SCENARIO_ID}`,
   'title: Tasks are created, listed newest-first, completed and filterable',
   `flow: { id: ${FLOW_ID}, fingerprint: "sha256:41ac" }`,
-  'journey:',
+  'interface:',
   '  path: [cli/tasks-add, cli/tasks-list, cli/tasks-done]',
   '  fingerprints: ["sha256:j1", "sha256:j2", "sha256:j3"]',
   'binds:',
@@ -299,7 +297,6 @@ const SCENARIO_YAML = [
 ].join('\n');
 
 const MANUAL_YAML = [
-  'guard: 2',
   `id: ${MANUAL_ID}`,
   'title: "`tasks --help` prints usage"',
   'binds:',
@@ -333,7 +330,7 @@ describe('Guard flow read surfaces', () => {
     writeJson('.truecourse/guard/LATEST.json', LATEST);
     writeJson(`.truecourse/guard/runs/${RUN_ID}.json`, LATEST);
     writeJson('.truecourse/guard/result.json', RESULT);
-    writeJson('.truecourse/guard/journeys.json', JOURNEYS);
+    writeJson('.truecourse/guard/interfaces.json', INTERFACES);
     write(`.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}/transcript.txt`, '$ tasks done 1\n');
   }
 
@@ -358,8 +355,8 @@ describe('Guard flow read surfaces', () => {
     const detail = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
     expect(() => GuardFlowDetailSchema.parse(detail.body)).not.toThrow();
 
-    const journeys = await request(app).get(url('journeys')).expect(200);
-    expect(() => GuardJourneysViewSchema.parse(journeys.body)).not.toThrow();
+    const interfaces = await request(app).get(url('interfaces')).expect(200);
+    expect(() => GuardInterfacesViewSchema.parse(interfaces.body)).not.toThrow();
 
     const latest = await request(app).get(url('latest')).expect(200);
     expect(() => z.array(GuardRunFlowSchema).parse(latest.body.runFlows)).not.toThrow();
@@ -391,7 +388,7 @@ describe('Guard flow read surfaces', () => {
       // Both surfaces ride the flow: the cli scenario (painted by the run) and the
       // web gap that explains why there is no second scenario.
       expect(creating.flows[0].surfaces).toEqual([
-        expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', journeyDrifted: true }),
+        expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', interfaceDrifted: true }),
         expect.objectContaining({
           surface: 'web',
           status: 'web',
@@ -409,10 +406,10 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
       const listing = res.body.sections.find((s: any) => s.anchor === 'tasks/listing-tasks');
       // Two flows bind this section: the failing lifecycle and the unrealized
-      // export (a `no-journey` gap). The failure wins.
+      // export (a `no-interface` gap). The failure wins.
       expect(listing.flows.map((f: any) => [f.flowId, f.status])).toEqual([
         [FLOW_ID, 'fail'],
-        ['task-export', 'no-journey'],
+        ['task-export', 'no-interface'],
       ]);
       expect(listing.status).toBe('fail');
     });
@@ -445,7 +442,50 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
       const overview = res.body.sections.find((s: any) => s.anchor === 'tasks');
       expect(overview.flows).toEqual([]);
-      expect(overview).toMatchObject({ status: 'no-claim', reason: 'the overview asserts nothing' });
+      // No flow, no run — the section's status comes from its gapped CLAIMS, and
+      // the reason that names one wins over the claim-less coverage gap.
+      expect(overview).toMatchObject({
+        status: 'untestable',
+        reason: 'implementation detail — nothing observable on any surface',
+      });
+      expect(guardCoverageWord(overview.status)).toBe('Not testable');
+      // Both records still show in the detail — the mix is never hidden.
+      expect(overview.claimGaps).toEqual([
+        expect.objectContaining({ title: 'Tasks are stored in a local file' }),
+        expect.objectContaining({ reason: 'the overview asserts nothing' }),
+      ]);
+    });
+
+    it('derives a Blocked section from its no-flow claims alone, never a mute bucket', async () => {
+      // The reference-store shape: a section whose every claim landed in
+      // `noFlowClaims`, with no coverage gap of its own and no flow binding it.
+      // Before claim-keyed derivation this read `unguarded` ("Not generated").
+      seed();
+      // `tasks` is the preamble section: no flow binds it, and with the manual
+      // scenario's run dropped it has no verdict either.
+      writeJson('.truecourse/scenarios/flows.json', {
+        ...FLOWS_FILE,
+        noFlowClaims: [
+          {
+            doc: DOC,
+            anchor: 'tasks',
+            claimTitle: 'Tasks are managed through the guard CLI',
+            reason: 'blocked-on layer 2: no `cli/guard` interface has been derived.',
+          },
+        ],
+      });
+      writeJson('.truecourse/guard/result.json', { ...RESULT, coverageGaps: [] });
+      writeJson('.truecourse/guard/LATEST.json', {
+        ...LATEST,
+        scenarios: LATEST.scenarios.filter((s) => s.id !== MANUAL_ID),
+      });
+
+      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
+      const section = res.body.sections.find((s: any) => s.anchor === 'tasks');
+      expect(section.flows).toEqual([]);
+      expect(section.status).toBe('no-interface');
+      expect(guardCoverageWord(section.status)).toBe('Blocked');
+      expect(section.reason).toContain('no `cli/guard` interface');
     });
   });
 
@@ -473,10 +513,10 @@ describe('Guard flow read surfaces', () => {
         findings: 0,
         toolDefects: 1,
         errors: 0,
-        journeyDrifted: true,
+        interfaceDrifted: true,
       });
       expect(byId.get('task-export')).toMatchObject({
-        status: 'no-journey',
+        status: 'no-interface',
         bucket: 'blocked',
         findings: 0,
         toolDefects: 0,
@@ -490,6 +530,66 @@ describe('Guard flow read surfaces', () => {
       expect(res.body).toMatchObject({ generatedAt: RESULT.generatedAt, runId: RUN_ID, ranAt: LATEST.run.ranAt });
       // Worst-first: the failing flow leads.
       expect(res.body.flows[0].flowId).toBe(FLOW_ID);
+    });
+
+    /**
+     * A row says which DRIVERS its tests exercise — the step kinds the scenario
+     * actually uses, not the scenario-level `driver` field (which names the
+     * sandbox world). The Tests list's driver chips narrow on exactly this.
+     */
+    it('carries the drivers a flow’s tests exercise, and a MIXED test reports both', async () => {
+      seed();
+      const res = await request(app).get(url('flows')).expect(200);
+      const byId = new Map<string, any>(res.body.flows.map((f: any) => [f.flowId, f]));
+      // The flow has a cli test AND a web gap: nothing runs on the surface it is
+      // still waiting for, so the row drives cli alone.
+      expect(byId.get(FLOW_ID).drivers).toEqual(['cli']);
+      // A flow with no test ANYWHERE has no steps to read — its declared surface
+      // answers instead, so a blocked flow stays reachable by the filter.
+      expect(byId.get('task-export').drivers).toEqual(['cli']);
+
+      // The same committed test with a WEB step in it: one sandbox scenario,
+      // two drivers, in registry order.
+      write(
+        SCENARIO_FILE,
+        SCENARIO_YAML.replace(
+          '  - run: [list, --done]',
+          ['  - driver: web', '    navigate: /tasks', '    milestone: 4', '  - run: [list, --done]'].join('\n'),
+        ),
+      );
+      const mixed = await request(app).get(url('flows')).expect(200);
+      expect(mixed.body.flows.find((f: any) => f.flowId === FLOW_ID).drivers).toEqual(['cli', 'web']);
+    });
+
+    /**
+     * A REQUEST step is the third driver a sandbox scenario can use — the UI acts,
+     * the request reads the structured answer — so a scenario carrying all three
+     * wears all three chips, in registry order.
+     */
+    it('a request step adds the api driver to a mixed sandbox test', async () => {
+      seed();
+      write(
+        SCENARIO_FILE,
+        SCENARIO_YAML.replace(
+          '  - run: [list, --done]',
+          [
+            '  - driver: web',
+            '    navigate: /tasks',
+            '    milestone: 4',
+            '  - request:',
+            '      method: GET',
+            '      path: /api/tasks?done=true',
+            '    expect:',
+            '      status: 200',
+            '    milestone: 4',
+            '  - run: [list, --done]',
+          ].join('\n'),
+        ),
+      );
+      const res = await request(app).get(url('flows')).expect(200);
+      // Registry order (`cli, api, web`), not step order — the chips read the same
+      // on every row.
+      expect(res.body.flows.find((f: any) => f.flowId === FLOW_ID).drivers).toEqual(['cli', 'api', 'web']);
     });
 
     it('is 200 with an empty payload on a fresh repo (the tab renders its CTA)', async () => {
@@ -544,7 +644,7 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.milestones[2]).toMatchObject({ anchor: 'tasks/completing-tasks', headingText: 'Completing tasks', drifted: true });
     });
 
-    it('carries the per-surface scenario rows, gaps, journeys and findings', async () => {
+    it('carries the per-surface scenario rows, gaps, interfaces and findings', async () => {
       seed();
       const res = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
       expect(res.body.surfaces[0]).toMatchObject({
@@ -555,19 +655,50 @@ describe('Guard flow read surfaces', () => {
         birthPassed: true,
         outcome: 'fail',
         failedMilestone: 3,
-        journeyDrifted: true,
+        interfaceDrifted: true,
         hasEvidence: true,
         evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
-        journeyPath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
+        interfacePath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
       });
       expect(res.body.surfaces[0].failure).toMatchObject({ step: 3 });
       expect(res.body.surfaces[1]).toMatchObject({ surface: 'web', status: 'web', birthPassed: false, hasEvidence: false });
       expect(res.body.gaps).toEqual([
         { surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'the board is browser-only', label: 'awaiting web driver' },
       ]);
-      expect(res.body.journeyIds).toEqual(['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done']);
+      expect(res.body.interfaceIds).toEqual(['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done']);
       expect(res.body.findings).toHaveLength(1);
       expect(res.body.findings[0]).toMatchObject({ kind: 'fidelity', flowId: FLOW_ID, failedMilestone: 4 });
+    });
+
+    // The board is merged across runs, so the detail's own `runId` is only the run
+    // that wrote it LAST. A row carried from an earlier run has to say which run it
+    // came from, or the client addresses its transcript to the wrong evidence dir.
+    it('addresses each scenario row to the run that produced it', async () => {
+      seed();
+      const res = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+      // Un-merged board: the row came from the envelope's run.
+      expect(res.body.surfaces[0]).toMatchObject({ runId: RUN_ID });
+
+      const CARRIED = '2026-07-20T09-00-00Z_older111';
+      writeJson('.truecourse/guard/LATEST.json', {
+        ...LATEST,
+        run: { ...LATEST.run, runId: 'a-later-scoped-run' },
+        scenarios: [
+          {
+            ...LATEST.scenarios[0],
+            runId: CARRIED,
+            ranAt: '2026-07-20T09:00:00.000Z',
+            evidencePath: `.truecourse/guard/evidence/${CARRIED}/${SCENARIO_ID}`,
+          },
+          LATEST.scenarios[1],
+        ],
+      });
+      const merged = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+      expect(merged.body.runId).toBe('a-later-scoped-run');
+      expect(merged.body.surfaces[0]).toMatchObject({
+        runId: CARRIED,
+        evidencePath: `.truecourse/guard/evidence/${CARRIED}/${SCENARIO_ID}`,
+      });
     });
 
     // The run's blocked-precondition annotation reaches the row the detail renders —
@@ -642,6 +773,166 @@ describe('Guard flow read surfaces', () => {
     });
   });
 
+  // --- The RAW artifact behind an entity: the store file's own bytes ---------
+  //
+  // Every artifact-backed entity offers two readings, and the second one must be
+  // the FILE — not a re-serialization of the view the first one composed. These
+  // pin that: the slice is the stored entry, taken from the real store path.
+
+  describe('raw artifact slices', () => {
+    it('serves one flow entry out of scenarios/flows.json, pretty-printed', async () => {
+      seed();
+      const res = await request(app).get(url(`flow/raw?id=${FLOW_ID}`)).expect(200);
+      expect(res.body).toMatchObject({
+        id: FLOW_ID,
+        file: path.join('.truecourse', 'scenarios', 'flows.json'),
+      });
+      // The ENTRY, not the whole file: this flow's object and no sibling's.
+      expect(JSON.parse(res.body.content)).toEqual(FLOWS_FILE.flows[0]);
+      expect(res.body.content).not.toContain('task-export');
+      // Pretty-printed — the pane shows a file a human can read.
+      expect(res.body.content.split('\n').length).toBeGreaterThan(5);
+    });
+
+    it('serves one interface entry out of guard/interfaces.json', async () => {
+      seed();
+      const res = await request(app).get(url('interface/raw?id=cli/tasks-add')).expect(200);
+      expect(res.body).toMatchObject({
+        id: 'cli/tasks-add',
+        file: path.join('.truecourse', 'guard', 'interfaces.json'),
+      });
+      expect(JSON.parse(res.body.content)).toEqual(INTERFACES.interfaces[0]);
+    });
+
+    it('404s an id the store has no entry for, and 400s a missing id', async () => {
+      seed();
+      await request(app).get(url('flow/raw?id=nope')).expect(404);
+      await request(app).get(url('interface/raw?id=cli/nope')).expect(404);
+      await request(app).get(url('flow/raw')).expect(400);
+      await request(app).get(url('interface/raw')).expect(400);
+    });
+
+    it('404s when the store file itself is absent — never an empty pane', async () => {
+      // Nothing seeded: no flows.json, no interfaces.json.
+      await request(app).get(url(`flow/raw?id=${FLOW_ID}`)).expect(404);
+      await request(app).get(url('interface/raw?id=cli/tasks-add')).expect(404);
+    });
+
+    it('reads the file, not the view — a field the view drops still shows', async () => {
+      seed();
+      // A key no `GuardFlow` view carries. The raw read is plain JSON, so it
+      // survives; a schema-parsed read would have silently eaten it.
+      writeJson('.truecourse/scenarios/flows.json', {
+        ...FLOWS_FILE,
+        flows: [{ ...FLOWS_FILE.flows[0], authoredBy: 'a-human' }, FLOWS_FILE.flows[1]],
+      });
+      const res = await request(app).get(url(`flow/raw?id=${FLOW_ID}`)).expect(200);
+      expect(JSON.parse(res.body.content).authoredBy).toBe('a-human');
+    });
+  });
+
+  // --- The RECIPE artifact: one per repo, and secrets never leave the file ----
+  //
+  // The recipe is the SINGLETON raw read — a repo has one, so it is addressed by
+  // nothing. It is also the only artifact that can carry a secret, and it is
+  // COMMITTED: what may be read of it here is exactly what `truecourse guard
+  // recipe` prints, which is everything except an inline credential value.
+
+  describe('the recipe artifact', () => {
+    const RECIPE_FILE = '.truecourse/scenarios/recipe.json';
+    const SECRET = 'sk-live-9f2c-super-secret';
+    const recipeWith = (over: Record<string, unknown> = {}) => ({
+      build: 'pnpm build',
+      entry: ['node', 'dist/tasks.js'],
+      env: { TASKS_HOME: '.tmp/tasks' },
+      ...over,
+    });
+
+    it('serves recipe.json itself, pretty-printed, with NO id required', async () => {
+      seed();
+      writeJson(RECIPE_FILE, recipeWith());
+      const res = await request(app).get(url('recipe/raw')).expect(200);
+      expect(res.body.file).toBe(path.join('.truecourse', 'scenarios', 'recipe.json'));
+      expect(JSON.parse(res.body.content)).toEqual(recipeWith());
+      expect(res.body.content.split('\n').length).toBeGreaterThan(3);
+    });
+
+    it('MASKS an inline credential value — the raw read is never the secret door', async () => {
+      seed();
+      writeJson(
+        RECIPE_FILE,
+        recipeWith({
+          api: {
+            serve: ['node', 'server.js'],
+            healthPath: '/health',
+            credentials: { 'api-key': { header: 'Authorization', value: SECRET } },
+            externals: {
+              'hit-pay': {
+                baseUrlEnv: 'HITPAY_BASE_URL',
+                env: { HITPAY_API_KEY: { value: 'hp-live-secret' } },
+              },
+            },
+          },
+        }),
+      );
+      const res = await request(app).get(url('recipe/raw')).expect(200);
+      expect(res.body.content).not.toContain(SECRET);
+      expect(res.body.content).not.toContain('hp-live-secret');
+      const parsed = JSON.parse(res.body.content);
+      expect(parsed.api.credentials['api-key'].value).toContain('masked');
+      expect(parsed.api.externals['hit-pay'].env.HITPAY_API_KEY.value).toContain('masked');
+      // The CAPABILITIES around the secret are not secrets — they all survive.
+      expect(parsed.api.credentials['api-key'].header).toBe('Authorization');
+      expect(parsed.api.externals['hit-pay'].baseUrlEnv).toBe('HITPAY_BASE_URL');
+      expect(parsed.env).toEqual({ TASKS_HOME: '.tmp/tasks' });
+    });
+
+    /**
+     * The CARD (the flows envelope's `recipe`) carries every surface's
+     * preparation in ONE per-surface shape, because the Interfaces catalog opens
+     * it per surface: the cli's install/build/entrypoint, the api server, the web
+     * block. A surface the recipe says nothing about gets no entry at all.
+     */
+    it('carries the install step and the web block on the card, per surface', async () => {
+      seed();
+      writeJson(
+        RECIPE_FILE,
+        recipeWith({
+          install: 'pnpm install --frozen-lockfile',
+          web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+        }),
+      );
+      const res = await request(app).get(url('flows')).expect(200);
+      expect(res.body.recipe.surfaces).toMatchObject({
+        cli: {
+          install: 'pnpm install --frozen-lockfile',
+          build: 'pnpm build',
+          entry: ['node', 'dist/tasks.js'],
+        },
+        web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health' },
+        // One served surface for web steps AND request steps: with no `api` block
+        // of its own, the api surface is the web block's server.
+        api: { serve: ['node', 'dist/web.js'], healthPath: '/health', sharedWithWeb: true },
+      });
+    });
+
+    it('reports no install and no web surface when the recipe declares neither', async () => {
+      seed();
+      writeJson(RECIPE_FILE, recipeWith());
+      const res = await request(app).get(url('flows')).expect(200);
+      expect(Object.keys(res.body.recipe.surfaces)).toEqual(['cli']);
+      expect(res.body.recipe.surfaces.cli.install).toBeUndefined();
+    });
+
+    it('404s with no recipe at all, and for one that does not parse', async () => {
+      seed();
+      await request(app).get(url('recipe/raw')).expect(404);
+      write(RECIPE_FILE, '{ "build": ');
+      // Unparseable ⇒ absent, never shown: a secret in it could not be found to hide.
+      await request(app).get(url('recipe/raw')).expect(404);
+    });
+  });
+
   // --- An orphaned flow: kept for its test, no longer derived from the specs ---
 
   describe('a flow no synthesized flow claims any more', () => {
@@ -649,7 +940,6 @@ describe('Guard flow read surfaces', () => {
     const ORPHAN_SCENARIO = `${ORPHAN_ID}.cli.1`;
     const ORPHAN_FILE = path.join('.truecourse', 'scenarios', 'tasks', `${ORPHAN_SCENARIO}.yaml`);
     const ORPHAN_YAML = [
-      'guard: 2',
       `id: ${ORPHAN_SCENARIO}`,
       'title: Purged tasks leave the list',
       `flow: { id: ${ORPHAN_ID}, fingerprint: "sha256:purge" }`,
@@ -729,29 +1019,29 @@ describe('Guard flow read surfaces', () => {
     });
   });
 
-  // --- Journeys tab --------------------------------------------------------
+  // --- Interfaces tab --------------------------------------------------------
 
-  describe('journeys', () => {
+  describe('interfaces', () => {
     it('returns the catalog with the reverse index onto the flows', async () => {
       seed();
-      const res = await request(app).get(url('journeys')).expect(200);
-      expect(res.body).toMatchObject({ mapped: true, generatedAt: JOURNEYS.generatedAt, recipeFingerprint: 'sha256:r' });
-      const byId = new Map<string, any>(res.body.journeys.map((j: any) => [j.id, j]));
+      const res = await request(app).get(url('interfaces')).expect(200);
+      expect(res.body).toMatchObject({ mapped: true, generatedAt: INTERFACES.generatedAt, recipeFingerprint: 'sha256:r' });
+      const byId = new Map<string, any>(res.body.interfaces.map((j: any) => [j.id, j]));
       expect(byId.get('cli/tasks-add')).toMatchObject({
         type: 'cli',
         title: 'tasks add',
         // This manifest carries no per-surface plan record — usage falls back to
-        // the committed scenario's own journey path, and reads as realized.
+        // the committed scenario's own interface path, and reads as realized.
         flows: [{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true }],
         scenarioIds: [SCENARIO_ID],
         source: 'tree',
       });
       // NOTHING references `tasks purge` — no scenario, no plan. The candidate spec gap.
       expect(byId.get('cli/tasks-purge').flows).toEqual([]);
-      expect(res.body.totals).toEqual({ journeys: 4, detectedSurfaces: 1, grounded: 3, ungrounded: 1 });
+      expect(res.body.totals).toEqual({ interfaces: 4, detectedSurfaces: 1, grounded: 3, ungrounded: 1 });
     });
 
-    it('counts a flow that MATCHED the journey but was blocked before authoring', async () => {
+    it('counts a flow that MATCHED the interface but was blocked before authoring', async () => {
       seed();
       // `task-export` matched `tasks purge`, then authoring refused: no scenario
       // exists, but the plan record proves the spec reaches this code path.
@@ -761,7 +1051,7 @@ describe('Guard flow read surfaces', () => {
           MANIFEST.flows[0],
           {
             ...MANIFEST.flows[1],
-            journeys: [{ surface: 'cli', journeyIds: ['cli/tasks-purge'] }],
+            interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-purge'] }],
             gaps: [
               {
                 surface: 'cli',
@@ -773,8 +1063,8 @@ describe('Guard flow read surfaces', () => {
         ],
       });
 
-      const res = await request(app).get(url('journeys')).expect(200);
-      const purge = res.body.journeys.find((j: any) => j.id === 'cli/tasks-purge');
+      const res = await request(app).get(url('interfaces')).expect(200);
+      const purge = res.body.interfaces.find((j: any) => j.id === 'cli/tasks-purge');
       expect(purge.flows).toEqual([
         {
           flowId: 'task-export',
@@ -787,7 +1077,7 @@ describe('Guard flow read surfaces', () => {
           },
         },
       ]);
-      // No scenario was written — the journey is used, not exercised.
+      // No scenario was written — the interface is used, not exercised.
       expect(purge.scenarioIds).toEqual([]);
       // …and it no longer counts as code the spec never mentions.
       expect(res.body.totals).toMatchObject({ grounded: 4, ungrounded: 0 });
@@ -802,30 +1092,30 @@ describe('Guard flow read surfaces', () => {
         flows: [
           {
             ...MANIFEST.flows[0],
-            journeys: [{ surface: 'cli', journeyIds: ['cli/tasks-add'] }],
+            interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-add'] }],
             gaps: [{ surface: 'cli', kind: 'blocked-on', reason: 'blocked on db: lifecycle' }],
           },
           MANIFEST.flows[1],
         ],
       });
 
-      const res = await request(app).get(url('journeys')).expect(200);
-      const add = res.body.journeys.find((j: any) => j.id === 'cli/tasks-add');
+      const res = await request(app).get(url('interfaces')).expect(200);
+      const add = res.body.interfaces.find((j: any) => j.id === 'cli/tasks-add');
       expect(add.flows).toEqual([{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true }]);
     });
 
     it('banners every registry surface with its runnable flag', async () => {
       seed();
-      const res = await request(app).get(url('journeys')).expect(200);
+      const res = await request(app).get(url('interfaces')).expect(200);
       const bySurface = new Map<string, any>(res.body.surfaces.map((s: any) => [s.surface, s]));
-      expect(bySurface.get('cli')).toMatchObject({ label: 'CLI', runnable: true, journeys: 4, detected: true, source: 'tree' });
-      expect(bySurface.get('web')).toMatchObject({ label: 'Web', runnable: false, waitingLabel: 'Needs web driver', journeys: 0, detected: false });
+      expect(bySurface.get('cli')).toMatchObject({ label: 'CLI', runnable: true, interfaces: 4, detected: true, source: 'tree' });
+      expect(bySurface.get('web')).toMatchObject({ label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, detected: false });
     });
 
     it('is 200 with a clean empty payload when nothing was mapped', async () => {
-      const res = await request(app).get(url('journeys')).expect(200);
-      expect(res.body).toMatchObject({ mapped: false, generatedAt: null, recipeFingerprint: null, journeys: [] });
-      expect(res.body.totals).toEqual({ journeys: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 });
+      const res = await request(app).get(url('interfaces')).expect(200);
+      expect(res.body).toMatchObject({ mapped: false, generatedAt: null, recipeFingerprint: null, interfaces: [] });
+      expect(res.body.totals).toEqual({ interfaces: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 });
       // The banner still lists every surface so the tab renders without a null check.
       expect(res.body.surfaces.length).toBeGreaterThan(0);
       expect(res.body.surfaces.every((s: any) => s.detected === false)).toBe(true);
@@ -839,7 +1129,7 @@ describe('Guard flow read surfaces', () => {
       seed();
       const res = await request(app).get(url('latest')).expect(200);
       expect(res.body.run.runId).toBe(RUN_ID);
-      expect(res.body.scenarios[0]).toMatchObject({ flowId: FLOW_ID, failedMilestone: 3, journeyDrifted: true });
+      expect(res.body.scenarios[0]).toMatchObject({ flowId: FLOW_ID, failedMilestone: 3, interfaceDrifted: true });
       expect(res.body.runFlows).toHaveLength(1);
       expect(res.body.runFlows[0]).toMatchObject({ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, epic: false });
       expect(res.body.runFlows[0].milestones.map((m: any) => m.order)).toEqual([1, 2, 3, 4]);
@@ -902,7 +1192,6 @@ describe('Guard flow read surfaces', () => {
         noFlowClaims: [],
       });
       writeJson('.truecourse/scenarios/manifest.json', {
-        version: 2,
         flows: [
           {
             flowId: RED_FLOW,
@@ -918,7 +1207,6 @@ describe('Guard flow read surfaces', () => {
       write(
         RED_FILE,
         [
-          'guard: 2',
           `id: ${RED_SCENARIO}`,
           'title: Analyze survives a pathological file',
           `flow: { id: ${RED_FLOW}, fingerprint: "sha256:red" }`,
@@ -1088,7 +1376,6 @@ describe('Guard flow read surfaces', () => {
           branch: 'main',
           commit: 'c0ffee',
           recipeFingerprint: 'sha256:r',
-          scenarioFormat: 2,
         },
         summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
         scenarios: [
@@ -1109,6 +1396,69 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.surfaces[0]).toMatchObject({ status: 'pass', outcome: 'pass', stage: 'run' });
       // The birth failure no longer speaks for the row — the run does.
       expect(res.body.surfaces[0].failure).toBeUndefined();
+    });
+
+    // --- A test that never executed AT ALL ---------------------------------
+    //
+    // A hand-authored corpus has no birth execution behind it. `passing` would be
+    // a green nothing ever earned, so the manifest says `never-run` and every
+    // surface that reads it says so too.
+
+    describe('and its sibling that has NEVER executed', () => {
+      function seedNeverRun() {
+        seedBornRed();
+        const manifest = JSON.parse(
+          fs.readFileSync(path.join(fixture.repoPath, '.truecourse/scenarios/manifest.json'), 'utf-8'),
+        );
+        manifest.flows[0].scenarios[0].status = 'never-run';
+        writeJson('.truecourse/scenarios/manifest.json', manifest);
+        // Nothing else claims a verdict: no generate report, no run.
+        fs.rmSync(path.join(fixture.repoPath, '.truecourse/guard/result.json'));
+      }
+
+      it('paints the surface `never-run` — never `guarded`, which reads as passing', async () => {
+        seedNeverRun();
+        const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
+        expect(() => GuardFlowDetailSchema.parse(res.body)).not.toThrow();
+        expect(res.body.surfaces[0]).toMatchObject({
+          scenarioId: RED_SCENARIO,
+          status: 'never-run',
+          // No execution decided it, so no birth pass either.
+          birthPassed: false,
+        });
+        expect(res.body.status).toBe('never-run');
+      });
+
+      it('rolls the section up as never-run, and the FIRST run overrides it', async () => {
+        seedNeverRun();
+        const coverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
+        const listing = coverage.body.sections.find((s: any) => s.anchor === 'tasks/listing-tasks');
+        expect(listing.status).toBe('never-run');
+
+        writeJson('.truecourse/guard/LATEST.json', {
+          run: {
+            runId: RUN_ID,
+            ranAt: '2026-07-26T10:00:00.000Z',
+            branch: 'main',
+            commit: 'c0ffee',
+            recipeFingerprint: 'sha256:r',
+          },
+          summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+          scenarios: [
+            {
+              id: RED_SCENARIO,
+              title: 'Analyze survives a pathological file',
+              binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing },
+              outcome: 'pass',
+              durationMs: 40,
+              flowId: RED_FLOW,
+            },
+          ],
+          sections: [],
+        });
+        const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
+        expect(res.body.surfaces[0]).toMatchObject({ status: 'pass', stage: 'run' });
+      });
     });
   });
 });

@@ -1,0 +1,422 @@
+id: read-a-violation-card-and-silence-its-rule
+title: A developer reads one violation card and silences the rule that raised it
+promise: >-
+  A developer reads a finding on its card, silences the rule that raised it, and turns
+  it back on from the Rules panel.
+flow:
+  id: read-a-violation-card-and-silence-its-rule
+  fingerprint: sha256:1d384e5b580dd32b0b6feef9d2fca690bfbbf3e8832f822ce980a41e223ba7fd
+interface:
+  path:
+    - cli/analyze
+    - web/open-dashboard-home
+    - web/open-repo-report
+    - web/search-the-violation-list
+    - web/reveal-a-violations-fix-prompt
+    - web/silence-rule-from-violation-card
+    - api/get-api-repos-id-violations
+    - cli/rules-list
+    - web/reenable-rule-from-rules-panel
+  fingerprints:
+    - sha256:66792fe9ce97d69aa7a54ecd634d57f145eebe1d89de01e7f2f4aedc0dc232b8
+    - sha256:88d3a9eac5b8cd6d86dbb9e63bcb0764bad77da40f236954826c55112408bf33
+    - sha256:1dd16aa090f30f87c67c0c8811b74a258b28fbbbf6a74f2b586345544119ea8b
+    - sha256:632b1bd433168026f5e1aa92aeff663c5ada9fdf2f01992ddc699b0d82994bb8
+    - sha256:a0549257254680368ecf653658d195e25543e591d5cc0b9d52e9f49870cd893a
+    - sha256:5b6e81cd9d6944cec14a80b5a424d9f006c5edd6a9f17f402598dd774174ec5c
+    - sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02
+    - sha256:a78a30d5a44c112fb60d3104f8b1fa6556c740d8676a7750c706406e276cd282
+    - sha256:dd50d571a52eb17ec8539648663fea07efd2cb2eb2395871b3d2c65434963d32
+binds:
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: a-violation-card
+    fingerprint: sha256:14d945d27cca01d02faed8265c3da2089c25d595eb4385a64ba555ac51d2d126
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: silencing-a-rule
+    fingerprint: sha256:ddcc931b1ee2c4bb7a92f7bf2ec56bd2581387d327883d315380b1cd19e7c5af
+  - doc: reference/spec-docs/dashboard/violations.mdx
+    section: the-rules-catalog
+    fingerprint: sha256:bc0c6e0b25089bb35998924198385ef5d5fc12ae7a4f40a00659bea3f9182ee8
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "private": true,
+        "type": "module",
+        "workspaces": ["services/*"]
+      }
+    sample-app/prisma/schema.prisma: |
+      datasource db {
+        provider = "postgresql"
+        url      = env("DATABASE_URL")
+      }
+
+      model User {
+        id     Int     @id @default(autoincrement())
+        email  String  @unique
+        name   String?
+        orders Order[]
+      }
+
+      model Order {
+        id     Int   @id @default(autoincrement())
+        userId Int
+        user   User  @relation(fields: [userId], references: [id])
+        total  Float
+      }
+    sample-app/services/api/package.json: |
+      {
+        "name": "api",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/server.js",
+        "dependencies": { "express": "^4.18.2", "pg": "^8.11.3" }
+      }
+    sample-app/services/api/src/server.js: |
+      import express from 'express'
+      import { listUsers, createUser } from './routes.js'
+
+      const app = express()
+
+      app.get('/users', listUsers)
+      app.post('/users', createUser)
+
+      app.listen(3000)
+
+      export default app
+    sample-app/services/api/src/routes.js: |
+      import { findAllUsers, saveUser } from './repositories/user-repository.js'
+
+      export async function listUsers(req, res) {
+        const users = await findAllUsers()
+        res.json(users)
+      }
+
+      export async function createUser(req, res) {
+        const user = await saveUser(req.body)
+        res.json(user)
+      }
+    sample-app/services/api/src/repositories/user-repository.js: |
+      import pg from 'pg'
+
+      const pool = new pg.Pool({ connectionString: 'postgres://localhost:5432/shop' })
+
+      export async function findAllUsers() {
+        const result = await pool.query('SELECT * FROM users')
+        return result.rows
+      }
+
+      export async function saveUser(user) {
+        const result = await pool.query('INSERT INTO users (email) VALUES (' + user.email + ')')
+        return result.rows
+      }
+    sample-app/services/worker/package.json: |
+      {
+        "name": "worker",
+        "version": "1.0.0",
+        "type": "module",
+        "main": "src/index.js"
+      }
+    sample-app/services/worker/src/index.js: |
+      export function runRule(source) {
+        return eval(source)
+      }
+
+      export function main() {
+        console.log('worker starting')
+        return runRule('1 + 1')
+      }
+
+      main()
+      setTimeout(main, 4200)
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - prisma/schema.prisma
+          - services/api/package.json
+          - services/api/src/server.js
+          - services/api/src/routes.js
+          - services/api/src/repositories/user-repository.js
+          - services/worker/package.json
+          - services/worker/src/index.js
+        message: seed the sample app
+normalize: []
+steps:
+  - run:
+      - analyze
+      - '--no-llm'
+      - '--no-stash'
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+      files:
+        sample-app/.truecourse/LATEST.json:
+          exists: true
+    note: >-
+      Arranges the world the card is read in, and registers the repository the dashboard
+      resolves. The seed is deliberate: `code-quality/deterministic/magic-number` raises
+      TWO findings whose titles differ (`Magic number: 3000` in the api service,
+      `Magic number: 4200` in the worker), which is what makes one card addressable while
+      the rule itself is still a multi-finding rule — the silencing half needs both. Every
+      claim `analyze` itself makes belongs to the code-analysis area. `--no-llm` keeps the
+      16 findings deterministic and free, `--no-stash` answers the dirty-tree question a
+      committed tree never asks, `--no-skills` keeps the sandbox HOME free of an editor
+      install this flow has no use for.
+  - driver: web
+    navigate: /
+    expect:
+      visible:
+        role: link
+        name: sample-app
+    note: >-
+      Boots the browser against the surface the sandbox serves; the home page can only list
+      a repository the analyze step really registered. Prepares the click below and proves
+      nothing of its own — this flow's doc says nothing about a home page.
+  - driver: web
+    click:
+      role: link
+      name: sample-app
+    expect:
+      url:
+        contains: /repos/sample-app
+      text:
+        matches: ^(?=[\s\S]*16\s*active)(?=[\s\S]*Code Quality\s*5)[\s\S]*$
+    note: >-
+      Opens the report and READS THE TWO NUMBERS the silencing half is later falsified
+      against: 16 findings active, 5 of them in the Code Quality category. Both are
+      analytics/filter furniture rather than card content, so both sit high on the page,
+      well inside the driver's 2,000-character visible-text window. Nothing here is a
+      milestone — it is the before-picture.
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: '4200'
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Filtered by)(?![\s\S]*Magic number: 3000)[\s\S]*$'
+    note: >-
+      Narrows the list to ONE card. This is mechanical necessity, not decoration: every
+      card carries a `Fix Prompt`, a `Copy Fix` and a `More actions` control with the same
+      accessible name, so a card-level control is only addressable once exactly one card is
+      on screen. The negative half proves the narrowing really happened — the rule's OTHER
+      finding, `Magic number: 3000`, has left the list.
+  - driver: web
+    expect:
+      text:
+        matches: >-
+          ^(?=[\s\S]*\bcode\b)(?=[\s\S]*\blow\b)(?=[\s\S]*Magic number: 4200)(?=[\s\S]*Extract
+          it to a named constant for clarity)(?=[\s\S]*File: services/worker/src/index\.js:11)[\s\S]*$
+      visible:
+        role: heading
+        name: 'Magic number: 4200'
+    note: >-
+      The card, read as the doc describes it. The two badges are asserted as the words they
+      render — the attachment kind `code` and the severity `low`, both lowercase in the DOM
+      and both word-bounded so a longer word cannot satisfy them; the title is asserted
+      twice over, once as text and once as the heading the card gives it; the description is
+      the analyzer's own sentence; and the file line is the exact `File: <path>:<line>` the
+      card renders, matching the finding the analysis recorded. A card that rendered but
+      carried none of this fails here.
+    milestone:
+      - dashboard-violations-card-carries-target-and-severity-badges
+      - dashboard-violations-card-shows-title-and-description
+      - dashboard-violations-code-finding-shows-file-and-line
+  - driver: web
+    click:
+      role: button
+      name: Fix Prompt
+    expect:
+      text:
+        contains: 'const THRESHOLD = 4200'
+    note: >-
+      Pressing it expands the ready-to-paste instruction. Asserted on the instruction's own
+      payload — the named constant it tells you to write, carrying the finding's own number
+      — never on the button, which was already on screen before the click. Page furniture
+      could not produce this string.
+    milestone:
+      - dashboard-violations-fix-prompt-expands-the-instruction
+  - driver: web
+    click:
+      role: button
+      name: More actions
+    expect:
+      visible:
+        role: menuitem
+        name: Disable rule for this repo
+      text:
+        contains: code-quality/deterministic/magic-number
+    note: >-
+      The ⋮ menu offers the action, and the action names the key it will disable. The key is
+      read HERE and is the identity every later step of this flow is checked against — the
+      config file, the CLI listing and the stored analysis all have to agree with this exact
+      string. The menu itself has no accessible name, so the item is addressed by its own.
+    milestone:
+      - dashboard-violations-card-menu-offers-disable-rule
+      - dashboard-violations-disable-menu-shows-the-rule-key
+  - driver: web
+    click:
+      role: menuitem
+      name: Disable rule for this repo
+    expect:
+      text:
+        matches: ^(?=[\s\S]*14\s*active)(?![\s\S]*16\s*active)[\s\S]*$
+    note: >-
+      The other half of the screen, at the same moment: the analytics count falls from 16 to
+      14 — exactly the two findings that rule raised — with no reload and no re-analysis in
+      between. The negative is what makes it a measurement rather than a sighting: the old
+      number must be gone, not merely joined by a new one.
+    milestone:
+      - dashboard-violations-disabling-removes-them-from-analytics
+  - request:
+      method: GET
+      path: /api/repos/sample-app/violations?limit=100
+    expect:
+      status: 200
+      json:
+        total:
+          equals: 14
+    note: >-
+      The same state read as DATA rather than as words, at the same origin the browser is
+      driving. It establishes what the list must now hold — 14 findings, the two from the
+      silenced rule gone — so that the page assertion below is a claim about the LIST and
+      not about how many words happened to render. Proves no claim of its own.
+  - driver: web
+    fill:
+      role: textbox
+      name: Search violations...
+    value: ''
+    expect:
+      text:
+        matches: ^(?=[\s\S]*Code Quality\s*3)(?![\s\S]*Code Quality\s*5)[\s\S]*$
+    note: >-
+      With the search cleared the whole list is back, and the category tab that counted 5
+      Code Quality findings before the silencing now counts 3: both `magic-number` findings
+      are gone from the list itself, and the three other Code Quality findings are untouched.
+      The count is the falsifiable form here — the cards themselves are low-severity, so they
+      sort past the driver's visible-text window, and an absence assertion on text that was
+      never in the window would prove nothing.
+    milestone:
+      - dashboard-violations-disabling-hides-the-rules-violations
+  - run:
+      - rules
+      - list
+    cwd: sample-app
+    capture:
+      ruleCount:
+        pattern: ': (\d+) shown'
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*code-quality/deterministic/magic-number)(?=[\s\S]*1 disabled)[\s\S]*$
+      files:
+        sample-app/.truecourse/config.json:
+          contains: code-quality/deterministic/magic-number
+        sample-app/.truecourse/LATEST.json:
+          contains: code-quality/deterministic/magic-number
+    note: >-
+      One reading of the store, three promises. The key the menu named is in
+      `<repo>/.truecourse/config.json`; the CLI — a different program, reading the same file
+      — lists that rule and counts exactly ONE disabled rule for this repository, which is
+      what "shared with the CLI" comes to;
+      and the stored analysis still carries findings from that rule, so nothing was deleted
+      and the silencing is reversible. The total rule count is captured here for the panel
+      assertion below rather than written as a literal, because the catalogue grows with the
+      product and a literal would be asserting on the release.
+    milestone:
+      - dashboard-violations-disabling-writes-to-disabledrules
+      - dashboard-violations-disabledrules-is-shared-with-the-cli
+      - dashboard-violations-violations-stay-in-the-stored-analysis
+  - driver: web
+    click:
+      role: button
+      name: Browse Rules
+    expect:
+      visible:
+        role: heading
+        name: Rules
+    note: >-
+      The control at the right of the filter row opens the Rules panel. Authored to the
+      client's own accessible name: the doc calls this a shield button, the UI names it
+      `Browse Rules`, and the milestone stays on the doc's SENTENCE (a control there opens
+      the panel) so a run reports the naming drift rather than hiding it.
+    milestone:
+      - dashboard-violations-shield-opens-the-rules-panel
+  - driver: web
+    expect:
+      within:
+        role: dialog
+        name: Rules
+      text:
+        contains: '${captured:ruleCount}'
+    note: >-
+      The panel's own unfiltered count is the number the CLI just reported for this
+      repository — the falsifiable form of "every rule this repository is analyzed against".
+      Read INSIDE the dialog, which both scopes the assertion to the panel and escapes the
+      whole-page text window, since the panel is portalled to the end of the document.
+    milestone:
+      - dashboard-violations-rules-panel-lists-every-rule
+  - driver: web
+    click:
+      role: button
+      name: 'Off'
+    expect:
+      within:
+        role: dialog
+        name: Rules
+      text:
+        matches: ^(?=[\s\S]*Off\s*1)(?=[\s\S]*Magic number)(?![\s\S]*Magic string)[\s\S]*$
+    note: >-
+      The All / On / Off switch, used the way a reader would use it — to find the rule just
+      silenced. Off leaves the one disabled rule and drops the enabled ones (`Magic string
+      without named constant`, a rule of the same domain and severity, is the negative), and
+      the count riding on the switch is 1, which is only falsifiable because the store began
+      this flow with an empty `disabledRules`.
+    milestone:
+      - dashboard-violations-rules-panel-all-on-off-switch
+      - dashboard-violations-rules-panel-counts-disabled-rules
+  - driver: web
+    click:
+      role: switch
+      name: Enable Magic number
+    expect:
+      within:
+        role: dialog
+        name: Rules
+      text:
+        matches: ^(?![\s\S]*Magic number)[\s\S]*$
+    note: >-
+      Flipping the rule's own switch turns it back on for this repository, and the disabled-
+      only view answers immediately: the rule is no longer in it. The Off filter is also what
+      makes the switch addressable at all — the catalogue carries a deterministic and an LLM
+      rule with the same human name, and only one of them is disabled.
+    milestone:
+      - dashboard-violations-rule-switch-toggles-for-this-repo
+  - driver: web
+    click:
+      role: button
+      name: Close
+    expect:
+      text:
+        matches: ^(?=[\s\S]*16\s*active)(?=[\s\S]*Code Quality\s*5)[\s\S]*$
+    note: >-
+      Back on the report, both numbers are the ones this flow started from: the list is
+      whole again and the analytics counts are back to 16, with no analysis run anywhere
+      between the flip and this reading. That is the same observation twice over — the
+      switch refreshing list and analytics straight away, and re-enabling restoring the
+      findings without re-running — because it is one event, and inventing a second weaker
+      step per claim would be assertion theater.
+    milestone:
+      - dashboard-violations-rule-switch-refreshes-list-and-analytics
+      - dashboard-violations-re-enabling-restores-them-without-rerunning

@@ -92,16 +92,19 @@ describe('SpecCorpusView — workspace badge', () => {
     render(<SpecCorpusView repoId="r1" corpus={state(MIXED)} activeKey={null} onOpen={vi.fn()} />);
 
     // The inherited doc's kept row carries the badge…
-    const wsRow = screen.getByText('Workspace ADR').closest('[role="button"]')!;
+    const wsRow = screen.getByText('Workspace ADR').closest('[role="listitem"]')!;
     expect(within(wsRow as HTMLElement).getByText('workspace')).toBeInTheDocument();
-    // …as a plain chip — no hover tooltip.
-    expect(within(wsRow as HTMLElement).queryByRole('tooltip')).not.toBeInTheDocument();
+    // …as a plain chip — the badge itself carries no hover tooltip (the row's
+    // skip action does, which is a different element entirely).
+    const badge = within(wsRow as HTMLElement).getByText('workspace');
+    expect(badge.closest('[role="tooltip"]')).toBeNull();
+    expect(within(badge.parentElement as HTMLElement).queryByRole('tooltip')).not.toBeInTheDocument();
     // …the repo-local doc's row does not.
-    const localRow = screen.getByText('docs/local.md').closest('[role="button"]')!;
+    const localRow = screen.getByText('docs/local.md').closest('[role="listitem"]')!;
     expect(within(localRow as HTMLElement).queryByText('workspace')).not.toBeInTheDocument();
 
     // The conflict row (workspace doc on one side) also carries the badge.
-    const conflictRow = screen.getByText('docs/local.md ↔ Workspace ADR').closest('button')!;
+    const conflictRow = screen.getByText('docs/local.md ↔ Workspace ADR').closest('[role="listitem"]')!;
     expect(within(conflictRow).getByText('workspace')).toBeInTheDocument();
   });
 

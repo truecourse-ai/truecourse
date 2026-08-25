@@ -8,7 +8,7 @@ import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/
 import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/core/config/paths";
 import { registerProject, type RegistryEntry } from "@truecourse/core/config/registry";
 import { readProjectConfig } from "@truecourse/core/config/project-config";
-import { getGit } from "@truecourse/core/lib/git";
+import { getGit, getUserWorkingTreeStatus } from "@truecourse/core/lib/git";
 import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
@@ -209,16 +209,18 @@ export async function resolveStashDecision(
 
   // No flag passed. If the tree is clean there's nothing to stash and no
   // need to prompt. If it's dirty we either ask (interactive) or exit
-  // loudly (non-interactive) — never stash silently.
+  // loudly (non-interactive) — never stash silently. "Dirty" means the
+  // user's changes: TrueCourse's own `.truecourse/` store is excluded, or a
+  // clean repo would demand a decision about the directory analyze itself
+  // just created.
   let modifiedCount = 0;
   let untrackedCount = 0;
   try {
     const git = await getGit(repoPath);
-    const status = await git.status();
-    if (status.isClean()) return { skipStash: false };
-    modifiedCount =
-      status.modified.length + status.staged.length + status.deleted.length + status.created.length;
-    untrackedCount = status.not_added.length;
+    const status = await getUserWorkingTreeStatus(git);
+    if (status.isClean) return { skipStash: false };
+    modifiedCount = status.modifiedCount;
+    untrackedCount = status.untrackedCount;
   } catch {
     // Not a git repo / git unavailable — nothing for the analyzer to stash.
     return { skipStash: false };

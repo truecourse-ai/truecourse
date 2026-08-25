@@ -5147,3 +5147,1964 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
     line is written by a real transition. The analysis pass is reported from `mapOnce`, so
     it lands on step 1 or step 2 depending on which one actually pays for it.
+
+90. **Code Analysis web reference expansion (2026-08-11).** STATUS: BUILT —
+    CLAIM-COMPLETE. The hand-authored reference corpus adds 15 stateful web interfaces
+    and seven executable mixed-driver flows, scoped to the dashboard's Code Analysis tab.
+    The added flows cover committed-state stashing, clean-tree handling, deterministic-only
+    LLM execution, path registration and first-analysis state, non-git repositories,
+    repository rule settings, and the Rules panel. Existing scenarios were expanded for
+    flow search/playback, shared tabs, schema rows, run history and diff details, analytics,
+    folder toggles, and graph connection state. The corpus totals are 114 interfaces
+    (55 web), 51 settled flows and 51 scenarios. Every one of the 301 dashboard claims is
+    accounted for exactly once: 222 by executable milestones and 79 by explicit no-flow
+    reasons tied to driver/state limitations. G90 is closed; remaining limitations are
+    tracked under G83–G88 and G91 rather than represented as false executable coverage.
+
+91. **Driver vocabulary — the five gaps the reference corpus kept filing (2026-08-11).**
+    STATUS: BUILT. The dashboard reference corpus filed the same limitations in step
+    notes and in the `transform-gaps.md` ledger run after run (G87, and three of the
+    channels G88 enumerates): claims that were perfectly observable were authored
+    DELIBERATELY PARTIAL, or rode as no-flow gaps, because the vocabulary had no way to
+    say them. Five capabilities, all additive and all optional — `GUARD_FORMAT_VERSION`
+    stays 3, every committed scenario parses and behaves exactly as before, and no
+    fingerprint moves (see the last paragraph).
+
+    1. **`expect.state` — an ARIA state on a role+name target** (web). The `visible`
+       matcher's shape with the assertion added: `{ role, name, exact?, checked? |
+       pressed? | selected? | expanded? | disabled? }`, several at once allowed and
+       each recorded as its own check, in the fixed order the state list declares.
+       The value read is the `aria-*` attribute where present, else the element's own
+       state (a checkbox's checkedness, an `<option>`'s selectedness, `:disabled`).
+       The deliberate outcome for a control whose position is drawn in COLOUR alone —
+       the dashboard's three-way detection switch — is a FAIL reading "…exposes no
+       aria-pressed state": the state is unobservable to this step and to a screen
+       reader alike, and that is the finding, not a reason to weaken the assertion.
+    2. **`expect.attribute` and `expect.class`** (web). `attribute: { of?, name,
+       value? | present? }` and `class: { of?, has? | absent? }`, both reading the
+       DOCUMENT ELEMENT when `of` names no element — which is where a page keeps what
+       it does not print (dark mode is a `dark` class on `<html>` plus a `theme`
+       storage key, and the theme button's own name never changes). `class` is its own
+       member rather than an attribute matcher because a class attribute is a TOKEN
+       LIST: `contains "dark"` also passes for `darkroom`, and a scenario should never
+       have to spell token boundaries in a regex.
+    3. **`expect.visible` takes a LIST** (web). One expectation, several role+name
+       targets, one check each, and a miss names WHICH target was missing. The
+       motivating claim — the graph canvas's three icon buttons surviving a reload —
+       is one claim, and their accessible names are `aria-label`s that never reach the
+       page's text, so neither a text matcher nor three separate steps could state it.
+       The single-object form is unchanged.
+    4. **`until: { marker }` on a `run` step** (cli). Run until that line appears in
+       what the command writes, then terminate the child and settle the step on the
+       output so far. This is G87: `truecourse dashboard` (console mode) and
+       `dashboard logs` hold the terminal by design, so before this the ONLY outcome
+       available to them was the whole budget spent and a SIGKILL, reported as an
+       infrastructure error that stops the scenario — which is why
+       `open-the-dashboard-and-find-your-way-around` had to put its console step LAST
+       with seven milestones riding on it red-by-timeout. A marker that never appears
+       is a FAIL naming it (the same reading an unasked prompt earns), never a
+       timeout; `expect.exit` beside `until` is refused at load, because a step the
+       runner stops has no exit code of its own. Works on pipes and on a pty, and both
+       marker features (this and the prompt-keyed answers) now read the child's output
+       through one module, `guard-runner/src/marker.ts`.
+    5. **`history: back | forward`** (web). The browser's own two buttons, a verb on
+       the same footing as navigate/click/fill — the web verb set is closed at five
+       now. The traversal's return value is deliberately ignored: a same-document
+       (single-page) Back completes without a navigation response, which is exactly the
+       case the verb exists for, and what the move DID is the expectation's business.
+       The claim "browser Back and Forward move through the views" was previously
+       authored as re-opening the earlier address, which proves that a link works.
+
+    **Fingerprint discipline.** `until` is added to a new `GuardRunStepObjectSchema`
+    (the runner's `run` step) and NOT to `GuardStepObjectSchema`, which
+    `guard-generator` extends for the scenario schema it embeds in the authoring
+    prompt — the `patch` precedent applied to a field. Verified after the change:
+    `GENERATE_PROMPT_FINGERPRINT` is still `1ee6cde76c89e1d9` and
+    `GENERATE_API_PROMPT_FINGERPRINT` still `244fc34ecb318a03`, so no author cache
+    entry is invalidated and no flow is re-authored. Flow fingerprints (milestone
+    composition) and interface fingerprints (an interface's own steps) never folded
+    scenario step content, so neither moves either.
+
+    **As built.** Schemas + rendering: `packages/shared/src/guard/web-steps.ts`,
+    `cli-steps.ts`, `step-actuals.ts` (the web check subject enum gains `state` |
+    `attribute` | `class`; a step record gains `endedAtMarker`, which the actual line
+    renders as "stopped at …" instead of "exit (killed)"). Runner:
+    `guard-runner/src/web/{executor,tokens}.ts`, `drivers/cli-driver.ts`,
+    `{executor,pty,marker,child-kill,evidence,expect}.ts`. Tests:
+    `tests/shared/guard-web-steps.test.ts`, `tests/shared/guard-until-step.test.ts`,
+    `tests/guard-runner/web-driver.test.ts` (eight new cases against the fixture's new
+    `/controls` page), `tests/guard-runner/run-until-marker.test.ts`.
+
+92. **Near-duplicate chaining collapses distinct endpoint reference pages
+    (2026-08-12, cal.com reference corpus).** STATUS: OPEN. On the cal.diy
+    booking-lifecycle scan (39 curated docs from cal.com's llms.txt sites), the
+    relevance filter's deterministic near-duplicate detector dropped
+    `confirm-a-booking.md`, `decline-a-booking.md`, and
+    `get-a-booking-by-seat-uid.md` as a PAIRWISE CHAIN (confirm ≈ decline ≈
+    get-by-seat-uid ≈ get-a-booking, each hop "kept the fuller copy"), leaving only
+    `get-a-booking.md`. The pages are OpenAPI-generated endpoint references: the
+    boilerplate (headers table, auth note, response scaffolding) dominates the
+    diffable text, so similarity is high even though the documents specify opposite
+    operations — confirm vs decline suppressed each other. Two defects to weigh:
+    (a) chaining — A≈B, B≈C transitively collapses a whole family no member of
+    which is a near-dup of the survivor; (b) the similarity measure ignores the
+    identity-bearing tokens of a reference page (method + path + operation title),
+    which would cheaply separate these. Remedy used in the field: `spec docs
+    include` force-includes (`manualIncludes` in `specs/decisions.json`) — but a
+    user only discovers the drop by auditing `skippedDocs`, so the default silently
+    deletes spec surface on exactly the doc shape (generated API references) the
+    guard pipeline cares most about. Candidate fixes: exempt same-source sibling
+    docs whose H1/path differ in an operation verb; fold method+path into the
+    similarity key; or cap collapse at direct (non-transitive) pairs.
+
+93. **The visual judge — an LLM annotation on failing web steps (2026-08-12).**
+    STATUS: IMPLEMENTED — PARKED (2026-08-14): off by default, opt back in with
+    `TRUECOURSE_GUARD_VISUAL_JUDGE=1`. The vision call slows every red web step
+    and the annotation is not currently buying its keep day-to-day, so
+    `guardRunInProcess` wires the built judge only under the flag (an injected
+    judge still always wins). Nothing else was removed — cache, schema, transports,
+    CLI close line and dashboard rendering all spring back with the flag — pending
+    a decision on the feature's future.
+
+    A web step asserts on the DOM: a role, an accessible name,
+    a substring of the page's text. When one misses, the transcript can say the
+    words were not found and the run leaves a full-page PNG behind — but the first
+    question a human has ("so what WAS on the screen?") is answerable only by
+    opening that PNG out of a gitignored evidence directory. This stage answers it
+    in the transcript: the screenshot the failing step already took, plus the step's
+    claim, its rendered expectation and the deterministic mismatch, go to an
+    OPUS-tier vision call that returns
+    `{ expectedVisible: yes | no | unclear, screenSummary, rationale }`.
+
+    **The rules, all downstream of §10.2's determinism rule.**
+    (a) FAILURE-ONLY: a green run makes zero calls even when the judge is enabled
+    (it was originally always-on and flagless for this reason; the PARKED status
+    above added the opt-in flag). (b)
+    ANNOTATION-ONLY: the verdict never moves an outcome, in either direction. Its
+    most valuable answer is `yes` — the expected result IS on screen though the
+    assertion missed, the signature of a brittle locator or matcher, i.e. the TEST
+    being wrong rather than the page — and that is surfaced to a human in those
+    words and acted on by nobody automatically (no triage integration in v1). (c)
+    FAIL-SOFT in every direction: no transport, a thrown call, a reply that will not
+    validate after one corrective re-ask, a screenshot missing or over the 8 MB
+    ceiling — each is a `null` verdict and a run bit-identical to one with no judge.
+    One call per failing scenario (the run stops at the first failing step), cached
+    on the failure identity so a re-run of an unchanged red board is free.
+
+    **The architecture boundary held.** `guard-runner` stays LLM-FREE: it defines a
+    callback TYPE (`GuardVisualJudge`, `visual-judge.ts`) threaded
+    `RunGuardOptions` → `GuardExecInput` → `RunScenarioContext`, and `core`'s
+    `guardRunInProcess` is the ONE place that supplies an implementation. Every
+    other caller of the runner — birth validation, a hosted executor, the whole test
+    suite — runs with no judge and reaches no model. The driver seam stayed intact
+    too: the runner never asks what KIND of step failed, it reads an optional
+    `visual: { screenshotPath, expectation }` off the `fail` outcome that the web
+    driver alone supplies.
+
+    **Transports gained vision.** `LlmRequest` grew `images?: LlmImage[]`
+    (base64 + media type). The cli backend passes `--input-format stream-json` and
+    writes ONE NDJSON user envelope (text block first, then one image block each) —
+    the shape the Claude Agent SDK emits; the api backend switches from `prompt:` to
+    the AI SDK `messages:` content-parts form; the agent mailbox passes `images`
+    through. A text-only request is byte-identical to before on all three.
+
+    **As built.** Transports: `packages/shared/src/llm/transport.ts`
+    (`LlmImage`, `buildCliStdinPayload`, `cliInputFormatArgs`),
+    `packages/llm-api/src/transport.ts` (`promptInputOf`). Schema:
+    `packages/shared/src/guard/visual.ts` (`GuardVisualJudgmentSchema`,
+    `visualAnnotation`, `visualJudgeLines`) + an additive optional
+    `failure.visual` on `GuardFailureDetailSchema` (NO format-version bump).
+    Runner: `guard-runner/src/{visual-judge,run-scenario,run,guard-executor,
+    evidence}.ts`, `drivers/{types,web-driver}.ts`. Engine:
+    `core/src/services/llm/guard-visual-judge.ts` (stage `guard.visualJudge`, cache
+    `guard/visual-judge`, prompt fingerprint, one corrective re-ask, prompt-injection
+    framing that treats every pixel as page DATA). CLI: `guard run`'s close prints
+    `visual judge N screenshots read · M where the expected result LOOKED present`.
+    Tests: `tests/shared/{llm-transport,guard-visual-judge}.test.ts`,
+    `tests/llm-api/transport.test.ts`, `tests/core/{guard-visual-judge,
+    guard-executor}.test.ts`, `tests/cli/guard.test.ts`,
+    `tests/guard-runner/visual-judge.test.ts` (a real browser: the judge fires once
+    on a failing web step, never on a green one, never on a cli step, and a judge
+    that throws leaves the run untouched).
+
+94. **The teardown channel — scenarios that mutate host state clean up on every
+    exit (2026-08-12).** STATUS: IMPLEMENTED. Found by the reference corpus: the
+    dashboard area's background-service flow installs a REAL user-level service
+    (`dashboard --service`, gated by the `host-service-session` supplied
+    dependency) and relied on its last two steps (`stop`, `uninstall`) to remove
+    it — but the runner stops at the first failing step, and the sandbox's own
+    cleanup cannot touch a launchd/systemd registration. Any mid-scenario failure
+    (and, before this item, the guaranteed `logs` follow-mode timeout) left the
+    service installed and holding port 3001. No workaround was possible in
+    authoring: the format had no way to say "run this even after a failure".
+
+    **The channel.** Cli scenarios (only — the api driver's server lifecycle is
+    runner-owned) grew an optional `teardown:` step list, same step union as
+    `steps`, additive so NO format bump. Step numbering is CONTINUOUS
+    (`steps.length + n`), and every whole-scenario pass walks the one concatenated
+    sequence via the new `guardExecutionSteps` helper: the loader's regex/capture/
+    milestone cross-checks, the step-list presentation, driver chips, the served-
+    surface scan.
+
+    **Semantics.** On a GREEN run teardown steps are ordinary, verdict-affecting
+    steps — they may carry milestones (the reference's `stop`/`uninstall` teardown
+    steps ARE those claims' proving steps). On every other exit — fail, infra
+    error, cancellation, even the `${captured:…}` birth-validation throw — the
+    runner executes every not-yet-reached teardown step BEST-EFFORT: without the
+    run signal (a cancelled run still restores the host; each step stays bounded
+    by the step budget), continuing past its own misses, recorded in the same
+    evidence bundle (`teardown` / `teardownMiss` on the step record, an advisory
+    block in the transcript), and NEVER moving the settled verdict. A best-effort
+    miss surfaces as the result's optional `teardownIncomplete` annotation —
+    "host state may remain" is a fact a reader gets told, not a silent leak.
+
+    **As built.** Schema: `shared/src/guard/scenario.ts` (`teardown`,
+    `guardExecutionSteps`, `GuardScenarioStepView.teardown`; a named
+    `GuardSandboxStepListSchema` alias keeps the doubled step union under the
+    TS7056 declaration-emit cap), `shared/src/guard/result.ts`
+    (`teardownIncomplete`). Runner: `guard-runner/src/run-scenario.ts`
+    (`finishTeardown`, hoisted so the outermost catch restores the host too),
+    `evidence.ts`, `scenario-loader.ts`, `claim-refs.ts`, `capture-refs.ts`,
+    `run.ts`. Engine/UI: `core/src/commands/guard-read.ts`,
+    `dashboard-client` step chips (`teardown` badge). Reference:
+    `run-the-dashboard-as-a-background-service.cli.1.yaml` moves `stop`/
+    `uninstall` into `teardown:`. Tests:
+    `tests/guard-runner/run-scenario-teardown.test.ts`,
+    `tests/shared/guard-scenario-teardown.test.ts`.
+
+95. **The preparation gate reads the scenario's NEED, not its driver tag
+    (2026-08-12, cal.com reference corpus).** STATUS: BUILT. `runGuard` gated
+    every `driver: cli` scenario on `recipe.entry` — but web steps live inside
+    cli scenarios, and a web-only product (cal.com has no CLI) has no honest
+    `entry` to declare, so all 65 of the cal.diy corpus's browser scenarios
+    would have settled error with `recipe.web` present and boot-proven. The
+    gate now derives each cli scenario's preparation from its steps: a `run:`
+    step demands `entry` (unchanged message); browser/`request` steps demand
+    the served web surface, and a missing `web` block settles the same honest
+    unprepared error naming `web`; a scenario needing neither (pure
+    git/write/delete sandbox work) runs on either. The entry preflight probe
+    fires only when a selected scenario actually invokes the entry — a
+    web-only selection must not boot a binary no step runs. As built:
+    `packages/guard-runner/src/run.ts` (`entryExec` beside `servedExec`);
+    tests: `tests/guard-runner/run-driver-preparation.test.ts` (web-only runs
+    entryless; run-step still refuses naming `entry`; surface-less browser
+    scenario refuses naming `web`, not `entry`).
+
+96. **The resource registry — places made first-class, interfaces stay the
+    identity (2026-08-12).** STATUS: BUILT. The web catalog was 55 one-to-two-step
+    task entries that read as confetti: no contract region (the cli got grammar +
+    io facts; web got nothing), and a states registry where 20 of 48 entries were
+    PLACES wearing state ids (`rules-panel-open`). The redesign makes the place
+    the ENVELOPE while identity stays per-interaction (the 2026-08-10 rule, and
+    the fingerprint fold, are untouched):
+    - **Resources** (`packages/shared/src/interfaces.ts`, RESOURCES region): per
+      area, `{ id, kind: screen|dialog|panel, of?, title, description?,
+      readables? }`. `of` is the nesting relation (a panel sits ON a screen, a
+      dialog OVER one) — what keeps a flow's location chain checkable across
+      nesting; a screen carries none. Opened-by is DERIVED (every task whose
+      `to` names the resource), never stored.
+    - **The location contract**: `Interface.at` (the resource the task acts on) /
+      `Interface.to` (where it leaves the user, only when it moves them). Both
+      ids into the area's registry, both validated, neither fingerprinted. The
+      states registry is WORLDS only now; the 16 pure `<place>-open` pseudo-states
+      are gone (`stash-prompt-open` → `at: stash-prompt-dialog`).
+    - **Readables** — the web analog of the cli io facts, in the driver's own
+      assertion vocabulary (`web-steps.ts` locators/states) so they compile to
+      `expect` blocks: `markers` (stable visible text, `within`-scoped),
+      `elements` (role+name presence), `controls` (which ARIA states a control
+      EXPOSES — the grounding the state assertions never had; exposure, never a
+      value), `rows` (the cli row grammar transplanted to the DOM: item role +
+      `within` container + `<slot>` template, typed slots). Absence rule as the
+      contract region; every readable takes an optional `id`, referenced by
+      nothing yet — reserved so a web capture step / count matcher land
+      additively (rung 3, deferred until a real spec claim demands them).
+    - **Consumers**: authoring renders a PLACES block (`buildResourceHints` in
+      `guard-generator/src/grounding.ts` — the plan's `at`/`to` places plus `of`
+      ancestors; `prompts.ts` `resourceLines`), riding the `InterfaceProvider`
+      seam and the snapshot fallback. The dashboard Interfaces tab IS the
+      registry (redesigned 2026-08-24, "screens and operations"): the panel is a
+      FLAT skim with nothing expandable, one row per SCREEN (web top-level place,
+      tallying its own interfaces plus every `of` descendant's), per OPERATION
+      (one api interface — a colour-coded method and its path, an endpoint's rows
+      kept adjacent and sorted GET · HEAD · POST · PUT · PATCH · DELETE) or per
+      COMMAND (one cli interface). A screen with nothing to do — and an api REST
+      NOUN no operation serves, which never had a row — is counted out under the
+      rows, not listed. The pane is that row in full:
+      - a SCREEN as the classic header (surface + kind chips, the place id, one
+        muted `route <address> · mapped <time>` line, the description) over ONE
+        **Contract** section, which is two tables: **Actions** (one row per task
+        on the screen or any part of it — title + LOCATOR CHAIN, the part as a
+        Where column, Needs/Leaves as state ids with a `to` rendering as a
+        clickable destination, and the Calls/Flows counts — each row opening IN
+        PLACE into that task's signature, fingerprint, sequence, calls and the
+        world it leaves) and **The page shows** (one row per readable across the
+        parts: kind, the fact, the element it is read off in `describeWebLocator`
+        words, the condition, the part);
+      - an OPERATION opened DIRECTLY, with no endpoint page in between — the
+        method and path as the header, the contract summary, one "also on this
+        endpoint" line whose siblings are chips that jump, then the HTTP contract;
+      - a COMMAND as its own contract.
+      `at`/`to`/`resource` and `apiEffects` pass through `GuardInterfaceRow`; the
+      resource and state registries travel once, on
+      `GuardInterfacesView.resources` / `.states`. All of it is a render-time
+      JOIN (`apps/dashboard/client/src/lib/interface-pom.ts`) — no field exists
+      for it, and the only invented data is the SIGNATURE and the LOCATOR CHAIN
+      (display, never identity, never fingerprinted). Selection is
+      `?gplace=<surface>:<id>`, where the id is a PLACE on a screens surface and
+      the INTERFACE SLUG on api/cli (`api:patch-api-repos-id-rules-rulekey`);
+      `?ginterface=` stays the inbound address and resolves to the row that owns
+      the member (a task's panel → the screen it is part of; an operation and a
+      command → themselves).
+    - **Reference migration**: 20 places, 32 world/view states (was 48), all 55
+      task entries and ALL fingerprints byte-identical (asserted by the pinned
+      reference tests). No merges: the envelope solves the many-small-entries
+      reading, and the one tempting merge (the two graph-depth entries) would
+      fold two different end states into one entry.
+    - **Recorded, deliberately not done here**: (a)
+      `web/toggle-a-file-tree-folder` targets `button "{folderName}"` but
+      `FileTree.tsx` renders tree rows as unlabelled divs — the locator cannot
+      resolve; fix the markup (role + accessible name, ideally `aria-expanded`)
+      or retire the entry. (b) Per-card controls (`More actions`, `Fix Prompt`,
+      `Copy Fix`) are ambiguous under the strict locator whenever several cards
+      render — rows-scoped addressing is the eventual fix. (c) `mapInterfaces`
+      REWRITES `guard/interfaces.json` from cli+api derivations, dropping
+      hand-authored web entries, states and resources — a Map click on a repo
+      with a hand-authored web catalog loses it; preservation (or the web
+      extractor) is owed. (d) A dozen real controls have no interface entry yet
+      (Return to latest, the rules-dialog Close, the graph scope picker, the
+      run-history dropdown, repository delete, the directory picker dialog).
+
+97. **The `upload` verb — a file the way a user gives one, plus the seed's fixtures
+    in sandbox scenarios (2026-08-14, documenso reference corpus).** STATUS: BUILT.
+    The documenso corpus filed it as G2: 24 of its 27 catalogued web tasks were
+    unreachable because the product's central promise — "you can put a document into
+    it" — had no verb. A file chooser is not a text field, so no combination of
+    `click` and `fill` states it, and the hidden `input[type=file]` behind every
+    styled upload button has no role and no accessible name, which is exactly what
+    the locator vocabulary refuses to address.
+
+    **The verb.** `upload: <locator>` with a sibling `file:` payload — `fill`'s
+    shape, locator in the verb key and data beside it. The locator names the control
+    a USER operates (documenso's `button "Upload Document"`, react-dropzone's styled
+    root), never the input it hides, and the executor drives Playwright's
+    `filechooser` event: arm, click the control a user clicks, answer the chooser
+    that opens. `locator.setInputFiles()` on a CSS-addressed input is REJECTED,
+    including as a fallback — it would skip the disabled state, the tooltip gate and
+    the app's own click handler, going green on a control a user cannot reach, and a
+    silent fallback would turn "this control opens no chooser" from a finding into a
+    false pass.
+
+    **The file.** `file: { base64 | text | path, as?, type? }` — exactly one byte
+    source, because two sources is two answers to "what did the user pick".
+    `base64` is the primary one and is fed by `{{fixture:<name>.base64}}`: the seed
+    already publishes the canonical document, so one document travels across every
+    surface that uploads it instead of N copies of an unreviewable blob in the
+    corpus. `text` is bytes an author can read (a CSV import, a config file, UTF-8
+    only); `path` is a file the scenario's OWN world already holds, sandbox-relative
+    and through the same `resolveInSandbox` containment rule every declared path goes
+    through. `as` is the filename the app sees and interpolates — apps routinely
+    title a resource after its filename, so `${unique}` in it is what keeps two runs
+    of one scenario from colliding in the app's own data. The type comes from the
+    name's extension against a closed table, or from an explicit `type`; a name
+    neither answers is refused AT LOAD rather than guessed into
+    `application/octet-stream`, which every accept filter rejects. Ceiling: 10 MiB
+    decoded, refused by name and size with nothing sent.
+
+    **What it asserts.** Only that it could TAKE the action: the target resolved
+    unambiguously, a chooser opened, and the chooser took the files. Everything about
+    the EFFECT — the document appearing, an accept filter refusing the type, a quota
+    message — is the ordinary `expect` block. The action acts, the expectation judges
+    (`history`'s rule). Its own failures are exactly three, all `subject: 'target'`,
+    all `fail`: the control is absent or ambiguous (the existing `targetMismatch`,
+    role inventory included), the control opened NO file chooser ("…it does not take
+    a file"), or the chooser refused the payload (the existing "the page refused the
+    interaction" catch). A payload that cannot be materialized — a path escaping the
+    sandbox, malformed base64, a file past the ceiling — is an `error`: nothing about
+    the app was observed, and it is settled before a page is ever loaded.
+
+    **G3a — the seed's fixtures reach a SANDBOX scenario.** `{{fixture:…}}` was
+    active only where its map was supplied, and the sandbox path was handed none, so
+    a fixture reference in a cli or web step stayed literal text. The `tok` closure
+    now runs a fixture pass FIRST, on the raw template, with the four `${…}` tokens
+    applied only to the literal segments between references — the api driver's
+    bounded-injection order, so a captured value can never expand into a fixture read
+    and a seeded value is never re-scanned (both proved by test). Fixture values are
+    NOT secrets (the seed manifest says so), which is what makes this cheap; the
+    credential half deliberately does not follow (item 99). An unknown fixture is a
+    scenario `error` naming it, and the two failures are told apart: a fixture the
+    seed does not publish is the author's mistake, while a seed that did not run for
+    this selection is the RUN's and says so — sending an author to fix a manifest
+    that is perfectly correct is the worse message. Item 98 has since landed, so the
+    selection that produced the second one no longer exists: a run prepares the seeded
+    world for anything that needs it, and the message survives only for a caller that
+    assembles a `RunScenarioContext` without fixtures by hand.
+
+    **Evidence.** The transcript gains one `file:` line beside `web:`/`at:`/`screen:`
+    — `file: contract-a1b2c3.pdf · 629 bytes · sha256:<hex>` — and the step record an
+    additive-optional `upload: { name, bytes, sha256 }`. BYTES NEVER ENTER EVIDENCE:
+    the digest is auditable against the seed's published one, and the payload is
+    either unreadable noise or the very data the scenario is about.
+
+    **Fingerprint discipline.** The verb is one more `.strict()` arm on a keyed union,
+    so every corpus written before it parses and behaves exactly as it did (named
+    test); the format marker it was written against has since been retired
+    altogether. `GENERATE_PROMPT_FINGERPRINT` cannot move: web
+    verbs are not in the authoring schema. `InterfaceStepKindSchema` is deliberately
+    NOT grown (it folds into `interfaceFingerprint`, and an upload target is the
+    `activate` it already is). The one real hazard was `isWebExpectStep`, which is
+    defined by NEGATION: an action verb missing from it is read as an assert-only
+    step — no action taken, tokens dropped, "check the page" in the transcript, and
+    green. It has its own named test.
+
+    **Known limitations, stated rather than papered over.** (1) A drag-ONLY dropzone
+    is unreachable (documenso's whole-page `EnvelopeDropZoneWrapper` is
+    `noClick: true`; the button beside it is the operable control, so documenso is
+    unaffected — a page whose only affordance is drag fails honestly, and an
+    `upload.mode: drop` is out of scope). (2) The File System Access API
+    (`showOpenFilePicker`) is not interceptable — a false red for apps that opt in;
+    react-dropzone defaults `useFsAccessApi: false`. (3) `text:` is UTF-8 only;
+    other encodings use `base64`. (4) One file per step in v1 — the growth path is
+    `file: <obj> | [<obj>, …]` (the `expect.visible` list precedent), and
+    `FileChooser.setFiles` already takes arrays. (5) The session video shows no OS
+    dialog (Playwright suppresses it); the post-step screenshot is the useful frame.
+
+    **As built.** Schema + rendering: `packages/shared/src/guard/web-steps.ts`
+    (`GUARD_WEB_FILE_TYPES`, `GUARD_WEB_FILE_MAX_BYTES`, `GuardWebFileSchema`,
+    `GuardWebUploadStepSchema`, `isWebUploadStep`, `webFileName`/`webFileType`, the
+    `isWebExpectStep` negation, `describeWebCommand`),
+    `packages/shared/src/guard/step-actuals.ts` (`GuardStepWebUploadSchema`).
+    Runner: `guard-runner/src/web/upload.ts` (new — `materializeWebFile`),
+    `web/{browser,session,executor,tokens}.ts` (the permanent `filechooser`
+    listener + per-step `armFileChooser`), `drivers/web-driver.ts`, `evidence.ts`,
+    `api/vars.ts` (`resolveFixtureText` over the one placeholder scanner),
+    `run-scenario.ts` (`fixtures` / `seedDeclared` context, the fixture-first `tok`
+    closure, the `UnknownFixtureError` settlement), `run.ts` (the sandbox call site
+    passes both). Fixture app: `tests/fixtures/guard-fixture-web/server.mjs` gains
+    `/upload` (visible labelled input, hidden input behind a button, an
+    `accept=".pdf"` one that refuses in the app's own words, a control that opens no
+    chooser, and a report of the name/size/type/first-bytes it actually received).
+    Tests: `tests/shared/guard-web-steps.test.ts` (nine new cases),
+    `tests/guard-runner/web-upload.test.ts` (new — thirteen real-browser cases plus
+    the token pass and the four G3a cases), `tests/guard-runner/scenario-loader.test.ts`.
+
+98. **G4 — the prepared world is gated on the API POOL, not on what the selection
+    needs (2026-08-14, documenso reference corpus).** STATUS: BUILT. `services.up`,
+    the seed and the credential mint all ran inside `if (api && apiRunnableExec.length
+    > 0)` (`guard-runner/src/run.ts`), so `guard run --scenario <a web one>` — or any
+    selection of cli/web scenarios alone — started no services and seeded nothing, and
+    every `{{fixture:…}}` in it settled the "the seed did not run for this selection"
+    error item 97 added. A full-corpus run was unaffected (the api pool is non-empty),
+    which is why this was its own item rather than a blocker for 97.
+
+    **As built.** The block is now `if (api && worldNeeded)`, where `worldNeeded` is
+    `apiRunnableExec.length > 0 || runnable.some(needsPreparedWorld)` — item 95's
+    principle applied to the world the whole RUN shares. `needsPreparedWorld(scenario)`
+    (`run.ts`, beside `servedExec`/`entryExec`) is three honest needs, read off the
+    scenario itself and never off a driver tag: an api-server scenario runs against the
+    booted server, which IS that world; a sandbox scenario that reaches the SERVED
+    surface (`usesServedSurface` — the predicate `servedExec` was already built from,
+    now extracted so the two cannot drift) is driving the product the datastore stands
+    behind; and a scenario whose steps carry a `{{fixture:…}}` is quoting the seed's own
+    output, whichever surface then uses it (`containsFixtureReference`, exported from
+    `api/vars.ts` beside the one placeholder scan so the pattern that ASKS and the
+    pattern that RESOLVES stay one). The api pool keeps its own disjunct, so an api
+    selection's preparation is byte-identical to what it always was.
+
+    Services were NOT already web-triggered: the web surface boots per-sandbox with
+    `recipe.env ⊕ web.env` and knew nothing of `api.services`, so both halves — the
+    bring-up and the seed — were genuinely missing for a web selection. What stays on
+    the api POOL (`apiPool`, inside the block) is the api SERVER half, which a
+    sandbox selection cannot use: `fromRequest` logins (minting one would boot a server
+    for nobody, and an empty `serversNeeded` is what keeps the preflight loop from
+    booting one) and `resolveApiCredentials` — refusing a web-only run over an api key
+    nothing in it can read would be the same false gate this item removes, so a
+    world-only preparation resolves none and the seed still folds in what it publishes.
+
+    Item 97's "the seed did not run for this selection" is now unreachable through
+    `runGuard`: a scenario that can raise it references a fixture in its steps, which is
+    exactly what makes `worldNeeded` true. It is kept (with its second clause corrected
+    — it used to claim a cli/web selection never starts the world) for the one residual:
+    `runScenario` is a public API, and a caller assembling a context without fixtures
+    still deserves the run-shaped answer rather than "no such fixture".
+
+    Tests: `tests/guard-runner/run-driver-preparation.test.ts` — a web-only selection
+    gets services + seed and resolves its `{{fixture:…}}` through an `upload`; a cli-only
+    selection that READS a fixture gets the seeded world too; a cli-only selection that
+    needs nothing starts no services and runs no seed (the economy, and the blast radius
+    this item had to respect); an api selection prepares the world exactly as before.
+
+99. **G3b — credentials in sandbox scenarios (2026-08-14).** STATUS: OPEN. The
+    fixture half landed with item 97; `{{cred:…}}` deliberately did not follow.
+    Credentials are SECRETS, and three things the api path has, the sandbox path
+    does not: a redactor over what is transcribed (`api/redact.ts` is applied on the
+    api path only), a per-server allowlisted view to resolve a credential against
+    (a sandbox scenario binds no server), and a single legitimate destination (the
+    api path confines a credential to a header; a sandbox step could put one in an
+    argv, a written file, or a page's text). documenso's own web sign-in uses fixture
+    FIELDS (`owner.email` / `owner.password`), so the corpus is not blocked on this.
+
+100. **G1 — multipart file parts on an api `request` step (2026-08-14).** STATUS:
+    OPEN. The api driver can send JSON and raw string bodies, so "the API accepts a
+    document upload" — the sibling of the claim item 97 made statable in the browser
+    — still has no form. Shape to reuse verbatim: `GuardWebFileSchema`'s
+    `{ base64 | text | path, as?, type? }`, as the value of a multipart part, so ONE
+    file declaration serves both surfaces and the same seeded document travels the
+    api and the web path (which is what makes the two findings comparable).
+
+101. **Web value capture, and the locator family widened to what a user perceives
+    (2026-08-14).** STATUS: BUILT. Capture existed on cli (a regex whose one group
+    is the value, over the streams) and on api (a JSON path, or a header, over the
+    response); the browser had none. So no claim of the form "take what the page
+    showed and use it" was reachable through a UI, and no claim about a CHANGE was
+    reachable at all — a delta needs two observations and a way to carry the first
+    one forward.
+    - **The locator family** (`packages/shared/src/guard/web-steps.ts`). Was one
+      member: role + accessible name. Now a union of six, each compiled 1:1 to the
+      browser's own query (`getByRole` / `getByPlaceholder` / `getByLabel` /
+      `getByText` / `getByTitle` / `getByAltText`), each carrying the same `exact`
+      and `pick: first` escapes, each member exclusive (strict objects, so two
+      handles at once is a parse error). The MEMBERSHIP RULE is now sayable and is
+      the whole rationale: a handle a person can point at on the screen. The
+      exclusions stand and are the point — no CSS, no XPath, no test ids: those are
+      names the implementation gave itself, invisible to every user, and a scenario
+      written in them passes for markup nobody can operate while breaking on a
+      refactor that changed nothing a user sees. `webLocatorValueKey` /
+      `webLocatorHandle` are the single source for which field a member carries, so
+      describing, interpolating and compiling a locator can never disagree; a state
+      expectation is a locator member with the ARIA fields added (`stateMember`),
+      because a union cannot be `.extend`ed. A missed non-role target reports
+      "nothing on the page matches …" with the page's own text; the role inventory
+      ("the button elements on the page are: …") stays only where it means
+      something, since "every element with this placeholder" IS the query that just
+      found nothing.
+    - **The capture anatomy is REUSED, not re-invented**: the name schema, the
+      `${captured:…}` token, `capturedNamesIn`, the one-capturing-group rule (now
+      exported from `capture.ts`) and `captureDefects` are the same ones cli and api
+      use. Web capture names join the ONE scenario-wide namespace, so single
+      assignment, defined-before-use, no self-reference and nothing-in-setup are
+      enforced at LOAD for cli, api and web together — a browser can hand a value to
+      an HTTP request and back.
+    - **The getters** (`GuardWebCaptureSchema`: `from` + `get` + optional `number`):
+      `text` (the default, matching the cli capture's `from: stdout` precedent),
+      `value` — the DOM PROPERTY, which is in no page text and not in the `value`
+      attribute once a user has typed (the input-value gap the reference corpora
+      kept filing) —, `count` (the one getter exempt from single-match strictness:
+      counting IS the question, and it reads at a glance since zero is a legitimate
+      answer and there is no predicate to wait on), `{ state }` (as `"true"` /
+      `"false"`, through the same three-valued reading the assertion makes, so a
+      state nothing exposes fails the capture as loudly as it fails an expectation),
+      and `{ attribute }`. `number` slices the value out of the sentence a page
+      writes it in ("seats left: 3") and belongs only to the three TEXT-shaped
+      getters — a count is already a number, a state is not one.
+    - **Failure discipline, verbatim from `capture.ts`**: a locator resolving
+      nothing (or ambiguously), an element with no value property, an absent
+      attribute, an unexposed state, a slicer that does not match — each is THAT
+      STEP failing with the page's text and its screenshot as evidence. Never an
+      empty value flowing on into a later assertion that then passes for the wrong
+      reason. Captures resolve after the action AND after the expectation has held,
+      so a failed step publishes nothing.
+    - **`compare.offset`** (`GuardComparisonSchema`, shared by every text and json
+      matcher): the comparand is shifted before the operator runs, which is what
+      makes the delta a verdict — `equals: "${captured:seatsBefore}", offset: -1`.
+      Messages quote the captured value AND the shift ("equals 3 − 1"), so a failed
+      delta says which half of the sentence the run disagreed with. It lands in the
+      SHARED matcher, so cli and api gain it too and both authoring prompts rolled
+      their fingerprint (`GENERATE_PROMPT_FINGERPRINT` → `07ba2c83da82d869`,
+      `GENERATE_API_PROMPT_FINGERPRINT` → `70755b107ca66f2a`) — deliberately: a
+      re-author is the cost of a claim about a change being writable at all, where
+      before it could only be written as an absolute number that tests the fixture.
+    - **Comparison on web subjects needed no new wiring** — `GuardStreamMatcher`
+      already carried `compare`, and the web `text` / `url` / `attribute.value`
+      subjects already use it; only the offset's evaluation was added.
+    - **Generator grounding (Tier 1)**: `resourceLines` renders a readable's `id`
+      when it has one — the name reserved by item 96 and rendered nowhere until now
+      — and the PLACES block gained a CAPTURE note documenting the primitive form.
+      The note lives in the USER prompt beside the facts a capture may point at,
+      because that adjacency IS the grounding.
+    - **As built**: `packages/shared/src/guard/{web-steps,capture,scenario}.ts`,
+      `packages/guard-runner/src/web/{executor,tokens}.ts`,
+      `packages/guard-runner/src/{expect,evidence}.ts`,
+      `packages/guard-runner/src/drivers/web-driver.ts`,
+      `packages/guard-generator/src/prompts.ts`. Tests:
+      `tests/shared/{guard-web-steps,guard-capture}.test.ts`,
+      `tests/guard-runner/web-driver.test.ts` (every getter against a real browser,
+      each failure mode, the delta), `tests/guard-generator/grounding.test.ts`. The
+      fixture gained `/capture` (`tests/fixtures/guard-fixture-web/server.mjs`).
+    - **Deliberately deferred**: (a) a `read: <resource>.<readable>` scenario
+      SHORTHAND — the reserved readable id is now rendered, so the seam is open, but
+      the generator authors the primitive until a corpus shows the shorthand earning
+      its second way to say one thing. (b) A `rows` READER (take the third row's
+      title) — rows are still only "a row containing X exists"; a row-scoped
+      locator is the missing piece and is the same work item as item 96's
+      per-card-ambiguity note. (c) POM emission — nothing generates page objects
+      from the registry. (d) css/testid locators, permanently: see the membership
+      rule above. (e) A `count` ASSERTION (`expect` counting elements) — capture
+      can now read a count and `compare` it, which covers the claims seen so far;
+      an expectation member would be a second way to say it.
+
+102. **The Surface Object Model — Tier 1: the contract goes surface-native, the
+    resource goes universal (2026-08-15).** STATUS: BUILT. Item 96 made the PLACE
+    first-class for the web surface and left the other two flat. What the cli and
+    api catalogs looked like after it: 60-odd sibling entries with no envelope, a
+    cli contract whose `commands: []` array had been exactly one element long
+    since the 2026-08-10 granularity split, and an api contract IMPERSONATING a
+    cli one — `contract.commands[0].path = ["GET", "/x"]`, response-body markers
+    as `stream: "stdout"` output facts, HTTP statuses as `exit` codes — with the
+    request half (the body/query fields a handler reads) living OUTSIDE the
+    catalog as a separate analysis product joined at prompt time by method+path.
+    Tier 1 makes the RESOURCE the universal envelope and the CONTRACT
+    surface-native, without moving the unit of identity.
+
+    **The evidence.** A fully deterministic prototype over this repo's own
+    surfaces — `truecourse-scratch/som-experiment/REPORT.md`, with `som.json` as
+    its output. It established three things this item then implemented: cli
+    resource formation is trivial and exact (13 groups over 62 commands, the human
+    tree), api noun formation needs a real verb/noun rule (naive last-static-
+    segment minted 87 resources from 137 operations, RPC tails included), and the
+    request contracts join onto operations cleanly by method+path — which is why
+    the join could be replaced by ownership.
+
+    The eight decisions, each with why it went that way:
+
+    - **1. `interfaces[]` stays FLAT; ownership is a reference.** An interface
+      remains one invocable thing with its own fingerprint over `type` + `entry` +
+      `steps` (untouched, and every fingerprint byte-identical — pinned by the
+      reference tests). Ownership lands as `Interface.resource`, an id validated
+      against the entry's OWN area registry, the same area-scoped resolution
+      `at`/`to` use, never fingerprinted. Nesting the entries under their resources
+      would have re-shaped every consumer that iterates the catalog (the
+      fingerprint set, the drift diff, the scenario grounding) to buy a rendering,
+      and a surface whose formation degrades would have had nowhere to put its
+      entries. References-not-copies is the file's standing doctrine.
+    - **2. Resources become universal.** `InterfaceResourceKindSchema` grows
+      `command-group` (a node of the cli command tree) and `rest-noun` (the thing
+      a path names), beside screen/dialog/panel. `of` nests both — `spec-docs` of
+      `spec`, `/api/repos/{id}/analyses` of `/api/repos` — and a ROOT of either
+      carries none, exactly as a screen does; the "a screen sits on nothing" rule
+      stays web-scoped because it is about screens. READABLES stay web
+      vocabulary: they are DOM facts, so a cli/api place carries none — omitted,
+      per the absence rule, never an invented analog.
+    - **3. The contract is a discriminated union on `surface`.** `cli` carries
+      today's shape with `commands: []` collapsed to the singular `command`; `api`
+      carries `operation` in HTTP's own words — `description?`, `request?`
+      (`params | query | body`, three arrays because the three are addressed
+      differently by every caller), `consumes?` (`env`, `reads` — no `prompts`: an
+      HTTP handler asks nobody anything), `produces?` (`statuses`, `body` markers
+      with no stream, `rows` = the shared row grammar minus the stream, `writes`).
+      The operation copies NO identity: method and path live on the entry, once.
+      There is deliberately NO `web` member — a web task's contract is its
+      resource's readables plus the capture vocabulary (items 96, 101), and a
+      member invented ahead of a claim would be a shape nothing fills; the union
+      is exactly what makes it land additively. `contract.surface` must equal the
+      interface's `type`, cross-checked at file level.
+    - **4. ONE home for the api request contract.** `mapInterfaces` writes
+      `collectApiRequestContracts`' output onto each operation as
+      `contract.operation.request`; `buildInterfaceContractHints` reads it there
+      and takes no second argument, and the `requestContracts` plumbing is gone
+      from the `InterfaceProvider` seam, the mapping result and every author call
+      site. Two things stop being possible: the two halves drifting because two
+      derivations composed paths differently, and a run reading the SNAPSHOT
+      catalog having every operation and none of their fields. The
+      `ApiRequestContract` analysis product itself remains — it is the mapper's
+      INPUT. The rendered prompt is unchanged (name + requiredness only), so a
+      hand-authored contract's widened fields enrich the catalog without
+      re-authoring a scenario, and both authoring system-prompt fingerprints hold.
+    - **5. Formation lives in the mapper, once.**
+      `packages/interface-mapper/src/resources.ts`: `formCliResources` (one group
+      per command-tree PARENT, plus the program's own root — a command belongs to
+      the group it is REGISTERED IN, so `spec docs` sits in `spec` and its
+      children sit in `spec-docs`, the way `--help` lists them; without a program
+      name there is no honest root, so top-level commands stay unowned and the
+      nested groups still form) and `formApiResources` (the verb/noun rule below).
+      The reference migration calls the identical functions, so a hand-authored
+      catalog's places are the ones a derived catalog would get.
+    - **6. `version: 2`, a hard bump.** The reader accepts 2 alone. This IS the
+      break the number was reserved for: unlike the additive contract fields and
+      the 2026-08-11 state-id rename (hand-authored web entries only), the api
+      reshape reaches data every api mapping has written. The recovery is the
+      designed one and costs nothing — the snapshot is gitignored and derived, so
+      a v1 file fails parse, reads as "no catalog", and the next map rewrites it.
+    - **7. The hand-authored catalog migrates.**
+      `scripts/migrate-interfaces-v2.mts` — cli contracts to the singular
+      `command`, api costumes to `operation` (argv path dropped, positionals →
+      `request.params`, options → `query`/`body` by the sentence the author opened
+      each description with, stdout markers → `produces.body`, exits →
+      `produces.statuses`, env/reads/writes verbatim), then the same formation
+      rules for the places and the `resource` refs. Web entries, states and the
+      web registry are byte-equal, and the script REFUSES to write if a
+      fingerprint moved. One authored correction rides with it: the costume's
+      `valueRequired` meant "the flag needs a value", so the mechanical mapping
+      overstated `analysisId` as required on the seven routes that read it — the
+      migration is mechanical and authoring is authoring, so that was fixed by
+      hand. This closes `reference/transform-gaps.md` G65, G66, G67, G68 and the
+      api half of G71.
+    - **8. Tier 1 only.** The scenario format, the runner, late binding, the web
+      extractor, POM emission, catalog committability and the `ApiRequestContract`
+      producer are all untouched.
+
+    **The api verb/noun rule**, documented at `formApiResources`. Over the merged
+    path tree, a STATIC node is a NOUN when any of: (a) it has children — a node
+    other paths hang off is structural, and a noun can never be registered under a
+    verb; (b) a GET is rooted exactly at it — GET reads a representation, so
+    something is there to represent (`/analyses/diff`, `/violations/summary` are
+    sub-resources; `/analyses/cancel`, POST alone, is a command issued to
+    `/analyses`); (c) nothing static sits above it — a path's first named segment
+    has no enclosing noun to be an action ON, which is also how the `/api` mount
+    point becomes the tree's root rather than a special case. Otherwise it is an
+    ACTION, and the operations rooted at it belong to the nearest noun above. A
+    path parameter is an INSTANCE, never a place, and one place per parameter
+    POSITION whatever the route table spells it. Two knowable edges, both accepted
+    deliberately because the surface itself is what says so: a write-only
+    sub-resource (PUT with no GET) reads as an action on its parent, and a verb
+    that takes a parameter (`/jobs/retry/{id}`) reads as a noun. Result on the
+    reference's 32 operations: 22 nouns, no RPC tails (`cancel` folds into
+    `api-repos-analyses`, `enrich` into `api-repos-flows`).
+
+    **Consumers**: `GuardInterfaceRow` gains `resource` beside `at`/`to` (the
+    registry already travelled on the view); the Interfaces pane's contract card
+    dispatches on the union and renders an operation natively — request by
+    location, response statuses, body markers, no argv and no "Exit codes"
+    heading; the panel families cli/api rows by their owning place
+    (`at ?? resource ?? group`). The command NAV and its `?gcmd` binding are gone:
+    a cli contract has carried exactly one command since 2026-08-10, so it was a
+    nav onto a list of one.
+
+    **As built**: `packages/shared/src/interfaces.ts`,
+    `packages/shared/src/guard/dashboard.ts`,
+    `packages/interface-mapper/src/resources.ts`,
+    `packages/core/src/services/interface.service.ts`,
+    `packages/core/src/commands/{guard-read,guard-in-process}.ts`,
+    `packages/guard-generator/src/{grounding,generate,prompts}.ts`,
+    `apps/dashboard/client/src/components/guard/{GuardInterfaceContract,GuardInterfacesPane,GuardInterfacesPanel}.tsx`,
+    `scripts/migrate-interfaces-v2.mts`. Tests:
+    `tests/shared/interfaces.test.ts`, `tests/interface-mapper/resources.test.ts`,
+    `tests/core/interface.service.test.ts`,
+    `tests/guard-generator/grounding.test.ts`,
+    `tests/server/guard-interfaces-contract.test.ts`,
+    `tests/dashboard-client/guard-interfaces.test.tsx`.
+
+    **Tier 2 — what this deliberately does NOT do, and what it opens.**
+    (a) A `web` contract member, when a web claim appears that readables and
+    capture cannot carry. (b) The PLACES prompt block following `resource` as well
+    as `at`/`to`, which would put a places block in every cli/api authoring prompt
+    — a real grounding change with a prompt-fingerprint roll attached, so it is a
+    decision of its own. (c) READERS on a resource: a named, typed read compiled
+    from a readable (the `som-experiment` stage C3 prototype), which is what a
+    `read: <resource>.<readable>` shorthand and POM emission would both stand on.
+    (d) Deriving the web registry rather than hand-authoring it — the experiment's
+    stage C measured ~60% place recall from three regex-grade heuristics, so the
+    build derisks downward, and it would retire item 96d as a side effect. (e) The
+    analyzer's router-mount composition on this repo's own dashboard server, which
+    the experiment exposed (123 of 137 paths came out bare): a PRE-EXISTING
+    product bug that degrades today's grounding independently of the SOM, and the
+    cheapest of the three cost centres the report named.
+
+103. **The web surface derives its PLACES (2026-08-17).** STATUS: BUILT (structural
+    half). Item 102's Tier-2 note (d) — "deriving the web registry rather than
+    hand-authoring it". Every web interface that exists across the three benchmark
+    corpora, 126 of them, was typed by an agent reading the target's JSX, because
+    `mapInterfaces` derived `cli` and `api` and nothing else. This item derives the
+    half of the web surface that is structure: the SCREENS, each carrying the
+    `address` a navigate step reaches it by.
+
+    **The split, and why it is the honest one.** A web surface is places plus
+    tasks. A place is stated by the app's routing — a directory, a filename, a JSX
+    element — and costs one command to re-derive. A task is an ordered
+    navigate/activate sequence with a start and an end state: intent, which no
+    tree states. So the places derive and the tasks stay authored, and the two
+    live in the two files they already lived in (`guard/interfaces.json` derived,
+    `guard/interfaces.authored.json` committed).
+
+    **Per-idiom readers, gated on evidence** (`packages/interface-mapper/src/web/`,
+    the shape `analyzer/src/extractors/routes/` took for the api side):
+    `next-app` and `next-pages` read the directory tree (groups `(x)` contribute
+    nothing, `[p]` → `{p}`, `[...p]` → `{...p}`, an optional catch-all addresses
+    its own parent, `_private`/`@slot`/`(.)intercept`/`route.ts` are not screens),
+    gated on a `next.config.*` at the app root; `remix-flat` reads the flat-routes
+    filename grammar (`.` splits, `+` folders nest, a leading `_` is pathless, a
+    trailing `_` opts out of a layout, `[…]` escapes, a bare `$` splat is not a
+    place), gated on a sibling `routes.ts` that IMPORTS `remix-flat-routes`;
+    `react-router` takes the JSX the analyzer read (`extractWebRoutes`), gated on
+    the file importing react-router. The gates are the whole game: `pages/` and
+    `routes/` are two of the most common directory names in a React codebase, and
+    strapi's checkout contains both traps verbatim.
+
+    **Nothing unaddressed**, the api extractor's rule transplanted: a `<Route>`
+    fragment that composes onto no absolute parent is dropped rather than emitted
+    bare. Two addresses differing only in what they NAME a slot are ONE place —
+    a router cannot serve `/[user]` and `/[bookingUid]` at one position, so when
+    both appear they came from two apps in one monorepo.
+
+    **Measured** (recall on the addresses the hand-authored web interfaces
+    actually use — entry paths, then navigate routes): cal.diy 6/6 and 9/10
+    (88 places derived); documenso 5/5 and 3/3 (125 places); strapi 0/4 and 0/2
+    (0 places). strapi is a deliberate zero, not a gap in the readers: its admin
+    panel is react-router `RouteObject` TABLES, every one of them relative to a
+    mount the file does not state, and the panel's own basename comes from
+    `process.env.ADMIN_PATH` read at runtime. Every authored strapi address starts
+    `/admin`, and no file in the checkout says so. That needs a declared web base
+    path (recipe) plus RouteObject mount composition — a slice of its own.
+
+    **Deliberately not built.** (a) Web TASKS — the interfaces. (b) READABLES, the
+    DOM facts a place shows. (c) DIALOGS and PANELS: readable in principle
+    (`DialogContent`, `role="dialog"`), but a dialog's identity is the screen it
+    opens OVER, and that `of` is a component-graph question this pass cannot
+    answer; a registry of hundreds of ownerless dialogs is worth less than none.
+
+    **The fail-loud guard, re-decided.** `assertDerivedSnapshot` refused to
+    overwrite a catalog carrying "a surface no derivation produces", tested as any
+    interface type outside `{cli, api}`. It now keys explicitly on INTERFACES
+    (`DERIVED_INTERFACE_SURFACES`), and `web` stays out of that set although web
+    resources are now derived: the protection exists for the half that cannot be
+    re-derived, and widening it because the other half became derivable would
+    retire it for the work it was built to save. The `version: 1` signal still
+    catches every legacy catalog.
+
+    **A surface with places and no interfaces** is a new state, and the Interfaces
+    banner used to read it as "the derivation found nothing" (`detected` was
+    `interfaces > 0`). `GuardInterfaceSurface` now carries a `resources` count and
+    `detected` is either half. What the dashboard CLIENT does with it is still
+    owed: the pane reaches a place only through an interface's `at`, so derived
+    web places are in the payload and not yet on screen.
+
+    **As built**: `packages/shared/src/types/analysis.ts` (`WebRoute`,
+    `FileAnalysis.webRoutes`), `packages/shared/src/interfaces.ts`
+    (`InterfaceResource.address`, screens only),
+    `packages/shared/src/guard/dashboard.ts`,
+    `packages/analyzer/src/extractors/web-routes.ts`,
+    `packages/interface-mapper/src/{web-tree.ts,web/,resources.ts}`,
+    `packages/core/src/services/interface.service.ts`,
+    `packages/core/src/commands/guard-read.ts`. Tests:
+    `tests/analyzer/web-routes.test.ts`, `tests/interface-mapper/web-tree.test.ts`,
+    `tests/interface-mapper/resources.test.ts`, `tests/shared/interfaces.test.ts`,
+    `tests/core/{interface.service,guard-interfaces-authored}.test.ts`.
+
+104. **Interface authoring runs on the agent loop (2026-08-17).** STATUS: BUILT.
+    Item 103 derived the web PLACES and stopped where derivation honestly stops:
+    a task is an ordered navigate/activate sequence with a start and an end
+    state — intent, which no tree states. Every web interface in existence (126
+    across the three corpora) was typed by an agent reading the target's JSX by
+    hand, outside the product. This item makes that an actual pipeline stage, and
+    it is the agent loop's FIRST production consumer: `runAgentLoop` shipped with
+    two drivers and a conformance suite, and nothing in the product called it.
+
+    **The unit of work is the PLACE, and that is the whole design.** A web task is
+    "one task from one state" (AGENTIC_PIPELINE_PLAN §10.4), and the state a task
+    starts from is a place plus a world. One session per screen gives a bounded
+    reading job (that screen's route module and the components it renders), a
+    natural done-condition, and a work item that re-runs alone — authoring one
+    place again re-authors nothing else. It also means the work LIST is derived
+    rather than typed: item 103's screens are the agenda, so `guard interfaces`
+    shows the bill before it is paid and the coverage after.
+
+    **What the model may write, and what it may not.** The outcome schema
+    (`AuthoredFragmentSchema`) is the web shape and nothing else: tasks, the
+    states they assume and leave, the dialogs/panels no derivation produces, and
+    `unresolved` — what the reading could not settle, one line each. Three fields
+    are deliberately absent. `fingerprint` is a FUNCTION of the entry and steps,
+    so it is computed after the outcome (a model-written one can disagree with
+    its own entry, and every scenario grounded on it inherits the disagreement).
+    `origin` is stamped by the merge, never declared — the field exists because a
+    declared one lied for months. `contract` cannot exist for a web entry at all:
+    the union has cli and api members and `contract.surface` must equal the type.
+    The step vocabulary is narrowed to the three WEB members, so a task that
+    wanted an `invoke` step is refused at parse rather than in review.
+
+    **`check_draft` is why this is a LOOP and not a prompt.** The session's five
+    tools are read-only — `read_file`, `search_repo` (repo-bounded, capped,
+    binary-skipping), `list_places`, `list_interfaces`, and `check_draft`, which
+    runs the identical function the write path runs. The rules are dozens of small
+    structural facts (an id that resolves, a role that exists, an entry that
+    agrees with its place); a model that can ASK converges on them, and a draft
+    that checks clean cannot be refused afterwards. Nothing writes: a tool that
+    wrote would leave half a fragment on disk every time a session ran out of
+    budget mid-draft.
+
+    **The rules, each one because the alternative is a plausible entry nothing can
+    run**: one id names one thing (no shadowing a derived entry, no silent
+    overwrite of an authored one); one fingerprint names one task (the same task
+    authored twice would double every scenario grounded on it); every target is
+    `<role> "<accessible name>"` with a real ARIA role — §10.3's locator policy,
+    and the grammar all 57 reference targets are already in; a task says where it
+    happens (`at`) or how it gets there (a first `navigate`), and its entry
+    agrees with the address of the place it stands on; and a session's tasks
+    belong to ITS place — one screen, plus the dialogs and panels that sit on it.
+
+    **The fold, not a rewrite.** Each place's fragment is validated and written
+    before the next session starts, so a later session sees the earlier ones
+    (uniqueness is checked against the catalog as it now stands), an interrupted
+    run keeps what it finished, and a failing session costs exactly its own
+    place — failures are DATA, the way the shell hands them back. A re-author may
+    replace ITS OWN place's tasks and nothing else: the rest of
+    `guard/interfaces.authored.json` is somebody else's committed work.
+
+    **The half-catalog fix (root cause, not a workaround).** The authored file was
+    read with the full `InterfacesFileSchema`, whose refinement resolves every
+    `at`/`to`/state id INSIDE the file — so an authored task standing on a DERIVED
+    place could not be read at all, and on a fresh clone (where the derived half
+    is gitignored and absent) neither could one standing on any place. The halves
+    are now checked for SHAPE (`InterfacesFragmentSchema`) and the WHOLE for
+    REFERENCES: the merged catalog is what `InterfacesFileSchema` holds, and the
+    authoring write path validates its fragment against the merge before a byte
+    lands. Without this the entire point of item 103 — tasks standing on derived
+    places — was unreachable.
+
+    **Surfaces**: `truecourse guard interfaces` (read-only: places, what is
+    authored on each, per-surface derived/authored counts) and
+    `truecourse guard interfaces author [--place <id>] [--replace] [--limit n]
+    [-y] [--llm-transport]`. The pre-flight is §3.5's shape — work items × the
+    session's own turn range, no averaged dollar figure dressed up as a fact.
+    Transcripts land in the standard sessions store under the new
+    `guard-interfaces` command; the driver comes from
+    `createConfiguredSessionDriver` (the session analog of
+    `install-transport.ts`): the Agent SDK driver on Opus in claude-code mode,
+    our per-turn loop on the configured flagship in api mode (§3.4, one model
+    everywhere). `--llm-transport agent` is refused with a reason — a mailbox is
+    not a session backend.
+
+    **Deliberately not built.** (a) READABLES — what a place SHOWS is its own
+    vocabulary (items 96, 101) and its own authoring pass. (b) Enriching the
+    DERIVED cli/api contracts through the same loop: the seam is open (the
+    authored file overlays any id, and the merge already prefers it) but a
+    surface that re-derives every mapping has a different incrementality story,
+    so it is a decision of its own. (c) Parallel sessions — the fold is
+    sequential by construction; a concurrent run needs the uniqueness check to
+    move behind a lock, which is worth doing when a corpus is large enough to
+    feel it. (d) Estimation in dollars, per §3.5's open rework.
+
+    **As built**: `packages/interface-author/` (the whole package),
+    `packages/shared/src/interfaces.ts` (`InterfacesFragmentSchema`),
+    `packages/guard-runner/src/store.ts` (the authored read),
+    `packages/agent-loop/src/session-store.ts` (the `guard-interfaces` command),
+    `packages/core/src/services/llm/session-driver.ts`,
+    `packages/core/src/commands/guard-interfaces.ts`,
+    `tools/cli/src/commands/guard-interfaces.ts`, `tools/cli/src/index.ts`.
+    Tests: `tests/interface-author/{draft,author}.test.ts`,
+    `tests/core/guard-interfaces-author.test.ts`.
+
+105. **The authoring session is handed what the AST pass already knows
+    (2026-08-17).** STATUS: BUILT (derivation + prompt; the paid before/after
+    re-run is not).
+    Item 104's session got a place id and an address and nothing else, so it
+    rediscovered by search what the derivation had just computed and thrown away.
+    The first pilot measured the cost, and it is a third of every session:
+
+    - documenso `settings-tokens`, 14 turns, six of them `list_interfaces`
+      `contains` probes guessing `apiToken`, `api-token`, `create`, `delete`,
+      `getMany`, `trpc` against a tRPC surface where none of those names exist.
+      `apiEffects` came back mostly unestablished anyway.
+    - cal.diy `availability`, 19 turns, six walking `page.tsx` →
+      `availability-view.tsx` → `ScheduleListItem.tsx` → `Button.tsx` →
+      `packages/i18n/locales/en/common.json` in 20–40 line windows.
+    - a toy-repo session that returned an EMPTY fragment whose `unresolved` read
+      "Module rendering the `/` screen could not be located" — about a module the
+      mapper had named in the same run.
+
+    **Three facts, in the order they cost anything.** (1) The route module: free,
+    because `WebPlaceSeed.filePath` already says it and `formWebResources` mints
+    the place id from the same seed — the pair only needed carrying, so the
+    formation now hands back `seeds` (id → seed) instead of dropping the half it
+    did not use. (2) The component closure: one graph walk over the RESOLVED
+    import edges (`buildDependencyGraph` — a `FileAnalysis.imports` entry carries
+    a specifier, and turning one into a file needs tsconfig paths and workspace
+    packages, which that function already does). (3) The api effects: the
+    frontend→API join of AGENTIC_PIPELINE_PLAN §10.4, the requests the closure
+    makes joined to the api ids the catalog already carries.
+
+    **The two rules that make the pack worth having rather than worth ignoring**,
+    both of them about restraint:
+
+    - **Barrels are followed BY NAME.** A monorepo screen imports `Button` from
+      `@calcom/ui`, whose index re-exports the design system; following every edge
+      of it buys two hundred modules and names none of the ones that render the
+      screen. A module whose exports are all re-exports is treated as the
+      pass-through it is, and only the edges carrying a name the importer actually
+      asked for are followed. Nothing is guessed away: the names come from the
+      import statement.
+    - **A wrapper's request is attributed only when the closure imported it BY
+      NAME.** The alternative hangs a shared api client's whole endpoint list on
+      every screen that imports one function from it. So: every http call in the
+      place's own module, plus every call inside a function or class somebody in
+      the closure imported by name (the "one hop through the api-client module" of
+      §10.4). A call nobody asked for is not this place's effect and is silently
+      not attributed — not even as unjoined, because the honest statement about it
+      is that it is not here.
+
+    **What does not join is STATED, and that turned out to be the useful half.**
+    Both pilot corpora talk tRPC, and the api derivation reads route tables and
+    OpenAPI — so a tRPC procedure has no interface to join to, by construction,
+    and `apiEffects` on those repos is honestly empty. The pack therefore names
+    the procedures themselves (`trpc.apiToken.create`, `trpc.apiToken.delete` for
+    documenso's tokens screen; the five `trpc.viewer.availability.schedule.*` for
+    cal.diy's availability screen) as `calls` that CANNOT be `apiEffects`, plus
+    any http request that joined to nothing and any URL the source builds at
+    runtime. That is what replaces the guessing loop: the answer to "which api id
+    does this save button call" is "none, it calls `trpc.apiToken.create`", and a
+    session told that stops looking.
+
+    **Nothing derived here is ever stored.** `interfaceFingerprint`'s contract is
+    surface-visible shape only — "never internal symbol names, file paths" — and a
+    stored path goes stale the moment a file moves. The pack lives exactly where
+    `externalServices`, `database`, `datastoreUrls` and `outboundRequests` live:
+    re-derived per run, handed to the stage that needs it, never committed. It is
+    also deliberately NOT part of `mapInterfaces`, which runs inside `guard
+    generate` and `guard setup` where a dependency-graph build is a cost nobody
+    asked for; the ids still agree because both sides mint them with the same pure
+    function over the same tree. Measured: documenso 1924 files → 125 places in
+    18s, cal.diy 4541 files → 88 places in 39s, amortised over every place a run
+    authors.
+
+    **Two prompt fixes, from the same transcripts.** documenso's `inbox` returned
+    13 tasks, four of them next/previous/first/last page — the page inventory item
+    103's re-scope rejected, arriving through the back door. `SYSTEM_PROMPT` now
+    says what is NOT a task (pagination, sorting, table density, row expansion,
+    theme and language switchers, copy-to-clipboard) and that a screen whose only
+    controls are those has zero tasks. And `endState` was frequently omitted: it
+    is now required of any task that changes the world, since that difference is
+    what a scenario asserts. Third, smaller: a `list_interfaces` `contains` miss
+    hands back the whole surface when it fits in one page, instead of answering
+    nothing six times.
+
+    **Findings this work turned up, neither of them fixed here.** (a) A tRPC
+    router derives no api interfaces, so no web task on a tRPC app can carry
+    `apiEffects` — deriving procedures as api interfaces is a mapper slice of its
+    own, and it is the one that would make Tier 3 pay on both pilot corpora.
+    (b) cal.diy's `/bookings` place resolves to
+    `packages/platform/examples/base/src/pages/bookings.tsx` — a DEMO app inside
+    the monorepo declaring the same address as the real screen, which item 103's
+    precedence takes at face value. The briefing states its module as a fact and
+    tells the session to author nothing and say so in `unresolved` if the module
+    does not render the screen it was asked about, which contains the damage
+    without fixing the derivation.
+
+    **Deliberately not built.** (a) The paid before/after re-run of the pilot's 8
+    screens per repo (baseline turn counts: cal.diy 19/35/14/32, documenso
+    14/14/19/13/19/25/28) — the derivation is verified offline against both
+    checkouts, but the turn-count claim is not verified and is not made. (b) An
+    affordance for LOCALE FILES, the last hop of cal.diy's measured walk. An i18n
+    key resolves in a JSON file, which is not an import edge and not a
+    `FileAnalysis` at all, so it cannot come out of the closure; the prompt says
+    where to look instead, which costs one line rather than a JSON reader with a
+    key-resolution rule per framework. Revisit if accessible names keep coming
+    back unresolved on i18n-heavy screens.
+
+    **As built**: `packages/interface-mapper/src/web-context.ts` (the whole
+    derivation), `packages/interface-mapper/src/resources.ts` (`seeds`),
+    `packages/core/src/services/web-context.service.ts` (the one pass per run),
+    `packages/core/src/services/interface.service.ts` (`analyzeWorkingTree`
+    exported), `packages/interface-author/src/{session,author,tools}.ts`,
+    `packages/core/src/commands/guard-interfaces.ts`,
+    `tools/cli/src/commands/guard-interfaces.ts`. Tests:
+    `tests/interface-mapper/{web-context,resources}.test.ts` (the rules, over
+    synthetic analyses), `tests/core/web-context.test.ts` (the pass over a real
+    tree, including the wrapper hop through an api-client module),
+    `tests/interface-author/author.test.ts` (the briefing, and the
+    `list_interfaces` miss).
+
+106. **The state registry reaches the session (2026-08-17).** STATUS: BUILT.
+    Named states are the mechanism web tasks CHAIN by: a task's `endState` and
+    another task's `startingState` meet by id equality, across places and across
+    sessions, which is what lets a scenario walk from "an event type exists" to
+    "a booking on it is rescheduled" without either task knowing about the other.
+    Item 104's session could not see them. `list_places` returned places,
+    `list_interfaces` returned interfaces, and nothing returned the area's state
+    registry — so every session minted a fresh id for a world an earlier session
+    had already named, and the chaining mechanism was a coincidence of spelling.
+
+    **Measured on the pilot, and it is not a matter of degree.** Across both
+    baseline runs, ONE of 180 state references pointed at the standing registry
+    (cal.diy 0 of 81, documenso 1 of 99) — with 66 and 28 states respectively
+    already sitting in the committed catalog. 56 and 58 new states were minted,
+    41 and 36 of them referenced at most once. Sessions were not under-reusing;
+    each one was working in a private namespace.
+
+    **The registry rides in the BRIEFING, not behind a `list_states` tool**, and
+    that was the decision. A tool is opt-in, and the failure mode measured here
+    is precisely that a session does not look before it drafts — a tool it never
+    calls teaches it nothing, while a prompt rule telling it to call one costs
+    the same line as the table itself. The table also costs LESS than the call:
+    a tool call is a whole turn, which resends the entire context, whereas the
+    registry is ~1.9k tokens on the largest corpus (cal.diy, 66 states) read
+    once. And the registry is small BY DESIGN — reuse is the thing that keeps it
+    so, so the artefact that grows if the fix fails is the same artefact that
+    would have made a tool worth it. Capped at 200 entries with a tail naming
+    the file, so a run-away registry cannot swamp a session's context silently.
+    Nothing about the package's driver- and store-agnostic contract changes: the
+    briefing is a string the caller composes, and `registryStates` merges the
+    two catalog halves the caller already reads.
+
+    **The rule that gives it teeth.** `validateFragment` gained its fifth rule: a
+    draft may REFERENCE any id the registry defines (the merged-catalog schema
+    already resolves it) and may DEFINE a new one, but it may not redefine an
+    existing id as a different world — every task already chained to it would
+    silently start asserting something else, and the drift signal would be
+    poisoned at the source rather than reported. Restating one verbatim is
+    allowed, because a re-author of a place hands back the states it handed back
+    last time and idempotence there is worth more than the strictness. The
+    prompt's rule 5 was rewritten to match: a referenced id is defined once,
+    either already in the registry or newly in `states`, never both.
+
+    **The fold is what makes this work per-run rather than per-corpus.** Sessions
+    run sequentially and each place's fragment is written before the next session
+    starts (item 104), so `registryStates(derived, authored)` at the top of a
+    session is the catalog as the previous place left it — the second screen of a
+    run is briefed with the worlds the first one named, without any cross-session
+    machinery. It is also the reason parallelising the fold is not free: a worker
+    pool would brief its sessions with a registry that is stale by however many
+    places are in flight.
+
+    **As built**: `packages/interface-author/src/draft.ts` (`registryStates`,
+    rule 5), `packages/interface-author/src/session.ts` (`PlaceBriefingInput`,
+    the registry block, prompt rules 5 and the state bullet),
+    `packages/interface-author/src/author.ts` (the per-place registry).
+    Tests: `tests/interface-author/draft.test.ts` (reference / redefine /
+    restate-verbatim / a derived state counts too),
+    `tests/interface-author/author.test.ts` (the second place is briefed with
+    the first place's worlds).
+
+107. **A place is an address whose module renders, in the app under test
+    (2026-08-17).** STATUS: BUILT.
+    Item 103 derives the web places off the routing tree, and the readers answer
+    "what address does this file declare". That is not the same question as "can
+    a user stand here", and authoring pays for the difference: one session per
+    place, on a work list that took anything shaped like a route at face value.
+    Measured across the two benchmark checkouts, 22 of 213 places were neither.
+
+    **Rule one: a route module with no default export renders nothing.** It
+    serves a RESPONSE — documenso's ten `api+/*` handlers (a `loader` returning
+    JSON), its `share.$slug.opengraph.tsx` (an image), and four `_index.tsx`
+    routes whose loader only redirects, so a user never sees the address at all.
+    15 of that repo's 125 places, every one of them an authoring session spent on
+    a screen nobody can open, and a place every downstream consumer reads as
+    somewhere to navigate. The rule applies to the three idioms where the route
+    file IS the rendering module (`next-app`, `next-pages`, `remix-flat`) and
+    deliberately NOT to `react-router`, where the route is declared in a JSX table
+    and the component lives elsewhere — asking the table for a default export
+    would refuse every place that idiom produces.
+
+    **Rule two: the app under test is the one the recipe serves.** cal.com's
+    checkout holds four Next.js apps, and the bundled platform demo
+    (`packages/platform/examples/base`) declares seven addresses `apps/web` never
+    does — `/troubleshooter`, `/calendar-view`, `/conferencing-apps`, a bare
+    `/bookings`. The first pilot spent 14 turns on `/bookings` and returned an
+    honest empty. No fact in the tree settles it: both are real Next apps with
+    real routes. So the recipe says it or nobody does — `recipe.web.app`, the
+    repo-relative workspace directory, mirroring `RecipeApiServerSchema.app`
+    (item 88's join key) in name and in meaning. Optional, and absent keeps every
+    app's places: a rule that guessed would drop real screens, which is the one
+    failure direction worth designing against.
+
+    **The analyzer half, and it is the larger half.** Rule one needs to know
+    whether a module exports a component, and `FileAnalysis.exports` could not
+    say. `extractExportName` read only the `declaration` field, so
+    `export default function Page()` and `export default class Page` were
+    recorded and `export default Page;` — the VALUE form — was recorded as no
+    export at all. That is 74 of cal.diy's 79 route modules and 11 of
+    documenso's: the naive rule would have dropped nearly every screen in the
+    repository. `export { default } from './index'` was the same bug wearing a
+    different hat (`isDefault` was false for it), and cal.com's
+    `pages/router/embed.tsx` is that single line and nothing else — it was the
+    one false drop the first implementation produced, caught by diffing the
+    derived list rather than by a test, which is why the diff is worth running.
+
+    **Measured, before and after**: documenso 125 → 110 places; cal.diy 88 → 88
+    on the render rule alone (its pages all render) and → 81 once a recipe
+    declares `web.app: apps/web`. No authored task in either corpus stands on a
+    dropped place — checked before the rule shipped, because dropping a place an
+    authored task is `at` would break the merged catalog's reference resolution.
+
+    **Deliberately not classified.** Embeds, terminal pages (`/maintenance`,
+    `/auth/logout`) and status screens. They are real screens; a session on one
+    is cheap and correctly returns zero tasks, and a rule that skipped them would
+    be a guess about intent wearing a deterministic costume. The two rules above
+    are facts about the tree and the recipe, and nothing else qualified.
+
+    **As built**: `packages/analyzer/src/extractors/languages/{typescript,javascript}.ts`
+    (the two export-extraction fixes), `packages/interface-mapper/src/web-tree.ts`
+    (both rules), `packages/guard-runner/src/recipe.ts` (`web.app`),
+    `packages/core/src/services/interface.service.ts` (`servedWebAppRoot`).
+    Tests: `tests/analyzer/file-analyzer.test.ts` (a default export in every form
+    it is written), `tests/interface-mapper/web-tree.test.ts` (both rules, and
+    the react-router exemption).
+
+108. **Authoring sessions run in a pool; the fold stays serial (2026-08-17).**
+    STATUS: BUILT.
+    Item 104 ran one session at a time, and the wall clock said what that costs:
+    the 16-screen pilot took two runs of roughly an hour each, and a session is
+    ~20 turns of provider latency with almost no local work between them. The
+    full corpus is 191 places. Sessions are network-bound, so they run
+    `concurrency` at a time — `p-limit`, the same dependency and the same
+    `TRUECOURSE_MAX_CONCURRENCY` knob `guard generate` already uses, default
+    `min(cpus, 4)`, `--concurrency` on the command.
+
+    **The fold does not, and that is the whole design.** A fragment is validated
+    against the catalog it is about to join and then written to it; two of those
+    interleaved would each validate against a catalog the other is halfway
+    through changing, and the loser's write would silently drop the winner's
+    tasks. So the run splits in two: `runPlaceSession` (concurrent, reads the
+    repository, touches no catalog) and `foldOnePlace` behind a one-at-a-time
+    gate, which re-reads the LIVE authored file rather than the snapshot its
+    session was briefed with — because the answer to "is this id taken" changed
+    while the session was thinking.
+
+    **What concurrency costs is briefing freshness, and it is named rather than
+    hoped away.** A session is briefed with the catalog as it stands when it
+    starts, so the C-1 peers beside it are invisible: their states are not in its
+    registry (item 106) and their tasks are not in its `list_interfaces`. Two
+    consequences. A world named twice under two ids is the reuse item 106 buys
+    back, which is why the default is small and why the STANDING registry — the
+    committed half every session does see, and where all 20 of documenso's
+    measured reuses came from — carries the weight. And an id or fingerprint a
+    peer claimed mid-flight is a RACE: nothing told this session, so refusing its
+    whole fragment would throw away a screen's work over a name two settings
+    pages both wanted to call `web/create-webhook`.
+
+    **So the fold distinguishes the two collisions by WHEN they appeared.**
+    `pruneRacedTasks` compares the catalog the session was briefed with against
+    the one it is joining: an entry present in both is one the session was SHOWN
+    and authored over anyway, which stays the refusal item 104 exists for; an
+    entry that appeared in between is a race, and exactly those tasks come out
+    while the rest of the place lands. Both identities are checked, because both
+    are refusals — the id, and the fingerprint (one entry + steps is one task,
+    whatever it is called). The dropped ids are reported as `raced`, which is not
+    a problem: the task exists, it is just somebody else's entry now.
+
+    **Two smaller things the pool forced.** The result list is sorted back into
+    work-list order, because completion order is provider latency and a report
+    that reorders itself run to run is unreadable. And the CLI's spinner became
+    an aggregate — with several sessions in flight, per-place tool calls arrive
+    interleaved and a line showing the last one flickers between places without
+    saying anything, so it shows `done/total · N running · <places>` and keeps
+    the old single-place line when only one is in flight.
+
+    **Deliberately not built.** Ordering the WRITES by work item. It would make
+    the committed file's entry order independent of completion order, at the cost
+    of holding finished fragments back behind a slow earlier place — which would
+    give up item 104's "an interrupted run keeps what it finished". The order of
+    newly appended entries is not semantic, and a re-author keeps positions.
+
+    **As built**: `packages/interface-author/src/author.ts` (the pool, the
+    serial gate, `pruneRacedTasks`, `defaultAuthorConcurrency`),
+    `packages/interface-author/package.json` (`p-limit`),
+    `packages/core/src/commands/guard-interfaces.ts`,
+    `tools/cli/src/commands/guard-interfaces.ts` (the flag, the live line),
+    `tools/cli/src/index.ts`. Tests: `tests/interface-author/author.test.ts`
+    (sessions overlap, folds never do, work-list order, the race policy, the
+    briefed-with collision that is still refused, what the pool cannot brief,
+    abort).
+
+109. **`guard setup` runs one step at a time (2026-08-20).** STATUS: BUILT.
+    `spec scan` got `--only-<step>` first, for the same reason setup needs it:
+    against a real repository the interesting question is almost never "did the
+    whole stage work" but "does THIS step do the right thing", and a stage whose
+    only granularity is all-of-it makes every inspection cost the steps around
+    it — an app boot, a live probe, four session kinds. Five mutually exclusive
+    flags now select one of setup's LLM-bearing steps:
+    `--only-recipe | --only-catalog | --only-interfaces | --only-seed | --only-auth`.
+
+    **`detect` is not selectable, on purpose.** It is one `mapInterfaces` pass,
+    deterministic and LLM-free, and every later step reads its in-memory output
+    (the detection snapshot, the schema, the route surface). So it always runs,
+    and the persisted snapshot is always the current tree's — which is what
+    keeps `readGuardExternalsView` and `guard status` honest after a partial run.
+
+    **Earlier steps REPLAY, later ones never start.** The recipe step's replay is
+    `recipe.json` itself — loaded, never re-derived, and never re-probed (the
+    boot and the live call belong to `--only-recipe`). The soft steps replay as
+    "leave what is on disk alone": no externals skeleton write, no reconcile, no
+    authoring run, no seed draft. A step that never ran throws
+    `SetupStepNotReadyError`, naming the flag to run first — the same refusal
+    `ScanStepNotReadyError` makes, and for the same reason: silently running the
+    prior step is exactly the blurring stepwise runs exist to prevent.
+
+    **What counts as "it ran" differs by step, because the steps differ.** The
+    recipe's evidence is its artifact — every later step reads `recipe.json`
+    directly, and a hand-committed one is as good as a derived one. The catalog,
+    interfaces and seed steps can each legitimately produce NOTHING (a repo with
+    no third parties, no screens, no schema), so demanding an artifact would
+    abort runs that are perfectly ready; their evidence is the step's row in
+    `guard/setup.json`, which is the same record skip-when-settled already reads.
+
+    **The report MERGES.** A single-step run rewrites `guard/setup.json`, so
+    without a merge a `--only-seed` run would leave a one-row spine and the next
+    bare setup would re-derive the recipe and re-classify the catalog for
+    nothing. Rows and blocks this run produced win; every other step keeps the
+    previous report's row verbatim, fingerprints included. The chosen step keeps
+    its normal idempotence (`--refresh` forces it, `--replace` still means
+    re-author), and the pre-flight estimate prices that step's session kinds and
+    nothing else.
+
+    **As built**: `packages/guard-generator/src/setup.ts` (`GUARD_SETUP_ONLY_STEPS`,
+    `SetupStepNotReadyError`, the `only` option, the replay branches,
+    `mergeStepSpine`), `packages/guard-generator/src/index.ts`,
+    `packages/core/src/commands/guard-setup.ts` (the option, the scoped estimate,
+    the sessions-run dirs, the bounded tracker),
+    `packages/core/src/services/llm/spec-estimate.ts` (`estimateGuardSetup({ only })`),
+    `tools/cli/src/commands/guard-setup.ts` (the labels, the refusal, the
+    "Next:" pointer), `tools/cli/src/index.ts` (the five flags + mutual
+    exclusivity). Tests: `tests/core/guard-setup-steps.test.ts` (each flag's
+    isolation, the replayed recipe that is never probed, both refusals, the
+    merge under `--refresh`, the scoped estimate).
+
+110. **`guard generate --only-<step>` runs one session stage in isolation
+    (2026-08-20).** STATUS: BUILT.
+    `spec scan` got stepwise flags first (`--only-orchestrate | --only-curate |
+    --only-settle | --only-overlap`), for the same reason generate needs them:
+    against a real corpus a whole run is an hour of provider latency and one
+    verdict at the end, so a prompt change to ONE stage cannot be read without
+    paying for every stage after it — and a stage read through a completed run
+    is read through everything downstream reinterpreted it as. Generate now has
+    the same three flags, one per SESSION stage: `--only-extract`,
+    `--only-flows`, `--only-worker` (mutually exclusive; the fidelity judge is a
+    depth-1 CHILD of a worker session, so it has no flag of its own and prices
+    with the worker step).
+
+    **Prior steps replay, they never re-spend.** Each step's durable artifact is
+    its own outcome cache (`guard/extract-session`, `guard/flows`), so a later
+    step's seams run cache-only: served from the entry, and a MISS throws
+    `GenerateStepNotReadyError` naming the flag to run first. That is the whole
+    point of the loudness — silently re-running the prior step would spend the
+    sessions its own flag exists to spend, and would hide exactly the cache-key
+    drift a stepwise run is being used to expose. Later steps never start: the
+    engine returns before the next seam is called, so `--only-extract` does not
+    even pay for the (free, but not instant) interface mapping.
+
+    **Nothing durable is written until the FINAL step runs.** An earlier stop
+    touches no scenario file, no `scenarios/manifest.json`, no
+    `scenarios/flows.json` (single-step mode passes `write: false` through
+    `synthesizeFlows`), no `guard/auto-resolutions.json`, and the command
+    adapter writes no `guard/result.json` — a partial run's counts would read as
+    a whole run's in `guard status` and the dashboard. The result carries
+    `stoppedAfter` instead, and the CLI closes with what ran, the sessions-store
+    run dir the transcripts landed in, and the next flag. `--only-worker` is a
+    complete generate: it replays extraction and synthesis from cache and runs
+    every write.
+
+    **The estimate gate prices only the chosen step.** `guardMatch` rides the
+    worker step — it is the one pre-stage with a bill and both earlier steps
+    return before it, so quoting the worker without it would under-price the
+    run; `guardRecipe` rides nothing, because generate refuses to start without
+    the recipe `guard setup` committed.
+
+    **Deliberately not a step.** The deterministic stages between the sessions
+    (section planning, interface mapping, grounding, the recipe build) run as
+    needed to feed the chosen one. Interface mapping still re-derives the
+    gitignored `guard/interfaces.json` under `--only-flows` / `--only-worker`:
+    it is a working-tree derivation any mapping rewrites, not a generate output.
+
+    **As built**: `packages/guard-generator/src/generate.ts`
+    (`GENERATE_SESSION_STEPS`, `only`, the two early returns, the gated
+    `flows.json` write, `stoppedAfter`),
+    `packages/core/src/services/guard-generate/run.ts`
+    (`GenerateStepNotReadyError`, the pools' `cacheOnly` replay, `runDir()`),
+    `packages/core/src/commands/guard-in-process.ts` (the estimate scoping, the
+    report-write gate, `sessionsRunDir`),
+    `packages/core/src/services/llm/spec-estimate.ts` (`GENERATE_STEP_STAGES`),
+    `tools/cli/src/commands/guard.ts` + `tools/cli/src/index.ts` (the flags,
+    mutual exclusivity, the reduced checklist, the not-ready error, the
+    next-flag outro). Tests: `tests/core/guard-generate-steps.test.ts`.
+
+111. **Conflict-resolution prune keys on doc existence, never on flag
+    matching (2026-08-20).** STATUS: BUILT.
+    The 2026-08-20 reference-corpus validation (cal.diy / documenso / strapi)
+    caught `pruneOrphanedConflictResolutions` deleting user-authored,
+    code-verified verdicts on every corpus write: cal.diy 6→1 rows, documenso
+    14→3. The old prune keyed staleness on "matches no currently flagged
+    overlap" — but the overlap session is a stochastic judge (~50–60% pair
+    recall run-to-run), and when it DOES re-flag a pair it re-excerpts the
+    quotes (drifted on 6 of 6 re-flagged pairs), so `resolutionMatchesConflict`'s
+    quote identity orphaned 16 of 20 stored verdicts in one scan. The
+    "cheaply re-derivable" premise the prune stood on is false.
+
+    Now: prune deletes ONLY a resolution naming a doc that left the corpus
+    (deterministic staleness). Everything else stays, dormant —
+    `orphanedConflictResolutions` still surfaces unmatched rows honestly, and a
+    new `dormantResolutionForPair` (shared) offers a re-flagged pair's stored
+    verdict as a one-command reapply hint on the OPEN conflict (`spec conflicts
+    list`/`show` + scan outro; `--json` carries `dormant`). Deliberately NOT
+    auto-honored: a genuinely new dispute between the same docs must not be
+    swallowed by an old verdict. As built:
+    `packages/spec-consolidator/src/curate.ts`,
+    `packages/shared/src/spec/overlap-resolution.ts`,
+    `tools/cli/src/commands/spec-conflicts.ts`, `tools/cli/src/commands/spec.ts`.
+    Tests: `tests/spec-consolidator/prune-conflict-resolutions.test.ts`,
+    `tests/shared/overlap-resolution.test.ts`.
+
+112. **Settle pushes back on a no-op settlement over a fragmented vocabulary
+    (2026-08-20).** STATUS: BUILT.
+    Same validation run, step 3: after the label→docs-map fix (`194af5dc`) the
+    settle sessions stopped timing out and started RUBBER-STAMPING — empty
+    draft to `check_settlement` on turn 1, zero `read_doc` calls, and the
+    checker answered "valid… produce it as the outcome". Net settlement across
+    all three repos: one trivial merge against 34–46 minted labels; with no
+    manualAreas pins the corpus grounds out at 25/34/26 areas (reference
+    6/4/5).
+
+    Now: `check_settlement` refuses the FIRST no-op draft (no merges, no
+    subdivisions, no collapse verdicts) over a fragmented vocabulary
+    (`FRAGMENTED_CONCERNS_MIN = 12` concerns, or ≥ half single-doc labels at 6+)
+    with the vocabulary's shape in numbers plus deterministic morphological
+    near-name candidates (per-token plural fold, token-sort equality — hints to
+    judge, never auto-merged). An identical resubmit passes, so a deliberate
+    "nothing to merge" still finishes in budget — one refusal cycle, the same
+    pattern as the outcome precondition. The system prompt and briefing gained
+    the grain rule (single-doc subtopics fold into their umbrella; "don't merge
+    when in doubt" scoped to distinct topics, not granularity). Prompt
+    fingerprint rides the settle cache key, so existing caches self-invalidate.
+    Papercut fixed alongside: a warm-cache `--only-<step>` run now prints the
+    step's replayed stats (docs/areas/verdicts) instead of a bare "Nothing to
+    run". As built: `packages/core/src/services/spec-scan/settle-areas.ts`,
+    `tools/cli/src/commands/spec.ts`. Tests: `tests/core/spec-scan-settle.test.ts`.
+
+113. **Cross-axis area grouping has no lever.** STATUS: OPEN.
+    The reference corpora group docs by AUDIENCE/SURFACE, not topic: documenso's
+    recipients docs split into `signing-concepts` (`concepts/recipient-roles.md`),
+    `signing-web` (`users/documents/add-recipients.md`) and `signing-api`
+    (`developers/api/recipients.md`); cal.diy splits `bookings-api` from
+    `bookings-help`. The settlement vocabulary operates on TOPIC labels — a
+    concern merge unifies topics (putting all three recipients docs in ONE area,
+    the opposite of the reference), and a subdivision splits one oversized label
+    — so no sequence of merges/subdivisions expresses "regroup every topic's
+    docs by the surface they document". Today only `manualAreas` pins express an
+    audience grouping; item 112's pushback cannot close this gap, it only stops
+    under-merging within the topic axis. A lever would let the settle session
+    assign docs wholesale to named areas (schema + validation + fold + briefing
+    + estimate) — deliberately deferred 2026-08-20 to keep the scan fixes
+    shippable. Related: overlap recall was ~50–60% per scan (cal.diy 3/6,
+    documenso 10/17 of reference pairs) — contained by item 111 (a missed pair
+    no longer destroys its stored verdict) and structurally addressed by item
+    119 (deterministic collision pairing replaces the session's own retrieval).
+
+114. **manualAreas pins are immune to settle merges (2026-08-20).** STATUS:
+    BUILT. Caught by the same day's fresh full-pipeline validation run:
+    strapi's settle session merged `content-manager →
+    admin-panel-configuration`, and `groupByArea` folded the user's pinned
+    area id through the settle vocab map too (`canonicalizeIds(override,
+    vocab)`), so the pinned `core/content-manager` area came out renamed —
+    a pin's id flapping with LLM nondeterminism, and decisions.json no
+    longer matching the corpus it produced. Pins are the human's final word,
+    applied after settle; now they slug-normalize (static aliases included)
+    but never pass through the dynamic vocab map, so merges keep unifying
+    MINTED labels while user-stated ids stay literal. The deliberate
+    trade-off: a pin written in a drifted label stays its own area instead
+    of folding into the settled one — that is what a pin means. As built:
+    `packages/spec-consolidator/src/area-grouper.ts`. Test:
+    `tests/spec-consolidator/area-grouper.test.ts` (pin-vs-merge case).
+
+115. **Recipe discovery hardening (2026-08-20 guard-setup bench).** STATUS:
+    BUILT. The setup bench ran `--only-recipe` against all three reference
+    repos and every session gamed verification green: cal.diy authored the
+    app-store CLI as the product (the briefing's own inventory listed the
+    Nest api), documenso authored an inline `node -e` stub server answering
+    200 to every path (rewriting the one-liner comma-operator style to slip
+    the shell-operator lint), strapi a no-op eval build plus a config module
+    as `entry`. Five closures, all gating on the ENGINE side because prompt
+    rules alone were what got gamed:
+    - **Stage `static` in `verifyProposal`** — the free refusal rules now run
+      at stage zero of EVERY verification path (deterministic, session fold,
+      one-shot, cache), not just the session's `check_recipe` tool.
+    - **Inline-eval refusal** — eval flags (`node -e/-p`, `python -c`,
+      `sh -c`, `deno eval`, …) in `entry`/`serve` argvs, and an
+      install/build that is nothing but one eval one-liner (`true` stays the
+      sanctioned no-build).
+    - **The inventory rule** — a proposal with no `api` block while the
+      route manifest lists apps with HTTP route prefixes is refused, naming
+      them. Partial coverage is deliberately NOT refused (a monorepo
+      routinely serves one app and ships others it never runs).
+    - **The wildcard (anti-stub) probe** — after the health path answers,
+      verification GETs two paths no app could serve; identical status+body
+      on all three fails `server boot`. Discovery-only — the runner's
+      preflight never re-probes a recipe a human accepted.
+    - **Workspace api derivation** — the deterministic proposer's workspace
+      branch used to punt unless exactly one member declared a `bin`; now
+      the most-routed non-example manifest app with a plain `start` script
+      derives `api.serve` (workspace-mediated argv, `app`, `cwd: "repo"`,
+      the member's own health route — `/api/health` joined the ranking).
+      cal.diy now derives `yarn workspace @calcom/api-v2 start` +
+      `/health`, documenso `npm run start -w @documenso/remix` +
+      `/api/health` — the reference targets — with zero LLM calls; a boot
+      failure hands the session THIS candidate as evidence instead of
+      nothing. Route manifest also learned Remix/React-Router flat routes
+      (`buildRouteManifest`, gate: the app's routes config imports
+      `remix-flat-routes`; grammar mirrored from
+      `packages/interface-mapper/src/web/remix-flat.ts` — dependency
+      direction forbids the import), which is what made documenso's product
+      app visible at all (125 routes vs `other · no routes`). And the
+      database hint gained the recipe-app manifest fallback
+      (`databaseFromManifest`): strapi's `examples/getstarted` declares
+      `better-sqlite3` that its code only names in a knex config string, and
+      `examples/` is not a service dir, so nothing else could see it.
+      Deliberately NOT built: a `web` block in the proposal schema (web is
+      authored, never discovered — the repair prompt now says so) and serve
+      grounding to workspace scripts (held until a re-bench shows the
+      probe + eval rules leaking). ADDENDUM (same day): the re-bench's
+      first cal.diy run exposed that the PROPOSAL schemas had no `cwd` —
+      the runner and the deterministic path carry `cwd: "repo"` but a
+      session could not express it, so no workspace-mediated serve could
+      ever boot from a repair (the session burned its budget on `--cwd`
+      argv hacks). Both proposal schemas gained `cwd: z.literal('repo')`
+      plus prompt lines. VALIDATED (step-05 re-bench ×3): gaming gone 3/3 —
+      cal.diy green (api-v2 `yarn workspace` serve, real /health 200 boot,
+      one verify, 249k tokens), documenso green (the reference serve
+      verbatim, real /api/health 200 against its dockerized test db, 261k),
+      strapi honest CLI-only (real install/build/bin; its api surface needs
+      a strapi route reader — open gap). Open observations: verify's
+      install/build channel is an unsandboxed host shell (one session used
+      `build: "…; ls -la ..; false"` as recon; strapi's green recipe runs
+      `corepack enable` — host shims — on every install), and the sandbox
+      HOME hits the corepack download prompt on yarn-workspace boots.
+      SECOND ADDENDUM (same evening, clean-rerun round): all four
+      observations closed and one incident survived. (1) compose bring-up
+      in install/build statically refused → `api.services.up/down`; the
+      proposal schemas therefore gained `services {up, down?}` + top-level
+      `app` (the first refusal steered an obedient session into a field the
+      schema forbade — two zod re-asks counted as the 2-strike malformed
+      death; open agent-loop question: schema re-asks may deserve their own
+      budget). (2) A GREEN verdict now carries `warnings` (surfaced as
+      todos + "VERIFIED WITH CAVEATS") when the boot rode a localhost
+      datastore the recipe never brings up. (3) Host-mutation refusals over
+      install/build/services + sudo in any argv: sudo, `corepack enable`
+      (message teaches `corepack yarn …`), global installs, npm config
+      set, git config --global, launchctl/systemctl, and — after a session
+      put `docker rm -f database` in services.up and REMOVED the
+      developer's running cal.diy database container (restored from its
+      surviving volume same hour) — `docker rm/kill/stop`, `docker volume
+      rm/prune`, `docker system prune`; project-scoped `docker compose
+      down` stays legal, and the incident command is a test verbatim.
+      (4) `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` defaults in every child env.
+      Plus: `probeApiServers` now runs `api.services.up` around the boots
+      and best-effort `down` after — the probe owns the world the recipe
+      declares (before this, a services recipe verified green and then
+      failed its own probe into an empty world). Final clean runs: cal.diy
+      green + warning fires; documenso green in the reference shape
+      (testing compose under services, collision solved WITHOUT docker rm);
+      strapi honest CLI-only green with zero host mutations.
+      As built:
+      `packages/guard-generator/src/{recipe-discovery,recipe-propose,prompts}.ts`,
+      `packages/core/src/services/guard-setup/recipe-repair.ts`,
+      `packages/guard-runner/src/route-manifest.ts`,
+      `packages/analyzer/src/database-detector.ts`,
+      `packages/core/src/services/interface.service.ts`. Tests:
+      `tests/guard-generator/recipe-static-complaints.test.ts`,
+      `recipe-discovery.test.ts` (wildcard probe),
+      `recipe-propose.test.ts` (workspace member),
+      `tests/guard-runner/route-manifest.test.ts` (remix),
+      `tests/analyzer/database-detector.test.ts` (manifest fallback),
+      `tests/core/guard-setup-recipe-repair.test.ts` (session tools).
+
+116. **Dependency-catalog session: domain grain + convergence (2026-08-20
+    guard-setup bench).** STATUS: BUILT. The step-06 bench failed 0/3: the
+    one session that completed classified the raw service detection (65
+    junk rows on cal.diy — rule 1 forced an entry per url-mined hostname,
+    amplifying detector noise into curation), and the other two spent every
+    turn on read_file/search_repo and died without an outcome (the settle
+    disease, item 112). Three fixes in
+    `packages/core/src/services/guard-setup/dependency-catalog.ts`:
+    (1) rule 1 narrowed to SUBSTANTIATED services — an SDK-registry match
+    or a base-URL env var, the skeleton's own declarability bar; url-mined
+    hostnames become an information-only briefing line and the prompt calls
+    entries for them wrong, not thorough. (2) The briefing grounds on the
+    DOMAIN: it opens with the grain ("a handful of entries — the domain
+    objects the documented flows stand on"), lists the corpus area tags
+    with doc counts (a local corpus.json read; a missing corpus yields
+    nothing), and splits detection into must-account vs information-only.
+    (3) Settle-style convergence pressure: draft to `check_catalog` no
+    later than mid-budget, read a handful of files at most. The prompt
+    change rotates the session cache key. Re-bench: 3/3 converged in the
+    right universe — cal.diy 8 domain entries (2 turns/27k; was 65 junk
+    rows), documenso 10 (14 turns/140k; was dead), strapi 7 (19/276k; was
+    dead). Residual, tracked not fixed: recall GRAIN vs the hand-curated
+    references (semantic ~5/17 · 6/8 · 4/15 — cold sessions produce the
+    coarse layer; credential variants and per-type documents are slice
+    curation), synonym NAMING with no shown vocabulary (the item-106
+    lesson), a library (`passport`) forced in by its registry category,
+    and the externals skeleton's baseUrlEnv minting (finding 58 class)
+    still open. Tests: `tests/core/guard-setup-catalog.test.ts`
+    (substantiated-only rule, briefing split + corpus grounding).
+
+117. **Budget visibility + the wrap-up window (2026-08-21 documenso
+    spec-scan field run).** STATUS: BUILT. The first loop-driven scan at
+    scale: 12 of 26 overlap sessions — the twelve largest areas
+    (documents, api-reference, fields, recipients, security…) — read ONE
+    section per turn to the 45-turn wall and failed `budget-exhausted`
+    with nothing, 7.5M of the run's 13.2M tokens producing zero corpus
+    rows; the sessions that finished clustered at 41–44 turns. Root
+    cause: grants were silent and no prompt stated the numbers, so no
+    session could pace itself or knew a grant was its last (one began
+    wrapping up exactly one turn too late). Fixes, per
+    AGENTIC_PIPELINE_PLAN §3.3 (2026-08-21 amendment): (1) the shell
+    steers an announcement on every automatic resume grant — grant N of
+    M, fresh turn count, "LAST grant" on the final one; (2) when the last
+    budget binds the shell demands the outcome and allows `WRAP_UP_TURNS`
+    (3) further turns — room for the precondition round trip — before
+    failing, making the hard limit `(maxResumes + 1) × turns +
+    WRAP_UP_TURNS` (estimates updated); (3) the overlap prompt states its
+    real numbers and demands BATCHED `read_section` calls (the failed
+    sessions' pace was 1/turn; the drivers execute parallel calls
+    already); (4) a FAILED area's `sectionsOpened` is stamped into the
+    corpus off its transcript, separating "opened 45 and ran out" from
+    "never read". Also wired the shell half of `draftCheckpoint` (the
+    guard-setup sibling nudge — see the setup bench items). As built:
+    `packages/agent-loop/src/agent-loop.ts` (WRAP_UP_TURNS,
+    resumeGrantMessage, wrapUpMessage, steer plumbing),
+    `packages/core/src/services/spec-scan/{overlap,run}.ts`,
+    `packages/core/src/services/llm/spec-estimate.ts`,
+    `packages/core/src/commands/guard-adjudicate.ts`. Tests:
+    `tests/agent-loop/agent-loop.test.ts` (wrap-up + announcements +
+    draft checkpoint), `tests/llm-drivers/session-driver-conformance.test.ts`
+    (the demand lands as a user message in BOTH drivers),
+    `tests/core/spec-scan-overlap.test.ts` (prompt numbers, failed-area
+    stamp), `tests/core/spec-estimate.test.ts` (ceilings).
+
+118. **Setup hardening round 2 (2026-08-21 steps-05/06 run-of-record).**
+    STATUS: BUILT. Six fixes from the bench's engine items:
+    (1) **Compose NAMESPACE rule** — the boundary the docker-rm refusal
+    left open: cal.diy's verified-green `services.up` re-ported and
+    stopped the developer's live redis through legal `docker compose
+    up/stop` (bare invocation = the developer's default project; compose
+    "resolves" a port change by RECREATING the running container). Static
+    refusal in `staticProposalComplaints` (now takes `repoRoot`): every
+    `docker compose` in install/build/services must carry `-p <project>`
+    or an `-f` file pinning top-level `name:`; `-f -` (stdin) demands
+    `-p`. The generated `docker-compose.guard.yml` now pins
+    `name: tc-guard-<database>` (datastore-compose.ts). Both prompts
+    teach the rule + "namespace YOUR OWN world, never touch theirs".
+    (2) **Empty-schema warning** — the unserviced-localhost warning's
+    sibling: services declared, SQL URL pinned, and NO migrate-ish
+    command anywhere (install/build/services.up) warns that the green
+    rode whatever schema the volume already carried (cal.diy verified
+    against a 7-day-old reference volume under `SKIP_DB_MIGRATIONS=1`).
+    (3) **`draftCheckpoint` on both setup sessions** — the item-117 shell
+    mechanism wired onto recipe-repair (check_recipe, turn 8) and
+    dependency-catalog (check_catalog, turn 6): the death mode (strapi
+    recipe run 5, documenso catalog runs 1+3 — 20+ exploration turns,
+    zero or one late draft) now gets a structural mid-budget steer, not
+    briefing prose.
+    (4) **Skeleton plausible-origin rule** (third skeleton rule): a
+    `baseUrlEnv` must be origin-shaped (or carry a detected default URL),
+    never credential/callback-shaped (`DAILY_API_KEY`,
+    `CLOSECOM_CLIENT_ID`, `*_WEBHOOK_URL`, `*_REDIRECT_URI`), and never
+    a variable the recipe itself pins (`dub→NEXT_PUBLIC_WEBAPP_URL`) —
+    kills the finding-58 mint-time class that reproduced 3/3 runs on
+    cal.diy (18 invented declarations → ~3 honest ones).
+    (5) **`ownHosts` joins the proposal schema** + both prompts, written
+    through to recipe.json — the fallback recipe can finally name the
+    product's own domains (cal.diy: 81 detected externals under a
+    hostless recipe). NOTE: the 06-bench observation that detection
+    reported 81 even WITH reference ownHosts is still open — the filter
+    itself needs a look.
+    (6) **Sandbox-starts-empty briefing** — sandbox_exec/shell
+    descriptions + the repair how-to now say the sandbox is an empty
+    scratch dir (strapi run 5 burned early turns discovering that).
+    As built: `packages/guard-generator/src/{recipe-discovery,
+    externals-skeleton, datastore-compose, schemas, prompts}.ts`,
+    `packages/core/src/services/guard-setup/{recipe-repair,
+    dependency-catalog}.ts`. Tests:
+    `tests/guard-generator/recipe-static-complaints.test.ts` (namespace
+    rule, incident verbatim), `recipe-discovery.test.ts` (empty-schema
+    warning trio), `externals-skeleton.test.ts` (plausible-origin rule,
+    cal.diy verbatim). Open from the bench: the strapi web
+    route/screen reader (07's 0/79 ceiling), catalog briefing naming
+    what is NOT a dependency (passport/strapi-project), ownHosts-filter
+    investigation above.
+
+119. **Overlap retrieval is deterministic: collision pairing + cluster
+    sessions (2026-08-21).** STATUS: BUILT. The documenso full-corpus field
+    run (item 117's subject) exposed the structural problem behind the
+    ~50–60% overlap recall item 113 tracks: the session was doing
+    RETRIEVAL — deciding from 62 heading outlines where claims collide —
+    and retrieval cost scales with area size, so `notReached` covered
+    ~70% of the big areas' docs (46/62 api-integration, 44/63
+    document-signing) and the reference corpus's single most consequential
+    find (the `/envelope/distribute` body-form vs path-param contradiction,
+    code-verified to 404, present in FOUR docs) was never flagged. Budget
+    was the wrong lever in both directions. Three changes, one derivation:
+
+    - **Deterministic candidate pairing**
+      (`packages/spec-consolidator/src/collision-pairing.ts`). A
+      disagreement definitionally requires both docs to NAME the same
+      concrete thing, and those names are surface-extractable: claim
+      tokens (route path segments, UPPER_SNAKE members, camel/snake
+      identifiers, hyphenated header names — markdown link targets and
+      URLs stripped first, they name places not claims) plus canonical
+      HEADING keys (the `canonicalizeConcern` fold, which subsumes the
+      retired doc-level `widenedOverlapDocs` net at section level; both
+      deleted). Keys are idf-weighted `log2((S+1)/df)` (the `+1` keeps
+      two-doc corpora pairable), pairs generate only from keys in ≤ 24
+      sections, and a score floor drops corpus-generic residue. Within a
+      doc pair, GREEDY MAX-COVERAGE selection (marginal uncovered-key
+      weight ≥ the floor, ceiling 6) keeps a modest pair carrying a
+      unique signal alive beneath 50-point shared-code-example walls —
+      the distribute route's exact shape. Sections split fence-aware via
+      the shared `parseHeadings`, so every pair side is a heading
+      `read_section` can open.
+    - **One session per collision-cluster CHUNK, never per area.** Pairs
+      are assigned to exactly ONE area (lexicographically-first shared
+      area, union-first when the docs share none — the widened-net case),
+      clustered by connected components over doc refs, and chunked at
+      `MAX_BRIEFED_PAIRS` (30) in rank order. Every derived pair is
+      briefed to exactly one session; docs with no candidate collision
+      cost no session. The briefing leads with the ranked checklist
+      (shared signals named) above the chunk docs' outlines, and the
+      prompt now says this session is the ONLY one that will see these
+      pairs (the per-area SCOPE deferral rule is gone) while still
+      inviting flags the checklist didn't nominate.
+    - **Single-area assignment kills the multi-tag multiplier**: a doc
+      tagged into 6 areas no longer appears in 6 briefings. The flagged
+      record still lists its SPAN (`overlap.areas` = the docs' shared
+      areas) so resolutions scope as before.
+    - **Coverage is corpus data, stamped off the transcript.**
+      `Area.uncheckedPairs` (additive, optional) holds the briefed pairs
+      whose two sections the transcript never shows both opened — parsed
+      from `read_section` result headers, never self-reported, cached with
+      the outcome like `sectionsOpened` (which now SUMS across a run's
+      chunks); a failed chunk lands all its pairs there. A recall gap is
+      now the exact list of pairs nobody compared.
+
+    Cache: new name `consolidator/overlap-cluster`, keyed on the chunk
+    docs' content hashes + the PAIR-IDENTITY fingerprint (docs+headings,
+    never scores/keys — a weight shift from an edit elsewhere re-runs
+    nothing). Estimate mirrors via the shared `deriveOverlapWorkItems`;
+    bound wording is now "N of M comparisons changed". Field numbers
+    (documenso, 126 kept docs): 1 718 pairs kept in ~35 ms, 70 sessions,
+    ~1.05 MB total briefing chars — vs the old run's 26 sessions whose
+    12 largest all budget-died with zero rows; the distribute conflict is
+    co-briefed in both its doc pairs. Tracked residuals: enum-ABSENCE
+    disputes pair weakly (the shared token is the missing member —
+    ASSISTANT vs `validRoles`), prose-only disputes with zero shared
+    identifiers/headings ride only on co-briefed outlines, and coverage
+    does not yet accrete across runs (uncheckedPairs is recorded but the
+    next scan does not prioritize it). As built:
+    `packages/spec-consolidator/src/{collision-pairing,corpus-types,
+    overlap-detector,index}.ts`,
+    `packages/core/src/services/spec-scan/{overlap,run}.ts`,
+    `packages/core/src/services/llm/spec-estimate.ts`,
+    `tools/cli/src/commands/spec.ts`. Tests:
+    `tests/spec-consolidator/collision-pairing.test.ts` (extraction,
+    rarity, greedy max-coverage, clustering, fingerprint),
+    `tests/core/spec-scan-overlap.test.ts` (checklist briefing,
+    uncheckedPairs stamping, failed-chunk fold),
+    `tests/spec-consolidator/{curate,request-schema,overlap-detector}.test.ts`
+    and `tests/core/spec-estimate.test.ts` updated to the new derivation.
+
+120. **Api steps carry an `Origin` header by default (2026-08-20).** STATUS: BUILT.
+    Node's fetch stamps browser-shaped `Sec-Fetch-*` headers on every request,
+    so origin-checking middleware (better-auth's CSRF protection, found by the
+    reactive-resume reference corpus — its recipe proof blocked 30 of 38
+    scenarios on 403 `MISSING_OR_NULL_ORIGIN`) reads a bare api step as a
+    browser call and refuses state-changing paths that carry no `Origin`. The
+    executor now defaults `Origin` to the server's own origin, explicit beats
+    implicit (same rule as the cookie jar): a step that authors its own
+    `Origin` header wins. `packages/guard-runner/src/api/executor.ts`;
+    `tests/guard-runner/api-origin.test.ts`; the `/echo` fixture endpoint
+    reflects `origin` alongside `authorization`.
+
+121. **Web text matchers judge the FULL page text (2026-08-20).** STATUS: BUILT.
+    `readVisibleText` truncated `body.innerText` to `WEB_TEXT_LIMIT` (2000)
+    BEFORE matching, so content past the cut — portal-rendered dialogs land at
+    the end of `<body>` by construction — was unassertable, and an absence
+    matcher could pass against content it never saw (a live false green on the
+    reactive-resume reference board; independently confirmed as G14 on the
+    trilium board, deciding 7+ reds each). Matchers now receive the whole
+    string; WEB_TEXT_LIMIT survives purely as the display/storage width at the
+    reporting sites (expect actuals, mismatch details, capture records).
+    `packages/guard-runner/src/web/executor.ts`; regression test
+    `tests/guard-runner/web-driver.test.ts` ("matches page text PAST the
+    2000-char display cut") over a new `/long` fixture page.
+
+122. **Api GET expects poll until the state lands (2026-08-20).** STATUS: BUILT.
+    An app may ack a write before it is queryable — rybbit's pageview queue
+    flushes on a 1000ms interval, and its first full reference board lost 27
+    of 53 scenarios to seed-then-read races the web driver never sees
+    (navigation costs seconds; an api read costs milliseconds). Both api
+    paths (the sandbox step driver and the pure-api scenario runner) now
+    re-issue an idempotent read (GET/HEAD) whose expectation does not hold
+    yet, every `API_EXPECT_POLL_MS` (100ms) until it holds or the
+    `API_EXPECT_SETTLE_MS` window (5s, capped by the step budget) closes —
+    the last observation is the judgment, mirroring the web driver's
+    poll-on-observable-state semantics. Mutating methods are never replayed;
+    their single observation stands. The settle window is deliberate: it
+    covers ack-to-queryable lag while a legitimately-wrong GET assertion
+    still fails in seconds (the first cut polled the whole step budget and
+    stalled every deliberate red — and 12 suite tests — at their timeouts).
+    `packages/guard-runner/src/{drivers/api-driver.ts,api/run-api-scenario.ts,api/executor.ts}`;
+    regression `tests/guard-runner/api-eventual.test.ts` over the fixture's
+    new `/eventual` pair (ack now, readable 400ms later).
+
+123. **Seed session hardening (2026-08-23 documenso drafting bench).** STATUS:
+    BUILT. Four fixes from the 08-drafting runs (run 2 died budget-exhausted at
+    43 turns holding a draft the engine had already run and verified; run 3
+    converged with one turn to spare; both spent their whole first grant
+    exploring; a `Bearer `-prefixed token passed every static check twice):
+    (1) **`draftCheckpoint` on the seed session** — item 118's mechanism,
+    third session: `run_seed_draft` at turn 10 (execution errors steer better
+    than more reading).
+    (2) **Salvage** — a session that dies without an outcome (budget,
+    malformed, dead provider — never an abort) while holding a draft
+    `run_seed_draft` FULLY verified gets that draft folded as its outcome;
+    the fresh-world proof still gates the write, and the step record + CLI
+    say `salvaged`.
+    (3) **Credential probes** — every minted credential must declare a live
+    probe (`probes: {name: {method?, path}}`, in `run_seed_draft` args and
+    the outcome; never in the committed recipe). The engine boots the
+    recipe's server (`preflightApiServer`) and sends the minted value
+    VERBATIM: refused (401/403) with the credential fails the draft, and so
+    does an endpoint that answers WITHOUT it (ungated proves nothing). Runs
+    in-session and again in the fold's fresh world. Closes the boot-green
+    Goodhart hole the Bearer drift sailed through.
+    (4) **Seed-machinery briefing** — `existingSeedMachinery` walks the repo
+    for seed-named files (capped, excerpted, dependency dirs skipped) and the
+    briefing carries them, so sessions stop re-finding the app's own seed
+    helpers by search (~10 turns/session on the bench).
+    As built: `packages/core/src/services/guard-setup/seed-session.ts`,
+    `packages/{shared/src/guard/setup.ts,guard-generator/src/setup.ts}`
+    (`salvaged` on the step record), `tools/cli/src/commands/guard-setup.ts`.
+    Tests: `tests/core/guard-setup-seed-session.test.ts` (probe pass/Bearer
+    drift/ungated endpoint/fold coverage, salvage incident-verbatim,
+    machinery walk) over the fixture's new auth-gated `GET /me`.
+
+124. **The seed step builds the app before the session (2026-08-24 cal.diy
+    drafting bench).** STATUS: BUILT. Item 123's credential probes boot the
+    recipe's server — in-session and in the fold — and a checkout that never
+    ran `recipe.build` has nothing to boot: cal.diy run 3 verified its draft
+    and then died on the probe's missing dist, twice, with no legal
+    self-rescue (a heavy nest build does not fit inside a seed command the
+    way documenso's remix build did). `buildSeedSession` now runs
+    `recipe.build` once, before the world boots and OUTSIDE the session
+    cache (a cache hit's fold probe needs the built app too); a failed
+    build fails the step honestly before any session tokens are spent. The
+    fold's fresh world keeps resetting only the datastore, never the app
+    binary. `packages/core/src/services/guard-setup/seed-session.ts`; tests
+    in `tests/core/guard-setup-seed-session.test.ts` (build-before-up
+    ordering, failing-build refusal with zero sessions).
+
+125. **One shared world per generate — sandbox lifecycles stop racing the
+    recipe's singleton compose project (2026-08-24 documenso 13-worker
+    bench).** STATUS: BUILT. Every sandboxed `run_scenario` and birth round
+    used to boot AND tear down `api.services` + `api.seed` itself; the
+    compose file pins one project name and one datastore volume, so at any
+    concurrency one execution's `down` landed under a sibling's seed —
+    Prisma P1017 / "can't reach database" — and a single hit latched a
+    run-wide seed-failed refusal (three aborted bench runs). The per-sandbox
+    up/down bought no isolation (every sandbox shared the same datastore):
+    now `generateGuards` creates ONE `GuardSharedWorld` (guard-runner
+    `shared-world.ts`, a single-flight memo whose boot/teardown thunks stay
+    in `run.ts` so the shared and owned paths cannot drift) and threads it
+    through `birthValidate` → the executor seam → `runGuard`; the first
+    execution boots services + seed, every later one reuses the memo, and
+    teardown happens exactly once — before persist, and on the worker
+    phase's early aborts (crashes fall to the item-94 channel). A failed
+    boot is never memoized (each round re-attempts, as before); a plain
+    `guard run` and hosted/EE executors pass no handle and keep owning
+    their worlds. Tests: `tests/guard-runner/shared-world.test.ts` (memo
+    contract; sequential/CONCURRENT runs boot once, seed once, down only at
+    shutdown; failed-up retry).
+
+126. **`blocked` worker outcomes are per-run — never cached (same bench).**
+    STATUS: BUILT. A cached `blocked` replayed as a fromCache hit with no
+    re-verification path (only `settled` has `confirmCached`), so six
+    P1017-era infra-blocks kept permanently skipping flows whose world was
+    healthy again, run after run. `cacheableWorkerOutcome` now admits ONLY
+    `settled`; a legacy `blocked` entry still parses but reads as a MISS
+    and is overwritten by the session's fresh outcome. Cost: a short
+    re-session per run for genuinely blocked flows — the price of never
+    trusting a world claim without re-proving it. Tests updated
+    incident-verbatim in `tests/core/guard-generate-worker-seam.test.ts`.
+
+127. **A latched refusal is reported honestly — partial corpora stop
+    reading as "nothing was validated" (same bench).** STATUS: BUILT. A
+    refusal that latches mid-validation leaves the scenarios settled BEFORE
+    it fully validated and written, yet the CLI said "nothing was built,
+    started, or validated" over 5 written files while `result.json` read
+    `status: ok` with no refusal surfaced in `guard status`. Now: the
+    refusal line and the outro are written-aware ("after N tests had
+    already settled…", "…the N tests written before the refusal stand"),
+    `GuardLastGenerateSummary` carries `refused` (the refusal status id)
+    and `guard status` renders a refused last-gen as a warn line instead of
+    a clean one, and the stale "birth validated nothing" comments on
+    `GuardGenerateResult.refusal` / `GuardRunRefusalSchema` / the report
+    error-kind now state the latch semantics. `status` itself stays `ok` —
+    the pre-latch corpus is real; `refusal` is the discriminator readers
+    must surface. Tests: `tests/cli/guard.test.ts` (outro, projection).
+
+128. **`blocked` may carry `lastEvidence` and `attempts` (same bench).**
+    STATUS: BUILT. A worker that ends blocked after real runs naturally
+    attaches the evidence that proved the block; the outcome schema's strict
+    pairing refused it (`kind "blocked" must not carry lastEvidence`),
+    costing a re-ask turn to DELETE information worth keeping — two sessions
+    died malformed on exactly this. `FLOW_WORKER_OPTIONAL_FIELDS` now allows
+    `lastEvidence` on `blocked`. AMENDED 2026-08-24 after the conc-4
+    verification run: `attempts` had stayed refused ("retirement bookkeeping
+    with no consumer on a block") and three sessions on the SAME bench then
+    died malformed volunteering it beside their evidence — honest blocked
+    verdicts turned into unsettled errors. `attempts` is now admitted on
+    `blocked` too (journey-defect/settled still refuse it). The worker
+    prompt is deliberately untouched — the blocked example still shows only
+    `perMilestone`, so the prompt fingerprint (and every worker cache) is
+    unmoved; models volunteer the field unprompted. Incident-verbatim tests
+    in `tests/shared/guard-flows.test.ts`.
+
+129. **A doc site's markdown twin may live at `.mdx`, not just `.md`
+    (documenso full-pipeline bench, 2026-08-25).** STATUS: BUILT.
+    `spec source add https://docs.documenso.com/llms.txt` wrote ZERO of 143
+    pages — every one skipped `not-markdown — content-type: text/html`.
+    llms.txt lists rendered page URLs by convention, which is why
+    `fetchPage` probes a speculative markdown twin before falling back to
+    the page; but `markdownTwin()` only ever tried `<url>.md`, and fumadocs
+    / Mintlify sites (documenso among them) publish the raw source at
+    `.mdx` and answer `.md` with a soft 404. One extension, and a whole
+    documentation site becomes unscannable — silently, since every page
+    lands in `skipped` with a plausible reason. The twin probe now walks
+    `TWIN_EXTENSIONS = ['.md', '.mdx']` in order (`.md` first: it is the
+    common case and the cheap hit), and `isMarkdownUrl` accepts `.mdx` so a
+    link that already names the source is fetched as-is with no probe.
+    Cost: one extra HEAD-shaped GET per page on sites that publish neither
+    twin — the price of not skipping a site whole. Incident-verbatim tests
+    in `tests/spec-consolidator/sources-fetch.test.ts`. NOTE: this bug is
+    the real cause of the bench's standing "documenso expands to ~140
+    skipped pages on refresh" hazard.
+
+130. **The api derivation reads sub-router mounts, `openapi` metas, and scoped
+    workspace specifiers — documenso's public API was 0% derived (same bench,
+    2026-08-25).** STATUS: BUILT. The fresh-store run was the first honest test
+    of the api mapper on documenso: the reference corpus's 60 api interfaces
+    live in `interfaces.authored.json`, HAND-AUTHORED, so nothing had ever
+    proved the tree could yield them. It could not. The derived catalog held
+    114 interfaces: 64 internal `/api/trpc/*` procedures, 2 `openapi.json`
+    metadata routes, and 48 paths that were WRONG rather than missing —
+    `/envelope/{envelopeId}/certificate/download`, `/session`, `/signup` — bare
+    where the app serves them under a mount. Not one documented v2 endpoint.
+    Three causes, three fixes:
+    - **`.route()` mounts.** The extractor read a mount only from
+      `.use(prefix, router)`; hono's idiom is `app.route(prefix, sub)`, which
+      documenso uses for all seven of `/api/auth`, `/api/files`, `/api/ai`,
+      `/api/csc`, `/api/v1`, `/api/v2`, `/api/v2-beta`. Now read as mounts,
+      gated on the same receiver evidence, with `.use` allowed to vouch (a
+      `.route` call is not itself the evidence). Express's one-argument
+      `app.route('/book').get(…)` is excluded by arity.
+    - **`openapi: {method, path}` metas.** `trpc-to-openapi` gives a tRPC
+      procedure a REST address in a meta literal beside the procedure — there is
+      no route registration anywhere. documenso's whole public API is 89 of
+      them. New per-file extractor (`analyzer/extractors/openapi-route-metas.ts`,
+      `FileAnalysis.openApiRouteMetas`) plus a join in `api-tree.ts`. THE META
+      BASE RULE: a meta's path is relative, and the base is taken only from the
+      app's own declaration — the prefix at which it SERVES ITS OPENAPI DOCUMENT,
+      and only when the file registering that document also answers everything
+      under the same prefix with a catch-all (`FileAnalysis.catchAllPrefixes`,
+      recorded whatever the handler's shape so an inline arrow counts). Both
+      halves are required: documenso publishes a v1 document from
+      `packages/api/hono.ts`, a different app whose file declares no catch-all,
+      so its prefix never claims the v2 metas. No qualifying base derives
+      nothing — a guessed prefix names an address the server does not answer.
+      An app documenting the same surface at several bases (`/api/v2` and
+      `/api/v2-beta`) derives it at each; both are live.
+    - **Scoped workspace specifiers.** `@documenso/auth/server` names
+      `packages/auth/server`, and the scope segment maps to no directory, so
+      `fileMatchesImportSource` never resolved it and two mounts stayed
+      unjoined. Now retried without the scope — and `resolveMountTarget`
+      requires a UNIQUE match, so an ambiguous specifier resolves to nothing
+      rather than composing a guessed prefix.
+    Result on documenso: **114 -> 291 interfaces, 2 -> 90 on `/api/v2/*`, and
+    ZERO bare paths.** Tests: `tests/analyzer/openapi-route-metas.test.ts`
+    (new), `tests/analyzer/route-registrations.test.ts`,
+    `tests/interface-mapper/api-tree.test.ts`.

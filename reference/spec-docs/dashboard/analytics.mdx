@@ -1,0 +1,62 @@
+---
+title: "Analytics"
+description: "Trend, severity and category breakdowns, top offenders and code hotspots, each one a filter on the violations list."
+---
+
+The left half of the **Home** tab summarizes the analysis you are viewing. Every widget below the summary row is also a filter: clicking into a chart narrows the [violations list](/dashboard/violations) beside it, and clicking the same thing again clears it.
+
+All of these numbers exclude rules you have disabled.
+
+## Summary row
+
+Five chips across the top, each with a hover explanation:
+
+| Chip         | Meaning                                                                 |
+| ------------ | ----------------------------------------------------------------------- |
+| **resolve**  | Average time from a violation first being detected to it being resolved |
+| **resolved** | Total violations fixed across all analyses                              |
+| **active**   | Violations open right now                                               |
+| **stale**    | Active violations that have been open for more than 7 days              |
+| **rate**     | Share of all detected violations that have been resolved                |
+
+## Violation Trend
+
+An area chart over your 20 most recent analyses with three series: total active, new, and resolved. The header shows the change in active violations against the previous analysis, up in red or down in green.
+
+With only one analysis on record there is no trend to draw, so the card shows the active count as a single number instead.
+
+When you are viewing a past analysis, its point on the line is ringed.
+
+## By Category
+
+A donut of findings per category with the total in the middle. Click a slice to filter the list to that category; the slice pops out and the others fade.
+
+## By Severity
+
+A bar per severity present in the analysis. Click a bar to filter the list to that severity.
+
+## Top Offenders
+
+Up to ten services and modules ranked by how many violations target them, with critical and high counts alongside. Click **Total**, **Critical** or **High** in the header to re-sort.
+
+Clicking a row scopes the violations list to that service or module. Only findings attributed to a service or module are counted. Most code findings carry no such attribution, so they sit outside the offender sets; use Code Hotspots for those. Architecture findings raised on code are the exception: when the file maps to a detected module, they count toward it.
+
+## Code Hotspots
+
+The ten files with the most code violations, each with its worst severity. Clicking a row filters the violations list to that file.
+
+## Following the run you selected
+
+Everything on this side follows the analysis chosen in the header's past-run dropdown. Pick an older run and the trend, breakdowns, offenders and hotspots are all recomputed as of that run. In [Git Diff mode](/dashboard/history-and-diff#git-diff-mode) this column is replaced by a diff-scoped summary instead.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Violations" icon="triangle-exclamation" href="/dashboard/violations">
+    The list these widgets filter.
+  </Card>
+
+  <Card title="Run history and diff mode" icon="clock-rotate-left" href="/dashboard/history-and-diff">
+    Choose which analysis the numbers describe.
+  </Card>
+</CardGroup>

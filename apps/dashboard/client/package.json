@@ -30,6 +30,7 @@
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.40.0",
     "@lezer/highlight": "^1.2.3",
+    "@truecourse/agent-loop": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@uiw/codemirror-theme-vscode": "^4.25.8",
     "@xyflow/react": "^12.4.0",

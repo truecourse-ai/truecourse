@@ -4,20 +4,24 @@ import path from 'node:path'
 import { buildDocSectionIndex } from '@truecourse/guard-runner'
 import {
   synthesizeFlows,
-  planFlowSynthesis,
   buildFlowAreas,
+  checkFlowSet,
   flowSectionKey,
+  isFlowSetClean,
+  isFlowSynthesisWipeout,
   flowsPath,
   readFlowsFile,
+  type EpicSynthesis,
+  type FlowSet,
   type FlowSynthesisArea,
-  type FlowsRunner,
-  type FlowsEpicRunner,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
+  type FlowsAreaSessionResult,
+  type FlowsAreaSessionSeam,
+  type FlowsEpicSessionSeam,
   type FlowClaimInput,
+  type FlowSynthesisResult,
 } from '@truecourse/guard-generator'
 import { GuardFlowsFileSchema, type GuardFlow } from '@truecourse/shared'
-import { makeTempRepo, rmrf } from './helpers.js'
+import { makeTempRepo, rmrf, sessionSummary, FLOWS_KIND } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -134,23 +138,54 @@ function ms(fixture: DocFixture, heading: string, claimTitle: string, order?: nu
   return { doc: fixture.doc, anchor: fixture.anchors[heading], claimTitle, ...(order ? { order } : {}) }
 }
 
-/** A flows runner answering per area, recording every context it was handed. */
-function flowsRunner(
-  answers: Record<string, unknown | ((ctx: FlowsUserContext, attempt: number) => unknown)>,
-  seen: FlowsUserContext[] = [],
-): FlowsRunner & { seen: FlowsUserContext[] } {
-  const attempts = new Map<string, number>()
-  const runner = (async (ctx: FlowsUserContext) => {
-    seen.push(ctx)
-    const attempt = attempts.get(ctx.areaId) ?? 0
-    attempts.set(ctx.areaId, attempt + 1)
-    const answer = answers[ctx.areaId]
-    if (typeof answer === 'function') return (answer as (c: FlowsUserContext, a: number) => unknown)(ctx, attempt)
-    return answer ?? { flows: [], noFlowClaims: [] }
-  }) as FlowsRunner & { seen: FlowsUserContext[] }
-  runner.seen = seen
-  return runner
+/**
+ * The per-area SESSION seam, answering from a per-area map — a `FlowSet` is a
+ * completed session, an `{ ok: false }` is a failed one. Every area it was
+ * handed is recorded, so a test can assert which areas the pool worked on
+ * (the cache lives in the seam now, so an area the run skips never appears).
+ */
+function areaSessions(
+  answers: Record<string, FlowSet | FlowsAreaSessionResult>,
+  seen: FlowSynthesisArea[] = [],
+): FlowsAreaSessionSeam & { seen: FlowSynthesisArea[] } {
+  const seam = (async ({ areas, onArea }: Parameters<FlowsAreaSessionSeam>[0]) => {
+    const byArea = new Map<string, FlowsAreaSessionResult>()
+    for (const area of areas) {
+      seen.push(area)
+      const answer = answers[area.areaId] ?? { flows: [], noFlowClaims: [] }
+      byArea.set(
+        area.areaId,
+        'flows' in answer ? { ok: true, value: answer, inputsKey: `key:${area.areaId}` } : answer,
+      )
+      onArea?.(area.areaId)
+    }
+    return { byArea, summary: sessionSummary(FLOWS_KIND, { ran: areas.length }) }
+  }) as FlowsAreaSessionSeam & { seen: FlowSynthesisArea[] }
+  seam.seen = seen
+  return seam
 }
+
+/** The epic SESSION seam over one fixed answer, recording the digests it saw. */
+function epicSession(
+  answer: EpicSynthesis | { ok: false; reason: string },
+  seen: Parameters<FlowsEpicSessionSeam>[0][] = [],
+): FlowsEpicSessionSeam & { seen: Parameters<FlowsEpicSessionSeam>[0][] } {
+  const seam = (async (input: Parameters<FlowsEpicSessionSeam>[0]) => {
+    seen.push(input)
+    return {
+      result: 'epics' in answer ? ({ ok: true as const, value: answer, inputsKey: 'key:epic' }) : answer,
+      summary: sessionSummary(FLOWS_KIND, { ran: 1 }),
+    }
+  }) as FlowsEpicSessionSeam & { seen: Parameters<FlowsEpicSessionSeam>[0][] }
+  seam.seen = seen
+  return seam
+}
+
+/** The default epic seam: nothing chains, and nothing is recorded. */
+const noEpics: FlowsEpicSessionSeam = async () => ({
+  result: { ok: true, value: { epics: [] }, inputsKey: 'key:epic' },
+  summary: sessionSummary(FLOWS_KIND, { ran: 1 }),
+})
 
 /** The whole-corpus answer: the task lifecycle plus the empty-title edge case. */
 const TASK_LIFECYCLE = {
@@ -188,13 +223,14 @@ const AUTH_SESSION = {
 async function synth(
   r: string,
   areas: FlowSynthesisArea[],
-  runner: FlowsRunner,
+  areaSession: FlowsAreaSessionSeam,
   extra: Partial<Parameters<typeof synthesizeFlows>[0]> = {},
 ) {
   return synthesizeFlows({
     repoRoot: r,
     areas,
-    runner,
+    areaSession,
+    epicSession: noEpics,
     sectionFingerprints: FINGERPRINTS,
     now: () => new Date('2026-07-24T00:00:00.000Z'),
     ...extra,
@@ -204,7 +240,7 @@ async function synth(
 describe('synthesizeFlows — composition', () => {
   it('composes a composite and an atomic flow, binds their sections, and writes flows.json', async () => {
     const r = repo()
-    const runner = flowsRunner({ tasks: TASK_LIFECYCLE })
+    const runner = areaSessions({ tasks: TASK_LIFECYCLE })
     const res = await synth(r, [tasksArea], runner)
 
     expect(res.unsettled).toEqual([])
@@ -237,32 +273,36 @@ describe('synthesizeFlows — composition', () => {
     expect(readFlowsFile(r)?.flows[0].id).toBe('create-list-and-complete-a-task')
   })
 
-  it('the synthesis prompt carries claims and outlines only — no code, probes, or recipe', async () => {
+  // The AREA the seam is handed is the whole spec-side input: claims + doc
+  // outlines, nothing else. (What the session's briefing renders out of it —
+  // including the interface GROUNDING step 16 added beside it — is pinned in
+  // `tests/core/guard-generate-flows-session.test.ts`.)
+  it('hands the seam the area claims and outlines, and nothing else', async () => {
     const r = repo()
-    const runner = flowsRunner({ tasks: TASK_LIFECYCLE })
+    const runner = areaSessions({ tasks: TASK_LIFECYCLE })
     await synth(r, [tasksArea], runner)
 
-    const ctx = runner.seen[0]
-    expect(ctx.areaId).toBe('tasks')
-    expect(ctx.claims.map((c) => c.claim)).toEqual([ADD, ADD_EMPTY, LIST, DONE, LIST_DONE])
-    expect(ctx.claims.every((c) => c.required)).toBe(true)
-    expect(ctx.docs.map((d) => d.doc)).toEqual([TASKS_DOC])
-    expect(JSON.stringify(ctx)).not.toContain('recipe')
+    const area = runner.seen[0]
+    expect(area.areaId).toBe('tasks')
+    expect(Object.keys(area).sort()).toEqual(['areaId', 'claims', 'docs'])
+    expect(area.claims.map((c) => c.title)).toEqual([ADD, ADD_EMPTY, LIST, DONE, LIST_DONE])
+    expect(area.docs.map((d) => d.doc)).toEqual([TASKS_DOC])
   })
 
-  it('marks claims on non-runnable surfaces optional for coverage accounting', async () => {
+  it('never requires a claim on a non-runnable surface to be accounted for', async () => {
     const r = repo()
     const area: FlowSynthesisArea = {
       ...tasksArea,
       claims: [...TASK_CLAIMS, claim(TASKS, 'Listing tasks', 'the board shows one card per open task', 'web')],
     }
-    const runner = flowsRunner({ tasks: TASK_LIFECYCLE })
+    const runner = areaSessions({ tasks: TASK_LIFECYCLE })
     const res = await synth(r, [area], runner)
 
-    // The web claim is never accounted for, so nothing is re-asked.
+    // The web claim reaches the session, but leaving it out of every flow is
+    // not a refusal — the area settles.
     expect(res.calls).toBe(1)
     expect(res.unsettled).toEqual([])
-    expect(runner.seen[0].claims.find((c) => c.driver === 'web')!.required).toBe(false)
+    expect(runner.seen[0].claims.some((c) => c.driver === 'web')).toBe(true)
   })
 
   it('records a claim whose section is not in the live index as a no-flow claim', async () => {
@@ -271,7 +311,7 @@ describe('synthesizeFlows — composition', () => {
       ...tasksArea,
       claims: [...TASK_CLAIMS, { doc: TASKS_DOC, anchor: 'tasks/deleted-section', title: 'stale claim', driver: 'cli' }],
     }
-    const res = await synth(r, [area], flowsRunner({ tasks: TASK_LIFECYCLE }))
+    const res = await synth(r, [area], areaSessions({ tasks: TASK_LIFECYCLE }))
     expect(res.noFlowClaims.map((c) => c.claimTitle)).toContain('stale claim')
     expect(res.flows.flatMap((f) => f.milestones).some((m) => m.claimTitle === 'stale claim')).toBe(false)
   })
@@ -280,7 +320,7 @@ describe('synthesizeFlows — composition', () => {
 describe('synthesizeFlows — milestone snapping and validation', () => {
   it('snaps a paraphrased milestone onto its claim without a re-ask', async () => {
     const r = repo()
-    const runner = flowsRunner({
+    const runner = areaSessions({
       tasks: {
         flows: [
           {
@@ -295,9 +335,9 @@ describe('synthesizeFlows — milestone snapping and validation', () => {
           },
         ],
         noFlowClaims: [
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD_EMPTY, reason: 'an error path no user journey walks' },
+          { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD_EMPTY, reason: 'an error path no user flow walks' },
           { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'covered by the completion flow later' },
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a journey step' },
+          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' },
         ],
       },
     })
@@ -309,50 +349,56 @@ describe('synthesizeFlows — milestone snapping and validation', () => {
     expect(res.flows[0].milestones.map((m) => m.claimTitle)).toEqual([ADD, LIST])
   })
 
-  it('rejects a milestone that matches no claim and re-asks ONCE with the reference quoted', async () => {
+  // The corrective RE-ASK is retired (plan 04 step 20): the session's own
+  // `check_flows` tool is where a milestone gets corrected, in-turn, and the
+  // fold NEVER trusts the transcript — a value that still fails validation
+  // refuses the area outright instead of buying a second round.
+  it('REFUSES the area for a milestone that matches no claim, quoting the reference', async () => {
     const r = repo()
-    const runner = flowsRunner({
-      tasks: (_ctx, attempt) =>
-        attempt === 0
-          ? {
-              flows: [
-                {
-                  title: 'Invented flow',
-                  goal: 'Asserts something extraction never produced.',
-                  milestones: [
-                    { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: '`relkit archive` hides a task from every list' },
-                  ],
-                },
-              ],
-              noFlowClaims: [],
-            }
-          : TASK_LIFECYCLE,
+    const runner = areaSessions({
+      tasks: {
+        flows: [
+          {
+            title: 'Invented flow',
+            goal: 'Asserts something extraction never produced.',
+            milestones: [
+              { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: '`relkit archive` hides a task from every list' },
+            ],
+          },
+        ],
+        noFlowClaims: [],
+      },
     })
     const res = await synth(r, [tasksArea], runner)
 
-    expect(res.calls).toBe(2)
-    expect(res.unsettled).toEqual([])
-    expect(res.flows).toHaveLength(2)
-    const reask = runner.seen[1]
-    expect(reask.issues!.unknownReferences).toHaveLength(1)
-    expect(reask.issues!.unknownReferences[0]).toContain('relkit archive')
-    // Everything else is asked again unchanged — the re-ask is a correction, not a delta.
-    expect(reask.claims).toEqual(runner.seen[0].claims)
+    expect(res.calls).toBe(1)
+    expect(runner.seen).toHaveLength(1)
+    expect(res.flows).toEqual([])
+    expect(res.unsettled).toHaveLength(1)
+    expect(res.unsettled[0].reason).toContain('flow synthesis refused')
+    expect(res.unsettled[0].reason).toContain('relkit archive')
   })
 
-  it('re-asks once when a malformed reply fails the schema', async () => {
+  it('reports a failed session as the area unsettled, with the seam’s reason', async () => {
     const r = repo()
-    const runner = flowsRunner({ tasks: (_c, attempt) => (attempt === 0 ? { nonsense: true } : TASK_LIFECYCLE) })
-    const res = await synth(r, [tasksArea], runner)
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: { ok: false, reason: 'flows session failed: the provider failed' } }))
+    expect(res.flows).toEqual([])
+    expect(res.unsettled).toEqual([{ areaId: 'tasks', reason: 'flows session failed: the provider failed' }])
+  })
 
-    expect(res.calls).toBe(2)
-    expect(runner.seen[1].correction!.invalidOutput).toContain('nonsense')
-    expect(res.flows).toHaveLength(2)
+  it('reports an area the seam answered for at all as unsettled', async () => {
+    const r = repo()
+    const seam: FlowsAreaSessionSeam = async () => ({
+      byArea: new Map(),
+      summary: sessionSummary(FLOWS_KIND, { ran: 1 }),
+    })
+    const res = await synth(r, [tasksArea], seam)
+    expect(res.unsettled).toEqual([{ areaId: 'tasks', reason: 'the flows session produced no result for this area' }])
   })
 })
 
 describe('synthesizeFlows — coverage honesty rule', () => {
-  it('re-asks with the unaccounted claims, then settles when they are covered', async () => {
+  it('REFUSES the area when a required claim is in no flow and no noFlowClaims entry', async () => {
     const r = repo()
     const partial = {
       flows: [
@@ -364,14 +410,12 @@ describe('synthesizeFlows — coverage honesty rule', () => {
       ],
       noFlowClaims: [],
     }
-    const runner = flowsRunner({ tasks: (_c, attempt) => (attempt === 0 ? partial : TASK_LIFECYCLE) })
-    const res = await synth(r, [tasksArea], runner)
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: partial }))
 
-    expect(res.calls).toBe(2)
-    const uncovered = runner.seen[1].issues!.uncoveredClaims
-    expect(uncovered).toHaveLength(3)
-    expect(uncovered.join('\n')).toContain(ADD_EMPTY)
-    expect(res.unsettled).toEqual([])
+    expect(res.calls).toBe(1)
+    expect(res.flows).toEqual([])
+    expect(res.unsettled[0].reason).toContain('3 claim(s) left unaccounted')
+    expect(res.unsettled[0].reason).toContain(ADD_EMPTY)
   })
 
   it('a stated no-flow reason satisfies the rule, and lands in flows.json', async () => {
@@ -379,7 +423,7 @@ describe('synthesizeFlows — coverage honesty rule', () => {
     const res = await synth(
       r,
       [tasksArea],
-      flowsRunner({
+      areaSessions({
         tasks: {
           flows: [TASK_LIFECYCLE.flows[0]],
           noFlowClaims: [
@@ -387,7 +431,7 @@ describe('synthesizeFlows — coverage honesty rule', () => {
               doc: TASKS_DOC,
               anchor: TASKS.anchors['Creating tasks'],
               claimTitle: ADD_EMPTY,
-              reason: 'a validation error no user journey walks through',
+              reason: 'a validation error no user flow walks through',
             },
           ],
         },
@@ -401,47 +445,37 @@ describe('synthesizeFlows — coverage honesty rule', () => {
         doc: TASKS_DOC,
         anchor: TASKS.anchors['Creating tasks'],
         claimTitle: ADD_EMPTY,
-        reason: 'a validation error no user journey walks through',
+        reason: 'a validation error no user flow walks through',
       },
     ])
     expect(readFlowsFile(r)!.noFlowClaims).toHaveLength(1)
   })
 
-  it('leaves the area UNSETTLED (no flows, nothing cached) when coverage never lands', async () => {
+  it('an area that refuses leaves the corpus re-synthesizable next run', async () => {
     const r = repo()
     const stubborn = {
-      flows: [
-        {
-          title: 'Create a task',
-          goal: 'A user adds a task.',
-          milestones: [ms(TASKS, 'Creating tasks', ADD, 1)],
-        },
-      ],
+      flows: [{ title: 'Create a task', goal: 'A user adds a task.', milestones: [ms(TASKS, 'Creating tasks', ADD, 1)] }],
       noFlowClaims: [],
     }
-    const runner = flowsRunner({ tasks: stubborn })
-    const res = await synth(r, [tasksArea], runner)
-
-    expect(res.calls).toBe(2)
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: stubborn }))
     expect(res.flows).toEqual([])
-    expect(res.unsettled).toHaveLength(1)
-    expect(res.unsettled[0].areaId).toBe('tasks')
     expect(res.unsettled[0].reason).toContain('unaccounted')
+    // A single-area wipeout: `flows.json` is never written, so the next run
+    // re-synthesizes against whatever was committed before.
+    expect(isFlowSynthesisWipeout(res)).toBe(true)
+    expect(res.path).toBeUndefined()
+    expect(fs.existsSync(flowsPath(r))).toBe(false)
 
-    // Nothing was cached, so the next run re-attempts the area from scratch.
-    const again = flowsRunner({ tasks: TASK_LIFECYCLE })
-    const second = await synth(r, [tasksArea], again)
+    const second = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }))
     expect(second.calls).toBe(1)
     expect(second.flows).toHaveLength(2)
   })
 
   it('one failing area never withholds another area flows', async () => {
     const r = repo()
-    const runner = flowsRunner({
+    const runner = areaSessions({
       tasks: TASK_LIFECYCLE,
-      accounts: () => {
-        throw new Error('transport exploded')
-      },
+      accounts: { ok: false, reason: 'flows session failed: transport exploded' },
     })
     const res = await synth(r, [tasksArea, authArea], runner)
 
@@ -471,25 +505,11 @@ describe('synthesizeFlows — epic pass', () => {
     ],
   }
 
-  function epicRunner(
-    answer: unknown | ((ctx: FlowsEpicUserContext, attempt: number) => unknown),
-    seen: FlowsEpicUserContext[] = [],
-  ): FlowsEpicRunner & { seen: FlowsEpicUserContext[] } {
-    let attempt = 0
-    const runner = (async (ctx: FlowsEpicUserContext) => {
-      seen.push(ctx)
-      const a = attempt++
-      return typeof answer === 'function' ? (answer as (c: FlowsEpicUserContext, n: number) => unknown)(ctx, a) : answer
-    }) as FlowsEpicRunner & { seen: FlowsEpicUserContext[] }
-    runner.seen = seen
-    return runner
-  }
-
   it('chains flows from two areas into an epic with composedOf provenance', async () => {
     const r = repo()
-    const epics = epicRunner(epicAnswer)
-    const res = await synth(r, [tasksArea, authArea], flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
-      epicRunner: epics,
+    const epics = epicSession(epicAnswer)
+    const res = await synth(r, [tasksArea, authArea], areaSessions({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
+      epicSession: epics,
     })
 
     expect(res.unsettled).toEqual([])
@@ -503,17 +523,21 @@ describe('synthesizeFlows — epic pass', () => {
     // The digests carry titles + milestones only — never document text.
     expect(epics.seen[0].digests.map((d) => d.ref)).toEqual(['F1', 'F2', 'F3'])
     expect(Object.keys(epics.seen[0].digests[0]).sort()).toEqual(['areaId', 'goal', 'milestones', 'ref', 'title'])
+    // The epic checker's snapping set is the whole run's claim inventory.
+    expect(epics.seen[0].claims).toHaveLength(TASK_CLAIMS.length + AUTH_CLAIMS.length)
   })
 
   it('skips the epic pass entirely when only one area produced flows', async () => {
     const r = repo()
-    const epics = epicRunner(epicAnswer)
-    const res = await synth(r, [tasksArea], flowsRunner({ tasks: TASK_LIFECYCLE }), { epicRunner: epics })
+    const epics = epicSession(epicAnswer)
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }), { epicSession: epics })
     expect(epics.seen).toEqual([])
     expect(res.flows.every((f) => f.composedOf.length === 0)).toBe(true)
   })
 
-  it('rejects an epic milestone that no composed flow carries, then accepts the corrected answer', async () => {
+  // The epic re-ask is retired with the area one: `check_flows` corrects in
+  // session, and the fold refuses what it is still handed.
+  it('REFUSES an epic whose milestone no composed flow carries, keeping the area flows', async () => {
     const r = repo()
     const bad = {
       epics: [
@@ -525,21 +549,24 @@ describe('synthesizeFlows — epic pass', () => {
         },
       ],
     }
-    const epics = epicRunner((_c, attempt) => (attempt === 0 ? bad : epicAnswer))
-    const res = await synth(r, [tasksArea, authArea], flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
-      epicRunner: epics,
+    const epics = epicSession(bad)
+    const res = await synth(r, [tasksArea, authArea], areaSessions({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
+      epicSession: epics,
     })
 
-    expect(epics.seen).toHaveLength(2)
-    expect(epics.seen[1].issues!.unknownReferences[0]).toContain('relkit sync')
-    expect(res.flows.some((f) => f.composedOf.length === 2)).toBe(true)
+    expect(epics.seen).toHaveLength(1)
+    expect(res.unsettled.map((u) => u.areaId)).toEqual(['(epic)'])
+    expect(res.unsettled[0].reason).toContain('epic pass refused')
+    expect(res.unsettled[0].reason).toContain('relkit sync')
+    expect(res.flows).toHaveLength(3)
+    expect(res.flows.every((f) => f.composedOf.length === 0)).toBe(true)
   })
 
   it('reports the epic pass as unsettled without touching the area flows', async () => {
     const r = repo()
-    const epics = epicRunner({ epics: [{ title: 'x', goal: 'y', composedOf: ['F9', 'F8'], milestones: [ms(TASKS, 'Creating tasks', ADD, 1), ms(TASKS, 'Listing tasks', LIST, 2)] }] })
-    const res = await synth(r, [tasksArea, authArea], flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
-      epicRunner: epics,
+    const epics = epicSession({ epics: [{ title: 'x', goal: 'y', composedOf: ['F9', 'F8'], milestones: [ms(TASKS, 'Creating tasks', ADD, 1), ms(TASKS, 'Listing tasks', LIST, 2)] }] })
+    const res = await synth(r, [tasksArea, authArea], areaSessions({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
+      epicSession: epics,
     })
 
     expect(res.unsettled.map((u) => u.areaId)).toEqual(['(epic)'])
@@ -549,12 +576,39 @@ describe('synthesizeFlows — epic pass', () => {
 })
 
 describe('synthesizeFlows — subsumption post-pass', () => {
+  // Plan 04 step 16: the near-duplicate is a REPORT in session (the checker
+  // never deletes) and a deterministic DROP in the fold. Both halves, on the
+  // same draft.
+  it('the checker reports a near-duplicate cleanly; the fold is what drops it', async () => {
+    const draft = {
+      flows: [
+        ...TASK_LIFECYCLE.flows,
+        {
+          title: 'Create and list a task',
+          goal: 'A user adds a task and sees it listed.',
+          milestones: [ms(TASKS, 'Creating tasks', ADD, 1), ms(TASKS, 'Listing tasks', LIST, 2)],
+        },
+      ],
+      noFlowClaims: [],
+    }
+    const report = checkFlowSet(draft, { area: tasksArea })
+    // Reported, not refused — the session may still produce it.
+    expect(report.subsumed).toEqual([
+      { title: 'Create and list a task', supersededBy: 'Create, list and complete a task' },
+    ])
+    expect(isFlowSetClean(report)).toBe(true)
+
+    const res = await synth(repo(), [tasksArea], areaSessions({ tasks: draft }))
+    expect(res.flows.map((f) => f.title)).not.toContain('Create and list a task')
+    expect(res.subsumed).toEqual(report.subsumed)
+  })
+
   it('drops a flow whose path is a contiguous subsequence of a sibling', async () => {
     const r = repo()
     const res = await synth(
       r,
       [tasksArea],
-      flowsRunner({
+      areaSessions({
         tasks: {
           flows: [
             ...TASK_LIFECYCLE.flows,
@@ -583,7 +637,7 @@ describe('synthesizeFlows — subsumption post-pass', () => {
     const res = await synth(
       r,
       [tasksArea],
-      flowsRunner({
+      areaSessions({
         tasks: {
           flows: [
             ...TASK_LIFECYCLE.flows,
@@ -611,7 +665,7 @@ describe('synthesizeFlows — subsumption post-pass', () => {
     const res = await synth(
       r,
       [tasksArea],
-      flowsRunner({ tasks: { flows: [...TASK_LIFECYCLE.flows, duplicate], noFlowClaims: [] } }),
+      areaSessions({ tasks: { flows: [...TASK_LIFECYCLE.flows, duplicate], noFlowClaims: [] } }),
     )
 
     // The empty-title claim keeps exactly one flow — mutual subsumption never
@@ -628,7 +682,7 @@ describe('synthesizeFlows — subsumption post-pass', () => {
 
   it('never lets an epic subsume the flows it composes', async () => {
     const r = repo()
-    const epics: FlowsEpicRunner = async () => ({
+    const epics = epicSession({
       epics: [
         {
           title: 'Full session',
@@ -645,8 +699,8 @@ describe('synthesizeFlows — subsumption post-pass', () => {
         },
       ],
     })
-    const res = await synth(r, [tasksArea, authArea], flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
-      epicRunner: epics,
+    const res = await synth(r, [tasksArea, authArea], areaSessions({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), {
+      epicSession: epics,
     })
 
     expect(res.subsumed).toEqual([])
@@ -687,8 +741,8 @@ describe('synthesizeFlows — the id stem is length-capped and order-free', () =
   }
 
   it('caps the stem and hashes the full slug, so two long titles stay distinct in either order', async () => {
-    const forward = await synth(repo(), [tasksArea], flowsRunner({ tasks: longFlows([LONG_A, LONG_B]) }))
-    const reversed = await synth(repo(), [tasksArea], flowsRunner({ tasks: longFlows([LONG_B, LONG_A]) }))
+    const forward = await synth(repo(), [tasksArea], areaSessions({ tasks: longFlows([LONG_A, LONG_B]) }))
+    const reversed = await synth(repo(), [tasksArea], areaSessions({ tasks: longFlows([LONG_B, LONG_A]) }))
 
     const [idA, idB] = forward.flows.map((f) => f.id)
     expect(idA).not.toBe(idB)
@@ -703,7 +757,7 @@ describe('synthesizeFlows — the id stem is length-capped and order-free', () =
   })
 
   it('leaves a title that fits the cap byte-identical (no hash suffix)', async () => {
-    const res = await synth(repo(), [tasksArea], flowsRunner({ tasks: TASK_LIFECYCLE }))
+    const res = await synth(repo(), [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }))
     expect(res.flows.map((f) => f.id)).toEqual([
       'create-list-and-complete-a-task',
       'adding-a-task-without-a-title-is-rejected',
@@ -714,7 +768,7 @@ describe('synthesizeFlows — the id stem is length-capped and order-free', () =
 describe('synthesizeFlows — identity across re-synthesis', () => {
   async function baseline(): Promise<GuardFlow[]> {
     const r = repo()
-    const res = await synth(r, [tasksArea], flowsRunner({ tasks: TASK_LIFECYCLE }))
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }))
     return res.flows
   }
 
@@ -728,7 +782,7 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
       ],
       noFlowClaims: [],
     }
-    const res = await synth(r, [tasksArea], flowsRunner({ tasks: retitled }), { previous })
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: retitled }), { previous })
 
     expect(res.flows[0].id).toBe('create-list-and-complete-a-task')
     expect(res.flows[0].title).toBe('Task lifecycle, end to end')
@@ -752,10 +806,10 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
         TASK_LIFECYCLE.flows[1],
       ],
       noFlowClaims: [
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a journey step' },
+        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' },
       ],
     }
-    const res = await synth(r, [tasksArea], flowsRunner({ tasks: shortened }), { previous })
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: shortened }), { previous })
 
     expect(res.flows[0].id).toBe('create-list-and-complete-a-task')
     expect(res.flows[0].fingerprint).not.toBe(previous[0].fingerprint)
@@ -785,7 +839,7 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
         { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'covered as a precondition elsewhere' },
       ],
     }
-    const res = await synth(r, [tasksArea], flowsRunner({ tasks: rebuilt }), { previous })
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: rebuilt }), { previous })
 
     expect(res.orphaned.map((f) => f.id)).toEqual(['create-list-and-complete-a-task'])
     expect(res.flows.map((f) => f.id)).toEqual(['adding-a-task-without-a-title-is-rejected', 'browse-the-completed-tasks'])
@@ -796,7 +850,7 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
     const res = await synth(
       r,
       [tasksArea],
-      flowsRunner({
+      areaSessions({
         tasks: {
           flows: [
             { title: 'Work with tasks', goal: 'Create and list.', milestones: [ms(TASKS, 'Creating tasks', ADD, 1), ms(TASKS, 'Listing tasks', LIST, 2)] },
@@ -811,112 +865,100 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
   })
 })
 
-describe('synthesizeFlows — caching', () => {
-  it('re-runs on an unchanged inventory with ZERO transport calls and identical ids', async () => {
+// The per-area/epic CACHE moved to the session seam in `@truecourse/core`
+// (`guard/flows`, keyed on the session prompt fingerprint + the same claim /
+// outline material) — `synthesizeFlows` no longer caches anything, so the
+// three cache cases that lived here are gone. What remains engine-side is the
+// stamp: whatever key the seam probed becomes the flows' `synthesisInputsHash`.
+// The keys themselves are pinned in `tests/core/guard-generate-flows-session.test.ts`.
+describe('synthesizeFlows — the inputs stamp and the write gate', () => {
+  it('stamps the seam’s inputsKey onto every flow it produced, epics included', async () => {
     const r = repo()
-    const first = await synth(r, [tasksArea], flowsRunner({ tasks: TASK_LIFECYCLE }))
-    expect(first.calls).toBe(1)
-
-    const exploding: FlowsRunner = async () => {
-      throw new Error('the cache should have answered')
-    }
-    const second = await synth(r, [tasksArea], exploding)
-    expect(second.calls).toBe(0)
-    expect(second.unsettled).toEqual([])
-    expect(second.flows.map((f) => f.id)).toEqual(first.flows.map((f) => f.id))
-    expect(second.flows.map((f) => f.fingerprint)).toEqual(first.flows.map((f) => f.fingerprint))
-  })
-
-  it('a changed claim inventory misses the cache and re-synthesizes that area only', async () => {
-    const r = repo()
-    await synth(r, [tasksArea, authArea], flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }))
-
-    const changedTasks: FlowSynthesisArea = {
-      ...tasksArea,
-      claims: [...TASK_CLAIMS, claim(TASKS, 'Listing tasks', '`relkit list --json` prints the open tasks as JSON')],
-    }
-    const runner = flowsRunner({
-      tasks: {
-        flows: [
-          ...TASK_LIFECYCLE.flows,
-          {
-            title: 'Read the task list as JSON',
-            goal: 'A script consumes the open tasks.',
-            milestones: [ms(TASKS, 'Listing tasks', '`relkit list --json` prints the open tasks as JSON', 1)],
-          },
-        ],
-        noFlowClaims: [],
-      },
-      accounts: AUTH_SESSION,
+    const areaSeam: FlowsAreaSessionSeam = async ({ areas }) => ({
+      byArea: new Map(
+        areas.map((a) => [
+          a.areaId,
+          { ok: true as const, value: a.areaId === 'tasks' ? TASK_LIFECYCLE : AUTH_SESSION, inputsKey: `K:${a.areaId}` },
+        ]),
+      ),
+      summary: sessionSummary(FLOWS_KIND, { ran: areas.length }),
     })
-    const res = await synth(r, [changedTasks, authArea], runner)
+    const epics: FlowsEpicSessionSeam = async () => ({
+      result: {
+        ok: true,
+        value: {
+          epics: [
+            {
+              title: 'Sign in and create a task',
+              goal: 'A new user signs in and adds a task.',
+              composedOf: ['F3', 'F1'],
+              milestones: [ms(AUTH, 'Signing in', SIGN_IN, 1), ms(TASKS, 'Creating tasks', ADD, 2)],
+            },
+          ],
+        },
+        inputsKey: 'K:epic',
+      },
+      summary: sessionSummary(FLOWS_KIND, { ran: 1 }),
+    })
+    const res = await synth(r, [tasksArea, authArea], areaSeam, { epicSession: epics })
 
-    expect(res.calls).toBe(1)
-    expect(runner.seen.map((c) => c.areaId)).toEqual(['tasks'])
-    expect(res.flows.map((f) => f.id)).toContain('read-the-task-list-as-json')
-  })
-
-  it('the epic pass is cached on the flow digests', async () => {
-    const r = repo()
-    let epicCalls = 0
-    const epics: FlowsEpicRunner = async () => {
-      epicCalls++
-      return { epics: [] }
-    }
-    await synth(r, [tasksArea, authArea], flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION }), { epicRunner: epics })
-    expect(epicCalls).toBe(1)
-
-    const cached = await synth(r, [tasksArea, authArea], flowsRunner({}), { epicRunner: epics })
-    expect(epicCalls).toBe(1)
-    expect(cached.calls).toBe(0)
+    expect(res.unsettled).toEqual([])
+    const byId = new Map(res.flows.map((f) => [f.id, f.synthesisInputsHash]))
+    expect(byId.get('create-list-and-complete-a-task')).toBe('K:tasks')
+    expect(byId.get('sign-in-and-sign-out')).toBe('K:accounts')
+    expect(byId.get('sign-in-and-create-a-task')).toBe('K:epic')
   })
 
   it('write: false computes the corpus without touching flows.json', async () => {
     const r = repo()
-    const res = await synth(r, [tasksArea], flowsRunner({ tasks: TASK_LIFECYCLE }), { write: false })
+    const res = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }), { write: false })
     expect(res.path).toBeUndefined()
     expect(fs.existsSync(flowsPath(r))).toBe(false)
     expect(res.flows).toHaveLength(2)
   })
-})
 
-describe('planFlowSynthesis — the planner the estimate and the run share', () => {
-  it('plans a call for every uncached area, and none once they are cached', async () => {
+  // The wipeout guard: a run that SPENT sessions and produced no flow at all
+  // is a loss, and the committable corpus is never rewritten with it.
+  it('never rewrites a committed flows.json on a wipeout', async () => {
     const r = repo()
-    const areas = [tasksArea, authArea]
+    const first = await synth(r, [tasksArea], areaSessions({ tasks: TASK_LIFECYCLE }))
+    expect(first.path).toBe(flowsPath(r))
+    const committed = fs.readFileSync(flowsPath(r), 'utf-8')
 
-    const cold = await planFlowSynthesis(r, areas)
-    expect(cold.areaCalls).toBe(2)
-    expect(cold.epicCalls).toBe(1)
-    expect(cold.maxFlows).toBe(TASK_CLAIMS.length + AUTH_CLAIMS.length)
-    expect(cold.areas.every((a) => !a.cached)).toBe(true)
-
-    const runner = flowsRunner({ tasks: TASK_LIFECYCLE, accounts: AUTH_SESSION })
-    const res = await synth(r, areas, runner)
-    // Estimate planned a call ⇔ the run made one.
-    expect(res.calls).toBe(cold.areaCalls)
-
-    const warm = await planFlowSynthesis(r, areas)
-    expect(warm.areaCalls).toBe(0)
-    expect(warm.areas.every((a) => a.cached)).toBe(true)
-    const rerun = await synth(r, areas, flowsRunner({}))
-    expect(rerun.calls).toBe(0)
+    const wiped = await synth(r, [tasksArea], areaSessions({ tasks: { ok: false, reason: 'flows session failed: gone' } }))
+    expect(isFlowSynthesisWipeout(wiped)).toBe(true)
+    expect(wiped.flows).toEqual([])
+    expect(wiped.unsettled).toHaveLength(1)
+    expect(wiped.calls).toBe(1)
+    expect(wiped.path).toBeUndefined()
+    expect(fs.readFileSync(flowsPath(r), 'utf-8')).toBe(committed)
   })
 
-  it('a single area needs no epic pass', async () => {
-    const plan = await planFlowSynthesis(repo(), [tasksArea])
-    expect(plan.epicCalls).toBe(0)
+  // An area with no claims at all spends a session and legitimately produces
+  // no flow: that is an empty corpus, not a loss, and it IS written.
+  it('writes an empty corpus when a session honestly produced no flows', async () => {
+    const r = repo()
+    const emptyArea: FlowSynthesisArea = { areaId: 'tasks', claims: [], docs: [{ doc: TASKS_DOC, outline: TASKS.outline }] }
+    const res = await synth(r, [emptyArea], areaSessions({ tasks: { flows: [], noFlowClaims: [] } }))
+    expect(isFlowSynthesisWipeout(res)).toBe(false)
+    expect(res.unsettled).toEqual([])
+    expect(res.flows).toEqual([])
+    expect(res.path).toBe(flowsPath(r))
   })
 
-  it('counts only runnable claims toward the flow bound', async () => {
-    const area: FlowSynthesisArea = {
-      ...tasksArea,
-      claims: [...TASK_CLAIMS, claim(TASKS, 'Listing tasks', 'the board shows one card per open task', 'web')],
-    }
-    const plan = await planFlowSynthesis(repo(), [area])
-    expect(plan.areas[0].claims).toBe(6)
-    expect(plan.areas[0].runnableClaims).toBe(5)
-    expect(plan.maxFlows).toBe(5)
+  // The predicate's whole truth table, on its own terms: a wipeout is an empty
+  // corpus AND a reported failure AND spend. Drop any one and it is not a loss.
+  it('isFlowSynthesisWipeout needs all three: no flows, an unsettled area, and spend', () => {
+    const unsettled = [{ areaId: 'tasks', reason: 'flow synthesis refused: …' }]
+    expect(isFlowSynthesisWipeout({ flows: [], unsettled, calls: 1 })).toBe(true)
+    // Nothing was spent — a run that never reached a session is not a loss.
+    expect(isFlowSynthesisWipeout({ flows: [], unsettled, calls: 0 })).toBe(false)
+    // Everything settled and the corpus is honestly empty.
+    expect(isFlowSynthesisWipeout({ flows: [], unsettled: [], calls: 1 })).toBe(false)
+    // One area lost, another produced flows: fail-soft, never an abort.
+    expect(
+      isFlowSynthesisWipeout({ flows: [{ id: 'f' }] as unknown as FlowSynthesisResult['flows'], unsettled, calls: 2 }),
+    ).toBe(false)
   })
 })
 

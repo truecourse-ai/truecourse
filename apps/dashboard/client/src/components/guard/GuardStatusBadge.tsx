@@ -4,7 +4,7 @@
  * so a status looks and READS the same wherever it appears:
  *
  *  - {@link GuardStatusBadge} — a wire status, for the coverage surfaces;
- *  - {@link GuardFlowStatusChip} — the four-status word a flow, a test, or a
+ *  - {@link GuardFlowStatusChip} — the five-status word a flow, a test, or a
  *    surface row wears, in the list and in the detail alike;
  *  - {@link GuardNotInSpecsChip} / {@link GuardDismissedChip} /
  *    {@link GuardToolDefectChip} — the NON-status markers, muted: one for a flow
@@ -20,12 +20,22 @@ import {
   GUARD_NOT_IN_SPECS_LABEL,
   GUARD_TOOL_DEFECT_HINT,
   GUARD_TOOL_DEFECT_LABEL,
+  guardStatusWord,
   type GuardFlowPlainStatus,
 } from '@/lib/guard-flow-status';
-import { guardFlowStatusBadge, guardStatusMeta } from '@/lib/guard-status';
+import { guardFlowStatusDot, guardStatusMeta } from '@/lib/guard-status';
 
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
 
+/** The status idiom: colored dot + full-contrast word. Capsules are for markers. */
+const STATUS = 'inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground';
+const DOT = 'h-2 w-2 shrink-0 rounded-full';
+
+/**
+ * A SECTION's coverage status — one of the five words, its precise wire status
+ * carried by the dot's colour. Which state produced the word is the detail's job
+ * (the reason line under this badge, and the per-flow / per-claim rows below it).
+ */
 export function GuardStatusBadge({
   status,
   className = '',
@@ -35,19 +45,18 @@ export function GuardStatusBadge({
 }) {
   const meta = guardStatusMeta(status);
   return (
-    <span
-      title={meta.hint}
-      className={`${CHIP} uppercase tracking-wider ${meta.badge} ${className}`}
-    >
-      {meta.label}
+    <span title={meta.hint} className={`${STATUS} uppercase tracking-wider ${className}`}>
+      <span aria-hidden className={`${DOT} ${meta.dot}`} />
+      {guardStatusWord(status)}
     </span>
   );
 }
 
 /**
- * The one word a flow / test / surface wears — "Passing", "Failing", "Blocked",
- * "Not generated". `word` overrides it only to name the STAGE a failure came from
- * ("Failing (birth)"); it is never a different status name.
+ * The one word a flow / surface wears — the five of coverage: "Succeeded",
+ * "Failed", "Blocked", "Not testable", "Never run". `word` overrides it for a row
+ * that is a TEST rather than coverage, which keeps the run-verdict wording
+ * ("Passing", "Failing (birth)").
  */
 export function GuardFlowStatusChip({
   status,
@@ -59,7 +68,8 @@ export function GuardFlowStatusChip({
   className?: string;
 }) {
   return (
-    <span className={`${CHIP} ${guardFlowStatusBadge(status)} ${className}`}>
+    <span className={`${STATUS} ${className}`}>
+      <span aria-hidden className={`${DOT} ${guardFlowStatusDot(status)}`} />
       {word ?? GUARD_FLOW_STATUS_WORD[status]}
     </span>
   );
@@ -73,7 +83,7 @@ export function GuardFlowStatusChip({
  */
 export function GuardNotInSpecsChip({ className = '' }: { className?: string }) {
   return (
-    <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_NOT_IN_SPECS_LABEL}</span>
+    <span className={`${CHIP} bg-muted text-foreground ${className}`}>{GUARD_NOT_IN_SPECS_LABEL}</span>
   );
 }
 
@@ -85,7 +95,7 @@ export function GuardNotInSpecsChip({ className = '' }: { className?: string }) 
  */
 export function GuardDismissedChip({ className = '' }: { className?: string }) {
   return (
-    <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>{GUARD_DISMISSED_LABEL}</span>
+    <span className={`${CHIP} bg-muted text-foreground ${className}`}>{GUARD_DISMISSED_LABEL}</span>
   );
 }
 
@@ -99,7 +109,7 @@ export function GuardDismissedChip({ className = '' }: { className?: string }) {
 export function GuardToolDefectChip({ className = '' }: { className?: string }) {
   return (
     <HoverPopover portal width="wide" content={GUARD_TOOL_DEFECT_HINT}>
-      <span className={`${CHIP} bg-muted text-muted-foreground ${className}`}>
+      <span className={`${CHIP} bg-muted text-foreground ${className}`}>
         {GUARD_TOOL_DEFECT_LABEL}
       </span>
     </HoverPopover>

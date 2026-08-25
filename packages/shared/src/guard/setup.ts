@@ -8,7 +8,7 @@
  *  1. DETECTION IS EXPENSIVE-ISH AND SHARED. The externals view used to read the
  *     detected third-party list out of `guard/result.json` — i.e. it could only
  *     answer "what does this repo talk to" AFTER a full generate. Setup detects the
- *     same list for free (one `mapJourneys` pass) and records it here, so the
+ *     same list for free (one `mapInterfaces` pass) and records it here, so the
  *     External APIs surfaces work before the first generate. `result.json` stays
  *     generate's own artifact.
  *  2. `guard status` needs a first-class setup row — what ran, what passed, and what
@@ -17,11 +17,97 @@
 
 import { z } from 'zod'
 import { DetectedExternalServiceSchema } from '../external-services.js'
+import { MapperDiagnosticSchema } from '../interfaces.js'
 import { DatastoreUrlRefSchema } from '../types/analysis.js'
 
 /** How a single setup step ended. `skipped` always carries a `reason`. */
 export const GuardSetupStepStatusSchema = z.enum(['ok', 'skipped', 'failed'])
 export type GuardSetupStepStatus = z.infer<typeof GuardSetupStepStatusSchema>
+
+// ---------------------------------------------------------------------------
+// The step taxonomy (the `steps` spine) — AGENTIC_PIPELINE_PLAN §7.6
+// ---------------------------------------------------------------------------
+
+/**
+ * The setup taxonomy, in run order. `externals` folded INTO `catalog` (the
+ * skeleton write runs inside that step); `interfaces` and `auth` are new steps
+ * of the rebuilt setup. The legacy top-level `recipe`/`externals`/`seed` report
+ * fields stay populated for back-compat — the `steps` array is the new spine.
+ */
+export const GuardSetupTaxonomyKeySchema = z.enum([
+  'recipe',
+  'detect',
+  'catalog',
+  'interfaces',
+  'seed',
+  'auth',
+])
+export type GuardSetupTaxonomyKey = z.infer<typeof GuardSetupTaxonomyKeySchema>
+
+/**
+ * ONE row of the `steps` spine: what the step did this run, and the input
+ * fingerprint it settled on. Skip-when-settled reads the fingerprint: a re-run
+ * whose freshly computed fingerprint matches a settled row's skips the step
+ * (`status: 'skipped'`, `reason: 'unchanged'`); `--refresh` forces every step.
+ *
+ * `blocked` is legal ONLY on `auth` (a supplied credential waiting on a user
+ * registration) — loud, actionable, and never a reason to fail setup.
+ */
+/**
+ * One reconcile-session resolution as the interfaces step row records it —
+ * WHOSE claim observation confirmed for one disputed subject. Structurally the
+ * shape core's reconcile session produces (shared cannot import core, so the
+ * record schema lives with the record).
+ */
+export const GuardSetupInterfaceResolutionSchema = z
+  .object({
+    /** The diagnostic's `subject`, verbatim. */
+    subject: z.string().min(1),
+    resolution: z.enum(['tree-right', 'probe-right', 'both', 'unknown']),
+    /** What was observed — quoted program output, or why nothing could be. */
+    evidence: z.string().min(1),
+  })
+  .strict()
+export type GuardSetupInterfaceResolution = z.infer<typeof GuardSetupInterfaceResolutionSchema>
+
+export const GuardSetupTaxonomyStepSchema = z
+  .object({
+    key: GuardSetupTaxonomyKeySchema,
+    status: z.enum(['ok', 'skipped', 'failed', 'blocked']),
+    /**
+     * sha256 over the step's inputs, computed over the tree AS THE STEP LEFT
+     * IT — a step that writes (the catalog's skeleton, the seed's script)
+     * records the post-write state, so an unchanged re-run computes the same
+     * value and skips. Empty for a step with no fingerprint (detect is free
+     * and always runs).
+     */
+    inputFingerprint: z.string(),
+    reason: z.string().optional(),
+    /** The sessions-store run that carried this step's agent sessions, if any. */
+    sessionRunId: z.string().optional(),
+    /**
+     * INTERFACES step only: what the derivations (and the catalog merge)
+     * disagreed about this run — the cli tree-vs-probe disputes plus any
+     * authored-place-not-derived reports. Run reporting: diagnostics never
+     * enter `interfaces.json` or a fingerprint; this row is where they land.
+     */
+    diagnostics: z.array(MapperDiagnosticSchema).optional(),
+    /** INTERFACES step only: the reconcile session's per-subject verdicts. */
+    resolutions: z.array(GuardSetupInterfaceResolutionSchema).optional(),
+    /** INTERFACES step only: the catalog edits the resolutions produced, one line each. */
+    changes: z.array(z.string()).optional(),
+  })
+  .strict()
+  .superRefine((step, ctx) => {
+    if (step.status === 'blocked' && step.key !== 'auth') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'only the auth step may end `blocked` — every other step is ok/skipped/failed',
+        path: ['status'],
+      })
+    }
+  })
+export type GuardSetupTaxonomyStep = z.infer<typeof GuardSetupTaxonomyStepSchema>
 
 /**
  * ONE declared api server's live endpoint probe (step 1). The pass bar is
@@ -102,6 +188,8 @@ export const GuardSetupSeedStepSchema = z
     fixtures: z.array(z.string()).optional(),
     /** Credential names the seed mints — one principal per detected role. */
     credentials: z.array(z.string()).optional(),
+    /** The session died without an outcome; the engine folded its last verified draft. */
+    salvaged: z.boolean().optional(),
   })
   .strict()
 export type GuardSetupSeedStep = z.infer<typeof GuardSetupSeedStepSchema>
@@ -116,6 +204,12 @@ export const GuardSetupReportSchema = z
     status: z.enum(['ok', 'failed']),
     /** For `failed`: the user-facing reason (step 0, 0.5, or the recipe gate). */
     reason: z.string().optional(),
+    /**
+     * THE STEP SPINE: one row per taxonomy step this run reached, in run order.
+     * A run that fails at the recipe gate carries only the rows up to it. Old
+     * records without the field read as an empty spine (nothing settled).
+     */
+    steps: z.array(GuardSetupTaxonomyStepSchema).default([]),
     recipe: GuardSetupRecipeStepSchema,
     externals: GuardSetupExternalsStepSchema.optional(),
     seed: GuardSetupSeedStepSchema.optional(),
@@ -129,7 +223,7 @@ export const GuardSetupReportSchema = z
       .strict()
       .optional(),
     /**
-     * THE DETECTION SNAPSHOT (step 2) — one `mapJourneys` pass, deterministic and
+     * THE DETECTION SNAPSHOT (step 2) — one `mapInterfaces` pass, deterministic and
      * free. `readGuardExternalsView` reads its detected list from here.
      */
     detection: z
@@ -151,6 +245,23 @@ export const GuardSetupReportSchema = z
         inputTokens: z.number().int().nonnegative(),
         outputTokens: z.number().int().nonnegative(),
         costUsd: z.number().nonnegative(),
+        /**
+         * The AGENT-SESSION share of the spend, in the loop's own units.
+         * `BudgetSpent` counts turns and TOTAL tokens (no input/output split),
+         * so it is recorded beside the one-shot fields rather than folded into
+         * them — mapping total tokens onto `inputTokens` would be a lie the
+         * cost column then repeats. `costUsd` above is the whole run
+         * (one-shots + sessions); this block says how much of it was sessions.
+         */
+        sessions: z
+          .object({
+            count: z.number().int().nonnegative(),
+            turns: z.number().int().nonnegative(),
+            tokens: z.number().int().nonnegative(),
+            costUsd: z.number().nonnegative(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

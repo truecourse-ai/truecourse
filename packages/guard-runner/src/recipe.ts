@@ -19,7 +19,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { GUARD_HTTP_METHODS } from '@truecourse/shared'
-import { recipePath } from './store.js'
+import { dependenciesPath, recipePath } from './store.js'
 
 /**
  * A credential MINTED BY A LOGIN REQUEST (`fromRequest`): one HTTP call
@@ -518,6 +518,56 @@ export const RecipeApiSchema = z
   })
 
 /**
+ * The web driver's preparation layer — how the WEB SURFACE starts and how its
+ * readiness is observed. Deliberately the api server block's fields under the same
+ * names (`serve`, `cwd`, `healthPath`, `readyTimeoutMs`, `env`): a served web
+ * surface IS a served process, it boots through the very same machinery
+ * (`spawnApiProcess` + `awaitApiServerReady`), and giving the same concept two
+ * spellings would be the fork this parallel exists to avoid.
+ *
+ * The one field the api block has no use for is `build`. A web surface usually has
+ * a CLIENT to compile, and compiling it is expensive — minutes, on a real app. The
+ * recipe's top-level `build` runs before EVERY run; this one runs only when the
+ * selected scenarios actually contain a web step, so a repo whose web surface is
+ * expensive to build does not pay for it on a cli-only run.
+ */
+export const RecipeWebSchema = z
+  .object({
+    /**
+     * Shell command run once in the repo root, AFTER the top-level `build`, and only
+     * when the run has web steps in it. Omit it when the top-level build already
+     * produces the served assets.
+     */
+    build: z.string().min(1).optional(),
+    /** Argv that starts the web surface (resolved like `entry`). The runner sets `PORT`. */
+    serve: z.array(z.string()).min(1),
+    /** Where the process runs — the api block's rule, verbatim. Defaults to `sandbox`. */
+    cwd: z.enum(['sandbox', 'repo']).optional(),
+    /** Path polled until it answers 2xx before the first web step. Defaults to `/`. */
+    healthPath: z.string().regex(/^\//, 'healthPath must start with /').optional(),
+    /** Wall-clock budget for the surface to become ready. Defaults to 60s. */
+    readyTimeoutMs: z.number().int().positive().optional(),
+    /** Extra env for the web surface process, on top of the recipe-level `env`. */
+    env: z.record(z.string(), z.string()).optional(),
+    /**
+     * Repo-relative directory of the workspace app this surface serves
+     * (`apps/web`). The web analog of {@link RecipeApiServerSchema}.app, and the
+     * JOIN KEY for the same reason: a monorepo holds more than one routable app,
+     * and only one of them is under test. cal.com's checkout has four Next.js
+     * apps, and the bundled platform demo declares seven addresses the product
+     * never serves (`/troubleshooter`, `/calendar-view`, a bare `/bookings`) —
+     * places the derivation took at face value and an authoring run paid for.
+     *
+     * No fact in the tree settles which app is served: both are real Next apps
+     * with real routes. The recipe is the only thing that knows, so it says so
+     * here or it says nothing. Optional — absent means the derivation keeps
+     * every app's places, never a silent drop.
+     */
+    app: z.string().min(1).optional(),
+  })
+  .strict()
+
+/**
  * argv0 basenames (compared case-insensitively) that are shell no-ops — they run
  * nothing and exit 0, so an `entry` built on one executes no program under test.
  * A recipe naming one is the sqlfluff-class defect: every scenario "passes"
@@ -560,8 +610,40 @@ export const RecipeSchema = z
      * re-authors the sections it used to block.
      */
     ownHosts: z.array(z.string().min(1)).optional(),
+    /**
+     * Programs to EXPOSE under their real binary name inside the sandbox:
+     * `{ <binName>: <argv | built entry path> }`. The runner writes one shim
+     * executable per entry into a directory it prepends to the sandbox PATH, so
+     * anything running in the sandbox that invokes the program BY NAME gets the
+     * build under test.
+     *
+     * Without it, a scenario that drives the program through something else —
+     * a git hook, a Makefile, another tool's plugin — silently runs whatever copy
+     * of the program the machine happens to have (a published release, a stale
+     * global install), and every verdict it reaches is about that copy instead of
+     * this working tree. That is not a hypothetical: TrueCourse's own pre-commit
+     * hook shells out to `truecourse`, so the hook scenarios were grading a
+     * published build until this existed.
+     *
+     * A string value is a path to a built entry (resolved like `entry`); an array
+     * is full argv. Both are recipe-owned, so neither is interpolated. No global
+     * mutation and no ecosystem assumption: it is a directory on PATH.
+     */
+    expose: z
+      .record(
+        z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a binary name has no path separators'),
+        z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
+      )
+      .optional(),
     /** The api driver's preparation layer; present when the repo has api scenarios. */
     api: RecipeApiSchema.optional(),
+    /**
+     * The web surface's preparation layer; present when any scenario carries web
+     * steps. See {@link RecipeWebSchema}. It is not a third "driver block" beside
+     * `entry` and `api`: web steps live inside an ordinary sandbox scenario, so a
+     * repo declaring `web` declares an `entry` (or an `api` block) too.
+     */
+    web: RecipeWebSchema.optional(),
   })
   .strict()
   .refine((r) => r.entry !== undefined || r.api !== undefined, {
@@ -576,6 +658,7 @@ export type RecipeApiExternalEnv = z.infer<typeof RecipeApiExternalEnvSchema>
 export type RecipeApiExternal = z.infer<typeof RecipeApiExternalSchema>
 export type RecipeApiServer = z.infer<typeof RecipeApiServerSchema>
 export type RecipeApi = z.infer<typeof RecipeApiSchema>
+export type RecipeWeb = z.infer<typeof RecipeWebSchema>
 export type Recipe = z.infer<typeof RecipeSchema>
 
 /**
@@ -793,6 +876,47 @@ export function resolveApiServers(recipe: Recipe): ResolvedApiServers {
   return { servers, defaultServer }
 }
 
+/** Default readiness path polled on the booted web surface. */
+export const DEFAULT_WEB_HEALTH_PATH = '/'
+/**
+ * Default budget for the web surface to answer its readiness path. Twice the api
+ * default: a web surface commonly boots a framework server that compiles or warms
+ * on first request, and the honest failure of a surface that needs 40s is "your
+ * scenarios are slow", not "guard says your app is broken".
+ */
+export const DEFAULT_WEB_READY_TIMEOUT_MS = 60_000
+
+/** The recipe's web surface with every default applied — the shape the runner boots. */
+export interface ResolvedWebSurface {
+  /** Template argv, `${PORT}` unresolved and paths unresolved (see `resolveEntry`). */
+  serve: readonly string[]
+  cwd: 'sandbox' | 'repo'
+  healthPath: string
+  readyTimeoutMs: number
+  /** `recipe.env` ⊕ `web.env`. */
+  env: Record<string, string>
+  /** The extra build command, when the surface declares one. */
+  build?: string
+}
+
+/**
+ * The recipe's web surface with its defaults applied, or `null` when the repo
+ * declares none — the ONE place the web block's defaults exist, so the runner, the
+ * estimate and any future read surface can never disagree about them.
+ */
+export function resolveWebSurface(recipe: Recipe): ResolvedWebSurface | null {
+  const web = recipe.web
+  if (!web) return null
+  return {
+    serve: web.serve,
+    cwd: web.cwd ?? 'sandbox',
+    healthPath: web.healthPath ?? DEFAULT_WEB_HEALTH_PATH,
+    readyTimeoutMs: web.readyTimeoutMs ?? DEFAULT_WEB_READY_TIMEOUT_MS,
+    env: { ...(recipe.env ?? {}), ...(web.env ?? {}) },
+    ...(web.build ? { build: web.build } : {}),
+  }
+}
+
 /**
  * The server a scenario binds to, or an actionable reason it cannot. A scenario
  * naming a server the recipe no longer declares is a PER-SCENARIO error (the
@@ -840,8 +964,12 @@ export interface LoadedRecipe {
  * nothing and keeps the fingerprint it had. The user's OWN compose files are
  * deliberately NOT here: they are the repo's, they move for reasons that have
  * nothing to do with guard, and a recipe that names one already folds that name.
+ *
+ * Exported for `guard setup`'s recipe-step fingerprint (plan 03 step 8), which
+ * hashes this exact list (the recipe file itself is folded separately below) —
+ * one source, so the two can never drift.
  */
-const FINGERPRINT_INPUTS: readonly string[] = [
+export const FINGERPRINT_INPUTS: readonly string[] = [
   'package.json',
   'pnpm-lock.yaml',
   'package-lock.json',
@@ -903,6 +1031,20 @@ export function computeRecipeFingerprint(repoRoot: string): string {
       hash.update('\0')
     }
   }
+  // The COMMITTED dependency catalog is a recipe-class input: it declares which
+  // classes of starting state exist and how a scenario may obtain each one, so
+  // declaring a dependency must re-author the sections that used to block on it —
+  // exactly what folding `api.externals` into the recipe hash already buys. The
+  // gitignored instance overlay is deliberately NOT folded (registering an instance
+  // or rotating a key must never re-author anything), and a repo with no catalog
+  // hashes exactly as it did before the file existed.
+  const dependenciesAbs = dependenciesPath(repoRoot)
+  if (fs.existsSync(dependenciesAbs) && fs.statSync(dependenciesAbs).isFile()) {
+    hash.update('dependencies.json')
+    hash.update('\0')
+    hash.update(fs.readFileSync(dependenciesAbs))
+    hash.update('\0')
+  }
   return `sha256:${hash.digest('hex')}`
 }
 
@@ -952,6 +1094,21 @@ export function hashableRecipeText(raw: string): string {
   } catch {
     return raw
   }
+  forEachInlineSecret(parsed, (holder) => {
+    delete holder.value
+  })
+  return JSON.stringify(canonicalizeJson(parsed))
+}
+
+/**
+ * Visit every INLINE SECRET a parsed recipe carries — the two `value` fields that
+ * hold a literal credential rather than a capability: `api.credentials.<name>.value`
+ * and `api.externals.<service>.env.<VAR>.value`. Both treatments of a stored
+ * recipe walk THIS list, so a new secret-bearing field leaves the fingerprint and
+ * leaves the reader's screen in one edit: {@link hashableRecipeText} deletes what
+ * it visits, {@link maskedRecipeText} masks it.
+ */
+function forEachInlineSecret(parsed: unknown, visit: (holder: Record<string, unknown>) => void): void {
   const api = (parsed as {
     api?: {
       credentials?: Record<string, unknown>
@@ -965,7 +1122,7 @@ export function hashableRecipeText(raw: string): string {
       if (!env || typeof env !== 'object') continue
       for (const entry of Object.values(env)) {
         if (entry && typeof entry === 'object' && 'value' in entry) {
-          delete (entry as Record<string, unknown>).value
+          visit(entry as Record<string, unknown>)
         }
       }
     }
@@ -974,11 +1131,57 @@ export function hashableRecipeText(raw: string): string {
   if (creds && typeof creds === 'object') {
     for (const cred of Object.values(creds)) {
       if (cred && typeof cred === 'object' && 'value' in cred) {
-        delete (cred as Record<string, unknown>).value
+        visit(cred as Record<string, unknown>)
       }
     }
   }
-  return JSON.stringify(canonicalizeJson(parsed))
+}
+
+/**
+ * How much of a secret any surface may show: bullets to its length, capped so a
+ * long key does not advertise how long it is. The one place the shape of a masked
+ * secret is decided — {@link maskRecipeSecret} and `maskStoredSecret` differ only
+ * in what they say the value IS, never in how much of it they give away.
+ */
+export function secretBullets(value: string): string {
+  return '•'.repeat(Math.min(value.length, 12))
+}
+
+/**
+ * ONE inline secret as it may be shown: bullets to the value's length (capped),
+ * labelled so it can never be mistaken for the value itself. The single spelling
+ * behind every reading of a recipe — the terminal's (`truecourse guard recipe`)
+ * and the dashboard's raw JSON — so neither can drift into printing more than
+ * the other.
+ */
+export function maskRecipeSecret(value: string): string {
+  return `${secretBullets(value)} (inline value, masked)`
+}
+
+/**
+ * A stored recipe as a READER may see it: the file's own JSON, pretty-printed,
+ * with every inline secret replaced by {@link maskRecipeSecret}. Exactly what the
+ * terminal prints — an env-var NAME is a capability and stays, an inline `value`
+ * IS the secret and never leaves the file.
+ *
+ * Everything else is the file's own: key order, and any field no schema knows
+ * about (unlike {@link hashableRecipeText}, which canonicalizes for hashing). This
+ * is a reading of what is STORED, not a digest input.
+ *
+ * `null` when the text does not parse as JSON — a file whose secrets cannot be
+ * located is never shown, rather than shown unmasked.
+ */
+export function maskedRecipeText(raw: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  forEachInlineSecret(parsed, (holder) => {
+    holder.value = maskRecipeSecret(typeof holder.value === 'string' ? holder.value : '')
+  })
+  return JSON.stringify(parsed, null, 2)
 }
 
 /** Recursively sort object keys (arrays keep order — argv order is meaningful) so

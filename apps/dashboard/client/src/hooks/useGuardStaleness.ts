@@ -1,5 +1,5 @@
 /**
- * The Guard tab's two amber-dot signals (generate / run staleness) plus the
+ * The Guard tab's two staleness-dot signals (generate / run) plus the
  * pipeline-stage flags the coverage view uses to pick its onboarding empty
  * state. RepoPage calls `refetch()` on tab entry and after guard socket events
  * so the indicators stay in sync without polling. The probe is advisory — a

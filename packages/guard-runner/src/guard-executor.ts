@@ -13,6 +13,8 @@
 import type { GuardScenario, GuardScenarioResult } from '@truecourse/shared'
 import type { Recipe } from './recipe.js'
 import { runGuard, type RunGuardResult } from './run.js'
+import type { GuardSharedWorld } from './shared-world.js'
+import type { GuardVisualJudge } from './visual-judge.js'
 
 export interface GuardExecInput {
   /** The checkout to build + run against (working-tree root). */
@@ -25,6 +27,14 @@ export interface GuardExecInput {
    * restriction is applied before the seam, so the executor carries no filter.
    */
   scenarios: GuardScenario[]
+  /**
+   * The ids of the FULL corpus `scenarios` was drawn from. Because the filter is
+   * applied before the seam, a scoped run must say what it filtered OUT, or the
+   * merged board would read those scenarios as deleted and drop their last verdicts.
+   * Omitted ⇒ `scenarios` IS the corpus (a full run; birth validation, which
+   * persists nothing at all).
+   */
+  corpusIds?: readonly string[]
   branch?: string | null
   commit?: string | null
   /** true = real run (persist LATEST/run/history), false = birth-validation (in-memory only). REQUIRED. */
@@ -48,6 +58,19 @@ export interface GuardExecInput {
   signal?: AbortSignal
   onPhase?: (phase: 'build' | 'run', total?: number) => void
   onScenarioSettled?: (done: number, total: number, result: GuardScenarioResult) => void
+  /**
+   * OPTIONAL annotator for failing web steps (see {@link GuardVisualJudge}). Like
+   * `signal` and the callbacks above it is an in-process handle, so a hosted
+   * executor simply ignores it and its runs stay unannotated — never a failure.
+   */
+  visualJudge?: GuardVisualJudge
+  /**
+   * OPTIONAL run-level shared world (see shared-world.ts): generate threads one
+   * across every execution so sandbox world lifecycles cannot race. Same
+   * in-process class as `visualJudge` — a hosted executor ignores it and keeps
+   * booting its own worlds (remote runs never shared a host to race on).
+   */
+  sharedWorld?: GuardSharedWorld
 }
 
 /** The run report — reuses the existing discriminated union verbatim. */
@@ -66,6 +89,7 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     repoRoot: input.checkoutDir,
     recipe: input.recipe,
     scenarios: input.scenarios,
+    ...(input.corpusIds ? { corpusIds: input.corpusIds } : {}),
     branch: input.branch,
     commit: input.commit,
     persist: input.persist,
@@ -79,4 +103,6 @@ export const defaultGuardExecutor: GuardExecutor = (input) =>
     signal: input.signal,
     onPhase: input.onPhase,
     onScenarioSettled: input.onScenarioSettled,
+    ...(input.visualJudge ? { visualJudge: input.visualJudge } : {}),
+    ...(input.sharedWorld ? { sharedWorld: input.sharedWorld } : {}),
   })

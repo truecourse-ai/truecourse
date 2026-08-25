@@ -1,28 +1,30 @@
 /**
- * The Flows tab's MAIN PANE — the shared GuardTabStrip (a permanent Overview chip
- * plus any opened flow, addressable as `?gflow=`) over the matching detail:
+ * THE guard MAIN PANE — the shared GuardTabStrip (any opened flow, addressable as
+ * `?gflow=`) over the merged flow detail: the flow's header and milestones, and
+ * then the test that realizes it, whole ({@link GuardFlowDetail}).
  *
- *   flow → the milestone graph and ONE row per surface (its test, or why there is
- *          none); a test row opens on the TESTS tab, which is where tests live
- *   none → the overview: the list's filter dashboard, the recipe card and the
- *          one last-generate line
+ * A test is not a destination of its own any more, and has no address of its own:
+ * one flow, one test, one page — two homes for one thing is how a reader loses
+ * track of which is authoritative.
  *
- * A test is never a tab here: it has exactly one home, and two homes for one thing
- * is how a reader loses track of which is authoritative.
+ * There is no Overview destination. The LIST beside this pane is the tab — it
+ * carries the corpus, its counts and its narrowing — so with no flow open this
+ * pane is at rest ("pick a flow"), not a second thing to read.
+ *
+ * It has no non-flow subject at all: the preparation a test runs against is
+ * per-surface, and is read on the Interfaces tab beside the surface it prepares.
  */
 
 import { useMemo } from 'react';
-import { FlaskConical, Loader2, Workflow } from 'lucide-react';
-import type { GuardFlowsView, GuardGenerateReport } from '@truecourse/shared';
+import { Loader2, FlaskConical } from 'lucide-react';
+import type { GuardFlowsView, GuardInterfaceRow } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
-import type { GuardFlowFilter } from '@/lib/guard-flow-status';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
 import { tabFlowId } from '@/hooks/useGuardFlowTabs';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
-import type { BlockedConflictRow } from './GuardBlockedPanel';
+import type { GuardTestBinds } from '@/lib/guard-tests';
 import { GuardFlowDetail } from './GuardFlowDetail';
-import { GuardScenariosOverview } from './GuardScenariosOverview';
 import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
 
 function Centered({ children }: { children: React.ReactNode }) {
@@ -34,54 +36,46 @@ export function GuardFlowsPane({
   view,
   loading,
   error,
-  report,
   tabs,
-  filter,
-  onFilter,
+  interfaces = null,
+  claimTitles,
+  binds,
   reloadKey = 0,
   prRef,
-  conflicts = null,
   decisions,
-  onOpenConflict,
   onOpenSpec,
-  onOpenTest,
-  onOpenJourney,
+  onOpenInterface,
   onOpenExternals,
 }: {
   repoId: string;
   view: GuardFlowsView | null;
   loading: boolean;
   error: string | null;
-  report: GuardGenerateReport | null;
   tabs: GuardTabsState;
-  /** The list's filter — the overview's chips set it, the panel reads it. */
-  filter: GuardFlowFilter;
-  onFilter: (filter: GuardFlowFilter) => void;
+  /** The mapped interface catalog, for the diagrams a test drives; null = unmapped. */
+  interfaces?: GuardInterfaceRow[] | null;
+  /** Claim id → its sentence, for a step group named by claim identity. */
+  claimTitles?: Readonly<Record<string, string>>;
+  /** scenarioId → the spec section it binds to (the inventory join). */
+  binds?: ReadonlyMap<string, GuardTestBinds>;
   reloadKey?: number;
   prRef?: string;
   /**
-   * The LIVE open conflicts, only meaningful when the report is `open-conflicts`.
-   * `null` while the spec corpus is still loading (the blocked panel spins).
-   */
-  conflicts?: BlockedConflictRow[] | null;
-  /**
    * The committable dismissals — the flow detail's "don't test this flow" ruling
-   * and its undo. Omitted (guard reads off / an unresolved PR scope) hides the
-   * ruling entirely: a decision the reader could not have seen never gets made.
+   * and its undo, plus the read-only note on a claim already dismissed. Omitted
+   * (guard reads off / an unresolved PR scope) hides both entirely: a decision the
+   * reader could not have seen never gets made.
    */
   decisions?: GuardDecisionsState;
-  onOpenConflict?: (key: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
-  /** Open a test on the Tests tab (`?gtest=`). */
-  onOpenTest: (testId: string) => void;
-  onOpenJourney: (journeyId: string) => void;
+  onOpenInterface: (interfaceId: string) => void;
   /**
-   * Jump to the External APIs tab, on the named service's card — the needs-setup
-   * CTA a flow's why-no-test row carries.
+   * Jump to the Dependencies tab, on the named service's card — the needs-setup
+   * CTA a flow's why-no-test block carries.
    */
   onOpenExternals?: (service?: string) => void;
 }) {
-  const { activeId, openTabs, open, close, selectOverview } = tabs;
+  const { activeId, openTabs, open, close } = tabs;
   const flows = view?.flows ?? [];
 
   const activeFlowId = tabFlowId(activeId);
@@ -94,7 +88,7 @@ export function GuardFlowsPane({
       openTabs.map((t) => {
         const flowId = tabFlowId(t.id);
         const label = flowId ? flowTitles.get(flowId) ?? flowId : t.id;
-        return { ...t, label, title: flowId ?? t.id, icon: Workflow };
+        return { ...t, label, title: flowId ?? t.id, icon: FlaskConical };
       }),
     [openTabs, flowTitles],
   );
@@ -105,11 +99,15 @@ export function GuardFlowsPane({
         return (
           <GuardFlowDetail
             key={detail.flowId}
+            repoId={repoId}
             detail={detail}
+            interfaces={interfaces}
+            {...(claimTitles ? { claimTitles } : {})}
+            {...(binds ? { binds } : {})}
             {...(decisions ? { decisions } : {})}
+            {...(prRef ? { prRef } : {})}
             onOpenSpec={onOpenSpec}
-            onOpenTest={onOpenTest}
-            onOpenJourney={onOpenJourney}
+            onOpenInterface={onOpenInterface}
             {...(onOpenExternals ? { onOpenExternals } : {})}
           />
         );
@@ -124,36 +122,51 @@ export function GuardFlowsPane({
       return (
         <EmptyState
           icon={FlaskConical}
-          title="Flow not found"
-          body="This flow is not in the current corpus — it may have been re-composed under a new id."
+          title="Test not found"
+          body="Not in the current corpus — it may have been re-composed under a new id."
         />
       );
     }
 
+    if (loading && flows.length === 0) {
+      return (
+        <Centered>
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </Centered>
+      );
+    }
+    if (error && flows.length === 0) {
+      return (
+        <Centered>
+          <p className="max-w-sm px-6 text-center text-sm text-muted-foreground">{error}</p>
+        </Centered>
+      );
+    }
+    if (flows.length === 0) {
+      return (
+        <EmptyState
+          icon={FlaskConical}
+          title="No tests yet"
+          body={
+            <>
+              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to
+              synthesize flows and write their tests.
+            </>
+          }
+        />
+      );
+    }
     return (
-      <GuardScenariosOverview
-        recipe={view?.recipe ?? null}
-        report={report}
-        flows={flows}
-        filter={filter}
-        onFilter={onFilter}
-        loading={loading}
-        error={error}
-        conflicts={conflicts}
-        onOpenConflict={onOpenConflict}
-      />
+      <EmptyState icon={FlaskConical} title="Select a test" body="" />
     );
   })();
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <GuardTabStrip
-        tabs={tabItems}
-        activeId={activeId}
-        onSelect={(t) => open(t.id, t.pinned)}
-        onSelectOverview={selectOverview}
-        onClose={close}
-      />
+    // `min-w-0` all the way down: the detail's wide data blocks scroll themselves,
+    // which only works if every box above them is allowed to shrink.
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
+      {/* No Overview chip: with no flow open this pane IS its no-selection state. */}
+      <GuardTabStrip tabs={tabItems} activeId={activeId} onSelect={(t) => open(t.id, t.pinned)} onClose={close} />
       <div className="relative min-h-0 flex-1 overflow-hidden">{content}</div>
     </div>
   );

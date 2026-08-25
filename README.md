@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="TrueCourse" width="300" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/truecourse-logo-horizontal.svg" />
+    <img src="assets/truecourse-logo-horizontal-light.svg" alt="TrueCourse" width="300" />
+  </picture>
 </p>
 
 <p align="center">
@@ -193,7 +196,7 @@ pre-commit:
 
 TrueCourse builds a curated spec corpus from your docs, then **guards** it: an LLM authors declarative scenario tests bound to each spec section once, and running them is fully deterministic — no model in the verification loop. A failing scenario means "this section and the code disagree" (a drift or a bug — the developer's call). This is a separate pipeline from `analyze`: it answers a different question, has different prerequisites (it reads your docs), and runs on a different time scale.
 
-> **Prerequisite:** the spec scan, guard setup and the guard generator need an LLM. By default they shell out to the Claude Code CLI (`claude -p`) — install Claude Code and sign in once before running `spec scan`, `guard setup` or `guard generate` — or point them at a provider API instead with [`truecourse config llm setup`](#llm-transport-claude-code-or-api). `guard run` needs neither — it's deterministic.
+> **Prerequisite:** the spec scan, guard setup and the guard generator need an LLM. By default they shell out to the Claude Code CLI (`claude -p`) — install Claude Code and sign in once before running `spec scan`, `guard setup` or `guard generate` — or point them at a provider API instead with [`truecourse config llm setup`](#llm-transport-claude-code-or-api). `guard run` needs neither — every verdict it reaches is deterministic; it only reaches for a model to *annotate* a failing web step with what was on screen, and skips that silently when none is configured.
 
 ## Quick Start
 
@@ -202,6 +205,7 @@ cd <your-repo>
 truecourse spec scan                    # Curate docs → corpus (areas + overlap flags)
 truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
 truecourse guard setup                  # Prepare the repo: recipe + external APIs + the data/auth seed (cheap)
+truecourse guard interfaces             # What surfaces this repo exposes, and which screens carry no task yet
 truecourse guard generate               # Author scenario tests from spec sections (classify → generate → birth-validate)
 truecourse guard run                    # Run the committed scenarios; exits non-zero on any drift (CI gate)
 ```
@@ -214,9 +218,9 @@ Resolve conflicts and review section coverage, scenarios, and run results visual
 
 Stages run in order, each producing committable artifacts the next consumes:
 
-**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped), plus any OpenAPI / Swagger `.yaml`/`.yml`/`.json` doc (admitted structurally — see "Which documents are scanned"). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts), preceded by a deterministic (zero-LLM) pre-filter that drops whole non-spec directory trees the classifier can't separate by content — agent-config trees (`agents/rules/**`, `agents/skills/**`, keeping the repo's own skill docs whose leaf names an API surface — `…/skills/*-api/**` — or matches the repo's product identity), changelogs/release-notes, and template/boilerplate dirs; OpenAPI docs bypass the filter and every prose-only stage. For the docs that remain, an LLM tags each into **areas** (`product/concern`) and flags within-area **overlaps** where two docs may disagree. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: `manualAreas`, `manualIncludes`, `manualExcludes`, and conflict verdicts — committable).
+**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs, ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`, `.git/` etc. are skipped), plus any OpenAPI / Swagger `.yaml`/`.yml`/`.json` doc (admitted structurally — see "Which documents are scanned"). An LLM relevance filter drops obvious non-spec material (task lists, research logs, AI agent prompts), preceded by a deterministic (zero-LLM) pre-filter that drops whole non-spec directory trees the classifier can't separate by content — agent-config trees (`agents/rules/**`, `agents/skills/**`, keeping the repo's own skill docs whose leaf names an API surface — `…/skills/*-api/**` — or matches the repo's product identity), changelogs/release-notes, and template/boilerplate dirs; OpenAPI docs bypass the filter and every prose-only stage. For the docs that remain, an LLM tags each into **areas** (`product/concern`) and flags **overlaps** where two docs may disagree — candidate section pairs are nominated deterministically (sections in different docs sharing rare identifiers, endpoint segments, or the same canonical heading), and one agent session per collision cluster checks the ranked list; pairs no session examined are recorded in the corpus as `uncheckedPairs`, so coverage gaps are visible data. Output: `.truecourse/specs/corpus.json` (the curated corpus every downstream stage consumes — kept docs + area tags, docs grouped by area, overlap flags, and the relevance-dropped docs; committable) and `.truecourse/specs/decisions.json` (the user's resolutions: `manualAreas`, `manualIncludes`, `manualExcludes`, and conflict verdicts — committable).
 
-Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. You resolve them in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss).
+Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. Each confirmed conflict carries the judge's resolution brief (the exact disagreement plus a recommended action) graded **low / medium / high** confidence: a high-confidence pick-a-side or dismissal is **auto-applied by the scan** as a `resolvedBy: 'auto'` verdict (reported in the scan summary, badged in the dashboard, undoable like any verdict), while lower grades stay advisory and show their confidence. You resolve the rest in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss); a suggested doc fix (`fix-doc`) is never auto-applied.
 
 **2. Guard setup** (`truecourse guard setup`) — The cheap preparation stage between the scan and the generator, and a **prerequisite** for it: `guard generate` refuses to run until it has been done. It derives and *proves* the recipe (install → build → boot, then a live call against a real route of every declared server), detects the third parties and the database this repo uses, **declares** every detected external API in `recipe.json`, and drafts the one seed script that creates both the rows and the authenticated principals your scenarios need — running it for real and validating its manifest before either artifact is written. At most two LLM calls.
 
@@ -230,7 +234,21 @@ Two authoring guarantees ride generation: a section's own **worked example** (a 
 
 **Generation also adjudicates what it wrote**, and that adjudication now actually runs on the default OSS transport (it did not in 0.8.0 — see below). Two stages judge the corpus after birth: a **fidelity review** (up to one call per green scenario — does this test actually verify the claim it binds to?) and a **failure triage** (up to one call per failing test — is the repo wrong, the doc wrong, or our test wrong?). Both were quietly disabled for OSS runs through 0.8.0 — they were gated on a transport the OSS CLI never installs, so they cost nothing and returned nothing. They now always run, which is a **real increase in what a generate bills** versus 0.8.0 for the same repo. The pre-flight estimate always priced both stages, so the ceiling you confirm is unchanged and still an upper bound — but the invoice is not where you should discover this. If either stage loses *every* call (a rate limit, an outage, an expired login), the run **still writes its scenarios** — those verdicts are annotation about tests birth has already executed, and throwing away a whole generate's spend over them costs strictly more — and reports the stage as **unadjudicated** in the summary, in `guard status`, and in the dashboard. The affected flows are deliberately left **unsettled**, so re-running generate once the model is reachable adjudicates exactly them; authoring is cached on unchanged specs, so that re-run pays for the verdicts, not for writing the tests again.
 
-**4. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A test that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
+**Interfaces — what the scenarios are written *with*.** Alongside the spec side, guard keeps a catalog of the surfaces this repo actually exposes: every CLI command with its full grammar, every HTTP operation with its request and response contract, and the web app's screens with the address each is reached at. That half is **derived** from the working tree — `guard setup` maps it, no LLM, and it is re-derived on every run, so it can never go stale.
+
+One half of the web surface cannot be derived: a **task** ("silence a rule from a violation card") is an ordered click/type sequence with a start and an end state, which is intent no routing tree states. `truecourse guard interfaces author` authors those, one agent session per screen: the session reads that screen's own source, drafts the tasks a user can perform there, and checks its draft against the same rules the write path enforces — locators are roles and accessible names only, an entry has to agree with the place it stands on, and nothing is guessed (what the source does not state comes back as a recorded gap, never an invented control). What it writes lands in the committable `guard/interfaces.authored.json`; a session may replace its own screen's tasks and nothing else. A session that reads a doc contradicting the source it just read does not resolve the disagreement — the catalog follows the code, and the discrepancy is appended verbatim to the committable `guard/interfaces.findings.md`, the doc-bug feed a human reads back against the repo. `truecourse guard interfaces` shows the catalog and which screens still carry no task — free, no LLM.
+
+**What counts as a screen worth authoring is decided before any session runs.** A place is an address whose module *renders*: a route module exporting no component serves a response — JSON, an image, a redirect the user never sees — and is not somewhere anyone can stand, which takes 15 of documenso's 125 addresses off the work list. And in a monorepo only one routable app is under test; `recipe.web.app` (the repo-relative workspace directory, the web twin of an api server's `app`) says which, because no fact in the tree can — cal.com's checkout has four Next.js apps, one of them a bundled demo declaring seven addresses the product never serves. Both rules are deterministic and both fail safe: a recipe that declares no app keeps every app's places.
+
+**Sessions run in a pool, the fold does not.** A session is ~20 turns of provider latency and almost no local work, so `--concurrency` of them run at once (default `min(cpus, 4)`, or `TRUECOURSE_MAX_CONCURRENCY`). Folding each fragment into the catalog stays strictly one at a time, because a fragment is validated against the catalog it is about to join. What concurrency costs is that a session cannot see the peers running beside it, so an id one of them claimed mid-flight is treated as a *race* — that one task is dropped and the rest of the screen lands, while a collision with something the session was actually shown stays a refusal.
+
+**The run closes by making the state registry a vocabulary again.** Tasks chain by *state* — an earlier task's end state and a later task's starting state are the same world, or the chain is a coincidence of spelling — and sessions that cannot see each other mint the same world under two names (a whole-app run over documenso landed 289 states with 41 `-updated`, 20 `-created` and 17 `-exists` families). So the last thing an authoring run does is reconcile them: descriptions that say the same thing collapse deterministically, then **one** LLM call over the whole registry names the synonym groups, and every `startingState`/`endState` that referenced an absorbed id is rewritten. It is safe by construction — a state id is a pure reference, never part of an interface's fingerprint, so no scenario is invalidated and nothing else in the file moves — and the rewrite is re-validated against the merged catalog before a byte is written, so a registry that would not parse leaves the original file exactly as it was. `truecourse guard interfaces reconcile` runs the same pass on its own, for a catalog authored before it existed or one whose registry drifted apart across partial runs. There is no alias table: the pass runs at the end of every run, so a synonym minted later is collapsed the next time round.
+
+**The session starts from what the code analysis already knows.** Before the first session, the run makes one analyzer pass over the working tree and hands every screen three derived facts: the module that *is* that screen (the routing tree says so), the modules it renders (an import walk, so the components carrying the accessible names are named rather than hunted for), and the server calls those modules make — HTTP requests joined to the api interfaces the catalog already carries, and tRPC procedures named as what they are: real server work with no api interface behind it, so it can never be an `apiEffects` id. What the join cannot establish is stated as unresolved rather than guessed, which is the point: a session that is told "nothing joined" stops searching for an id that does not exist. None of it is stored — like the rest of the derived surface it is a statement about the tree as it is right now, re-derived on every run.
+
+**4. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A test that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. Every pass/fail decision is deterministic, and a **green run makes no LLM call at all** — no API key, no `claude` binary.
+
+**One opt-in annotation on failures: the visual judge** (off by default — enable with `TRUECOURSE_GUARD_VISUAL_JUDGE=1`). When a *web* step fails, the run already has a screenshot of the page it failed against — with the judge enabled, it shows that screenshot, the step's claim and the exact mismatch to a vision model and records what was actually on screen next to the failure (in the evidence transcript, and compactly in `LATEST.json`). It **cannot change an outcome** in either direction — the deterministic expectation decides, always — and it fail-softs to nothing if no model is reachable, so `guard run` stays a valid CI gate on a machine with no LLM configured at all. Its most useful answer is that the expected result *was* plainly visible despite the assertion missing: that is the signature of a brittle locator or matcher, i.e. the **test** being wrong rather than the app, and the run says so in those words. The close prints `visual judge N screenshots read · M where the expected result LOOKED present` whenever it fired. It is off by default because each red web step waits on a vision call; flip the flag when the annotation is worth the extra latency.
 
 **Not every red test is drift.** A scenario walks a flow: some steps assert a spec claim (they carry a milestone), others only prepare the world — the seeding request at the head of a flow, a login. When the step that fails is one of the *preparation* steps, the run annotates the result **blocked precondition**: the scenario still fails, but the documented behavior was never actually exercised, so the fix is the setup (seed the row, declare the fixture, supply the credential), not the code. The CLI prints it on its own line under the failure and the dashboard marks the test "setup failed", distinctly from a real expectation mismatch. It is an annotation only — it never changes an outcome and never softens a CI gate.
 
@@ -262,6 +280,9 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 │   ├── history.json          ← per-run summaries (gitignored)
 │   ├── evidence/<runId>/     ← per-failure transcripts (gitignored)
 │   ├── setup.json            ← last `truecourse guard setup` record + detection snapshot (gitignored)
+│   ├── interfaces.json       ← the derived interface catalog: cli + api, and the web screens (gitignored)
+│   ├── interfaces.authored.json ← the interfaces no derivation produces — every web task (committable)
+│   ├── interfaces.findings.md ← what authoring read in the source that the docs contradict (committable)
 │   └── result.json           ← last `guard generate` summary (gitignored)
 └── .cache/                  ← LLM caches (gitignored)
 ```
@@ -929,6 +950,9 @@ LLM.
 ```bash
 # Spec consolidation (docs → curated corpus)
 truecourse spec scan                              # Curate docs into corpus.json (areas + overlap flags)
+truecourse spec scan --only-<step>                # Run ONE scan step in isolation: orchestrate | curate | settle | overlap.
+                                                  # Prior steps replay from their stored artifacts (a missing one aborts,
+                                                  # naming the flag to run first); only --only-overlap writes corpus.json.
 truecourse spec status [--json]                   # Summary: docs, areas, open vs resolved overlaps
 
 # Conflict resolution — flagged within-area overlaps
@@ -957,7 +981,15 @@ truecourse spec source remove <id>                # Delete a source's snapshot a
 truecourse guard setup                            # PREREQUISITE for generate: derive + prove the recipe, declare external APIs, draft the data/auth seed
 truecourse guard setup --refresh                  # Re-derive the recipe and re-draft the seed (asks before replacing an existing seed script)
 truecourse guard setup -y                         # Skip the cost confirm (and, with --refresh, consent to replacing the seed)
+truecourse guard setup --only-<step>              # Run ONE setup step in isolation: recipe | catalog | interfaces | seed | auth.
+                                                  # Earlier steps replay from what they left on disk (a step nobody ran aborts,
+                                                  # naming the flag to run first), later steps never start, detection always
+                                                  # re-runs, and setup.json keeps the untouched steps' rows.
 truecourse guard generate                         # Author scenarios from spec sections (classify → generate → birth-validate)
+truecourse guard generate --only-<step>           # Run ONE generate step in isolation: extract | flows | worker.
+                                                  # Prior steps replay from their outcome caches (a missing one aborts,
+                                                  # naming the flag to run first); only --only-worker writes anything —
+                                                  # the scenarios, scenarios/manifest.json, flows.json and guard/result.json.
 truecourse guard run                              # Build via the recipe + run committed scenarios; exits non-zero on any drift (CI gate)
 truecourse guard run --scenario <id>              # Run a single scenario
 truecourse guard run --verbose                    # List every scenario result (one ✓ line per pass; default shows failures only)
@@ -972,6 +1004,13 @@ truecourse guard findings                         # The last generate's findings
 truecourse guard findings --kind drift --json     # Filter by class (drift | defect | escalation) or --flow <id>; --json is the agent-facing envelope
 truecourse guard status                           # Compact summary: setup state, section coverage, last run, last generate (LLM-free, no re-run)
 truecourse guard drifts                           # List the latest run's non-pass scenarios, most severe first (paginated; --all / --offset / --json)
+
+# Interfaces — the catalog scenarios are written WITH (cli + api derived, web tasks authored)
+truecourse guard interfaces                       # Read-only: every place, and the tasks authored on it (LLM-free)
+truecourse guard interfaces author                # Author the web tasks no derivation produces — one agent session per screen
+truecourse guard interfaces author --place <id>   # Author one screen (repeatable); --replace re-authors screens that already carry tasks
+truecourse guard interfaces author --concurrency <n>  # Run N sessions at once (default min(cpus, 4)); --limit <n> stops after N screens
+truecourse guard interfaces reconcile             # Collapse the state registry's synonyms — one LLM call, no authoring (-y skips the confirm)
 ```
 
 **Findings are split by whose fault they are.** A generate produces two very different
@@ -1196,6 +1235,7 @@ The built-in defaults below are Claude Code tier aliases, which mean nothing to 
 | guard scenario generate | `TRUECOURSE_MODEL_GUARD_GENERATE` | opus |
 | guard recipe derivation | `TRUECOURSE_MODEL_GUARD_RECIPE` | sonnet |
 | guard seed drafting | `TRUECOURSE_MODEL_GUARD_SEED` | opus |
+| guard run visual judge (opt-in: `TRUECOURSE_GUARD_VISUAL_JUDGE=1`) | `TRUECOURSE_MODEL_GUARD_VISUAL_JUDGE` | opus |
 
 `TRUECOURSE_FALLBACK_MODEL` sets the `--fallback-model` used when the primary is overloaded (in API mode `llm.api.fallbackModel` is the last resort). `TRUECOURSE_MAX_CONCURRENCY` caps concurrent LLM calls across every stage (default `min(cpus, 4)`) and the guard runner's parallel scenario sandboxes. `TRUECOURSE_MAX_API_CONCURRENCY` caps concurrent api-driver scenario boots separately (default `min(TRUECOURSE_MAX_CONCURRENCY, 3)`, clamped to it): an api scenario boots a whole target server that lives for the scenario, so running boots at the full sandbox width can starve the host — this bounds the number of resident servers. The api and cli pools SHARE the `TRUECOURSE_MAX_CONCURRENCY` budget, so a mixed-driver recipe never runs more than that many scenarios in flight at once (the api pool draws from the budget; cli takes the remainder, never throttled below it); a single-driver run uses the whole budget for that driver. `TRUECOURSE_LLM_TIMEOUT_SCALE` multiplies every stage's per-call timeout by a float (default `1`), on every transport — the `claude` spawn and the direct API alike; a slow model or proxy that trips the built-in ceilings can widen them all with one knob — e.g. `TRUECOURSE_LLM_TIMEOUT_SCALE=3` for a slow proxy. `TRUECOURSE_LLM_LOG` / `TRUECOURSE_LLM_DUMP` enable per-call logging.
 

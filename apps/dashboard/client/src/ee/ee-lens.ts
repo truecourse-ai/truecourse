@@ -5,7 +5,7 @@
  *
  * Lenses:
  *   - `codequality`  — analysis (Analytics · Violations · Settings)
- *   - `guard`        — spec coverage (Coverage · Flows · Journeys · Tests · Runs)
+ *   - `guard`        — spec coverage (Coverage · Flows · Interfaces · Runs)
  */
 
 /** EE Code Quality (analysis) tab bar: Analytics · Violations, then the common
@@ -15,9 +15,9 @@
  *  shown in hosted — violations link straight to the code on GitHub instead. */
 export const EE_ANALYSIS_TAB_ORDER = ['analytics', 'violations', 'settings'];
 
-/** EE Guard tab bar: the full OSS set — Coverage (default) · Flows · Journeys ·
- *  Tests · Runs. */
-export const EE_GUARD_TAB_ORDER = ['coverage', 'guardflows', 'tests', 'journeys', 'guarddrifts'];
+/** EE Guard tab bar: the full OSS set — Coverage (default) · Flows · Interfaces ·
+ *  Runs. (Flows carries the tests: one flow, one test, one page.) */
+export const EE_GUARD_TAB_ORDER = ['coverage', 'guardflows', 'interfaces', 'guarddrifts'];
 
 /** EE relabels for Code Quality tabs (none currently — registry labels stand). */
 export const EE_ANALYSIS_TAB_LABELS: Record<string, string> = {};

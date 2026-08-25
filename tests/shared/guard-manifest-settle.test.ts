@@ -21,7 +21,7 @@ function entry(overrides: Partial<GuardManifestFlow> = {}): GuardManifestFlow {
     flowFingerprint: 'sha256:flow',
     bindings: [{ doc: 'docs/cli.md', anchor: 'tasks', fingerprint: 'sha256:section' }],
     scenarios: [],
-    journeys: [{ surface: 'cli', journeyIds: ['cli/tasks'] }],
+    interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks'] }],
     generationInputsHash: HASH,
     gaps: [],
     ...overrides,
@@ -30,13 +30,13 @@ function entry(overrides: Partial<GuardManifestFlow> = {}): GuardManifestFlow {
 
 describe('unaccountedSurfaces', () => {
   it('is empty when the planned surface committed a test', () => {
-    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', surface: 'cli', status: 'passing' }] })
+    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', drivers: ['cli'], status: 'passing' }] })
     expect(unaccountedSurfaces(flow)).toEqual([])
     expect(violatesSettleInvariant(flow)).toBe(false)
   })
 
   it('is empty when a committed test FAILED — a red test is an outcome', () => {
-    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', surface: 'cli', status: 'failing' }] })
+    const flow = entry({ scenarios: [{ id: 'create-a-task.cli.1', drivers: ['cli'], status: 'failing' }] })
     expect(violatesSettleInvariant(flow)).toBe(false)
   })
 
@@ -53,11 +53,11 @@ describe('unaccountedSurfaces', () => {
 
   it('names only the unaccounted surface when a sibling is covered', () => {
     const flow = entry({
-      journeys: [
-        { surface: 'cli', journeyIds: ['cli/tasks'] },
-        { surface: 'api', journeyIds: ['api/post-tasks'] },
+      interfaces: [
+        { surface: 'cli', interfaceIds: ['cli/tasks'] },
+        { surface: 'api', interfaceIds: ['api/post-tasks'] },
       ],
-      scenarios: [{ id: 'create-a-task.cli.1', surface: 'cli', status: 'passing' }],
+      scenarios: [{ id: 'create-a-task.cli.1', drivers: ['cli'], status: 'passing' }],
     })
     expect(unaccountedSurfaces(flow)).toEqual(['api'])
     expect(violatesSettleInvariant(flow)).toBe(true)
@@ -65,8 +65,8 @@ describe('unaccountedSurfaces', () => {
 
   it('holds vacuously for a flow that planned nothing (every surface gapped at match)', () => {
     const flow = entry({
-      journeys: [],
-      gaps: [{ surface: 'cli', kind: 'unrealizable', reason: 'no journey serves this' }],
+      interfaces: [],
+      gaps: [{ surface: 'cli', kind: 'unrealizable', reason: 'no interface serves this' }],
     })
     expect(unaccountedSurfaces(flow)).toEqual([])
     expect(violatesSettleInvariant(flow)).toBe(false)

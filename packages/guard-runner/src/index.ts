@@ -7,7 +7,21 @@
 export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite } from './run.js'
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
+// The board — `LATEST.json` as the merged current-state view across runs.
+export { mergeGuardBoard, summarizeResults, withScenarioAdjudication } from './board.js'
+
 export { newRunNonce, scenarioUnique, applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
+export {
+  SANDBOX_TOKEN,
+  applySandbox,
+  applySandboxEnv,
+  applySandboxSetup,
+  applySandboxExpect,
+  mapComparisonStrings,
+} from './sandbox-token.js'
+
+// `${captured:…}` — what a later step reads out of what an earlier step produced.
+export { applyCaptured, CapturedValueError } from './captured.js'
 
 // No-op anomaly detection (C4) — per-driver step aggregation + the verdict the
 // runner reports and the generator aborts on.
@@ -35,14 +49,20 @@ export type {
 
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
+export { createGuardSharedWorld } from './shared-world.js'
+export type { GuardSharedWorld } from './shared-world.js'
 
-export { loadScenarios, walkScenarioRelFiles, outdatedFormatMessage } from './scenario-loader.js'
+export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'
+export { crossCheckClaimRefs } from './claim-refs.js'
+export type { ClaimRefSources } from './claim-refs.js'
+export { crossCheckCaptureRefs } from './capture-refs.js'
 
 export {
   loadRecipe,
   resolveEntry,
   computeRecipeFingerprint,
+  FINGERPRINT_INPUTS,
   resolveApiCredentials,
   credentialShapeWarning,
   warnCredentialShapes,
@@ -51,13 +71,18 @@ export {
   DEFAULT_API_HEALTH_PATH,
   DEFAULT_API_READY_TIMEOUT_MS,
   DEFAULT_API_SERVER_NAME,
+  DEFAULT_WEB_HEALTH_PATH,
+  DEFAULT_WEB_READY_TIMEOUT_MS,
   resolveApiServers,
+  resolveWebSurface,
   resolveScenarioServer,
   credentialServers,
 } from './recipe.js'
 export type {
   Recipe,
   RecipeApi,
+  RecipeWeb,
+  ResolvedWebSurface,
   RecipeApiServer,
   ResolvedApiServer,
   ResolvedApiServers,
@@ -70,6 +95,7 @@ export type {
 } from './recipe.js'
 export {
   RecipeSchema,
+  RecipeWebSchema,
   RecipeApiSchema,
   RecipeApiServerSchema,
   RecipeApiCredentialSchema,
@@ -80,6 +106,7 @@ export {
   RecipeApiExternalEnvSchema,
 } from './recipe.js'
 export { hashableRecipeText, resolveSeedScript, recipeControlledEnvVars } from './recipe.js'
+export { maskedRecipeText, maskRecipeSecret } from './recipe.js'
 export { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from './recipe.js'
 
 // The route manifest — which workspace app serves which path, derived
@@ -116,6 +143,34 @@ export type {
   ResolvedExternal,
 } from './externals.js'
 
+export {
+  DependencyCatalogError,
+  maskStoredSecret,
+  loadDependencyCatalog,
+  loadDependenciesLocal,
+  resolveDependencies,
+  resolveDependency,
+  scenarioDependencyNames,
+  dependencyBlockFor,
+  suppliedInstancesFor,
+  materializeSupplied,
+  applySupplied,
+  applySuppliedExpect,
+  omitsOptionalPair,
+  externalServiceStates,
+  SUPPLIED_DIR,
+} from './dependencies.js'
+export type {
+  DependencyState,
+  DependencyRequirement,
+  ResolvedDependency,
+  ResolvedDependencies,
+  DependencyBlock,
+  SuppliedInstance,
+  SuppliedValues,
+  SuppliedOmissions,
+} from './dependencies.js'
+
 export { runApiScenario } from './api/run-api-scenario.js'
 export type { RunApiScenarioContext, ServesPathVerdict } from './api/run-api-scenario.js'
 export {
@@ -138,8 +193,8 @@ export type { ApiStepCapture, ExecuteApiRequestOptions } from './api/executor.js
 export { CookieJar, defaultCookiePath, cookiePathMatches } from './api/cookies.js'
 export { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 export type { RunCredentialRequestsOptions } from './api/credential-request.js'
-export { evaluateApiExpect, parseJsonBody } from './api/expect.js'
-export type { ApiExpectMismatch, EvaluateApiExpectParams } from './api/expect.js'
+export { evaluateApiExpect, observeApiExpect, parseJsonBody } from './api/expect.js'
+export type { ApiExpectMismatch, ApiCheck, ApiObservation, EvaluateApiExpectParams } from './api/expect.js'
 export {
   interpolate,
   interpolateRequest,
@@ -166,18 +221,51 @@ export {
   SANDBOX_SETUP_EXPECTED,
   CAPABILITY_SETUP_EXPECTED,
   ORPHANED_STDIO_INFRA,
+  NO_WEB_SURFACE_INFRA,
 } from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
 
-export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
-export type { Sandbox, SandboxOptions } from './sandbox.js'
+// The visual-judge seam — a callback TYPE only. This package stays LLM-free; core
+// supplies the implementation. See `visual-judge.ts` for the contract.
+export type { GuardVisualJudge, GuardVisualJudgeInput } from './visual-judge.js'
+
+// The step-driver seam — one module per surface, routed by the registry. A step
+// says how it acts; the runner asks who owns it and hands it over.
+export {
+  buildStepDrivers,
+  driverFor,
+  closeStepDrivers,
+  cliStepDriver,
+  webStepDriver,
+  apiStepDriver,
+  sandboxSurface,
+  resolveRequestStep,
+  NO_SERVED_SURFACE_INFRA,
+  NO_SCHEMA_BINDING_INFRA,
+} from './drivers/index.js'
+export type {
+  StepDriver,
+  StepOutcome,
+  StepRunContext,
+  ScenarioDrivers,
+  BuildStepDriversOptions,
+  CliStepDriverOptions,
+  WebStepDriverOptions,
+  ApiStepDriverOptions,
+  SandboxSurface,
+  SurfaceOpenContext,
+  OpenSurfaceResult,
+} from './drivers/index.js'
+
+export { createSandbox, createWorkingSandbox, resolveInSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
+export type { Sandbox, SandboxOptions, WorkingSandbox } from './sandbox.js'
 
 export { constructChildEnv, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
 export type { ChildEnvOptions } from './child-env.js'
 
 export { applyCapabilities, CapabilityError } from './capabilities/index.js'
 export type { CapabilityContext } from './capabilities/index.js'
-export { materializeGit } from './capabilities/git.js'
+export { materializeGit, gitChildEnv, GIT_DEFAULT_IDENTITY } from './capabilities/git.js'
 export { startHttpStubs, applyHttpStubOrigins, evaluateStubExpect, pathMatches } from './capabilities/http.js'
 export type { HttpStubsHandle, HttpStubViolation, HttpStubRequestRecord } from './capabilities/http.js'
 export { startExternalProxies } from './capabilities/external-proxy.js'
@@ -194,7 +282,7 @@ export type { StepCapture, ExecuteStepOptions } from './executor.js'
 export { normalize } from './normalizers.js'
 export type { NormalizerContext } from './normalizers.js'
 
-export { evaluateExpect } from './expect.js'
+export { evaluateExpect, matchTextMatcher, describeTextMatcher } from './expect.js'
 export type { ExpectMismatch, EvaluateExpectParams } from './expect.js'
 
 export { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS } from './build.js'
@@ -222,8 +310,48 @@ export type {
   PreflightEntryOptions,
 } from './preflight.js'
 
-export { writeEvidence } from './evidence.js'
-export type { EvidenceStep, WriteEvidenceParams } from './evidence.js'
+export { writeEvidence, stepExcerpt, STEP_OUTPUT_LIMIT, isFileStepKind } from './evidence.js'
+export type {
+  EvidenceStep,
+  EvidenceWebStep,
+  EvidenceWebCheck,
+  EvidenceApiStep,
+  EvidenceApiCheck,
+  EvidencePatchOp,
+  WriteEvidenceParams,
+} from './evidence.js'
+
+// The WEB driver — the served surface, the browser, and the step executor. A web
+// step runs inside an ordinary sandbox scenario, so there is no `runWebScenario`:
+// `runScenario` opens this world at the first web step and closes it at the end.
+export { openWebSession } from './web/session.js'
+export type { WebSession, OpenWebSessionOptions, OpenWebSessionResult } from './web/session.js'
+export { startWebSurface } from './web/surface.js'
+export type { StartWebSurfaceOptions, WebSurfaceHandle } from './web/surface.js'
+export {
+  launchWebBrowser,
+  isBrowserInstalled,
+  BROWSER_MISSING_MESSAGE,
+  PLAYWRIGHT_MISSING_MESSAGE,
+  WEB_VIEWPORT,
+  WEB_VIDEO_FILE,
+} from './web/browser.js'
+export type { WebBrowserHandle, LaunchWebBrowserOptions, ArmedFileChooser } from './web/browser.js'
+export { materializeWebFile } from './web/upload.js'
+export type { WebFilePayload, MaterializeWebFileResult } from './web/upload.js'
+export {
+  executeWebStep,
+  webLocator,
+  pageAddress,
+  webScreenshotFile,
+  DEFAULT_WEB_STEP_TIMEOUT_MS,
+  WEB_TEXT_LIMIT,
+} from './web/executor.js'
+export type { WebStepResult, ExecuteWebStepOptions, WebCheck } from './web/executor.js'
+export { resolveWebStep } from './web/tokens.js'
+
+export { patchJsonText, resolvePatchValue, jsonSyntaxPosition, PatchError } from './patch.js'
+export type { PatchJsonTextParams, JsonSyntaxPosition } from './patch.js'
 
 export {
   guardDir,
@@ -233,12 +361,21 @@ export {
   guardHistoryPath,
   guardResultPath,
   guardSetupPath,
-  guardJourneysPath,
+  guardInterfacesPath,
+  guardAuthoredInterfacesPath,
+  guardInterfaceFindingsPath,
+  guardSetupFindingsPath,
+  guardAdjudicateFindingsPath,
+  guardFindingsReportPath,
   scenariosDir,
   recipePath,
   manifestPath,
   guardDecisionsPath,
+  guardFlowsPath,
+  guardClaimsPath,
   externalsLocalPath,
+  dependenciesPath,
+  dependenciesLocalPath,
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,
@@ -255,7 +392,18 @@ export {
   guardAutoResolutionsPath,
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
-  readJourneyCatalog,
+  readInterfaceCatalog,
+  readAuthoredInterfaceCatalog,
+  readMergedInterfaceCatalog,
+  mergeInterfaceCatalogs,
+  mergeInterfaceLists,
+  mergeRegistries,
+  staleAuthoredPlaceDiagnostics,
+  type InterfaceMergeDiagnostic,
+  readInterfaceCatalogRaw,
+  readGuardFlowsCorpus,
+  readGuardClaimsCorpus,
+  writeGuardClaims,
   atomicWriteJson,
 } from './store.js'
 
@@ -280,7 +428,7 @@ export type {
   SectionText,
 } from './section-index.js'
 
-export { isJourneyDrifted } from './journey-drift.js'
+export { isInterfaceDrifted } from './interface-drift.js'
 
 export { corpusKeptDocs, indexRepoDocs, nodeRefContext } from './doc-index.js'
 export type { RepoDocIndexes } from './doc-index.js'

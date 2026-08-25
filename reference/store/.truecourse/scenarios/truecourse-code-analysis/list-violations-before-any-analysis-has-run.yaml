@@ -1,0 +1,66 @@
+id: list-violations-before-any-analysis-has-run
+title: A developer registers a directory and finds there is nothing to list yet
+promise: A developer registers a directory and finds there is nothing to list yet
+flow:
+  id: list-violations-before-any-analysis-has-run
+  fingerprint: sha256:453e5193b6618d2b0705c0bc11be96993b8e0a69c97d964d9e95066073327b1c
+interface:
+  path:
+    - cli/add
+    - cli/list
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:b7b34908386f2c205afb3ab048ed34ebca96cd05f9ae0622025f613a45c574e8
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: add
+    fingerprint: sha256:3d00ba881dffc7c0184ea08bc4b73b83bd1d180ef11df57a47e2583f070f1a3d
+setup:
+  files:
+    package.json: |
+      {
+        "name": "unanalyzed-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/.gitignore:
+          exists: true
+        .truecourse/LATEST.json:
+          absent: true
+    note: >-
+      Registration created the store; no analysis snapshot exists in it.
+      `LATEST.json` is the artifact an analysis always writes, so its absence is
+      decisive on its own: whatever this directory does or does not contain, no
+      analysis has run in it.
+    milestone:
+      - cli-ref-add-does-not-analyze
+  - run:
+      - list
+    expect:
+      exit: 0
+      stdout:
+        matches: ^(?=[\s\S]*No violations)(?![\s\S]*Showing )(?![\s\S]*violations \()[\s\S]*$
+    note: >-
+      The other observation of "without analyzing": a registered repository whose
+      listing is EMPTY — the command ran and rendered its empty state ("No
+      violations…"), and neither of the two things a non-empty listing always prints
+      is there (the window line and the violation-count footer). The positive half is
+      what separates "there is nothing to list" from "the command printed nothing at
+      all", which the absences alone cannot tell apart.
+    milestone:
+      - cli-ref-add-does-not-analyze

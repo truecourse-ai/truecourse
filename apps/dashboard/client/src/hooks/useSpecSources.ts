@@ -6,7 +6,7 @@
  * / remove) and re-reads the registry itself the moment one lands, so the list
  * is never a socket round-trip behind the action that changed it. `reloadKey` is
  * the OTHER refetch signal — bumped by the page on `spec:complete { kind:
- * 'sources' }`, the same idiom `useGuardExternals` takes, so a CLI-side add
+ * 'sources' }`, the same idiom `useGuardDependencies` takes, so a CLI-side add
  * shows up too. `enabled` keeps a repo without a local checkout (or a workspace
  * corpus) from asking for a registry it cannot have.
  */

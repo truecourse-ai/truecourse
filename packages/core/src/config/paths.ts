@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TRUECOURSE_DIR = '.truecourse';
+/** Directory name of the per-repo store (and of the user-level `~/.truecourse`). */
+export const TRUECOURSE_DIR = '.truecourse';
 // Committable (NOT ignored): `config.json`, `LATEST.json`, `specs/corpus.json`,
 // `specs/decisions.json` — and the `contracts/` `.tc` tree, which is git-tracked
 // ON PURPOSE so the generated spec→code map travels with the repo. `LATEST.json`
@@ -14,19 +15,32 @@ const TRUECOURSE_DIR = '.truecourse';
 // `contracts/result.json` — the last-generate run result (transient run output
 // the dashboard reads back; the rest of `contracts/` stays tracked) — and the
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
-// report), `guard/evidence/` transcripts, `guard/journeys.json` (the journey
+// report), `guard/evidence/` transcripts, `guard/interfaces.json` (the interface
 // catalog, re-derived from the working tree on every mapping — what travels with
-// the repo are the journey fingerprints embedded in scenarios),
+// the repo are the interface fingerprints embedded in scenarios),
 // `guard/auto-resolutions.json` (the auto-resolve ledger + flow-taint set —
 // transient run memory), and `guard/history.json` (covered by the
 // unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
 // LATEST convention as the analyze baseline.
+//
+// `guard/interfaces.authored.json` is the deliberate ABSENCE from the list below:
+// the hand-authored half of that catalog, holding the surfaces no derivation
+// produces (every web interface in existence). Nothing re-derives it, so it is
+// committed — an ignored copy would leave a fresh clone with cli + api and
+// nothing else. The derived `guard/interfaces.json` stays ignored; the two are
+// joined at read time, authored winning.
 //
 // `scenarios/externals.local.json` is the secrets overlay for the committed
 // `api.externals` declaration: base URLs and API keys for the external
 // accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH
 // services exist (and is committed so the team shares the declaration), this file
 // holds the values that must never reach git.
+//
+// `scenarios/dependencies.local.json` is the same split one level up: the committed
+// `scenarios/dependencies.json` declares WHICH classes of starting state the
+// program needs (and travels with the repo), while this file holds the machine's
+// INSTANCES — a path to a real project, a config dir, an API key — which are
+// per-developer by definition and must never reach git.
 /** The template written to `<repo>/.truecourse/.gitignore` on first use — the
  *  materialized committable-vs-derived split (exported so a test can pin it). */
 export const GITIGNORE_CONTENTS = [
@@ -42,9 +56,11 @@ export const GITIGNORE_CONTENTS = [
   'guard/result.json',
   'guard/setup.json',
   'guard/evidence/',
-  'guard/journeys.json',
+  'guard/interfaces.json',
   'guard/auto-resolutions.json',
   'scenarios/externals.local.json',
+  'scenarios/dependencies.local.json',
+  'sessions/',
 ].join('\n') + '\n';
 
 // ---------------------------------------------------------------------------
@@ -122,6 +138,12 @@ export function resolveRepoDir(startDir: string): string | null {
  * Ensure `<repoDir>/.truecourse/` exists, writing a default `.gitignore`
  * alongside it so runtime state (db, ui-state, logs) stays out of version
  * control while `config.json` can be committed by the team.
+ *
+ * An EXISTING `.gitignore` is upgraded in place: every template line it is
+ * missing is appended (user additions are preserved, nothing is removed). The
+ * template grows secret-bearing entries over time — `scenarios/
+ * dependencies.local.json` holds registered API keys — and a repo initialized
+ * before such an entry existed must not be able to `git add` a secret.
  */
 export function ensureRepoTruecourseDir(repoDir: string): string {
   const tcDir = getRepoTruecourseDir(repoDir);
@@ -130,6 +152,14 @@ export function ensureRepoTruecourseDir(repoDir: string): string {
   const gitignore = path.join(tcDir, '.gitignore');
   if (!fs.existsSync(gitignore)) {
     fs.writeFileSync(gitignore, GITIGNORE_CONTENTS, 'utf-8');
+    return tcDir;
+  }
+  const existing = fs.readFileSync(gitignore, 'utf-8');
+  const have = new Set(existing.split('\n').map((line) => line.trim()));
+  const missing = GITIGNORE_CONTENTS.split('\n').filter((line) => line !== '' && !have.has(line));
+  if (missing.length > 0) {
+    const joined = existing.endsWith('\n') || existing === '' ? existing : existing + '\n';
+    fs.writeFileSync(gitignore, joined + missing.join('\n') + '\n', 'utf-8');
   }
   return tcDir;
 }

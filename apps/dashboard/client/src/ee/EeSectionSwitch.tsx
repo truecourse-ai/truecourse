@@ -10,8 +10,8 @@ import { FlaskConical, Network } from 'lucide-react';
 import type { DashboardSection, NavIcon } from '@/navigation/registry';
 
 const SEGMENTS: { id: DashboardSection; label: string; icon: NavIcon }[] = [
-  { id: 'codequality', label: 'Code Quality', icon: Network },
   { id: 'guard', label: 'Spec Guard', icon: FlaskConical },
+  { id: 'codequality', label: 'Code Quality', icon: Network },
 ];
 
 export function EeSectionSwitch({

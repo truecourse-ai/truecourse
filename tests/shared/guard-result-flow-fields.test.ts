@@ -6,7 +6,7 @@ import {
 } from '../../packages/shared/src/guard/index'
 
 // A run result gained three optional flow-era annotations — `flowId`, the failing
-// step's `failedMilestone`, and the `journeyDrifted` dot. All optional, so runs
+// step's `failedMilestone`, and the `interfaceDrifted` dot. All optional, so runs
 // stored before flows existed keep parsing.
 
 const binds = { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x' }
@@ -22,9 +22,9 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
       failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
       flowId: 'publish',
       failedMilestone: 2,
-      journeyDrifted: true,
+      interfaceDrifted: true,
     })
-    expect(parsed).toMatchObject({ flowId: 'publish', failedMilestone: 2, journeyDrifted: true })
+    expect(parsed).toMatchObject({ flowId: 'publish', failedMilestone: 2, interfaceDrifted: true })
   })
 
   it('parses a result from before flows existed (the fields stay absent)', () => {
@@ -37,7 +37,7 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
     })
     expect(parsed.flowId).toBeUndefined()
     expect(parsed.failedMilestone).toBeUndefined()
-    expect(parsed.journeyDrifted).toBeUndefined()
+    expect(parsed.interfaceDrifted).toBeUndefined()
   })
 
   it('rejects a non-positive milestone', () => {
@@ -53,7 +53,6 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
         branch: null,
         commit: null,
         recipeFingerprint: 'sha256:r',
-        scenarioFormat: 2,
       },
       summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0 },
       scenarios: [
@@ -65,12 +64,12 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
           durationMs: 12,
           flowId: 'publish',
           failedMilestone: 3,
-          journeyDrifted: true,
+          interfaceDrifted: true,
         },
       ],
       sections: [{ doc: 'docs/spec.md', section: 'a/b', status: 'fail', scenarioIds: ['publish.cli.1'] }],
     })
-    expect(latest.scenarios[0]).toMatchObject({ flowId: 'publish', failedMilestone: 3, journeyDrifted: true })
+    expect(latest.scenarios[0]).toMatchObject({ flowId: 'publish', failedMilestone: 3, interfaceDrifted: true })
   })
 
   // A fourth annotation, same shape as the others — optional, never an outcome.

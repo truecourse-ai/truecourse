@@ -132,6 +132,24 @@ export interface GuardStore {
     file: string,
   ): Promise<string | null>;
   /**
+   * The file NAMES a scenario's evidence bundle holds, addressed by the same
+   * repo-relative evidence DIRECTORY `readGuardEvidenceAt` takes. Sorted, and empty
+   * for an unsafe dir or one that was never written. The one way to discover the
+   * artifacts nothing points at — a browser run's `step-<n>.png` / `session.webm`
+   * are named by no transcript field.
+   */
+  listGuardEvidenceAt(repoPath: string, evidenceDir: string): Promise<string[]>;
+  /**
+   * One evidence file's raw BYTES, addressed like `readGuardEvidenceAt`. The binary
+   * sibling of that text read: a screenshot or a video decoded as UTF-8 is a
+   * corrupted file, so the visual artifacts are read through here.
+   */
+  readGuardEvidenceBytesAt(
+    repoPath: string,
+    evidenceDir: string,
+    file: string,
+  ): Promise<Buffer | null>;
+  /**
    * Persist a BIRTH-finding's evidence for a generate result. A birth run is
    * `persist: false`, so it never creates a run row — its transcripts attach to the
    * generate report (`ref`'s commit) instead, resolved by `readGuardEvidenceAt`'s
@@ -179,6 +197,37 @@ export interface GuardStore {
 
 /** Run ids, evidence filenames, scenario-dir names — no separators, no `..`. */
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Resolve a repo-relative evidence directory INSIDE the guard evidence root, or
+ * `null` when it points anywhere else. The one confinement every dir-addressed
+ * evidence read shares — a `../`-laced pointer can never escape it, whether the
+ * caller went on to read text, bytes, or the listing.
+ */
+function confinedEvidenceDir(repoPath: string, evidenceDir: string): string | null {
+  const evidenceRoot = path.resolve(guardDir(repoPath), 'evidence');
+  const dir = path.resolve(repoPath, evidenceDir);
+  if (dir !== evidenceRoot && !dir.startsWith(evidenceRoot + path.sep)) return null;
+  return dir;
+}
+
+/**
+ * The absolute path of one evidence file, or `null` for an unsafe file name, a
+ * directory outside the evidence root, or a path that is not an existing file.
+ */
+function confinedEvidenceFile(
+  repoPath: string,
+  evidenceDir: string,
+  file: string,
+): string | null {
+  if (!SAFE_SEGMENT.test(file)) return null;
+  const dir = confinedEvidenceDir(repoPath, evidenceDir);
+  if (dir == null) return null;
+  const full = path.resolve(dir, file);
+  if (!full.startsWith(dir + path.sep)) return null;
+  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+  return full;
+}
 
 /** The PR-overlay sentinel scope (`_pr/<number>`) — enterprise-only. */
 function isPrScope(scope: string | undefined): boolean {
@@ -293,14 +342,27 @@ class FileGuardStore implements GuardStore {
     evidenceDir: string,
     file: string,
   ): Promise<string | null> {
-    if (!SAFE_SEGMENT.test(file)) return null;
-    const evidenceRoot = path.resolve(guardDir(repoPath), 'evidence');
-    const dir = path.resolve(repoPath, evidenceDir);
-    if (dir !== evidenceRoot && !dir.startsWith(evidenceRoot + path.sep)) return null;
-    const full = path.resolve(dir, file);
-    if (!full.startsWith(dir + path.sep)) return null;
-    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
-    return fs.readFileSync(full, 'utf-8');
+    const full = confinedEvidenceFile(repoPath, evidenceDir, file);
+    return full == null ? null : fs.readFileSync(full, 'utf-8');
+  }
+
+  async listGuardEvidenceAt(repoPath: string, evidenceDir: string): Promise<string[]> {
+    const dir = confinedEvidenceDir(repoPath, evidenceDir);
+    if (dir == null || !fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile())
+      .map((e) => e.name)
+      .sort();
+  }
+
+  async readGuardEvidenceBytesAt(
+    repoPath: string,
+    evidenceDir: string,
+    file: string,
+  ): Promise<Buffer | null> {
+    const full = confinedEvidenceFile(repoPath, evidenceDir, file);
+    return full == null ? null : fs.readFileSync(full);
   }
 
   async writeGuardResultEvidence(): Promise<void> {
@@ -433,6 +495,13 @@ export const readGuardEvidenceAt = (
   evidenceDir: string,
   file: string,
 ): Promise<string | null> => active.readGuardEvidenceAt(repoPath, evidenceDir, file);
+export const listGuardEvidenceAt = (repoPath: string, evidenceDir: string): Promise<string[]> =>
+  active.listGuardEvidenceAt(repoPath, evidenceDir);
+export const readGuardEvidenceBytesAt = (
+  repoPath: string,
+  evidenceDir: string,
+  file: string,
+): Promise<Buffer | null> => active.readGuardEvidenceBytesAt(repoPath, evidenceDir, file);
 export const writeGuardResultEvidence = (
   ref: RepoRef,
   scenarioSeg: string,

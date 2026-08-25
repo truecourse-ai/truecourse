@@ -1,0 +1,129 @@
+id: reject-unusable-book-details
+title: Members receive validation errors for missing or unusable book details
+promise: A member receives a validation error when trying to add a book without usable isbn, title, or author details.
+flow:
+  id: reject-unusable-book-details
+  fingerprint: sha256:9cd7b532753a6c6f54f72c7af46d5175f30fdfb774df02a1842975715962bf12
+journey:
+  path:
+    - api/post-books
+  fingerprints:
+    - sha256:669ba831388d19c1887828c546e0ef8d3c0c2dbb324a837285d007ec80ba3906
+binds:
+  - doc: docs/openapi.yaml
+    section: paths/post-addbook
+    fingerprint: sha256:1c55d318ba4976a4f903da7aae2a2176e9a38b4b770880d98a6591d89a1fa815
+normalize: []
+driver: api
+steps:
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        title: Validation Test ${unique}
+        author: Scenario Author ${unique}
+    expect:
+      status: 400
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: '9781234567897'
+        author: Scenario Author ${unique}
+    expect:
+      status: 400
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: '9781234567897'
+        title: Validation Test ${unique}
+    expect:
+      status: 400
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: not-an-isbn
+        title: Validation Test ${unique}
+        author: Scenario Author ${unique}
+    expect:
+      status: 400
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: '9781234567897'
+        title: ''
+        author: Scenario Author ${unique}
+    expect:
+      status: 400
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1
+  - request:
+      method: POST
+      path: /books
+      headers:
+        Authorization: '{{cred:member}}'
+      json:
+        isbn: '9781234567897'
+        title: Validation Test ${unique}
+        author: ''
+    expect:
+      status: 400
+      headers:
+        content-type:
+          contains: application/json
+      json:
+        error:
+          exists: true
+      schema: true
+    milestone: 1

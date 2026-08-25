@@ -1,0 +1,116 @@
+id: turn-llm-rules-on-and-off-from-the-cli-reference
+title: A team turns LLM rules off for their repository, back on, and then to the default
+promise: A team turns LLM rules off for their repository, back on, and then to the default
+flow:
+  id: turn-llm-rules-on-and-off-from-the-cli-reference
+  fingerprint: sha256:02184154f03da86813105edaa93b540372ab60144a4139fe4807cf92041737bd
+interface:
+  path:
+    - cli/add
+    - cli/rules-llm
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:23ad6cb2a11da30f8f40226ccd122367e3fe43b2b4cdde3ee7ab696f047cbf78
+binds:
+  - doc: reference/spec-docs/reference/cli.mdx
+    section: rules
+    fingerprint: sha256:3db6a25efb8692740c901c8d12d5b78a7bef67efe18ab0bf1cc7dd1b5c1d339f
+setup:
+  files:
+    package.json: |
+      {
+        "name": "llm-rules-sample",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    src/index.js: |
+      export function main(input) {
+        return input
+      }
+  env:
+    TRUECOURSE_TELEMETRY: '0'
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    expect:
+      exit: 0
+      files:
+        .truecourse/.gitignore:
+          exists: true
+    note: Plumbing — every `rules` subcommand needs a registered repository.
+  - run:
+      - rules
+      - llm
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules for[^\n]*global default
+      files:
+        .truecourse/config.json:
+          absent: true
+    note: >-
+      The status read, before anything is overridden: the command reports the LLM
+      rules' state and says the state comes from the global default rather than from
+      this repository.
+    milestone:
+      - cli-ref-rules-llm-shows-the-llm-rules-status
+  - run:
+      - rules
+      - llm
+      - '--disable'
+    expect:
+      exit: 0
+      files:
+        .truecourse/config.json:
+          exists: true
+    note: The mutation; the read-back is the proof.
+  - run:
+      - rules
+      - llm
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules for[^\n]*disabled
+    note: Read back — the repository's LLM rules are off.
+    milestone:
+      - cli-ref-rules-llm-disable-disables-llm-rules
+  - run:
+      - rules
+      - llm
+      - '--enable'
+    expect:
+      exit: 0
+    note: The inverse mutation, from the off state the previous step established.
+  - run:
+      - rules
+      - llm
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules for[^\n]*enabled
+    note: Read back — the repository's LLM rules are on again.
+    milestone:
+      - cli-ref-rules-llm-enable-enables-llm-rules
+  - run:
+      - rules
+      - llm
+      - '--reset'
+    expect:
+      exit: 0
+    note: Drop the per-repo override.
+  - run:
+      - rules
+      - llm
+    expect:
+      exit: 0
+      stdout:
+        matches: LLM rules for[^\n]*global default
+    note: >-
+      The status is sourced from the global default again. The effective value may
+      well be the same as it was under the override, so the SOURCE label is the only
+      honest evidence that the override is gone.
+    milestone:
+      - cli-ref-rules-llm-reset-clears-the-override

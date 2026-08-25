@@ -1,6 +1,6 @@
 /**
- * Guard coverage view tests: the onboarding empty states (now the Overview
- * pane, shown when no item tab is open), coverage rendering with per-status
+ * Guard coverage view tests: the ONE no-document empty state (the pane at rest,
+ * shown when no item tab is open), coverage rendering with per-status
  * treatments, the filtering totals strip (incl. the blocked-on chip expanding to
  * the capability breakdown moved from the Report tab), section → scenario detail,
  * the evidence transcript fetch, and the shared preview/pin TAB model (doc tabs
@@ -21,7 +21,8 @@ import type {
   GuardSectionCoverageStatus,
   GuardStaleness,
 } from '@truecourse/shared';
-import { SpecCorpusView, overlapKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
+import { conflictId } from '@truecourse/shared';
+import { SpecCorpusView, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { useGuardCoverageTabs } from '@/hooks/useGuardCoverageTabs';
@@ -193,7 +194,17 @@ const CORPUS = {
 
 // A two-doc corpus with a within-area overlap — the sidebar shows two doc rows
 // plus one conflict row, so preview/pin and conflict tabs are all exercisable.
-const OVERLAP_KEY = overlapKey('core/auth', 'docs/SPEC.md', 'docs/OTHER.md');
+const OVERLAP = {
+  docs: ['docs/SPEC.md', 'docs/OTHER.md'] as [string, string],
+  note: 'they disagree on rate limits',
+  sections: [
+    { doc: 'docs/SPEC.md', heading: 'Failing bit' },
+    { doc: 'docs/OTHER.md', heading: 'Failing bit' },
+  ],
+};
+// The row/tab id is the one `buildCorpusConflicts` stamps — never rebuilt from the
+// pair, which cannot tell two disputes on the same two docs apart.
+const OVERLAP_KEY = conflictId('core/auth', 'docs/SPEC.md', 'docs/OTHER.md', OVERLAP);
 const CORPUS2 = {
   ...CORPUS,
   data: {
@@ -210,16 +221,7 @@ const CORPUS2 = {
           product: 'core',
           concern: 'auth',
           docRefs: ['docs/SPEC.md', 'docs/OTHER.md'],
-          overlaps: [
-            {
-              docs: ['docs/SPEC.md', 'docs/OTHER.md'],
-              note: 'they disagree on rate limits',
-              sections: [
-                { doc: 'docs/SPEC.md', heading: 'Failing bit' },
-                { doc: 'docs/OTHER.md', heading: 'Failing bit' },
-              ],
-            },
-          ],
+          overlaps: [OVERLAP],
         },
       ],
     },
@@ -243,7 +245,7 @@ function stubFetchCoverage(coverage: GuardDocCoverage) {
       if (u.includes('/guard/coverage')) return json(coverage);
       if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
       if (u.includes('/guard/evidence')) return new Response('TRANSCRIPT-BODY-XYZ', { status: 200 });
-      if (u.includes('/guard/scenario')) return json({ id: 's1', file: 's1.yaml', content: 'guard: 2\nid: s1' });
+      if (u.includes('/guard/scenario')) return json({ id: 's1', file: 's1.yaml', content: 'id: s1' });
       return json({});
     }),
   );
@@ -309,44 +311,50 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('GuardCoveragePage — onboarding empty states (the Overview pane)', () => {
+describe('GuardCoveragePage — the no-document pane is ONE shared empty state', () => {
   beforeEach(stubFetch);
 
-  it('points to spec scan when there is no corpus', () => {
-    renderPage({ ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false }, '/repos/r');
-    expect(screen.getByText('No spec corpus')).toBeInTheDocument();
-    expect(screen.getByText('truecourse spec scan')).toBeInTheDocument();
-  });
+  // The stage CTAs are gone. Whatever the pipeline flags say, a pane with
+  // nothing selected rests on the corpus-wide OVERVIEW — read-only numbers,
+  // nothing clickable. "What next?" is the header's own Scan / Generate / Run
+  // buttons; the doc list is the sidebar.
+  const STAGES: [string, GuardStaleness][] = [
+    ['no corpus at all', { ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false }],
+    ['a corpus with no guards', { ...ALL_TRUE, hasGenerated: false, hasRun: false }],
+    ['guards that never ran', { ...ALL_TRUE, hasRun: false }],
+    // A FULL pipeline over a one-doc corpus auto-opens that doc, so it never sees
+    // the no-selection pane at all — it is covered by the close-the-last-tab case
+    // below, which lands here with a run present.
+  ];
+
+  for (const [what, staleness] of STAGES) {
+    it(`rests on the read-only Overview with ${what}`, async () => {
+      renderPage(staleness, '/repos/r');
+      expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
+      for (const retired of ['No spec corpus', 'No guards generated', 'No guard run yet']) {
+        expect(screen.queryByText(retired), retired).toBeNull();
+      }
+      // Read-only: the overview offers no buttons and no links at all.
+      const pane = screen.getByText('Coverage overview').closest('div')!.parentElement!;
+      expect(pane.querySelectorAll('button, a')).toHaveLength(0);
+    });
+  }
 
   it('still renders a doc opened by hand before the first scan', async () => {
-    // The stage empty states answer "what next?", which only an EMPTY pane asks.
     // A page of a freshly registered web source is a real file on disk, and the
-    // Sources page sends the user straight to it — landing on "No spec corpus"
-    // with its tab open would be a dead end.
+    // Sources page sends the user straight to it — landing on an empty state with
+    // its tab open would be a dead end.
     renderPage({ ...ALL_TRUE, hasCorpus: false, hasGenerated: false, hasRun: false });
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
-    expect(screen.queryByText('No spec corpus')).not.toBeInTheDocument();
+    expect(screen.queryByText('Coverage overview')).not.toBeInTheDocument();
   });
 
-  it('points to guard generate when the corpus has no guards', () => {
-    renderPage({ ...ALL_TRUE, hasGenerated: false, hasRun: false }, '/repos/r');
-    expect(screen.getByText('No guards generated')).toBeInTheDocument();
-    expect(screen.getByText('truecourse guard generate')).toBeInTheDocument();
-  });
-
-  it('points to guard run when generated but never run', () => {
-    renderPage({ ...ALL_TRUE, hasRun: false }, '/repos/r');
-    expect(screen.getByText('No guard run yet')).toBeInTheDocument();
-    expect(screen.getByText('truecourse guard run')).toBeInTheDocument();
-  });
-
-  it('renders the raw doc markdown pre-generate when a doc is selected — never the generate empty state', async () => {
+  it('renders the raw doc markdown pre-generate when a doc is selected', async () => {
     // Corpus present, generate never run, but a doc IS selected → the doc's raw
     // markdown renders so conflicts stay resolvable in context (no coverage fetch,
-    // so no totals strip), and the onboarding card never shadows the selection.
+    // so no totals strip).
     renderPage({ ...ALL_TRUE, hasGenerated: false, hasRun: false });
     expect(await screen.findByText('Intro paragraph.')).toBeInTheDocument();
-    expect(screen.queryByText('No guards generated')).not.toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Coverage totals' })).not.toBeInTheDocument();
   });
 });
@@ -418,62 +426,36 @@ describe('GuardCoveragePage — a selected conflict owns the whole main pane', (
 describe('GuardCoveragePage — coverage surface', () => {
   beforeEach(stubFetch);
 
-  it('renders the doc and a totals chip per status', async () => {
+  it('renders the doc and ONE chip per coverage word — five, ever', async () => {
     renderPage(ALL_TRUE);
     expect(await screen.findByText('Guard Spec')).toBeInTheDocument();
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-    // Every label comes from the ONE vocabulary — `blocked-on` wears the plain
-    // status word ("Blocked"), never a second name of its own.
-    for (const label of ['Passing', 'Failing', 'Not run yet', 'Blocked', 'Needs web driver', 'Nothing testable']) {
+    // The counters are the coverage vocabulary: the wire's nineteen statuses fold
+    // onto the five a reader has to hold in their head.
+    for (const label of ['Failed', 'Blocked', 'Succeeded', 'Not testable']) {
       expect(within(strip).getByText(label)).toBeInTheDocument();
     }
+    // No gap kind, driver name or retired bucket may reach the strip.
+    for (const retired of ['Passing', 'Failing', 'Not run yet', 'Needs web driver', 'Nothing testable', 'Not generated', 'Stale', 'Dismissed']) {
+      expect(within(strip).queryByText(retired), retired).not.toBeInTheDocument();
+    }
   });
 
-  it('groups the chips into CLI vs Other-drivers clusters, separated by a divider', async () => {
-    const { container } = renderPage(ALL_TRUE);
+  it('folds every wire status into the five — and counts ONLY on the chips', async () => {
+    renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-
-    const cli = within(strip).getByRole('group', { name: 'CLI, API' });
-    const others = within(strip).getByRole('group', { name: 'Other drivers' });
-
-    // CLI verdicts + coverage gaps (incl. the user's dismissals) live in the CLI
-    // cluster, never among the drivers.
-    for (const label of ['Passing', 'Failing', 'Stale', 'Not run yet', 'Blocked', 'Nothing testable', 'No testable claim', 'Dismissed', 'Not generated']) {
-      expect(within(cli).getByText(label)).toBeInTheDocument();
-      expect(within(others).queryByText(label)).not.toBeInTheDocument();
-    }
-
-    // The future-driver postponement lives in the Other-drivers cluster only.
-    expect(within(others).getByText('Needs web driver')).toBeInTheDocument();
-    expect(within(cli).queryByText('Needs web driver')).not.toBeInTheDocument();
-
-    // A subtle divider physically separates the two clusters.
-    expect(container.querySelector('span[aria-hidden].w-px')).not.toBeNull();
-  });
-
-  it('hides the Other-drivers cluster (label + divider) when no driver sections exist', async () => {
-    // Coverage with every driver status at zero — the cluster must not render.
-    const driverFree: GuardDocCoverage = {
-      ...COVERAGE,
-      sections: SECTIONS.filter((s) => s.status !== 'web'),
-      totals: { ...TOTALS, web: 0 },
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string | URL) => {
-        const u = String(url);
-        if (u.includes('/guard/coverage')) return json(driverFree);
-        if (u.includes('/spec/doc')) return json({ ref: 'docs/SPEC.md', content: MD });
-        return json({});
-      }),
-    );
-    const { container } = renderPage(ALL_TRUE);
-    await screen.findByText('Guard Spec');
-
-    expect(screen.getByRole('group', { name: 'CLI, API' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Other drivers' })).not.toBeInTheDocument();
-    expect(container.querySelector('span[aria-hidden].w-px')).toBeNull();
+    const chips = within(strip)
+      .getAllByRole('button')
+      .map((b) => b.textContent);
+    // fail | stale + web + blocked-on + unguarded | pass + guarded | untestable +
+    // no-claim + dismissed — the tiers of the one precedence.
+    expect(chips).toEqual(['1Failed', '4Blocked', '2Succeeded', '3Not testable']);
+    // A number earns the strip by NARROWING the doc, which is what a chip does. The
+    // section total in front of them narrowed nothing, so it is gone — and nothing
+    // outside the chips may put a count back.
+    expect(within(strip).queryByText(/\d+ sections?/)).toBeNull();
+    expect(strip.textContent).toBe('1Failed4Blocked2Succeeded3Not testable');
   });
 
   it('paints each section with its status band', async () => {
@@ -483,12 +465,15 @@ describe('GuardCoveragePage — coverage surface', () => {
       (container.querySelector(`[data-anchor="${anchor}"]`) as HTMLElement).className;
     expect(bandOf('failing-bit')).toContain('border-red-500');
     expect(bandOf('passing-bit')).toContain('border-emerald-500');
-    expect(bandOf('stale-bit')).toContain('border-amber-500');
+    // An UNKNOWN (never executed) is grey; a BLOCKED state is blue. Four colours
+    // across guard, and amber/orange are banned outright.
+    expect(bandOf('stale-bit')).toContain('border-slate-400');
     expect(bandOf('guarded-bit')).toContain('border-sky-500');
-    expect(bandOf('blocked-bit')).toContain('bg-muted');
+    expect(bandOf('blocked-bit')).toContain('border-sky-500');
     expect(bandOf('web-bit')).toContain('border-dashed');
-    // Unguarded stays unmarked (no band wrapper classes).
-    expect(bandOf('unguarded-bit')).not.toContain('border-l-4');
+    // Nothing accounts for it — which reads Blocked, so it is banded like the rest
+    // of the blockers. An unpainted section is the mute bucket that is now gone.
+    expect(bandOf('unguarded-bit')).toContain('border-l-4');
   });
 
   it('filters the doc when a totals chip is clicked', async () => {
@@ -496,12 +481,12 @@ describe('GuardCoveragePage — coverage surface', () => {
     const { container } = renderPage(ALL_TRUE);
     await screen.findByText('Guard Spec');
     const strip = screen.getByRole('group', { name: 'Coverage totals' });
-    await user.click(within(strip).getByRole('button', { name: /Passing/ }));
+    await user.click(within(strip).getByRole('button', { name: /Succeeded/ }));
     const fail = container.querySelector('[data-anchor="failing-bit"]') as HTMLElement;
     const pass = container.querySelector('[data-anchor="passing-bit"]') as HTMLElement;
     expect(fail.className).toContain('opacity-40');
     expect(pass.className).not.toContain('opacity-40');
-    expect(within(strip).getByRole('button', { name: /Passing/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(strip).getByRole('button', { name: /Succeeded/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('toggles the active filter between blur (dim) and hide (collapse)', async () => {
@@ -515,7 +500,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     expect(screen.queryByRole('group', { name: 'Filter display mode' })).not.toBeInTheDocument();
 
     // Filter to Passing → toggle appears, blur is the default (non-match dimmed).
-    await user.click(within(strip).getByRole('button', { name: /Passing/ }));
+    await user.click(within(strip).getByRole('button', { name: /Succeeded/ }));
     const modeGroup = screen.getByRole('group', { name: 'Filter display mode' });
     expect(failEl()?.className).toContain('opacity-40');
 
@@ -555,11 +540,11 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
     const detail = await screen.findByRole('list', { name: 'Flows through this section' });
     // The flow, its per-surface chips, and the milestone positions it covers here.
     expect(within(detail).getByText(LIFECYCLE_FLOW.title)).toBeInTheDocument();
-    // The flow row reads EXACTLY like a Flows-list row: the one status word, then
-    // the compact surface chips (what a surface needs is its hover / the flow detail).
-    expect(within(detail).getByText('Failing')).toBeInTheDocument();
-    expect(within(detail).getByText('CLI ✗')).toBeInTheDocument();
-    expect(within(detail).getByText('Web')).toBeInTheDocument();
+    // The flow row reads EXACTLY like a Flows-list row: the ONE status word, and no
+    // surface chips at all (one surface per flow — they carried no information).
+    expect(within(detail).getByText('Failed')).toBeInTheDocument();
+    expect(within(detail).queryByText('CLI ✗')).toBeNull();
+    expect(within(detail).queryByText('Web')).toBeNull();
     expect(within(detail).queryByText('Web · awaiting web driver')).not.toBeInTheDocument();
     expect(within(detail).getByText(/covers milestones 3–4 of 4/)).toBeInTheDocument();
     // The scenario id / its failure detail belong to the flow detail, not here.
@@ -589,7 +574,7 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
             findings: 0,
             toolDefects: 0,
             errors: 0,
-            journeyDrifted: false,
+            interfaceDrifted: false,
           } as unknown as GuardFlowListItem,
         ]}
         loading={false}
@@ -597,14 +582,16 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
         activeId={null}
         filter="all"
         onFilter={() => {}}
+        drivers={[]}
+        onDrivers={() => {}}
         onOpen={() => {}}
       />,
     );
-    const listRow = within(screen.getByRole('list', { name: 'Flow inventory' })).getAllByRole('listitem')[0];
+    const listRow = within(screen.getByRole('list', { name: 'Test inventory' })).getAllByRole('listitem')[0];
     const chipText = (el: HTMLElement) =>
       Array.from(el.querySelectorAll('span'))
         .map((n) => n.textContent?.trim())
-        .filter((t): t is string => !!t && ['Failing', 'CLI ✗', 'Web'].includes(t));
+        .filter((t): t is string => !!t && ['Failed', 'Failing', 'CLI ✗', 'Web'].includes(t));
     expect(chipText(row)).toEqual(chipText(listRow as HTMLElement));
     unmount();
 
@@ -631,7 +618,8 @@ describe('GuardCoveragePage — section detail lists FLOWS', () => {
     await user.click(container.querySelector('[data-anchor="passing-bit"]') as HTMLElement);
     const detail = await screen.findByRole('list', { name: 'Flows through this section' });
     expect(within(detail).getByText('manual')).toBeInTheDocument();
-    expect(within(detail).getByText('CLI ✓')).toBeInTheDocument();
+    // The marker, never a surface chip.
+    expect(within(detail).queryByText('CLI ✓')).toBeNull();
   });
 
   it('opening a flow row deep-links into the Flows tab (?gflow=)', async () => {
@@ -704,21 +692,29 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     expect(decodeURIComponent(search())).toContain(OVERLAP_KEY);
   });
 
-  it('shows no strip while no item tab is open', () => {
-    // No ?guard/?gconf and never-run → the no-selection pane fills the tab, no strip.
+  it('shows no strip while no item tab is open', async () => {
+    // No ?guard/?gconf → the Overview pane fills the tab, no strip.
     renderHarness({ ...ALL_TRUE, hasRun: false });
-    expect(screen.getByText('No guard run yet')).toBeInTheDocument();
-    expect(screen.queryByText('Overview')).toBeNull();
+    expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
+    // No tab-strip chip named Overview — the rest state is the pane, not a tab.
+    expect(screen.queryByRole('tab')).toBeNull();
   });
 
-  it('carries NO Overview chip — nothing selected IS the pane', async () => {
+  it('the strip leads with a pinned Overview tab that deselects without closing', async () => {
     const user = userEvent.setup();
     renderHarness(ALL_TRUE);
     await within(sidebar()).findByText('docs/SPEC.md');
     await user.click(within(sidebar()).getByText('docs/SPEC.md'));
-    // The strip is up (a doc tab is open) and it holds the doc alone.
+    // The strip is up: the pinned Overview tab first, then the doc tab.
     expect(closeBtn('docs/SPEC.md')).toBeInTheDocument();
-    expect(screen.queryByText('Overview')).toBeNull();
+    expect(screen.getByText('Overview')).toBeInTheDocument();
+    // Overview is uncloseable — it lives and dies with the strip.
+    expect(screen.queryByLabelText('Close Overview')).toBeNull();
+    // Clicking it shows the overview pane while the doc tab stays open.
+    await user.click(screen.getByText('Overview'));
+    expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
+    expect(closeBtn('docs/SPEC.md')).toBeInTheDocument();
+    expect(search()).not.toContain('guard=');
   });
 
   it('closing the last tab hides the strip and returns to the no-selection pane', async () => {
@@ -729,7 +725,7 @@ describe('GuardCoveragePage — the shared preview/pin tab model', () => {
     await user.click(closeBtn('docs/SPEC.md'));
     // Last item tab closed → the strip is gone and the pane is at rest.
     expect(screen.queryByText('Overview')).toBeNull();
-    expect(await screen.findByText('Select a document')).toBeInTheDocument();
+    expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
     expect(search()).not.toContain('guard=');
   });
 

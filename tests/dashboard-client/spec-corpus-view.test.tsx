@@ -12,12 +12,24 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useState, type ComponentProps } from 'react';
 import { render, screen, waitFor, renderHook, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SpecCorpusView, useSpecCorpus, overlapKey, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
+import { buildCorpusConflicts } from '@truecourse/shared';
+import { SpecCorpusView, useSpecCorpus, type SpecCorpusState } from '../../apps/dashboard/client/src/components/spec/SpecCorpusView';
 import { SpecScanButton } from '../../apps/dashboard/client/src/components/spec/SpecScanButton';
 import { SpecDocViewer } from '../../apps/dashboard/client/src/components/spec/SpecDocViewer';
 import { SpecOverlapDetail } from '../../apps/dashboard/client/src/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '../../apps/dashboard/client/src/components/spec/DocMarkdown';
 import type { SpecCorpusResponse, SpecOverlapReview } from '../../apps/dashboard/client/src/lib/api';
+
+/**
+ * The dispute the PAGE resolves and hands the pane. SpecOverlapDetail no longer
+ * re-finds it by doc pair (a pair can carry several disputes, and any pair lookup
+ * lands on the first), so a test supplies it exactly the way GuardCoveragePage does.
+ */
+const conflictFor = (data: SpecCorpusResponse, docA = 'docs/v1.md', docB = 'docs/v2.md') =>
+  buildCorpusConflicts(data.corpus, {
+    manualExcludes: data.manualExcludes ?? [],
+    conflictResolutions: data.conflictResolutions ?? [],
+  }).find((c) => (c.a === docA && c.b === docB) || (c.a === docB && c.b === docA));
 
 const RESP: SpecCorpusResponse = {
   corpus: {
@@ -139,7 +151,7 @@ describe('SpecCorpusView (left nav)', () => {
     expect(screen.getByText('docs/auth.md')).toBeInTheDocument();
     expect(screen.getByText('docs/v1.md ↔ docs/v2.md')).toBeInTheDocument();
     // Filter to `auth` → only the auth doc remains; the appointments conflict is filtered out.
-    await user.click(screen.getByRole('button', { name: 'auth' }));
+    await user.click(screen.getByRole('button', { name: 'auth 1' }));
     expect(screen.getByText('docs/auth.md')).toBeInTheDocument();
     expect(screen.queryByText('docs/v1.md')).not.toBeInTheDocument();
     expect(screen.queryByText('docs/v1.md ↔ docs/v2.md')).not.toBeInTheDocument();
@@ -154,7 +166,57 @@ describe('SpecCorpusView (left nav)', () => {
     const user = userEvent.setup();
     render(<SpecCorpusView corpus={state()} activeKey={null} onOpen={onOpen} />);
     await user.click(screen.getByText('docs/v1.md ↔ docs/v2.md'));
-    expect(onOpen).toHaveBeenCalledWith(overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md'), false);
+    expect(onOpen).toHaveBeenCalledWith(conflictFor(RESP)!.id, false);
+  });
+
+  // Auto-resolve settles the high-confidence conflicts, so a corpus can carry
+  // hundreds of rows of which only a handful still need a human. A lone total
+  // ("757") cannot say that; the header tallies OPEN of TOTAL.
+  const TWO_CONFLICTS: SpecCorpusResponse = {
+    ...RESP,
+    corpus: {
+      ...RESP.corpus,
+      areas: RESP.corpus.areas.map((ar) =>
+        ar.id === 'booking/appointments'
+          ? {
+              ...ar,
+              docRefs: [...ar.docRefs, 'docs/auth.md'],
+              overlaps: [
+                ...ar.overlaps,
+                {
+                  docs: ['docs/v2.md', 'docs/auth.md'] as [string, string],
+                  note: 'session length disagreement',
+                  sections: [
+                    { doc: 'docs/v2.md', heading: 'Sessions' },
+                    { doc: 'docs/auth.md', heading: 'Sessions' },
+                  ],
+                },
+              ],
+            }
+          : ar,
+      ),
+    },
+    // Resolves the cancellation dispute only — the session one stays open.
+    conflictResolutions: [
+      { docA: 'docs/v1.md', anchorA: 'Cancellation', docB: 'docs/v2.md', anchorB: 'Cancellation policy', verdict: 'a' },
+    ],
+  };
+
+  it('tallies Conflicts as OPEN of TOTAL, while the other sections keep a plain count', () => {
+    render(<SpecCorpusView corpus={state({ data: TWO_CONFLICTS })} activeKey={null} onOpen={vi.fn()} />);
+    const conflicts = screen.getByText('Conflicts').closest('button, div') as HTMLElement;
+    expect(within(conflicts).getByText('1/2')).toBeInTheDocument();
+    // Documents is a plain tally — it has no open/resolved axis.
+    const documents = screen.getByText('Documents').closest('button, div') as HTMLElement;
+    expect(within(documents).getByText('3')).toBeInTheDocument();
+  });
+
+  it('narrows the Conflicts tally with the area filter, so both numbers describe the same rows', async () => {
+    const user = userEvent.setup();
+    render(<SpecCorpusView corpus={state({ data: TWO_CONFLICTS })} activeKey={null} onOpen={vi.fn()} />);
+    expect(within(screen.getByText('Conflicts').closest('button, div') as HTMLElement).getByText('1/2')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'auth 1' }));
+    expect(screen.queryByText('Conflicts')).not.toBeInTheDocument();
   });
 
   it('shows the empty state when there is no corpus', () => {
@@ -362,7 +424,7 @@ describe('SpecCorpusView — section default collapse states', () => {
       <SpecCorpusView repoId="r1" corpus={state({ data: WITH_SKIPPED })} activeKey="docs/notes.md" onOpen={vi.fn()} />,
     );
     // The active row is visible without any manual expand…
-    const row = screen.getByTitle(/docs\/notes\.md/);
+    const row = screen.getByText('docs/notes.md').closest('[role="listitem"]') as HTMLElement;
     expect(row).toBeInTheDocument();
     // …and carries the active highlight (the same match the containment check uses).
     expect(row.className).toContain('bg-primary/10');
@@ -373,7 +435,7 @@ describe('SpecCorpusView — section default collapse states', () => {
       <SpecCorpusView
         repoId="r1"
         corpus={state({ data: ALL_RESOLVED })}
-        activeKey={overlapKey('booking/appointments', 'docs/v1.md', 'docs/v2.md')}
+        activeKey={conflictFor(ALL_RESOLVED)!.id}
         onOpen={vi.fn()}
       />,
     );
@@ -626,18 +688,23 @@ describe('SpecOverlapDetail (right pane) — section verdicts', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  const renderDetail = (props: Partial<ComponentProps<typeof SpecOverlapDetail>> = {}) =>
-    render(
+  // `conflict` is derived from the FINAL data (after any override), mirroring the
+  // page: the record the pane renders and the corpus it renders it against are one.
+  const renderDetail = (props: Partial<ComponentProps<typeof SpecOverlapDetail>> = {}) => {
+    const data = props.data ?? RESP;
+    return render(
       <SpecOverlapDetail
         repoId="r1"
         area="booking/appointments"
         docA="docs/v1.md"
         docB="docs/v2.md"
-        data={RESP}
         onResolved={vi.fn()}
         {...props}
+        data={data}
+        conflict={props.conflict ?? conflictFor(data)}
       />,
     );
+  };
 
   it('renders the three verdicts — "<docA> is right" / "<docB> is right" / dismiss — and NO relation buttons', () => {
     renderDetail();
@@ -753,6 +820,7 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
         data={data}
         onResolved={vi.fn()}
         {...props}
+        conflict={props.conflict ?? conflictFor(data)}
       />,
     );
 
@@ -878,6 +946,79 @@ describe('SpecOverlapDetail (right pane) — reviewed conflicts', () => {
     expect(screen.queryByRole('button', { name: 'Apply recommendation' })).not.toBeInTheDocument();
     // The plain-text detector note still renders exactly as before.
     expect(screen.getByText('24h vs 48h cancellation')).toBeInTheDocument();
+  });
+
+  it("renders the judge's confidence grade as a bar in the assessment card, named on hover", () => {
+    renderDetail(
+      withReview({
+        explanation: 'They disagree on the window.',
+        recommendation: { action: 'pick-a', rationale: 'v1 wins.', confidence: 'medium' },
+      }),
+    );
+    const card = screen.getByTestId('conflict-assessment');
+    // The bar carries the grade as its accessible name; the hover tooltip says
+    // exactly the grade and nothing more (no static explainer prose), and the
+    // bar itself renders no text label.
+    const bar = within(card).getByTestId('confidence-chip');
+    expect(bar).toHaveAttribute('aria-label', 'Medium confidence');
+    expect(bar).toHaveTextContent('');
+    expect(within(card).getByRole('tooltip')).toHaveTextContent(/^Medium confidence$/);
+  });
+
+  it('a graded recommendation without confidence renders no chip (legacy corpora)', () => {
+    renderDetail(
+      withReview({
+        explanation: 'They disagree on the window.',
+        recommendation: { action: 'pick-a', rationale: 'v1 wins.' },
+      }),
+    );
+    expect(screen.queryByTestId('confidence-chip')).not.toBeInTheDocument();
+  });
+
+  it('an auto-applied resolution renders Auto-resolved with the high-confidence badge, Undo intact', () => {
+    const data = withReview({
+      explanation: 'They disagree.',
+      recommendation: { action: 'pick-b', rationale: 'v2 wins.', confidence: 'high' },
+    });
+    const resolved: SpecCorpusResponse = {
+      ...data,
+      conflictResolutions: [
+        {
+          docA: 'docs/v1.md',
+          anchorA: 'Cancellation',
+          docB: 'docs/v2.md',
+          anchorB: 'Cancellation policy',
+          verdict: 'b',
+          resolvedBy: 'auto',
+        },
+      ],
+    };
+    renderDetail(resolved);
+    const banner = screen.getByTestId('conflict-verdict');
+    expect(within(banner).getByText(/Auto-resolved —/)).toBeInTheDocument();
+    expect(within(banner).getByTestId('auto-applied-badge')).toHaveAttribute('aria-label', 'High confidence');
+    // An auto verdict stays undoable like any other.
+    expect(within(banner).getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+  });
+
+  it('an auto-applied dismissal reads Auto-dismissed', () => {
+    const resolved: SpecCorpusResponse = {
+      ...RESP,
+      conflictResolutions: [
+        {
+          docA: 'docs/v1.md',
+          anchorA: 'Cancellation',
+          docB: 'docs/v2.md',
+          anchorB: 'Cancellation policy',
+          verdict: 'dismissed',
+          resolvedBy: 'auto',
+        },
+      ],
+    };
+    renderDetail(resolved);
+    const banner = screen.getByTestId('conflict-verdict');
+    expect(within(banner).getByText('Auto-dismissed — not a real conflict')).toBeInTheDocument();
+    expect(within(banner).getByTestId('auto-applied-badge')).toBeInTheDocument();
   });
 });
 
@@ -1026,7 +1167,7 @@ describe('SpecOverlapDetail (PR-scoped verdict)', () => {
     const onResolved = vi.fn();
     const user = userEvent.setup();
     render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef="head-1" onResolved={onResolved} />,
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" conflict={conflictFor(RESP)} data={RESP} prNumber={4} prRef="head-1" onResolved={onResolved} />,
     );
     await user.click(screen.getByRole('button', { name: 'docs/v1.md is right' }));
     await waitFor(() => expect(onResolved).toHaveBeenCalled());
@@ -1045,6 +1186,7 @@ describe('SpecOverlapDetail (PR-scoped verdict)', () => {
         area="booking/appointments"
         docA="docs/v1.md"
         docB="docs/v2.md"
+        conflict={conflictFor(RESP)}
         data={RESP}
         onResolved={onResolved}
         onConflictChange={onConflictChange}
@@ -1059,7 +1201,7 @@ describe('SpecOverlapDetail (PR-scoped verdict)', () => {
 
   it('disables the verdict actions (with a hint) before the PR gate runs', () => {
     render(
-      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" data={RESP} prNumber={4} prRef={undefined} onResolved={vi.fn()} />,
+      <SpecOverlapDetail repoId="r1" area="booking/appointments" docA="docs/v1.md" docB="docs/v2.md" conflict={conflictFor(RESP)} data={RESP} prNumber={4} prRef={undefined} onResolved={vi.fn()} />,
     );
     expect(screen.getByRole('button', { name: 'docs/v1.md is right' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Not a real conflict' })).toBeDisabled();

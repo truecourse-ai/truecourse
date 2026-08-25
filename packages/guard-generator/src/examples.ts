@@ -112,26 +112,26 @@ interface ExampleCarrier {
 
 /** The input-side carriers — where a doc example RUNS, and where byte comparison
  *  is feasible: seeded file content, cli stdin, api raw request body. */
-function exampleCarriers(
-  scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
-    | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
-): ExampleCarrier[] {
+function exampleCarriers(scenario: {
+  steps: readonly (GuardStep | GuardApiStep)[]
+  setup?: GuardSetup
+}): ExampleCarrier[] {
   const carriers: ExampleCarrier[] = []
   for (const [file, content] of Object.entries(scenario.setup?.files ?? {})) {
     carriers.push({ where: `setup.files["${file}"]`, value: content })
   }
-  if (scenario.driver === 'cli') {
-    scenario.steps.forEach((step, i) => {
-      if (typeof step.stdin === 'string') carriers.push({ where: `step ${i + 1} stdin`, value: step.stdin })
-    })
-  } else {
-    scenario.steps.forEach((step, i) => {
-      if (isApiRequestStep(step) && typeof step.request.body === 'string') {
+  // Each step names its own carrier — a cli step's `stdin`, a request step's raw
+  // body — so a mixed scenario contributes both without anyone declaring a driver.
+  scenario.steps.forEach((step, i) => {
+    if (isApiRequestStep(step)) {
+      if (typeof step.request.body === 'string') {
         carriers.push({ where: `step ${i + 1} request.body`, value: step.request.body })
       }
-    })
-  }
+      return
+    }
+    const stdin = (step as GuardStep).stdin
+    if (typeof stdin === 'string') carriers.push({ where: `step ${i + 1} stdin`, value: stdin })
+  })
   return carriers
 }
 
@@ -143,9 +143,7 @@ function exampleCarriers(
  * composition defect gets. An example no carrier resembles constrains nothing.
  */
 export function exampleFidelityDefect(
-  scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
-    | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
+  scenario: { steps: readonly (GuardStep | GuardApiStep)[]; setup?: GuardSetup },
   examples: readonly DocExampleBlock[],
 ): string | null {
   if (examples.length === 0) return null

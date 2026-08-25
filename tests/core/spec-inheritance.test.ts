@@ -17,9 +17,14 @@ import {
 } from '@truecourse/core/commands/spec-in-process';
 import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
 import type { CuratedCorpus, DecisionsFile, ConflictResolution } from '@truecourse/spec-consolidator';
-import { tagDocs, isAreaTagCached } from '../../packages/spec-consolidator/src/index.js';
 import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
-import { setKvCacheStore, resetKvCacheStore, type KvCacheStore } from '@truecourse/llm';
+import {
+  CURATE_DOC_CACHE_NAME,
+  DocVerdictSchema,
+  curateDocCacheKey,
+} from '../../packages/core/src/services/spec-scan/curate-doc';
+import { cachedSessionOutcome } from '../../packages/core/src/services/agent/session-cache';
+import { getCacheEntry, setKvCacheStore, resetKvCacheStore, type KvCacheStore } from '@truecourse/llm';
 
 function decisions(over: Partial<DecisionsFile>): DecisionsFile {
   return { ...EMPTY_DECISIONS, ...over };
@@ -184,7 +189,7 @@ describe('corpusContentSha', () => {
 // --- Cross-tree cache hit (workspace-seeded → repo scan is free) ------------
 
 describe('inherited-doc cache reuse across trees', () => {
-  it('the area-tag cache the workspace paid for hits at a DIFFERENT (repo) tree scope — no LLM call', async () => {
+  it('the curate-doc verdict the workspace paid for hits at a DIFFERENT (repo) tree scope — no session', async () => {
     // A content-addressed KV store that IGNORES scope — the shape the EE Postgres
     // cache has (keys are content hashes, not tree paths), which is what makes an
     // inherited doc a cache hit in the repo's own scan tree.
@@ -210,23 +215,34 @@ describe('inherited-doc cache reuse across trees', () => {
       contentHash: createHash('sha256').update(body).digest('hex'),
       size: body.length,
     };
+    // The key is a pure function of the prompt, the identity, the path and the
+    // content — never of the tree the scan happens to run in.
+    const key = curateDocCacheKey({ identity: null, doc });
+    const verdict = { keep: true, reason: 'a spec', areas: [] };
 
-    let calls = 0;
-    const runner = async (): Promise<{ tags: [] }> => {
-      calls++;
-      return { tags: [] };
-    };
+    let sessions = 0;
+    const curate = (repoRoot: string) =>
+      cachedSessionOutcome({
+        repoRoot,
+        cacheName: CURATE_DOC_CACHE_NAME,
+        key,
+        schema: DocVerdictSchema,
+        run: async () => {
+          sessions++;
+          return { status: 'completed', output: verdict, pendingQuestions: [], spent: { turns: 1, tokens: 1, costUsd: 0 } };
+        },
+      });
 
-    // Workspace tags it (cold: one LLM call) in ITS scratch tree.
-    await tagDocs('/tmp/workspace-tree', [doc], { runner });
-    expect(calls).toBe(1);
+    // The workspace curates it (cold: one session) in ITS scratch tree.
+    expect(await curate('/tmp/workspace-tree')).toMatchObject({ output: verdict });
+    expect(sessions).toBe(1);
 
     // The repo's own scan, a DIFFERENT tree — same docPath + content → cache hit,
-    // no second call.
-    await tagDocs('/tmp/repo-clone-tree', [doc], { runner });
-    expect(calls).toBe(1);
+    // no second session.
+    expect(await curate('/tmp/repo-clone-tree')).toMatchObject({ fromCache: true, output: verdict });
+    expect(sessions).toBe(1);
 
     // And the estimate's cache probe agrees (it would count this doc as unchanged).
-    expect(await isAreaTagCached('/tmp/another-repo-tree', doc)).toBe(true);
+    expect(await getCacheEntry('/tmp/another-repo-tree', CURATE_DOC_CACHE_NAME, key)).toEqual(verdict);
   });
 });

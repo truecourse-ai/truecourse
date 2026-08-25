@@ -44,9 +44,21 @@
       "types": "./dist/commands/guard-seed.d.ts",
       "import": "./dist/commands/guard-seed.js"
     },
+    "./commands/guard-interfaces": {
+      "types": "./dist/commands/guard-interfaces.d.ts",
+      "import": "./dist/commands/guard-interfaces.js"
+    },
+    "./commands/guard-adjudicate": {
+      "types": "./dist/commands/guard-adjudicate.d.ts",
+      "import": "./dist/commands/guard-adjudicate.js"
+    },
     "./commands/guard-externals": {
       "types": "./dist/commands/guard-externals.d.ts",
       "import": "./dist/commands/guard-externals.js"
+    },
+    "./commands/guard-dependencies": {
+      "types": "./dist/commands/guard-dependencies.d.ts",
+      "import": "./dist/commands/guard-dependencies.js"
     },
     "./commands/guard-read": {
       "types": "./dist/commands/guard-read.d.ts",
@@ -103,6 +115,10 @@
     "./lib/analysis-store": {
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
+    },
+    "./lib/sessions-store": {
+      "types": "./dist/lib/sessions-store.d.ts",
+      "import": "./dist/lib/sessions-store.js"
     },
     "./lib/contract-store": {
       "types": "./dist/lib/contract-store.d.ts",
@@ -208,9 +224,13 @@
       "types": "./dist/services/flow.service.d.ts",
       "import": "./dist/services/flow.service.js"
     },
-    "./services/journey": {
-      "types": "./dist/services/journey.service.d.ts",
-      "import": "./dist/services/journey.service.js"
+    "./services/interface": {
+      "types": "./dist/services/interface.service.d.ts",
+      "import": "./dist/services/interface.service.js"
+    },
+    "./services/interface-author": {
+      "types": "./dist/services/interface-author/index.d.ts",
+      "import": "./dist/services/interface-author/index.js"
     },
     "./services/violation-query": {
       "types": "./dist/services/violation-query.service.d.ts",
@@ -244,6 +264,10 @@
       "types": "./dist/services/llm/model-prices.d.ts",
       "import": "./dist/services/llm/model-prices.js"
     },
+    "./services/llm/session-driver": {
+      "types": "./dist/services/llm/session-driver.d.ts",
+      "import": "./dist/services/llm/session-driver.js"
+    },
     "./services/llm/install-transport": {
       "types": "./dist/services/llm/install-transport.d.ts",
       "import": "./dist/services/llm/install-transport.js"
@@ -267,14 +291,16 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@truecourse/agent-loop": "workspace:*",
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
-    "@truecourse/journey-mapper": "workspace:*",
+    "@truecourse/interface-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/llm-api": "workspace:*",
+    "@truecourse/llm-claude-agent": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "cross-spawn": "^7.0.6",

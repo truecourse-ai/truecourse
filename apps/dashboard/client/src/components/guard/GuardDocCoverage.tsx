@@ -6,7 +6,7 @@
  * data-addressable (`data-anchor`) so a selection or a totals-strip filter jumps
  * the matching section into view — the deep-link target for the drifts page.
  *
- * A section can be both guarded and conflicted. A conflicted heading (one flagged
+ * A section can be both covered and conflicted. A conflicted heading (one flagged
  * by a within-area spec overlap) gets a small "conflict" TAG alongside its status
  * dot — never a second band — that opens the overlap's resolution detail. When a
  * conflict is the active selection, its heading scrolls into view too.
@@ -22,23 +22,69 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { GitMerge } from 'lucide-react';
-import type { GuardDocCoverage as GuardDocCoverageData, GuardSectionCoverageStatus } from '@truecourse/shared';
+import { guardCoveragePlainStatus } from '@truecourse/shared';
+import type {
+  GuardCoveragePlainStatus,
+  GuardDocCoverage as GuardDocCoverageData,
+  GuardSectionCoverageStatus,
+} from '@truecourse/shared';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
 import { guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
+import { guardStatusWord } from '@/lib/guard-flow-status';
 
 /** How a status filter treats the non-matching sections. */
 export type CoverageFilterMode = 'blur' | 'hide';
 
-function reasonText(status: GuardSectionCoverageStatus, reason: string | undefined): string {
-  const label = guardStatusMeta(status).label;
-  return reason ? `${label} — ${reason}` : label;
+/** The red/green split of a MIXED section — some flows failing, some passing. */
+interface SectionMix {
+  failed: number;
+  succeeded: number;
+  total: number;
+}
+
+/** A section with both failing and succeeding flows, from its per-flow statuses. */
+function sectionMix(flows: readonly { status: GuardSectionCoverageStatus }[] | undefined): SectionMix | null {
+  if (!flows || flows.length < 2) return null;
+  let failed = 0;
+  let succeeded = 0;
+  for (const f of flows) {
+    const plain = guardCoveragePlainStatus(f.status);
+    if (plain === 'failed') failed++;
+    else if (plain === 'succeeded') succeeded++;
+  }
+  return failed > 0 && succeeded > 0 ? { failed, succeeded, total: flows.length } : null;
+}
+
+/** A section's hover: its coverage word, then the reason (a mix: the composition). */
+function reasonText(
+  status: GuardSectionCoverageStatus,
+  reason: string | undefined,
+  mix: SectionMix | null,
+): string {
+  const word = guardStatusWord(status);
+  if (mix) return `${word}: ${mix.failed} of ${mix.total} flows failing, ${mix.succeeded} passing`;
+  return reason ? `${word}: ${reason}` : word;
+}
+
+/** A mixed section's corner indicator — replaces the dot; sized by real proportions. */
+function MixBar({ mix }: { mix: SectionMix }) {
+  const pct = Math.round((mix.failed / (mix.failed + mix.succeeded)) * 100);
+  return (
+    <span
+      data-testid="section-mix"
+      className="flex h-2.5 w-10 overflow-hidden rounded-full ring-2 ring-background"
+    >
+      <span className="bg-red-500" style={{ width: `${pct}%` }} />
+      <span className="flex-1 bg-emerald-500" />
+    </span>
+  );
 }
 
 import { headingMatchKey as norm } from '@/lib/heading-match';
 
-/** A small amber "conflict" tag that opens the overlap resolution detail. */
+/** A small "conflict" tag that opens the overlap resolution detail. */
 function ConflictTag({ onClick }: { onClick: () => void }) {
   return (
     <HoverPopover portal align="end" content="Flagged spec conflict — click to resolve">
@@ -48,7 +94,7 @@ function ConflictTag({ onClick }: { onClick: () => void }) {
           e.stopPropagation();
           onClick();
         }}
-        className="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-amber-500/30 hover:bg-amber-500/25 dark:text-amber-400"
+        className="flex items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-600 ring-1 ring-sky-500/30 hover:bg-sky-500/25 dark:text-sky-400"
       >
         <GitMerge className="h-2.5 w-2.5" />
         conflict
@@ -63,6 +109,8 @@ interface CoverageBlockProps {
   anchor: string | undefined;
   status: GuardSectionCoverageStatus | undefined;
   reason: string | undefined;
+  /** Present when the section mixes failing and passing flows. */
+  mix: SectionMix | null;
   /** The overlap key of a conflict flagging this heading, if any. */
   conflictKey: string | undefined;
   selected: boolean;
@@ -84,6 +132,7 @@ const CoverageBlock = memo(function CoverageBlock({
   anchor,
   status,
   reason,
+  mix,
   conflictKey,
   selected,
   dimmed,
@@ -95,7 +144,9 @@ const CoverageBlock = memo(function CoverageBlock({
   const md = useMemo(() => <DocMarkdown source={stripDocAnchors(text)} />, [text]);
   if (hidden) return null;
 
-  const statused = status != null && status !== 'unguarded';
+  // Every SECTION carries a status now (claim-keyed coverage always has an answer),
+  // so the only unstatused block is a preamble chunk that is no section at all.
+  const statused = status != null;
   // Preamble / unmarked-and-unconflicted sections render plain.
   if (!statused && !conflictKey) {
     return (
@@ -110,8 +161,8 @@ const CoverageBlock = memo(function CoverageBlock({
   }
 
   const meta = statused ? guardStatusMeta(status) : null;
-  // A conflicted-but-unguarded heading has no scenario detail, so clicking its
-  // body opens the conflict; a guarded one opens its section detail.
+  // A conflicted preamble block has no section detail to open, so clicking its
+  // body opens the conflict; a real section opens its own detail.
   const onBodyClick = statused
     ? () => onSelectSection(anchor!)
     : conflictKey && onOpenConflict
@@ -132,8 +183,12 @@ const CoverageBlock = memo(function CoverageBlock({
       <span className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
         {conflictKey && onOpenConflict && <ConflictTag onClick={() => onOpenConflict(conflictKey)} />}
         {meta && (
-          <HoverPopover portal width="narrow" align="end" content={reasonText(status!, reason)}>
-            <span className={`block h-2.5 w-2.5 rounded-full ring-2 ring-background ${meta.dot}`} />
+          <HoverPopover portal width="narrow" align="end" content={reasonText(status!, reason, mix)}>
+            {mix ? (
+              <MixBar mix={mix} />
+            ) : (
+              <span className={`block h-2.5 w-2.5 rounded-full ring-2 ring-background ${meta.dot}`} />
+            )}
           </HoverPopover>
         )}
       </span>
@@ -155,7 +210,8 @@ export function GuardDocCoverage({
 }: {
   content: string;
   coverage: GuardDocCoverageData;
-  activeFilter: GuardSectionCoverageStatus | null;
+  /** The five-word coverage status the strip narrowed to, or null for everything. */
+  activeFilter: GuardCoveragePlainStatus | null;
   /** Blur (dim in place) vs hide (collapse) the sections a filter excludes. */
   filterMode?: CoverageFilterMode;
   selectedAnchor: string | null;
@@ -187,7 +243,9 @@ export function GuardDocCoverage({
     } else if (activeConflictKey) {
       sel = root.querySelector(`[data-conflict="${CSS.escape(activeConflictKey)}"]`);
     } else if (activeFilter) {
-      const anchor = coverage.sections.find((s) => s.status === activeFilter)?.anchor;
+      const anchor = coverage.sections.find(
+        (s) => guardCoveragePlainStatus(s.status) === activeFilter,
+      )?.anchor;
       if (anchor) sel = root.querySelector(`[data-anchor="${CSS.escape(anchor)}"]`);
     }
     // Optional call: jsdom doesn't implement scrollIntoView in every version.
@@ -238,7 +296,7 @@ export function GuardDocCoverage({
         const section = aligned[i];
         const status = section?.status;
         const conflictKey = conflictOf(block.headingText);
-        const statused = section != null && status !== 'unguarded';
+        const statused = section != null;
         const isSelected = section != null && selectedAnchor === section.anchor;
         // The ring marks only statused sections (matches the click-to-open target).
         const selected = statused && isSelected;
@@ -246,7 +304,8 @@ export function GuardDocCoverage({
         // visible, so a click/deep-link lands even when it doesn't match the
         // filter (reveal the target rather than clear the user's filter).
         const forceVisible = isSelected || (conflictKey != null && conflictKey === activeConflictKey);
-        const matches = activeFilter == null || status === activeFilter;
+        const matches =
+          activeFilter == null || (status != null && guardCoveragePlainStatus(status) === activeFilter);
         const dimmed = filterMode === 'blur' && !matches && !forceVisible;
         const hidden = filterMode === 'hide' && !matches && !forceVisible;
         return (
@@ -256,6 +315,7 @@ export function GuardDocCoverage({
             anchor={section?.anchor}
             status={status}
             reason={section?.reason}
+            mix={sectionMix(section?.flows)}
             conflictKey={conflictKey}
             selected={selected}
             dimmed={dimmed}

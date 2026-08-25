@@ -6,21 +6,41 @@
  * stays declaratively readable and deterministic.
  */
 
-import type { GuardApiExpect, GuardHttpRequest, GuardJsonMatcher, GuardStreamMatcher } from '@truecourse/shared'
+import type {
+  GuardApiExpect,
+  GuardComparison,
+  GuardHttpRequest,
+  GuardJsonMatcher,
+  GuardStreamMatcher,
+} from '@truecourse/shared'
+import { mapComparisonStrings } from '../sandbox-token.js'
 
 /** Thrown when a template references a variable no earlier step captured. */
 export class UnknownVariableError extends Error {
-  constructor(readonly variable: string) {
-    super(`\${${variable}} is not defined — no earlier step captured it`)
+  constructor(
+    readonly variable: string,
+    /** The reference AS WRITTEN, so the message quotes the spelling the author used. */
+    token: string = `\${${variable}}`,
+  ) {
+    super(`${token} is not defined — no earlier step captured it`)
     this.name = 'UnknownVariableError'
   }
 }
 
-/** Replace every `${name}` with its captured value; unknown names throw. */
+/**
+ * A captured-value reference in either spelling: `${captured:<name>}` — the
+ * canonical token, the one both drivers share — or the bare `${<name>}` the api
+ * driver has always used. ONE namespace, two ways to write it: an api scenario
+ * predating the token keeps working, and a scenario written today reads the same
+ * on either surface.
+ */
+const VAR_REFERENCE = /\$\{(?:captured:)?([A-Za-z_][A-Za-z0-9_]*)\}/g
+
+/** Replace every captured-value reference with its value; unknown names throw. */
 export function interpolate(template: string, vars: ReadonlyMap<string, string>): string {
-  return template.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => {
+  return template.replace(VAR_REFERENCE, (token, name: string) => {
     const value = vars.get(name)
-    if (value === undefined) throw new UnknownVariableError(name)
+    if (value === undefined) throw new UnknownVariableError(name, token)
     return value
   })
 }
@@ -90,13 +110,18 @@ export function interpolateApiExpect(
   nativeVars: ReadonlyMap<string, unknown> = NO_NATIVE_VARS,
 ): GuardApiExpect {
   const one = (s: string): string => resolvePlaceholders(s, vars, { fixtures })
+  // A comparison's operands are the captured-value half of an assertion: resolved
+  // here so the comparison compares numbers and the failure quotes them.
+  const comparison = (c: GuardComparison): GuardComparison => mapComparisonStrings(c, one)
   const stream = (m: GuardStreamMatcher): GuardStreamMatcher => ({
     ...(m.equals !== undefined ? { equals: one(m.equals) } : {}),
     ...(m.contains !== undefined ? { contains: one(m.contains) } : {}),
     ...(m.matches !== undefined ? { matches: one(m.matches) } : {}),
+    ...(m.compare !== undefined ? { compare: comparison(m.compare) } : {}),
   })
   const json = (m: GuardJsonMatcher): GuardJsonMatcher => ({
     ...m,
+    ...(m.compare !== undefined ? { compare: comparison(m.compare) } : {}),
     // `equals` is a JSON value — interpolate its string leaves (a created id may be
     // nested), mirroring how a request `json` body resolves. A WHOLE-leaf placeholder
     // takes the native fixture/capture type, so `equals: "{{fixture:evt.id}}"` compares
@@ -176,7 +201,8 @@ function nativeFixture(ident: string, fixtures: ReadonlyMap<string, Record<strin
 
 /** Exact whole-string forms of the two native-capable placeholder kinds (no surrounding text). */
 const WHOLE_FIXTURE = /^\{\{fixture:([^{}]+)\}\}$/
-const WHOLE_VAR = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/
+/** Both spellings, so `${captured:id}` keeps a captured number a number too. */
+const WHOLE_VAR = /^\$\{(?:captured:)?([A-Za-z_][A-Za-z0-9_]*)\}$/
 
 /** Classify a string that is EXACTLY one native-capable placeholder, else null. */
 function wholeValuePlaceholder(s: string): { kind: 'fixture'; ident: string } | { kind: 'var'; name: string } | null {
@@ -235,25 +261,73 @@ function resolvePlaceholders(
   const kinds: string[] = []
   if (maps.credentials) kinds.push('cred')
   if (maps.fixtures) kinds.push('fixture')
-  if (kinds.length === 0) return interpolate(template, vars)
+  return substitutePlaceholders(
+    template,
+    kinds,
+    (kind, ident) => {
+      if (kind === 'cred') {
+        const secret = maps.credentials!.get(ident)
+        if (secret === undefined) throw new UnknownCredentialError(ident)
+        return secret
+      }
+      return resolveFixture(ident, maps.fixtures!)
+    },
+    (segment) => interpolate(segment, vars),
+  )
+}
 
+/**
+ * THE placeholder scan, and the only one: locate `{{kind:ident}}` in the RAW
+ * template, resolve each one, and run the caller's own `${…}` interpolation over the
+ * literal segments BETWEEN them. That order is the bounded-injection rule itself —
+ * a resolved value is inserted verbatim and never re-scanned — which is why it lives
+ * in one function rather than once per surface.
+ */
+function substitutePlaceholders(
+  template: string,
+  kinds: readonly string[],
+  resolveOne: (kind: string, ident: string) => string,
+  literal: (segment: string) => string,
+): string {
+  if (kinds.length === 0) return literal(template)
   const pattern = new RegExp(`\\{\\{(${kinds.join('|')}):([^{}]+)\\}\\}`, 'g')
   let out = ''
   let last = 0
   let match: RegExpExecArray | null
   while ((match = pattern.exec(template)) !== null) {
-    out += interpolate(template.slice(last, match.index), vars)
-    const [, kind, ident] = match
-    if (kind === 'cred') {
-      const secret = maps.credentials!.get(ident)
-      if (secret === undefined) throw new UnknownCredentialError(ident)
-      out += secret
-    } else {
-      out += resolveFixture(ident, maps.fixtures!)
-    }
+    out += literal(template.slice(last, match.index))
+    out += resolveOne(match[1], match[2])
     last = match.index + match[0].length
   }
-  return out + interpolate(template.slice(last), vars)
+  return out + literal(template.slice(last))
+}
+
+/**
+ * The FIXTURE half of {@link resolvePlaceholders}, for a surface whose `${…}` pass
+ * is NOT the api driver's `vars` map — the sandbox scenario's four-token closure
+ * (`${unique}` / `${supplied:…}` / `${sandbox}` / `${captured:…}`), which it takes as
+ * `literal`. Fixtures are usable everywhere because they are not secrets; the
+ * credential half deliberately does not follow, and stays the api path's alone
+ * (a sandbox scenario binds no server, so there is no allowlisted view to resolve
+ * one against, and no redactor over what a child process prints).
+ */
+export function resolveFixtureText(
+  template: string,
+  fixtures: ReadonlyMap<string, Record<string, unknown>>,
+  literal: (segment: string) => string,
+): string {
+  return substitutePlaceholders(template, ['fixture'], (_kind, ident) => resolveFixture(ident, fixtures), literal)
+}
+
+/**
+ * Does this text carry a `{{fixture:…}}` reference AT ALL? A question about need,
+ * not about value: the run asks it of a scenario's steps to decide whether this
+ * selection has to prepare the seeded world before anything runs (item 98). It
+ * lives beside {@link substitutePlaceholders} so the pattern it asks with and the
+ * pattern the scan resolves with can never drift apart.
+ */
+export function containsFixtureReference(text: string): boolean {
+  return /\{\{fixture:[^{}]+\}\}/.test(text)
 }
 
 /**

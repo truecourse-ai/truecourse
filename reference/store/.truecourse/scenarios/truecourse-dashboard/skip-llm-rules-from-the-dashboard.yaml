@@ -1,0 +1,132 @@
+id: skip-llm-rules-from-the-dashboard
+title: A developer skips LLM rules and keeps the dashboard analysis deterministic
+promise: >-
+  A developer reaches the LLM estimate, chooses Skip, and verifies that deterministic
+  findings are stored without a model provider.
+flow:
+  id: skip-llm-rules-from-the-dashboard
+  fingerprint: sha256:1fc60bfdd80efedd691ebc90614cc78d6798d5fe9caee5e87e2aa2dd381fab0f
+interface:
+  path:
+    - cli/add
+    - web/open-an-unanalyzed-repository
+    - web/run-an-analysis-from-the-header
+    - web/skip-the-llm-rules-for-a-run
+    - api/get-api-repos-id-analyses
+    - api/get-api-repos-id-violations
+  fingerprints:
+    - sha256:61d9dd0c58f542195f6305faa593fc5ee2fc8de203fac212df3c86d442beb0a4
+    - sha256:974fded7a1d399851b62982724063f2a195f5ba4cef7d83a221100319349c84b
+    - sha256:1870a66f645e0648e54f8e11ad0699baa24bb22e7022efebcc5d4eae2c54bbe0
+    - sha256:392bccc47ef75a7e46fdd093cfdf09319e6c087ab8fdfa3e0479fb0458447971
+    - sha256:9f14c34aa3bce7a0b7a932adbcacac3414f81efcbb05332005a13d4d338449a1
+    - sha256:3b451a118147cc0a8bdb70612625b77ea367536f7a04b7921d97bdaa39738b02
+binds:
+  - doc: reference/spec-docs/dashboard/running-analyses.mdx
+    section: before-the-run-starts
+    fingerprint: sha256:03a985b61a5a89f0a9b9dcf4b466c831ae0b27f0a7433c18bbe7bf9d008b9d85
+setup:
+  files:
+    sample-app/package.json: |
+      {
+        "name": "sample-app",
+        "version": "1.0.0",
+        "type": "module"
+      }
+    sample-app/src/unsafe.js: |
+      export function evaluate(source) {
+        return eval(source)
+      }
+    sample-app/.truecourse/config.json: |
+      {
+        "enableLlmRules": true
+      }
+  env:
+    TRUECOURSE_LLM_TRANSPORT: claude-code
+    TRUECOURSE_TELEMETRY: '0'
+  git:
+    root: sample-app
+    branch: main
+    identity:
+      name: TrueCourse Reference
+      email: reference@truecourse.test
+    commits:
+      - files:
+          - package.json
+          - src/unsafe.js
+        message: seed the deterministic finding
+normalize: []
+steps:
+  - run:
+      - add
+      - '--no-skills'
+    cwd: sample-app
+    expect:
+      exit: 0
+    note: >-
+      Registers the clean repository. The transport env only bypasses the first-run
+      question; the flow supplies no login and will decline before any model call.
+  - driver: web
+    navigate: /repos/sample-app
+    expect:
+      visible:
+        role: button
+        name: Analyze
+      text:
+        contains: No analysis yet
+    note: Opens the unanalyzed repository at the Code Analysis Home tab.
+  - driver: web
+    click:
+      role: button
+      name: Analyze
+      exact: true
+    expect:
+      text:
+        matches: '^(?=[\s\S]*Run LLM rules\?)(?=[\s\S]*Skip — deterministic rules only)[\s\S]*$'
+    note: Reaches the LLM estimate on a clean tree, before a model is allowed to run.
+  - driver: web
+    click:
+      role: button
+      name: Skip — deterministic rules only
+      exact: true
+    expect:
+      text:
+        matches: '^(?![\s\S]*Run LLM rules\?)(?=[\s\S]*(Analyzing\.\.\.|Dynamic code evaluation))[\s\S]*$'
+    note: Chooses the deterministic-only successor and lets that analysis finish.
+  - driver: web
+    timeoutMs: 180000
+    expect:
+      text:
+        matches: '^(?![\s\S]*Analyzing\.\.\.)(?=[\s\S]*Dynamic code evaluation)[\s\S]*$'
+    note: Waits for the deterministic finding to refresh into the Code Analysis view.
+  - request:
+      method: GET
+      path: /api/repos/sample-app/analyses
+    expect:
+      status: 200
+      json:
+        '[0].provider':
+          equals: null
+    note: >-
+      The newest completed run records no model provider, which distinguishes Skip from
+      approving the LLM rules.
+  - request:
+      method: GET
+      path: /api/repos/sample-app/violations?limit=200
+    expect:
+      status: 200
+      body:
+        matches: 'src/unsafe\.js'
+      json:
+        total:
+          equals: 1
+    note: >-
+      The deterministic finding is still present, so Skip did not cancel or empty the run;
+      it removed only the model-rule half. The total is asserted as the exact ONE the seed
+      raises rather than as "at least one": this repository is the scenario's own, and its
+      single `eval` export is the only thing in it any deterministic rule has to say
+      something about, so an exact count also refuses the opposite failure — a Skip that
+      quietly let the model rules run anyway would land findings this seed cannot produce
+      deterministically.
+    milestone:
+      - dashboard-analyze-skip-runs-deterministic-rules-only
