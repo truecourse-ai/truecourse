@@ -76,10 +76,23 @@ export type ProgressEmit = (payload: AnalysisProgressPayload) => void;
 export class StepTracker {
   private steps: AnalysisStep[];
   private readonly emitFn: ProgressEmit;
+  private readonly taps: ProgressEmit[] = [];
 
   constructor(emit: ProgressEmit, stepDefs: { key: string; label: string }[]) {
     this.steps = stepDefs.map((s) => ({ ...s, status: 'pending' as StepStatus }));
     this.emitFn = emit;
+  }
+
+  /**
+   * Add a secondary emit listener — e.g. the sessions run record mirroring
+   * the checklist so the dashboard sees CLI-run progress. Returns the remover.
+   */
+  tap(fn: ProgressEmit): () => void {
+    this.taps.push(fn);
+    return () => {
+      const i = this.taps.indexOf(fn);
+      if (i !== -1) this.taps.splice(i, 1);
+    };
   }
 
   start(key: string, detail?: string): void {
@@ -142,12 +155,14 @@ export class StepTracker {
     const activeStep = this.steps.find((s) => s.status === 'active');
     const stepLabel = activeStep?.label ?? 'Analyzing';
 
-    this.emitFn({
+    const payload: AnalysisProgressPayload = {
       step: stepLabel,
       percent,
       detail: activeStep?.detail,
       steps: [...this.steps],
-    });
+    };
+    this.emitFn(payload);
+    for (const tap of this.taps) tap(payload);
   }
 }
 

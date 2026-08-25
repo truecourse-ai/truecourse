@@ -28,20 +28,16 @@ vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMo
 
 import { createApiTransport } from '../../packages/llm-api/src/index';
 
-// --- spec-consolidator -------------------------------------------------------
-import {
-  filterByRelevance,
-  tagDocs,
-  normalizeVocabulary,
-  flagOverlaps,
-  verifyFlaggedOverlaps,
-} from '../../packages/spec-consolidator/src/index.js';
-import type {
-  Area,
-  DocAreaTags,
-  DocCandidate,
-  Overlap,
-} from '../../packages/spec-consolidator/src/index.js';
+// --- spec scan ---------------------------------------------------------------
+// The five spec stages are AGENT SESSIONS now (plan 02): they build no
+// `LlmRequest`, so they contribute nothing to the request sweep below. Their
+// outcome schemas ride the session driver's toolset instead, and are checked
+// object-rooted in their own describe at the end of this file.
+import { DocVerdictSchema } from '../../packages/core/src/services/spec-scan/curate-doc';
+import { AreaSettlementSchema } from '../../packages/core/src/services/spec-scan/settle-areas';
+import { OverlapOutcomeSchema } from '../../packages/core/src/services/spec-scan/overlap';
+import { ScanScopeOutcomeSchema } from '../../packages/core/src/services/spec-scan/orchestrate';
+import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 
 // --- contract-extractor ------------------------------------------------------
 import {
@@ -182,49 +178,6 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
   const push = (name: string, reqs: LlmRequest[]) => {
     for (const req of reqs) if (req.schema) out.push({ name, req });
   };
-
-  // spec scan
-  {
-    const c = capture();
-    await filterByRelevance(repo, [doc('docs/orders-prd.md')], { transport: c.transport });
-    push('spec.relevance', c.reqs);
-  }
-  {
-    const c = capture();
-    await tagDocs(repo, [doc('docs/auth-prd.md')], { transport: c.transport });
-    push('spec.areaTag', c.reqs);
-  }
-  {
-    const c = capture();
-    const tags = new Map<string, DocAreaTags>([
-      ['a.md', { tags: [{ product: 'core', concern: 'booking' }] }],
-      ['b.md', { tags: [{ product: 'core', concern: 'appointments' }] }],
-    ]);
-    await normalizeVocabulary(repo, tags, { transport: c.transport });
-    push('spec.vocab', c.reqs);
-  }
-  {
-    const c = capture();
-    const a = doc('docs/a.md');
-    const b = doc('docs/b.md');
-    const area: Area = {
-      id: 'core/auth',
-      product: 'core',
-      concern: 'auth',
-      docRefs: [a.path, b.path],
-      overlaps: [],
-    };
-    await flagOverlaps(repo, [area], [a, b], { transport: c.transport });
-    push('spec.overlap', c.reqs);
-  }
-  {
-    const c = capture();
-    const a = doc('docs/a.md');
-    const b = doc('docs/b.md');
-    const ov: Overlap = { docs: [a.path, b.path], note: 'token ttl', sections: [], areas: ['core/auth'] };
-    await verifyFlaggedOverlaps(repo, new Map([['core/auth', [ov]]]), [a, b], { transport: c.transport });
-    push('spec.verifyOverlap', c.reqs);
-  }
 
   // contracts generate
   {
@@ -481,7 +434,6 @@ const EXPECTED_OPT_OUTS = [
   'guard.generate.api', // the same schema, api driver
   'guard.recipe', // `env` / `servers` records
   'guard.seed', // `provides.credentials` / `provides.fixtures` records
-  'spec.vocab', // `products` / `concerns` records
 ];
 
 let repo: string;
@@ -502,7 +454,9 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    expect(collected.length).toBeGreaterThanOrEqual(27);
+    // 22 since the five spec stages became agent sessions (plan 02) — they build
+    // no LlmRequest at all. A NEW schema-bearing call site still has to raise it.
+    expect(collected.length).toBeGreaterThanOrEqual(22);
     // Each collected call site contributed exactly one request.
     expect(new Set(collected.map((c) => c.name)).size).toBe(collected.length);
   });
@@ -763,5 +717,27 @@ describe('a non-object-rooted schema fails loudly on the JSON-mode path too', ()
     });
     expect(getFormat()?.type).toBe('json');
     expect(getFormat()?.schema).toBeUndefined();
+  });
+});
+
+/**
+ * The scan's five one-shot stages are agent sessions now: their schemas ride the
+ * session driver's TOOLSET (the injected `outcome` tool) rather than an
+ * `LlmRequest`, so they are outside the sweep above. The one rule that still
+ * binds them is the one JSON mode imposes on everything — an object root.
+ */
+describe('spec-scan session outcome schemas', () => {
+  const SCAN_OUTCOMES: Array<[string, ZodType]> = [
+    ['spec-scan.curate-doc', DocVerdictSchema],
+    ['spec-scan.settle-areas', AreaSettlementSchema],
+    ['spec-scan.overlap', OverlapOutcomeSchema],
+    ['spec-scan.orchestrate', ScanScopeOutcomeSchema],
+  ];
+
+  it('are all object-rooted', () => {
+    for (const [kind, schema] of SCAN_OUTCOMES) {
+      const rendered = JSON.parse(jsonSchemaHint(schema)) as { type?: string };
+      expect(rendered.type, kind).toBe('object');
+    }
   });
 });

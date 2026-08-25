@@ -1,31 +1,28 @@
 /**
- * Per-doc AREA tagger — the curated-corpus classifier. For each kept doc it
- * asks an LLM "which AREAS does this doc cover?" and returns a list of
- * two-level `{product, concern}` tags plus the doc's lifecycle status. The
- * whole doc stays the unit; tagging only annotates it.
+ * Area-tag vocabulary + deterministic status parsing — what remains of the
+ * per-doc AREA tagger after the spec-scan sessions (plan 02 step 3) absorbed
+ * its LLM call into the merged `spec-scan.curate-doc` session (in
+ * `@truecourse/core`'s `services/spec-scan/`).
  *
- * Cheap and cached per-doc by (path, contentHash, prompt
- * fingerprint) through the pluggable KV seam — re-running a scan with unchanged
- * docs costs zero tokens, which is what keeps `corpus.json` stable across
- * re-scans. Failures degrade gracefully: a doc that errors out classifies to no
- * areas (it still appears in the corpus, just ungrouped) rather than breaking
- * the scan.
+ * What stays here, and why:
+ * - {@link DocAreaTags} — the per-doc verdict shape the scan run's fold still
+ *   produces and the deterministic grouper consumes;
+ * - {@link parseDocStatus} / {@link classifyStatusValue} — the deterministic
+ *   status backstop the fold applies to every session verdict (a session that
+ *   omits or free-forms the status degrades to the header parse, never to a
+ *   dropped doc);
+ * - {@link AREA_TAGGER_SYSTEM_PROMPT} — the retired one-shot's prompt, kept
+ *   exported because the merged session prompt derives its area rules from
+ *   this text (provenance, not runtime).
  *
- * The classifier proposes FREE-FORM product/concern strings; canonicalization
- * (synonym folding, slugging) happens deterministically downstream in
- * `area-grouper.ts`, so the engine carries no hardcoded per-repo vocabulary and
- * a wider alias map re-normalizes cached tags for free.
+ * The old `consolidator/area-tags` cache is neither written nor read any more
+ * (the estimate probes the session cache with the run's own key builders —
+ * plan 02 step 7); its files remain on disk, inert.
  */
 
-import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import { z } from 'zod';
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
-import type { DocCandidate } from './discovery.js';
-import { AreaTagSchema, type AreaTag } from './corpus-types.js';
+import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm';
+import type { AreaTag } from './corpus-types.js';
 import { StatusSchema, type Status } from './types.js';
-import { defaultConcurrency } from './runner.js';
 
 /** The tagger's per-doc verdict: the raw (un-normalized) area tags + status. */
 export interface DocAreaTags {
@@ -35,125 +32,9 @@ export interface DocAreaTags {
   status?: Status;
 }
 
-export interface AreaTagRunnerInput {
-  doc: DocCandidate;
-}
-
-export type AreaTagRunner = (input: AreaTagRunnerInput) => Promise<DocAreaTags>;
-
-export interface AreaTaggerOptions {
-  /** Override the runner. Tests pass a stub. */
-  runner?: AreaTagRunner;
-  /** LLM transport for the auto-created runner (defaults to cli). */
-  transport?: LlmTransport;
-  /** When false, skip the LLM call entirely; every doc tags to no areas. */
-  enabled?: boolean;
-  /** Cap on concurrent LLM calls. Default {@link defaultConcurrency}. */
-  concurrency?: number;
-  /** Model forwarded to the default spawn runner. */
-  model?: string;
-  /** Fallback model forwarded to the default spawn runner. */
-  fallbackModel?: string;
-  /**
-   * Fired once per doc as it's tagged, plus an initial `(0, total)` so the
-   * caller learns the total upfront. Tagging is concurrent, so `done`
-   * increments in completion order, not doc order.
-   */
-  onProgress?: (done: number, total: number) => void;
-}
-
 // ---------------------------------------------------------------------------
-// Top-level entry point
+// Header status parsing (deterministic backstop)
 // ---------------------------------------------------------------------------
-
-/**
- * Tag every doc with the areas it covers. Returns a map keyed by `doc.path`.
- * When `enabled === false` (or there are no docs) every doc maps to empty tags.
- */
-export async function tagDocs(
-  repoRoot: string,
-  docs: DocCandidate[],
-  opts: AreaTaggerOptions = {},
-): Promise<Map<string, DocAreaTags>> {
-  const out = new Map<string, DocAreaTags>();
-  if (opts.enabled === false || docs.length === 0) {
-    for (const d of docs) out.set(d.path, { tags: [] });
-    return out;
-  }
-
-  const runner =
-    opts.runner ??
-    spawnAreaTagRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
-  // Clamp to >=1: concurrency is a public option, and a 0/negative value would
-  // stall the hand-rolled limiter (no task ever launches, the promise never resolves).
-  const concurrency = Math.max(1, opts.concurrency ?? defaultConcurrency());
-
-  const total = docs.length;
-  let done = 0;
-  const markDone = (): void => opts.onProgress?.(++done, total);
-  opts.onProgress?.(0, total);
-
-  let cursor = 0;
-  let active = 0;
-  await new Promise<void>((resolve) => {
-    const launch = (): void => {
-      while (active < concurrency && cursor < docs.length) {
-        const doc = docs[cursor++];
-        active++;
-        tagOne(repoRoot, doc, runner)
-          .then((verdict) => {
-            out.set(doc.path, verdict);
-          })
-          .catch(() => {
-            // A failed doc gets no areas — it still appears in the corpus,
-            // ungrouped, rather than aborting the whole scan.
-            out.set(doc.path, { tags: [], status: parseDocStatus(docBody(doc)) });
-          })
-          .finally(() => {
-            markDone();
-            active--;
-            if (cursor >= docs.length && active === 0) resolve();
-            else launch();
-          });
-      }
-      if (cursor >= docs.length && active === 0) resolve();
-    };
-    launch();
-  });
-
-  return out;
-}
-
-async function tagOne(repoRoot: string, doc: DocCandidate, runner: AreaTagRunner): Promise<DocAreaTags> {
-  const cacheKey = computeCacheKey(doc);
-  const cached = await readCache(repoRoot, cacheKey);
-  if (cached) return cached;
-  const verdict = await runner({ doc });
-  // Deterministic status fallback when the model omitted it — the header is the
-  // more reliable source anyway.
-  if (verdict.status === undefined) {
-    const parsed = parseDocStatus(docBody(doc));
-    if (parsed) verdict.status = parsed;
-  }
-  await writeCache(repoRoot, cacheKey, verdict);
-  return verdict;
-}
-
-// ---------------------------------------------------------------------------
-// Doc body + header status parsing
-// ---------------------------------------------------------------------------
-
-function docBody(doc: DocCandidate): string {
-  if (doc.content !== undefined) return doc.content;
-  if (doc.absPath) {
-    try {
-      return fs.readFileSync(doc.absPath, 'utf-8');
-    } catch {
-      /* fall through to preview */
-    }
-  }
-  return doc.preview;
-}
 
 const STATUS_VALUES = new Set(StatusSchema.options);
 
@@ -181,8 +62,13 @@ export function parseDocStatus(body: string): Status | undefined {
  * deprecated" or "draft, GA in Q3" classify by their governing state, not an
  * incidental keyword. Ambiguous short tokens (`ga`/`live`) only count when they
  * are the whole value.
+ *
+ * Exported for the scan run's fold: the curate-doc session reports the status
+ * as the free-form string the doc states, and the fold coerces it through the
+ * SAME classifier the header parser uses — an unrecognized value degrades to
+ * the header parse rather than discarding the verdict.
  */
-function classifyStatusValue(rawValue: string): Status | undefined {
+export function classifyStatusValue(rawValue: string): Status | undefined {
   const raw = rawValue.toLowerCase().replace(/[`*_]/g, '').trim();
   if (!raw) return undefined;
   if (STATUS_VALUES.has(raw as Status)) return raw as Status;
@@ -197,7 +83,7 @@ function classifyStatusValue(rawValue: string): Status | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Prompt + subprocess runner
+// The retired one-shot's prompt — see the module note for why it stays.
 // ---------------------------------------------------------------------------
 
 export const AREA_TAGGER_SYSTEM_PROMPT = `You classify ONE documentation file by the AREAS of a software system it covers. You do NOT extract facts — you only tag the whole doc.
@@ -232,100 +118,3 @@ Output ONLY a JSON object, no prose, no code fences:
 
 Use "status": null when no lifecycle is stated. Never invent areas the doc does not cover, but never leave a real spec doc with zero areas.`;
 
-/** How much of the doc to show the classifier. Tagging needs structure, not the full body. */
-const TAGGER_PREVIEW_LINES = 120;
-
-export function buildAreaTaggerUserPrompt(doc: DocCandidate, body: string): string {
-  const preview = body.split(/\r?\n/).slice(0, TAGGER_PREVIEW_LINES).join('\n');
-  return [
-    `Path: ${doc.path}`,
-    `Detected kind: ${doc.kind}`,
-    `Size: ${doc.size} bytes`,
-    '',
-    `--- doc (first ${TAGGER_PREVIEW_LINES} lines) ---`,
-    preview,
-    '--- end doc ---',
-    '',
-    'Return the JSON object as specified.',
-  ].join('\n');
-}
-
-const AreaTaggerOutputSchema = z.object({
-  areas: z.array(AreaTagSchema).default([]),
-  // Accept ANY status string the model echoes from the doc header ("accepted",
-  // "draft", "WIP", …) and coerce it below. A strict enum here would throw on an
-  // unrecognized value and discard the AREAS along with it — which silently
-  // dropped every "Status: accepted" ADR to zero areas.
-  status: z.string().nullish(),
-});
-
-/** The response schema sent on the request — the API transport enforces it via
- *  structured output; the cli transport ignores it. */
-const AREA_TAGGER_RESPONSE_SCHEMA = jsonSchemaHint(AreaTaggerOutputSchema);
-
-function spawnAreaTagRunner(
-  opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
-): AreaTagRunner {
-  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
-  const timeoutMs = opts.timeoutMs ?? 60_000;
-  return async ({ doc }) => {
-    const body = docBody(doc);
-    const raw = await transport({
-      id: `spec.areaTag:${doc.path}`,
-      stage: 'spec.areaTag',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: AREA_TAGGER_SYSTEM_PROMPT,
-      user: buildAreaTaggerUserPrompt(doc, body),
-      responseFormat: 'json',
-      schema: AREA_TAGGER_RESPONSE_SCHEMA,
-      timeoutMs,
-    });
-    const inner = JSON.parse(stripCodeFences(raw));
-    const parsed = AreaTaggerOutputSchema.parse(inner);
-    // Coerce the free-form status through the same classifier the header parser
-    // uses; an unrecognized value becomes undefined rather than discarding the tags.
-    return { tags: parsed.areas, status: parsed.status ? classifyStatusValue(parsed.status) : undefined };
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Cache — content-addressed via the pluggable KV seam (Postgres in EE, file in
-// OSS). Key folds in the prompt fingerprint + doc contentHash so an unchanged
-// doc is a hit and a prompt change invalidates.
-// ---------------------------------------------------------------------------
-
-const CACHE_NAME = 'consolidator/area-tags';
-
-const PROMPT_FINGERPRINT = createHash('sha256').update(AREA_TAGGER_SYSTEM_PROMPT).digest('hex').slice(0, 16);
-
-function computeCacheKey(doc: DocCandidate): string {
-  return createHash('sha256')
-    .update(`${PROMPT_FINGERPRINT}::${doc.path}::${doc.contentHash}`)
-    .digest('hex');
-}
-
-const CachedAreaTagsSchema = z.object({
-  tags: z.array(AreaTagSchema),
-  status: StatusSchema.optional(),
-});
-
-async function readCache(scope: string, cacheKey: string): Promise<DocAreaTags | null> {
-  const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
-  if (raw === null) return null;
-  const parsed = CachedAreaTagsSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
-}
-
-async function writeCache(scope: string, cacheKey: string, verdict: DocAreaTags): Promise<void> {
-  await setCacheEntry(scope, CACHE_NAME, cacheKey, verdict);
-}
-
-/**
- * Whether a doc's area-tags are already cached (an unchanged doc ⇒ no LLM call
- * next run). Reuses the runtime cache key so the estimate matches the next scan
- * exactly.
- */
-export async function isAreaTagCached(repoRoot: string, doc: DocCandidate): Promise<boolean> {
-  return (await readCache(repoRoot, computeCacheKey(doc))) !== null;
-}

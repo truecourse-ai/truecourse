@@ -151,6 +151,46 @@ describe('fetchPages', () => {
     expect(pages[0].content).toContain('# Routing');
   });
 
+  // docs.documenso.com (fumadocs), 2026-08-25: every llms.txt link renders HTML and
+  // the raw source lives at `.mdx` — `.md` is a soft 404. Probing only `.md` skipped
+  // all 143 pages as not-markdown and produced an empty source.
+  it('finds the markdown twin at .mdx when .md is a soft 404', async () => {
+    const site = await startSite({
+      '/llms.txt': {
+        body: (origin) => `# MDX Docs\n\n## Users\n\n- [Upload](${origin}/docs/users/upload): Upload documents.\n`,
+        contentType: 'text/plain',
+      },
+      '/docs/users/upload.md': { body: '<html><body>Page not found</body></html>', contentType: 'text/html', status: 404 },
+      '/docs/users/upload.mdx': { body: '# Upload Documents\n\nDrop a PDF to start.\n' },
+      '/docs/users/upload': { body: '<html><body>Upload</body></html>', contentType: 'text/html' },
+    });
+    sites.push(site);
+
+    const { pages, skipped } = await fetchAll(site);
+    expect(skipped).toEqual([]);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].content).toContain('# Upload Documents');
+    // The page itself is never fetched once a twin answers.
+    expect(site.hitsFor('/docs/users/upload')).toBe(0);
+  });
+
+  it('fetches an .mdx link as-is, without probing for a twin', async () => {
+    const site = await startSite({
+      '/llms.txt': {
+        body: (origin) => `# MDX Docs\n\n## Users\n\n- [Users](${origin}/docs/users.mdx): Everything users do.\n`,
+        contentType: 'text/plain',
+      },
+      '/docs/users.mdx': { body: '# Users\n\nWhat a user can do.\n' },
+    });
+    sites.push(site);
+
+    const { pages, skipped } = await fetchAll(site);
+    expect(skipped).toEqual([]);
+    expect(pages[0].content).toContain('# Users');
+    expect(site.hitsFor('/docs/users.mdx')).toBe(1);
+    expect(site.hitsFor('/docs/users.mdx.md')).toBe(0);
+  });
+
   it('skips a page whose only response is HTML, with the content type as detail', async () => {
     const site = await startSite({
       '/llms.txt': {

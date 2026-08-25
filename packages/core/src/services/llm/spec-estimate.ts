@@ -4,32 +4,83 @@
  * the shared {@link estimateStageTokens}, so the calculation lives in one place
  * and the CLI + dashboard render identical numbers.
  *
- * Deterministic, no LLM, no transport: SCAN is accurate in CALL COUNT (discovery
- * + the same deterministic prefilter the real run uses); token sizes are
- * heuristic.
+ * Deterministic, no LLM, no transport. SCAN models SESSIONS (plan 02 step 7):
+ * per session kind the estimate counts cache-MISSING work items by probing the
+ * SAME caches with the SAME exported key builders the run uses (instructions
+ * fingerprint included), then turns items into calls with per-kind expected
+ * turn counts — `minCalls` = items (one turn each), `maxCalls` = items ×
+ * (maxResumes+1) × turns (the budget ceiling), expected = items ×
+ * EXPECTED_TURNS. One model runs every session (§3.4), so the scan estimate
+ * carries no per-stage tier labels.
  *
- * Per-stage system-prompt sizes are the REAL prompt constants (imported from the
- * packages that send them), so they can't drift from what a run actually pays.
- * The body sizes (doc/area chars) are real and dominate.
+ * Per-kind system prompts and briefing builders are the REAL ones (imported
+ * from the session modules), so sizes can't drift from what a run pays.
  */
 
 import {
+  applySubjectAttribution,
   discoverDocs,
-  planRelevanceWork,
-  readCorpus,
+  prefilterDocs,
   readCorpusDecisions,
-  isAreaTagCached,
-  RELEVANCE_SYSTEM_PROMPT,
-  relevanceUserPromptChars,
-  resolveRepoIdentity,
   readRepoIdentityInput,
-  AREA_TAGGER_SYSTEM_PROMPT,
-  VOCAB_NORMALIZER_SYSTEM_PROMPT,
-  OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  OVERLAP_WINDOW_CHARS,
-  VERIFY_OVERLAP_SYSTEM_PROMPT,
-  VERIFY_DOC_BUDGET_CHARS,
+  readSourcesFile,
+  resolveRepoIdentity,
+  groupByArea,
+  type AreaTag,
+  type DocAreaTags,
+  type DocCandidate,
 } from '@truecourse/spec-consolidator';
+import { getCacheEntry } from '@truecourse/llm';
+import type { z } from 'zod';
+import { WRAP_UP_TURNS, type SessionBudget } from '@truecourse/agent-loop';
+import {
+  CURATE_DOC_BUDGET,
+  CURATE_DOC_CACHE_NAME,
+  CURATE_DOC_SESSION_KIND,
+  CURATE_DOC_SYSTEM_PROMPT,
+  DocVerdictSchema,
+  curateDocBriefing,
+  curateDocCacheKey,
+  type DocVerdict,
+} from '../spec-scan/curate-doc.js';
+import {
+  AreaSettlementSchema,
+  SETTLE_AREAS_BUDGET,
+  SETTLE_AREAS_CACHE_NAME,
+  SETTLE_AREAS_SESSION_KIND,
+  SETTLE_AREAS_SYSTEM_PROMPT,
+  applySettlement,
+  canonicalDocTags,
+  collectAreaVocab,
+  settleAreasBriefing,
+  settleAreasCacheKey,
+  settleAreasGate,
+  type AreaSettlement,
+} from '../spec-scan/settle-areas.js';
+import {
+  OVERLAP_SESSION_BUDGET,
+  OVERLAP_SESSION_CACHE_NAME,
+  OVERLAP_SESSION_KIND,
+  OVERLAP_SESSION_SYSTEM_PROMPT,
+  OverlapOutcomeSchema,
+  deriveOverlapWorkItems,
+  overlapBriefing,
+  overlapSessionCacheKey,
+  type OverlapWorkItem,
+} from '../spec-scan/overlap.js';
+import {
+  ORCHESTRATE_BUDGET,
+  ORCHESTRATE_SYSTEM_PROMPT,
+  SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+  applyScopeVerdicts,
+  buildScanScopeUniverse,
+  orchestrateBriefing,
+  scopeCoverage,
+} from '../spec-scan/orchestrate.js';
+import { buildScanUniverse, instructionsFingerprint } from '../spec-scan/tools.js';
+import type { ScanStep } from '../spec-scan/run.js';
+import { SESSION_MODEL_CLAUDE_CODE } from './session-driver.js';
+import { apiModeModel } from '../../config/global-config.js';
 import {
   planGuardWork,
   proposeRecipe,
@@ -82,18 +133,16 @@ import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './
 import type { PriceTable } from './model-prices.js';
 
 // Heuristic assumptions, surfaced as ranges where they bite.
-const KEEP_RATE = 0.9; // fraction of prefiltered docs the relevance LLM keeps
-const AVG_AREA_SIZE = 4; // docs per area (drives overlap pair count)
-const FLAG_RATE = 0.15; // rough fraction of overlap PAIRS the detector flags (→ verify calls)
+const KEEP_RATE = 0.9; // fraction of curated docs a session keeps (approximation path)
+const AVG_AREA_SIZE = 4; // docs per area (sizes the changed-docs share of overlap areas)
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
 const STAGE_LABELS: Record<string, string> = {
-  // scan
-  relevance: 'Filtering docs',
-  areaTag: 'Tagging areas',
-  vocab: 'Normalizing vocabulary',
-  overlap: 'Flagging overlaps',
-  verifyOverlap: 'Verifying conflicts',
+  // scan (session kinds — plan 02)
+  [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 'Settling scan scope',
+  [CURATE_DOC_SESSION_KIND]: 'Curating docs',
+  [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
+  [OVERLAP_SESSION_KIND]: 'Flagging overlaps',
   // guard generate
   // guard setup
   guardRecipe: 'Discovering recipe',
@@ -109,162 +158,320 @@ const STAGE_LABELS: Record<string, string> = {
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
 
+// --- Session-kind modeling constants (plan 02 step 7) ------------------------
+// PROVISIONAL expected turn counts per session kind, to be re-grounded on real
+// transcript data once a few scans have run. They drive the EXPECTED cost only;
+// the ceiling is always the budget's hard limit.
+const EXPECTED_TURNS: Record<string, number> = {
+  [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 6,
+  [CURATE_DOC_SESSION_KIND]: 2,
+  [SETTLE_AREAS_SESSION_KIND]: 4,
+  [OVERLAP_SESSION_KIND]: 8,
+};
+// PROVISIONAL prior-turns growth: each turn's input carries the turns before it
+// (tool results, the model's own reasoning); this approximates the average
+// extra chars a mid-session turn pays beyond the briefing.
+const SESSION_TURN_GROWTH_CHARS = 1_500;
+// Rough output tokens per TURN, per kind (tool calls are short; the outcome
+// object dominates the last turn).
+const SESSION_OUTPUT_TOKENS: Record<string, number> = {
+  [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 300,
+  [CURATE_DOC_SESSION_KIND]: 120,
+  [SETTLE_AREAS_SESSION_KIND]: 250,
+  [OVERLAP_SESSION_KIND]: 400,
+};
+/** Cold-cache fallback for an overlap briefing's size (outlines, no bodies). */
+const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
+
+/** One session kind's work, rolled into the `StageCallEstimate` shape the
+ *  CLI/dashboard already render. `calls` = expected TURNS (items × expected
+ *  turns per session); `minCalls` = items (one turn each); `maxCalls` = the
+ *  budget's hard limit (items × ((maxResumes+1) × turns + the shell's
+ *  wrap-up window) — §3.3, 2026-08-21). */
+function sessionKindStage(input: {
+  kind: string;
+  model: string;
+  items: number;
+  minItems?: number;
+  maxItems?: number;
+  budget: SessionBudget;
+  systemPromptChars: number;
+  briefingChars: number;
+  bound?: string;
+}): StageCallEstimate {
+  const expectedTurns = EXPECTED_TURNS[input.kind] ?? 4;
+  const ceilingTurns = (input.budget.maxResumes + 1) * input.budget.turns + WRAP_UP_TURNS;
+  const stage: StageCallEstimate = {
+    stage: input.kind,
+    model: input.model,
+    calls: input.items * expectedTurns,
+    expectedCalls: input.items * expectedTurns,
+    minCalls: input.minItems ?? input.items,
+    maxCalls: (input.maxItems ?? input.items) * ceilingTurns,
+    avgInputTokens: tokensFromChars(
+      input.systemPromptChars,
+      input.briefingChars + Math.round((expectedTurns / 2) * SESSION_TURN_GROWTH_CHARS),
+    ),
+    avgOutputTokens: SESSION_OUTPUT_TOKENS[input.kind] ?? 300,
+  };
+  if (input.bound) stage.bound = input.bound;
+  return stage;
+}
+
+/** A schema-gated cache probe — the read half of `cachedSessionOutcome`, so the
+ *  estimate counts a MISS exactly when the run would spend a session. */
+async function probeSessionCache<T>(
+  repoRoot: string,
+  cacheName: string,
+  key: string,
+  schema: z.ZodType<T>,
+): Promise<T | null> {
+  const raw = await getCacheEntry(repoRoot, cacheName, key).catch(() => null);
+  if (raw === null) return null;
+  const parsed = schema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** The one model every scan session runs on (§3.4): the configured api-mode
+ *  flagship, or claude-code mode's pinned tier. No per-stage tiers. */
+function sessionModel(mode?: LlmTransportMode): string {
+  return (mode !== undefined ? apiModeModel(mode) : apiModeModel()) ?? SESSION_MODEL_CLAUDE_CODE;
+}
+
+const mean = (ns: number[]): number =>
+  ns.length === 0 ? 0 : Math.round(ns.reduce((a, b) => a + b, 0) / ns.length);
+
 /**
- * Pre-flight token estimate for `spec scan` (curate). Pass `prices` to add a
- * ceiling cost.
+ * Pre-flight token estimate for `spec scan`. Pass `prices` to add a ceiling
+ * cost. Models SESSIONS (plan 02 step 7): per kind, `items` = cache-missing
+ * work items, probed against the run's own cache names + key builders — the
+ * instructions fingerprint included, so editing a standing instruction shows
+ * up here as the full re-scan it really is. A warmed cache yields an EMPTY
+ * estimate (no stages) and the confirm prompt is skipped.
  *
- * Cache-aware (exact — no proxy): relevance + area-tags are cached per doc,
- * content-keyed, and each cache directly gates its own LLM call. So a re-scan
- * only pays for docs whose content changed; we read the real caches up front and
- * count only the misses. The global stages (vocab/relation/overlap) re-run only
- * when the kept set changed. When nothing changed the estimate has no stages and
- * the confirm prompt is skipped.
+ * Where an upstream miss makes downstream work unknowable (changed docs feed
+ * the vocabulary that feeds the areas), the affected kind degrades to an
+ * honest range instead of a guess dressed as a count.
  */
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode } = {},
+  opts: { identity?: RepoIdentity | null; mode?: LlmTransportMode; only?: ScanStep } = {},
 ): Promise<LlmEstimate> {
+  const model = sessionModel(opts.mode);
+
   // Load the user's decisions so the estimate probes the SAME doc set the run
-  // classifies. Without the manualIncludes the prefilter (dedup pool) and the
-  // kept set diverge from the runtime — the estimate would report "all cached"
-  // while the run cache-misses and spends (silent-spend bug).
+  // classifies (manual includes/excludes, scope verdicts, instructions — all of
+  // them shift what the run spends).
   const decisions = readCorpusDecisions(repoRoot);
   const manualIncludes = decisions.manualIncludes ?? [];
+  const manualSet = new Set(manualIncludes);
   const manualExcludes = new Set(decisions.manualExcludes ?? []);
 
-  // Scope-aware, exactly as `curate` discovers: `spec.include` narrows the
-  // universe before anything else runs, and the estimate must see the same doc
-  // set the run will. It also has to, now that identity is part of the relevance
-  // cache key — a different doc set can resolve a different identity, and then
-  // the estimate reads a cache the run never hits.
-  //
-  // `skipGit` is unconditional here, and only here: `lastTouched` comes from one
-  // `git log` PER DOC — 7.6s for 492 docs, ~99% of a large repo's pre-flight —
-  // and no estimate input reads it (cache keys are path + contentHash, identity
-  // is derived from doc bodies). The curate run still derives it; the doc list,
-  // hashes and sizes the estimate prices are identical either way.
-  const docs = discoverDocs(repoRoot, { skipGit: true, scope: loadSpecScope(repoRoot) });
-  // Resolved AFTER discovery (corpus name expansion reads the docs) and folded
-  // into the relevance cache key. The estimate and the run must resolve the same
-  // identity or they key differently and the estimate under-reports — the
-  // silent-re-spend class this module already documents. An explicit `null` from
-  // the caller (EE) is honored; only `undefined` falls back to resolving here.
+  // Discovery, scope-aware and gitless, exactly as before (`lastTouched` feeds
+  // no estimate input and costs one `git log` per doc).
+  const docsAll = discoverDocs(repoRoot, { skipGit: true, scope: loadSpecScope(repoRoot) });
+
+  // The orchestrator pre-pass, mirrored: a covered universe spends no session;
+  // an uncovered one spends exactly one (no cache for that kind — the pre-pass
+  // IS its cheap path).
+  const scanScope = buildScanScopeUniverse(buildScanUniverse(docsAll), readSourcesFile(repoRoot).sources);
+  const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? []);
+  const orchestrateItems = coverage.covered ? 0 : 1;
+
+  // Scope verdicts excluded BEFORE anything below — same order as the run.
+  const docs = applyScopeVerdicts(docsAll, decisions.scopeVerdicts ?? [], scanScope.sources);
+
+  // Identity AFTER discovery + scope, as the run resolves it; it enters every
+  // curate-doc cache key, so estimate and run must agree. Explicit null (EE)
+  // is honored.
   const identity =
     opts.identity !== undefined
       ? opts.identity
       : resolveRepoIdentity({ ...readRepoIdentityInput(repoRoot), docs });
-  // Exact same planner `filterByRelevance` runs: one LLM call per doc whose
-  // verdict isn't cached (manual-includes never call). Its `known` verdicts also
-  // tell us which docs are kept (feed area-tagging).
-  const plan = await planRelevanceWork(repoRoot, docs, { manualIncludes, identity });
-  const nClassify = plan.toClassify.length;
-  const relevanceMissDocs = plan.needsCall;
-  // Kept without a call = cached-include ∪ manual-include, minus force-excludes
-  // (the run drops excluded docs before tagging).
-  const cachedKeptDocs = plan.toClassify.filter(
-    (d) => plan.known.get(d.path)?.include === true && !manualExcludes.has(d.path),
+
+  const instructions = decisions.instructions ?? [];
+  const instructionParts = [instructionsFingerprint(instructions)];
+
+  // ---- curate-doc: exact — probe the run's own per-doc cache ----------------
+  const { toClassify } = prefilterDocs(docs, manualIncludes, identity);
+  const curateItems = toClassify.filter((d) => !manualExcludes.has(d.path));
+  const cachedVerdicts = new Map<string, DocVerdict>();
+  const curateMissDocs: DocCandidate[] = [];
+  for (const doc of curateItems) {
+    const cached = await probeSessionCache(
+      repoRoot,
+      CURATE_DOC_CACHE_NAME,
+      curateDocCacheKey({ identity, doc }, instructionParts),
+      DocVerdictSchema,
+    );
+    if (cached) cachedVerdicts.set(doc.path, cached);
+    else curateMissDocs.push(doc);
+  }
+  const missCount = curateMissDocs.length;
+
+  // ---- The cached fold, reconstructed (det) ---------------------------------
+  // The kept set from CACHED verdicts, through the same subject-attribution
+  // backstop the run's fold applies. (The alias reinstatement backstop is
+  // deliberately skipped here — expected ~0 hits, and it reads every doc body.)
+  const keptTags = new Map<string, AreaTag[]>();
+  for (const [path, v] of cachedVerdicts) {
+    const attributed = applySubjectAttribution({
+      path,
+      subject: v.subject,
+      include: v.keep,
+      reason: v.reason,
+      category: v.category,
+    });
+    if (attributed.include || manualSet.has(path)) keptTags.set(path, v.areas);
+  }
+  const canonicalByPath = new Map<string, AreaTag[]>(
+    [...keptTags].map(([path, tags]) => [path, canonicalDocTags(tags)]),
   );
+  const vocab = collectAreaVocab(canonicalByPath);
 
-  // Area-tag: cached-kept docs that still lack tags + the kept share of changed
-  // docs (whose tags are necessarily uncached — same content key).
-  const cachedKeptTagged = await Promise.all(cachedKeptDocs.map((d) => isAreaTagCached(repoRoot, d)));
-  const cachedKeptTagMisses = cachedKeptTagged.filter((cached) => !cached).length;
-  const estChangedKept = Math.round(relevanceMissDocs.length * KEEP_RATE);
+  // ---- settle-areas: gate + probe when the vocabulary is knowable -----------
+  const gate = keptTags.size > 0 && settleAreasGate(vocab);
+  let settlement: AreaSettlement | null = null;
+  let settleItems = 0;
+  let settleMin = 0;
+  let settleMax = 0;
+  if (missCount === 0) {
+    if (gate) {
+      settlement = await probeSessionCache(
+        repoRoot,
+        SETTLE_AREAS_CACHE_NAME,
+        settleAreasCacheKey(vocab, instructionParts),
+        AreaSettlementSchema,
+      );
+      settleItems = settlement ? 0 : 1;
+      settleMin = settleItems;
+      settleMax = settleItems;
+    }
+  } else {
+    // Changed docs may move the label sets, so the settlement key is unknowable:
+    // the honest answer is a 0..1 range, expected 1.
+    settleItems = 1;
+    settleMin = 0;
+    settleMax = 1;
+  }
 
-  const nRelevanceCalls = relevanceMissDocs.length;
-  const nAreaTagCalls = cachedKeptTagMisses + estChangedKept;
-  const nKept = cachedKeptDocs.length + estChangedKept;
-  const changedDocs = relevanceMissDocs.length + cachedKeptTagMisses;
-  const hasWork = changedDocs > 0;
+  // ---- overlap: group from cached tags, probe per-cluster keys --------------
+  // Exactly the run's derivation whenever everything upstream is cached (the
+  // settlement applied, the same grouper, the same collision pairing and
+  // clustering via deriveOverlapWorkItems, the same key builder); with
+  // upstream misses the probed part still holds and the changed docs' share is
+  // added as a range.
+  const applied = settlement ? applySettlement(settlement, vocab) : null;
+  const vocabMap = applied?.vocab ?? { products: {}, concerns: {} };
+  if (applied) {
+    for (const [ref, perDoc] of applied.reassignments) {
+      const tags = canonicalByPath.get(ref);
+      if (!tags) continue;
+      canonicalByPath.set(
+        ref,
+        tags.map((tag) => (perDoc.has(tag.concern) ? { ...tag, concern: perDoc.get(tag.concern)! } : tag)),
+      );
+    }
+  }
+  const keptDocs = curateItems.filter((d) => keptTags.has(d.path));
+  const groupTags = new Map<string, DocAreaTags>(
+    keptDocs.map((d) => [d.path, { tags: canonicalByPath.get(d.path) ?? [] }]),
+  );
+  const grouped = groupByArea(keptDocs, groupTags, decisions.manualAreas ?? [], vocabMap);
+  const overlapItems: OverlapWorkItem[] = deriveOverlapWorkItems(grouped.areas, keptDocs, vocabMap);
+  const overlapMissItems: OverlapWorkItem[] = [];
+  for (const item of overlapItems) {
+    const cached = await probeSessionCache(
+      repoRoot,
+      OVERLAP_SESSION_CACHE_NAME,
+      overlapSessionCacheKey(item, instructionParts),
+      OverlapOutcomeSchema,
+    );
+    if (!cached) overlapMissItems.push(item);
+  }
+  // Exact only when the whole upstream is settled: every doc verdict cached AND
+  // the settlement either cached or not needed. A pending settlement can
+  // reshape the areas, so its presence downgrades the overlap count to a range.
+  const overlapExact = missCount === 0 && (settlement !== null || !gate);
+  // Comparison clusters the CHANGED docs will land in — unknowable before
+  // their sessions run; sized by the mean-area heuristic and carried as a range.
+  const changedClusters = missCount > 0 ? Math.ceil(Math.round(missCount * KEEP_RATE) / AVG_AREA_SIZE) : 0;
+  const overlapExpectedItems = overlapMissItems.length + changedClusters;
+  // A fully settled upstream with zero misses is a KNOWN no-op — the ceiling
+  // drops to zero so the stage vanishes and a warmed cache yields an EMPTY
+  // estimate (confirm skipped). An unsettled upstream keeps the honest
+  // ceiling: a fresh settlement can re-key every cluster.
+  const overlapIdle = overlapExpectedItems === 0 && overlapExact;
+  const overlapMaxItems = overlapIdle ? 0 : overlapItems.length + changedClusters;
+  const clustersTotal = overlapItems.length + changedClusters;
 
-  const avgDocChars = docs.length
-    ? Math.round(docs.reduce((n, d) => n + d.size, 0) / docs.length)
-    : 0;
-
-  // Overlap pairs (within-area): when a prior corpus is on disk, use its real area
-  // structure — Σ n·(n-1)/2 over areas (n = area docRefs) — instead of the mean-area
-  // heuristic. Heading-widened cross-area pairs need doc content and stay unmodeled.
-  // Without a corpus, estimate from the kept docs grouped into mean-sized areas.
-  // Every pair judged (no cap), reported as a range. Only when the kept set actually
-  // changed (otherwise overlap is a cache hit).
-  const corpus = readCorpus(repoRoot);
-  const areaCount = Math.max(1, Math.ceil(nKept / AVG_AREA_SIZE));
-  const pairsPerArea = (AVG_AREA_SIZE * (AVG_AREA_SIZE - 1)) / 2;
-  const overlapPairs = !hasWork
-    ? 0
-    : corpus
-      ? corpus.areas.reduce((n, a) => n + (a.docRefs.length * (a.docRefs.length - 1)) / 2, 0)
-      : nKept >= 2
-        ? areaCount * pairsPerArea
-        : 0;
-  // Each pair compares FULL docs windowed at OVERLAP_WINDOW_CHARS: the complete
-  // window matrix (never truncated), so calls scale with the square of doc size.
-  // This estimate IS the cost gate for that completeness — the user approves it.
-  const callsPerPairFactor = Math.ceil(Math.max(1, avgDocChars) / OVERLAP_WINDOW_CHARS) ** 2;
-  const overlapCalls = overlapPairs * callsPerPairFactor;
-
-  // Verify pass: one call per FLAGGED pair (not per window call) — the detector
-  // flags only a fraction of the pairs it examines, so scale by the flag rate.
-  // Bounded above by every pair being flagged and verified.
-  const verifyCalls = Math.round(FLAG_RATE * overlapPairs);
-
+  // ---- roll-up ---------------------------------------------------------------
   const stages: StageCallEstimate[] = [
-    {
-      // Exact: one call per doc whose relevance verdict isn't cached.
-      stage: 'relevance',
-      model: resolveModel('spec.relevance', undefined, repoRoot, opts.mode),
-      calls: nRelevanceCalls,
-      avgInputTokens: tokensFromChars(RELEVANCE_SYSTEM_PROMPT.length, relevanceUserPromptChars(identity)),
-      avgOutputTokens: 40,
-    },
-    {
-      // The cached-kept misses are exact; how many CHANGED docs end up kept (and
-      // thus tagged) is the only unknown → range out to +all changed docs.
-      stage: 'areaTag',
-      model: resolveModel('spec.areaTag', undefined, repoRoot, opts.mode),
-      calls: nAreaTagCalls,
-      minCalls: cachedKeptTagMisses,
-      maxCalls: cachedKeptTagMisses + nRelevanceCalls,
-      avgInputTokens: tokensFromChars(AREA_TAGGER_SYSTEM_PROMPT.length, avgDocChars),
-      avgOutputTokens: 80,
-    },
-    {
-      stage: 'vocab',
-      model: resolveModel('spec.vocab', undefined, repoRoot, opts.mode),
-      calls: hasWork && nKept > 0 ? 1 : 0,
-      avgInputTokens: tokensFromChars(VOCAB_NORMALIZER_SYSTEM_PROMPT.length, 2000),
-      avgOutputTokens: 200,
-    },
-    {
-      stage: 'overlap',
-      model: resolveModel('spec.overlap', undefined, repoRoot, opts.mode),
-      calls: overlapCalls,
-      minCalls: 0,
-      maxCalls: overlapCalls * 2,
-      avgInputTokens: tokensFromChars(OVERLAP_DETECTOR_SYSTEM_PROMPT.length, Math.min(avgDocChars, OVERLAP_WINDOW_CHARS) * 2),
-      avgOutputTokens: 120,
-    },
-    {
-      // Verify each flagged pair — a heuristic fraction of the overlap pairs (the
-      // exact count isn't known until detection runs). Each call carries both
-      // sides' context, each clamped to VERIFY_DOC_BUDGET_CHARS.
-      stage: 'verifyOverlap',
-      model: resolveModel('spec.verifyOverlap', undefined, repoRoot, opts.mode),
-      calls: verifyCalls,
-      expectedCalls: verifyCalls,
-      minCalls: 0,
-      maxCalls: overlapPairs,
-      avgInputTokens: tokensFromChars(
-        VERIFY_OVERLAP_SYSTEM_PROMPT.length,
-        Math.min(avgDocChars, VERIFY_DOC_BUDGET_CHARS) * 2,
-      ),
-      avgOutputTokens: 80,
-    },
+    sessionKindStage({
+      kind: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+      model,
+      items: orchestrateItems,
+      budget: ORCHESTRATE_BUDGET,
+      systemPromptChars: ORCHESTRATE_SYSTEM_PROMPT.length,
+      briefingChars:
+        orchestrateItems > 0 ? orchestrateBriefing(scanScope, decisions, coverage).length : 0,
+      bound: 'its scope verdicts + instructions re-key every stage below',
+    }),
+    sessionKindStage({
+      kind: CURATE_DOC_SESSION_KIND,
+      model,
+      items: missCount,
+      budget: CURATE_DOC_BUDGET,
+      systemPromptChars: CURATE_DOC_SYSTEM_PROMPT.length,
+      briefingChars: mean(curateMissDocs.map((d) => curateDocBriefing(d, identity, instructions).length)),
+      bound: 'keys fold the standing instructions — editing one re-scans every doc',
+    }),
+    sessionKindStage({
+      kind: SETTLE_AREAS_SESSION_KIND,
+      model,
+      items: settleItems,
+      minItems: settleMin,
+      maxItems: settleMax,
+      budget: SETTLE_AREAS_BUDGET,
+      systemPromptChars: SETTLE_AREAS_SYSTEM_PROMPT.length,
+      briefingChars:
+        settleItems > 0 ? settleAreasBriefing(vocab, buildScanUniverse(docs), instructions).length : 0,
+    }),
+    sessionKindStage({
+      kind: OVERLAP_SESSION_KIND,
+      model,
+      items: overlapExpectedItems,
+      minItems: overlapMissItems.length,
+      maxItems: overlapMaxItems,
+      budget: OVERLAP_SESSION_BUDGET,
+      systemPromptChars: OVERLAP_SESSION_SYSTEM_PROMPT.length,
+      briefingChars:
+        mean(overlapMissItems.map((i) => overlapBriefing(i, instructions).length)) ||
+        (overlapExpectedItems > 0 ? OVERLAP_BRIEFING_FALLBACK_CHARS : 0),
+      bound: overlapExact
+        ? `${overlapMissItems.length} of ${Math.max(clustersTotal, overlapMissItems.length)} comparison${clustersTotal === 1 ? '' : 's'} changed`
+        : `~${overlapExpectedItems} of ~${clustersTotal} comparison${clustersTotal === 1 ? '' : 's'} changed (changed docs may reshape clusters)`,
+    }),
   ];
 
-  return estimateStageTokens(withLabels(stages), changedSubject(nClassify, changedDocs, 'doc'), prices);
+  const changedDocs = missCount;
+  // Single-step mode prices only the chosen step — prior steps replay from
+  // cache (a miss fails the run loudly, never spends), later ones don't start.
+  const SCAN_STEP_KIND: Record<ScanStep, string> = {
+    orchestrate: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+    curate: CURATE_DOC_SESSION_KIND,
+    settle: SETTLE_AREAS_SESSION_KIND,
+    overlap: OVERLAP_SESSION_KIND,
+  };
+  const included = opts.only ? stages.filter((s) => s.stage === SCAN_STEP_KIND[opts.only!]) : stages;
+  return estimateStageTokens(
+    withLabels(included),
+    changedSubject(curateItems.length, changedDocs, 'doc'),
+    prices,
+  );
 }
+
 
 // Guard heuristics (grounded in real extractions: whole-document reads average ~2
 // runnable claims per section, with dense sections higher). Claims are no longer

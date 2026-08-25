@@ -1,24 +1,34 @@
 /**
- * Total-vs-partial LLM failure accounting in curate(). Every stage fails OPEN per
- * item, so total failure used to be written as a healthy corpus (all docs kept,
- * zero areas) and reported as success. Now: a stage that loses EVERY call aborts
- * the scan and leaves the previous corpus.json untouched; a stage that loses SOME
- * keeps its fail-open defaults and reports the counts; a run that never reaches the
- * transport (cache hits) is healthy; and a parse failure is not a transport failure.
+ * Total-vs-partial LLM failure accounting in the SCAN RUN (plan 02: the
+ * `curate()` stages are sessions now, so a "call" is a session and a "stage" is
+ * a session kind). The rules are carried over verbatim: every kind fails OPEN
+ * per item, so total failure would otherwise be written as a healthy corpus (all
+ * docs kept, zero areas) and reported as success. Instead — a kind that loses
+ * EVERY session to a TRANSPORT failure aborts the scan and leaves the previous
+ * corpus.json untouched; a kind that loses SOME keeps its fail-open defaults and
+ * reports the counts; a run that never starts a session (cache hits) is healthy;
+ * and a malformed outcome is not a transport failure, so it never aborts.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { LlmStageFailureError, type LlmTransport } from '@truecourse/shared/llm';
-import { curate, corpusFilePath, readCorpus } from '../../packages/spec-consolidator/src/index.js';
-import type {
-  AreaTagRunner,
-  DecisionsFile,
-  DocCandidate,
-  RelevanceRunner,
-} from '../../packages/spec-consolidator/src/index.js';
+import { LlmStageFailureError } from '@truecourse/shared/llm';
+import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run';
+import { corpusFilePath, readCorpus } from '../../packages/spec-consolidator/src/index.js';
+import type { DecisionsFile, DocCandidate } from '../../packages/spec-consolidator/src/index.js';
+import {
+  docPathOf,
+  malformedFailure,
+  memoryPersistence,
+  outcome,
+  stubDriver,
+  toolResult,
+  transportFailure,
+  type StubCall,
+  type StubScript,
+} from '../core/spec-scan-session-stub';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
   return {
@@ -36,26 +46,23 @@ function doc(p: string, content = `body of ${p}`): DocCandidate {
 const DOCS = [doc('docs/orders.md'), doc('docs/auth.md'), doc('docs/billing.md')];
 
 const EMPTY_DECISIONS: DecisionsFile = {
-  version: 1,
+  version: 2,
   manualIncludes: [],
   manualExcludes: [],
   manualAreas: [],
   conflictResolutions: [],
+  scopeVerdicts: [],
+  instructions: [],
 };
 
-/** Keep every doc — used to hold a stage OFF the transport. */
-const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
-const tagAll: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'orders' }], status: 'shipped' });
-
-/** A transport that throws for `stages` and answers `answer` otherwise. */
-function transport(stages: string[], message: string, answer = '{}'): LlmTransport {
-  return async (req) => {
-    if (stages.includes(req.stage ?? '')) throw new Error(message);
-    return answer;
-  };
-}
-
-const RELEVANCE_OK = '{"include":true,"reason":"spec"}';
+/** One concern for every doc — the settle gate stays CLOSED unless a case wants it. */
+const keepAll = (concern = 'orders') => (): unknown => ({
+  keep: true,
+  reason: 'spec',
+  subject: 'this-product',
+  areas: [{ product: 'core', concern }],
+  status: 'shipped',
+});
 
 let repo: string;
 beforeEach(() => {
@@ -63,16 +70,24 @@ beforeEach(() => {
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-llm-fail-'));
 });
 afterEach(() => {
+  resetKvCacheStore();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
-function run(extra: Parameters<typeof curate>[1] = {}) {
-  return curate(repo, {
-    docSource: () => DOCS,
-    decisions: EMPTY_DECISIONS,
-    disableOverlapDetection: true,
-    ...extra,
-  });
+function run(script: StubScript) {
+  const stub = stubDriver(script);
+  return {
+    stub,
+    result: runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
+      docSource: () => DOCS,
+      decisions: EMPTY_DECISIONS,
+      disableOverlapDetection: true,
+      skipGit: true,
+    }),
+  };
 }
 
 /** Seed a previous corpus.json so an abort can be shown to leave it alone. */
@@ -90,107 +105,140 @@ function seedCorpus(): string {
   return prior;
 }
 
-describe('curate — a stage that loses every LLM call aborts', () => {
-  it('all relevance calls failed: throws the typed error and leaves the previous corpus untouched', async () => {
+describe('the scan run — a kind that loses every session to transport aborts', () => {
+  it('every curate-doc session failed: throws the typed error and leaves the previous corpus untouched', async () => {
     const prior = seedCorpus();
-    const err = await run({
-      transport: transport(['spec.relevance'], 'claude exited 1: invalid schema for response_format'),
-      areaTagRunner: tagAll,
-    }).then(
+    const err = await run(() => transportFailure()).result.then(
       () => null,
       (e: unknown) => e,
     );
 
     expect(err).toBeInstanceOf(LlmStageFailureError);
     const tally = (err as LlmStageFailureError).tally;
-    expect(tally.stage).toBe('spec.relevance');
+    expect(tally.stage).toBe('spec-scan.curate-doc');
     expect(tally.attempts).toBe(DOCS.length);
     expect(tally.failures).toBe(DOCS.length);
-    expect(tally.firstError).toContain('invalid schema for response_format');
-    expect((err as Error).message).toContain('spec.relevance');
+    expect(tally.firstError).toContain('the provider is gone');
+    expect((err as Error).message).toContain('spec-scan.curate-doc');
 
     // The fail-open corpus (every doc kept, zero areas) was never written.
     expect(fs.readFileSync(corpusFilePath(repo), 'utf-8')).toBe(prior);
   });
 
-  it('all area-tag calls failed: aborts at the tagging stage, writing no corpus at all', async () => {
-    const err = await run({
-      relevanceRunner: keepAll,
-      transport: transport(['spec.areaTag'], 'claude exited 1: expired login'),
-    }).then(
+  it('the settle session failed: aborts at that kind, writing no corpus at all', async () => {
+    // Two concerns ⇒ the settle gate opens; every curate session lands, so the
+    // abort can only come from the barrier.
+    const err = await run((call) =>
+      call.kind === 'spec-scan.settle-areas'
+        ? transportFailure()
+        : outcome(keepAll(docPathOf(call.briefing).includes('auth') ? 'auth' : 'orders')()),
+    ).result.then(
       () => null,
       (e: unknown) => e,
     );
 
     expect(err).toBeInstanceOf(LlmStageFailureError);
-    expect((err as LlmStageFailureError).tally.stage).toBe('spec.areaTag');
-    expect((err as LlmStageFailureError).tally.failures).toBe(DOCS.length);
+    expect((err as LlmStageFailureError).tally.stage).toBe('spec-scan.settle-areas');
+    expect((err as LlmStageFailureError).tally.failures).toBe(1);
     expect(fs.existsSync(corpusFilePath(repo))).toBe(false);
   });
 });
 
-describe('curate — isolated failures stay fail-open but are reported', () => {
-  it('one relevance call failed: the corpus is written, the doc is kept, the counts are recorded', async () => {
-    const failing: LlmTransport = async (req) => {
-      if (req.stage === 'spec.relevance' && req.id?.endsWith('docs/auth.md')) {
-        throw new Error('claude API error (api 429): usage limit reached');
-      }
-      return RELEVANCE_OK;
-    };
+describe('the scan run — isolated failures stay fail-open but are reported', () => {
+  it('one curate session failed: the corpus is written, the doc is kept, the counts are recorded', async () => {
+    const { result } = run((call) =>
+      docPathOf(call.briefing) === 'docs/auth.md'
+        ? {
+            kind: 'failure',
+            failure: {
+              kind: 'transport',
+              detail: 'claude API error (api 429): usage limit reached',
+              class: 'provider',
+              retryability: 'none',
+            },
+          }
+        : outcome(keepAll()()),
+    );
+    const res = await result;
 
-    const result = await run({ transport: failing, areaTagRunner: tagAll });
-
-    expect(result.stats.llmFailures).toEqual([
+    expect(res.stats.llmFailures).toEqual([
       {
-        stage: 'spec.relevance',
+        stage: 'spec-scan.curate-doc',
         attempts: 3,
         failures: 1,
-        firstError: 'claude API error (api 429): usage limit reached',
+        firstError: expect.stringContaining('usage limit reached'),
       },
     ]);
     // Fail-open: the affected doc is KEPT, never silently dropped.
-    expect(result.corpus.docs.map((d) => d.ref)).toContain('docs/auth.md');
-    expect(result.skippedDocs.map((s) => s.path)).not.toContain('docs/auth.md');
+    expect(res.corpus.docs.map((d) => d.ref)).toContain('docs/auth.md');
+    expect(res.skippedDocs.map((s) => s.path)).not.toContain('docs/auth.md');
+    expect(res.stats.classifyFailed).toBe(1);
     expect(readCorpus(repo)).not.toBeNull();
   });
 
   it('a clean run reports no failures', async () => {
-    const result = await run({ relevanceRunner: keepAll, areaTagRunner: tagAll });
-    expect(result.stats.llmFailures).toEqual([]);
+    const res = await run(() => outcome(keepAll()())).result;
+    expect(res.stats.llmFailures).toEqual([]);
+    expect(res.noChanges).toBe(false);
   });
 });
 
-describe('curate — what is NOT a transport failure', () => {
-  it('a cache-hit-only re-run never reaches the transport, so it is healthy', async () => {
-    const first = await run({
-      transport: async (req) =>
-        req.stage === 'spec.relevance' ? RELEVANCE_OK : '{"areas":[{"product":"core","concern":"orders"}],"status":null}',
-    });
+describe('the scan run — what is NOT a transport failure', () => {
+  it('a cache-hit-only re-run starts no session, so it is healthy', async () => {
+    const first = await run(() => outcome(keepAll()())).result;
     expect(first.stats.llmFailures).toEqual([]);
 
-    // Same docs, same content hashes: every stage resolves from cache. A transport
-    // call here would throw — zero attempts must NOT read as a failure.
-    let calls = 0;
-    const second = await run({
-      transport: async () => {
-        calls++;
-        throw new Error('the cached run must not call the transport');
+    // Same docs, same content hashes: every kind resolves from cache. Resolving
+    // the driver at all would throw — zero attempts must NOT read as a failure.
+    const second = await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => {
+        throw new Error('the cached run must not resolve a driver');
       },
+      persistence: memoryPersistence().persistence,
+      docSource: () => DOCS,
+      decisions: EMPTY_DECISIONS,
+      disableOverlapDetection: true,
+      skipGit: true,
     });
-    expect(calls).toBe(0);
     expect(second.stats.llmFailures).toEqual([]);
+    expect(second.noChanges).toBe(true);
     expect(second.corpus.docs).toHaveLength(DOCS.length);
   });
 
-  it('an unparseable answer is a parse failure, not a transport failure: no abort, no tally', async () => {
-    // The transport answered every call; the runner then failed to parse it. That
-    // has its own per-stage handling (fail-open), and it is not accounted here.
-    const result = await run({
-      transport: async () => 'I cannot help with that.',
-      areaTagRunner: tagAll,
-    });
+  it('a MALFORMED total loss falls open instead of aborting — the corpus is written', async () => {
+    // The provider answered every session; the model never produced a valid
+    // outcome. That is not a transport failure, so the one-abort rule stays out
+    // of it: every doc is kept untagged and the loss is tallied.
+    const res = await run(() => malformedFailure('outcome failed schema')).result;
 
-    expect(result.stats.llmFailures).toEqual([]);
-    expect(result.corpus.docs.map((d) => d.ref)).toEqual(expect.arrayContaining(['docs/auth.md']));
+    expect(res.stats.llmFailures).toEqual([
+      {
+        stage: 'spec-scan.curate-doc',
+        attempts: 3,
+        failures: 3,
+        firstError: expect.stringContaining('outcome failed schema'),
+      },
+    ]);
+    expect(res.corpus.docs.map((d) => d.ref)).toEqual(expect.arrayContaining(['docs/auth.md']));
+    expect(readCorpus(repo)).not.toBeNull();
+  });
+
+  it('a settlement refused for its own reasons never aborts a healthy scan', async () => {
+    const script: StubScript = async (call: StubCall) => {
+      if (call.kind !== 'spec-scan.settle-areas') {
+        return outcome(keepAll(docPathOf(call.briefing).includes('auth') ? 'auth' : 'orders')());
+      }
+      await call.emit(toolResult('check_settlement', 'valid'));
+      return malformedFailure('the settlement never arrived');
+    };
+    const res = await run(script).result;
+
+    expect(res.stats.llmFailures).toEqual([
+      expect.objectContaining({ stage: 'spec-scan.settle-areas', attempts: 1, failures: 1 }),
+    ]);
+    // Labels are kept as-is; the corpus still lands.
+    expect(readCorpus(repo)).not.toBeNull();
+    expect(res.corpus.areas.map((a) => a.id).sort()).toEqual(['core/auth', 'core/orders']);
   });
 });

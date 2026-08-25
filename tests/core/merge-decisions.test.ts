@@ -86,6 +86,55 @@ describe('mergeDecisions — empty overlay is a no-op', () => {
   });
 });
 
+// Decisions v2 (plan 02 step 6): the overlay wins per SCOPE PATH — normalized,
+// so `docs/` and `docs` are one row — and instructions union, base order kept.
+// The merge always stamps version 2, whatever the inputs still carry.
+describe('mergeDecisions — scope verdicts and instructions (v2)', () => {
+  const row = (path: string, verdict: 'keep' | 'exclude', reason: string) => ({
+    path,
+    verdict,
+    reason,
+    decidedAt: '2026-01-01T00:00:00Z',
+    resolvedBy: 'auto' as const,
+  });
+
+  it('the overlay wins per scope path; other base rows survive', () => {
+    const base = decisions({
+      scopeVerdicts: [row('docs', 'keep', 'base'), row('vendor', 'exclude', 'base')],
+    });
+    const overlay = decisions({ scopeVerdicts: [row('docs', 'exclude', 'overlay')] });
+    const merged = mergeDecisions(base, overlay);
+    expect(merged.scopeVerdicts).toEqual([
+      row('vendor', 'exclude', 'base'),
+      row('docs', 'exclude', 'overlay'),
+    ]);
+  });
+
+  it('normalizes the path, so `docs/` in the overlay replaces `docs` in the base', () => {
+    const merged = mergeDecisions(
+      decisions({ scopeVerdicts: [row('docs', 'keep', 'base')] }),
+      decisions({ scopeVerdicts: [row('docs/', 'exclude', 'overlay')] }),
+    );
+    expect(merged.scopeVerdicts).toHaveLength(1);
+    expect(merged.scopeVerdicts[0]).toMatchObject({ path: 'docs/', verdict: 'exclude' });
+  });
+
+  it('unions instructions, base order first, no duplicates', () => {
+    const merged = mergeDecisions(
+      decisions({ instructions: ['a', 'b'] }),
+      decisions({ instructions: ['b', 'c'] }),
+    );
+    expect(merged.instructions).toEqual(['a', 'b', 'c']);
+  });
+
+  it('always yields version 2, and defaults the v2 fields for a v1 input', () => {
+    const merged = mergeDecisions(empty, empty);
+    expect(merged.version).toBe(2);
+    expect(merged.scopeVerdicts).toEqual([]);
+    expect(merged.instructions).toEqual([]);
+  });
+});
+
 describe('PR-scoped decisions are enterprise-only on the file store', () => {
   let repo: string;
   beforeEach(() => {

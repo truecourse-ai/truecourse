@@ -283,6 +283,14 @@ export const OverlapReviewSchema = z.object({
     rationale: z.string(),
     /** Only for `fix-doc`: which doc and what to change. */
     fix: z.string().optional(),
+    /**
+     * The judge's confidence in the recommended action. `high` on an actionable
+     * recommendation (pick-a-side / dismiss, never `fix-doc`) is AUTO-APPLIED at
+     * scan as a `resolvedBy: 'auto'` conflict resolution; lower grades stay
+     * advisory and surfaces show the grade. Optional so pre-confidence corpora
+     * and cached verdicts still parse (absent = never auto-applied).
+     */
+    confidence: z.enum(['low', 'medium', 'high']).optional(),
   }),
 });
 export type OverlapReview = z.infer<typeof OverlapReviewSchema>;
@@ -313,6 +321,29 @@ export const OverlapSchema = z.object({
 });
 export type Overlap = z.infer<typeof OverlapSchema>;
 
+/** One side of a deterministic candidate pair — a section, addressed the way
+ *  the overlap session's `read_section` addresses it (`null` = the doc's lead). */
+export const CandidateSectionRefSchema = z.object({
+  doc: DocRefSchema,
+  heading: z.string().nullable(),
+});
+export type CandidateSectionRef = z.infer<typeof CandidateSectionRefSchema>;
+
+/**
+ * A candidate collision the deterministic pairing nominated (item 119): two
+ * sections in different docs sharing rare claim tokens or the same canonical
+ * heading. Lands in the corpus only when NOT examined (`Area.uncheckedPairs`),
+ * so a coverage gap is data — the exact pairs nobody compared — never an
+ * inference from doc lists.
+ */
+export const CandidatePairSchema = z.object({
+  a: CandidateSectionRefSchema,
+  b: CandidateSectionRefSchema,
+  /** The shared signals that nominated the pair (display form), sorted. */
+  keys: z.array(z.string()).default([]),
+});
+export type CandidatePair = z.infer<typeof CandidatePairSchema>;
+
 /** A group of docs sharing one normalized area. */
 export const AreaSchema = z.object({
   /** Canonical area id, `product/concern`. */
@@ -323,6 +354,29 @@ export const AreaSchema = z.object({
   docRefs: z.array(DocRefSchema),
   /** Within-area overlaps still awaiting a relation. */
   overlaps: z.array(OverlapSchema).default([]),
+  /**
+   * Docs of this area the overlap SESSION did not reach — either the session
+   * declared them (its budget contract: "docs you do not reach go in
+   * notReached") or the session failed and every doc of the area lands here.
+   * Additive + optional so older corpora parse; absent means fully covered by
+   * the one-shot pipeline that predates sessions.
+   */
+  notReached: z.array(DocRefSchema).optional(),
+  /**
+   * How many `read_section` tool calls the area's overlap session actually
+   * made — counted from the TRANSCRIPT by the fold (never self-reported), so a
+   * session that flagged nothing while opening nothing is visible as a skim.
+   * Absent on cache-hit areas (no transcript) and on pre-session corpora.
+   */
+  sectionsOpened: z.number().int().nonnegative().optional(),
+  /**
+   * Candidate pairs assigned to this area that no session examined — briefed
+   * pairs whose two sections the transcript never shows both opened, pairs
+   * beyond a session's briefing cap, and every pair of a failed session.
+   * Stamped by the run off the transcript (never self-reported). Additive +
+   * optional; absent on pre-pairing corpora.
+   */
+  uncheckedPairs: z.array(CandidatePairSchema).optional(),
 });
 export type Area = z.infer<typeof AreaSchema>;
 

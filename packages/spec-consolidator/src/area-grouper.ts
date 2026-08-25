@@ -51,8 +51,13 @@ export function groupByArea(
     const verdict = tagsByPath.get(doc.path);
     const override = manualByDoc.get(doc.path);
 
+    // A pin is the human's final word: slug-normalized, but NEVER folded
+    // through the settle session's vocab map — an LLM merge that unifies
+    // minted labels must not rename an area the user stated by id. (Strapi
+    // 2026-08-20: `content-manager → admin-panel-configuration` rewrote a
+    // pinned area, flapping the corpus's area ids with LLM nondeterminism.)
     const ids = override
-      ? canonicalizeIds(override, vocab)
+      ? canonicalizeIds(override)
       : canonicalizeTags(verdict?.tags ?? [], vocab);
 
     corpusDocs.push({
@@ -90,11 +95,13 @@ function canonicalizeTags(tags: DocAreaTags['tags'], vocab?: VocabMap): string[]
   return [...ids].sort();
 }
 
-/** Normalize user-supplied area-id strings (e.g. "Core/Users Entity") into canonical ids. */
-function canonicalizeIds(idStrings: string[], vocab?: VocabMap): string[] {
+/** Normalize user-supplied area-id strings (e.g. "Core/Users Entity") into
+ *  canonical ids. Deliberately takes no vocab map — pinned ids are literal
+ *  (see the override comment in {@link groupByArea}). */
+function canonicalizeIds(idStrings: string[]): string[] {
   const ids = new Set<string>();
   for (const raw of idStrings) {
-    const id = normalizeArea(splitArea(raw), vocab);
+    const id = normalizeArea(splitArea(raw));
     if (id) ids.add(id);
   }
   return [...ids].sort();

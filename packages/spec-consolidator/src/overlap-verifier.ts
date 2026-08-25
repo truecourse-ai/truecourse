@@ -1,281 +1,77 @@
 /**
- * OVERLAP VERIFICATION — the precision pass over the recall-biased overlap
- * detector's flags. Detection (`overlap-detector.ts`) runs on a cheap, fast model
- * and is biased to flag-for-human, so it over-flags: most of its "disagreements"
- * are two docs describing different components, one doc merely omitting what the
- * other states, a hedge, or complementary detail — not a real contradiction. This stage
- * re-reads each flagged pair with FULL context and a stronger model and rules
- * strictly: is this a genuine contradiction a human must reconcile, or a false
- * alarm?
+ * Section machinery of the old overlap VERIFIER, kept for the overlap SESSION.
  *
- * Detection is untouched. This pass only ever REMOVES a flag on an explicit
- * `refuted` verdict — curate filters those out before the corpus is assembled, so
- * a refuted flag never reaches `corpus.json`. Everything else is KEPT: a
- * `confirmed` verdict, and — critically — a verifier ERROR or a missing verdict.
- * Refutation is the only thing that prunes, and only ever by explicit ruling
- * (fail-open).
+ * The verify one-shot itself retired (plan 02 step 5): the `spec-scan.overlap`
+ * session in `@truecourse/core`'s `services/spec-scan/overlap.ts` both flags
+ * and adjudicates in one pass, so there is no separate precision judge any
+ * more. What stays is the deterministic section reading the session's tools
+ * and briefing are built on — via the shared doc-chunks heading scan
+ * (`parseHeadings`), the one fence-aware ATX scanner every doc consumer
+ * shares:
  *
- * A `confirmed` verdict also carries a RESOLUTION BRIEF (`review`) — an
- * explanation of the exact disagreement plus a recommended action — stamped onto
- * the kept flag. The brief's prose names the documents by their paths, the same
- * names the reader sees beside it; the A/B letters are wire orientation for the
- * `recommendation.action` enum alone. Enrichment is itself fail-open: a confirmed
- * verdict whose brief is malformed keeps the flag bare (no `review`); only an
- * explicit `refuted` drops one.
- *
- * Verdicts cache per flag by (prompt fingerprint, area, both content hashes, the
- * dispute), so a re-scan of unchanged docs pays nothing. The fan-out pools through
- * {@link defaultConcurrency} exactly like the sibling relevance/overlap stages.
+ * - {@link headingOutline} — the doc's headings, one per line, hash-prefixed.
+ *   The overlap briefing shows each doc as its outline, never its full body.
+ * - {@link leadText} / {@link sectionText} — what the session's `read_section`
+ *   tool answers with (the lead for a `null` pointer, a heading's section down
+ *   to the next same-or-higher heading otherwise).
+ * - {@link VERIFY_OVERLAP_SYSTEM_PROMPT} / {@link VERIFY_DOC_BUDGET_CHARS} —
+ *   kept exported for the pre-flight estimate (until step 7's rework); the
+ *   session prompt derives its confirm/refute strictness and the resolution
+ *   brief contract from this text. The `consolidator/verify-overlap` cache
+ *   keeps its files but is no longer read.
  */
 
-import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import { z } from 'zod';
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
-import { cliTransport, jsonSchemaHint, stripCodeFences, OUTPUT_ONLY_GUARDRAIL, type LlmTransport } from '@truecourse/shared/llm';
 import { parseHeadings } from '@truecourse/shared';
-import type { DocCandidate } from './discovery.js';
-import { OverlapReviewSchema, type Overlap, type OverlapReview, type OverlapSection } from './corpus-types.js';
-import { defaultConcurrency } from './runner.js';
+import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm';
 
-/**
- * One judge ruling on a flagged overlap. `refuted` prunes the flag; anything else
- * keeps it. A `confirmed` verdict carries a resolution brief (`review`) when the
- * judge supplied one that parsed cleanly — the brief is stamped onto the kept flag.
- */
-export interface OverlapVerification {
-  verdict: 'confirmed' | 'refuted';
-  /** One sentence explaining a `refuted` ruling, shown to the user (e.g. in logs). */
-  reason?: string;
-  /**
-   * The resolution brief for a `confirmed` verdict — present only when the judge
-   * returned a brief that parsed cleanly. A confirmed verdict with a malformed
-   * brief omits this (fail-open on enrichment): the flag is still kept, just bare.
-   */
-  review?: OverlapReview;
-}
-
-/** The per-flag judge — a test seam, mirroring {@link import('./overlap-detector.js').OverlapRunner}. */
-export type VerifyOverlapRunner = (input: {
-  areaId: string;
-  overlap: Overlap;
-  a: DocCandidate;
-  b: DocCandidate;
-}) => Promise<OverlapVerification>;
-
-export interface VerifyFlaggedOverlapsOptions {
-  /** Override the runner. Tests pass a stub. */
-  runner?: VerifyOverlapRunner;
-  /** LLM transport for the auto-created runner (defaults to cli). */
-  transport?: LlmTransport;
-  /** When false, skip verification entirely; every flag is kept. */
-  enabled?: boolean;
-  /** Cap on concurrent LLM calls. Default {@link defaultConcurrency}. */
-  concurrency?: number;
-  /** Model forwarded to the default spawn runner. */
-  model?: string;
-  /** Fallback model forwarded to the default spawn runner. */
-  fallbackModel?: string;
-  /** Fired once per flag verified, plus an initial `(0, total)`. */
-  onProgress?: (done: number, total: number) => void;
-}
-
-/** The verification outcome: the flags that survived, plus how many were refuted. */
-export interface VerifyOverlapsResult {
-  /** The overlap map with every refuted flag removed (empty areas dropped). */
-  overlaps: Map<string, Overlap[]>;
-  /** How many flags an explicit `refuted` verdict pruned. */
-  refuted: number;
-}
-
-/** Per-side context budget. A doc whose body fits is shown in full; a larger one
- *  is shown as its heading outline plus the full text of the disputed section(s). */
+/** Per-side context budget of the retired one-shot; the estimate still sizes
+ *  with it (step 7 retires it). */
 export const VERIFY_DOC_BUDGET_CHARS = 60_000;
 
-/**
- * Verify every flagged overlap in `overlapsByArea` and return the map with the
- * refuted flags removed. Only an explicit `refuted` verdict prunes a flag; a
- * `confirmed` verdict, a thrown call, or an unresolvable doc pair all KEEP it
- * (fail-open). Pools through {@link defaultConcurrency}; caches per flag.
- */
-export async function verifyFlaggedOverlaps(
-  repoRoot: string,
-  overlapsByArea: Map<string, Overlap[]>,
-  docs: DocCandidate[],
-  opts: VerifyFlaggedOverlapsOptions = {},
-): Promise<VerifyOverlapsResult> {
-  if (opts.enabled === false) return { overlaps: overlapsByArea, refuted: 0 };
+/** Match key for a heading pointer vs a section heading — strip inline-code +
+ *  emphasis markers, fold case. */
+const headingKey = (h: string): string => h.replace(/[`*_~]/g, '').trim().toLowerCase();
 
-  const byPath = new Map(docs.map((d) => [d.path, d]));
-
-  interface Work {
-    areaId: string;
-    overlap: Overlap;
-    a: DocCandidate;
-    b: DocCandidate;
-  }
-  const work: Work[] = [];
-  for (const [areaId, list] of overlapsByArea) {
-    for (const overlap of list) {
-      const a = byPath.get(overlap.docs[0]);
-      const b = byPath.get(overlap.docs[1]);
-      // Can't judge without both bodies — leave the flag in place (fail-open).
-      if (a && b) work.push({ areaId, overlap, a, b });
-    }
-  }
-
-  const total = work.length;
-  let done = 0;
-  const markDone = (): void => opts.onProgress?.(++done, total);
-  opts.onProgress?.(0, total);
-  if (total === 0) return { overlaps: overlapsByArea, refuted: 0 };
-
-  const runner =
-    opts.runner ??
-    spawnVerifyRunner({ transport: opts.transport, model: opts.model, fallbackModel: opts.fallbackModel });
-  // Clamp to >=1: a 0/negative value would stall the hand-rolled limiter.
-  const concurrency = Math.max(1, opts.concurrency ?? defaultConcurrency());
-
-  // The set of flags an explicit `refuted` verdict pruned — by object identity, so
-  // the filter below reaches the exact overlap objects in the map.
-  const refutedSet = new Set<Overlap>();
-  // The resolution brief a confirmed verdict supplied, per kept flag (by identity),
-  // stamped onto the surviving overlap below.
-  const reviewByOverlap = new Map<Overlap, OverlapReview>();
-
-  let cursor = 0;
-  let active = 0;
-  await new Promise<void>((resolve) => {
-    const launch = (): void => {
-      while (active < concurrency && cursor < work.length) {
-        const item = work[cursor++];
-        active++;
-        verifyOne(repoRoot, item, runner)
-          .then((verification) => {
-            // ONLY an explicit refutation prunes; confirmed keeps the flag — and
-            // carries the brief onto it when the judge supplied a valid one.
-            if (verification.verdict === 'refuted') refutedSet.add(item.overlap);
-            else if (verification.review) reviewByOverlap.set(item.overlap, verification.review);
-          })
-          .catch(() => {
-            // Fail-open: a thrown call keeps the flag (no verdict = no prune).
-          })
-          .finally(() => {
-            markDone();
-            active--;
-            if (cursor >= work.length && active === 0) resolve();
-            else launch();
-          });
-      }
-      if (cursor >= work.length && active === 0) resolve();
-    };
-    launch();
-  });
-
-  // Nothing to prune and no brief to stamp — hand back the input map untouched.
-  if (refutedSet.size === 0 && reviewByOverlap.size === 0) return { overlaps: overlapsByArea, refuted: 0 };
-
-  const overlaps = new Map<string, Overlap[]>();
-  for (const [areaId, list] of overlapsByArea) {
-    const kept = list
-      .filter((o) => !refutedSet.has(o))
-      .map((o) => {
-        const review = reviewByOverlap.get(o);
-        return review ? { ...o, review } : o;
-      });
-    if (kept.length > 0) overlaps.set(areaId, kept);
-  }
-  return { overlaps, refuted: refutedSet.size };
+/** The doc's headings, one per line, prefixed with their level's hashes. */
+export function headingOutline(body: string): string {
+  const headings = parseHeadings(body.split('\n'));
+  if (headings.length === 0) return '(no headings)';
+  return headings.map((h) => `${'#'.repeat(h.level)} ${h.text}`).join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Per-flag cache + runner
-// ---------------------------------------------------------------------------
-
-async function verifyOne(
-  repoRoot: string,
-  item: { areaId: string; overlap: Overlap; a: DocCandidate; b: DocCandidate },
-  runner: VerifyOverlapRunner,
-): Promise<OverlapVerification> {
-  const cacheKey = computeCacheKey(item.areaId, item.overlap, item.a, item.b);
-  const cached = await readCache(repoRoot, cacheKey);
-  if (cached) return cached;
-  const verification = await runner(item);
-  await writeCache(repoRoot, cacheKey, verification);
-  return verification;
+/** The doc's lead: everything before its first heading (the whole body if none). */
+export function leadText(body: string): string {
+  const lines = body.split('\n');
+  const headings = parseHeadings(lines);
+  const end = headings.length ? headings[0].line : lines.length;
+  return lines.slice(0, end).join('\n');
 }
-
-/** The verdict envelope — every valid response has exactly this discriminator. A
- *  missing/unknown verdict throws, which the caller treats as an error (flag kept
- *  unverified). Everything else on the object is verdict-specific, parsed below. */
-const VerdictEnvelopeSchema = z.object({
-  verdict: z.enum(['confirmed', 'refuted']),
-});
-
-/** The persisted verification, covering both verdict shapes (brief cached too). */
-const VerificationCacheSchema = z.object({
-  verdict: z.enum(['confirmed', 'refuted']),
-  reason: z.string().optional(),
-  review: OverlapReviewSchema.optional(),
-});
 
 /**
- * The FULL response shape, declared in one place because the API transport
- * enforces it via structured output (the cli transport ignores it): the verdict,
- * a refuted `reason`, and a confirmed verdict's brief — `explanation` +
- * `recommendation`, flattened onto the response exactly as the prompt asks for
- * them. Only the verdict is required; the brief is a per-verdict field the judge
- * fills on `confirmed`. Enforcement is one-way — READING stays layered and
- * lenient below, so a brief this schema would reject still keeps its flag.
+ * The full text of the section whose heading matches `heading` — the heading line
+ * down to the next heading of the same or higher level (its subsections included),
+ * or `null` when no heading matches. Heading match folds inline markers + case, so
+ * a backtick-styled or emphasized heading still resolves.
  */
-const VerifyResponseSchema = z.object({
-  verdict: z.enum(['confirmed', 'refuted']),
-  reason: z.string().optional(),
-  explanation: z.string().optional(),
-  recommendation: OverlapReviewSchema.shape.recommendation.optional(),
-});
-
-const VERIFY_RESPONSE_SCHEMA = jsonSchemaHint(VerifyResponseSchema);
-
-function spawnVerifyRunner(
-  opts: { transport?: LlmTransport; bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
-): VerifyOverlapRunner {
-  const transport = opts.transport ?? cliTransport({ bin: opts.bin });
-  const timeoutMs = opts.timeoutMs ?? 90_000;
-  return async ({ areaId, overlap, a, b }) => {
-    const raw = await transport({
-      id: `spec.verifyOverlap:${areaId}:${a.path}:${b.path}`,
-      stage: 'spec.verifyOverlap',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: VERIFY_OVERLAP_SYSTEM_PROMPT,
-      user: buildVerifyOverlapUserPrompt(areaId, overlap, a, b),
-      responseFormat: 'json',
-      schema: VERIFY_RESPONSE_SCHEMA,
-      timeoutMs,
-    });
-    const parsed: unknown = JSON.parse(stripCodeFences(raw));
-    // The verdict must parse — a missing/unknown one throws (error path, flag kept
-    // unverified). It is the ONLY thing that can fail the response.
-    const { verdict } = VerdictEnvelopeSchema.parse(parsed);
-    if (verdict === 'refuted') {
-      const reason = typeof (parsed as { reason?: unknown }).reason === 'string'
-        ? (parsed as { reason: string }).reason
-        : '';
-      return { verdict: 'refuted', reason };
+export function sectionText(body: string, heading: string): string | null {
+  const lines = body.split('\n');
+  const headings = parseHeadings(lines);
+  const key = headingKey(heading);
+  const idx = headings.findIndex((h) => headingKey(h.text) === key);
+  if (idx === -1) return null;
+  const level = headings[idx].level;
+  let end = lines.length;
+  for (let j = idx + 1; j < headings.length; j++) {
+    if (headings[j].level <= level) {
+      end = headings[j].line;
+      break;
     }
-    // Confirmed: attach the resolution brief only if it parses cleanly. A malformed
-    // brief must never drop or fail a real conflict — keep the flag bare instead.
-    const brief = OverlapReviewSchema.safeParse({
-      explanation: (parsed as { explanation?: unknown }).explanation,
-      recommendation: (parsed as { recommendation?: unknown }).recommendation,
-    });
-    return brief.success ? { verdict: 'confirmed', review: brief.data } : { verdict: 'confirmed' };
-  };
+  }
+  return lines.slice(headings[idx].line, end).join('\n');
 }
 
 // ---------------------------------------------------------------------------
-// Prompt
+// The retired one-shot's prompt — see the module note for why it stays.
 // ---------------------------------------------------------------------------
 
 export const VERIFY_OVERLAP_SYSTEM_PROMPT = `You are a strict adjudicator of documentation conflicts. Another pass — deliberately biased toward catching everything — flagged TWO documentation sections as possibly contradicting each other. With the full context below, rule whether this is a REAL contradiction a human must reconcile, or a false alarm.
@@ -309,200 +105,21 @@ NAME THE DOCUMENTS. Every reference to a document in "explanation", "rationale" 
   The A/B letters are wire orientation for THIS FIELD ONLY: they bind to the two sides EXACTLY as labeled in the message above (doc A is the first side shown, doc B the second). They never appear in your prose.
 - "recommendation.rationale": ONE sentence on why that side wins or that fix applies (e.g. which document is newer, authoritative, or internally consistent), naming the documents it talks about.
 - "recommendation.fix": include ONLY when the action is "fix-doc" — name the document to edit and what to change. Omit it for the other three actions.
+- "recommendation.confidence": EXACTLY ONE of "low" | "medium" | "high" — how sure you are the recommended action is the CORRECT resolution (this is separate from the verdict: the conflict can be certain while the right way to resolve it is not).
+    "high"   — the evidence is unambiguous and a careful human would make the same call: the disagreement is a single stated value and one side is clearly authoritative (newer, the canonical reference, internally consistent). A "high" pick-a/pick-b/dismiss is APPLIED AUTOMATICALLY with no human review, so grade "high" only when you would be comfortable acting on it unsupervised.
+    "medium" — a solid case with real judgment involved; a human should glance at it before applying.
+    "low"    — a lean, not a ruling; the evidence underdetermines which side is right.
+  When in doubt between two grades, give the LOWER one. A "fix-doc" recommendation is never auto-applied regardless of grade, but still carries its confidence.
 
 Worked confirmed example — the two sides are "docs/api/pagination.md" (labeled doc A) and "docs/guides/listing.md" (labeled doc B), disagreeing on a list endpoint's default page size. The prose names them; only the action field uses the letters:
 
   { "verdict": "confirmed",
     "explanation": "Both documents give the default page size for the same list endpoint, but to different values: docs/api/pagination.md says \\"the default page size is 20\\" while docs/guides/listing.md says \\"results default to 50 per page\\". A caller reading one is promised a different default than the other, so the two cannot both hold.",
-    "recommendation": { "action": "pick-a", "rationale": "docs/api/pagination.md is the current API reference and docs/guides/listing.md predates the last pagination change" } }
+    "recommendation": { "action": "pick-a", "rationale": "docs/api/pagination.md is the current API reference and docs/guides/listing.md predates the last pagination change", "confidence": "high" } }
 
 Output ONLY a JSON object, no prose, no code fences:
 
-  { "verdict": "confirmed", "explanation": "...", "recommendation": { "action": "pick-b", "rationale": "..." } }
+  { "verdict": "confirmed", "explanation": "...", "recommendation": { "action": "pick-b", "rationale": "...", "confidence": "medium" } }
   { "verdict": "refuted", "reason": "the two sections describe different services, so both statements hold (rule a)" }
 
 The refuted "reason" is one sentence, shown to the user.`;
-
-/**
- * Build the judge's user message for one flagged dispute: the detector's note and,
- * for each side, its section pointer(s) + verbatim quote(s) and its doc context.
- * A doc whose body fits {@link VERIFY_DOC_BUDGET_CHARS} is shown in full; a larger
- * one is shown as its heading outline plus the full text of the disputed
- * section(s) named by the flag's pointers (and its lead for a `null` pointer).
- *
- * Each side's repo-relative path is its NAME, and the message says so outright:
- * the brief is read beside two named documents, so its prose must name them too.
- * The A/B letters exist for the `action` enum's orientation, nothing else.
- */
-export function buildVerifyOverlapUserPrompt(
-  areaId: string,
-  overlap: Overlap,
-  a: DocCandidate,
-  b: DocCandidate,
-): string {
-  return [
-    `Area: ${areaId}`,
-    '',
-    'The recall-biased detector flagged these two documents as possibly disagreeing.',
-    `Detector's note: ${overlap.note || '(none)'}`,
-    '',
-    renderSide('A', a, overlap),
-    '',
-    renderSide('B', b, overlap),
-    '',
-    `The documents' names: doc A is "${a.path}", doc B is "${b.path}". Refer to them by these names in "explanation", "rationale" and "fix" — never by the letters.`,
-    '',
-    'Return the JSON verdict as specified.',
-  ].join('\n');
-}
-
-function renderSide(label: 'A' | 'B', doc: DocCandidate, overlap: Overlap): string {
-  const body = docBody(doc);
-  const pointers = (overlap.sections ?? []).filter((s) => s.doc === doc.path);
-  const ptrLines = pointers.length
-    ? pointers.map((s) => {
-        const where = s.heading === null ? '(lead / preamble)' : s.heading;
-        const quote = s.quote ? `  quote: "${s.quote}"` : '';
-        return `  - section: ${where}${quote}`;
-      })
-    : ['  - (no specific section named)'];
-  return [
-    `--- doc ${label}: ${doc.path} ---`,
-    'flagged section(s):',
-    ...ptrLines,
-    '',
-    'context:',
-    sideContext(body, pointers),
-    `--- end doc ${label} ---`,
-  ].join('\n');
-}
-
-/**
- * The context shown for one side. A doc within budget is shown whole. A larger doc
- * is shown as its full heading outline plus the full text of each disputed section
- * (and the doc's lead when a pointer is `null`), so the judge sees exactly the
- * passages in dispute without the whole (oversized) body.
- */
-function sideContext(body: string, pointers: readonly OverlapSection[]): string {
-  if (body.length <= VERIFY_DOC_BUDGET_CHARS) return body;
-
-  const parts: string[] = ['DOCUMENT OUTLINE (headings only):', headingOutline(body)];
-  const seen = new Set<string>();
-  for (const ptr of pointers) {
-    if (ptr.heading === null) {
-      if (seen.has('\x00lead')) continue;
-      seen.add('\x00lead');
-      const lead = leadText(body);
-      if (lead.trim()) parts.push('', 'LEAD (text before the first heading):', lead);
-    } else {
-      const key = headingKey(ptr.heading);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const text = sectionText(body, ptr.heading);
-      if (text) parts.push('', `SECTION "${ptr.heading}":`, text);
-    }
-  }
-  return parts.join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// Section machinery — via the shared doc-chunks heading scan (`parseHeadings`),
-// the one fence-aware ATX scanner every doc consumer shares. The section-text
-// boundary (a heading down to the next same-or-higher heading, descendants
-// included) mirrors the shared section convention; kept local so this module
-// stays dependency-lean, matching the sibling pointer-verifier.
-// ---------------------------------------------------------------------------
-
-const headingKey = (h: string): string => h.replace(/[`*_~]/g, '').trim().toLowerCase();
-
-function docBody(doc: DocCandidate): string {
-  if (doc.content !== undefined) return doc.content;
-  if (doc.absPath) {
-    try {
-      return fs.readFileSync(doc.absPath, 'utf-8');
-    } catch {
-      /* fall through to preview */
-    }
-  }
-  return doc.preview;
-}
-
-/** The doc's headings, one per line, prefixed with their level's hashes. */
-function headingOutline(body: string): string {
-  const headings = parseHeadings(body.split('\n'));
-  if (headings.length === 0) return '(no headings)';
-  return headings.map((h) => `${'#'.repeat(h.level)} ${h.text}`).join('\n');
-}
-
-/** The doc's lead: everything before its first heading (the whole body if none). */
-function leadText(body: string): string {
-  const lines = body.split('\n');
-  const headings = parseHeadings(lines);
-  const end = headings.length ? headings[0].line : lines.length;
-  return lines.slice(0, end).join('\n');
-}
-
-/**
- * The full text of the section whose heading matches `heading` — the heading line
- * down to the next heading of the same or higher level (its subsections included),
- * or `null` when no heading matches. Heading match folds inline markers + case, so
- * a backtick-styled or emphasized heading still resolves.
- */
-function sectionText(body: string, heading: string): string | null {
-  const lines = body.split('\n');
-  const headings = parseHeadings(lines);
-  const key = headingKey(heading);
-  const idx = headings.findIndex((h) => headingKey(h.text) === key);
-  if (idx === -1) return null;
-  const level = headings[idx].level;
-  let end = lines.length;
-  for (let j = idx + 1; j < headings.length; j++) {
-    if (headings[j].level <= level) {
-      end = headings[j].line;
-      break;
-    }
-  }
-  return lines.slice(headings[idx].line, end).join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// Cache — content-addressed via the pluggable KV seam, like the sibling stages.
-// The key folds the prompt fingerprint + the area + both content hashes + the
-// dispute (note + section pointers), so an unchanged flag is a hit and a prompt
-// change invalidates.
-// ---------------------------------------------------------------------------
-
-const CACHE_NAME = 'consolidator/verify-overlap';
-
-/**
- * The prompt text is folded in below, so the version tag is a deliberate PIN:
- * bump it when a contract change must invalidate every cached verdict, not just
- * the ones whose prompt bytes moved. Pinned `v3` on 2026-08-03 — the brief now
- * names the documents instead of calling them doc A / doc B, and every verdict
- * cached under the old contract carries letter prose.
- */
-const PROMPT_FINGERPRINT = createHash('sha256')
-  .update(`v3::${VERIFY_OVERLAP_SYSTEM_PROMPT}`)
-  .digest('hex')
-  .slice(0, 16);
-
-function computeCacheKey(areaId: string, overlap: Overlap, a: DocCandidate, b: DocCandidate): string {
-  // Order-insensitive on the two docs so (a,b) and (b,a) share a cache entry.
-  const hashes = [a.contentHash, b.contentHash].sort().join('::');
-  const dispute = createHash('sha256')
-    .update(`${overlap.note}${JSON.stringify(overlap.sections ?? [])}`)
-    .digest('hex');
-  return createHash('sha256').update(`${PROMPT_FINGERPRINT}::${areaId}::${hashes}::${dispute}`).digest('hex');
-}
-
-async function readCache(scope: string, cacheKey: string): Promise<OverlapVerification | null> {
-  const raw = await getCacheEntry(scope, CACHE_NAME, cacheKey);
-  if (raw === null) return null;
-  const parsed = VerificationCacheSchema.safeParse(raw);
-  if (!parsed.success) return null;
-  return { verdict: parsed.data.verdict, reason: parsed.data.reason, review: parsed.data.review };
-}
-
-async function writeCache(scope: string, cacheKey: string, verification: OverlapVerification): Promise<void> {
-  await setCacheEntry(scope, CACHE_NAME, cacheKey, verification);
-}

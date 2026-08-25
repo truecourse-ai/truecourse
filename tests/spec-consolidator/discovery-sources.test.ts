@@ -14,7 +14,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
 import {
-  curate,
   discoverDocs,
   readSourcesFile,
   sourceDirPath,
@@ -24,13 +23,14 @@ import {
   SourcesFileError,
   SOURCES_REF_PREFIX,
 } from '../../packages/spec-consolidator/src/index.js';
-import type {
-  AreaTagRunner,
-  DecisionsFile,
-  OverlapRunner,
-  RelevanceRunner,
-  VerifyOverlapRunner,
-} from '../../packages/spec-consolidator/src/index.js';
+import type { DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
+import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run';
+import {
+  docPathOf,
+  memoryPersistence,
+  outcome,
+  stubDriver,
+} from '../core/spec-scan-session-stub';
 import { INSTALLATION_MD, QUICK_START_MD, SEED_PAGES, seedSource } from './sources-fixture.js';
 
 const DEPLOYMENT_MD = `# Deployment
@@ -221,55 +221,79 @@ describe('discoverDocs — degraded registries', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Curate — a snapshot doc is just a doc: relevance, tagging, overlap, decisions.
+// The scan run — a snapshot doc is just a doc: curation, tagging, decisions.
 // ---------------------------------------------------------------------------
 
-const relevance: RelevanceRunner = async ({ doc }) => ({
-  path: doc.path,
-  include: !doc.path.endsWith('scratch.md'),
-  reason: doc.path.endsWith('scratch.md') ? 'scratch note' : 'documents the product',
-});
-
-const areaTagger: AreaTagRunner = async () => ({
-  tags: [{ product: 'cms', concern: 'content' }],
-  status: 'shipped',
-});
-
-const noOverlap: OverlapRunner = async () => ({ overlap: false });
-const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
-
-const DECISIONS: DecisionsFile = {
-  version: 1,
-  decisions: [],
-  manualChains: [],
-  manualIncludes: [],
-  relations: [],
-  manualAreas: [],
+/** Drop the scratch note; tag everything else into one area. */
+const curateSession = (briefing: string): unknown => {
+  const p = docPathOf(briefing);
+  return p.endsWith('scratch.md')
+    ? {
+        keep: false,
+        reason: 'scratch note',
+        subject: 'this-product',
+        category: 'scratch',
+        areas: [],
+        status: null,
+      }
+    : {
+        keep: true,
+        reason: 'documents the product',
+        subject: 'this-product',
+        areas: [{ product: 'cms', concern: 'content' }],
+        status: 'shipped',
+      };
 };
 
-function runCurate(decisions: DecisionsFile = DECISIONS) {
-  return curate(root, {
+const scopeRow = (p: string) => ({
+  path: p,
+  verdict: 'keep' as const,
+  reason: 'covered by the test',
+  decidedAt: '2026-01-01T00:00:00Z',
+  resolvedBy: 'user' as const,
+});
+
+const DECISIONS: DecisionsFile = {
+  version: 2,
+  manualIncludes: [],
+  manualExcludes: [],
+  manualAreas: [],
+  conflictResolutions: [],
+  instructions: [],
+  // Covering verdicts keep the scope orchestrator (step 6) out of these cases.
+  scopeVerdicts: [scopeRow('.'), scopeRow('notes'), scopeRow(SITE_ID)],
+};
+
+function runScan(decisions: DecisionsFile = DECISIONS) {
+  const stub = stubDriver(({ kind, briefing }) =>
+    kind === 'spec-scan.curate-doc'
+      ? outcome(curateSession(briefing))
+      : outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] }),
+  );
+  return runSpecScanSessions({
+    repoRoot: root,
+    driver: async () => stub.driver,
+    persistence: memoryPersistence().persistence,
     decisions,
-    relevanceRunner: relevance,
-    areaTagRunner: areaTagger,
-    overlapRunner: noOverlap,
-    verifyOverlapRunner: confirmAll,
-    disableVocabNormalization: true,
+    repoIdentity: null,
+    disableOverlapDetection: true,
     skipGit: true,
   });
 }
 
-describe('curate — snapshot docs flow through the pipeline', () => {
-  it('a registered page is classified, tagged, and lands in the corpus', async () => {
+describe('the scan run — snapshot docs flow through the pipeline', () => {
+  it('a registered page is curated, tagged, and lands in the corpus', async () => {
     place('README.md', '# The product\n\nThe repo doc.\n');
     place('notes/scratch.md', '# Scratch\n\nA note the classifier drops.\n');
     seedSource(root, { id: SITE_ID });
 
-    const result = await runCurate();
+    const result = await runScan();
 
     expect(result.corpus.docs.map((d) => d.ref)).toContain(ref('cms/installation.md'));
     expect(result.stats.docsScanned).toBe(5);
-    expect(result.skippedDocs).toEqual([{ path: 'notes/scratch.md', reason: 'scratch note' }]);
+    expect(result.skippedDocs).toEqual([
+      { path: 'notes/scratch.md', reason: 'scratch note', category: 'scratch' },
+    ]);
     const area = result.corpus.areas.find((a) => a.id === 'cms/content')!;
     expect(area.docRefs).toContain(ref('cms/quick-start.md'));
     // The ref resolves to the real file, which is what guard generate + the doc
@@ -282,7 +306,7 @@ describe('curate — snapshot docs flow through the pipeline', () => {
   it('a force-exclude by source ref drops that page from the corpus', async () => {
     seedSource(root, { id: SITE_ID });
 
-    const result = await runCurate({ ...DECISIONS, manualExcludes: [ref('cms/installation.md')] });
+    const result = await runScan({ ...DECISIONS, manualExcludes: [ref('cms/installation.md')] });
 
     const refs = result.corpus.docs.map((d) => d.ref);
     expect(refs).not.toContain(ref('cms/installation.md'));
