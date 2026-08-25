@@ -24,7 +24,7 @@ import {
   normalizeRemoteUrl,
   parseRemoteUrl,
 } from '../services/repo-clone.service.js';
-import { startOnboardingScan } from '../services/onboarding-scan.service.js';
+import { isSpecScanRunning, startOnboardingScan } from '../services/onboarding-scan.service.js';
 
 const router: Router = Router();
 
@@ -101,8 +101,15 @@ router.post('/connect', async (req: Request, res: Response, next: NextFunction) 
 
     // Same `<owner>__<repo>` directory, different remote (e.g. the same
     // owner/repo on two hosts). Refuse rather than clobber the other clone.
+    // Case-insensitive: clone dir names are lowercased now, but a registry
+    // written before that can still hold a mixed-case dir which, on a
+    // case-insensitive filesystem (macOS default), IS the directory this
+    // connect would rmSync. A false 409 on Linux for a genuinely distinct
+    // casing is the safe direction.
     const clonePath = getClonePath(remote);
-    const occupant = registry.find((e) => path.resolve(e.path) === path.resolve(clonePath));
+    const occupant = registry.find(
+      (e) => path.resolve(e.path).toLowerCase() === path.resolve(clonePath).toLowerCase(),
+    );
     if (occupant) {
       throw createAppError(
         `${occupant.name} already occupies the directory ${remote.displayName} would clone into. Disconnect it first.`,
@@ -117,19 +124,22 @@ router.post('/connect', async (req: Request, res: Response, next: NextFunction) 
     const repoPath = await cloneRepository(remote);
     const entry = await registerProject(repoPath, remote.displayName, { remoteUrl: remote.url });
 
+    // Onboarding (§4.3): connecting a repository starts its spec scan. The
+    // scan itself runs in the background — the call only claims the slot and
+    // returns whether it started (false: a scan for this path is already
+    // running, e.g. CLI-started), which the response reports so a client can
+    // tell "scanning now" from "join the run already in flight". Never throws
+    // (see the service).
+    const onboardingScanStarted = startOnboardingScan(entry.slug, entry.path);
+
     res.status(201).json({
       id: entry.slug,
       name: entry.name,
       path: entry.path,
       remoteUrl: entry.remoteUrl ?? null,
       lastAnalyzed: null,
+      onboardingScanStarted,
     });
-
-    // Onboarding (§4.3): connecting a repository starts its spec scan. AFTER
-    // the response, never inside it — the scan takes minutes and its outcome is
-    // no part of "the repository is connected". Fire-and-forget and never
-    // throwing (see the service), so nothing here can reach `next` post-response.
-    startOnboardingScan(entry.slug, entry.path);
   } catch (error) {
     next(error);
   }
@@ -341,6 +351,17 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
     const entry = await getProjectBySlug(slug);
     if (!entry) {
       throw createAppError('Project not found', 404);
+    }
+
+    // A running spec scan is writing into this tree right now. Deleting it
+    // under the scan leaves an orphaned `.truecourse/` the scan's later writes
+    // recreate, and — because the in-flight guard is keyed on the path — blocks
+    // a same-URL reconnect from ever getting its onboarding scan.
+    if (isSpecScanRunning(entry.path)) {
+      throw createAppError(
+        'A spec scan is running for this repository. Wait for it to finish, then disconnect.',
+        409,
+      );
     }
 
     if (entry.remoteUrl && isManagedClonePath(entry.path)) {

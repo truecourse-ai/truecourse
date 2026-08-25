@@ -135,6 +135,18 @@ export function acquireRunsWatch(repoPath: string, onChange: () => void): void {
     existing.refs++;
     return;
   }
+  // chokidar (4.x, pinned) never attaches to a directory that does not exist:
+  // no add/change/error events, even after the tree appears later. A fresh
+  // repo has no `sessions/` until its first run, so without this the watch
+  // would sit dead and the first run would never reach the room. Guarded on
+  // the repo root existing — a repo identity that is not a local path (hosted)
+  // must not mint directories — and best-effort: an unwritable tree just
+  // leaves the watch as dead as it was before.
+  try {
+    if (fs.existsSync(repoPath)) fs.mkdirSync(sessionsDir(repoPath), { recursive: true });
+  } catch {
+    /* the watcher's own error handler reports anything further */
+  }
   // depth 2: sessions/<command>/<runId>/run.json
   const watcher = watch(sessionsDir(repoPath), { ignoreInitial: true, depth: 2 });
   const entry: RunsWatch = { watcher, refs: 1 };

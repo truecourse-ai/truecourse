@@ -309,6 +309,55 @@ describe('applySettlement — lenient where the validator is strict', () => {
     expect([...applied.reassignments.keys()].sort()).toEqual(['a.md', 'zz.md'])
     expect(applied.reassignments.get('a.md')).toEqual(new Map([['endpoints', 'endpoint reads']]))
   })
+
+  it('compresses merge chains — the grouper applies the map ONE hop deep', () => {
+    // Labels chosen clear of CONCERN_ALIASES/PRODUCT_ALIASES, so all three
+    // survive canonicalization as distinct concerns.
+    const chained = collectAreaVocab(
+      tagMap({
+        'a.md': [['core', 'slots']],
+        'b.md': [['core', 'slot-holds']],
+        'c.md': [['core', 'slot-reservations']],
+        'd.md': [['widgets', 'billing']],
+        'e.md': [['gadgets', 'billing']],
+      }),
+    )
+    const applied = applySettlement(
+      {
+        // slot-reservations → slot-holds → slots must land … on slots.
+        concernMerges: { 'slot-reservations': 'slot-holds', 'slot-holds': 'slots' },
+        // widgets → gadgets, and gadgets collapses to core: widgets lands on core.
+        productMerges: { widgets: 'gadgets' },
+        productVerdicts: [
+          { product: 'widgets', verdict: 'justified', reason: 'merged away' },
+          { product: 'gadgets', verdict: 'collapse-to-core', reason: 'a feature' },
+        ],
+        subdivisions: [],
+      },
+      chained,
+    )
+    expect(applied.vocab.concerns).toEqual({ 'slot-reservations': 'slots', 'slot-holds': 'slots' })
+    expect(applied.vocab.products).toEqual({ widgets: 'core', gadgets: 'core' })
+  })
+
+  it('resolves a merge cycle to its smallest label instead of leaving it unapplied', () => {
+    const cyclic = collectAreaVocab(
+      tagMap({
+        'a.md': [['core', 'slots']],
+        'b.md': [['core', 'slot-holds']],
+      }),
+    )
+    const applied = applySettlement(
+      {
+        concernMerges: { slots: 'slot-holds', 'slot-holds': 'slots' },
+        productMerges: {},
+        productVerdicts: [],
+        subdivisions: [],
+      },
+      cyclic,
+    )
+    expect(applied.vocab.concerns).toEqual({ slots: 'slot-holds' })
+  })
 })
 
 describe('the settle session definition', () => {

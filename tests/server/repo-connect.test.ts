@@ -63,7 +63,7 @@ import {
   parseRemoteUrl,
 } from '../../apps/dashboard/server/src/services/repo-clone.service';
 import {
-  isOnboardingScanRunning,
+  isSpecScanRunning,
   startOnboardingScan,
 } from '../../apps/dashboard/server/src/services/onboarding-scan.service';
 
@@ -153,6 +153,13 @@ describe('parseRemoteUrl', () => {
 
   it('sanitizes path segments into a flat directory name', () => {
     expect(parseRemoteUrl('https://example.com/a b/c d').dirName).toBe('a-b__c-d');
+  });
+
+  it('lowercases the directory name — case variants collide visibly, never on disk', () => {
+    // On a case-insensitive filesystem (macOS default) `Acme__Widgets` and
+    // `acme__widgets` are the same directory; lowercasing makes the occupant
+    // guard see the collision instead of rmSync-ing the other repo's clone.
+    expect(parseRemoteUrl('https://github.com/Acme/Widgets').dirName).toBe('acme__widgets');
   });
 
   it.each([
@@ -255,6 +262,26 @@ describe('POST /api/repos/connect', () => {
     expect(await readRegistry()).toHaveLength(1);
   });
 
+  it('refuses a case-variant of a connected remote instead of clobbering its clone', async () => {
+    const origin = makeOriginRepo('widgets');
+    const first = await request(app)
+      .post('/api/repos/connect')
+      .send({ url: `file://${origin}` })
+      .expect(201);
+    const clone = first.body.path as string;
+
+    // Same path, different case: not a duplicate by normalized URL (paths stay
+    // case-sensitive), but it maps to the SAME lowercased clone directory —
+    // the occupant guard must 409 rather than let cloneRepository rmSync the
+    // first repo's clone (which, on macOS, that path resolves to).
+    const variant = `file://${path.dirname(origin)}/Widgets`;
+    const res = await request(app).post('/api/repos/connect').send({ url: variant }).expect(409);
+
+    expect(res.body.error).toMatch(/already occupies/);
+    expect(fs.existsSync(path.join(clone, 'README.md'))).toBe(true);
+    expect(await readRegistry()).toHaveLength(1);
+  });
+
   it('rejects a non-https URL without cloning anything', async () => {
     const res = await request(app)
       .post('/api/repos/connect')
@@ -350,7 +377,7 @@ describe('connecting a repository starts its spec scan', () => {
 
     await until(() => scan.calls.length > 0);
     expect(scan.calls).toEqual([res.body.path]);
-    expect(isOnboardingScanRunning(res.body.path)).toBe(true);
+    expect(isSpecScanRunning(res.body.path)).toBe(true);
   });
 
   it('a scan that fails leaves the connect response alone and rejects nothing', async () => {
@@ -368,11 +395,11 @@ describe('connecting a repository starts its spec scan', () => {
         .expect(201);
       expect(res.body.remoteUrl).toBe(`file://${origin}`);
 
-      await until(() => !isOnboardingScanRunning(res.body.path));
+      await until(() => !isSpecScanRunning(res.body.path));
       expect(scan.calls).toHaveLength(1);
       expect(unhandled).toEqual([]);
       // The failure released the repo: a later scan is not blocked by it.
-      expect(isOnboardingScanRunning(res.body.path)).toBe(false);
+      expect(isSpecScanRunning(res.body.path)).toBe(false);
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }
@@ -393,13 +420,13 @@ describe('connecting a repository starts its spec scan', () => {
 
   it('sees a scan another process started, through the sessions store', async () => {
     const repo = makeOriginRepo('elsewhere');
-    expect(isOnboardingScanRunning(repo)).toBe(false);
+    expect(isSpecScanRunning(repo)).toBe(false);
 
     // A run record left `running` by a live process — what a CLI `spec scan` in
     // the same clone looks like from here.
     createSessionRun(repo, { command: 'spec-scan', gitRef: 'HEAD' });
 
-    expect(isOnboardingScanRunning(repo)).toBe(true);
+    expect(isSpecScanRunning(repo)).toBe(true);
     expect(startOnboardingScan('elsewhere', repo)).toBe(false);
     await settle();
     expect(scan.calls).toEqual([]);
@@ -420,6 +447,9 @@ describe('DELETE /api/repos/:id', () => {
     const clone = res.body.path as string;
     expect(fs.existsSync(clone)).toBe(true);
 
+    // The connect started the onboarding scan; disconnect refuses while it
+    // runs, so wait for the (stubbed, immediate) scan to settle first.
+    await until(() => !isSpecScanRunning(clone));
     await request(app).delete(`/api/repos/${res.body.id}`).expect(204);
 
     expect(fs.existsSync(clone)).toBe(false);
@@ -441,5 +471,37 @@ describe('DELETE /api/repos/:id', () => {
     expect(fs.existsSync(local)).toBe(true);
     expect(fs.existsSync(path.join(local, 'source.ts'))).toBe(true);
     expect(fs.existsSync(path.join(local, '.truecourse'))).toBe(false);
+  });
+
+  it('refuses to disconnect while the spec scan is still running', async () => {
+    const origin = makeOriginRepo('widgets');
+    scan.calls.length = 0;
+    let release: (() => void) | undefined;
+    scan.impl = () => new Promise((r) => (release = () => r({})));
+    try {
+      const res = await request(app)
+        .post('/api/repos/connect')
+        .send({ url: `file://${origin}` })
+        .expect(201);
+      const clone = res.body.path as string;
+      expect(isSpecScanRunning(clone)).toBe(true);
+
+      // Deleting the tree under the scan would orphan its later writes and
+      // leave the path's in-flight guard blocking a same-URL reconnect.
+      const refused = await request(app).delete(`/api/repos/${res.body.id}`).expect(409);
+      expect(refused.body.error).toMatch(/scan is running/i);
+      expect(fs.existsSync(clone)).toBe(true);
+
+      // The scan holds the slot from the moment of the 201; the stub itself is
+      // only reached after the service's own git preamble.
+      await until(() => release !== undefined);
+      release!();
+      await until(() => !isSpecScanRunning(clone));
+      await request(app).delete(`/api/repos/${res.body.id}`).expect(204);
+      expect(fs.existsSync(clone)).toBe(false);
+    } finally {
+      release?.();
+      scan.impl = async () => ({});
+    }
   });
 });

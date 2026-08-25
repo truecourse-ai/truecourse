@@ -146,6 +146,7 @@ import {
   orchestrateSessionDef,
   scopeCoverage,
   type ScanScopeOutcome,
+  type ScopeSourceView,
 } from './orchestrate.js'
 import { buildScanUniverse, instructionsFingerprint } from './tools.js'
 
@@ -357,14 +358,20 @@ async function runCachedSessionPool<TItem, TOutcome>(
       },
     })
     finals.push(
-      outcomePromise.then((outcome) => {
-        if (outcome.fromCache) {
-          summary.fromCache++
-          opts.fold(item, { outcome })
-          opts.onProgress?.(++done, total)
-          decide()
-        }
-      }),
+      outcomePromise
+        .then((outcome) => {
+          if (outcome.fromCache) {
+            summary.fromCache++
+            opts.fold(item, { outcome })
+            opts.onProgress?.(++done, total)
+          }
+        })
+        // `decide` unconditionally, whatever the chain above did: a fold or
+        // progress callback that THROWS on a cache hit (or a cache read that
+        // rejects) must fail the scan at the `Promise.all(finals)` below — not
+        // park the probe loop's `await decided` forever. Idempotent on a miss,
+        // where run() already decided at registration.
+        .finally(decide),
     )
     await decided
   }
@@ -506,10 +513,30 @@ export async function runSpecScanSessions(
   // but still honors the stored verdicts.
   const pendingQuestions: UserInputQuestion[] = []
   const scanFindings: string[] = []
+  // The docs a scope verdict excluded, recorded for `skippedDocs`: the
+  // dashboard's "not included" surface must be able to show them (and
+  // force-include them) — a doc that just vanishes cannot be undone. User
+  // pins (`manualIncludes`) never land here: applyScopeVerdicts keeps them.
+  const scopeExcluded: Array<{ path: string; reason: string; category?: string }> = []
+  const applyScope = (docs: DocCandidate[], sources: ScopeSourceView[]): DocCandidate[] => {
+    const kept = applyScopeVerdicts(docs, decisions.scopeVerdicts ?? [], sources, decisions.manualIncludes ?? [])
+    if (kept.length !== docs.length) {
+      const keptSet = new Set(kept.map((d) => d.path))
+      // Force-excluded docs stay out of the skip list here too — a manual
+      // exclude drops a doc whole, same as the fold below.
+      const excluded = new Set(decisions.manualExcludes ?? [])
+      for (const d of docs) {
+        if (!keptSet.has(d.path) && !excluded.has(d.path)) {
+          scopeExcluded.push({ path: d.path, reason: 'excluded by a scan-scope verdict', category: 'out-of-scope' })
+        }
+      }
+    }
+    return kept
+  }
   let orchestrateSummary: (ScanSessionKindSummary & { firstError?: string; allTransport: boolean }) | null =
     null
   if (opts.docSource || opts.disableScopeOrchestration) {
-    allDocs = applyScopeVerdicts(allDocs, decisions.scopeVerdicts ?? [], [])
+    allDocs = applyScope(allDocs, [])
     opts.onScope?.('skipped')
   } else {
     const scanScope = buildScanScopeUniverse(buildScanUniverse(allDocs), readSourcesFile(repoRoot).sources)
@@ -572,7 +599,7 @@ export async function runSpecScanSessions(
       if (settled && !opts.skipCorpusWrite) writeDecisions(repoRoot, decisions)
       opts.onScope?.(settled ? 'ran' : 'failed')
     }
-    allDocs = applyScopeVerdicts(allDocs, decisions.scopeVerdicts ?? [], scanScope.sources)
+    allDocs = applyScope(allDocs, scanScope.sources)
   }
 
   // Single-step early return: what ran so far, an empty corpus skeleton (the
@@ -622,7 +649,9 @@ export async function runSpecScanSessions(
     }
   }
   if (only === 'orchestrate') {
-    return stoppedResult('orchestrate', orchestrateSummary ? [orchestrateSummary] : [])
+    return stoppedResult('orchestrate', orchestrateSummary ? [orchestrateSummary] : [], {
+      skippedDocs: scopeExcluded,
+    })
   }
 
   // The standing instructions bind every downstream session: they open each
@@ -724,7 +753,9 @@ export async function runSpecScanSessions(
   const prefilterReason = new Map(prefilterSkipped.map((s) => [s.path, s.reason]))
   const keptProse: DocCandidate[] = []
   const tagsByPath = new Map<string, DocAreaTags>()
-  const skippedDocs: Array<{ path: string; reason: string; category?: string }> = []
+  // Seeded with the scope-excluded docs (discovery order), so the corpus's
+  // skip list shows them and the dashboard can force-include them back.
+  const skippedDocs: Array<{ path: string; reason: string; category?: string }> = [...scopeExcluded]
   const reinstatedCount = { value: 0 }
   let thirdPartyDropped = 0
 

@@ -273,6 +273,37 @@ export interface AppliedSettlement {
 }
 
 /**
+ * Follow a merge map's chains to their terminal label (`a → b` plus `b → c`
+ * becomes `a → c`), so a chained settlement lands in ONE application — the
+ * grouper applies the map a single hop deep. A cycle has no terminal; every
+ * label on it resolves to the cycle's lexicographically smallest member,
+ * deterministically, rather than dropping the merges whole.
+ */
+function compressMergeChains(map: Record<string, string>): Record<string, string> {
+  const resolve = (start: string): string => {
+    const seen = new Set<string>([start])
+    let cur = start
+    while (map[cur] !== undefined) {
+      const next = map[cur]!
+      if (seen.has(next)) {
+        const cycle: string[] = [next]
+        for (let n = map[next]!; n !== next; n = map[n]!) cycle.push(n)
+        return [...cycle].sort()[0]!
+      }
+      seen.add(next)
+      cur = next
+    }
+    return cur
+  }
+  const out: Record<string, string> = {}
+  for (const from of Object.keys(map)) {
+    const to = resolve(from)
+    if (to !== from) out[from] = to
+  }
+  return out
+}
+
+/**
  * Sanitize + apply a settlement — like the old vocab sanitize EXCEPT that
  * collapse-to-core is legal on this path. LENIENT where the validator is
  * strict: one bad mapping must never cost the whole settlement, so an unknown
@@ -298,6 +329,10 @@ export function applySettlement(settlement: AreaSettlement, vocab: AreaVocabView
   for (const v of settlement.productVerdicts) {
     if (v.verdict === 'collapse-to-core' && products.has(v.product)) map.products[v.product] = CORE_PRODUCT
   }
+  // AFTER the verdict fold, so `a → b` plus `b collapses to core` lands a on
+  // core too.
+  map.concerns = compressMergeChains(map.concerns)
+  map.products = compressMergeChains(map.products)
 
   const reassignments = new Map<string, Map<string, string>>()
   for (const sub of settlement.subdivisions) {

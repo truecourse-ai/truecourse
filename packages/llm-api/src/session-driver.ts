@@ -196,7 +196,14 @@ export function createApiSessionDriver(
         steer: (message) => steers.push(message),
         interrupt: async () => {
           interrupted = true;
-          await done.then(() => undefined);
+          // Settlement only — the shell's own `await handle.done` observes any
+          // rejection. Without the rejection handler here, this second consumer
+          // of `done` would turn a driver-defect rejection during an interrupt
+          // into an unhandledRejection that kills the whole process.
+          await done.then(
+            () => undefined,
+            () => undefined,
+          );
         },
       };
     },

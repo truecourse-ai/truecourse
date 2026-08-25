@@ -42,15 +42,17 @@ import {
 } from '../socket/handlers.js';
 
 /**
- * Repos whose scan this process started and has not finished. The store's own
+ * Repos whose scan THIS PROCESS started and has not finished — the onboarding
+ * scan or the manual Scan route, which share this guard. The store's own
  * `running` records cover a scan started by anything else (a CLI run, an
  * earlier server process); this set covers the window between "started" and
- * "the run record exists", which the store cannot see.
+ * "the run record exists", which the store cannot see. (For the manual scan
+ * that window includes the whole estimate-confirm wait.)
  */
 const inFlight = new Set<string>();
 
 /** Is a spec scan already running for this repo — here or anywhere else? */
-export function isOnboardingScanRunning(repoPath: string): boolean {
+export function isSpecScanRunning(repoPath: string): boolean {
   if (inFlight.has(path.resolve(repoPath))) return true;
   try {
     // listSessionRuns sweeps dead-pid runs as it reads, so `running` here means
@@ -62,19 +64,30 @@ export function isOnboardingScanRunning(repoPath: string): boolean {
 }
 
 /**
+ * Claim the repo's one scan slot. Returns the release function, or `null`
+ * when a scan is already running (here or anywhere else). Check-and-claim is
+ * synchronous, so two concurrent requests cannot both get a slot.
+ */
+export function beginSpecScan(repoPath: string): (() => void) | null {
+  if (isSpecScanRunning(repoPath)) return null;
+  const key = path.resolve(repoPath);
+  inFlight.add(key);
+  return () => inFlight.delete(key);
+}
+
+/**
  * Start the repo's spec scan in the background. Returns whether it started:
  * `false` means a scan for this repo is already running and this call was a
  * no-op. Never throws.
  */
 export function startOnboardingScan(repoId: string, repoPath: string): boolean {
   try {
-    if (isOnboardingScanRunning(repoPath)) {
+    const release = beginSpecScan(repoPath);
+    if (!release) {
       log.info(`[onboarding] spec scan already running for ${repoId} — not starting a second`);
       return false;
     }
-    const key = path.resolve(repoPath);
-    inFlight.add(key);
-    void runScan(repoId, repoPath).finally(() => inFlight.delete(key));
+    void runScan(repoId, repoPath).finally(release);
     return true;
   } catch (err) {
     log.error(`[onboarding] could not start the spec scan for ${repoId}: ${messageOf(err)}`);

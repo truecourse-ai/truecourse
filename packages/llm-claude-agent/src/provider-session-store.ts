@@ -22,7 +22,14 @@ export function providerSessionStore(dir: string): SdkSessionStore {
     async append(key, entries) {
       if (entries.length === 0) return;
       fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(fileFor(key), entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+      const file = fileFor(key);
+      // A crash mid-append leaves the file without its trailing newline. The
+      // next append must not glue its first entry onto that truncated line —
+      // the merged line would never parse again, corrupting the store for
+      // good. Open the newline instead, so the debris stays a line of its own
+      // (load skips it) and every new entry stays whole.
+      const payload = entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
+      fs.appendFileSync(file, endsWithNewline(file) ? payload : '\n' + payload);
     },
     async load(key) {
       let raw: string;
@@ -40,8 +47,11 @@ export function providerSessionStore(dir: string): SdkSessionStore {
         try {
           entry = JSON.parse(lines[i]) as SdkSessionStoreEntry;
         } catch {
-          if (i === lines.length - 1) break; // crash-truncated final line
-          throw new Error(`corrupt provider session line ${i} in ${fileFor(key)}`);
+          // Crash debris: a truncated append, at the tail or (healed by the
+          // append above) mid-file. The entry was never fully persisted, so
+          // skipping it is the honest recovery — the rest of the mirror stays
+          // usable instead of failing every resume forever.
+          continue;
         }
         if (typeof entry.uuid === 'string') {
           if (seen.has(entry.uuid)) continue;
@@ -56,4 +66,23 @@ export function providerSessionStore(dir: string): SdkSessionStore {
 
 function sanitize(id: string): string {
   return id.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+/** Does the file end in `\n`? A missing file counts as yes (nothing to heal). */
+function endsWithNewline(file: string): boolean {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, 'r');
+  } catch {
+    return true;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size === 0) return true;
+    const buf = Buffer.alloc(1);
+    fs.readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] === 0x0a;
+  } finally {
+    fs.closeSync(fd);
+  }
 }

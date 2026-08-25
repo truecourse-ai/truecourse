@@ -54,10 +54,19 @@ function stripGitSuffix(segment: string): string {
   return segment.endsWith('.git') ? segment.slice(0, -'.git'.length) : segment;
 }
 
-/** Keep only characters that are safe (and boring) in a directory name. */
+/**
+ * Keep only characters that are safe (and boring) in a directory name.
+ * LOWERCASED: clone directories live on whatever filesystem the user has, and
+ * on a case-insensitive one (macOS default) `Facebook__React` and
+ * `facebook__react` are the SAME directory — a case-variant reconnect would
+ * `rmSync` the other repo's clone. Lowercasing makes the collision explicit:
+ * both variants map to one directory name, so the occupant guard in the
+ * connect route sees it and refuses instead of clobbering.
+ */
 function sanitizeSegment(segment: string): string {
   return segment
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[.\-]+/, '')
     .slice(0, 64);
 }

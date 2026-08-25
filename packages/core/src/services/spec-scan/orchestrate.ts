@@ -209,15 +209,24 @@ export function scopeCoverage(
  * prefilter and the sessions (the whole point: an excluded subtree costs
  * nothing downstream). Per doc the MOST SPECIFIC matching verdict decides;
  * an uncovered doc is kept (exclusion is explicit, never a default).
+ *
+ * `pinned` (the user's `manualIncludes`) outranks every verdict: a doc-level
+ * pin is more specific than any subtree row, and it is a HUMAN decision — an
+ * auto exclude must never silently revert it. The caller records what this
+ * filter dropped (run.ts folds it into `skippedDocs`), so an excluded doc
+ * stays visible and force-includable in the dashboard.
  */
 export function applyScopeVerdicts(
   docs: readonly DocCandidate[],
   verdicts: readonly ScopeVerdict[],
   sources: readonly ScopeSourceView[],
+  pinned: readonly string[] = [],
 ): DocCandidate[] {
   if (verdicts.length === 0) return [...docs]
   const sourceIds = new Set(sources.map((s) => s.id))
+  const pins = new Set(pinned)
   return docs.filter((doc) => {
+    if (pins.has(doc.path)) return true
     let winner: ScopeVerdict | undefined
     let winnerSpecificity = -1
     for (const v of verdicts) {

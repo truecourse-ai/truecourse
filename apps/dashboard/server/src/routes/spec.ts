@@ -58,6 +58,7 @@ import {
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { baselineCommit } from './diff-base.js';
 import { ensureLlmTransport } from '../services/llm-transport.service.js';
+import { beginSpecScan } from '../services/onboarding-scan.service.js';
 import {
   createSocketSpecTracker,
   createSocketSpecEstimateHandler,
@@ -290,11 +291,22 @@ router.get(
   '/:id/spec/corpus/scan',
   async (req: Request, res: Response, next: NextFunction) => {
     let repoIdForCleanup: string | null = null;
+    let releaseScanSlot: (() => void) | null = null;
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
       if (!(await isGitRepo(repo.path))) {
         res.status(400).json({ error: NOT_A_GIT_REPO_MESSAGE });
+        return;
+      }
+      // One scan per repo at a time, shared with the onboarding scan a connect
+      // starts: two concurrent scans would race each other's corpus/decisions
+      // writes. The slot is held through the whole request — the estimate
+      // confirm included, which is exactly the window the run record can't
+      // cover yet.
+      releaseScanSlot = beginSpecScan(repo.path);
+      if (!releaseScanSlot) {
+        res.status(409).json({ error: 'A spec scan is already running for this repository.' });
         return;
       }
       // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
@@ -325,6 +337,8 @@ router.get(
         emitSpecProgress(repoIdForCleanup, { step: 'error', percent: 100, detail: (e as Error).message });
       }
       next(e);
+    } finally {
+      releaseScanSlot?.();
     }
   },
 );

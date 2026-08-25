@@ -279,8 +279,9 @@ export async function estimateScanTokens(
   const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? []);
   const orchestrateItems = coverage.covered ? 0 : 1;
 
-  // Scope verdicts excluded BEFORE anything below — same order as the run.
-  const docs = applyScopeVerdicts(docsAll, decisions.scopeVerdicts ?? [], scanScope.sources);
+  // Scope verdicts excluded BEFORE anything below — same order (and the same
+  // manual-include pins) as the run.
+  const docs = applyScopeVerdicts(docsAll, decisions.scopeVerdicts ?? [], scanScope.sources, manualIncludes);
 
   // Identity AFTER discovery + scope, as the run resolves it; it enters every
   // curate-doc cache key, so estimate and run must agree. Explicit null (EE)

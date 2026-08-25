@@ -491,6 +491,17 @@ describe('applyScopeVerdicts', () => {
     const kept = applyScopeVerdicts(docs, [verdict({ path: 'docs/', verdict: 'exclude' })], sources)
     expect(kept.map((d) => d.path)).toEqual(['README.md', '.truecourse/specs/sources/acme/index.md'])
   })
+
+  it('a manual-include pin outranks every verdict — a user decision is never silently reverted', () => {
+    const kept = applyScopeVerdicts(
+      docs,
+      [verdict({ path: 'docs', verdict: 'exclude' })],
+      sources,
+      ['docs/archive/old.md'],
+    )
+    expect(kept.map((d) => d.path)).toContain('docs/archive/old.md')
+    expect(kept.map((d) => d.path)).not.toContain('docs/a.md')
+  })
 })
 
 describe('a registered source', () => {
