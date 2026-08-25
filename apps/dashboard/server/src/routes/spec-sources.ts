@@ -195,6 +195,7 @@ function failRun(
     step: 'error',
     percent: 100,
     detail: err instanceof Error ? err.message : String(err),
+    kind: 'sources',
   });
   respondSourceError(repoPath, res, next, err);
 }
@@ -279,7 +280,7 @@ router.post('/:id/spec/sources', async (req: Request, res: Response, next: NextF
     const body = (req.body ?? {}) as { id?: unknown };
     const id = typeof body.id === 'string' && body.id.trim() !== '' ? body.id.trim() : undefined;
 
-    const tracker = createSocketSpecTracker(repoId, SOURCE_ADD_STEPS.map((s) => ({ ...s })));
+    const tracker = createSocketSpecTracker(repoId, SOURCE_ADD_STEPS.map((s) => ({ ...s })), 'sources');
     started = true;
     const result = await addSpecSourceInProcess(repo.path, url, {
       tracker,
@@ -325,7 +326,7 @@ async function runRefresh(
       res.json({ results: [] });
       return;
     }
-    const tracker = createSocketSpecTracker(repoId, sourceRefreshSteps(targets));
+    const tracker = createSocketSpecTracker(repoId, sourceRefreshSteps(targets), 'sources');
     started = true;
     const results = await refreshSpecSourcesInProcess(repo.path, { sourceId, tracker });
     emitSpecComplete(repoId, 'sources');

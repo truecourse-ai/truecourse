@@ -224,7 +224,7 @@ describe('spec scan — estimate presentation', () => {
   // The scope orchestrator is interactive but a CLI run never blocks on it, so an
   // unanswered question must be LOUD in the summary or it silently becomes a
   // default (plan 02 step 6 / §3.7).
-  it('surfaces an unanswered scope question in the summary', async () => {
+  it('surfaces an unanswered scope question in the summary, with the dashboard link', async () => {
     vi.mocked(curateInProcess).mockImplementation(
       curateDriver(true, {
         pendingQuestions: [
@@ -244,6 +244,7 @@ describe('spec scan — estimate presentation', () => {
     expect(exit).toBeUndefined();
     expect(stdout).toContain('1 scan question went unanswered');
     expect(stdout).toContain('Scan scope: Is `docs/` product documentation');
+    expect(stdout).toContain('?tab=activity');
   });
 });
 

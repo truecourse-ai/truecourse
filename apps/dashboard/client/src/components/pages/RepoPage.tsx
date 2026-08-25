@@ -56,6 +56,7 @@ import { GuardJourneysPane } from '@/components/guard/GuardJourneysPane';
 import { GuardTestsPanel } from '@/components/guard/GuardTestsPanel';
 import { GuardTestsPane } from '@/components/guard/GuardTestsPane';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
+import { SessionsActivityView } from '@/components/sessions/SessionsActivityView';
 import { GuardExternalsPane } from '@/components/guard/GuardExternalsPane';
 import { buildOpenConflictRows, type BlockedConflictRow } from '@/components/guard/GuardBlockedPanel';
 import { GuardSectionActions } from '@/components/guard/GuardSectionActions';
@@ -1482,6 +1483,10 @@ function RepoPageInner() {
             // reading of a machine's own recipe + overlay. The reload key carries the
             // `spec:complete { kind: 'guard-externals' }` refresh.
             <GuardExternalsPane repoId={repoId} reloadKey={guardReloadKey} />
+          ) : leftTab === 'activity' ? (
+            // Agentic runs + sessions + live transcripts (plan §3.6–§3.9),
+            // deep-linked by ?run=<runId> — the CLI's "Watch live" URL.
+            <SessionsActivityView repoId={repoId} />
           ) : leftTab === 'guarddrifts' ? (
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardDriftsView

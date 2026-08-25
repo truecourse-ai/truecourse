@@ -149,6 +149,12 @@ describe('spec scan outro points at guard generate, never at contracts generate'
     fileURLToPath(new URL('../../tools/cli/src/commands/spec.ts', import.meta.url)),
     'utf-8',
   );
+  // The deep link's SHAPE lives in one place for every agentic command, so the
+  // `?tab=activity` literal is asserted there rather than at each caller.
+  const helpersSrc = fs.readFileSync(
+    fileURLToPath(new URL('../../tools/cli/src/commands/helpers.ts', import.meta.url)),
+    'utf-8',
+  );
 
   it('conflict-free scan points at `truecourse guard generate`', () => {
     expect(specSrc).toContain('Corpus written to .truecourse/specs/corpus.json. Run `truecourse guard generate`.');
@@ -166,18 +172,26 @@ describe('spec scan outro points at guard generate, never at contracts generate'
 
   // §3.7 / plan 02 step 6: the scope orchestrator is interactive, but a CLI run
   // never blocks on a question. Both the live `onQuestion` line and the closing
-  // summary must surface it, or an unanswered question silently becomes a
-  // default nobody sees. (The dashboard deep link arrives with the Activity
-  // viewer; until then the lines name the question and where to answer it.)
-  it('a live scan question is printed, without blocking', () => {
-    expect(specSrc).toContain('onQuestion:');
+  // summary must point at the dashboard deep link, or an unanswered question
+  // silently becomes a default nobody sees.
+  it('a live scan question prints the dashboard deep link, without blocking', () => {
+    expect(helpersSrc).toContain('?tab=activity');
     expect(specSrc).toContain('Scan question:');
+    expect(specSrc).toContain('Answer it in the dashboard: ${activityLink()}');
   });
 
-  it('unanswered questions get a LOUD closing block', () => {
+  it('unanswered questions get a LOUD closing block naming the deep link', () => {
     expect(specSrc).toContain('pendingQuestions.length > 0');
     expect(specSrc).toContain('went unanswered — the scan proceeded on defaults');
-    expect(specSrc).toContain('then re-run ');
+    expect(specSrc).toContain('Answer them in the dashboard (${activityLink()})');
+  });
+
+  // The moment the run record exists, before any session — the §3.6 line that
+  // makes a CLI run watchable from the dashboard.
+  it('prints the "watch live" deep link as soon as the run record exists', () => {
+    expect(specSrc).toContain('onRunStarted:');
+    expect(specSrc).toContain('printWatchLive(dashboardUrl, project.slug, info.runId)');
+    expect(helpersSrc).toContain('Watch live: ${activityUrl(dashboardUrl, slug, runId)}');
   });
 
   it('the orchestrator\'s findings are surfaced in the summary', () => {

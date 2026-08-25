@@ -1,4 +1,7 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// PREVIEW (UI mock, fake data) with one exception: on a REAL (URL-connected)
+// repository the Activity tab is the real thing, reading and live-tailing the
+// repository's sessions store. Delete the mock when the one-product dashboard
+// lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
@@ -18,6 +21,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { ChevronRight, FolderGit2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
+import { SessionsActivityView as RealSessionsActivityView } from '@/components/sessions/SessionsActivityView';
 import { SessionPage, SessionsActivityView } from '@/preview/activity/SessionsActivityView';
 import { ProviderIcon, SideMenu } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
@@ -144,6 +148,13 @@ export default function RepoConsole() {
         <div className="min-h-0 min-w-0 flex-1">
           {active === 'settings' ? (
             <SettingsTab repo={repo} />
+          ) : active === 'activity' && repo.real ? (
+            // REAL, not mock: a URL-connected repository is a real registry
+            // entry, so its Activity reads the real sessions store over
+            // `/api/repos/<id>/sessions/*` and live-tails it over the socket.
+            // A `truecourse spec scan` in that clone shows up here as it runs.
+            // The fixture repositories keep the mock below.
+            <RealSessionsActivityView repoId={repo.id} />
           ) : !guard ? (
             <EmptyState
               icon={FolderGit2}

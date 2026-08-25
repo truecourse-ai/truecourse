@@ -185,6 +185,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
+      '@truecourse/agent-loop':
+        specifier: workspace:*
+        version: link:../../../packages/agent-loop
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
@@ -288,6 +291,9 @@ importers:
 
   apps/dashboard/server:
     dependencies:
+      '@truecourse/agent-loop':
+        specifier: workspace:*
+        version: link:../../../packages/agent-loop
       '@truecourse/contract-extractor':
         specifier: workspace:*
         version: link:../../../packages/contract-extractor

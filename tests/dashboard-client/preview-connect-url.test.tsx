@@ -9,6 +9,10 @@
  * `/api/repos`, and a repository that came back that way renders on Home with
  * none of the fixture coverage the mock repositories have.
  *
+ * The seam widened with the Activity surface: a repository that is real gets
+ * the REAL sessions view (`/api/repos/<id>/sessions/*`, live-tailed) on its
+ * Activity tab, while the fixtures keep the mock — the last describe here.
+ *
  * `window.fetch` is replaced wholesale rather than routed around the preview's
  * own shim: the shim is installed once when the preview chunk loads (it never
  * uninstalls), and replacing the global is what a caller's stub does anyway.
@@ -20,6 +24,19 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PreviewApp from '@/preview/PreviewApp';
 import { parseRemote, toPreviewRepo } from '@/preview/data/real-repos';
+
+// The real sessions view opens a socket for its live tail; jsdom has no server
+// to reach, and the tail is not what this file is about.
+vi.mock('@/lib/socket', () => {
+  const socket = { connected: false, on: vi.fn(), off: vi.fn(), emit: vi.fn(), connect: vi.fn() };
+  return {
+    connectSocket: () => socket,
+    getSocket: () => socket,
+    disconnectSocket: vi.fn(),
+    joinRepoRoom: vi.fn(),
+    leaveRepoRoom: vi.fn(),
+  };
+});
 
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
@@ -192,5 +209,56 @@ describe('connecting a repository by URL', () => {
     }) as unknown as typeof window.fetch;
     renderAt('/preview');
     expect(await screen.findByText('acme/orders-api')).toBeInTheDocument();
+  });
+});
+
+describe('Activity is real on a connected repository', () => {
+  const CONNECTED: RegistryEntry = {
+    id: 'linkwarden',
+    name: 'linkwarden/linkwarden',
+    path: '/clones/linkwarden__linkwarden',
+    remoteUrl: 'https://github.com/linkwarden/linkwarden',
+  };
+
+  it('reads the real sessions store and shows its empty state', async () => {
+    const fetchMock = serve([CONNECTED], () => json({ error: 'not called' }, 500));
+    // The registry read is served above; the sessions route is this test's point.
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const { pathname } = new URL(href, window.location.origin);
+      if (pathname === '/api/repos') return json([CONNECTED]);
+      if (pathname === '/api/repos/linkwarden/sessions/runs') return json({ runs: [] });
+      return json({ error: 'not found' }, 404);
+    });
+
+    renderAt('/preview/repos/linkwarden/activity');
+
+    // The real view's own empty copy, which names the CLI command that fills it.
+    expect(await screen.findByText(/No agentic runs yet\. Start one with/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(typeof input === 'string' ? input : (input as Request).url).includes(
+            '/api/repos/linkwarden/sessions/runs',
+          ),
+        ),
+      ).toBe(true),
+    );
+    // Not the mock: its runs are hand-written, and none of them is here.
+    expect(screen.queryByText('spec scan')).toBeNull();
+  });
+
+  it('leaves a fixture repository on the mock', async () => {
+    const fetchMock = serve([], () => json({ error: 'not called' }, 500));
+    renderAt('/preview/repos/orders-api/activity');
+
+    // The mock opens on its newest hand-written run.
+    expect((await screen.findAllByText('spec scan')).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/No agentic runs yet/)).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(typeof input === 'string' ? input : (input as Request).url).includes('/sessions/runs'),
+      ),
+    ).toBe(false);
   });
 });

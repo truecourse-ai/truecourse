@@ -16,6 +16,7 @@ import type {
   GuardStaleness,
 } from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
+import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
@@ -1437,3 +1438,40 @@ export function deleteSpecConflictResolution(
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Agent sessions (the Activity tab) — the sessions-store read surface.
+// ---------------------------------------------------------------------------
+
+/** A run record as the server serializes it: `endpoint` (token) + `pid` stripped. */
+export type PublicSessionRun = Omit<RunRecord, 'endpoint' | 'pid'>;
+
+/** Every agent-sessions run of the repo, newest first (all five commands). */
+export function listSessionRuns(repoId: string): Promise<{ runs: PublicSessionRun[] }> {
+  return fetchApi<{ runs: PublicSessionRun[] }>(`/api/repos/${repoId}/sessions/runs`);
+}
+
+/** One run's current record + session index. */
+export function getSessionRun(
+  repoId: string,
+  command: SessionCommand,
+  runId: string,
+): Promise<{ run: PublicSessionRun }> {
+  return fetchApi<{ run: PublicSessionRun }>(
+    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}`,
+  );
+}
+
+/** One session's transcript; `since` returns only events past that seq cursor. */
+export function getSessionTranscript(
+  repoId: string,
+  command: SessionCommand,
+  runId: string,
+  sessionId: string,
+  since?: number,
+): Promise<{ events: SessionEvent[] }> {
+  const query = since !== undefined ? `?since=${since}` : '';
+  return fetchApi<{ events: SessionEvent[] }>(
+    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}${query}`,
+  );
+}

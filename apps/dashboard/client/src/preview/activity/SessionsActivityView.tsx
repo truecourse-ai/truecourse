@@ -6,6 +6,10 @@
  * setup, guard generate), with Kind and Status filters; a row opens the session
  * as its own page (`/activity/:sessionId`, the transcript and chat). The run a
  * session belonged to is a fact on the row, never a level to click through.
+ *
+ * Reached only for a FIXTURE repository: on a real (URL-connected) one the
+ * console mounts `@/components/sessions/SessionsActivityView` instead, which
+ * reads and live-tails the repository's own sessions store.
  */
 
 import { useMemo, useState } from 'react';
