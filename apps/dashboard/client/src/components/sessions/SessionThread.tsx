@@ -6,24 +6,23 @@
  * transcript-model drops it. A did-bubble expands in place to its per-call
  * detail (step → calls → raw result), and auto-expands when a call failed.
  * While the session runs, the last message is the agent's live status bubble,
- * updating off the stream. No composer until the §3.7 session API can
- * actually deliver a message.
+ * updating off the stream.
  *
- * Read-only — the snapshot comes off the sessions REST route and the tail off
- * `useRunStream`'s pushed events, merged and deduped by `seq`.
+ * This is a BLOCK, not a pane: the run's conversation expands one of these in
+ * place under a session line, so it brings no header and no scroller of its
+ * own. Its events are handed in (see `useSessionEvents`) — the thread only
+ * renders. Read-only; the composer lives on the run, not the session.
  */
 
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Bot, Check, ChevronDown, ChevronRight } from 'lucide-react';
-import type { SessionCommand, SessionEvent, SessionIndexEntry } from '@truecourse/agent-loop';
+import type { SessionEvent, SessionIndexEntry } from '@truecourse/agent-loop';
 import { buildCorpusConflicts, resolutionForConflict } from '@truecourse/shared';
 import * as api from '@/lib/api';
 import type { SpecConflictResolution } from '@/lib/api';
 import {
   distinctDocRefs,
-  grantSize,
-  mergeEvents,
   shortDocRef,
   toChatRows,
   type ActionCall,
@@ -52,13 +51,21 @@ type ConflictRecord = ReturnType<typeof buildCorpusConflicts>[number];
 
 const rowKey = (row: ChatRow): string => `${row.seq}.${row.sub ?? 0}`;
 
-function Avatar({ live }: { live?: boolean }) {
+/**
+ * THE bot avatar. `size="stream"` is the 28px circle the run conversation puts
+ * beside a real message; the default 24px one heads a stack inside a thread.
+ * `ring` marks the message that needs an answer.
+ */
+export function Avatar({ live, size, ring }: { live?: boolean; size?: 'stream'; ring?: boolean }) {
+  const stream = size === 'stream';
   return (
     <span
       aria-hidden
-      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-card ${live ? 'text-sky-500' : 'text-sky-500/70'}`}
+      className={`mt-0.5 flex shrink-0 items-center justify-center rounded-full border bg-card ${
+        stream ? 'h-7 w-7' : 'h-6 w-6'
+      } ${ring ? 'border-sky-500' : 'border-border'} ${live ? 'text-sky-500' : 'text-sky-500/70'}`}
     >
-      <Bot className="h-3.5 w-3.5" />
+      <Bot className={stream ? 'h-[15px] w-[15px]' : 'h-3.5 w-3.5'} />
     </span>
   );
 }
@@ -402,38 +409,15 @@ function toChunks(rows: ChatRow[]): Chunk[] {
   return chunks;
 }
 
-export function SessionTranscript({ repoId, command, runId, session, liveEvents }: {
+export function SessionThread({ repoId, session, events, loading, error }: {
   repoId: string;
-  command: SessionCommand;
-  runId: string;
   session: SessionIndexEntry;
-  /** Socket-pushed events for THIS session (may overlap the snapshot). */
-  liveEvents: readonly SessionEvent[];
+  /** Snapshot + live tail, already merged (see `useSessionEvents`). */
+  events: readonly SessionEvent[];
+  loading: boolean;
+  error: string | null;
 }) {
-  const [snapshot, setSnapshot] = useState<SessionEvent[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setSnapshot(null);
-    setError(null);
-    api
-      .getSessionTranscript(repoId, command, runId, session.sessionId)
-      .then((res) => {
-        if (!cancelled) setSnapshot(res.events);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [repoId, command, runId, session.sessionId]);
-
-  const events = mergeEvents(snapshot ?? [], liveEvents);
   const rows = toChatRows(events);
-  const budget = grantSize(events);
   const running = session.status === 'running' || session.status === 'waiting';
 
   // Conflict verdicts + the derived conflicts list, read once a finding card
@@ -500,10 +484,6 @@ export function SessionTranscript({ repoId, command, runId, session, liveEvents 
     },
   };
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [session.sessionId, rows.length]);
-
   // The live status bubble: while the agent works, its in-flight action (or a
   // plain "Working") stands as the newest message.
   const lastRow = rows[rows.length - 1];
@@ -518,23 +498,13 @@ export function SessionTranscript({ repoId, command, runId, session, liveEvents 
 
   return (
     <FindingResolveContext.Provider value={resolveCtx}>
-    <div className="flex h-full min-w-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-        <span className="min-w-0 truncate text-xs font-semibold text-foreground">{session.workItem}</span>
-        <span className="shrink-0 text-[11px] text-muted-foreground">{session.kind}</span>
-        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-          {session.spent.turns}
-          {budget !== undefined ? `/${budget}` : ''} turns
-        </span>
-      </div>
-
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      <div className="min-w-0 space-y-3 border-l border-border py-2 pl-3">
         {error ? (
-          <p className="py-8 text-center text-xs text-red-500">{error}</p>
-        ) : snapshot === null && rows.length === 0 ? (
-          <p className="py-8 text-center text-xs text-muted-foreground">Loading conversation…</p>
+          <p className="text-xs text-red-500">{error}</p>
+        ) : loading && rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Loading conversation…</p>
         ) : rows.length === 0 && !running ? (
-          <p className="py-8 text-center text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             The conversation appears once the session starts.
           </p>
         ) : (
@@ -574,7 +544,6 @@ export function SessionTranscript({ repoId, command, runId, session, liveEvents 
           </>
         )}
       </div>
-    </div>
     </FindingResolveContext.Provider>
   );
 }
