@@ -7043,3 +7043,23 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `perMilestone`, so the prompt fingerprint (and every worker cache) is
     unmoved; models volunteer the field unprompted. Incident-verbatim tests
     in `tests/shared/guard-flows.test.ts`.
+
+129. **A doc site's markdown twin may live at `.mdx`, not just `.md`
+    (documenso full-pipeline bench, 2026-08-25).** STATUS: BUILT.
+    `spec source add https://docs.documenso.com/llms.txt` wrote ZERO of 143
+    pages — every one skipped `not-markdown — content-type: text/html`.
+    llms.txt lists rendered page URLs by convention, which is why
+    `fetchPage` probes a speculative markdown twin before falling back to
+    the page; but `markdownTwin()` only ever tried `<url>.md`, and fumadocs
+    / Mintlify sites (documenso among them) publish the raw source at
+    `.mdx` and answer `.md` with a soft 404. One extension, and a whole
+    documentation site becomes unscannable — silently, since every page
+    lands in `skipped` with a plausible reason. The twin probe now walks
+    `TWIN_EXTENSIONS = ['.md', '.mdx']` in order (`.md` first: it is the
+    common case and the cheap hit), and `isMarkdownUrl` accepts `.mdx` so a
+    link that already names the source is fetched as-is with no probe.
+    Cost: one extra HEAD-shaped GET per page on sites that publish neither
+    twin — the price of not skipping a site whole. Incident-verbatim tests
+    in `tests/spec-consolidator/sources-fetch.test.ts`. NOTE: this bug is
+    the real cause of the bench's standing "documenso expands to ~140
+    skipped pages on refresh" hazard.
