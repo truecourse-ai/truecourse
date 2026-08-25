@@ -69,6 +69,8 @@ export type RepoResponse = {
   id: string;
   name: string;
   path: string;
+  /** Set when the repo was connected by git URL; `path` is then a managed clone. */
+  remoteUrl?: string | null;
   lastAnalyzed?: string;
   /** Most recent lifecycle event across features (home-page card), or null. */
   latestEvent?: { kind: LatestEventKind; at: string } | null;
@@ -190,6 +192,18 @@ export function addRepo(path: string): Promise<RepoResponse> {
   return fetchApi<RepoResponse>('/api/repos', {
     method: 'POST',
     body: JSON.stringify({ path }),
+  });
+}
+
+/**
+ * Connect a public repository by its https git URL. The server clones it and
+ * registers the clone, so the call is slow (seconds to minutes) — callers must
+ * show a pending state. A 409 means the repo is already connected.
+ */
+export function connectRepo(url: string): Promise<RepoResponse> {
+  return fetchApi<RepoResponse>('/api/repos/connect', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
   });
 }
 

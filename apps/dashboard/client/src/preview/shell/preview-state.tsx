@@ -1,4 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// PREVIEW: the repository list is PART REAL (URL-connected repos come from the
+// server); everything else is fake data. Delete when the one-product dashboard
+// lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 
 /**
  * The preview's session state: the parts of the mock a user can actually move.
@@ -7,8 +9,13 @@
  * clears its dot, and the active job's counter climbs on a timer (a counter,
  * never a bar).
  *
- * Nothing here is persisted: no localStorage, no server call, no socket. A
- * reload is a fresh mock, which is the point.
+ * One exception, and only one: repositories connected by git URL are REAL. They
+ * are read from `GET /api/repos` on mount, listed ahead of the fixtures, and
+ * unlinking one really disconnects it. With no server behind the preview that
+ * read yields nothing and the mock is exactly what it was.
+ *
+ * Nothing else is persisted: no localStorage, no socket. A reload is a fresh
+ * mock, which is the point.
  */
 
 import {
@@ -32,6 +39,7 @@ import {
   REPOS,
   WORKSPACES,
 } from '@/preview/data';
+import { disconnectRealRepo, fetchRealRepos } from '@/preview/data/real-repos';
 import type {
   ConnectableRepo,
   JobChain,
@@ -46,9 +54,12 @@ interface PreviewStateValue {
   workspace: Workspace;
   workspaces: Workspace[];
   setWorkspaceId: (id: string) => void;
+  /** The real URL-connected repositories first, then the fixtures. */
   repos: Repo[];
   updateRepo: (id: string, patch: Partial<Repo>) => void;
   unlinkRepo: (id: string) => void;
+  /** Re-read the real registry. Called after a connect-by-URL succeeds. */
+  refreshRealRepos: () => Promise<void>;
   connections: ProviderConnection[];
   /** Repositories the picker can offer: the seeded ones plus those of added connections. */
   connectableRepos: ConnectableRepo[];
@@ -89,6 +100,7 @@ const slugOf = (fullName: string): string => fullName.split('/').slice(-1)[0] ??
 export function PreviewStateProvider({ children }: { children: ReactNode }) {
   const [workspaceId, setWorkspaceId] = useState(ACTIVE_WORKSPACE_ID);
   const [repos, setRepos] = useState<Repo[]>(REPOS);
+  const [realRepos, setRealRepos] = useState<Repo[]>([]);
   const [connections, setConnections] = useState<ProviderConnection[]>(PROVIDER_CONNECTIONS);
   const [notifications, setNotifications] = useState<PreviewNotification[]>(NOTIFICATIONS);
   const [jobs, setJobs] = useState<JobChain[]>(JOBS_IN_FLIGHT);
@@ -116,13 +128,40 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(timer);
   }, []);
 
+  const refreshRealRepos = useCallback(async () => {
+    const found = await fetchRealRepos();
+    setRealRepos(found);
+  }, []);
+
+  // The real registry, read once on mount. `fetchRealRepos` never rejects, so a
+  // preview with no server behind it simply has no real repositories.
+  useEffect(() => {
+    let live = true;
+    void fetchRealRepos().then((found) => {
+      if (live) setRealRepos(found);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   const updateRepo = useCallback((id: string, patch: Partial<Repo>) => {
+    setRealRepos((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
     setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }, []);
 
-  const unlinkRepo = useCallback((id: string) => {
-    setRepos((prev) => prev.filter((r) => r.id !== id));
-  }, []);
+  /** A fixture row just disappears; a real one is really disconnected. */
+  const unlinkRepo = useCallback(
+    (id: string) => {
+      if (realRepos.some((r) => r.id === id)) {
+        setRealRepos((prev) => prev.filter((r) => r.id !== id));
+        void disconnectRealRepo(id).then(refreshRealRepos);
+        return;
+      }
+      setRepos((prev) => prev.filter((r) => r.id !== id));
+    },
+    [realRepos, refreshRealRepos],
+  );
 
   const [connectableRepos, setConnectableRepos] = useState<ConnectableRepo[]>(CONNECTABLE_REPOS);
 
@@ -200,19 +239,21 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<PreviewStateValue>(() => {
     const workspace = WORKSPACES.find((w) => w.id === workspaceId) ?? WORKSPACES[0]!;
+    const allRepos = [...realRepos, ...repos];
     return {
       workspace,
       workspaces: WORKSPACES,
       setWorkspaceId,
-      repos,
+      repos: allRepos,
       updateRepo,
       unlinkRepo,
+      refreshRealRepos,
       connections,
       connectableRepos,
       addConnection,
       revokeConnection,
       connectRepositories,
-      privateReposUsed: repos.filter((r) => r.visibility === 'private').length,
+      privateReposUsed: allRepos.filter((r) => r.visibility === 'private').length,
       privateRepoLimit: PRIVATE_REPO_ALLOWANCE.limit,
       notifications,
       unreadCount: notifications.filter((n) => !n.read).length,
@@ -225,15 +266,15 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   }, [
     workspaceId,
     repos,
+    realRepos,
     connections,
     notifications,
     jobs,
     generatedVersions,
     regenerateVersion,
-    generatedVersions,
-    regenerateVersion,
     updateRepo,
     unlinkRepo,
+    refreshRealRepos,
     connectableRepos,
     addConnection,
     revokeConnection,

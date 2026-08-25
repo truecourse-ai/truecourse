@@ -1,13 +1,20 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// PREVIEW: the connect-by-URL path here is REAL (it clones on the server); the
+// provider flow beside it is a mock. Delete with the preview when the
+// one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 
 /**
  * Connect a repository: pick a provider (a provider with nothing connected
  * authorizes first), pick the account and the repositories it can see (checked
  * against the plan's private-repository allowance), confirm. The repository then
  * appears on Home with its onboarding chain in flight. Opened from Home.
+ *
+ * Below the providers, the one path that really works today: a public repository
+ * by git URL. It posts to `/api/repos/connect`, which clones the repository on
+ * the server and registers it, so the row it adds to Home is a real one. The
+ * clone happens inside the request, hence the pending button.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Plus } from 'lucide-react';
 import {
   Dialog,
@@ -19,6 +26,7 @@ import {
 } from '@/components/ui/dialog';
 import { Capsule, ProviderIcon, PROVIDER_NAME } from '@/preview/ui/bits';
 import type { ConnectableRepo, ProviderId } from '@/preview/data/types';
+import { connectRepo } from '@/preview/data/real-repos';
 import { usePreviewState } from '@/preview/shell/preview-state';
 
 const PROVIDER_OPTIONS: ProviderId[] = ['github', 'gitlab', 'azure'];
@@ -32,11 +40,15 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     privateReposUsed,
     privateRepoLimit,
     repos,
+    refreshRealRepos,
   } = usePreviewState();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [provider, setProvider] = useState<ProviderId>('github');
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
+  const [url, setUrl] = useState('');
+  const [cloning, setCloning] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -44,6 +56,9 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       setPicked([]);
       setProvider('github');
       setConnectionId(null);
+      setUrl('');
+      setCloning(false);
+      setUrlError(null);
     }
   }, [open]);
 
@@ -67,6 +82,24 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setConnectionId(existing[0]?.id ?? addConnection(id).id);
     setPicked([]);
     setStep(2);
+  };
+
+  /** The real one: clone on the server, then let Home re-read the registry. */
+  const submitUrl = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = url.trim();
+    if (!trimmed || cloning) return;
+    setCloning(true);
+    setUrlError(null);
+    try {
+      await connectRepo(trimmed);
+      await refreshRealRepos();
+      onOpenChange(false);
+    } catch (error) {
+      setUrlError(error instanceof Error ? error.message : 'Could not connect that repository');
+    } finally {
+      setCloning(false);
+    }
   };
 
   return (
@@ -110,6 +143,33 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               );
             })}
           </ul>
+        )}
+
+        {step === 1 && (
+          <form onSubmit={submitUrl} className="border-t border-border pt-3">
+            <label htmlFor="connect-url" className="block text-[11px] text-muted-foreground">
+              Or connect a public repository by URL
+            </label>
+            <div className="mt-1.5 flex items-center gap-2">
+              <input
+                id="connect-url"
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://github.com/owner/repo"
+                spellCheck={false}
+                className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <button
+                type="submit"
+                disabled={url.trim().length === 0 || cloning}
+                className="shrink-0 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {cloning ? 'Cloning...' : 'Connect'}
+              </button>
+            </div>
+            {urlError && <p className="mt-1.5 text-[11px] text-destructive">{urlError}</p>}
+          </form>
         )}
 
         {step === 2 && (
