@@ -3,9 +3,25 @@
  * route registrations the analyzer read out of the framework's own calls
  * (`FileAnalysis.routeRegistrations` + `routerMounts`), the procedures of a tRPC
  * router tree once an adapter states where it is mounted (`rpc-interfaces.ts`),
- * and the operations of any committed OpenAPI doc. The union is the surface;
- * identity is the operation, so the sources dedupe onto one interface
- * (`api-interfaces.ts`).
+ * the operations of any committed OpenAPI doc, and the `openapi: {method, path}`
+ * METAS that declare a procedure's REST address beside the procedure instead of
+ * in any route table. The union is the surface; identity is the operation, so
+ * the sources dedupe onto one interface (`api-interfaces.ts`).
+ *
+ * THE META BASE RULE: a meta's path is relative — `/envelope/distribute` is
+ * served at `/api/v2/envelope/distribute` — and nothing in the literal says
+ * where. The base is taken from the app's own declaration: the prefix at which
+ * it SERVES ITS OPENAPI DOCUMENT (`GET /api/v2/openapi.json`), and only when the
+ * file registering that document ALSO answers everything under the same prefix
+ * with a catch-all (`app.use('/api/v2/*', handler)`). Both halves are required,
+ * and the second is what keeps a neighbouring API honest: documenso publishes a
+ * v1 document from `packages/api/hono.ts` — a different app, whose base is NOT
+ * where the v2 metas live — and that file declares no catch-all, so its prefix
+ * never claims them. NO QUALIFYING BASE → NO META OPERATIONS: a guessed prefix
+ * names an address the server does not answer, which is the same refusal the RPC
+ * derivation makes when no adapter states a mount. An app that documents the
+ * same surface at several bases (documenso's `/api/v2` and `/api/v2-beta`)
+ * derives it at each, because each is a live address.
  *
  * The OpenAPI double-agent rule: an operation declared in an OpenAPI doc with NO
  * matching route registration is kept and marked `specOnly` — the
@@ -61,6 +77,19 @@ export function deriveApiInterfacesFromTree(
     merged.set(key, op)
   }
 
+  // The meta half joins on the operation like everything else, so a path a route
+  // table ALSO registers (documenso's download routes, which the adapter shadows)
+  // stays one interface.
+  for (const op of collectMetaOperations(fileAnalyses, codeOps)) {
+    const key = `${op.method} ${op.path}`
+    const existing = merged.get(key)
+    if (existing) {
+      if (!existing.label && op.label) existing.label = op.label
+      continue
+    }
+    merged.set(key, op)
+  }
+
   for (const spec of specOperations) {
     const method = spec.method.trim().toUpperCase()
     const path = canonicalRoutePath(spec.routePath)
@@ -86,6 +115,78 @@ export function deriveApiInterfacesFromTree(
     (a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method),
   )
   return buildApiInterfaces(seeds)
+}
+
+/**
+ * Document-file names an app serves its OpenAPI spec under. The base is
+ * whatever precedes one of these.
+ */
+const OPENAPI_DOCUMENT_FILES = new Set(['openapi.json', 'swagger.json', 'openapi.yaml', 'openapi.yml'])
+
+/**
+ * The bases at which this tree serves an OpenAPI document AND answers everything
+ * underneath — see THE META BASE RULE in the module note. Deduped, deterministic.
+ */
+function collectMetaBases(
+  fileAnalyses: readonly FileAnalysis[],
+  codeOps: readonly ApiInterfaceSeed[],
+): string[] {
+  const catchAllsByFile = new Map<string, Set<string>>()
+  const prefixes = buildMountPrefixes(fileAnalyses)
+  for (const fa of fileAnalyses) {
+    const declared = fa.catchAllPrefixes ?? []
+    if (declared.length === 0) continue
+    const filePrefix = prefixes.get(fa.filePath) ?? ''
+    catchAllsByFile.set(
+      fa.filePath,
+      new Set(declared.map((p) => (filePrefix ? composePath(filePrefix, p || '/') : p))),
+    )
+  }
+
+  const bases = new Set<string>()
+  for (const fa of fileAnalyses) {
+    const filePrefix = prefixes.get(fa.filePath) ?? ''
+    const catchAlls = catchAllsByFile.get(fa.filePath)
+    if (!catchAlls) continue
+    for (const route of fa.routeRegistrations ?? []) {
+      if (route.httpMethod !== 'GET') continue
+      const full = canonicalRoutePath(composePath(filePrefix, route.path))
+      const segments = full.split('/')
+      const last = segments[segments.length - 1]
+      if (!last || !OPENAPI_DOCUMENT_FILES.has(last)) continue
+      const base = segments.slice(0, -1).join('/')
+      if (catchAlls.has(base)) bases.add(base)
+    }
+  }
+  // `codeOps` is the composed view the rest of the derivation works from; a base
+  // that no operation sits under is still a base (the document may be the only
+  // registration there), so it is not filtered against it — the parameter keeps
+  // the call sites honest about ordering.
+  void codeOps
+  return [...bases].sort()
+}
+
+/** Every `openapi` meta in the tree, at every qualifying base. */
+function collectMetaOperations(
+  fileAnalyses: readonly FileAnalysis[],
+  codeOps: readonly ApiInterfaceSeed[],
+): ApiInterfaceSeed[] {
+  const metas = fileAnalyses.flatMap((fa) => fa.openApiRouteMetas ?? [])
+  if (metas.length === 0) return []
+  const bases = collectMetaBases(fileAnalyses, codeOps)
+  if (bases.length === 0) return []
+
+  const seeds: ApiInterfaceSeed[] = []
+  for (const base of bases) {
+    for (const meta of metas) {
+      seeds.push({
+        method: meta.httpMethod,
+        path: canonicalRoutePath(composePath(base, meta.path)),
+        ...(meta.label ? { label: meta.label } : {}),
+      })
+    }
+  }
+  return seeds
 }
 
 /**
@@ -184,8 +285,13 @@ function resolveMountTarget(
       (s) => s.alias === mount.routerName || (!s.alias && s.name === mount.routerName),
     )
     if (!spec) continue
-    const match = all.find((t) => t !== fa && fileMatchesImportSource(fa.filePath, t.filePath, imp.source))
-    if (match) return match
+    // Exactly one file may answer a specifier. Two that both could is not a
+    // resolution — a guessed prefix names an address the server does not serve —
+    // so an ambiguous specifier resolves to nothing, the same refusal the RPC
+    // derivation makes for a router name two files define.
+    const matches = all.filter((t) => t !== fa && fileMatchesImportSource(fa.filePath, t.filePath, imp.source))
+    if (matches.length === 1) return matches[0]
+    if (matches.length > 1) return undefined
   }
   const local =
     fa.functions.some((f) => f.name === mount.routerName) ||
@@ -222,7 +328,17 @@ export function fileMatchesImportSource(importerPath: string, filePath: string, 
   const suffix = bare.replace(/^\.+/, '').replace(/\./g, '/').replace(/^\/+/, '')
   if (!suffix) return false
   const indexless = fileBase.replace(/\/index$/, '')
-  return indexless === suffix || indexless.endsWith(`/${suffix}`)
+  if (indexless === suffix || indexless.endsWith(`/${suffix}`)) return true
+
+  // A monorepo's own packages are imported by SCOPE — `@documenso/auth/server`
+  // is `packages/auth/server` — and the scope segment maps to no directory, so
+  // the suffix never matches with it attached. Retry without it. The caller
+  // requires a unique match, which is what keeps this from claiming a
+  // same-named file in another package.
+  if (!suffix.startsWith('@')) return false
+  const unscoped = suffix.split('/').slice(1).join('/')
+  if (!unscoped) return false
+  return indexless === unscoped || indexless.endsWith(`/${unscoped}`)
 }
 
 export function composePath(prefix: string, routePath: string): string {

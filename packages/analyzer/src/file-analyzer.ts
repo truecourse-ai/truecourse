@@ -5,6 +5,7 @@ import { withParsedTree, type Tree } from './parser.js'
 import { extractCalls, buildFunctionContext } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
+import { extractOpenApiRouteMetas } from './extractors/openapi-route-metas.js'
 import { extractWebRoutes } from './extractors/web-routes.js'
 import { extractWebRedirects } from './extractors/web-redirects.js'
 import { extractCliCommands } from './extractors/cli-commands.js'
@@ -120,7 +121,15 @@ function buildFileAnalysis(
   const functionContext = buildFunctionContext(functions, classes)
   const calls = extractCalls(tree, filePath, language, functionContext)
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
-  const { routes: rawRoutes, mounts: routerMounts, rpcRouters } = extractRouteRegistrations(tree, filePath, language)
+  const {
+    routes: rawRoutes,
+    mounts: routerMounts,
+    rpcRouters,
+    catchAllPrefixes,
+  } = extractRouteRegistrations(tree, filePath, language)
+  // The `openapi: {method, path}` metas — REST addresses declared beside a
+  // procedure rather than in any route table (trpc-to-openapi).
+  const openApiRouteMetas = extractOpenApiRouteMetas(tree, filePath, language)
   const webRoutes = extractWebRoutes(tree, filePath, language)
   const webRedirects = extractWebRedirects(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
@@ -151,6 +160,8 @@ function buildFileAnalysis(
     httpCalls,
     ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
     ...(routerMounts.length > 0 ? { routerMounts } : {}),
+    ...(openApiRouteMetas.length > 0 ? { openApiRouteMetas } : {}),
+    ...(catchAllPrefixes.length > 0 ? { catchAllPrefixes } : {}),
     ...(rpcRouters.length > 0 ? { rpcRouters } : {}),
     ...(webRoutes.length > 0 ? { webRoutes } : {}),
     ...(webRedirects.redirects.length > 0 ? { webRedirects: webRedirects.redirects } : {}),

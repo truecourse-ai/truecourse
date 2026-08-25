@@ -409,6 +409,40 @@ describe('extractRouteRegistrations — the receiver gate', () => {
     expect(routes).toEqual([])
   })
 
+  // documenso (hono), 2026-08-25: every sub-router is mounted with `.route()`, not
+  // `.use()`. Reading only `.use` lost seven mounts — /api/auth, /api/files,
+  // /api/ai, /api/csc, /api/v1, /api/v2, /api/v2-beta — so the sub-routers' own
+  // registrations came out bare (`/envelope/{id}/certificate/download` for what is
+  // served at `/api/v2/envelope/...`): paths that are WRONG, not merely missing.
+  it('extracts hono `.route()` sub-router mounts', () => {
+    const tree = parse(`
+      import { Hono } from 'hono';
+      const app = new Hono();
+      app.route('/api/auth', auth);
+      app.route(\`/api/v2\`, downloadRoute);
+    `)
+
+    const { mounts } = extractRouteRegistrations(tree, '/server/router.ts', 'typescript')
+
+    expect(mounts).toMatchObject([
+      { path: '/api/auth', routerName: 'auth' },
+      { path: '/api/v2', routerName: 'downloadRoute' },
+    ])
+  })
+
+  it('does not read express `.route(path)` chaining as a mount', () => {
+    // `app.route('/book').get(…).post(…)` names a route builder, not a sub-router:
+    // one argument, nothing mounted.
+    const tree = parse(`
+      const app = express();
+      app.route('/book').get(getBook).post(createBook);
+    `)
+
+    const { mounts } = extractRouteRegistrations(tree, '/src/app.ts', 'typescript')
+
+    expect(mounts).toEqual([])
+  })
+
   it('gates mounts on the receiver too, and `.use` cannot vouch for itself', () => {
     // `i18n.use(...)` is the very call being gated, so its own presence must not
     // be what admits it — otherwise every `.use` in the repo is a router mount.

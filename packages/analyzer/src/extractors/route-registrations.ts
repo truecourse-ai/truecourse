@@ -103,6 +103,15 @@ export interface RouteExtraction {
   mounts: RouterMount[]
   /** tRPC router bindings; always empty for a language with no such idiom. */
   rpcRouters: RpcRouter[]
+  /**
+   * Prefixes served by a CATCH-ALL here (`app.use('/api/v2/*', handler)`),
+   * wildcard stripped. Recorded whatever the handler's shape — an inline arrow
+   * counts, where `mounts` needs an identifier — because this fact is not a
+   * mount: nothing composes onto it. It states only that this file answers
+   * everything under the prefix, which is how a handler-served surface (a
+   * trpc-to-openapi adapter, a proxy) names its base.
+   */
+  catchAllPrefixes: string[]
 }
 
 /**
@@ -116,15 +125,15 @@ export function extractRouteRegistrations(
 ): RouteExtraction {
   switch (language) {
     case 'python':
-      return { ...extractPythonRoutes(tree, filePath), rpcRouters: [] }
+      return { ...extractPythonRoutes(tree, filePath), rpcRouters: [], catchAllPrefixes: [] }
     case 'csharp':
-      return { ...extractCSharpRoutes(tree, filePath), rpcRouters: [] }
+      return { ...extractCSharpRoutes(tree, filePath), rpcRouters: [], catchAllPrefixes: [] }
     case 'typescript':
     case 'tsx':
     case 'javascript':
       return extractJsRoutes(tree, filePath)
     default:
-      return { routes: [], mounts: [], rpcRouters: [] }
+      return { routes: [], mounts: [], rpcRouters: [], catchAllPrefixes: [] }
   }
 }
 
@@ -147,6 +156,8 @@ function extractJsRoutes(tree: Tree, filePath: string): RouteExtraction {
   const strapi = extractStrapiRouteTables(tree, filePath)
   const routes: RouteRegistration[] = [...extractNestControllerRoutes(tree, filePath), ...strapi.routes]
   const mounts: RouterMount[] = [...strapi.mounts]
+
+  const catchAll = new Set<string>()
 
   const evidence = collectReceiverEvidence(tree)
   const cursor = tree.walk()
@@ -174,6 +185,17 @@ function extractJsRoutes(tree: Tree, filePath: string): RouteExtraction {
           // app.use('/prefix', ...middleware, routerRef)
           if (isRouterLikeReceiver(receiver, evidence, false)) {
             mounts.push(...extractMounts(argsNode, filePath, node))
+            const wildcard = extractCatchAllPrefix(argsNode)
+            if (wildcard !== null) catchAll.add(wildcard)
+          }
+        } else if (methodName === 'route') {
+          // hono's sub-router mount: app.route('/prefix', subApp). `.use` MAY vouch
+          // for the receiver here — unlike a `.use` mount, this call is not itself
+          // the evidence. Express's `app.route('/book').get(…)` names a route
+          // builder rather than a router, and is excluded by arity: `extractMounts`
+          // needs a path AND an identifier.
+          if (isRouterLikeReceiver(receiver, evidence, true)) {
+            mounts.push(...extractMounts(argsNode, filePath, node))
           }
         } else if (HTTP_METHODS.has(methodName)) {
           // router.get('/path', ...middleware, handler)
@@ -192,7 +214,12 @@ function extractJsRoutes(tree: Tree, filePath: string): RouteExtraction {
   }
 
   traverse()
-  return { routes, mounts, rpcRouters: extractTrpcRouters(tree, filePath) }
+  return {
+    routes,
+    mounts,
+    rpcRouters: extractTrpcRouters(tree, filePath),
+    catchAllPrefixes: [...catchAll],
+  }
 }
 
 /**
@@ -370,6 +397,20 @@ function extractRoute(
  * holding the whole tree (`buildMountPrefixes`) resolves each one and drops the
  * ones that are not routers.
  */
+/**
+ * The prefix of a catch-all `use` — `'/api/v2/*'` → `/api/v2`, `'*'` → `''` (the
+ * whole app). `null` when the first argument is not a wildcard path, which is
+ * every ordinary mount and every argument-less `use(middleware)`.
+ */
+function extractCatchAllPrefix(argsNode: SyntaxNode): string | null {
+  const firstArg = argsNode.namedChild(0)
+  if (!firstArg) return null
+  const path = extractStringLiteral(firstArg)
+  if (!path || !path.endsWith('*')) return null
+  const prefix = path.replace(/\/?\*$/, '')
+  return prefix.startsWith('/') || prefix === '' ? prefix : null
+}
+
 function extractMounts(
   argsNode: SyntaxNode,
   filePath: string,
@@ -458,7 +499,7 @@ function extractIdentifierName(node: SyntaxNode): string | null {
  * other than plain text inside the backticks — an interpolation, an escape —
  * disqualifies it.
  */
-function extractStringLiteral(node: SyntaxNode): string | null {
+export function extractStringLiteral(node: SyntaxNode): string | null {
   if (node.type === 'string' || node.type === 'string_fragment') {
     return node.text.replace(/^["'`]|["'`]$/g, '')
   }

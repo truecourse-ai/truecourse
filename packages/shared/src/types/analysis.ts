@@ -383,6 +383,23 @@ export const RouteRegistrationSchema = z.object({
 
 export type RouteRegistration = z.infer<typeof RouteRegistrationSchema>
 
+/**
+ * One `openapi: { method, path }` meta literal — the REST address an RPC
+ * procedure ALSO answers at, declared beside the procedure rather than in any
+ * route table (the `trpc-to-openapi` / `trpc-openapi` idiom, and documenso's
+ * whole public API). The path is relative to wherever the OpenAPI handler is
+ * mounted; the mapper composes it with the base the app serves its document at.
+ */
+export const OpenApiRouteMetaSchema = z.object({
+  httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']),
+  path: z.string(),
+  /** `summary`/`operationId` when the literal carries one — cosmetic only. */
+  label: z.string().optional(),
+  location: SourceLocationSchema,
+})
+
+export type OpenApiRouteMeta = z.infer<typeof OpenApiRouteMetaSchema>
+
 export const RouterMountSchema = z.object({
   path: z.string(),
   routerName: z.string(),
@@ -557,6 +574,17 @@ export const FileAnalysisSchema = z.object({
   httpCalls: z.array(HttpCallSchema),
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
+  /** `openapi: {method, path}` metas declared here — REST addresses for RPC
+   *  procedures, relative to the OpenAPI mount; absent when none. */
+  openApiRouteMetas: z.array(OpenApiRouteMetaSchema).optional(),
+  /**
+   * Prefixes this file serves with a CATCH-ALL (`app.use('/api/v2/*', handler)`),
+   * wildcard stripped — recorded whatever shape the handler takes, so an inline
+   * one counts. Not a mount: nothing is composed onto it. It says only "this file
+   * answers everything under here", which is what identifies the base of a
+   * handler-served surface. Absent when none.
+   */
+  catchAllPrefixes: z.array(z.string()).optional(),
   /** tRPC routers this file BINDS (`const appRouter = router({…})`); absent when none. */
   rpcRouters: z.array(RpcRouterSchema).optional(),
   /** Routes this file DECLARES as JSX (React Router); absent when none. */

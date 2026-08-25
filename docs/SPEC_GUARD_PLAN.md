@@ -7063,3 +7063,48 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     in `tests/spec-consolidator/sources-fetch.test.ts`. NOTE: this bug is
     the real cause of the bench's standing "documenso expands to ~140
     skipped pages on refresh" hazard.
+
+130. **The api derivation reads sub-router mounts, `openapi` metas, and scoped
+    workspace specifiers — documenso's public API was 0% derived (same bench,
+    2026-08-25).** STATUS: BUILT. The fresh-store run was the first honest test
+    of the api mapper on documenso: the reference corpus's 60 api interfaces
+    live in `interfaces.authored.json`, HAND-AUTHORED, so nothing had ever
+    proved the tree could yield them. It could not. The derived catalog held
+    114 interfaces: 64 internal `/api/trpc/*` procedures, 2 `openapi.json`
+    metadata routes, and 48 paths that were WRONG rather than missing —
+    `/envelope/{envelopeId}/certificate/download`, `/session`, `/signup` — bare
+    where the app serves them under a mount. Not one documented v2 endpoint.
+    Three causes, three fixes:
+    - **`.route()` mounts.** The extractor read a mount only from
+      `.use(prefix, router)`; hono's idiom is `app.route(prefix, sub)`, which
+      documenso uses for all seven of `/api/auth`, `/api/files`, `/api/ai`,
+      `/api/csc`, `/api/v1`, `/api/v2`, `/api/v2-beta`. Now read as mounts,
+      gated on the same receiver evidence, with `.use` allowed to vouch (a
+      `.route` call is not itself the evidence). Express's one-argument
+      `app.route('/book').get(…)` is excluded by arity.
+    - **`openapi: {method, path}` metas.** `trpc-to-openapi` gives a tRPC
+      procedure a REST address in a meta literal beside the procedure — there is
+      no route registration anywhere. documenso's whole public API is 89 of
+      them. New per-file extractor (`analyzer/extractors/openapi-route-metas.ts`,
+      `FileAnalysis.openApiRouteMetas`) plus a join in `api-tree.ts`. THE META
+      BASE RULE: a meta's path is relative, and the base is taken only from the
+      app's own declaration — the prefix at which it SERVES ITS OPENAPI DOCUMENT,
+      and only when the file registering that document also answers everything
+      under the same prefix with a catch-all (`FileAnalysis.catchAllPrefixes`,
+      recorded whatever the handler's shape so an inline arrow counts). Both
+      halves are required: documenso publishes a v1 document from
+      `packages/api/hono.ts`, a different app whose file declares no catch-all,
+      so its prefix never claims the v2 metas. No qualifying base derives
+      nothing — a guessed prefix names an address the server does not answer.
+      An app documenting the same surface at several bases (`/api/v2` and
+      `/api/v2-beta`) derives it at each; both are live.
+    - **Scoped workspace specifiers.** `@documenso/auth/server` names
+      `packages/auth/server`, and the scope segment maps to no directory, so
+      `fileMatchesImportSource` never resolved it and two mounts stayed
+      unjoined. Now retried without the scope — and `resolveMountTarget`
+      requires a UNIQUE match, so an ambiguous specifier resolves to nothing
+      rather than composing a guessed prefix.
+    Result on documenso: **114 -> 291 interfaces, 2 -> 90 on `/api/v2/*`, and
+    ZERO bare paths.** Tests: `tests/analyzer/openapi-route-metas.test.ts`
+    (new), `tests/analyzer/route-registrations.test.ts`,
+    `tests/interface-mapper/api-tree.test.ts`.

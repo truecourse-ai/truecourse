@@ -273,3 +273,124 @@ describe('api interface fingerprints — operation identity only', () => {
     expect(moved.map((j) => j.fingerprint)).not.toEqual(before.map((j) => j.fingerprint))
   })
 })
+
+/**
+ * The trpc-to-openapi surface: procedures whose REST address exists only as an
+ * `openapi: {method, path}` meta, mounted where the app SERVES ITS DOCUMENT.
+ * documenso, 2026-08-25: 89 such metas and zero route registrations for them, so
+ * the derivation saw none of its public API.
+ */
+const DOCUMENSO_ROUTER_SOURCE = `
+  import { Hono } from 'hono'
+  import { openApiTrpcServerHandler } from './trpc/hono-trpc-open-api'
+  const app = new Hono()
+  app.get(\`/api/v2/openapi.json\`, (c) => c.json(openApiDocument))
+  app.use(\`/api/v2/*\`, async (c) => openApiTrpcServerHandler(c, { isBeta: false }))
+  app.listen(3000)
+`
+
+const DOCUMENSO_META_SOURCE = `
+  export const distributeEnvelopeMeta = {
+    openapi: { method: 'POST', path: '/envelope/distribute', summary: 'Distribute envelope' },
+  }
+  export const getEnvelopeMeta = {
+    openapi: { method: 'GET', path: '/envelope/{envelopeId}' },
+  }
+`
+
+describe('deriveApiInterfacesFromTree — openapi metas', () => {
+  const tree = [
+    analyze('apps/remix/server/router.ts', DOCUMENSO_ROUTER_SOURCE),
+    analyze('packages/trpc/server/envelope-router/distribute-envelope.types.ts', DOCUMENSO_META_SOURCE),
+  ]
+  const interfaces = deriveApiInterfacesFromTree(tree)
+  const paths = interfaces.map((j) => `${j.entry?.method} ${j.entry?.path}`)
+
+  it('mounts each meta under the base the app serves its openapi document at', () => {
+    expect(paths).toContain('POST /api/v2/envelope/distribute')
+    expect(paths).toContain('GET /api/v2/envelope/{envelopeId}')
+  })
+
+  it('keeps the document route itself as its own operation', () => {
+    expect(paths).toContain('GET /api/v2/openapi.json')
+  })
+
+  it('carries the meta summary as the step label', () => {
+    // Titles stay `<METHOD> <path>`; a label is cosmetic and rides the step, as
+    // it does for a handler name or an operationId.
+    const distribute = interfaces.find((j) => j.entry?.path === '/api/v2/envelope/distribute')
+    expect(distribute?.steps?.[0]).toMatchObject({ label: 'Distribute envelope' })
+  })
+
+  it('derives NOTHING from metas when no document route names a base', () => {
+    // Without a served document the metas' paths are relative to nowhere, and a
+    // guessed prefix names an address the server does not answer.
+    const orphaned = deriveApiInterfacesFromTree([
+      analyze('packages/trpc/server/envelope-router/distribute-envelope.types.ts', DOCUMENSO_META_SOURCE),
+    ])
+    expect(orphaned).toEqual([])
+  })
+
+  it('serves the metas at EVERY base the app documents', () => {
+    // documenso publishes the same surface at /api/v2 and /api/v2-beta; both are
+    // live addresses, and the beta prefix is a documented one.
+    const dual = deriveApiInterfacesFromTree([
+      analyze(
+        'apps/remix/server/router.ts',
+        DOCUMENSO_ROUTER_SOURCE.replace(
+          'app.listen(3000)',
+          "app.get('/api/v2-beta/openapi.json', (c) => c.json(openApiDocument))\n" +
+            "  app.use('/api/v2-beta/*', async (c) => openApiTrpcServerHandler(c, { isBeta: true }))\n" +
+            '  app.listen(3000)',
+        ),
+      ),
+      analyze('packages/trpc/server/envelope-router/distribute-envelope.types.ts', DOCUMENSO_META_SOURCE),
+    ]).map((j) => `${j.entry?.method} ${j.entry?.path}`)
+
+    expect(dual).toContain('POST /api/v2/envelope/distribute')
+    expect(dual).toContain('POST /api/v2-beta/envelope/distribute')
+  })
+})
+
+/**
+ * Monorepo scoped specifiers: `@documenso/auth/server` names `packages/auth/server`.
+ * Without this the mount is read but its target never resolves, and the sub-router's
+ * routes stay at the bare paths it declares them with — an address that 404s.
+ */
+describe('deriveApiInterfacesFromTree — scoped workspace mounts', () => {
+  const ROOT = `
+    import { Hono } from 'hono'
+    import { auth } from '@documenso/auth/server'
+    const app = new Hono()
+    app.route('/api/auth', auth)
+    app.listen(3000)
+  `
+  const AUTH = `
+    import { Hono } from 'hono'
+    export const auth = new Hono()
+    auth.get('/session', getSession)
+    auth.post('/signout', signOut)
+  `
+
+  it('resolves a scoped package specifier to its workspace file', () => {
+    const paths = deriveApiInterfacesFromTree([
+      analyze('apps/remix/server/router.ts', ROOT),
+      analyze('packages/auth/server.ts', AUTH),
+    ]).map((j) => `${j.entry?.method} ${j.entry?.path}`)
+
+    expect(paths).toContain('GET /api/auth/session')
+    expect(paths).toContain('POST /api/auth/signout')
+  })
+
+  it('refuses an AMBIGUOUS scoped match rather than composing a guessed prefix', () => {
+    // Two files could serve `@documenso/auth/server`; neither may claim the mount.
+    const paths = deriveApiInterfacesFromTree([
+      analyze('apps/remix/server/router.ts', ROOT),
+      analyze('packages/auth/server.ts', AUTH),
+      analyze('vendor/auth/server.ts', AUTH),
+    ]).map((j) => `${j.entry?.method} ${j.entry?.path}`)
+
+    expect(paths).toContain('GET /session')
+    expect(paths).not.toContain('GET /api/auth/session')
+  })
+})
