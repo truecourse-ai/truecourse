@@ -939,14 +939,14 @@ describe('composeGuardStatus', () => {
   it('classifies a section by the driver its flows await when no scenario exists', () => {
     const awaiting: GuardManifestFlow = {
       ...sectionFlow('w', []),
-      gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
+      gaps: [{ surface: 'tui', kind: 'awaiting-driver', driver: 'tui', reason: 'no tui driver yet' }],
     }
     const untestable: GuardManifestFlow = {
       ...sectionFlow('u', []),
       gaps: [{ surface: 'cli', kind: 'untestable', reason: 'design history' }],
     }
     const s = composeGuardStatus({ flows: [awaiting, untestable] }, null, null)
-    expect(s.coverage?.classification.web).toBe(1)
+    expect(s.coverage?.classification.tui).toBe(1)
     expect(s.coverage?.classification.untestable).toBe(1)
     expect(s.coverage?.classification.unclassified).toBe(0)
   })
@@ -955,7 +955,7 @@ describe('composeGuardStatus', () => {
     const guarded = sectionFlow('a', ['a.1'])
     const partial: GuardManifestFlow = {
       ...sectionFlow('b', ['b.1']),
-      gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
+      gaps: [{ surface: 'tui', kind: 'awaiting-driver', driver: 'tui', reason: 'no tui driver yet' }],
     }
     const blocked: GuardManifestFlow = {
       ...sectionFlow('c', []),
@@ -967,7 +967,7 @@ describe('composeGuardStatus', () => {
       guarded: 1,
       partial: 1,
       blocked: 1,
-      gapLabels: ['awaiting web driver', 'no interface'],
+      gapLabels: ['awaiting tui driver', 'no interface'],
       // The manifest's own buckets say how much of each flow was realized; the
       // five words say what a reader is TOLD. Nothing ran here, so the realized
       // flow reads Succeeded (it passed when it was written) and the two with a
@@ -982,7 +982,7 @@ describe('composeGuardStatus', () => {
       birthPassed: 3,
       coverageGaps: [
         { doc: DOC, anchor: 'a', kind: 'untestable', reason: 'r' },
-        { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'web', reason: 'r' },
+        { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'tui', reason: 'r' },
         { doc: DOC, anchor: 'c', kind: 'untestable', reason: 'r' },
       ],
       birthFindings: [{ doc: DOC, anchor: 'a', title: 't', step: 1, expected: 'e', actual: 'a' }],
@@ -993,7 +993,7 @@ describe('composeGuardStatus', () => {
     expect(s.lastGenerate).toMatchObject({
       written: 1,
       birthPassed: 3,
-      coverageGapsByKind: { web: 1, tui: 0, library: 0, untestable: 2, 'no-claim': 0 },
+      coverageGapsByKind: { tui: 1, library: 0, untestable: 2, 'no-claim': 0 },
       birthFindings: 1,
       errors: 1,
       usage: { calls: 5, costUsd: 0.42 },
@@ -1334,7 +1334,7 @@ describe('runGuardStatus (printer)', () => {
     const r = repo()
     const partial: GuardManifestFlow = {
       ...sectionFlow('b', ['b.1']),
-      gaps: [{ surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'no web driver yet' }],
+      gaps: [{ surface: 'tui', kind: 'awaiting-driver', driver: 'tui', reason: 'no tui driver yet' }],
     }
     writeManifest(r, {
       flows: [sectionFlow('a', ['a.1']), partial, sectionFlow('c', [])],
@@ -1346,7 +1346,7 @@ describe('runGuardStatus (printer)', () => {
     // birth), the one whose flow has no test at all reads Blocked. No section and
     // no flow may read a retired word.
     expect(out).toContain('coverage    3 sections (via 3 flows) · 2 blocked · 1 succeeded')
-    expect(out).toContain('flows       3 total · 2 blocked · 1 succeeded (awaiting web driver)')
+    expect(out).toContain('flows       3 total · 2 blocked · 1 succeeded (awaiting tui driver)')
     expect(out).not.toMatch(/sections guarded|\d+ guarded|\d+ partial/)
   })
 })
@@ -1685,7 +1685,7 @@ describe('printGuardGenerateSummary — flow-led', () => {
       birthPassed: 7,
       coverageGaps: [
         { doc: DOC, anchor: 'a', kind: 'no-interface', reason: 'nothing mapped for web', flowId: 'onboarding', surface: 'web' },
-        { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'web', reason: 'the web driver is not runnable yet', flowId: 'task-lifecycle', surface: 'web' },
+        { doc: DOC, anchor: 'b', kind: 'awaiting-driver', driver: 'tui', reason: 'the tui driver is not runnable yet', flowId: 'task-lifecycle', surface: 'tui' },
       ],
       usage: { calls: 21, inputTokens: 900_000, outputTokens: 40_000, costUsd: 8.01 },
     })
@@ -1694,7 +1694,7 @@ describe('printGuardGenerateSummary — flow-led', () => {
 
     expect(out).toContain('flows       5 settled · 1 unsettled · 12 unchanged')
     expect(out).toContain('tests       7 written · 7 passing')
-    expect(out).toContain('gaps        2 (1 awaiting web driver · 1 no interface)')
+    expect(out).toContain('gaps        2 (1 awaiting tui driver · 1 no interface)')
     expect(out).toContain('usage       21 calls · $8.01 (≤ $10.29 estimated)')
     expect(out).toContain('next  `truecourse guard run`')
     // Nothing failed, so no failing/rejected/errors blocks at all — and the tests

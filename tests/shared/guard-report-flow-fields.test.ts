@@ -67,12 +67,12 @@ describe('guard report — the realization gap kinds', () => {
       doc: 'd',
       anchor: 'a',
       kind: 'awaiting-driver',
-      driver: 'web',
-      reason: 'Needs web driver',
+      driver: 'tui',
+      reason: 'Needs TUI driver',
       flowId: 'task-lifecycle',
-      surface: 'web',
+      surface: 'tui',
     })
-    expect(gapDisplayKind(gap)).toBe('web')
+    expect(gapDisplayKind(gap)).toBe('tui')
   })
 })
 

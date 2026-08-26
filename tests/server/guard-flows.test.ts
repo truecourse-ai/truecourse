@@ -118,7 +118,7 @@ const MANIFEST = {
       scenarios: [{ id: SCENARIO_ID, surface: 'cli' }],
       generationInputsHash: 'sha256:gen',
       gaps: [
-        { surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'the board is browser-only' },
+        { surface: 'tui', kind: 'awaiting-driver', driver: 'tui', reason: 'the board is terminal-only' },
       ],
     },
     {
@@ -155,10 +155,10 @@ const RESULT = {
       doc: DOC,
       anchor: 'tasks/creating-tasks',
       kind: 'awaiting-driver',
-      driver: 'web',
+      driver: 'tui',
       reason: 'the board is browser-only',
       flowId: FLOW_ID,
-      surface: 'web',
+      surface: 'tui',
     },
     { doc: DOC, anchor: 'tasks', kind: 'no-claim', reason: 'the overview asserts nothing' },
   ],
@@ -386,13 +386,13 @@ describe('Guard flow read surfaces', () => {
         milestoneCount: 4,
       });
       // Both surfaces ride the flow: the cli scenario (painted by the run) and the
-      // web gap that explains why there is no second scenario.
+      // tui gap that explains why there is no second scenario.
       expect(creating.flows[0].surfaces).toEqual([
         expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', interfaceDrifted: true }),
         expect.objectContaining({
-          surface: 'web',
-          status: 'web',
-          gap: { kind: 'awaiting-driver', driver: 'web', reason: 'the board is browser-only', label: 'awaiting web driver' },
+          surface: 'tui',
+          status: 'tui',
+          gap: { kind: 'awaiting-driver', driver: 'tui', reason: 'the board is terminal-only', label: 'awaiting tui driver' },
         }),
       ]);
       expect(creating.scenarioIds).toEqual([SCENARIO_ID]);
@@ -661,9 +661,9 @@ describe('Guard flow read surfaces', () => {
         interfacePath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
       });
       expect(res.body.surfaces[0].failure).toMatchObject({ step: 3 });
-      expect(res.body.surfaces[1]).toMatchObject({ surface: 'web', status: 'web', birthPassed: false, hasEvidence: false });
+      expect(res.body.surfaces[1]).toMatchObject({ surface: 'tui', status: 'tui', birthPassed: false, hasEvidence: false });
       expect(res.body.gaps).toEqual([
-        { surface: 'web', kind: 'awaiting-driver', driver: 'web', reason: 'the board is browser-only', label: 'awaiting web driver' },
+        { surface: 'tui', kind: 'awaiting-driver', driver: 'tui', reason: 'the board is terminal-only', label: 'awaiting tui driver' },
       ]);
       expect(res.body.interfaceIds).toEqual(['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done']);
       expect(res.body.findings).toHaveLength(1);
@@ -1109,7 +1109,11 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url('interfaces')).expect(200);
       const bySurface = new Map<string, any>(res.body.surfaces.map((s: any) => [s.surface, s]));
       expect(bySurface.get('cli')).toMatchObject({ label: 'CLI', runnable: true, interfaces: 4, detected: true, source: 'tree' });
+      // web's runner shipped, but generate cannot author a web scenario yet, so
+      // its row stays awaiting (item 132)…
       expect(bySurface.get('web')).toMatchObject({ label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, detected: false });
+      // …as does a surface whose runner has not shipped at all.
+      expect(bySurface.get('tui')).toMatchObject({ label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver', interfaces: 0, detected: false });
     });
 
     it('is 200 with a clean empty payload when nothing was mapped', async () => {

@@ -137,6 +137,7 @@ import {
 } from '../guard-generate/index.js';
 import {
   loadSpecScope,
+  driverRecipeKey,
   isRunnableDriver,
   runnableDriverIds,
   violatesSettleInvariant,
@@ -906,11 +907,13 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
     recipe = derived.recipe;
   }
   const prepared = recipe;
-  return runnableDriverIds.filter(
-    (id) =>
-      isRunnableDriver(id) &&
-      (id === 'cli' ? prepared.entry !== undefined : id === 'api' ? prepared.api !== undefined : false),
-  );
+  // Same registry-driven check generate authors by (item 132) — an estimate that
+  // priced a surface generate refuses (or skipped one it authors) is a lie.
+  return runnableDriverIds.filter((id) => {
+    if (!isRunnableDriver(id)) return false;
+    const key = driverRecipeKey(id);
+    return key !== undefined && prepared[key] !== undefined;
+  });
 }
 
 // --- guard setup session-modeling constants (plan 03 retirement) -------------

@@ -109,6 +109,16 @@ function seed(content = DOC_CONTENT, areaTags?: string[]): string {
   return r
 }
 
+/** A web interface — one screen at `/`, the shape the web driver navigates. */
+const webInterface = (): Interface => ({
+  id: 'web/board',
+  type: 'web',
+  title: 'Board',
+  entry: { command: ['/'] },
+  steps: [{ kind: 'navigate', route: '/' }],
+  fingerprint: 'sha256:web',
+})
+
 /** A worker that submits `scenario` for every task it is handed. */
 const authorsEvery = (scenario = raw('v', PASSING_STEPS)) => submitWorkerSessions(() => scenario)
 
@@ -245,30 +255,54 @@ describe('generateGuards — realization gaps', () => {
     expect(gap.reason).toContain('no interface realizes milestone 2')
   })
 
-  it('a surface with interfaces but no driver yet is an awaiting-driver gap on the flow', async () => {
+  it('a surface whose runner has not shipped is an awaiting-driver gap on the flow', async () => {
     const r = seed()
-    const webInterface: Interface = {
-      id: 'web/board',
-      type: 'web',
+    const tuiInterface: Interface = {
+      id: 'tui/board',
+      type: 'tui',
       title: 'Board',
       entry: { command: ['/'] },
       steps: [{ kind: 'navigate', route: '/' }],
-      fingerprint: 'sha256:web',
+      fingerprint: 'sha256:tui',
     }
 
     const res = await runGenerate({
       repoRoot: r,
-      interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface),
+      interfaces: interfacesOf(r, cliInterface(['relkit']), tuiInterface),
       extractSession: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
-    // cli still guards it; web is recorded as realizable-but-unrunnable.
+    // cli still guards it; tui is recorded as realizable-but-unrunnable.
     expect(res.written.map((w) => w.surface)).toEqual(['cli'])
     const gap = res.coverageGaps.find((g) => g.kind === 'awaiting-driver' && g.flowId === 'version')!
-    expect(gap.surface).toBe('web')
-    expect(gap.driver).toBe('web')
-    expect(gap.reason).toContain('Needs web driver')
+    expect(gap.surface).toBe('tui')
+    expect(gap.driver).toBe('tui')
+    expect(gap.reason).toContain('Needs TUI driver')
+  }, 60_000)
+
+  // Item 132: the web RUNNER shipped (guard-runner's web-driver, playwright-core,
+  // the reference corpus's eleven executed web scenarios) — but GENERATE still
+  // cannot author one, because the flow-worker has an api arm and a cli arm and
+  // nothing else. So web keeps the awaiting-driver treatment every unshipped
+  // surface gets, and its recipe block is READ (the row names one) without making
+  // the surface authorable.
+  it('records web as awaiting its driver even when the recipe prepares it', async () => {
+    const r = repo()
+    writeRecipe(r, { web: { serve: ['node', 'server.js'], healthPath: '/' } })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+
+    const res = await runGenerate({
+      repoRoot: r,
+      interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface()),
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: authorsEvery(),
+    })
+
+    expect(res.written.some((w) => w.surface === 'web')).toBe(false)
+    const gap = res.coverageGaps.find((g) => g.surface === 'web')!
+    expect(gap.kind).toBe('awaiting-driver')
   }, 60_000)
 })
 

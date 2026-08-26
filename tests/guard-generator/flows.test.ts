@@ -293,16 +293,17 @@ describe('synthesizeFlows — composition', () => {
     const r = repo()
     const area: FlowSynthesisArea = {
       ...tasksArea,
-      claims: [...TASK_CLAIMS, claim(TASKS, 'Listing tasks', 'the board shows one card per open task', 'web')],
+      claims: [...TASK_CLAIMS, claim(TASKS, 'Listing tasks', 'the board shows one card per open task', 'tui')],
     }
     const runner = areaSessions({ tasks: TASK_LIFECYCLE })
     const res = await synth(r, [area], runner)
 
-    // The web claim reaches the session, but leaving it out of every flow is
-    // not a refusal — the area settles.
+    // The tui claim reaches the session, but leaving it out of every flow is
+    // not a refusal — the area settles. (`tui`, not `web`: web's row flips to
+    // runnable once generate can author it — item 132.)
     expect(res.calls).toBe(1)
     expect(res.unsettled).toEqual([])
-    expect(runner.seen[0].claims.some((c) => c.driver === 'web')).toBe(true)
+    expect(runner.seen[0].claims.some((c) => c.driver === 'tui')).toBe(true)
   })
 
   it('records a claim whose section is not in the live index as a no-flow claim', async () => {

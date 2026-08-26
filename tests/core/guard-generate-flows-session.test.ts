@@ -362,8 +362,8 @@ describe('checkFlowSet — the tool and the fold agree', () => {
   })
 
   it('does NOT count a non-runnable claim toward coverage', () => {
-    const withWeb: FlowSynthesisArea = { ...AREA, claims: [...CLAIMS, claim(LIST, 'the board shows one card per task', { driver: 'web' })] }
-    const report = checkFlowSet(LIFECYCLE, { area: withWeb, ...CHECKER })
+    const withTui: FlowSynthesisArea = { ...AREA, claims: [...CLAIMS, claim(LIST, 'the board shows one card per task', { driver: 'tui' })] }
+    const report = checkFlowSet(LIFECYCLE, { area: withTui, ...CHECKER })
     expect(report.uncoveredClaims).toEqual([])
     expect(isFlowSetClean(report)).toBe(true)
   })
@@ -523,7 +523,7 @@ describe('flowsSessionBriefing', () => {
   })
 
   it('marks a non-runnable claim optional', () => {
-    const area: FlowSynthesisArea = { ...AREA, claims: [claim(LIST, 'the board shows a card', { driver: 'web' })] }
+    const area: FlowSynthesisArea = { ...AREA, claims: [claim(LIST, 'the board shows a card', { driver: 'tui' })] }
     expect(flowsSessionBriefing(area, undefined)).toContain('account: optional')
   })
 

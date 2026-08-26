@@ -49,7 +49,7 @@ const MD = [
   '## Blocked bit',
   'Needs a database.',
   '',
-  '## Web bit',
+  '## Tui bit',
   'HTTP boundary.',
   '',
   '## Untestable bit',
@@ -94,11 +94,11 @@ const LIFECYCLE_FLOW = {
   surfaces: [
     { surface: 'cli' as const, scenarioId: 's1', status: 'fail' as const, outcome: 'fail' as const },
     {
-      surface: 'web' as const,
-      status: 'web' as const,
+      surface: 'tui' as const,
+      status: 'tui' as const,
       gap: {
         kind: 'awaiting-driver' as const,
-        driver: 'web' as const,
+        driver: 'tui' as const,
         reason: 'the board is browser-only',
         label: 'awaiting web driver',
       },
@@ -141,7 +141,7 @@ const SECTIONS: GuardSectionCoverage[] = [
   sec('Stale bit', 2, 'stale', { scenarioIds: ['s3'], scenarios: [{ id: 's3', title: 'stale claim', outcome: 'stale', durationMs: 0 }] }),
   sec('Guarded bit', 2, 'guarded', { scenarioIds: ['g1'] }),
   sec('Blocked bit', 2, 'blocked-on', { reason: 'blocked on db: needs a database', blockedOnCapabilities: ['db'] }),
-  sec('Web bit', 2, 'web', { reason: 'browser UI boundary' }),
+  sec('Tui bit', 2, 'tui', { reason: 'terminal UI boundary' }),
   sec('Untestable bit', 2, 'untestable', { reason: 'nothing assertable' }),
   sec('Dismissed bit', 2, 'dismissed', { reason: 'dismissed: the rate-limit claim' }),
   sec('Unguarded bit', 2, 'unguarded'),
@@ -470,7 +470,7 @@ describe('GuardCoveragePage — coverage surface', () => {
     expect(bandOf('stale-bit')).toContain('border-slate-400');
     expect(bandOf('guarded-bit')).toContain('border-sky-500');
     expect(bandOf('blocked-bit')).toContain('border-sky-500');
-    expect(bandOf('web-bit')).toContain('border-dashed');
+    expect(bandOf('tui-bit')).toContain('border-dashed');
     // Nothing accounts for it — which reads Blocked, so it is banded like the rest
     // of the blockers. An unpainted section is the mute bucket that is now gone.
     expect(bandOf('unguarded-bit')).toContain('border-l-4');

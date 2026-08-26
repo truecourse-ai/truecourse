@@ -7150,3 +7150,90 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     repo copy alone. Related: [129] (the `.mdx` twin fetch that made the
     source fetchable at all).
 
+132. **The web driver SHIPPED and generate never noticed — two stale gates make
+    every web claim, task and flow dead on arrival (documenso, 2026-08-25).**
+    STATUS: BUILT (2026-08-26) — the registry-driven prepared-check; the
+    `runnable` flip itself is DEFERRED until the flow-worker can author web (see
+    THE FIX below). The lineage-3 run spent **69M tokens authoring 638 web tasks**
+    (item 104, this branch's flagship) onto 108 derived places, and `guard
+    generate` then discarded **651 web claims** and could author **zero** web
+    scenarios. The cause is not the corpus and not the sessions — it is two
+    switches that were never thrown when the web runner landed.
+    What IS ready, checked file by file:
+    - **The runner executes web today.** `packages/guard-runner/src/drivers/web-driver.ts`
+      exports `webStepDriver`, wired in `drivers/index.ts`; `playwright-core` is
+      a real dependency; the module's own recent commits are active work
+      (`0d1b14b2` visual judge, `e0bdcd24` hand the browser a file, `dca857ba`
+      the browser reads its captures). The reference corpus holds **11 executed
+      web scenarios** (`core-signing-web/*.web.1.yaml`) driving
+      `web/open-documents-list`, `web/upload-document`, `web/fill-recipient`,
+      with interface fingerprints and board verdicts.
+    - **The recipe schema supports web.** `RecipeWebSchema` (guard-runner
+      `recipe.ts`) carries `serve`/`cwd`/`healthPath`/`readyTimeoutMs`/`env`/
+      `build`/`app` and is documented as "the web driver's preparation layer".
+      The reference recipe fills it in (`healthPath: /signin`, 60s ready).
+    - **The runner never consults `runnable`.** Every consumer of
+      `isRunnableDriver` is on the GENERATE side (`spec-estimate.ts`,
+      `guard-generate/flows.ts`, `guard-generator/{flows,generate}.ts`);
+      `run.ts`'s own `runnable` local is an unrelated preparedness filter.
+    The two gates that block it, both in generate's path:
+    - **A stale registry row.** `GUARD_DRIVERS` still reads
+      `{ id: 'web', runnable: false, waitingLabel: 'Needs web driver' }`
+      (`packages/shared/src/guard/drivers.ts:61`). That file's own contract says
+      a row flips to `runnable: true` when its runner module ships — the module
+      shipped in three commits and the row was never touched (`drivers.ts` is
+      unchanged since `2cbd35a8`).
+    - **A hardcoded prepared-check.** `driverPrepared()`
+      (`guard-generator/src/generate.ts:3237`) is
+      `cli → recipe.entry !== undefined`, `api → recipe.api !== undefined`,
+      **`return false`** for everything else — so a fully-formed `recipe.web`
+      block is unreadable to it and flipping the registry row ALONE fixes
+      nothing. `missingPrepNoun()` beside it likewise knows only two nouns.
+    A third fact shapes the fix rather than blocking it: the recipe PROPOSER
+    deliberately never derives a web block — `recipe-repair.ts:420` instructs
+    "the `web` browser surface is authored later by hand — never bend `api` into
+    serving a docs site or demo to stand in for it." So after both gates are
+    fixed, enabling web still requires a hand-authored `recipe.web`, exactly as
+    the reference corpus has. Whether the proposer should learn to derive one
+    (it already identifies the served app for `api`, and documenso's web block
+    differs from its api block only by `healthPath`) is the open design question.
+    Measured consequence on documenso: 651 of 1,327 claims typed `web`, 63 of
+    117 flows composed from web-adjacent areas, 638 authored tasks, 11 reference
+    web scenarios provably runnable — and 0 authorable. Related: [104] (the
+    authoring loop whose output this strands), [131] (the scan-scope gap found in
+    the same run).
+
+    **THE FIX (TDD, 2026-08-26).** The prepared-check became DATA rather than
+    branches: every row names the recipe block that prepares it (`cli → entry`,
+    `api → api`, `web → web`), read through a new `driverRecipeKey()` in shared.
+    The three copies of the old hardcoded logic — `driverPrepared()`,
+    `missingPrepNoun()` (`guard-generator/src/generate.ts`) and the inline
+    duplicate in `preparedSurfaces()` (`core/src/services/llm/spec-estimate.ts`)
+    — all read the registry now, so the estimate cannot price a surface generate
+    refuses, and driver #4 lands by adding one row exactly as the file promises.
+    **The registry row did NOT flip.** The first cut set web `runnable: true`,
+    and the bench run it enabled exposed a THIRD gate this item's write-up had
+    missed: the flow-worker has an api arm and a cli arm and nothing else
+    (`task.surface === 'api' ? API_PROMPT : CLI_PROMPT`), so every web task was
+    handed CLI tooling and died as a journey-defect — **121 doomed sessions** on
+    documenso. RUNNABLE means authorable AND executable; generate cannot author
+    web, so the row reads `{ id: 'web', runnable: false, recipeKey: 'web' }` and
+    web work settles as awaiting-driver instead of burning sessions that can
+    only fail. The flip — and with it the status fallout (`web` leaving
+    `awaitingDriverIds`, precedence 22 → 21) — waits on the worker's web arm.
+    Tests: `tests/shared/guard-drivers.test.ts` (new — web stays UNRUNNABLE
+    though its runner shipped, every runnable driver names a recipe block, a
+    driver still awaiting its runner stays unprepared and labelled) and two
+    cases in `tests/guard-generator/generate.test.ts`: a surface whose runner
+    has not shipped is still an awaiting-driver gap (now carried by `tui`), and
+    web settles as awaiting-driver even when the recipe prepares it. Fixtures
+    that used web as the stand-in "recorded but unrunnable" surface were
+    retargeted to `tui`/`desktop` during the first cut and stay that way — the
+    mechanism is tested by a driver whose runner really has not shipped, so
+    those cases survive the eventual flip.
+    Still hand-authored, by design: the recipe's `web` block. The bench added one
+    to documenso (`serve` = the api block's, `healthPath: /signin`); under the
+    first cut's flipped row the pre-flight went from 1 surface / 515 runnable
+    claims to **2 surfaces / 1,166** — the doubled inventory item 133 then
+    tripped over.
+

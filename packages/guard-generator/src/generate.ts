@@ -98,6 +98,7 @@ import {
   firstInvalidMatchPattern,
   guardDriver,
   guardScenarioDrivers,
+  driverRecipeKey,
   isRunnableDriver,
   runnableDriverIds,
   unaccountedSurfaces,
@@ -3235,14 +3236,17 @@ function sameGap(a: GuardManifestGap, b: GuardManifestGap): boolean {
 
 /** True when the recipe carries a driver's preparation layer. */
 function driverPrepared(recipe: Recipe, driver: GuardDriverId): boolean {
-  if (driver === 'cli') return recipe.entry !== undefined
-  if (driver === 'api') return recipe.api !== undefined
-  return false
+  // The registry row names the block that prepares the surface, so a driver
+  // landing needs no edit here (item 132: web shipped its runner, and these
+  // hardcoded branches kept answering `false` for it).
+  const key = driverRecipeKey(driver)
+  return key !== undefined && recipe[key] !== undefined
 }
 
 /** The capability noun a prep-missing blocked-on gap names. */
 function missingPrepNoun(driver: GuardDriverId): string {
-  return driver === 'api' ? 'a recipe `api` block' : 'a recipe `entry`'
+  const key = driverRecipeKey(driver)
+  return key === undefined || key === 'entry' ? 'a recipe `entry`' : `a recipe \`${key}\` block`
 }
 
 /** The `dismissed` coverage-gap reason: the subject one-liner, plus the note if any. */

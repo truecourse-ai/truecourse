@@ -54,7 +54,7 @@ describe('coverage status precedence', () => {
     // a blocked claim reads Blocked, and its detail keeps both.
     expect(worstCoverageStatus(['pass', 'no-interface'])).toBe('no-interface');
     expect(worstCoverageStatus(['pass', 'never-run'])).toBe('never-run');
-    expect(worstCoverageStatus(['fail', 'pass', 'web'])).toBe('fail');
+    expect(worstCoverageStatus(['fail', 'pass', 'tui'])).toBe('fail');
     // Within a tier the more informative status still wins.
     expect(worstCoverageStatus(['pass', 'guarded'])).toBe('pass');
     expect(worstCoverageStatus(['stale', 'orphaned'])).toBe('stale');
@@ -63,7 +63,7 @@ describe('coverage status precedence', () => {
   it('puts "not testable" last — it decides only when nothing else applies', () => {
     expect(worstCoverageStatus(['guarded', 'untestable'])).toBe('guarded');
     expect(worstCoverageStatus(['never-run', 'untestable'])).toBe('never-run');
-    expect(worstCoverageStatus(['web', 'untestable'])).toBe('web');
+    expect(worstCoverageStatus(['tui', 'untestable'])).toBe('tui');
     expect(worstCoverageStatus(['no-claim', 'unguarded'])).toBe('unguarded');
     // "could not test" outranks "nothing to test".
     expect(worstCoverageStatus(['dismissed', 'unrealizable'])).toBe('unrealizable');
@@ -123,7 +123,7 @@ describe('the five-word coverage vocabulary', () => {
     expect(guardCoverageWord('blocked-on')).toBe('Blocked');
     expect(guardCoverageWord('needs-setup')).toBe('Blocked');
     expect(guardCoverageWord('authoring-error')).toBe('Blocked');
-    expect(guardCoverageWord('web')).toBe('Blocked');
+    expect(guardCoverageWord('tui')).toBe('Blocked');
     // …including the one bucket that used to be mute.
     expect(guardCoverageWord('unguarded')).toBe('Blocked');
     // Not testable — a settled answer nobody can act on.

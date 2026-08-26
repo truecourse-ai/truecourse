@@ -61,12 +61,19 @@ export function rmrf(dir: string): void {
 /** Write a `recipe.json` whose entry invokes the fixture CLI with a no-op build. */
 export function writeRecipe(
   repo: string,
-  overrides: { install?: string; build?: string; entry?: string[] } = {},
+  overrides: {
+    install?: string
+    build?: string
+    entry?: string[]
+    /** The web driver's preparation layer — present when a case authors web. */
+    web?: { serve: string[]; cwd?: string; healthPath?: string }
+  } = {},
 ): void {
   const recipe = {
     ...(overrides.install ? { install: overrides.install } : {}),
     build: overrides.build ?? 'true',
     entry: overrides.entry ?? ['node', FIXTURE_BIN],
+    ...(overrides.web ? { web: overrides.web } : {}),
   }
   const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
   fs.mkdirSync(path.dirname(target), { recursive: true })

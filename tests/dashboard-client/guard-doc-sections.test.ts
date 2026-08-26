@@ -161,7 +161,7 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('untestable')).toContain('muted');
     expect(guardBandClasses('no-claim')).toContain('muted');
     expect(guardBandClasses('unrealizable')).toContain('muted');
-    expect(guardBandClasses('web')).toContain('dashed');
+    expect(guardBandClasses('tui')).toContain('dashed');
     expect(guardBandClasses('tui')).toContain('dashed');
     // Generate tried and failed: red like a problem, but its own label — never the
     // run outcome `Error`, and never the blank `unguarded` band.
