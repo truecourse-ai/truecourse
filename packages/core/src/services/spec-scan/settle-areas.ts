@@ -13,7 +13,13 @@
  */
 
 import { z } from 'zod'
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
+import {
+  defineSessionTool,
+  type OutcomeBlock,
+  type SessionBudget,
+  type SessionDef,
+  type SessionTool,
+} from '@truecourse/agent-loop'
 import {
   CORE_PRODUCT,
   PROCESS_PRODUCT,
@@ -430,6 +436,10 @@ function checkSettlementTool(vocab: AreaVocabView): SessionTool {
     kind: 'check-settlement',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I checked my settlement against the corpus before committing it',
+      many: 'I checked my settlement {n} times before committing it',
+    },
     inputSchema: AreaSettlementSchema,
     async execute(args) {
       const errors = validateSettlement(args, vocab)
@@ -452,17 +462,46 @@ export interface SettleAreasSessionInput {
   universe: ScanDocUniverse
 }
 
+/** What the settlement changed, per decision the session makes. */
+function presentSettlement(settlement: AreaSettlement): OutcomeBlock[] {
+  const concerns = Object.keys(settlement.concernMerges).length
+  const products = Object.keys(settlement.productMerges).length
+  const lines: string[] = []
+  if (concerns === 0 && products === 0) {
+    lines.push('I merged nothing — the labels already name distinct things')
+  } else {
+    if (concerns > 0) lines.push(`I merged ${concerns} concern label${concerns === 1 ? '' : 's'} into ones already in use`)
+    if (products > 0) lines.push(`I merged ${products} product label${products === 1 ? '' : 's'}`)
+  }
+  const verdicts = settlement.productVerdicts
+  if (verdicts.length > 0) {
+    const collapsed = verdicts.filter((v) => v.verdict === 'collapse-to-core').length
+    lines.push(
+      `I judged ${verdicts.length} non-core product${verdicts.length === 1 ? '' : 's'}: ${verdicts.length - collapsed} kept apart, ${collapsed} folded into core`,
+    )
+  }
+  for (const sub of settlement.subdivisions) lines.push(`I split ${sub.label} into ${sub.into.join(', ')}`)
+  return [{ kind: 'facts', lines }]
+}
+
 export function settleAreasSessionDef(input: SettleAreasSessionInput): SessionDef<AreaSettlement> {
   return {
     kind: SETTLE_AREAS_SESSION_KIND,
     systemPrompt: SETTLE_AREAS_SYSTEM_PROMPT,
     tools: [
       docsWithLabelTool(input.universe, () => labelIndex(input.vocab)),
-      readDocTool(input.universe),
+      readDocTool(input.universe, {
+        one: "I opened one of a label's docs to judge it by more than its title",
+        many: 'I opened {n} docs to judge the labels by more than their titles',
+      }),
       checkSettlementTool(input.vocab),
     ],
     outcomeSchema: AreaSettlementSchema,
     budget: SETTLE_AREAS_BUDGET,
+    display: {
+      intro: "I'm settling the area labels, merging synonyms so the corpus speaks one vocabulary.",
+    },
+    presentOutcome: presentSettlement,
     // The structural half of "run check_settlement": the shell refuses the
     // first outcome of a session that never validated its draft (one refusal
     // cycle, one turn), mirroring interface authoring's check_draft.

@@ -18,7 +18,7 @@
  */
 
 import { z } from 'zod'
-import type { SessionBudget, SessionDef } from '@truecourse/agent-loop'
+import type { OutcomeBlock, SessionBudget, SessionDef } from '@truecourse/agent-loop'
 import {
   DocSubjectSchema,
   SkipCategorySchema,
@@ -188,6 +188,20 @@ export interface CurateDocSessionInput {
   liveVocab: () => { products: readonly string[]; concerns: readonly string[] }
 }
 
+/** The two judgments in words: corpus membership (with its reason) and areas. */
+function presentDocVerdict(verdict: DocVerdict): OutcomeBlock[] {
+  const lines = [
+    verdict.keep
+      ? `I'm keeping this doc: ${verdict.reason}`
+      : `I'm leaving this doc out${verdict.category ? ` (${verdict.category})` : ''}: ${verdict.reason}`,
+    verdict.areas.length > 0
+      ? `Areas it covers: ${verdict.areas.map((a) => `${a.product} / ${a.concern}`).join(', ')}`
+      : 'It covers no area I could name',
+  ]
+  if (verdict.status) lines.push(`The doc states its status: ${verdict.status}`)
+  return [{ kind: 'facts', lines }]
+}
+
 export function curateDocSessionDef(input: CurateDocSessionInput): SessionDef<DocVerdict> {
   return {
     kind: CURATE_DOC_SESSION_KIND,
@@ -200,6 +214,10 @@ export function curateDocSessionDef(input: CurateDocSessionInput): SessionDef<Do
     ],
     outcomeSchema: DocVerdictSchema,
     budget: CURATE_DOC_BUDGET,
+    display: {
+      intro: `I'm reading ${curateDocWorkItem(input.doc.path)} to decide whether it belongs in the corpus and which areas it covers.`,
+    },
+    presentOutcome: presentDocVerdict,
   }
 }
 

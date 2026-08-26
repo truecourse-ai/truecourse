@@ -8,6 +8,7 @@
  * Driver-agnostic by construction: this package imports neither `ai` nor
  * the Agent SDK nor node builtins; persistence is injected.
  */
+export * from './session-presentation.js';
 export * from './session-events.js';
 export * from './session-def.js';
 export * from './session-driver.js';

@@ -12,6 +12,8 @@
 
 import { z } from 'zod';
 
+import { OutcomeDisplaySchema, SessionDisplaySchema } from './session-presentation.js';
+
 // ---------------------------------------------------------------------------
 // usage + budget
 // ---------------------------------------------------------------------------
@@ -204,6 +206,10 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     /** What the driver declared it will call (optional: a driver predating
      *  attribution still produces a legal transcript). */
     llm: SessionLlmSchema.optional(),
+    /** How this session narrates itself, from its def. Optional so a
+     *  transcript written before presentation existed still parses — and
+     *  DECLARED because this schema is non-strict and would strip it. */
+    display: SessionDisplaySchema.optional(),
   }),
   // A steer, an initial message, or a resume observation. `actor` is empty in
   // OSS, the workspace user in EE, so "who answered" is auditable.
@@ -267,7 +273,17 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     status: SessionStatusSchema.optional(),
     spent: BudgetSpentSchema.optional(),
   }),
-  z.object({ type: z.literal('outcome'), value: z.unknown() }),
+  z.object({
+    type: z.literal('outcome'),
+    value: z.unknown(),
+    /** The def's own rendering of `value`, stamped at emit — the only moment
+     *  the definition and the validated outcome coexist. Absent when the def
+     *  presents nothing, or when its presenter threw. */
+    display: OutcomeDisplaySchema.optional(),
+    /** A presenter that threw, recorded as data: the UI stays silent, the
+     *  failure stays greppable. */
+    displayError: z.string().optional(),
+  }),
   z.object({ type: z.literal('failure'), failure: SessionFailureSchema }),
 ]);
 export type SessionEventBody = z.infer<typeof SessionEventBodySchema>;

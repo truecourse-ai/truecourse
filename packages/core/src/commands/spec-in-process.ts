@@ -40,7 +40,13 @@ import { getStageUsage, stageTokenTotal } from '@truecourse/shared/llm';
 import type { SessionDriver, UserInputQuestion } from '@truecourse/agent-loop';
 import { runSpecScanSessions, type ScanStep } from '../services/spec-scan/run.js';
 export { SCAN_STEPS, ScanStepNotReadyError, type ScanStep } from '../services/spec-scan/run.js';
-import { normalizeScopePath } from '../services/spec-scan/orchestrate.js';
+import {
+  SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+  normalizeScopePath,
+} from '../services/spec-scan/orchestrate.js';
+import { CURATE_DOC_SESSION_KIND } from '../services/spec-scan/curate-doc.js';
+import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
+import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
 import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import {
@@ -118,6 +124,19 @@ export const CURATE_STEPS = [
   { key: 'overlap', label: 'Flagging overlaps' },
   { key: 'verify', label: 'Verifying conflicts' },
 ] as const;
+
+/**
+ * Which session kinds do each scan phase's work — declared here, beside the
+ * checklist itself, and stamped onto the run record so a reader places sessions
+ * under phases without a mapping of its own. `verify` is the deterministic fold
+ * (re-anchoring, dedup, auto-apply): no sessions at all.
+ */
+const CURATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
+  discover: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
+  tag: [CURATE_DOC_SESSION_KIND, SETTLE_AREAS_SESSION_KIND],
+  overlap: [OVERLAP_SESSION_KIND],
+  verify: [],
+};
 
 export const INFER_STEPS = [
   { key: 'load', label: 'Loading authored contracts' },
@@ -455,7 +474,13 @@ export async function curateInProcess(
   // locally, but the dashboard can only see what run.json carries, and the
   // early phases (discover/tag) have no sessions to show progress through.
   tracker?.tap((p) => {
-    if (p.steps) run.setProgress(p.steps);
+    if (!p.steps) return;
+    run.setProgress(
+      p.steps.map((step) => {
+        const kinds = CURATE_STEP_SESSION_KINDS[step.key];
+        return kinds ? { ...step, sessionKinds: [...kinds] } : step;
+      }),
+    );
   });
 
   // The driver, LAZILY: a fully-cached re-scan resolves nothing (so an edition

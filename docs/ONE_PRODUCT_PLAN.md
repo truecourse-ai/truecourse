@@ -534,6 +534,16 @@ dashboard.
   table keyed (workspace, repo, run, session), the loop's sink inserting
   rows. The "file vertical first, then EE port" sequencing is withdrawn;
   there is one vertical.
+- **Transcripts are self-describing.** A session definition declares its
+  presentation (intro copy, per-tool phrasing, an outcome-to-blocks digest)
+  and the loop stamps it into the transcript events at emit time: the
+  `session-start` event carries the session's display copy, the `outcome`
+  event carries structured display blocks (an append-only vocabulary in
+  `@truecourse/agent-loop`). The dashboard client renders whatever the
+  transcript streams, with generic fallbacks for events that carry no
+  display — it holds no per-session-kind copy or workflow knowledge, so
+  adding a session kind requires zero client changes; only a genuinely new
+  interaction pattern adds a widget.
 - **Versioned state** (agentic plan §3.8) lands as rows keyed (repo, ref,
   parent) from the start: corpus versions, generation records, run records,
   each with parent pointers and content-addressed item pointers. The PR

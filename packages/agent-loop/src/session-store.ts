@@ -57,6 +57,9 @@ export const RunProgressStepSchema = z.object({
   label: z.string(),
   status: z.enum(['pending', 'active', 'done', 'error']),
   detail: z.string().optional(),
+  /** Which session kinds belong to this step — declared by the run process,
+   *  so no reader needs a phase-to-kind table of its own. */
+  sessionKinds: z.array(z.string()).optional(),
 });
 export type RunProgressStep = z.infer<typeof RunProgressStepSchema>;
 

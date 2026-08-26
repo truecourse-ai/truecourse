@@ -31,7 +31,13 @@
  */
 
 import { z } from 'zod'
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
+import {
+  defineSessionTool,
+  type OutcomeBlock,
+  type SessionBudget,
+  type SessionDef,
+  type SessionTool,
+} from '@truecourse/agent-loop'
 import {
   SOURCES_REF_PREFIX,
   docBody,
@@ -370,6 +376,10 @@ function listUniverseTool(scope: ScanScopeUniverse): SessionTool {
     kind: 'list-scan-universe',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I looked over the doc tree to see the folders and how many docs each holds',
+      many: 'I looked over the doc tree {n} times, checking folders and doc counts',
+    },
     inputSchema: z.object({}).strict(),
     async execute() {
       return { content: renderUniverseTree(scope) }
@@ -385,6 +395,10 @@ function docOutlineTool(scope: ScanScopeUniverse): SessionTool {
     kind: 'doc-outline',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I skimmed one doc outline, sampling its folder before ruling anything in or out',
+      many: 'I skimmed the outlines of {n} docs, sampling each folder before ruling anything in or out',
+    },
     inputSchema: z
       .object({ ref: z.string().min(1).describe('Repo-relative doc ref, e.g. `docs/api/auth.md`.') })
       .strict(),
@@ -406,6 +420,53 @@ function docOutlineTool(scope: ScanScopeUniverse): SessionTool {
   })
 }
 
+/**
+ * The scope decision in words: what stayed in, what was left out and WHY (the
+ * verdicts carry real reason strings), whether the scan sessions got standing
+ * instructions, and the observations that fit no verdict. It lives beside
+ * {@link ScanScopeOutcomeSchema} so it can only ever read fields the session
+ * really produces.
+ */
+// A monorepo scope can exclude dozens of subtrees; the close bubble stays a
+// digest, so long lists state their first few and count the rest.
+const SCOPE_DIGEST_CAP = 6
+
+function capped(lines: string[], rest: (n: number) => string): string[] {
+  if (lines.length <= SCOPE_DIGEST_CAP) return lines
+  return [...lines.slice(0, SCOPE_DIGEST_CAP), rest(lines.length - SCOPE_DIGEST_CAP)]
+}
+
+function presentScanScope(outcome: ScanScopeOutcome): OutcomeBlock[] {
+  const excluded = outcome.scopeVerdicts.filter((v) => v.verdict === 'exclude')
+  const kept = outcome.scopeVerdicts.length - excluded.length
+  const lines: string[] = []
+  if (outcome.scopeVerdicts.length > 0) {
+    lines.push(
+      `I set the scan's scope: ${kept} of ${outcome.scopeVerdicts.length} doc subtrees kept${excluded.length === 0 ? ', nothing left out' : ''}`,
+    )
+    lines.push(
+      ...capped(
+        excluded.map((v) => `left out ${v.path}${v.reason ? `: ${v.reason}` : ''}`),
+        (n) => `…and ${n} more subtree${n === 1 ? '' : 's'} left out`,
+      ),
+    )
+  }
+  if (outcome.instructions.length === 0) lines.push('no extra instructions for the scan sessions')
+  else for (const line of outcome.instructions) lines.push(`instruction for the scan: ${line}`)
+
+  const blocks: OutcomeBlock[] = [{ kind: 'facts', lines }]
+  if (outcome.findings && outcome.findings.length > 0) {
+    blocks.push({
+      kind: 'facts',
+      lines: capped(
+        outcome.findings.map((f) => `worth a look: ${f}`),
+        (n) => `…and ${n} more observation${n === 1 ? '' : 's'}`,
+      ),
+    })
+  }
+  return blocks
+}
+
 export function orchestrateSessionDef(scope: ScanScopeUniverse): SessionDef<ScanScopeOutcome> {
   return {
     kind: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
@@ -413,6 +474,11 @@ export function orchestrateSessionDef(scope: ScanScopeUniverse): SessionDef<Scan
     tools: [listUniverseTool(scope), docOutlineTool(scope)],
     outcomeSchema: ScanScopeOutcomeSchema,
     budget: ORCHESTRATE_BUDGET,
+    display: {
+      intro:
+        "Before the scan reads anything, I'm working out what it should cover. I'll look over the doc tree, sample a few outlines, and decide which folders are in and which are out.",
+    },
+    presentOutcome: presentScanScope,
     // The session may wait on user input where a surface can carry it;
     // non-interactive runs never block — unanswered questions land on the
     // outcome as pendingQuestions and the run surfaces them loudly.

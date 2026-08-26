@@ -59,11 +59,25 @@ function scan(over: Partial<PublicSessionRun> = {}): PublicSessionRun {
     gitRef: '4d80ec9a1b2c3d4e5f60718293a4b5c6d7e8f900',
     startedAt: '2026-08-25T14:32:00.000Z',
     status: 'running',
+    // Each step names the session kinds that do its work — the run process
+    // declares the mapping, the client only reads it.
     progress: [
-      { key: 'discover', label: 'Discovering docs', status: 'done', detail: '41 docs · 12 to curate' },
-      { key: 'tag', label: 'Tagging doc areas', status: 'active', detail: '7/12 docs' },
-      { key: 'overlap', label: 'Flagging overlaps', status: 'pending' },
-      { key: 'verify', label: 'Verifying conflicts', status: 'pending' },
+      {
+        key: 'discover',
+        label: 'Discovering docs',
+        status: 'done',
+        detail: '41 docs · 12 to curate',
+        sessionKinds: ['spec-scan.orchestrate'],
+      },
+      {
+        key: 'tag',
+        label: 'Tagging doc areas',
+        status: 'active',
+        detail: '7/12 docs',
+        sessionKinds: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
+      },
+      { key: 'overlap', label: 'Flagging overlaps', status: 'pending', sessionKinds: ['spec-scan.overlap'] },
+      { key: 'verify', label: 'Verifying conflicts', status: 'pending', sessionKinds: [] },
     ],
     sessions: [
       session({ sessionId: 'ses-scope', kind: 'spec-scan.orchestrate', workItem: 'scan scope' }),
@@ -106,6 +120,7 @@ const askingTranscript: SessionEvent[] = [
     workItem: 'docs/guides/booking.md',
     systemPrompt: 'MACHINERY',
     toolNames: [],
+    display: { intro: "I'm reading docs/guides/booking.md to decide whether it belongs in the corpus." },
   },
   {
     seq: 1,
@@ -131,6 +146,7 @@ const keptTranscript: SessionEvent[] = [
     workItem: 'docs/getting-started.md',
     systemPrompt: 'MACHINERY',
     toolNames: [],
+    display: { intro: "I'm reading docs/getting-started.md to decide whether it belongs in the corpus." },
   },
 ] as SessionEvent[];
 
@@ -181,7 +197,29 @@ describe('a run record as the stream reads it', () => {
     expect(next).toBe('Flagging overlaps');
   });
 
-  it('still shows the work of a command the table does not know', () => {
+  it('places sessions on whichever step claims their kind, whatever the command', () => {
+    const { phases } = buildRunStream(
+      setup({
+        status: 'running',
+        progress: [
+          {
+            key: 'recipe',
+            label: 'Writing the recipe',
+            status: 'active',
+            sessionKinds: ['guard-setup.map'],
+          },
+        ],
+        sessions: [
+          session({ sessionId: 'a', kind: 'guard-setup.map', status: 'completed' }),
+          session({ sessionId: 'b', kind: 'guard-setup.map', status: 'running' }),
+        ],
+      }),
+    );
+    expect(phases.map((p) => p.key)).toEqual(['recipe']);
+    expect(phases[0].sessions.map((s) => s.sessionId)).toEqual(['a', 'b']);
+  });
+
+  it('still shows the work of a run whose steps claim no session kinds', () => {
     const { phases } = buildRunStream(
       setup({
         status: 'running',
@@ -192,8 +230,8 @@ describe('a run record as the stream reads it', () => {
         ],
       }),
     );
-    // The checklist card carries no session lines, and the unmapped kind gets
-    // its own card after it — nothing disappears for want of a mapping.
+    // The checklist card carries no session lines, and the unclaimed kind gets
+    // its own card after it — nothing disappears for want of a declaration.
     expect(phases.map((p) => [p.key, p.label, p.detail, p.sessions.length])).toEqual([
       ['recipe', 'Writing the recipe', undefined, 0],
       ['kind:guard-setup.map', 'guard-setup.map', '1 of 2', 2],
@@ -334,7 +372,7 @@ describe('a run as a conversation', () => {
     // Clicking it opens that session's thread, where the machinery still
     // never shows.
     await userEvent.click(bubble);
-    expect(await screen.findByText(/reading its docs side by side|I'm reading docs\/guides\/booking\.md/)).toBeInTheDocument();
+    expect(await screen.findByText(/I'm reading docs\/guides\/booking\.md/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('MACHINERY');
   });
 
@@ -345,7 +383,7 @@ describe('a run as a conversation', () => {
     const line = await screen.findByRole('button', { name: /docs\/getting-started\.md/ });
     expect(line).toHaveAttribute('aria-expanded', 'true');
     expect(line).toHaveAttribute('aria-current', 'true');
-    // The thread underneath is the transcript fold's own opening line.
+    // The thread underneath opens with the line the session declared.
     expect(
       await screen.findByText(/I'm reading docs\/getting-started\.md to decide whether it belongs/),
     ).toBeInTheDocument();

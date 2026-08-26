@@ -4,6 +4,8 @@ import {
   defineSessionTool,
   resumeGrantMessage,
   runAgentLoop,
+  RunProgressStepSchema,
+  SessionEventBodySchema,
   SessionToolArgsError,
   WRAP_UP_TURNS,
   wrapUpMessage,
@@ -1360,6 +1362,198 @@ describe('runAgentLoop draft checkpoint', () => {
 
     expect(outcome.status).toBe('completed');
     expect(seenSteers).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// presentation
+// ---------------------------------------------------------------------------
+
+describe('runAgentLoop presentation', () => {
+  const readDoc = defineSessionTool({
+    name: 'read_doc',
+    description: 'read a doc',
+    kind: 'read-doc',
+    readOnly: true,
+    destructive: false,
+    inputSchema: z.object({ path: z.string() }),
+    display: { one: 'I read a doc.', many: 'I read {n} docs.' },
+    execute: async () => ({ content: 'ok' }),
+  });
+  const unnamedTool = defineSessionTool({
+    name: 'check_draft',
+    description: 'validate a draft',
+    kind: 'validate',
+    readOnly: true,
+    destructive: false,
+    inputSchema: z.object({}),
+    execute: async () => ({ content: 'ok' }),
+  });
+
+  it('stamps the declared display onto session-start', async () => {
+    const { driver } = fakeDriver(async () => ({ kind: 'outcome', value: { verdict: 'keep' } }));
+    const { persistence } = memoryPersistence();
+
+    await runAgentLoop({
+      def: makeDef({
+        display: { intro: "I'm curating docs/a.md." },
+        tools: [readDoc, unnamedTool],
+      }),
+      workItem: 'docs/a.md',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    const start = persistence.readEvents('s1')[0];
+    if (start?.type !== 'session-start') throw new Error('unreachable');
+    // Only the tools that declared wording appear; the rest fall back client-side.
+    expect(start.display).toEqual({
+      intro: "I'm curating docs/a.md.",
+      tools: { read_doc: { one: 'I read a doc.', many: 'I read {n} docs.' } },
+    });
+  });
+
+  it('omits display entirely when the def declares none', async () => {
+    const { driver } = fakeDriver(async () => ({ kind: 'outcome', value: { verdict: 'keep' } }));
+    const { persistence } = memoryPersistence();
+
+    await runAgentLoop({
+      def: makeDef({ tools: [unnamedTool] }),
+      workItem: 'docs/a.md',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    // Not an empty object: nothing declared means nothing to interpret.
+    expect(persistence.readEvents('s1')[0]).not.toHaveProperty('display');
+  });
+
+  it('stamps the presented blocks onto the outcome event', async () => {
+    const { driver } = fakeDriver(async () => ({ kind: 'outcome', value: { verdict: 'keep' } }));
+    const { persistence } = memoryPersistence();
+
+    await runAgentLoop({
+      def: makeDef({
+        presentOutcome: (outcome) => [
+          { kind: 'text', text: 'Curation done.' },
+          { kind: 'facts', lines: [`verdict: ${outcome.verdict}`] },
+        ],
+      }),
+      workItem: 'docs/a.md',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    const event = persistence.readEvents('s1').find((e) => e.type === 'outcome');
+    if (event?.type !== 'outcome') throw new Error('unreachable');
+    expect(event.display).toEqual({
+      blocks: [
+        { kind: 'text', text: 'Curation done.' },
+        { kind: 'facts', lines: ['verdict: keep'] },
+      ],
+    });
+    expect(event).not.toHaveProperty('displayError');
+  });
+
+  it('records a throwing presenter as displayError and still completes', async () => {
+    const { driver } = fakeDriver(async () => ({ kind: 'outcome', value: { verdict: 'keep' } }));
+    const { persistence } = memoryPersistence();
+
+    const outcome = await runAgentLoop({
+      def: makeDef({
+        presentOutcome: () => {
+          throw new Error('digest read a field nobody writes');
+        },
+      }),
+      workItem: 'docs/a.md',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    // A broken digest costs the session nothing.
+    expect(outcome.status).toBe('completed');
+    if (outcome.status !== 'completed') throw new Error('unreachable');
+    expect(outcome.output).toEqual({ verdict: 'keep' });
+
+    const event = persistence.readEvents('s1').find((e) => e.type === 'outcome');
+    if (event?.type !== 'outcome') throw new Error('unreachable');
+    expect(event.value).toEqual({ verdict: 'keep' });
+    expect(event).not.toHaveProperty('display');
+    expect(event.displayError).toBe('digest read a field nobody writes');
+  });
+
+  it('survives a schema round-trip — the event schemas strip what they do not declare', () => {
+    const start = SessionEventBodySchema.parse({
+      type: 'session-start',
+      kind: 'spec-scan.overlap',
+      workItem: 'billing',
+      systemPrompt: 'you compare docs',
+      toolNames: ['read_doc'],
+      display: { intro: 'I compare docs.', tools: { read_doc: { one: 'a doc', many: '{n} docs' } } },
+    });
+    expect(start).toMatchObject({
+      display: {
+        intro: 'I compare docs.',
+        tools: { read_doc: { one: 'a doc', many: '{n} docs' } },
+      },
+    });
+
+    const outcome = SessionEventBodySchema.parse({
+      type: 'outcome',
+      value: { verdict: 'keep' },
+      display: {
+        blocks: [
+          {
+            kind: 'finding',
+            claim: 'The two docs disagree on the refund window.',
+            quotes: [
+              { doc: 'a.md', heading: 'Refunds', quote: '30 days' },
+              { doc: 'b.md', quote: '14 days' },
+            ],
+            recommendation: { doc: 'a.md', rationale: 'newer', confidence: 'high' },
+            dispute: { docA: 'a.md', anchorA: 'refunds', docB: 'b.md', anchorB: null },
+          },
+        ],
+      },
+      displayError: undefined,
+    });
+    expect(outcome).toMatchObject({
+      display: {
+        blocks: [
+          {
+            kind: 'finding',
+            claim: 'The two docs disagree on the refund window.',
+            quotes: [
+              { doc: 'a.md', heading: 'Refunds', quote: '30 days' },
+              { doc: 'b.md', quote: '14 days' },
+            ],
+            recommendation: { doc: 'a.md', rationale: 'newer', confidence: 'high' },
+            dispute: { docA: 'a.md', anchorA: 'refunds', docB: 'b.md', anchorB: null },
+          },
+        ],
+      },
+    });
+  });
+});
+
+describe('run progress steps', () => {
+  it('carries the session kinds a phase step covers', () => {
+    // The run process declares the mapping; no reader keeps a table of kinds.
+    const step = RunProgressStepSchema.parse({
+      key: 'tag',
+      label: 'Tag areas',
+      status: 'active',
+      sessionKinds: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
+    });
+    expect(step.sessionKinds).toEqual(['spec-scan.curate-doc', 'spec-scan.settle-areas']);
   });
 });
 

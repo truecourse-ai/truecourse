@@ -20,7 +20,7 @@ import type {
   GuardStaleness,
 } from '@/preview/vendor/shared';
 import type { GuardDependenciesView, GuardDependencyPatch } from '@/preview/vendor/types/guard-dependencies';
-import type { RunRecord, SessionCommand, SessionEvent } from '@/preview/vendor/shared/agent-loop';
+import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { LlmEstimateData } from '@/preview/vendor/hooks/useSocket';
 import { getServerUrl } from '@/preview/vendor/lib/server-url';
 

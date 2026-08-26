@@ -7,6 +7,7 @@
 
 import type { z } from 'zod';
 import type { BudgetSpent, SessionFailure, UserInputQuestion } from './session-events.js';
+import type { OutcomeBlock, ToolDisplay } from './session-presentation.js';
 
 /** What a tool hands back to the model. An error result is an observation
  *  the session ingests and revises on — never a session failure. */
@@ -47,6 +48,10 @@ export interface SessionTool {
   readOnly: boolean;
   destructive: boolean;
   inputSchema: z.ZodTypeAny;
+  /** How a call to this tool reads in a transcript. Colocated with the tool
+   *  because tools are factory-built per def, so wording can differ per def
+   *  for the same tool. Absent ⇒ the reader phrases it from the name. */
+  display?: ToolDisplay;
   execute(args: unknown, ctx: ToolContext): Promise<SessionToolResult>;
 }
 
@@ -63,6 +68,7 @@ export function defineSessionTool<TSchema extends z.ZodTypeAny>(tool: {
   readOnly: boolean;
   destructive: boolean;
   inputSchema: TSchema;
+  display?: ToolDisplay;
   execute(args: z.infer<TSchema>, ctx: ToolContext): Promise<SessionToolResult>;
 }): SessionTool {
   return tool;
@@ -90,6 +96,16 @@ export interface SessionDef<TOutcome = unknown> {
   budget: SessionBudget;
   /** May wait on user input. Non-interactive runs never block. */
   interactive?: boolean;
+  /** The session's opening line. A finished string, not a template: the def
+   *  factory already has the work item when it builds this. */
+  display?: { intro?: string };
+  /**
+   * How this session's outcome reads. Typed against `outcomeSchema`, so a
+   * schema change breaks the presenter at compile time instead of drifting
+   * into a digest that silently reads a field nobody writes. Runs once, at
+   * emit; a throw is recorded on the event and never fails the session.
+   */
+  presentOutcome?: (outcome: TOutcome) => OutcomeBlock[];
   /**
    * A structural demand that `tool` was called before the outcome is accepted
    * (01 step 2k). Exists because prompting alone did not carry it: across 110

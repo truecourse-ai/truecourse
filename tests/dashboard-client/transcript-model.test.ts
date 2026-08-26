@@ -1,8 +1,9 @@
 /**
- * The chat fold (transcript-model): machinery is dropped, the agent's intro
- * is synthesized per kind, runs of one tool phrase into a single did-bubble,
- * a user answer becomes a right-side row, and an overlap outcome lifts its
- * findings into cards with a Done close carrying facts in words.
+ * The chat fold (transcript-model): machinery is dropped, the session's own
+ * declared copy does the talking (its intro, its per-tool wording, its outcome
+ * blocks), runs of one tool phrase into a single did-bubble, a user answer
+ * becomes a right-side row. Nothing here knows a session kind: a transcript
+ * that declares nothing degrades to generic phrasing and key/value facts.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -23,10 +24,20 @@ const result = (toolName: string): Omit<SessionEvent, 'seq' | 'ts'> =>
   ({ type: 'tool-result', toolName, content: 'ok' }) as never;
 
 describe('toChatRows', () => {
-  it('synthesizes the intro, drops machinery, and keeps actor messages on the user side', () => {
+  it('speaks the intro the session declared, drops machinery, and keeps actor messages on the user side', () => {
     seq = 0;
     const rows = toChatRows([
-      ev({ type: 'session-start', kind: 'spec-scan.overlap', workItem: 'signing-certificate', systemPrompt: 'SECRET', toolNames: [] }),
+      ev({
+        type: 'session-start',
+        kind: 'a-kind',
+        workItem: 'signing-certificate',
+        systemPrompt: 'SECRET',
+        toolNames: [],
+        display: {
+          intro:
+            "I'm reviewing signing-certificate, reading its docs side by side to catch any claims that disagree.",
+        },
+      }),
       ev({ type: 'user-message', content: 'the briefing' }),
       ev({ type: 'user-message', content: '[budget] resume grant', }),
       ev({ type: 'resume-grant', grant: 1, of: 2 }),
@@ -39,9 +50,39 @@ describe('toChatRows', () => {
     expect(JSON.stringify(rows)).not.toContain('SECRET');
   });
 
+  it('opens with a generic line when the session declares no intro', () => {
+    seq = 0;
+    const rows = toChatRows([
+      ev({ type: 'session-start', kind: 'a-kind', workItem: 'docs/guides/booking.md', systemPrompt: 'x', toolNames: [] }),
+    ]);
+    expect(rows[0]).toMatchObject({
+      kind: 'agent-text',
+      text: "I'm getting started on docs/guides/booking.md.",
+    });
+  });
+
   it('folds a run of one tool into a single phrased did-bubble, split by tool change or reply', () => {
     seq = 0;
     const rows = toChatRows([
+      ev({
+        type: 'session-start',
+        kind: 'a-kind',
+        workItem: 'signing-certificate',
+        systemPrompt: 'x',
+        toolNames: ['read_section', 'check_findings'],
+        display: {
+          tools: {
+            read_section: {
+              one: 'I read one section of the docs',
+              many: 'I read through {n} sections of the docs',
+            },
+            check_findings: {
+              one: 'I double-checked my findings',
+              many: 'I double-checked my findings, {n} passes',
+            },
+          },
+        },
+      }),
       ev(call('read_section'), 0),
       ev(result('read_section'), 20),
       ev(call('read_section'), 21),
@@ -52,16 +93,30 @@ describe('toChatRows', () => {
       ev(call('read_section')),
       ev(result('read_section')),
     ]);
-    expect(rows.map((r) => r.kind)).toEqual(['action', 'action', 'agent-text', 'action']);
-    expect(rows[0]).toMatchObject({ phrase: 'I read through 2 sections of the docs', duration: '58s', inFlight: false });
-    expect(rows[1]).toMatchObject({ phrase: 'I double-checked my findings', inFlight: false });
-    expect(rows[3]).toMatchObject({ phrase: 'I read one section of the docs' });
+    expect(rows.map((r) => r.kind)).toEqual(['agent-text', 'action', 'action', 'agent-text', 'action']);
+    expect(rows[1]).toMatchObject({ phrase: 'I read through 2 sections of the docs', duration: '58s', inFlight: false });
+    expect(rows[2]).toMatchObject({ phrase: 'I double-checked my findings', inFlight: false });
+    expect(rows[4]).toMatchObject({ phrase: 'I read one section of the docs' });
+  });
+
+  it('humanizes the tool name when the session declared no wording for it', () => {
+    seq = 0;
+    const rows = toChatRows([
+      ev(call('read_section')),
+      ev(result('read_section')),
+      ev(call('read_section')),
+      ev(result('read_section')),
+      ev(call('check_settlement')),
+      ev(result('check_settlement')),
+    ]);
+    expect(rows[0]).toMatchObject({ kind: 'action', phrase: 'I ran read section 2 times' });
+    expect(rows[1]).toMatchObject({ kind: 'action', phrase: 'I ran check settlement' });
   });
 
   it('marks the open did-bubble in flight until its result lands', () => {
     seq = 0;
     const rows = toChatRows([ev(call('read_section'))]);
-    expect(rows[0]).toMatchObject({ kind: 'action', phrase: 'I read one section of the docs', inFlight: true });
+    expect(rows[0]).toMatchObject({ kind: 'action', phrase: 'I ran read section', inFlight: true });
   });
 
   it('renders a user answer as a right-side row and a policy answer as a note', () => {
@@ -78,77 +133,50 @@ describe('toChatRows', () => {
     expect(rows[1]).toMatchObject({ text: 'tips.mdx' });
     expect(rows[3]).toMatchObject({ text: 'No answer arrived, so the run went ahead with defaults' });
   });
-
-  it('speaks the scan-scope session in its own words and hides the outcome transport', () => {
+  it("renders the outcome's own blocks and hides the outcome transport", () => {
     seq = 0;
     const rows = toChatRows([
-      ev({ type: 'session-start', kind: 'spec-scan.orchestrate', workItem: 'scan-scope', systemPrompt: 'x', toolNames: [] }),
-      ev(call('list_universe')),
-      ev(result('list_universe')),
-      ev(call('doc_outline')),
-      ev(result('doc_outline')),
-      ev(call('doc_outline')),
-      ev(result('doc_outline')),
       // The reserved outcome tool is the result's transport, never a step.
-      ev({ type: 'assistant-turn', toolCall: { name: 'outcome', args: { verdicts: [] } }, usage }),
+      ev({ type: 'assistant-turn', toolCall: { name: 'outcome', args: { overlaps: [] } }, usage }),
       ev({ type: 'tool-result', toolName: 'outcome', content: 'outcome recorded' }),
       ev({
         type: 'outcome',
-        value: {
-          verdicts: [
-            { path: 'docs', verdict: 'keep', reason: 'product docs', decidedAt: 'x' },
-            { path: 'apps/docs', verdict: 'keep', reason: 'reference', decidedAt: 'x' },
-            { path: 'docs/legal', verdict: 'exclude', reason: 'boilerplate, nothing testable', decidedAt: 'x' },
-          ],
-          instructions: [],
-        },
-      }),
-    ]);
-    expect(rows.map((r) => r.kind)).toEqual(['agent-text', 'action', 'action', 'close']);
-    expect(rows[0]).toMatchObject({ text: expect.stringContaining("working out what it should cover") });
-    expect(rows[1]).toMatchObject({ phrase: 'I looked over the doc tree to see the folders and how many docs each holds' });
-    expect(rows[2]).toMatchObject({
-      phrase: 'I skimmed the outlines of 2 docs, sampling each folder before ruling anything in or out',
-      inFlight: false,
-    });
-    const close = rows[3];
-    if (close.kind !== 'close') throw new Error('unreachable');
-    expect(close.facts).toEqual([
-      "I set the scan's scope: 2 of 3 doc subtrees kept",
-      'left out docs/legal: boilerplate, nothing testable',
-      'no extra instructions for the scan sessions',
-    ]);
-  });
-
-  it('lifts overlap findings into cards and closes with facts in words, never raw JSON', () => {
-    seq = 0;
-    const rows = toChatRows([
-      ev({
-        type: 'outcome',
-        value: {
-          overlaps: [
+        value: { overlaps: [], notReached: [] },
+        display: {
+          blocks: [
+            { kind: 'text', text: 'I read both docs end to end.' },
             {
-              docs: ['docs/self-hosting/tips.mdx', 'docs/signing-certificate/troubleshooting.mdx'],
-              note: 'The two docs give different macOS base64 commands.',
-              sections: [
-                { doc: 'docs/self-hosting/tips.mdx', heading: 'Base64', quote: 'base64 -i certificate.p12' },
-                { doc: 'docs/signing-certificate/troubleshooting.mdx', heading: null, quote: "base64 -i certificate.p12 | tr -d '\\n'" },
+              kind: 'finding',
+              claim: 'The two docs give different macOS base64 commands.',
+              quotes: [
+                { doc: 'self-hosting/tips.mdx', heading: 'Base64', quote: 'base64 -i certificate.p12' },
+                { doc: 'signing-certificate/troubleshooting.mdx', quote: "base64 -i certificate.p12 | tr -d '\\n'" },
               ],
-              review: {
-                explanation: 'x',
-                recommendation: { action: 'pick-b', rationale: 'strips line breaks', confidence: 'medium' },
+              recommendation: {
+                doc: 'signing-certificate/troubleshooting.mdx',
+                rationale: 'strips line breaks',
+                confidence: 'medium',
+              },
+              dispute: {
+                docA: 'docs/self-hosting/tips.mdx',
+                anchorA: 'Base64',
+                quoteA: 'base64 -i certificate.p12',
+                docB: 'docs/signing-certificate/troubleshooting.mdx',
+                anchorB: null,
+                quoteB: "base64 -i certificate.p12 | tr -d '\\n'",
               },
             },
+            { kind: 'facts', lines: ['1 finding recorded', 'sections opened: 35'] },
           ],
-          notReached: [],
-          sectionsOpened: 35,
-          uncheckedPairs: [],
         },
       }),
     ]);
-    expect(rows.map((r) => r.kind)).toEqual(['finding', 'close']);
-    const [finding, close] = rows;
-    if (finding.kind !== 'finding' || close.kind !== 'close') throw new Error('unreachable');
+    expect(rows.map((r) => r.kind)).toEqual(['agent-text', 'finding', 'close']);
+    const [text, finding, close] = rows;
+    if (text.kind !== 'agent-text' || finding.kind !== 'finding' || close.kind !== 'close') {
+      throw new Error('unreachable');
+    }
+    expect(text.text).toBe('I read both docs end to end.');
     expect(finding.finding.claim).toBe('The two docs give different macOS base64 commands.');
     expect(finding.finding.quotes.map((q) => q.doc)).toEqual([
       'self-hosting/tips.mdx',
@@ -159,8 +187,8 @@ describe('toChatRows', () => {
       rationale: 'strips line breaks',
       confidence: 'medium',
     });
-    // The dispute identity carries FULL paths + anchors + quotes — the exact
-    // key postSpecConflictResolution takes, so chat verdicts match the corpus.
+    // The dispute identity travels through untouched — the exact key
+    // postSpecConflictResolution takes, so chat verdicts match the corpus.
     expect(finding.finding.dispute).toEqual({
       docA: 'docs/self-hosting/tips.mdx',
       anchorA: 'Base64',
@@ -170,6 +198,62 @@ describe('toChatRows', () => {
       quoteB: "base64 -i certificate.p12 | tr -d '\\n'",
     });
     expect(close).toMatchObject({ tone: 'ok', headline: "All done here. Here's where things landed." });
-    expect(close.facts).toEqual(['1 finding recorded', 'not reached: 0', 'sections opened: 35', 'unchecked pairs: 0']);
+    expect(close.facts).toEqual(['1 finding recorded', 'sections opened: 35']);
+  });
+
+  it('falls back to key/value facts for an outcome that carries no display', () => {
+    seq = 0;
+    const rows = toChatRows([
+      ev({
+        type: 'outcome',
+        value: { notReached: [], sectionsOpened: 35, uncheckedPairs: [] },
+      }),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(['close']);
+    const close = rows[0];
+    if (close.kind !== 'close') throw new Error('unreachable');
+    expect(close.facts).toEqual(['not reached: 0', 'sections opened: 35', 'unchecked pairs: 0']);
+  });
+
+  it('stays silent about a presenter that threw, and still states the facts', () => {
+    seq = 0;
+    const rows = toChatRows([
+      ev({ type: 'outcome', value: { kept: true }, displayError: 'TypeError: cannot read areas of undefined' }),
+    ]);
+    const close = rows[0];
+    if (close.kind !== 'close') throw new Error('unreachable');
+    expect(close.facts).toEqual(['kept: true']);
+    expect(JSON.stringify(rows)).not.toContain('TypeError');
+  });
+
+  it('renders a block kind it does not know as a fact line, never crashing', () => {
+    seq = 0;
+    const rows = toChatRows([
+      ev({
+        type: 'outcome',
+        value: {},
+        display: {
+          blocks: [
+            { kind: 'timeline', points: 3 },
+            { kind: 'facts', lines: ['12 docs kept'] },
+          ],
+        },
+      } as never),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(['close']);
+    const close = rows[0];
+    if (close.kind !== 'close') throw new Error('unreachable');
+    expect(close.facts).toEqual(['timeline · points: 3', '12 docs kept']);
+  });
+
+  it('treats a display without a blocks array as no display at all', () => {
+    // Transcript lines reach the client as bare JSON.parse output; a display
+    // stamped without blocks must degrade to the generic digest, not crash.
+    seq = 0;
+    const rows = toChatRows([ev({ type: 'outcome', value: { kept: true }, display: {} } as never)]);
+    expect(rows.map((r) => r.kind)).toEqual(['close']);
+    const close = rows[0];
+    if (close.kind !== 'close') throw new Error('unreachable');
+    expect(close.facts).toEqual(['kept: true']);
   });
 });

@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
+import { defineSessionTool, type SessionTool, type ToolDisplay } from '@truecourse/agent-loop'
 import {
   docBody,
   headingOutline,
@@ -100,9 +100,10 @@ function renderChunk(doc: DocCandidate, chunk: number): { content: string; isErr
 /**
  * `read_doc` — any universe doc, by ref, one chunk at a time. Steps 3 and 4
  * share it: a curation session opens ANOTHER doc only to resolve an explicit
- * reference/deferral; the settle session reads samples of a label's docs.
+ * reference/deferral; the settle session reads samples of a label's docs — a
+ * different purpose, so it passes its own `display`.
  */
-export function readDocTool(universe: ScanDocUniverse): SessionTool {
+export function readDocTool(universe: ScanDocUniverse, display?: ToolDisplay): SessionTool {
   return defineSessionTool({
     name: 'read_doc',
     description:
@@ -110,6 +111,7 @@ export function readDocTool(universe: ScanDocUniverse): SessionTool {
     kind: 'read-doc',
     readOnly: true,
     destructive: false,
+    display: display ?? { one: 'I read the doc in full', many: 'I read the doc in full, {n} passes' },
     inputSchema: z
       .object({
         ref: z.string().min(1).describe('Repo-relative doc ref, as listed by `list_docs`.'),
@@ -135,6 +137,7 @@ export function readChunkTool(doc: DocCandidate): SessionTool {
     kind: 'read-own-doc-chunk',
     readOnly: true,
     destructive: false,
+    display: { one: 'I read one chunk of the doc', many: 'I read {n} chunks of the doc' },
     inputSchema: z
       .object({ chunk: z.number().int().positive().describe('Chunk number (2 and up — 1 is in the briefing).') })
       .strict(),
@@ -159,6 +162,10 @@ export function corpusVocabTool(
     kind: 'corpus-vocab',
     readOnly: true,
     destructive: false,
+    display: {
+      one: "I checked the corpus's area vocabulary so I reuse existing labels instead of minting new ones",
+      many: "I checked the corpus's area vocabulary {n} times",
+    },
     inputSchema: z.object({}).strict(),
     async execute() {
       const { products, concerns } = liveVocab()
@@ -184,6 +191,10 @@ export function listDocsTool(universe: ScanDocUniverse): SessionTool {
     kind: 'list-docs',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I looked over the docs already in the corpus',
+      many: 'I looked over the docs already in the corpus {n} times',
+    },
     inputSchema: z
       .object({ dir: z.string().min(1).optional().describe('Keep only refs under this path prefix, e.g. `docs/api`.') })
       .strict(),
@@ -222,6 +233,10 @@ export function docsWithLabelTool(
     kind: 'docs-with-label',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I pulled up the docs behind one label to see whether it earns its own area',
+      many: 'I pulled up the docs behind {n} labels to see whether each earns its own area',
+    },
     inputSchema: z.object({ label: z.string().min(1).describe('A canonical label from the briefing.') }).strict(),
     async execute(args) {
       const byLabel = docsByLabel()
@@ -258,6 +273,10 @@ export function readSectionTool(universe: ScanDocUniverse): SessionTool {
     kind: 'read-doc-section',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I read one section, collecting what the doc claims',
+      many: 'I read through {n} sections, collecting what each doc claims',
+    },
     inputSchema: z
       .object({
         doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),
@@ -299,6 +318,10 @@ export function readDocChunkTool(universe: ScanDocUniverse): SessionTool {
     kind: 'read-doc-chunk',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I read a doc straight through where its outline was too thin to pick sections from',
+      many: 'I read {n} doc chunks straight through where outlines were too thin',
+    },
     inputSchema: z
       .object({
         doc: z.string().min(1).describe('The doc ref, as shown in the briefing.'),

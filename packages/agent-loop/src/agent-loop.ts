@@ -6,6 +6,10 @@
  * malformed policy, envelope stamping (seq + ts), sub-session depth, and
  * persistence — over a `SessionDriver` that owns the mechanics.
  *
+ * Presentation is declarative data stamped at emit time: the def's display
+ * copy rides `session-start`, its `presentOutcome` digest rides `outcome`,
+ * and clients render the transcript generically without knowing any kind.
+ *
  * Driver-agnostic by construction: imports neither `ai` nor the Agent SDK
  * nor node builtins; persistence is injected (`SessionPersistence`).
  */
@@ -26,6 +30,7 @@ import type {
   TurnUsage,
   UserInputQuestion,
 } from './session-events.js';
+import type { OutcomeDisplay, SessionDisplay, ToolDisplay } from './session-presentation.js';
 import type { SessionPersistence } from './session-store.js';
 
 /**
@@ -307,6 +312,7 @@ function startSession<TOutcome>(
   };
 
   const outcome = (async (): Promise<SessionOutcome<TOutcome>> => {
+    const display = sessionDisplay(def);
     append({
       type: 'session-start',
       kind: def.kind,
@@ -315,6 +321,7 @@ function startSession<TOutcome>(
       toolNames: def.tools.map((t) => t.name),
       ...(input.resume ? { resumeOf: input.resume.of } : {}),
       llm: driver.attribution,
+      ...(display ? { display } : {}),
     });
     updateIndex();
 
@@ -390,7 +397,11 @@ function startSession<TOutcome>(
       },
     });
 
-    const wrappedDef = { ...def, tools: def.tools.map(wrapTool) };
+    // The driver sees the def with its tools wrapped and its presenter
+    // dropped: presentation happens at emit, in the shell, and a presenter
+    // typed to THIS outcome does not fit the driver's erased view of a def.
+    const { presentOutcome: _present, ...driverDef } = def;
+    const wrappedDef = { ...driverDef, tools: def.tools.map(wrapTool) };
     const runOnce = async (
       resume: SessionResume | undefined,
       initialMessages: readonly string[] = input.initialMessages,
@@ -490,7 +501,7 @@ function startSession<TOutcome>(
     if (result.kind === 'outcome') {
       const parsed = def.outcomeSchema.safeParse(result.value);
       if (parsed.success) {
-        append({ type: 'outcome', value: parsed.data });
+        append({ type: 'outcome', value: parsed.data, ...presented(def, parsed.data) });
         status = 'completed';
         updateIndex({ resumeCursor: result.resumeCursor });
         return {
@@ -551,6 +562,37 @@ function startSession<TOutcome>(
     steer: (message) => handle?.steer(message),
     status: () => status,
   };
+}
+
+/**
+ * The def's declared presentation, flattened for the transcript — `undefined`
+ * when nothing was declared, so the event carries no empty `display` object
+ * for a reader to interpret.
+ */
+function sessionDisplay<T>(def: SessionDef<T>): SessionDisplay | undefined {
+  const tools: Record<string, ToolDisplay> = {};
+  for (const tool of def.tools) if (tool.display) tools[tool.name] = tool.display;
+  const intro = def.display?.intro;
+  const hasTools = Object.keys(tools).length > 0;
+  if (intro === undefined && !hasTools) return undefined;
+  return { ...(intro === undefined ? {} : { intro }), ...(hasTools ? { tools } : {}) };
+}
+
+/**
+ * The def's rendering of a validated outcome, as the fields the outcome event
+ * carries. A presenter that throws must never cost the session its result, so
+ * the throw becomes `displayError` — data, like every other failure here.
+ */
+function presented<T>(
+  def: SessionDef<T>,
+  outcome: T,
+): { display?: OutcomeDisplay; displayError?: string } {
+  if (!def.presentOutcome) return {};
+  try {
+    return { display: { blocks: def.presentOutcome(outcome) } };
+  } catch (err) {
+    return { displayError: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Total tokens a turn moved — cache reads included (they occupy context). */

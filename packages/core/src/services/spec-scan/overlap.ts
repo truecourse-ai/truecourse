@@ -32,7 +32,14 @@
  */
 
 import { z } from 'zod'
-import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
+import {
+  defineSessionTool,
+  type DisplayDispute,
+  type OutcomeBlock,
+  type SessionBudget,
+  type SessionDef,
+  type SessionTool,
+} from '@truecourse/agent-loop'
 import {
   OverlapReviewSchema,
   assignPairArea,
@@ -370,6 +377,10 @@ function checkFindingsTool(briefed: ReadonlyMap<string, DocCandidate>): SessionT
     kind: 'check-overlap-findings',
     readOnly: true,
     destructive: false,
+    display: {
+      one: 'I double-checked my findings against the docs before writing them down',
+      many: 'I double-checked my findings against the docs, {n} passes',
+    },
     inputSchema: OverlapOutcomeSchema,
     async execute(args) {
       const errors = validateOverlapFindings(args, briefed)
@@ -388,6 +399,67 @@ export interface OverlapSessionInput {
   universe: ScanDocUniverse
 }
 
+/**
+ * One reported disagreement as a card: the note as the claim, up to two quoted
+ * passages, the adjudication, and the DISPUTE IDENTITY — the unordered doc pair
+ * plus each side's section anchor and verbatim quote, which is the same key a
+ * `conflictResolutions` entry carries, so a verdict recorded off the card
+ * matches the corpus conflict.
+ */
+function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): OutcomeBlock {
+  const [docA, docB] = overlap.docs
+  const side = (ref: string): { anchor: string | null; quote?: string } => {
+    const section = overlap.sections.find((s) => s.doc === ref)
+    return { anchor: section?.heading ?? null, ...(section ? { quote: section.quote } : {}) }
+  }
+  const a = side(docA)
+  const b = side(docB)
+  const dispute: DisplayDispute = {
+    docA,
+    anchorA: a.anchor,
+    ...(a.quote !== undefined ? { quoteA: a.quote } : {}),
+    docB,
+    anchorB: b.anchor,
+    ...(b.quote !== undefined ? { quoteB: b.quote } : {}),
+  }
+  const { action, rationale, confidence } = overlap.review.recommendation
+  // Only a pick names a doc; `fix-doc`/`dismiss` recommend no side.
+  const recommendedDoc = action === 'pick-a' ? docA : action === 'pick-b' ? docB : undefined
+  // Full paths throughout: the client matches the recommendation against the
+  // quotes and the dispute sides by ref equality, and shortens only to display.
+  return {
+    kind: 'finding',
+    claim: overlap.note,
+    quotes: overlap.sections.slice(0, 2).map((s) => ({
+      doc: s.doc,
+      ...(s.heading !== null ? { heading: s.heading } : {}),
+      quote: s.quote,
+    })),
+    recommendation: {
+      ...(recommendedDoc ? { doc: recommendedDoc } : {}),
+      rationale,
+      ...(confidence ? { confidence } : {}),
+    },
+    dispute,
+  }
+}
+
+/**
+ * The cards, then what the session did not get to. `sectionsOpened` and
+ * `uncheckedPairs` are deliberately absent: the run recomputes both from the
+ * transcript after this display is already persisted, so at emit time the
+ * outcome only carries the model's self-report of them.
+ */
+function presentOverlapOutcome(outcome: OverlapOutcome): OutcomeBlock[] {
+  const lines: string[] = [
+    outcome.overlaps.length === 0
+      ? 'These docs agree — I found no disagreements'
+      : `I found ${outcome.overlaps.length} disagreement${outcome.overlaps.length === 1 ? '' : 's'}`,
+  ]
+  if (outcome.notReached.length > 0) lines.push(`I didn't get through ${outcome.notReached.join(', ')}`)
+  return [...outcome.overlaps.map(presentOverlap), { kind: 'facts', lines }]
+}
+
 export function overlapSessionDef(input: OverlapSessionInput): SessionDef<OverlapOutcome> {
   const briefed = new Map(input.item.docs.map((d) => [d.path, d]))
   return {
@@ -396,6 +468,10 @@ export function overlapSessionDef(input: OverlapSessionInput): SessionDef<Overla
     tools: [readSectionTool(input.universe), readDocChunkTool(input.universe), checkFindingsTool(briefed)],
     outcomeSchema: OverlapOutcomeSchema,
     budget: OVERLAP_SESSION_BUDGET,
+    display: {
+      intro: `I'm reviewing ${overlapWorkItem(input.item.areaId, input.item.cluster)}, reading its docs side by side to catch any claims that disagree.`,
+    },
+    presentOutcome: presentOverlapOutcome,
     // The structural half of "run check_findings" — mirrors check_draft
     // (01 step 2k): the shell refuses the first outcome of a session that
     // never validated its anchors, once, at the cost of one turn.

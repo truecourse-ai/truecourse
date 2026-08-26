@@ -110,29 +110,6 @@ export function progressSentence(run: PublicSessionRun): string {
 // phase ↔ session mapping
 // ---------------------------------------------------------------------------
 
-/**
- * WHICH sessions did which phase's work, per command — the one table.
- *
- * The keys are the run record's real checklist keys (the run process mirrors
- * its own step tracker into `progress`; spec scan's are `CURATE_STEPS` in
- * `packages/core/src/commands/spec-in-process.ts`). The values are the real
- * `*_SESSION_KIND` constants the scan services mint. A deterministic phase
- * maps to no session kinds at all — its card is the header row alone.
- */
-const PHASE_SESSION_KINDS: Record<string, Record<string, readonly string[]>> = {
-  'spec-scan': {
-    // Discovery is deterministic, but the interactive scope orchestrator runs
-    // while it is the open step.
-    discover: ['spec-scan.orchestrate'],
-    // One curate-doc session per doc, then at most one settle-areas session
-    // to merge the labels they minted.
-    tag: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
-    overlap: ['spec-scan.overlap'],
-    // The deterministic fold (re-anchoring, dedup, auto-apply) — no sessions.
-    verify: [],
-  },
-};
-
 /** One card in the run's stream: a phase, and the sessions that did its work. */
 export interface StreamPhase {
   key: string;
@@ -153,23 +130,25 @@ export interface RunStream {
 /**
  * The run's stream: its phase checklist, each phase carrying its sessions.
  *
+ * WHICH sessions did which phase's work is the run record's own claim: each
+ * progress step names its `sessionKinds`. Nothing here knows a command or a
+ * kind — a deterministic phase simply claims none.
+ *
  * Pending phases don't render as cards — they appear when they start — but the
  * first one names itself in `next` so the stream says what is coming.
  *
- * FALLBACK: any session kind the table above doesn't place still gets its own
- * card, appended after the checklist ones (title = the kind, counter =
- * done/total). That is what a command with no mapping entry — every future
- * guard command — renders: checklist cards with no session lines, plus one
- * generic card per kind. Nothing ever disappears because the table is behind.
+ * FALLBACK: any session kind no step claims still gets its own card, appended
+ * after the checklist ones (title = the kind, counter = done/total). That is
+ * what a run whose steps declare nothing renders: checklist cards with no
+ * session lines, plus one generic card per kind. Nothing ever disappears.
  */
 export function buildRunStream(run: PublicSessionRun): RunStream {
   const steps = run.progress ?? [];
-  const table = PHASE_SESSION_KINDS[run.command];
   const placed = new Set<string>();
   const phases: StreamPhase[] = [];
 
   for (const step of steps) {
-    const kinds = table?.[step.key] ?? [];
+    const kinds = step.sessionKinds ?? [];
     for (const kind of kinds) placed.add(kind);
     if (step.status === 'pending') continue;
     phases.push({

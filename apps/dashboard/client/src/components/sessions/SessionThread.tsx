@@ -171,9 +171,9 @@ function FindingCard({ finding }: { finding: ChatFinding }) {
                 className={`truncate font-mono text-[10px] ${
                   finding.recommendation?.doc === q.doc ? 'text-emerald-600 dark:text-emerald-500' : 'text-muted-foreground'
                 }`}
-                title={q.heading}
+                title={q.heading ?? q.doc}
               >
-                {q.doc}
+                {shortDocRef(q.doc)}
               </div>
               <pre className="mt-1 overflow-x-auto rounded border border-border/70 bg-background px-2 py-1.5 font-mono text-[11px] text-foreground">
                 {q.quote}
@@ -187,7 +187,7 @@ function FindingCard({ finding }: { finding: ChatFinding }) {
           <span className="min-w-0">
             {finding.recommendation.doc ? (
               <>
-                I'd follow <span className="text-foreground">{finding.recommendation.doc}</span>
+                I'd follow <span className="text-foreground">{shortDocRef(finding.recommendation.doc)}</span>
                 {finding.recommendation.rationale && <>: {finding.recommendation.rationale}</>}
               </>
             ) : (
@@ -205,9 +205,9 @@ function FindingCard({ finding }: { finding: ChatFinding }) {
         <FindingResolveFooter
           dispute={finding.dispute}
           recommended={
-            finding.recommendation?.doc === shortDocRef(finding.dispute.docA)
+            finding.recommendation?.doc === finding.dispute.docA
               ? 'a'
-              : finding.recommendation?.doc === shortDocRef(finding.dispute.docB)
+              : finding.recommendation?.doc === finding.dispute.docB
                 ? 'b'
                 : undefined
           }

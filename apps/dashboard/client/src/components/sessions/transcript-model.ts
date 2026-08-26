@@ -3,16 +3,26 @@
  * shapes) to CHAT rows — the session rendered as a conversation between the
  * AGENT (left) and the person watching (right). Machinery never renders: the
  * system prompt, orchestrator user-messages and budget bookkeeping are
- * dropped; instead the agent "speaks" its own progress — a per-kind intro
- * line, tool work phrased as did-bubbles ("Read 35 sections · 58s") via
- * `TOOL_PHRASES`, findings extracted out of the outcome as cards, questions
- * asked in-chat, and a closing Done message with the facts in words. The only
- * right-side voice is a real person: their question answers, and any
+ * dropped; instead the agent "speaks" its own progress — the intro line and
+ * tool wording IT declared, its outcome blocks as finding cards and narration,
+ * questions asked in-chat, and a closing Done message with the facts in words.
+ * The only right-side voice is a real person: their question answers, and any
  * `user-message` carrying an `actor`. Snapshot + live-pushed events merge
  * here, deduped by `seq`.
+ *
+ * NOTHING here knows a session kind or a tool name. Copy is stamped into the
+ * transcript by the session's own definition, so a new kind renders with zero
+ * changes here; a transcript that declares nothing degrades to generic
+ * phrasing and key/value facts.
  */
 
-import type { SessionEvent, UserInputQuestion } from '@truecourse/agent-loop';
+import type {
+  DisplayDispute,
+  OutcomeBlock,
+  SessionDisplay,
+  SessionEvent,
+  UserInputQuestion,
+} from '@truecourse/agent-loop';
 
 /** One call inside a did-bubble — the step's expandable detail. */
 export interface ActionCall {
@@ -30,25 +40,10 @@ export interface ActionCall {
  * quote), so a verdict recorded from the chat matches the corpus conflict.
  * Full repo-relative paths; the display layer shortens separately.
  */
-export interface FindingDispute {
-  docA: string;
-  anchorA: string | null;
-  quoteA?: string;
-  docB: string;
-  anchorB: string | null;
-  quoteB?: string;
-}
+export type FindingDispute = DisplayDispute;
 
-/** A finding lifted out of an outcome value — the chat's result card. */
-export interface ChatFinding {
-  /** What disagrees, in a sentence. */
-  claim: string;
-  /** Up to two quoted passages, side by side. */
-  quotes: { doc: string; heading?: string; quote: string }[];
-  recommendation?: { doc?: string; rationale: string; confidence?: string };
-  /** Present when the finding names a resolvable two-doc dispute. */
-  dispute?: FindingDispute;
-}
+/** The chat's result card — a `finding` block as the view consumes it. */
+export type ChatFinding = Omit<Extract<OutcomeBlock, { kind: 'finding' }>, 'kind'>;
 
 export type ChatRow =
   /** The agent talking: narration text or the synthesized intro. */
@@ -115,8 +110,9 @@ export function toChatRows(events: readonly SessionEvent[]): ChatRow[] {
   };
   /** The call awaiting its `tool-result` (at most one — turns alternate). */
   let pending: { call: ActionCall; ts: string } | null = null;
-  /** The session kind (from `session-start`) — keys the copy layer. */
-  let sessionKind = '';
+  /** What the session said about itself on `session-start`, when it said
+   *  anything: its intro line and per-tool wording. */
+  let display: SessionDisplay | undefined;
   const questionRows = new Map<string, Extract<ChatRow, { kind: 'question' }>>();
 
   const push = (row: ChatRow): void => {
@@ -127,8 +123,12 @@ export function toChatRows(events: readonly SessionEvent[]): ChatRow[] {
   for (const event of events) {
     switch (event.type) {
       case 'session-start':
-        sessionKind = event.kind;
-        push({ seq: event.seq, kind: 'agent-text', text: kindIntro(event.kind, event.workItem) });
+        display = event.display;
+        push({
+          seq: event.seq,
+          kind: 'agent-text',
+          text: display?.intro ?? `I'm getting started on ${event.workItem}.`,
+        });
         break;
       case 'user-message':
         // Actor-less messages are orchestrator-injected (briefing, budget
@@ -148,7 +148,7 @@ export function toChatRows(events: readonly SessionEvent[]): ChatRow[] {
           }
           const call: ActionCall = { target: targetOf(event.toolCall.args), detail: '' };
           open.action.row.calls.push(call);
-          open.action.row.phrase = toolPhrase(sessionKind, tool, open.action.row.calls.length);
+          open.action.row.phrase = toolPhrase(display, tool, open.action.row.calls.length);
           open.action.row.inFlight = true;
           pending = { call, ts: event.ts };
         }
@@ -196,11 +196,19 @@ export function toChatRows(events: readonly SessionEvent[]): ChatRow[] {
         break;
       }
       case 'outcome': {
-        const { findings, facts } = digestOutcome(event.value);
-        findings.forEach((finding, i) => push({ seq: event.seq, sub: i, kind: 'finding', finding }));
+        // The session's own rendering when it stamped one; otherwise the
+        // generic key/value digest, which is what a transcript written before
+        // presentation existed — or by a def that presents nothing — degrades
+        // to. `displayError` is deliberately never shown. The Array.isArray
+        // guard holds the never-crash contract against a malformed `display`
+        // on a tailed transcript line — nothing on the read path validates it.
+        const { rows: outcomeRows, facts } = Array.isArray(event.display?.blocks)
+          ? foldBlocks(event.display.blocks, event.seq)
+          : { rows: [], facts: digestOutcome(event.value) };
+        for (const row of outcomeRows) push(row);
         push({
           seq: event.seq,
-          sub: findings.length,
+          sub: outcomeRows.length,
           kind: 'close',
           tone: 'ok',
           headline: "All done here. Here's where things landed.",
@@ -247,115 +255,8 @@ export function toChatRows(events: readonly SessionEvent[]): ChatRow[] {
 // phrasing — the product-language layer over raw events
 // ---------------------------------------------------------------------------
 
-interface ToolPhrase {
-  one: string;
-  many: string;
-}
-
-/**
- * The per-kind copy layer: the agent's opening line plus purpose-bearing
- * did-bubble sentences for the tools whose PURPOSE depends on the session
- * (`doc_outline` in scan-scope is sampling for coverage; `read_section` in an
- * overlap review is collecting claims). Every phrase states what the session's
- * briefing actually asks for, never an invented motive. Keys are the real
- * `*_SESSION_KIND` constants; unknown kinds fall to the defaults below.
- */
-const KIND_COPY: Record<string, { intro: (workItem: string) => string; tools?: Record<string, ToolPhrase> }> = {
-  'spec-scan.orchestrate': {
-    intro: () =>
-      "Before the scan reads anything, I'm working out what it should cover. I'll look over the doc tree, sample a few outlines, and decide which folders are in and which are out.",
-    tools: {
-      list_universe: {
-        one: 'I looked over the doc tree to see the folders and how many docs each holds',
-        many: 'I looked over the doc tree {n} times, checking folders and doc counts',
-      },
-      doc_outline: {
-        one: 'I skimmed one doc outline, sampling its folder before ruling anything in or out',
-        many: 'I skimmed the outlines of {n} docs, sampling each folder before ruling anything in or out',
-      },
-    },
-  },
-  'spec-scan.overlap': {
-    intro: (w) => `I'm reviewing ${w}, reading its docs side by side to catch any claims that disagree.`,
-    tools: {
-      read_section: {
-        one: 'I read one section, collecting what the doc claims',
-        many: 'I read through {n} sections, collecting what each doc claims',
-      },
-      read_doc_chunk: {
-        one: 'I read a doc straight through where its outline was too thin to pick sections from',
-        many: 'I read {n} doc chunks straight through where outlines were too thin',
-      },
-      check_findings: {
-        one: 'I double-checked my findings against the docs before writing them down',
-        many: 'I double-checked my findings against the docs, {n} passes',
-      },
-    },
-  },
-  'spec-scan.curate-doc': {
-    intro: (w) => `I'm reading ${w} to decide whether it belongs in the corpus and which areas it covers.`,
-    tools: {
-      read_doc: { one: 'I read the doc in full', many: 'I read the doc in full, {n} passes' },
-      read_chunk: { one: 'I read one chunk of the doc', many: 'I read {n} chunks of the doc' },
-      corpus_vocab: {
-        one: "I checked the corpus's area vocabulary so I reuse existing labels instead of minting new ones",
-        many: "I checked the corpus's area vocabulary {n} times",
-      },
-      list_docs: {
-        one: 'I looked over the docs already in the corpus',
-        many: 'I looked over the docs already in the corpus {n} times',
-      },
-    },
-  },
-  'spec-scan.settle-areas': {
-    intro: () => "I'm settling the area labels, merging synonyms so the corpus speaks one vocabulary.",
-    tools: {
-      docs_with_label: {
-        one: 'I pulled up the docs behind one label to see whether it earns its own area',
-        many: 'I pulled up the docs behind {n} labels to see whether each earns its own area',
-      },
-      check_settlement: {
-        one: 'I checked my settlement against the corpus before committing it',
-        many: 'I checked my settlement {n} times before committing it',
-      },
-    },
-  },
-  'guard-interfaces.web-tasks': {
-    intro: (w) => `I'm writing the user tasks for ${w}, grounded in what its screens and code actually support.`,
-    tools: {
-      read_file: {
-        one: 'I read one source file to see what this screen supports',
-        many: 'I read through {n} source files to see what this screen supports',
-      },
-      search_repo: {
-        one: 'I searched the code for how this screen behaves',
-        many: 'I searched the code {n} times for how this screen behaves',
-      },
-      list_interfaces: {
-        one: "I looked up the tasks that already exist so I don't duplicate one",
-        many: "I looked up the tasks that already exist so I don't duplicate one",
-      },
-    },
-  },
-};
-
-function kindIntro(kind: string, workItem: string): string {
-  return (KIND_COPY[kind]?.intro ?? ((w: string) => `I'm getting started on ${w}.`))(workItem);
-}
-
-/** Kind-independent defaults for tools that read the same everywhere. */
-const TOOL_PHRASES: Record<string, ToolPhrase> = {
-  read_section: { one: 'I read one section of the docs', many: 'I read through {n} sections of the docs' },
-  read_file: { one: 'I read one file', many: 'I read through {n} files' },
-  search_repo: { one: 'I searched the codebase', many: 'I searched the codebase {n} times' },
-  check_findings: { one: 'I double-checked my findings', many: 'I double-checked my findings, {n} passes' },
-  check_draft: { one: 'I validated my draft against the catalog', many: 'I validated my draft {n} times' },
-  list_places: { one: "I looked up the app's screens", many: "I looked up the app's screens" },
-  list_interfaces: { one: 'I looked up the tasks that already exist', many: 'I looked up the tasks that already exist' },
-};
-
-function toolPhrase(kind: string, tool: string, n: number): string {
-  const t = KIND_COPY[kind]?.tools?.[tool] ?? TOOL_PHRASES[tool];
+function toolPhrase(display: SessionDisplay | undefined, tool: string, n: number): string {
+  const t = display?.tools?.[tool];
   if (t) return n === 1 ? t.one : t.many.replace('{n}', String(n));
   const humane = tool.replace(/[_-]/g, ' ');
   return n === 1 ? `I ran ${humane}` : `I ran ${humane} ${n} times`;
@@ -381,131 +282,77 @@ function cap(text: string, max: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// outcome digestion — findings out, facts in words
+// outcome rendering — the session's own blocks, or a generic digest
 // ---------------------------------------------------------------------------
 
 const FACT_LINE_CAP = 8;
 
 /**
- * Lift findings and facts out of an outcome value. Shape-driven, not
- * kind-driven: any outcome carrying an `overlaps` array of {note, sections,
- * review} entries yields finding cards (the spec-scan overlap shape); every
- * other top-level field becomes a plain-language fact line. Unknown shapes
- * degrade to facts alone — never to raw JSON.
+ * The blocks a session stamped onto its outcome, as rows: a finding becomes a
+ * card, prose becomes narration, and every `facts` line joins the closing
+ * message. The vocabulary is append-only, so a kind this client has never
+ * heard of still says what it carries — as a fact line, never a crash.
  */
-function digestOutcome(value: unknown): { findings: ChatFinding[]; facts: string[] } {
-  if (typeof value === 'string') {
-    return { findings: [], facts: value.split('\n').slice(0, FACT_LINE_CAP) };
-  }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return { findings: [], facts: [String(Array.isArray(value) ? `${value.length} results` : value)] };
-  }
-  const record = value as Record<string, unknown>;
-  const scopeFacts = digestScope(record);
-  if (scopeFacts) return { findings: [], facts: scopeFacts.slice(0, FACT_LINE_CAP) };
-  const findings = Array.isArray(record.overlaps)
-    ? record.overlaps.map(toFinding).filter((f): f is ChatFinding => f !== null)
-    : [];
+function foldBlocks(
+  blocks: readonly OutcomeBlock[],
+  seq: number,
+): { rows: ChatRow[]; facts: string[] } {
+  const rows: ChatRow[] = [];
   const facts: string[] = [];
-  for (const [key, v] of Object.entries(record)) {
-    if (key === 'overlaps' && findings.length > 0) {
-      facts.push(`${findings.length} finding${findings.length === 1 ? '' : 's'} recorded`);
-      continue;
+  for (const block of blocks) {
+    switch (block.kind) {
+      case 'text':
+        rows.push({ seq, sub: rows.length, kind: 'agent-text', text: block.text });
+        break;
+      case 'facts':
+        facts.push(...block.lines);
+        break;
+      case 'finding':
+        rows.push({
+          seq,
+          sub: rows.length,
+          kind: 'finding',
+          finding: {
+            claim: block.claim,
+            quotes: block.quotes,
+            ...(block.recommendation ? { recommendation: block.recommendation } : {}),
+            ...(block.dispute ? { dispute: block.dispute } : {}),
+          },
+        });
+        break;
+      default:
+        facts.push(unknownBlockLine(block));
     }
-    facts.push(`${humanKey(key)}: ${describeValue(v)}`);
   }
-  return { findings, facts: facts.slice(0, FACT_LINE_CAP) };
+  return { rows, facts };
+}
+
+/** A block kind that postdates this client, stated by its own fields. */
+function unknownBlockLine(block: object): string {
+  const record = block as Record<string, unknown>;
+  const kind = humanKey(String(record.kind ?? 'result'));
+  const parts = Object.entries(record)
+    .filter(([key]) => key !== 'kind')
+    .map(([key, value]) => `${humanKey(key)}: ${describeValue(value)}`);
+  return parts.length > 0 ? `${kind} · ${parts.join(' · ')}` : kind;
 }
 
 /**
- * The scan-scope outcome shape (`verdicts` of keep/exclude subtree calls +
- * `instructions`), digested into words: what stayed in scope, what was left
- * out and WHY (the verdict entries carry real reason strings), and whether the
- * scan sessions got standing instructions. Null when the shape doesn't hold.
+ * An outcome that stamped no rendering, in words: a string is its own lines,
+ * anything else states its top-level fields as key/value facts. That is what a
+ * transcript written before sessions described themselves degrades to — plain
+ * phrasing, never raw JSON.
  */
-function digestScope(record: Record<string, unknown>): string[] | null {
-  if (!Array.isArray(record.verdicts) || !Array.isArray(record.instructions)) return null;
-  const verdicts = record.verdicts.filter(
-    (v): v is { path: string; verdict: string; reason?: string } =>
-      v !== null && typeof v === 'object' && typeof (v as Record<string, unknown>).path === 'string' &&
-      ((v as Record<string, unknown>).verdict === 'keep' || (v as Record<string, unknown>).verdict === 'exclude'),
-  );
-  if (verdicts.length === 0) return null;
-  const excluded = verdicts.filter((v) => v.verdict === 'exclude');
-  const kept = verdicts.length - excluded.length;
-  const facts = [
-    `I set the scan's scope: ${kept} of ${verdicts.length} doc subtrees kept${excluded.length === 0 ? ', nothing left out' : ''}`,
-  ];
-  for (const v of excluded) {
-    facts.push(`left out ${v.path}${typeof v.reason === 'string' && v.reason ? `: ${v.reason}` : ''}`);
+function digestOutcome(value: unknown): string[] {
+  if (typeof value === 'string') return value.split('\n').slice(0, FACT_LINE_CAP);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return [String(Array.isArray(value) ? `${value.length} results` : value)];
   }
-  const instructions = record.instructions.filter((i): i is string => typeof i === 'string');
-  if (instructions.length === 0) facts.push('no extra instructions for the scan sessions');
-  else for (const i of instructions) facts.push(`instruction for the scan: ${i}`);
-  return facts;
+  return Object.entries(value)
+    .map(([key, v]) => `${humanKey(key)}: ${describeValue(v)}`)
+    .slice(0, FACT_LINE_CAP);
 }
 
-/** One overlap entry → a card, or null when the shape doesn't hold. */
-function toFinding(entry: unknown): ChatFinding | null {
-  if (entry === null || typeof entry !== 'object') return null;
-  const o = entry as Record<string, unknown>;
-  if (typeof o.note !== 'string') return null;
-  const docs = Array.isArray(o.docs) ? o.docs.filter((d): d is string => typeof d === 'string') : [];
-  const sections = Array.isArray(o.sections) ? o.sections : [];
-  const quotes = sections
-    .filter((s): s is Record<string, unknown> => s !== null && typeof s === 'object')
-    .filter((s) => typeof s.quote === 'string')
-    .slice(0, 2)
-    .map((s) => ({
-      doc: basename(typeof s.doc === 'string' ? s.doc : ''),
-      heading: typeof s.heading === 'string' ? s.heading : undefined,
-      quote: s.quote as string,
-    }));
-  const review =
-    o.review !== null && typeof o.review === 'object' ? (o.review as Record<string, unknown>) : undefined;
-  const rec =
-    review?.recommendation !== null && typeof review?.recommendation === 'object'
-      ? (review.recommendation as Record<string, unknown>)
-      : undefined;
-  const recommendation = rec
-    ? {
-        doc: recommendedDoc(typeof rec.action === 'string' ? rec.action : undefined, docs),
-        rationale: typeof rec.rationale === 'string' ? rec.rationale : '',
-        confidence: typeof rec.confidence === 'string' ? rec.confidence : undefined,
-      }
-    : undefined;
-  return { claim: o.note, quotes, recommendation, ...disputeOf(docs, sections) };
-}
-
-/**
- * The dispute identity, when the entry names exactly two docs: full paths,
- * each side's section heading (null = preamble, or no section captured for
- * that doc) and verbatim quote — the key `postSpecConflictResolution` takes.
- */
-function disputeOf(docs: string[], sections: unknown[]): { dispute?: FindingDispute } {
-  if (docs.length !== 2) return {};
-  const side = (doc: string): { anchor: string | null; quote?: string } => {
-    const section = sections
-      .filter((s): s is Record<string, unknown> => s !== null && typeof s === 'object')
-      .find((s) => s.doc === doc);
-    return {
-      anchor: typeof section?.heading === 'string' ? section.heading : null,
-      ...(typeof section?.quote === 'string' ? { quote: section.quote } : {}),
-    };
-  };
-  const a = side(docs[0]);
-  const b = side(docs[1]);
-  return {
-    dispute: {
-      docA: docs[0],
-      anchorA: a.anchor,
-      ...(a.quote !== undefined ? { quoteA: a.quote } : {}),
-      docB: docs[1],
-      anchorB: b.anchor,
-      ...(b.quote !== undefined ? { quoteB: b.quote } : {}),
-    },
-  };
-}
 
 /** The last two path segments — enough to tell sibling docs apart. Exported
  *  for the view's resolve buttons, which name docs off the full dispute. */
@@ -523,13 +370,6 @@ export function distinctDocRefs(a: string, b: string): [string, string] {
   if (last(a) !== last(b)) return [last(a), last(b)];
   if (basename(a) !== basename(b)) return [basename(a), basename(b)];
   return [a, b];
-}
-
-/** `pick-a`/`pick-b` name a side of the pair; anything else names no doc. */
-function recommendedDoc(action: string | undefined, docs: string[]): string | undefined {
-  if (action === 'pick-a' && docs[0]) return basename(docs[0]);
-  if (action === 'pick-b' && docs[1]) return basename(docs[1]);
-  return undefined;
 }
 
 /** The last two path segments — enough to tell sibling docs apart. */
