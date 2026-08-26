@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": ["TRUECOURSE_*", "CLAUDE_CODE_*"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
